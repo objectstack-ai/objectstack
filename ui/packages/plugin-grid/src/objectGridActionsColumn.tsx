@@ -30,7 +30,7 @@ export function resolveObjectGridActionsColumn({
   schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
   wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
   recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
-  setRefreshKey, t,
+  setRefreshKey, t, foldInlineRowActions = false,
 }: {
   schema: ObjectGridSchema;
   data: any[];
@@ -53,6 +53,13 @@ export function resolveObjectGridActionsColumn({
   executeAction: ReturnType<typeof useAction>['execute'];
   setRefreshKey: React.Dispatch<React.SetStateAction<number>>;
   t: ReturnType<typeof useGridTranslation>['t'];
+  /**
+   * objectstack#33230 — draw no inline button: every primary action renders at
+   * the top of its row's "⋮" menu instead. `ObjectGrid` sets it while the
+   * table overflows its scroll box with the buttons drawn
+   * (`./objectGridInlineActionFold`).
+   */
+  foldInlineRowActions?: boolean;
 }) {
   // `operations`, the row-action lists and the row CRUD affordance verdict are
   // resolved further up, next to the permission reads they AND with — this
@@ -70,7 +77,7 @@ export function resolveObjectGridActionsColumn({
   // rows that offer nothing. One row is enough, so the read stops at the first.
   const rowActionDefsGated = (resolvedRowActionDefs as any[]).filter((d) => mayInvokeRowAction(d?.requiredPermissions) && !isActionSwitchedOff(d));
   // NON-AUTHOR SURFACE — see the `maxInlineActions` prop below.
-  const maxInlineRowActions: number = (schema as any).maxInlineRowActions ?? 1;
+  const maxInlineRowActions: number = foldInlineRowActions ? 0 : ((schema as any).maxInlineRowActions ?? 1);
   const rowCrudVerdicts = (row: any) => {
     // [objectui#8674] The CALLER's answer for this one row, ANDed in below.
     const rowOps = rowOperations?.(row);

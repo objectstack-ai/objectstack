@@ -1265,10 +1265,13 @@ export async function runSsoProviderDeleteImpact(
 //  - SAML: email = attribute `mapping.email` (default `email`), else the
 //    NameID; name = `mapping.firstName` (default `givenName`) + `mapping.lastName`
 //    (default `surname`), else `mapping.name` (default `displayName`), else the
-//    NameID. An IdP whose attribute names differ from those defaults — Okta's
-//    `name`, Entra ID's claim URIs (`http://schemas.xmlsoap.org/ws/2005/05/
-//    identity/claims/givenname`, …) — names every user after their NameID until
-//    the provider maps them.
+//    NameID. An IdP whose attribute names differ from those defaults (Okta's
+//    `name`) names every user after their NameID until the provider maps them.
+//    A member left unset reads the standard claim first when the assertion
+//    carries it (Entra ID's and AD FS's `http://schemas.xmlsoap.org/ws/2005/05/
+//    identity/claims/emailaddress`, `givenname`, `surname`, `name`), at the ACS
+//    only (`sso-saml-standard-claims.ts`); the stored mapping is unchanged, so
+//    the get bridge below still answers `null` for such a member.
 //  - OIDC: email = claim `mapping.email` (default `email`), name = claim
 //    `mapping.name` (default `name`). The OIDC mapping has no first/last-name
 //    member (`oidcMappingSchema` is strict).

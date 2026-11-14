@@ -153,24 +153,24 @@
     },
     {
       "id": "identity-auth.auth-method-matrix",
-      "title": "Every supported auth method signs in when enabled, is absent when disabled, and is advertised exactly as configured",
+      "title": "Every auth method a stock boot can switch on signs in when enabled, is absent when disabled, and is advertised exactly as configured (device authorization, which no stock boot can switch on, is identity-auth.device-authorization-grant)",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "per-variant env boots: the matrix flips AuthPluginConfigSchema flags (phoneNumber, twoFactor, deviceAuthorization, oidcProvider) and the socialProviders/oidcProviders maps — each variant names which boot it needs",
-          "an SMS service (@objectstack/service-sms) is required ONLY to make phone-OTP pass; its ABSENCE is itself a tested state (loud 400 SMS_SERVICE_REQUIRED)"
+          "per-variant env boots: the matrix flips AuthPluginConfigSchema flags (phoneNumber, twoFactor, oidcProvider; deviceAuthorization belongs to identity-auth.device-authorization-grant) and the socialProviders/oidcProviders maps — each variant names which boot it needs",
+          "an SMS service (@objectstack/service-sms) is required ONLY to make phone-OTP pass; its ABSENCE is itself a tested state (loud 400 SMS_SERVICE_REQUIRED)",
+          "for the enterprise SSO half (features.sso): a boot with OS_SSO_ENABLED=true (packages/plugins/plugin-auth/src/auth-manager-plugin-list.ts) and a run-local mock OIDC IdP whose origin is listed in OS_TRUSTED_ORIGINS (read in packages/cli/src/commands/serve.ts): the register door POST /api/v1/auth/admin/sso/register re-dispatches into @better-auth/sso, whose validateOIDCEndpointUrl refuses a loopback or private discovery URL 400 discovery_private_host unless its origin is trusted. features.sso reads true only once a provider is registered (isSsoUsable). Under the stock invite_only posture the SSO user must hold a pending invitation unless the provider's allowJit is on (packages/plugins/plugin-auth/src/audience-posture.ts). The same recipe drove identity-auth.idp-group-permission-set-mapping's SSO leg in QA run #33092"
         ],
         "knownGaps": [
           "magic-link and passkeys: the AuthPluginConfigSchema flags still exist, but objectui ships NO login UI for either, so #7481 withdrew both from the /api/v1/auth/config payload (protocol 17) — features.magicLink / features.passkeys are now ABSENT by design, not false. objectui#4179 (the login-UI card) was CLOSED not_planned on 2026-09-24: the maintainer's 'no UI for now' stands until the login UI is scheduled. So the browser-lane variants have no environment to run in; record them blocked(dependency, objectui#4179 closed not_planned), never pass (QA run #21784 N3, parked on #22017 row 20). The flag-advertisement clause inverts here: seeing either key in the payload is itself a FAIL now, and magic-link's endpoints (/magic-link/send, /magic-link/verify) stay live and drivable without a UI",
-          "the two spec files disagree on the device-flow paths (packages/spec/src/api/auth-endpoints.zod.ts: /device/request, /device/token, /device/approve vs packages/spec/src/system/auth-config.zod.ts: /device/code, /device/token, /device, /device/approve, /device/deny) — the LIVE better-auth surface serves POST /device/code, /device/token, /device/approve, /device/deny and GET /device (auth-route-ledger.ts BETTER_AUTH_MOUNTED_SURFACE); trust the live routes and file the doc divergence",
           "the password-reset path names ALSO diverge from the spec: AuthEndpointPaths.forgetPassword = '/forget-password' but the live catch-all serves POST /request-password-reset, POST /reset-password and GET /reset-password/:token (BETTER_AUTH_MOUNTED_SURFACE) — trust the live routes (this is the same divergence identity-auth.self-service-password-reset drives)",
-          "acceptance[0]'s SSO and device-authorization variants have no switch on the stock `os dev` → `os serve` path (QA run #21784, parked on #22017 row 20). The AuthPlugin the CLI injects takes only env-mapped plugins (packages/cli/src/commands/serve.ts: OS_AUTH_ADMIN, OS_AUTH_TWO_FACTOR, OS_AUTH_PASSWORD_REJECT_BREACHED, OS_AUTH_PHONE_NUMBER_ENABLED), and neither plugins.deviceAuthorization nor an oidcProviders map is one of them. Device authorization needs a host that constructs AuthPlugin itself with plugins.deviceAuthorization: true. The SSO plugin DOES have a boot switch, OS_SSO_ENABLED (packages/plugins/plugin-auth/src/auth-manager.ts, isSsoWired), but features.sso is advertised only once a provider is registered, and registering one needs an IdP whose discovery URL is publicly routable or allowlisted: the register door (POST /api/v1/auth/admin/sso/register, re-dispatched into @better-auth/sso's /sso/register) refuses a loopback or private IdP 400 discovery_private_host unless its origin is in trustedOrigins (@better-auth/sso validateOIDCEndpointUrl; QA run #27438 measured it on a localhost IdP), so the localhost IdP that unblocks generic OIDC below does NOT unblock features.sso. So the environment these variants need is a custom host (device) and a reachable IdP (SSO / OIDC). A reachable IdP need not be external: generic OIDC is drivable against an IdP started on localhost (the identity-auth slice report on #23878 (6216631966)), so the generic-OIDC half is not blocked(environment) — only the device variant (no custom host) and the enterprise @better-auth/sso half (features.sso) stay blocked(environment) — the latter until a run reaches a publicly routable IdP or boots with a trustedOrigins configuration naming its IdP's origin"
+          "the device-authorization variant has no switch on the stock `os dev` → `os serve` path: the AuthPlugin the CLI injects takes only env-mapped plugins (packages/cli/src/commands/serve.ts: OS_AUTH_ADMIN, OS_AUTH_TWO_FACTOR, OS_AUTH_PASSWORD_REJECT_BREACHED, OS_AUTH_PHONE_NUMBER_ENABLED), and plugins.deviceAuthorization is none of them (QA run #21784, parked on #22017 row 20). It kept every run of this item from scoring acceptance[0], [4] and [5] whole, so it was split out (#33353 row 8): identity-auth.device-authorization-grant carries the variant, its steps, its spec-path divergence and its blocked(environment) marker. The enterprise @better-auth/sso half (features.sso) is NOT blocked(environment) any more: it has a boot switch, OS_SSO_ENABLED, and the register door's refusal of a loopback IdP is lifted by naming the IdP's origin in OS_TRUSTED_ORIGINS (fixtures.requires[2]; QA run #27438 measured the refusal, QA runs #33092 and #33093 the trusted-origin road). Generic OIDC is drivable against a localhost IdP (the identity-auth slice report on #23878 (6216631966))"
         ]
       },
       "steps": [
@@ -178,8 +178,7 @@
         "email+password: POST /api/v1/auth/sign-up/email (when sign-up enabled), POST /api/v1/auth/sign-in/email, GET /api/v1/auth/get-session, POST /api/v1/auth/sign-out — capture each response and the session cookie lifecycle",
         "phone+password: create a phone-carrying user with a known password, POST the phone sign-in (better-auth /sign-in/phone-number surface — 'always works' when the plugin is on per the spec), verify get-session identifies the user",
         "phone OTP with NO SMS service configured, on a boot with NODE_ENV=production: request /phone-number/send-otp and capture the loud 400 SMS_SERVICE_REQUIRED rejection (never a silent 200, never a hang, never a bare 500). On a development boot the SMS service falls back to its log transport, which delivers in dev (LogSmsTransport prints the body — packages/services/service-sms/src/sms-service.ts), so send-otp succeeds there and the no-SMS state never occurs",
-        "SSO/OIDC: the two halves surface differently. A generic oidcProviders[] entry is advertised as a socialProviders[] entry of type 'oidc' in /api/v1/auth/config (getPublicConfig, auth-manager.ts) — the list the login page's provider buttons read; features.sso tracks ONLY the @better-auth/sso plugin (isSsoWired), so a generic OIDC provider never sets it. Drive the generic-OIDC authorization-code round trip against a localhost IdP, or cite the pinned OIDC dogfood test per rule 6",
-        "device authorization: with deviceAuthorization on, drive the RFC 8628 flow (POST /device/code, approve via /device/approve in a signed-in browser, poll /device/token) against the LIVE server's routes, recording which path spelling the server actually serves",
+        "SSO/OIDC: the two halves surface differently. A generic oidcProviders[] entry is advertised as a socialProviders[] entry of type 'oidc' in /api/v1/auth/config (getPublicConfig, auth-manager.ts) — the list the login page's provider buttons read; features.sso tracks ONLY the @better-auth/sso plugin (isSsoWired), so a generic OIDC provider never sets it. Drive the generic-OIDC authorization-code round trip against a localhost IdP, or cite the pinned OIDC dogfood test per rule 6. The enterprise half, on the fixtures.requires[2] boot: as admin register the mock IdP (POST /api/v1/auth/admin/sso/register), read data.features.sso true, and sign the invited user in through it; on a boot without OS_SSO_ENABLED, features.sso is false or absent and the register door is refused",
         "2FA: with twoFactor on, enable it for a user (sys_user enable_two_factor action, gated on features.twoFactor), sign in, and verify the server-driven challenge (ADR-0069) interrupts before a session is granted",
         "discovery documents: GET /.well-known/openid-configuration and GET /.well-known/oauth-authorization-server (both mounted at the APP ROOT, not under /api/v1/auth — RFC 8414 / OIDC require it, auth-plugin.ts) and record the issuer + advertised endpoints. The same documents also answer 200 under /api/v1/auth/.well-known/ (QA run #33093); that is not a defect, the app-root mounts are what this step reads",
         "self-service identity mutations: POST /api/v1/auth/change-email (authed) and POST /api/v1/auth/delete-user (authed) — capture each, plus the anonymous forge of both. delete-user is deliberately unwired (auth-route-ledger disposition 'disabled': user.deleteUser is not configured, maintainer ruling on #7735), so expect 404 for the signed-in caller and 401 for the anonymous forge (the route is mounted and session-guarded, so the session check answers first) — never 2xx",
@@ -259,9 +258,8 @@
         "email+password (POST /api/v1/auth/sign-in/email, /sign-up/email, /sign-out, /get-session)",
         "phone+password (better-auth phone-number plugin sign-in surface)",
         "phone OTP sign-in + reset (requires SMS service; loud 400 SMS_SERVICE_REQUIRED on send-otp without — #2780)",
-        "enterprise SSO / generic OIDC (generic oidcProviders[] via genericOAuth surface as socialProviders[] of type 'oidc'; features.sso tracks only @better-auth/sso)",
+        "enterprise SSO / generic OIDC (generic oidcProviders[] via genericOAuth surface as socialProviders[] of type 'oidc'; features.sso tracks only @better-auth/sso, armed with OS_SSO_ENABLED and a trusted-origin IdP, fixtures.requires[2])",
         "social OAuth (socialProviders map, per-provider enabled)",
-        "device authorization grant (RFC 8628 — CLI/TV login)",
         "two-factor (server-driven challenge, ADR-0069; cookie-lane completion pinned end-to-end by two-factor-lockout.dogfood.test.ts — arm with OS_AUTH_TWO_FACTOR=true BEFORE boot, the plugin list is resolved once at auth-manager construction; enrollment lifecycle owned by identity-auth.two-factor-*)",
         "magic link (off on a stock boot — the routes answer 404 unless plugins.magicLink is enabled; no login UI and no advertised flag since #7481 — blocked, objectui#4179)",
         "passkeys (plugin flag accepted but nothing wired; no advertised flag since #7481 — blocked, objectui#4179)"
@@ -287,7 +285,91 @@
         { "revision": 8, "date": "2026-10-17", "change": "knownGaps[3], steps[3] and [4], acceptance[3].verify and variants[3] and [7] corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The no-SMS state needs NODE_ENV=production: in development the SMS log transport delivers, so send-otp succeeds. A generic oidcProviders entry surfaces as a socialProviders[] entry of type 'oidc', while features.sso tracks only the @better-auth/sso plugin, so the SSO step's 'features.sso refined to usable' check could never see a generic provider. Magic-link is off on stock (404), not 'server endpoints live'. Generic OIDC is drivable against a localhost IdP, so only the device and enterprise-SSO halves stay blocked(environment). Not loosened: a phone OTP without SMS that succeeds, hangs or 500s on a production boot still FAILS", "ref": "#24036" },
         { "revision": 9, "date": "2026-10-26", "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.auth-method-matrix a3, a6, a9 and ref; wave anchor #25807; card #25843). acceptance[3], [6] and [9] each named a pin that exists but was not in automated.ref (phone-otp-no-sms-service-refusal.test.ts, two-factor-lockout.dogfood.test.ts, change-email-delete-user-wiring.test.ts), and the ref held a single OIDC pin (acceptance[7]) under kind 'e2e', over-implying coverage of a 10-clause item. automated.ref now lists all four pins with the clause and layer each scores, and kind reads 'dogfood'; acceptance[3].verify and acceptance[9].verify say their pins drive AuthManager at unit layer, not the production boot's send-otp door or a booted server, so they score partial and the live calls are still driven. No clause's assertion changed", "ref": "#25843" },
         { "revision": 10, "date": "2026-10-31", "change": "knownGaps[3] said registering an enterprise SSO provider 'needs a reachable external IdP'. The precise rule, measured by QA run #27438: the register door re-dispatches into @better-auth/sso's /sso/register, whose validateOIDCEndpointUrl refuses a loopback or private discovery URL with 400 discovery_private_host unless its origin is in trustedOrigins. So the localhost IdP that unblocks generic OIDC does not unblock features.sso. The gap now says so, and names the two environments that would lift it. Verdicts are unchanged: device and features.sso stay blocked(environment). Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310", "ref": "#27438" },
-        { "revision": 11, "date": "2026-11-14", "change": "steps[0], steps[7] and acceptance[9].verify re-pointed (stale spec, QA runs #32949 and #33093, comment 6850899929; ledger row 54 of #32908). /auth/config answers { success: true, data } (auth-plugin.ts), so the flags sit under data. The delete-user callback needs ?token= or its query schema answers 400 before the disabled branch (change-email-delete-user-wiring.test.ts sends ?token=whatever). The /api/v1/auth/.well-known/ copies answering 200 are recorded as not a defect. No clause changed. Read at base 82838e83", "ref": "#33328" }
+        { "revision": 11, "date": "2026-11-14", "change": "steps[0], steps[7] and acceptance[9].verify re-pointed (stale spec, QA runs #32949 and #33093, comment 6850899929; ledger row 54 of #32908). /auth/config answers { success: true, data } (auth-plugin.ts), so the flags sit under data. The delete-user callback needs ?token= or its query schema answers 400 before the disabled branch (change-email-delete-user-wiring.test.ts sends ?token=whatever). The /api/v1/auth/.well-known/ copies answering 200 are recorded as not a defect. No clause changed. Read at base 82838e83", "ref": "#33328" },
+        { "revision": 12, "date": "2026-11-14", "change": "split (coverage, card #33353 row 8; ledger row 8 of #32908, QA runs #32949 and #33093, comment 6850899929). The SSO and device variants were recorded blocked(environment), which kept acceptance[0], [4] and [5] (per variant) from ever scoring whole. Re-measured on main: device authorization still has no stock switch (serve.ts injects only the env-mapped plugins; auth-manager-plugin-list.ts reads plugins.deviceAuthorization from config alone), so the variant, steps[5], knownGaps[1] (its spec-path divergence) and the device half of knownGaps[3] moved to a new item, identity-auth.device-authorization-grant, which keeps the blocked(environment) marker and the same three clauses for that variant. The enterprise SSO half stays here and is no longer recorded blocked: OS_SSO_ENABLED arms it and OS_TRUSTED_ORIGINS lifts the register door's loopback refusal (fixtures.requires[2], new; the road QA runs #33092 and #33093 used). The rule followed is the README's Lifecycle 'Append' and 'Change' (an item is never deleted; a semantic edit bumps revision and records history), with the new item's history naming this parent. No clause changed and none is narrowed: every clause still reads per variant, over the variants this item now lists. Read from source at base bd439f17", "ref": "#33353" }
+      ]
+    },
+    {
+      "id": "identity-auth.device-authorization-grant",
+      "title": "Device authorization (RFC 8628, the browser-approved CLI and TV login) signs in when enabled, is absent when disabled, and is advertised exactly as configured",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "a device client with no session, requesting a code",
+        "a signed-in user approving the code in the console",
+        "admin (for the host configuration)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an ON host: a host that constructs AuthPlugin itself with plugins.deviceAuthorization: true. The stock `os dev` → `os serve` path cannot: the AuthPlugin the CLI injects takes only env-mapped plugins (packages/cli/src/commands/serve.ts: OS_AUTH_ADMIN, OS_AUTH_TWO_FACTOR, OS_AUTH_PASSWORD_REJECT_BREACHED, OS_AUTH_PHONE_NUMBER_ENABLED), and the plugin list reads deviceAuthorization from the plugin config alone, with no environment switch (packages/plugins/plugin-auth/src/auth-manager-plugin-list.ts)",
+          "an OFF host: the same host with plugins.deviceAuthorization absent or false (the stock boot is one)"
+        ],
+        "knownGaps": [
+          "the two spec files disagree on the device-flow paths (packages/spec/src/api/auth-endpoints.zod.ts: /device/request, /device/token, /device/approve vs packages/spec/src/system/auth-config.zod.ts: /device/code, /device/token, /device, /device/approve, /device/deny) — the LIVE better-auth surface serves POST /device/code, /device/token, /device/approve, /device/deny and GET /device (auth-route-ledger.ts BETTER_AUTH_MOUNTED_SURFACE); trust the live routes and file the doc divergence",
+          "no stock boot is an ON host, so this item is blocked(environment) until a run has one (QA run #21784, parked on #22017 row 20). It was split out of identity-auth.auth-method-matrix (#33353 row 8) so that item scores without it; the OFF-host half (acceptance[0]'s off read and acceptance[3]) is drivable on a stock boot and scores on its own"
+        ]
+      },
+      "blocked": {
+        "by": "environment",
+        "ref": "#22017 row 20 (QA run #21784): no stock os dev or os serve switch for plugins.deviceAuthorization"
+      },
+      "steps": [
+        "on the ON host: GET /api/v1/auth/config and record data.features.deviceAuthorization (getPublicConfig in packages/plugins/plugin-auth/src/auth-manager.ts answers pluginConfig.deviceAuthorization ?? false; the route answers { success: true, data: config })",
+        "device authorization: with deviceAuthorization on, drive the RFC 8628 flow (POST /device/code, approve via /device/approve in a signed-in browser, poll /device/token) against the LIVE server's routes, recording which path spelling the server actually serves",
+        "open the console's device-approval page signed in, with the user_code in its query (the verification URI the plugin is handed is the console page /auth/device, auth-manager-plugin-list.ts); screenshot its approve and deny affordance",
+        "on the OFF host: GET /api/v1/auth/config, open the same device-approval page (with deviceAuthorization false it says device authorization is not enabled instead of calling the endpoints, AuthFeaturesConfigSchema.deviceAuthorization in packages/spec/src/api/auth-endpoints.zod.ts), and POST /api/v1/auth/device/code anyway; record each answer"
+      ],
+      "acceptance": [
+        {
+          "clause": "advertisement parity: data.features.deviceAuthorization reads true on the ON host and false or absent on the OFF host, never advertised while off and never hidden while on (identity-auth.auth-method-matrix acceptance[0], for this variant)",
+          "oracle": "api",
+          "verify": "the two /api/v1/auth/config reads, each against the configuration that booted its host",
+          "evidence": "the /auth/config pair"
+        },
+        {
+          "clause": "the RFC 8628 flow signs a user in when on: POST /device/code issues a device_code and a user_code, a signed-in user approves the user_code through /device/approve, and polling /device/token then answers a token for that user",
+          "oracle": "api",
+          "verify": "the three calls on the ON host against the LIVE routes (BETTER_AUTH_MOUNTED_SURFACE serves POST /device/code, /device/token, /device/approve, /device/deny and GET /device), recording the path spelling the server served; the token's user is the approving user",
+          "evidence": "the code, approve and token responses"
+        },
+        {
+          "clause": "the console offers the approval affordance exactly when the method is on (identity-auth.auth-method-matrix acceptance[4], for this variant)",
+          "oracle": "screenshot",
+          "verify": "the /auth/device page on each host, checked against that host's /auth/config: approve and deny on the ON host, the not-enabled notice on the OFF host",
+          "evidence": "the two screenshots"
+        },
+        {
+          "clause": "a disabled device flow is refused SERVER-SIDE, not merely hidden (identity-auth.auth-method-matrix acceptance[5], for this variant; ADR-0124 D1)",
+          "oracle": "api",
+          "verify": "on the OFF host, POST /api/v1/auth/device/code answers a non-2xx (the plugin's routes are not mounted)",
+          "evidence": "the forged-request response"
+        }
+      ],
+      "negative": [
+        "a 2xx from /device/code on the OFF host is a FAIL: a page that only hides the flow is not a gate",
+        "data.features.deviceAuthorization true on the OFF host, or false on the ON host, is a FAIL"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route"
+      ],
+      "source": [
+        "packages/spec/src/system/auth-config.zod.ts#AuthPluginConfigSchema (deviceAuthorization)",
+        "packages/spec/src/api/auth-endpoints.zod.ts#AuthEndpointPaths (the device-flow paths and response schemas; AuthFeaturesConfigSchema.deviceAuthorization)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts#BETTER_AUTH_MOUNTED_SURFACE (the live /device/* rows)",
+        "packages/plugins/plugin-auth/src/auth-manager-plugin-list.ts (the deviceAuthorization plugin and its /auth/device verification URI)",
+        "identity-auth.auth-method-matrix (split from it, #33353 row 8)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-14",
+          "change": "new — split from identity-auth.auth-method-matrix at its revision 11 (card #33353 row 8; ledger row 8 of #32908). Its device-authorization variant, steps[5], knownGaps[1] (the spec-path divergence) and the device half of knownGaps[3] moved here, so the parent's per-variant clauses can score whole on a stock boot. This item keeps the variant's blocked(environment) marker (#22017 row 20). acceptance[0], [2] and [3] are the parent's acceptance[0], [4] and [5] read for this variant; acceptance[1] states what the parent's step and title asked of it (the flow signs a user in when on). Nothing is narrowed. Read from source at base bd439f17, not driven live",
+          "ref": "#33353"
+        }
       ]
     },
     {
@@ -404,7 +486,7 @@
       "title": "Admin user-lifecycle operations (ban/unban, set-password, impersonate, create/set-role/remove, revoke-sessions) enforce, persist, and stay closed to non-admins",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["platform admin", "target user", "non-admin forger"],
@@ -413,7 +495,7 @@
         "requires": [
           "the better-auth admin plugin enabled (plugins.admin: true) — it exposes /admin/ban-user, /admin/unban-user, /admin/set-user-password, /admin/impersonate-user, /admin/stop-impersonating, /admin/list-users, /admin/create-user, /admin/set-role, /admin/remove-user, /admin/revoke-user-session(s) under the auth route and augments sys_user with role/banned/ban_reason/ban_expires and sys_session with impersonated_by",
           "a disposable target user with a known password (create one; do not ban a seeded persona other items depend on). A user made by POST /api/v1/auth/admin/create-user carries must_change_password (default true, packages/plugins/plugin-auth/src/admin-user-endpoints.ts; the admin set-user-password stamps it too), and every data read then answers 403 PASSWORD_RESET_REQUIRED until the user changes the password: pass mustChangePassword: false, or have the user POST /api/v1/auth/change-password first",
-          "for acceptance[10]–[12] only: a walled boot (OS_TENANCY_POSTURE=isolated or group) provisioned per RUNNER.md's entry 'A walled boot is a fixture of its own', with the admin plugin on. Declare its membership policy as OS_AUTH_MEMBERSHIP_POLICY=invite-only, so one boot serves all three clauses. On a walled boot the admin starts with no active organization: create one (POST /api/v1/auth/organization/create) and set it active (POST /api/v1/auth/organization/set-active) before Create User, or create-user answers 400 NO_ACTIVE_ORGANIZATION. On the stock single-org showcase Create User binds the Default Organization instead, so these three clauses are blocked(fixture) without the walled boot"
+          "for acceptance[10]–[12] only: a walled boot (OS_TENANCY_POSTURE=isolated or group) provisioned per RUNNER.md's entry 'A walled boot is a fixture of its own', with the admin plugin on. Declare its membership policy as OS_AUTH_MEMBERSHIP_POLICY=invite-only, so one boot serves all three clauses. Create User joins the admin's CURRENT organization and answers 400 NO_ACTIVE_ORGANIZATION without one. The walled admin does not start with none: named by OS_PLATFORM_OWNER_EMAIL, it is bound owner of the Default Organization at boot (packages/plugins/plugin-auth/src/ensure-default-organization.ts) and a new session starts on the owned organization (selectActiveOrg in packages/plugins/plugin-auth/src/auth-manager-database-hooks.ts; QA run #33093). So make the organization the clauses are meant to run in current before Create User: POST /api/v1/auth/organization/create, then POST /api/v1/auth/organization/set-active. scripts/qa/qa-fixture.mjs walled-boot does both by default (and exports OS_PLATFORM_OWNER_EMAIL and OS_AUTH_MEMBERSHIP_POLICY=invite-only); with --no-organization it skips them. On the stock single-org showcase Create User binds the Default Organization instead, so these three clauses are blocked(fixture) without the walled boot"
         ],
         "knownGaps": [
         "SUPERSEDED 2026-08-24 (#9482) — the note below is kept because a runner may still meet it on an OLD build, but it no longer describes current main. The 2026-08-18 measurement said EVERY better-auth-native /admin/ endpoint refuses an ObjectStack platform admin. Since then #9970 re-mounted ban-user/unban-user with the ADR-0068 gate and #10352 re-authorized impersonate-user as a better-auth PLUGIN endpoint (consolidated onto hasPlatformAdminStanding by #11686). Re-measured on main 2026-08-24: the platform admin gets 200 from ban-user, unban-user, create-user, set-user-password, unlock-user, import-users, oauth2/toggle-disabled and impersonate-user. EIGHT routes still answer the platform admin 403 YOU_ARE_NOT_ALLOWED_TO_*, and that is now a RULED OUTCOME rather than a gap: remove-user, revoke-user-session, revoke-user-sessions, list-user-sessions, update-user, list-users and get-user (#9969, closed not_planned — no ObjectStack consumer, re-implement on demand), plus set-role (#9968, ruled B — the sys_user action was RETIRED by PR #11530 and the vendor route deliberately left vendor-gated, because its only effect is writing the legacy scalar ADR-0068 D2 retired). A runner who meets a 403 on any of those EIGHT is seeing the intended design, not a fixture mistake and not a bug to file.",
@@ -583,6 +665,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[1], steps[9], steps[10] and acceptance[4].verify re-pointed (stale spec and fixture gap, QA runs #33093 and #33094, comments 6850899929 and 6852480973; ledger rows 244 and 240 of #32908, row 240 from #33331). Admin-made users carry must_change_password and read 403 PASSWORD_RESET_REQUIRED until it clears (admin-user-endpoints.ts). Impersonation deletes the admin's original session (impersonation-bearer-rotation.ts). showcase_task requires project (task.object.ts). No clause changed. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[2] re-pointed (stale spec, card #33353; batch A's out-of-scope note in report 6881502398 on #33328, QA run #33093 comment 6850899929). It said the walled admin starts with no active organization. Re-measured on main: ensure-default-organization.ts binds the OS_PLATFORM_OWNER_EMAIL admin owner of the Default Organization under a walled posture, and selectActiveOrg (auth-manager-database-hooks.ts) starts a new session on the owned organization, as QA run #33093 found and identity-auth.workspace-org-switch already says. The line now says Create User needs a current organization, which one the admin starts on, and that scripts/qa/qa-fixture.mjs walled-boot creates and sets one by default. No clause changed. Read from source at base bd439f17",
+          "ref": "#33353"
         }
       ]
     },
@@ -3259,6 +3347,80 @@
           "date": "2026-11-14",
           "change": "acceptance[1].verify re-pointed (stale spec, QA run #32940, card body of #32908; ledger row 34). The bound's key is the connection, or the client address for an unverified bearer, and a schema-refused request stays on its address because the bound admits before the lookup (packages/plugins/plugin-auth/src/scim-refusal-audit.ts, the bound's doc block). So the 20 are counted per address, which steps[0]'s real-bearer request shares. The clause is unchanged. Read at base 82838e83",
           "ref": "#33328"
+        }
+      ]
+    },
+    {
+      "id": "identity-auth.scim-deactivation-revokes-api-keys",
+      "title": "A directory deactivation through SCIM revokes the user's API keys: each key then answers 403 API_KEY_REVOKED, a re-activation re-arms none, and no one restores them",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "an identity provider calling SCIM 2.0 (the connection's bearer)",
+        "the provisioned user, who mints and presents the key",
+        "admin (the seeded admin): the SCIM credential, the password set, the key-row read and the restore attempt"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a boot with OS_SCIM_ENABLED=true and one SCIM connection credential minted at POST /api/v1/auth/admin/scim/mint-credential (as identity-auth.scim-refused-audit-row)",
+          "a SCIM-provisioned user that holds an API key: POST /api/v1/auth/scim/v2/Users {userName, emails, active: true} with the bearer (record the SCIM id it answers); as admin POST /api/v1/auth/admin/set-user-password {userId, newPassword} (refused only under SSO-only mode, which is off by default); sign in as the user and POST /api/v1/auth/change-password, since set-user-password stamps must_change_password and every other call answers 403 PASSWORD_RESET_REQUIRED until it is changed (packages/plugins/plugin-auth/src/admin-user-endpoints.ts); then POST /api/v1/keys as the user and keep the raw key it answers once"
+        ],
+        "knownGaps": [
+          "the key-holding SCIM user is assembled from source and has not been driven yet: a run that cannot mint the key (a refused sign-in, set-user-password or POST /api/v1/keys for a SCIM-provisioned user) records the item blocked(fixture) naming the step and its answer, and cites packages/plugins/plugin-auth/src/scim-deactivation-reconcile-user.test.ts per rule 6. That pin drives the SCIM door and the key door's admission in process over a real engine, with keys inserted directly rather than minted over HTTP, so it scores acceptance[0]–[2] partial, never pass"
+        ]
+      },
+      "steps": [
+        "control: call GET /api/v1/data/showcase_task with the user's key (x-api-key) and record the answer: the key is admitted (any answer but 401 and the API_KEY_* lifecycle codes; a data refusal for an object the user may not read still proves admission)",
+        "deactivate through the directory: PATCH /api/v1/auth/scim/v2/Users/SCIM_ID {\"schemas\": [\"urn:ietf:params:scim:api:messages:2.0:PatchOp\"], \"Operations\": [{\"op\": \"replace\", \"path\": \"active\", \"value\": false}]} with the bearer; expect 200",
+        "call the same data read with the same key; then, as admin, read the key row: GET /api/v1/data/sys_api_key filtered to the user (revoked, revoked_reason)",
+        "re-activate: the same PATCH with value true; call the data read with the old key again",
+        "restore attempts: as the re-activated owner, and then as admin, PATCH /api/v1/data/sys_api_key/KEY_ID {revoked: false} (the Restore API Key action's write); record both answers and re-read the row",
+        "the new-key road: as the re-activated user POST /api/v1/keys and call the data read with the NEW key"
+      ],
+      "acceptance": [
+        {
+          "clause": "after the SCIM deactivation the user's key answers 403 API_KEY_REVOKED, and its message says the directory deactivated the owner and the key cannot be restored",
+          "oracle": "api",
+          "verify": "steps[2]'s call: status 403, code API_KEY_REVOKED, beside steps[0]'s admitted control (packages/core/src/security/api-key.ts#resolveApiKeyAdmission; the scim_deactivated message in the same file names the new-key road and no restorer); the admin read shows the row kept with revoked true and revoked_reason scim_deactivated (packages/plugins/plugin-auth/src/scim-deactivation-key-revocation.ts#revokeDirectoryDeactivatedApiKeys)",
+          "evidence": "the control answer, the refusal body and the key row"
+        },
+        {
+          "clause": "a re-activation re-arms none of the keys: after SCIM active true the old key still answers 403 API_KEY_REVOKED, and the user's new key is admitted",
+          "oracle": "api",
+          "verify": "steps[3]'s call (403 API_KEY_REVOKED) and steps[5]'s call with the new key (admitted, as in steps[0]); the directory lifts its ban on re-activation (AuthManager#reconcileScimUserLifecycle in packages/plugins/plugin-auth/src/auth-manager.ts), the key is a credential of its own and stays revoked",
+          "evidence": "the two answers"
+        },
+        {
+          "clause": "no one restores a scim_deactivated key from a user context: the owner's restore and a platform administrator's restore are each refused 403 PERMISSION_DENIED, naming the reason and the new-key road, and the row stays revoked",
+          "oracle": "api",
+          "verify": "steps[4]'s two answers and the re-read (packages/plugins/plugin-auth/src/api-key-restore-guard.ts, rule 1: judged first, no standing lifts it)",
+          "evidence": "the two refusals and the re-read row"
+        }
+      ],
+      "negative": [
+        "a key that still answers 2xx after the directory deactivated its owner is a FAIL: the leaver keeps a working credential",
+        "a key the re-activation re-arms, or that a platform administrator restores, is a FAIL of ruling 6787890900 on #32004 ('an administrator cannot restore them')"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-auth/src/scim-deactivation-reconcile-user.test.ts, packages/plugins/plugin-auth/src/api-key-restore-guard.test.ts (in-process layer only: both score partial, the live calls are driven)"
+      },
+      "source": [
+        "packages/plugins/plugin-auth/src/scim-deactivation-key-revocation.ts#revokeDirectoryDeactivatedApiKeys",
+        "packages/plugins/plugin-auth/src/api-key-restore-guard.ts",
+        "packages/core/src/security/api-key.ts#resolveApiKeyAdmission",
+        "#33075 (PR), ruling 6787890900 on #32004 (Directory deactivation)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-14",
+          "change": "new (coverage, card #33353 row 232; ledger row 232 of #32908, QA run #33092 comment 6850793622): no item asserted #33075's SCIM-deactivation key revocation live. Placed beside identity-auth.scim-refused-audit-row because the trigger is the SCIM door. The three clauses are the rule as main states it: the revocation and its 403 API_KEY_REVOKED message (scim-deactivation-key-revocation.ts, core api-key.ts), no re-arm on re-activation (AuthManager reconcileScimUserLifecycle), and no restorer (api-key-restore-guard.ts rule 1). The key-holding SCIM user is a source-read recipe, recorded as a knownGap until a run drives it. Read from source at base bd439f17, not driven live",
+          "ref": "#33353"
         }
       ]
     },
