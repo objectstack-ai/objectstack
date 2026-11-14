@@ -48,7 +48,7 @@ import {
 } from '@objectstack/types';
 import { ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
 import type { ILock } from '@objectstack/spec/contracts';
-import type { ConnectorConnectionRecord, ConnectorConnectionStore } from '../connector-connections.js';
+import { ConnectorConnectionConflictError, type ConnectorConnectionRecord, type ConnectorConnectionStore } from '../connector-connections.js';
 import { OAuth2GrantRefusedError, requestOAuth2Token, type OAuth2Client, type OAuth2TokenResponse } from './token-endpoint.js';
 import { parseKeptConnectionClient } from './installer-client.js';
 
@@ -81,6 +81,12 @@ export interface OAuth2GrantConfig {
 export interface OAuth2GrantHandleDeps {
     /** The connector instance — named in every refusal. */
     readonly connector: string;
+    /**
+     * [#31699] The instance's package (`null`: the environment's or the
+     * platform's instance): its connections are read by `(package, name)`.
+     * Absent, every connection of the name answers, as before.
+     */
+    readonly packageId?: string | null;
     readonly config: OAuth2GrantConfig;
     /** The connection store (`authorization_code` only). */
     readonly connections: ConnectorConnectionStore;
@@ -235,9 +241,9 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
         let record: ConnectorConnectionRecord | undefined;
         try {
             if (organizationId !== undefined) {
-                record = await deps.connections.read(organizationId, connector);
+                record = await deps.connections.read(organizationId, connector, deps.packageId);
             } else {
-                const all = await deps.connections.listFor(connector);
+                const all = await deps.connections.listFor(connector, deps.packageId);
                 if (all.length > 1) {
                     throw connectorCredentialRefusal(
                         `connector instance '${connector}' is connected for ${all.length} organizations, and this dispatch carries `
@@ -248,9 +254,15 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
                     );
                 }
                 record = all[0];
+                // [#31699] The one organization's read is refused: said as the read
+                // says it, its row never taken for the connection.
+                if (record?.conflict !== undefined) throw new ConnectorConnectionConflictError(record.conflict);
             }
         } catch (err) {
             if ((err as { status?: unknown })?.status === 422) throw err;
+            // [#31699] Two connections answering the instance: said as the store
+            // says it (a retry does not settle it), never one of them used.
+            if (err instanceof ConnectorConnectionConflictError) throw unavailable(err.message.replace(/\.$/, ''));
             throw unavailable(`the connection of connector instance '${connector}' could not be read now; the next dispatch retries`);
         }
         if (!record) throw unavailable(notConnectedReason(connector, organizationId));
@@ -309,7 +321,14 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
 
     /** One refresh of `organizationId`'s connection, read again under the lock. */
     const refreshOnce = async (organizationId: string): Promise<CachedToken> => {
-        const current = await deps.connections.read(organizationId, connector);
+        let current: ConnectorConnectionRecord | undefined;
+        try {
+            current = await deps.connections.read(organizationId, connector, deps.packageId);
+        } catch (err) {
+            // [#31699] As `select` says it: a conflict is no transient fault, never a 409 out of the dispatch.
+            if (err instanceof ConnectorConnectionConflictError) throw unavailable(err.message.replace(/\.$/, ''));
+            throw err;
+        }
         if (!current) throw unavailable(notConnectedReason(connector, organizationId));
         if (current.status === 'reconnect_required') throw unavailable(markedReason(connector, current));
         let refreshToken: string | undefined;
