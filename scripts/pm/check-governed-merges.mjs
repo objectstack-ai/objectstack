@@ -484,9 +484,10 @@
  *
  *   - every governed path lies under a catalog row — `.claude/**`, a workflow,
  *     `AGENTS.md`, an ADR or any other row beside it is H;
- *   - every changed path lies under a hit catalog row or `LOW_RISK_RIDER_PREFIXES`
- *     (`.changeset/`, `docs/`, `content/docs/`) — an ALLOWLIST, so `packages/**`,
- *     `ui/packages/**`, a gate script, a ratchet ceiling or a lockfile is H;
+ *   - every changed path lies under a hit catalog row or matches
+ *     `LOW_RISK_RIDER_PATTERNS` (a changeset, Markdown prose under the docs
+ *     trees) — an ALLOWLIST, so `packages/**`, `ui/packages/**`, a gate script,
+ *     a ratchet ceiling or a lockfile is H;
  *   - the body declares `Clause-②: no` with no arm (`readClause2Line`, the one
  *     reader) — `yes`, `(narrowing)`, malformed or absent is H;
  *   - the labels were read and none is `security`.
@@ -2227,16 +2228,17 @@ export function renderWorkflowSplitLines(matched) {
 export const LOW_RISK_ARM_RULING = 'maintainer ruling 2026-11-14 on #33501, 「同意 把低风险的 Tier H 放权给座位」';
 
 /**
- * The ungoverned paths a low-risk PR may carry BESIDE its low-risk rows:
- * prose the register does not govern and the changeset the published catalog
- * owes. ⭐ An ALLOWLIST, never a denylist of published trees: a path outside
- * it — `packages/**`, `ui/packages/**`, a gate script, a ratchet ceiling, a
- * lockfile — keeps the PR Tier H however harmless it reads, because the
- * ruling's arm is wording and a denylist fails open on the next published tree.
- * `docs/` holds `docs/adr/**` and `docs/NORTH-STAR.md`; those are register
- * rows outside the arm, so they keep the PR Tier H by the governed-rows rule.
+ * The ungoverned paths a low-risk PR may carry BESIDE its low-risk rows: a
+ * changeset (the one the published catalog owes) and Markdown prose under the
+ * docs trees the register does not govern. ⭐ An ALLOWLIST of path SHAPES, never
+ * a denylist of published trees: anything else — `packages/**`,
+ * `ui/packages/**`, a gate script, a ratchet ceiling, a lockfile, a non-prose
+ * file under a docs tree — keeps the PR Tier H however harmless it reads,
+ * because the ruling's arm is wording and a denylist fails open on the next
+ * published tree. `docs/adr/**` and `docs/NORTH-STAR.md` match the prose shape
+ * but are register rows outside the arm, so the governed-rows rule keeps them H.
  */
-export const LOW_RISK_RIDER_PREFIXES = Object.freeze(['.changeset/', 'docs/', 'content/docs/']);
+export const LOW_RISK_RIDER_PATTERNS = Object.freeze([/^\.changeset\/[^/]+\.md$/, /^(?:content\/)?docs\/.+\.mdx?$/]);
 
 /** Does this matched row carry the arm in `repo`? */
 function lowRiskArmIn(surface, repo) {
@@ -2252,7 +2254,7 @@ function lowRiskArmIn(surface, repo) {
  * Tier S only when ALL of these hold, each a reason when it does not:
  *   - every governed row hit is a low-risk row (a `.claude/**`, workflow or
  *     any Tier H row beside it is H — the card's "no other governed path");
- *   - every changed path lies under a hit low-risk row or `LOW_RISK_RIDER_PREFIXES`;
+ *   - every changed path lies under a hit low-risk row or matches `LOW_RISK_RIDER_PATTERNS`;
  *   - the reading's path list holds every governed file of the slice;
  *   - the body declares `Clause-②: no` with NO arm (`readClause2Line`, the
  *     fleet's one reader; `no (narrowing)`, `yes`, malformed or absent is H);
@@ -2276,8 +2278,8 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
   if (outside.length > 0) reasons.push(`a governed path outside the arm: ${outside.map((s) => `\`${s.glob}\``).join(', ')}`);
   const paths = (Array.isArray(reading.paths) ? reading.paths : []).filter((p) => typeof p === 'string' && p !== '');
   if (paths.length === 0) reasons.push('the reading carries no path list');
-  const allowed = [...armRows.map((s) => s.prefix).filter(Boolean), ...LOW_RISK_RIDER_PREFIXES];
-  const stray = paths.filter((p) => !allowed.some((prefix) => p.startsWith(prefix)));
+  const armPrefixes = armRows.map((s) => s.prefix).filter(Boolean);
+  const stray = paths.filter((p) => !armPrefixes.some((prefix) => p.startsWith(prefix)) && !LOW_RISK_RIDER_PATTERNS.some((re) => re.test(p)));
   if (stray.length > 0) reasons.push(`a path outside skills wording and prose: ${stray.slice(0, 4).join(', ')}${stray.length > 4 ? ` (+${stray.length - 4} more)` : ''}`);
   const listed = new Set(paths);
   const unlisted = rows.flatMap((s) => s.files ?? []).filter((f) => !listed.has(f));
@@ -5566,7 +5568,8 @@ async function selfTest() {
     const armRows = GOVERNED_SURFACES.filter((s) => s.lowRisk);
     assert('the-arm-rides-exactly-the-two-catalog-rows-scoped-to-objectstack-and-both-keep-row-tier-H',
       armRows.map((s) => s.id).join() === 'skills-catalog,ui-skills-catalog' && armRows.every((s) => s.tier === GOVERNED_TIER_H && Object.isFrozen(s.lowRisk) && s.lowRisk.repos.join() === REPO), JSON.stringify(armRows.map((s) => [s.id, s.tier, s.lowRisk])));
-    assert('the-rider-allowlist-is-changesets-and-ungoverned-prose-only', LOW_RISK_RIDER_PREFIXES.join() === '.changeset/,docs/,content/docs/' && Object.isFrozen(LOW_RISK_RIDER_PREFIXES));
+    const rider = (p) => LOW_RISK_RIDER_PATTERNS.some((re) => re.test(p));
+    assert('the-rider-allowlist-is-changesets-and-Markdown-prose-under-the-docs-trees-only', Object.isFrozen(LOW_RISK_RIDER_PATTERNS) && [CS, 'docs/agents/x.md', 'content/docs/guides/x.mdx'].every(rider) && !['.changeset/config.json', 'docs/x.ts', 'content/docs/x.json', 'content/x.md', 'packages/docs/x.md', '.changeset/a/b.md'].some(rider));
 
     // ⛔ Fail closed: no reading, or an unmeasured one, is H — the path-only readers (`--test`, `--branch`, CODEOWNERS, the prose gate) answer as before.
     assert('⛔ no-reading-is-Tier-H-and-says-NOT-MEASURED', tier([SK], null) === GOVERNED_TIER_H && governedTierFor([SK], REPO) === GOVERNED_TIER_H && testVerdict([SK], { repo: REPO }).tier === GOVERNED_TIER_H && /low-risk skills arm .*NOT MEASURED/.test(renderTestVerdict(testVerdict([SK], { repo: REPO }))));
