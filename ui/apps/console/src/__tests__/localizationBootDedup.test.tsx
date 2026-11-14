@@ -103,7 +103,7 @@ describe('first-visit localization request budget', () => {
 
   it("still ONE request when both state the app's declared default (objectstack#33231)", async () => {
     const gate = deferred<Response>();
-    const fetchStub = vi.fn((url: string) =>
+    const fetchStub = vi.fn((url: string, _init?: RequestInit) =>
       isDiscovery(url)
         ? Promise.resolve(jsonResponse({ locale: { default: 'zh-CN', supported: ['zh-CN'], timezone: 'UTC' } }))
         : gate.promise,
@@ -126,7 +126,7 @@ describe('first-visit localization request budget', () => {
     expect(meCalls(fetchStub)).toBe(1);
     const stated = fetchStub.mock.calls
       .filter(([url]) => !isDiscovery(url))
-      .map(([, init]) => (init as RequestInit).headers as Record<string, string>);
+      .map(([, init]) => init?.headers as Record<string, string>);
     expect(stated.map((h) => h['Accept-Language'])).toEqual(['zh-CN']);
   });
 
