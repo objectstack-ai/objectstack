@@ -34,6 +34,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
+
 const OBJECT = 'crm_lead';
 const ACTION = 'convert_lead';
 const DECLARATION = { name: ACTION, label: 'Convert Lead', objectName: OBJECT, type: 'script', _packageId: 'crm' };
