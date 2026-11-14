@@ -82,6 +82,12 @@
  * "resolved to 0 recipients" path. The silence is identical to the card's, and
  * it arrives through a completely different cause — which is the card's point.
  *
+ * A `role:` audience resolves in the emitting organization and in no other:
+ * the run's organization when it carries one, else the one stored on the
+ * notification's event row. A tick that yields no organization reaches nobody
+ * through `role:`, so the schedule family's delivering CONTROL is a tick that
+ * carries the recipients' own organization (`cronTickWithRecipientsOrg()`).
+ *
  * ## The three-way comparison the fix is actually judged on
  *
  * Pairwise inequality is too weak: before the fix the zero-delivery run and
@@ -152,6 +158,14 @@ function cronTickToday(): AutomationContext {
  */
 function cronTickWithOrg(): AutomationContext {
     return { ...cronTickToday(), tenantId: ORG_PLATFORM } as AutomationContext;
+}
+
+/**
+ * `type: 'schedule'` carrying the organization the recipients belong to — the
+ * delivering shape of the schedule family.
+ */
+function cronTickWithRecipientsOrg(): AutomationContext {
+    return { ...cronTickToday(), tenantId: ORG_EMPLOYER } as AutomationContext;
 }
 
 /**
@@ -523,19 +537,32 @@ describe.each(DRIVERS)('#17123 zero-delivery is distinguishable [driver=%s]', (k
         expect(JSON.stringify(zeroRow)).not.toBe(JSON.stringify(deliveringRow));
     });
 
-    it('CONTROL: the cron tick as it fires TODAY (no organization) still delivers — the schedule family is not blanket-silent', async () => {
+    it('CONTROL: a cron tick carrying the recipients\' organization delivers — the schedule family is not blanket-silent', async () => {
         // Without this, the zero above could be read as "scheduled runs never
-        // deliver in this harness". Today's org-less cron tick resolves
-        // `role:admin` UNSCOPED, so it reaches the four admins and its run
-        // reads like the API arm's.
+        // deliver in this harness". A tick that carries the organization the
+        // admins belong to resolves `role:admin` there, reaches the four
+        // admins, and its run reads like the API arm's.
+        stack = await boot(kind);
+
+        const scheduled = (await stack.engine.execute('nudge', cronTickWithRecipientsOrg())).summary!;
+
+        expect(scheduled.selected).toBeGreaterThan(0);
+        expect(scheduled.unmeasured).toBeGreaterThan(0);
+        expect(insideBrokenSweepFilter(scheduled)).toBe(false);
+        expect((await stack.outbox.list()).length).toBe(MANAGERS.length);
+    });
+
+    it('a cron tick that carries no organization reaches 0 recipients through role:, and its run says so', async () => {
+        // `role:` resolves in the emitting organization only; this tick names
+        // none, so no admin of any organization is reached.
         stack = await boot(kind);
 
         const orgless = (await stack.engine.execute('nudge', cronTickToday())).summary!;
 
+        expect(await stack.outbox.list()).toEqual([]);
         expect(orgless.selected).toBeGreaterThan(0);
-        expect(orgless.unmeasured).toBeGreaterThan(0);
-        expect(insideBrokenSweepFilter(orgless)).toBe(false);
-        expect((await stack.outbox.list()).length).toBe(MANAGERS.length);
+        expect(orgless.acted).toBe(0);
+        expect(insideBrokenSweepFilter(orgless)).toBe(true);
     });
 });
 
