@@ -127,6 +127,7 @@ import { parseCelToAst, sqlPredicateToCel, type CelAstNode } from '@objectstack/
 import {
   controlledByParentMasterOf,
   controlledByParentOwnerMayEdit,
+  controlledByParentWriteRequiresMasterRead,
   isControlledByParentMasterField,
   referenceCarrierOf,
 } from '@objectstack/spec/data';
@@ -1078,12 +1079,22 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // flagged whether or not the detail opted in, with the remedy that works —
   // key the accountable person on `owner_id` — and ⛔ never with the opt-in.
   //
+  // [ADR-0055 §3 as amended for #33250 · ruling A+] A detail that declares
+  // `sharing.controlledByParent.writeRequiresMasterRead: true` asks READ on
+  // the master for every write, so a caller-keyed update policy on it is no
+  // longer a narrowing of master editors: it decides among everyone who reads
+  // the master, as authored, keyed on `owner_id` or on any other user field.
+  // The arm stands down on such a detail, both of its branches.
+  //
   // Judged on the detail the policy names, as declared in THIS stack, and
   // only where its master resolves (an object that derives no master is
   // refused whole by the two rules above). A wildcard policy names no detail.
   // The opt-in is read through the spec's one reader, raw or parsed, so the
   // unparsed doors (`os lint` on a raw config) read it as the parse does.
-  const cbpDetails = new Map<string, { optedIn: boolean; ownerColumn: boolean; masterField: string }>();
+  const cbpDetails = new Map<
+    string,
+    { optedIn: boolean; masterReadSuffices: boolean; ownerColumn: boolean; masterField: string }
+  >();
   for (const obj of objects) {
     if (!obj || typeof obj !== 'object' || typeof obj.name !== 'string') continue;
     if (owdOf(obj) !== 'controlled_by_parent') continue;
@@ -1091,6 +1102,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     if (!rel) continue;
     cbpDetails.set(obj.name, {
       optedIn: controlledByParentOwnerMayEdit(obj),
+      masterReadSuffices: controlledByParentWriteRequiresMasterRead(obj),
       ownerColumn: carriesCbpOwnerColumn(obj),
       masterField: rel.field,
     });
@@ -1129,6 +1141,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         const detail = typeof detailName === 'string' ? cbpDetails.get(detailName) : undefined;
         if (typeof detailName !== 'string' || !detail) continue;
         if (!UPDATE_CLASS_RLS_OPERATIONS.has(String(policy.operation ?? ''))) continue;
+        // [#33250] Read on the master is the master question: the policy decides as authored.
+        if (detail.masterReadSuffices) continue;
         const policyName = typeof policy.name === 'string' ? policy.name : `(policy ${j})`;
         for (const predicate of ['using', 'check'] as const) {
           const fields = callerIdentityKeyedFields(policy[predicate]);

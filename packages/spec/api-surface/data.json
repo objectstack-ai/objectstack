@@ -912,6 +912,7 @@
     "controlledByParentMasterOf (function)",
     "controlledByParentMasterRefusal (function)",
     "controlledByParentOwnerMayEdit (function)",
+    "controlledByParentWriteRequiresMasterRead (function)",
     "countAuthorableFields (function)",
     "credentialFreeMongoOptions (function)",
     "credentialFreeUrl (function)",

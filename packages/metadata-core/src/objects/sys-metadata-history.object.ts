@@ -102,10 +102,13 @@ export const SysMetadataHistoryObject = ObjectSchema.create({
      * type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`,
      * `@objectstack/metadata`): its versions are numbered per name across the
      * packages' rows, so this column, not the version, says whose version it is.
-     * NULL for every other type, for a package-less row, for a row written
-     * before the column existed (its package is then the one its stored body
-     * names, as for a `sys_metadata` row), and for every row
-     * `SysMetadataRepository` writes. Nullable: adding it rewrites no row.
+     * NULL for every other type, and for a row written before the column
+     * existed (its package is then the one its stored body names, as for a
+     * `sys_metadata` row); a package-less row's snapshot carries the
+     * `sys_metadata` mark. [#32905] `SysMetadataRepository` (the `/meta`
+     * doors) records it as `DatabaseLoader` does, so the `/meta` history and
+     * rollback doors read whose version a row is; the rows it wrote before
+     * that carry NULL. Nullable: adding it rewrites no row.
      */
     package_id: Field.text({
       label: 'Package ID',

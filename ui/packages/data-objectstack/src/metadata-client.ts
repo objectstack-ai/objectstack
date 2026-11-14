@@ -807,6 +807,16 @@ export interface MetadataHistoryOptions {
   sinceSeq?: number;
   /** Limit the number of events returned. */
   limit?: number;
+  /**
+   * The package whose versions to read (`?package=`, the `layered()`
+   * spelling). For a type stored per `(package, name)` the server numbers a
+   * name's versions across every holder; naming the package reads only that
+   * holder's, and a bare read of a name two holders hold is refused `409`
+   * naming every holder. On every other type both doors refuse it `400`:
+   * send it only for a type `isPackageSlottedMetaType` (`@objectstack/spec/api`)
+   * answers true for.
+   */
+  packageId?: string;
 }
 
 /** A single field-anchored spec-validation issue (server `error.details.issues`). */
@@ -2015,14 +2025,22 @@ export class MetadataClient {
    * `{ success, version, seq, restoredFromVersion, message }`. Throws
    * `404 version_not_found` for unknown versions and `409 version_not_restorable`
    * when the target version is a delete tombstone.
+   *
+   * `packageId` (`?package=`) names whose row a by-package name's version is
+   * restored into, as `history()`'s does: the version must be that holder's
+   * (`404` otherwise), and a bare rollback of a name two holders hold is
+   * refused `409` naming every holder, with no row written. As with
+   * `history()`, only for a type `isPackageSlottedMetaType` answers true for:
+   * every other type refuses it `400`.
    */
   async rollback<T = unknown>(
     type: string,
     name: string,
     toVersion: number,
-    options: { message?: string } = {},
+    options: { message?: string; packageId?: string } = {},
   ): Promise<T> {
-    const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/rollback`;
+    const qs = options.packageId ? `?package=${encodeURIComponent(options.packageId)}` : '';
+    const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/rollback${qs}`;
     const headers: Record<string, string> = {
       ...this.headers,
       'Content-Type': 'application/json',
@@ -2075,6 +2093,7 @@ export class MetadataClient {
     const params = new URLSearchParams();
     if (options.sinceSeq !== undefined) params.set('sinceSeq', String(options.sinceSeq));
     if (options.limit !== undefined) params.set('limit', String(options.limit));
+    if (options.packageId) params.set('package', options.packageId);
     const qs = params.toString();
     const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`;
     const res = await this.fetchImpl(url, { method: 'GET', headers: this.headers, cache: 'no-store' });
