@@ -1341,11 +1341,6 @@ export class DatabaseLoader implements MetadataLoader {
    * package's is that holder's customization (D4), and the row saved last of
    * the two is the one answered; one package's action bound to several
    * objects is one `(package, name)`, as before.
-   *
-   * [#32681, ADR-0150 D4] A package-less action row is that one holder's only
-   * where the holder binds the name to the row's object (`pluralEntryKeys`,
-   * per `(object, name)`): bound to another object, it is kept beside the
-   * holder's row, FROM folded into it by name.
    */
   private async unscopedTypeRows(type: string): Promise<StoredTypeRow[]> {
     const rows = await this.readTypeRows(type);
