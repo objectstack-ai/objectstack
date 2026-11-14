@@ -2190,7 +2190,11 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
     await seed('action', null, 2);
     const m = await bootPass(HOST);
     // [#32812] FROM `main` `25ee5076`: the host's key. TO: the bare slot.
-    expect(registryKeys(m, 'action')).toEqual(['helper']);
+    // [#32681] …beside ALPHA's own `account` key: the object-less row is not
+    // ALPHA's customization (ALPHA binds the name to `account`), so the plural
+    // read keeps both rows and the pass registers both, FROM the bare slot
+    // alone (the fold kept the row saved last).
+    expect(registryKeys(m, 'action')).toEqual([`${ALPHA}\u0000account\u0001helper`, 'helper']);
     expect(await bareAnswers(m)).toEqual(['env', 'env']);
   });
 
