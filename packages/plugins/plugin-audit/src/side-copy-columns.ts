@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#32442, GHSA-2985-5f64-8wgh] Columns a ledger copy of a row never carries
+ * [#32442; rule: a ledger copy holds no value its owner narrows per reader] Columns a ledger copy of a row never carries
  * because their stored value is ANOTHER record's field values, served on its
  * own row only through its owner's per-reader narrowing. A copy cannot be
  * narrowed that way, so it holds none of them.
