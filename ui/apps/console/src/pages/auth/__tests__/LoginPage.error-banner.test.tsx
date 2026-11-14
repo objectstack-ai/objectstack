@@ -93,7 +93,10 @@ describe('LoginPage — a refused single sign-on names its own cause (objectstac
     '(audience posture invite_only). Ask an administrator for an invitation, or ask them to turn on ' +
     'just-in-time provisioning (allowJit) for this provider.';
 
-  const CASES: ReadonlyArray<{ code: string; description?: string; sentence: string }> = [
+  const EMAIL_DOMAIN_SENTENCE =
+    "No account was created: your email address isn't at a domain this system accepts new accounts from. Use your organization email, or ask your administrator.";
+
+  const CASES: ReadonlyArray<{ code: string; label?: string; description?: string; sentence: string }> = [
     {
       code: 'SELF_REGISTRATION_CLOSED',
       description: SELF_REGISTRATION_CLOSED_MESSAGE,
@@ -130,11 +133,22 @@ describe('LoginPage — a refused single sign-on names its own cause (objectstac
     // refused, with the description that module redirects with.
     {
       code: 'EMAIL_DOMAIN_NOT_ALLOWED',
+      label: 'EMAIL_DOMAIN_NOT_ALLOWED (SSO proven-domain rule)',
       description:
         'With SSO domain verification on, an identity provider creates an account only for an email address at a ' +
         'domain it has proven. Nothing was created.',
-      sentence:
-        "No account was created: your email address isn't at a domain that your organization's sign-in service has verified with this system. Ask your administrator to check the single sign-on setup.",
+      sentence: EMAIL_DOMAIN_SENTENCE,
+    },
+    // plugin-auth `audience-posture.ts`: the `email_domain` posture refused a
+    // self-serve creation (a social sign-up lands here through the errorURL)
+    // with the same code; the one sentence is true of both emitters.
+    {
+      code: 'EMAIL_DOMAIN_NOT_ALLOWED',
+      label: 'EMAIL_DOMAIN_NOT_ALLOWED (email_domain audience posture)',
+      description:
+        'Self-registration is limited to approved email domains, and this address ' +
+        'is not on the list. Use your organization email, or ask an administrator for an invitation.',
+      sentence: EMAIL_DOMAIN_SENTENCE,
     },
     {
       code: 'INVALID_EMAIL',
@@ -147,8 +161,8 @@ describe('LoginPage — a refused single sign-on names its own cause (objectstac
     },
   ];
 
-  for (const { code, description, sentence } of CASES) {
-    it(`${code}: its own sentence, not the generic one, with the technical cause only in the toggle`, async () => {
+  for (const { code, label, description, sentence } of CASES) {
+    it(`${label ?? code}: its own sentence, not the generic one, with the technical cause only in the toggle`, async () => {
       const query = new URLSearchParams({ error: code, ...(description ? { error_description: description } : {}) });
       renderLogin(`?${query.toString()}`);
 

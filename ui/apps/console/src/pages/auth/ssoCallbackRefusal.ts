@@ -67,7 +67,7 @@ const ACCESS_DENIED: RefusalCopy = {
 const EMAIL_DOMAIN_NOT_ALLOWED: RefusalCopy = {
   key: 'auth.login.errors.ssoEmailDomainNotAllowed',
   defaultValue:
-    "No account was created: your email address isn't at a domain that your organization's sign-in service has verified with this system. Ask your administrator to check the single sign-on setup.",
+    "No account was created: your email address isn't at a domain this system accepts new accounts from. Use your organization email, or ask your administrator.",
 };
 
 const EMAIL_NOT_AN_ADDRESS: RefusalCopy = {
@@ -108,11 +108,16 @@ const GENERIC: RefusalCopy = {
  *    `oauth-authorize-refusal.ts`), and the callback hands it on unchanged.
  *    Its sentence says the same as that provider's own refusal page, and the
  *    page offers the same two ways on ({@link accessDeniedExits}).
- *  - `EMAIL_DOMAIN_NOT_ALLOWED`: with SSO domain verification on, the
- *    provider asked for a new account whose email is not at a domain the
- *    provider has proven (plugin-auth `sso-account-at-proven-domain.ts`).
- *    Nothing was created, and a second attempt meets the same rule, so the
- *    sentence sends the person to their administrator, not to try again;
+ *  - `EMAIL_DOMAIN_NOT_ALLOWED`: two emitters send it here. With SSO domain
+ *    verification on, an identity provider asked for a new account whose
+ *    email is not at a domain it has proven (plugin-auth
+ *    `sso-account-at-proven-domain.ts`); and the `email_domain` audience
+ *    posture refused a self-serve creation, a social sign-up included, whose
+ *    email is not on the approved-domain list (plugin-auth
+ *    `audience-posture.ts`). The sentence is true of both: nothing was
+ *    created, the address is not at a domain this system accepts new accounts
+ *    from, and a second attempt meets the same rule, so it names the
+ *    organization email and the administrator, not trying again;
  *  - `INVALID_EMAIL`: the provider asked for a new account and the sign-in
  *    resolved to a value that is not an email address (no email attribute or
  *    claim mapped). Nothing was created; only the administrator can fix the
