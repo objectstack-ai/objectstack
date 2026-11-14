@@ -440,6 +440,86 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'env1']]);
       });
 
+      // [#32717] One answer per rollback door: `MetadataManager.rollback` and
+      // `DatabaseLoader.registerRollback`, asked the same question, answer it in
+      // the same words. An address names whose versions are restored; a
+      // version its history does not hold answers "not found" at both.
+      const failure = (promise: Promise<unknown>) => promise.then(() => undefined, (error: any) => error);
+      const legacyHistory = async () => {
+        // The table as the release before #32351 created it: no `package_id`.
+        const { package_id: _added, ...before } = SysMetadataHistoryObject.fields as Record<string, unknown>;
+        await driver.syncSchema('sys_metadata_history', { ...SysMetadataHistoryObject, fields: before } as never);
+        return (version: number, data: Record<string, unknown>) => driver.create('sys_metadata_history', {
+          id: `legacy_${version}`, event_seq: version, type, name: 'x', version, operation_type: 'update',
+          metadata: JSON.stringify(data), checksum: `c${version}`, recorded_at: `2026-01-0${version}T00:00:00.000Z`,
+          source: 'database-loader',
+        });
+      };
+
+      for (const [holder, suffix] of [[A, `(package ${A})`], [null, '(environment)']] as const) {
+        it(`one row slot (${holder ?? 'the environment'}): a rollback addressing it to a version attributed to none answers "not found" at both doors, and writes nothing`, async () => {
+          const legacy = await legacyHistory();
+          await legacy(1, body('custom'));
+          await loader.save(type, 'x', holder === null ? body('env2') : body('A2', holder));
+          const rows = await rowsOf(type);
+          expect(rows.map((row) => row.package_id ?? null)).toEqual([holder]);
+          for (const attempt of [
+            manager.rollback(type, 'x', 1, { packageId: holder }),
+            loader.registerRollback(type, 'x', body('custom'), 1, undefined, undefined, { packageId: holder }),
+          ]) {
+            const error = await failure(attempt);
+            expect(error?.message).toBe(`Version 1 not found in history for ${type}/x ${suffix}`);
+            expect(error?.status).toBeUndefined();
+          }
+          expect(await rowsOf(type)).toEqual(rows);
+          // CONTROL: naming no package, it lands in the one row, as before.
+          await loader.registerRollback(type, 'x', body('custom'), 1);
+          expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[holder, 'custom']]);
+        });
+      }
+
+      it('M1: one row slot a package took over: a rollback addressing that package to the environment\'s version answers "not found" at both doors, and writes nothing', async () => {
+        await loader.save(type, 'x', body('env1'));
+        await loader.save(type, 'x', body('A2', A));
+        const rows = await rowsOf(type);
+        expect(rows.map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'A2']]);
+        for (const attempt of [
+          manager.rollback(type, 'x', 1, { packageId: A }),
+          loader.registerRollback(type, 'x', body('env1'), 1, undefined, undefined, { packageId: A }),
+        ]) {
+          const error = await failure(attempt);
+          expect(error?.message).toBe(`Version 1 not found in history for ${type}/x (package ${A})`);
+          expect(error?.status).toBeUndefined();
+        }
+        expect(await rowsOf(type)).toEqual(rows);
+      });
+
+      it('a version attributed to none is attributed by its history row, never by the restored body\'s package stamp', async () => {
+        const legacy = await legacyHistory();
+        await legacy(1, body('custom'));
+        await loader.save(type, 'x', body('A2', A));
+        // One row slot: the stamp names B, the history row nobody; naming no
+        // package it lands in the one row, as the unstamped body does.
+        await loader.registerRollback(type, 'x', body('custom', B), 1);
+        expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'custom']]);
+        // Two row slots: refused naming both holders at both doors, whatever
+        // package the restored body is stamped with — ⛔ never landed in B's row.
+        await loader.save(type, 'x', body('B4', B));
+        const rows = await rowsOf(type);
+        const both = {
+          code: 'RESOURCE_CONFLICT',
+          status: 409,
+          reason: 'ambiguous-in-environment',
+          callerPackageId: null,
+          candidates: [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }],
+        };
+        for (const packageId of [A, B]) {
+          expect(await refusal(manager.rollback(type, 'x', 1, { packageId }))).toEqual(both);
+          expect(await refusal(loader.registerRollback(type, 'x', body('custom', B), 1, undefined, undefined, { packageId }))).toEqual(both);
+        }
+        expect(await rowsOf(type)).toEqual(rows);
+      });
+
       it('an environment version is not written into a package\'s row', async () => {
         await twoHolders();
         await loader.save(type, 'x', body('env1'));
