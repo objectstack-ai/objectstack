@@ -52,6 +52,7 @@ import {
   deriveStudioDetailSections,
   toAuthoredDetailSections,
   MORE_DETAILS_DEFAULT_LABEL,
+  UNGROUPED_SECTION_DEFAULT_LABEL,
 } from './recordDetailSections';
 import { registerBuiltinAnchors } from './metadata-admin/anchors';
 import { resolveResourceConfig } from './metadata-admin/registry';
@@ -88,7 +89,7 @@ const groupedDef = {
   },
 };
 
-const LABELS = { moreDetails: MORE_DETAILS_DEFAULT_LABEL };
+const LABELS = { moreDetails: MORE_DETAILS_DEFAULT_LABEL, ungrouped: UNGROUPED_SECTION_DEFAULT_LABEL };
 
 /** Every `record:details` node in a page document, depth-first. */
 function detailsNodes(node: unknown): Array<Record<string, any>> {

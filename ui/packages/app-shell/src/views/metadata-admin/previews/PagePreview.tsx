@@ -20,7 +20,12 @@ import { PreviewShell, PreviewErrorBoundary, PreviewMessage } from './PreviewShe
 import { OutlineStrip } from './OutlineStrip.js';
 import { SourcePageEditor } from './SourcePageEditor.js';
 import { pageKindNode } from '../../pageKindNode.js';
-import { deriveStudioDetailSections, toAuthoredDetailSections, MORE_DETAILS_DEFAULT_LABEL } from '../../recordDetailSections.js';
+import {
+  deriveStudioDetailSections,
+  toAuthoredDetailSections,
+  MORE_DETAILS_DEFAULT_LABEL,
+  UNGROUPED_SECTION_DEFAULT_LABEL,
+} from '../../recordDetailSections.js';
 import { PageBlockCanvas } from './PageBlockCanvas.js';
 import { InterfaceListPage } from '../../InterfaceListPage.js';
 import { t as tr, tFormat } from '../i18n.js';
@@ -312,7 +317,10 @@ export function PagePreview({ draft, editing, selection, onSelectionChange, onPa
       // The running app's detail sections, from the one derivation it uses
       // and with the heading it translates (objectui#12442) — without them an
       // object with no `fieldGroups` previewed a bare `record:details`.
-      const sections = deriveStudioDetailSections(recordSchema, { moreDetails: moreDetailsLabel });
+      const sections = deriveStudioDetailSections(recordSchema, {
+        moreDetails: moreDetailsLabel,
+        ungrouped: t('common.ungroupedSection', 'Other'),
+      });
       return buildDefaultPageSchema(recordSchema ?? undefined, sections ? { slots, sections: sections as any } : { slots }) as Record<string, unknown>;
     } catch {
       return schema;
@@ -339,7 +347,10 @@ export function PagePreview({ draft, editing, selection, onSelectionChange, onPa
     if (!canConvertToFull) return;
     const slots = (draft as { slots?: Record<string, unknown> })?.slots ?? {};
     const sections = toAuthoredDetailSections(
-      deriveStudioDetailSections(recordSchema, { moreDetails: MORE_DETAILS_DEFAULT_LABEL }),
+      deriveStudioDetailSections(recordSchema, {
+        moreDetails: MORE_DETAILS_DEFAULT_LABEL,
+        ungrouped: UNGROUPED_SECTION_DEFAULT_LABEL,
+      }),
     );
     const synth = buildDefaultPageSchema(
       recordSchema,

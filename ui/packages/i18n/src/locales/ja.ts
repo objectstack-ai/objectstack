@@ -125,6 +125,7 @@ const ja = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "{{total}} 件中、最初の {{shown}} 件を表示しています。フィルターを絞り込んでください。",
     rowCeilingNoteUnknownTotal: "最初の {{shown}} 件を表示しています。フィルターを絞り込んでください。",
+    ungroupedSection: "その他",
   },
   actions: {
     decisionOutput: {

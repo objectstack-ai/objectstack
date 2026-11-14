@@ -142,6 +142,12 @@ const en = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: 'Showing the first {{shown}} of {{total}} records. Narrow the filter.',
     rowCeilingNoteUnknownTotal: 'Showing the first {{shown}} records. Narrow the filter.',
+    // objectstack#33229 — the heading of the trailing section that holds the
+    // fields no declared field group claims (`deriveFieldGroupLayout`'s keyless
+    // bucket), drawn only when declared groups precede it: the record detail
+    // body and the object form arms. Without it those fields sat headerless
+    // under the last group and read as its members.
+    ungroupedSection: 'Other',
   },
   actions: {
     decisionOutput: {

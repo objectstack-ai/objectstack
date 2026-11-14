@@ -25,9 +25,12 @@ vi.mock('./PageBlockCanvas', () => ({
   PageBlockCanvas: () => <div data-testid="mock-page-canvas" />,
 }));
 
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 import { PagePreview } from './PagePreview';
 import { buildDefaultPageSchema } from '@object-ui/plugin-detail';
-import { deriveRecordDetailSections, MORE_DETAILS_DEFAULT_LABEL } from '../../recordDetailSections';
+import { deriveRecordDetailSections, MORE_DETAILS_DEFAULT_LABEL, UNGROUPED_SECTION_DEFAULT_LABEL } from '../../recordDetailSections';
 
 afterEach(cleanup);
 
@@ -222,7 +225,10 @@ describe('PagePreview — slotted record page detail sections (objectui#12442)',
   }
 
   it('an object with no fieldGroups: the preview carries the runtime sections, not a bare record:details', async () => {
-    const runtimeSections = deriveRecordDetailSections(flatDef, { moreDetails: MORE_DETAILS_DEFAULT_LABEL });
+    const runtimeSections = deriveRecordDetailSections(flatDef, {
+      moreDetails: MORE_DETAILS_DEFAULT_LABEL,
+      ungrouped: UNGROUPED_SECTION_DEFAULT_LABEL,
+    });
     // Firing control: the split really yields two sections for this fixture.
     expect(runtimeSections).toHaveLength(2);
     const node = await previewDetails(flatDef);

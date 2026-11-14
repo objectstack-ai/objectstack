@@ -134,6 +134,7 @@ const zhHant = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: '僅顯示 {{total}} 條記錄中的前 {{shown}} 條。請縮小篩選範圍。',
     rowCeilingNoteUnknownTotal: '僅顯示前 {{shown}} 條記錄。請縮小篩選範圍。',
+    ungroupedSection: '其他',
   },
   actions: {
     decisionOutput: {

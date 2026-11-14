@@ -219,10 +219,9 @@ const UNTITLED_BLOCK_CLASS = 'mt-4 border-t border-border pt-4';
  *
  * A sectioned form is ONE form whose section headings are inline
  * `section-divider` rows. Every row used to share one field grid, so the fields
- * of an UNTITLED section — `@objectstack/spec`'s trailing ungrouped bucket
- * (`deriveFieldGroupLayout`, ADR-0085 §5), which by the one row rule
- * (objectui#9849, director ruling letter E: a row exists iff
- * `title || description`) draws no row of its own — flowed on under the
+ * of an UNTITLED section — one with neither a label nor a description, which
+ * by the one row rule (objectui#9849, director ruling letter E: a row exists
+ * iff `title || description`) draws no row of its own — flowed on under the
  * previous section's heading, into the same grid row, and read as its members.
  *
  * The heading already says where its section ends: its membership claim

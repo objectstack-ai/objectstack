@@ -79,6 +79,9 @@ const FORM_CHROME_DEFAULTS = {
   // (objectui#11145): the key the record page's `record:line_items` panel
   // reads for its own default title, not a key of the form's own.
   'form.lineItems.title': 'Line Items',
+  // The heading of the fields no declared field group claims
+  // (`deriveFieldGroupSections`' trailing bucket).
+  'common.ungroupedSection': 'Other',
 };
 
 /**
