@@ -7,6 +7,15 @@
 // send-back, the read's `flow_route` / `flow_steps` and resubmit answer as
 // before; a request naming no package reads through its run; CONTROL: one
 // whose run cannot be read either keeps the refusal naming both.
+//
+// [ADR-0150 D8 row R7, #32647] A request whose stamped package was
+// uninstalled never reads another package's flow of that name, on a real
+// boot: install, open, uninstall, install another namespace's same-named
+// flow. The second package's flow is filed under the bare name the run
+// carries, so both the run's key and the bare read would serve it; the
+// send-back refuses naming every holder, and the read serves no route or
+// steps. CONTROL: with no holder left, the doors answer as for a deleted
+// flow, as on `main`.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -145,5 +154,117 @@ describe('an approval request reads its flow from its own slot once a second nam
     const unread = await call('GET', `/approvals/requests/${control.id}`);
     const unreadRow = unread.body?.data ?? unread.body;
     expect([unread.status, unreadRow?.status, unreadRow?.flow_route, unreadRow?.flow_steps], JSON.stringify(unread.body)).toEqual([200, 'pending', undefined, undefined]);
+  });
+});
+
+const WD_HOST = 'com.qa.appr.wdhost';
+const WD_ALPHA = 'com.qa.appr.wdalpha';
+const WD_IOTA = 'com.qa.appr.wdiota';
+const WD_FLOW = 'qa_appr_wd_flow';
+/** The host's object: it outlives the uninstall, so the request's record does too. */
+const WD_SHEET = 'qaapprwd_sheet';
+
+/** A package shipping `WD_FLOW` with one approval step and a revise window, each labelled `label`. */
+const wdPackage = (id: string, namespace: string, label: string) => ({
+  manifest: {
+    id, namespace, name: namespace, version: '1.0.0', type: 'app', scope: 'project',
+    engines: { protocol: `^${PROTOCOL_MAJOR}` },
+    flows: [{
+      name: WD_FLOW, label: `${label} approval`, type: 'autolaunched', status: 'active',
+      nodes: [
+        { id: 'start', type: 'start', label: 'On Create', config: { objectName: WD_SHEET, triggerType: 'record-after-create' } },
+        { id: 'gate', type: 'approval', label: `${label} gate`, config: { approvers: [{ type: 'user', value: ADMIN }], behavior: 'first_response' } },
+        { id: 'rework', type: 'approval_revise', label: `${label} revision` },
+        { id: 'approved', type: 'end', label: 'Approved' },
+        { id: 'rejected', type: 'end', label: 'Rejected' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'gate' },
+        { id: 'e2', source: 'gate', target: 'approved', label: 'approve' },
+        { id: 'e3', source: 'gate', target: 'rejected', label: 'reject' },
+        { id: 'e4', source: 'gate', target: 'rework', label: 'revise' },
+        { id: 'e5', source: 'rework', target: 'gate', label: 'resubmit', type: 'back' },
+      ],
+    }],
+  },
+});
+
+describe('a request whose stamped package was uninstalled never reads another namespace\'s flow of that name (ADR-0150 D8 R7, #32647)', () => {
+  let stack: VerifyStack;
+  let admin: string;
+  let tempDir: string;
+  let ql: any;
+
+  const call = async (method: string, path: string, body?: unknown) => {
+    const res = await stack.apiAs(admin, method, path, body);
+    const json = (await res.json().catch(() => ({}))) as any;
+    const error = json?.error && typeof json.error === 'object' ? json.error : json;
+    return { status: res.status, body: json, code: error?.code ?? null, message: String(error?.message ?? json?.error ?? '') };
+  };
+  const stored = async (id: string) => (await ql.find('sys_approval_request', { where: { id }, context: SYSTEM_CTX }))[0];
+  /** The read's route and steps, and the send-back's answer, with the row's status after it. */
+  const doors = async (id: string) => {
+    const read = await call('GET', `/approvals/requests/${id}`);
+    const row = read.body?.data ?? read.body;
+    const revised = await call('POST', `/approvals/requests/${id}/revise`, { comment: 'revise' });
+    return {
+      read: [read.status, row?.flow_route === undefined ? undefined : 'route', row?.flow_steps?.map((s: any) => s.label)],
+      revise: [revised.status, revised.code],
+      message: revised.message,
+      status: (await stored(id)).status,
+    };
+  };
+
+  beforeAll(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'dogfood-approval-flow-withdrawn-'));
+    const host = defineStack({
+      manifest: { id: WD_HOST, namespace: 'qaapprwd', name: 'qa_appr_wd_host', version: '1.0.0', type: 'app' },
+      requires: ['automation', 'triggers'],
+      objects: [{ name: WD_SHEET, label: 'Sheet', sharingModel: 'public_read_write', fields: { name: { type: 'text', label: 'Name' } } }],
+    } as never);
+    stack = await bootStack(host as never, {
+      automation: true,
+      extraPlugins: [
+        new RecordChangeTriggerPlugin(),
+        new ApprovalsServicePlugin(),
+        new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: join(tempDir, 'installs') }),
+      ],
+    });
+    admin = await stack.signIn();
+    ql = await stack.kernel.getServiceAsync('objectql');
+  }, 300_000);
+
+  afterAll(async () => {
+    await stack?.stop().catch(() => undefined);
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('install, open, uninstall, install another namespace\'s flow of the name: the send-back refuses naming every holder and the read serves no route or steps; CONTROL: no holder answers as a deleted flow', async () => {
+    const automation = (stack.kernel as any).getService('automation');
+    const installed = await call('POST', '/marketplace/install-local', wdPackage(WD_ALPHA, 'qaapprwda', 'Alpha'));
+    expect(installed.status, JSON.stringify(installed.body)).toBeLessThan(300);
+
+    const created = await call('POST', `/data/${WD_SHEET}`, { name: 'withdrawn' });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const recordId = String(created.body?.id ?? created.body?.record?.id ?? created.body?.data?.id ?? '');
+    const [request] = await ql.find('sys_approval_request', { where: { object_name: WD_SHEET, record_id: recordId, status: 'pending' }, context: SYSTEM_CTX });
+    expect([request?.process_package, automation.flowSlotKey(WD_ALPHA, WD_FLOW)], 'alpha\'s flow opened a request stamped with alpha, under the bare key').toEqual([WD_ALPHA, WD_FLOW]);
+
+    const uninstalled = await call('DELETE', `/marketplace/install-local/${WD_ALPHA}`);
+    expect(uninstalled.status, JSON.stringify(uninstalled.body)).toBe(200);
+    expect(automation.getFlowSlots(WD_FLOW)).toEqual([]);
+
+    // CONTROL: no package holds the name: the doors answer as for a deleted flow, as on `main`.
+    const gone = await doors(request.id);
+    expect([gone.read, gone.revise[1], gone.status], JSON.stringify(gone)).toEqual([[200, undefined, undefined], 'VALIDATION_FAILED', 'pending']);
+
+    const iota = await call('POST', '/marketplace/install-local', wdPackage(WD_IOTA, 'qaapprwdi', 'Iota'));
+    expect(iota.status, JSON.stringify(iota.body)).toBeLessThan(300);
+    // Iota's flow is filed under the bare name the request's run carries.
+    expect([automation.flowSlotKey(WD_IOTA, WD_FLOW), (await automation.getFlow(WD_FLOW))?.label]).toEqual([WD_FLOW, 'Iota approval']);
+
+    const moved = await doors(request.id);
+    expect([moved.read, moved.revise, moved.status], JSON.stringify(moved)).toEqual([[200, undefined, undefined], [409, 'RESOURCE_CONFLICT'], 'pending']);
+    expect([moved.message.includes(WD_ALPHA), moved.message.includes(WD_IOTA)], moved.message).toEqual([true, true]);
   });
 });
