@@ -285,7 +285,18 @@ import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
 import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-instance.js';
 import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
 import { createEngineSsoProviderConfigReader, emailClaimOfStoredOidcConfig, type SsoProviderConfigEngine } from './register-sso-provider.js';
-import { readSsoProviderSignInOptions, runWithSamlIdpInitiated } from './sso-sign-in-options.js';
+import { readSsoProviderSignInOptions, runWithSamlProviderScope } from './sso-sign-in-options.js';
+import {
+  judgeSignOutOfIdpCapability,
+  parkOidcEndSessionEndpoint,
+  recordOidcSignOutSession,
+  runSsoSignOut,
+  samlSingleLogoutProviderId,
+  SIGN_OUT_ENDPOINT_PATH,
+  SIGN_OUT_OF_IDP_BODY_KEY,
+  type SignOutAuthContext,
+  type SsoSignOutDeps,
+} from './sso-sign-out-of-idp.js';
 import { readStoredSamlConfig, runSsoSamlRefusalCauseScope } from './sso-saml-refusal-cause.js';
 import { readThirdPartyLoginProvider, runThirdPartyInitiatedLogin, type ThirdPartyLoginContext } from './sso-third-party-initiated-login.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
@@ -2074,6 +2085,7 @@ export class AuthManager {
       assertRevokeSessionIdentifiesRecord: (...a) => this.assertRevokeSessionIdentifiesRecord(...a),
       assertSsoProviderDeletable: (...a) => this.assertSsoProviderDeletable(...a),
       assertSsoProviderDomainFree: (...a) => this.assertSsoProviderDomainFree(...a),
+      assertSsoSignOutOfIdpSupported: (...a) => this.assertSsoSignOutOfIdpSupported(...a),
       auditRefusedSignIn: (...a) => this.auditRefusedSignIn(...a),
       buildPluginList: (...a) => this.buildPluginList(...a),
       clearSignInLockout: (...a) => this.clearSignInLockout(...a),
@@ -2112,6 +2124,7 @@ export class AuthManager {
       sendExistingAccountSignUpNotice: (...a) => this.sendExistingAccountSignUpNotice(...a),
       settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
       settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
+      settleSsoSignOutOfIdp: (...a) => this.settleSsoSignOutOfIdp(...a),
       signUpForcedOff: (...a) => this.signUpForcedOff(...a),
       ssoDiscoveryTrustedOrigins: (...a) => this.ssoDiscoveryTrustedOrigins(...a),
       stampLastLogin: (...a) => this.stampLastLogin(...a),
@@ -4138,7 +4151,7 @@ export class AuthManager {
    */
   handleVendorRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
-    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'resolveAuthSecret'> = {
+    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'runSsoLogout' | 'resolveAuthSecret'> = {
       config: this.config,
       betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
       getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
@@ -4146,6 +4159,7 @@ export class AuthManager {
       runSubjectErasureAtomically: (...a) => this.runSubjectErasureAtomically(...a),
       answerOAuthTokenRevocation: (...a) => this.answerOAuthTokenRevocation(...a),
       runSsoCallback: (...a) => this.runSsoCallback(...a),
+      runSsoLogout: (...a) => this.runSsoLogout(...a),
       resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
     };
     return handleRequest.call(host, request, transport);
@@ -4171,7 +4185,10 @@ export class AuthManager {
   ): Promise<Response> {
     // A SAML ACS request runs with its provider's IdP-initiated toggle in
     // scope: the vendor's one plugin-wide option answers it per provider
-    // (`sso-sign-in-options.ts`, ruling record 6718355623).
+    // (`sso-sign-in-options.ts`, ruling record 6718355623). Its single-logout
+    // switch too (ruling record 6866334319): on, the vendor records the
+    // session's NameID and SessionIndex for the sign-out
+    // (`sso-sign-out-of-idp.ts`).
     const scoped =
       callback.protocol === 'saml'
         ? async (): Promise<Response> => {
@@ -4187,7 +4204,7 @@ export class AuthManager {
               const auth: any = await this.getOrCreateAuth();
               return readStoredSamlConfig(await auth.$context, callback.providerId);
             };
-            return runWithSamlIdpInitiated(options.allowIdpInitiated, () =>
+            return runWithSamlProviderScope({ allowIdpInitiated: options.allowIdpInitiated, singleLogout: options.signOutOfIdp }, () =>
               runSsoSamlRefusalCauseScope(callback, this.config.logger, readSamlConfig, run),
             );
           }
@@ -4217,6 +4234,13 @@ export class AuthManager {
     // hold; anything else reaches the vendor callback unchanged
     // (`sso-third-party-initiated-login.ts`).
     const engine = this.config.dataEngine;
+    // An OIDC sign-in at a provider whose "sign out of the company sign-in
+    // too" switch is on records the session's provider for its sign-out
+    // (`sso-sign-out-of-idp.ts`, ruling record 6866334319).
+    const recorded = async (answer: Response): Promise<Response> => {
+      await recordOidcSignOutSession(this.ssoSignOutDeps(transport), callback.providerId, answer);
+      return answer;
+    };
     return runThirdPartyInitiatedLogin(
       callback,
       {
@@ -4232,7 +4256,145 @@ export class AuthManager {
         logger: this.config.logger,
       },
       callbackScope,
+    ).then(recorded);
+  }
+
+  /**
+   * What `sso-sign-out-of-idp.ts` reads: better-auth's context, the provider
+   * switch (system read), the session of a set of cookies, and the vendor
+   * entry for an in-process re-dispatch (never back through the route table).
+   */
+  private ssoSignOutDeps(transport?: { remoteAddress?: string }): SsoSignOutDeps {
+    const engine = this.config.dataEngine;
+    return {
+      context: async () => {
+        const auth: any = await this.getOrCreateAuth();
+        return (await auth.$context) as SignOutAuthContext;
+      },
+      reader: () => (engine ? (withSystemReadContext(engine) as never) : undefined),
+      getSession: async (headers) => {
+        const auth: any = await this.getOrCreateAuth();
+        const found = await auth.api.getSession({ headers, query: { disableRefresh: true } }).catch(() => null);
+        return found?.session?.id && found?.user?.id ? found : null;
+      },
+      dispatch: (request) => this.handleVendorRequest(request, transport),
+      warn: (message) => this.config.logger?.warn?.(message),
+    };
+  }
+
+  /**
+   * A sign-out, or one of the vendor's SAML single-logout endpoints, with the
+   * provider's "sign out of the company sign-in too" switch in scope (ruling
+   * record 6866334319, `sso-sign-out-of-idp.ts`):
+   *
+   * - `POST /sign-out` of a session that started at a provider whose switch is
+   *   on also ends the identity provider's session (SAML single logout, or
+   *   an OIDC RP-initiated logout URL in the answer); any other sign-out is
+   *   `run`, unchanged.
+   * - `/sso/saml2/sp/slo/:providerId`, `/sso/saml2/logout/:providerId` and
+   *   the SP metadata run with the vendor's `enableSingleLogout` answering the
+   *   provider's switch, so they are closed for a provider with it off.
+   */
+  private async runSsoLogout(
+    endpointPath: string | undefined,
+    request: Request,
+    run: () => Promise<Response>,
+    transport?: { remoteAddress?: string },
+  ): Promise<Response> {
+    if (endpointPath === SIGN_OUT_ENDPOINT_PATH) return runSsoSignOut(this.ssoSignOutDeps(transport), request, run);
+    const providerId = samlSingleLogoutProviderId(endpointPath, request);
+    if (providerId === undefined) return run();
+    const engine = this.config.dataEngine;
+    const options = await readSsoProviderSignInOptions(
+      engine ? (withSystemReadContext(engine) as never) : undefined,
+      providerId,
     );
+    return runWithSamlProviderScope({ singleLogout: options.signOutOfIdp }, run);
+  }
+
+  /**
+   * Saving "sign out of the company sign-in too" ON through `/sso/register`
+   * or `/sso/update-provider` is refused `400 VALIDATION_FAILED` on
+   * `signOutOfIdp`, before the vendor writes, when the provider cannot honour
+   * it: a SAML provider with no logout address, an OIDC provider whose
+   * discovery document names no `end_session_endpoint`
+   * (`judgeSignOutOfIdpCapability`, ruling record 6866334319). An OIDC
+   * endpoint it read is kept for the after-hook, which stores it once the
+   * vendor's write landed.
+   */
+  private async assertSsoSignOutOfIdpSupported(ctx: any): Promise<void> {
+    const path = ctx?.path;
+    if (path !== '/sso/register' && path !== '/sso/update-provider') return;
+    if (ctx?.body?.[SIGN_OUT_OF_IDP_BODY_KEY] !== true) return;
+    const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
+    if (!providerId) return;
+    const context = ctx.context as SignOutAuthContext & { isTrustedOrigin: (url: string) => boolean };
+    let stored: Record<string, unknown> | undefined;
+    if (path === '/sso/update-provider') {
+      stored = (await context.adapter
+        .findOne({ model: 'ssoProvider', where: [{ field: 'providerId', value: providerId }] })
+        .catch(() => null)) ?? undefined;
+      // No row: the vendor answers its own 404.
+      if (!stored) return;
+    }
+    const issuer =
+      (typeof ctx.body.issuer === 'string' && ctx.body.issuer)
+      || (typeof stored?.issuer === 'string' && stored.issuer)
+      || undefined;
+    const verdict = await judgeSignOutOfIdpCapability({
+      providerId,
+      issuer,
+      stored: stored ? { samlConfig: stored.samlConfig, oidcConfig: stored.oidcConfig } : undefined,
+      body: { samlConfig: ctx.body.samlConfig, oidcConfig: ctx.body.oidcConfig },
+      isTrustedOrigin: (url) => context.isTrustedOrigin(url),
+    });
+    if (!verdict.ok) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError(verdict.refusal.status, {
+        code: verdict.refusal.code,
+        message: verdict.refusal.message,
+        field: verdict.refusal.field,
+      });
+    }
+    if (verdict.endSessionEndpoint && ctx.request instanceof Request) {
+      this.pendingEndSessionEndpoints.set(ctx.request, verdict.endSessionEndpoint);
+    }
+  }
+
+  /** OIDC `end_session_endpoint`s read by a save of the switch, by request, until its after-hook stores them. */
+  private readonly pendingEndSessionEndpoints = new WeakMap<Request, string>();
+
+  /**
+   * After a `/sso/register` or `/sso/update-provider` that saved the switch
+   * ON for an OIDC provider landed: store the `end_session_endpoint` its
+   * before-hook read in the provider's `oidc_config`. A failure is logged at
+   * `error` (the switch is stored on, and its sign-out would not reach the
+   * identity provider) with the remedy: save the sign-in options again.
+   */
+  private async settleSsoSignOutOfIdp(ctx: any): Promise<void> {
+    const path = ctx?.path;
+    if (path !== '/sso/register' && path !== '/sso/update-provider') return;
+    if (ctx?.body?.[SIGN_OUT_OF_IDP_BODY_KEY] !== true) return;
+    const returned = ctx?.context?.returned;
+    // A refusal (the vendor's or a before-hook's) is an APIError here: nothing landed.
+    if (!returned || returned instanceof Error) return;
+    const request = ctx.request instanceof Request ? ctx.request : undefined;
+    const endpoint = request ? this.pendingEndSessionEndpoints.get(request) : undefined;
+    if (!endpoint) return;
+    this.pendingEndSessionEndpoints.delete(request!);
+    const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
+    try {
+      await parkOidcEndSessionEndpoint(ctx.context as SignOutAuthContext, providerId, endpoint);
+    } catch (error) {
+      const message =
+        `[sso] OIDC provider "${providerId}" was saved with "sign out of the company sign-in too" on, but its end_session_endpoint `
+        + `could not be stored, so signing out will not sign out of the identity provider until it is: save its sign-in options again. ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+      const sink = this.config.logger as { error?: (msg: string) => void } | undefined;
+      if (typeof sink?.error === 'function') sink.error(message);
+      else console.error(message);
+    }
   }
 
   /**

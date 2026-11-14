@@ -60,7 +60,7 @@ interface Harness {
  * @param opts.published  what `client.meta.getItem` (the published read) does:
  *                        a body to resolve, or an Error to throw.
  */
-function makeDS(opts: { draft: any | null; published: any | Error }): Harness {
+function makeDS(opts: { draft: any | null; published: any | Error; packages?: Record<string, unknown> }): Harness {
   const draftPuts: Array<[string, any]> = [];
   const urls: string[] = [];
 
@@ -100,6 +100,7 @@ function makeDS(opts: { draft: any | null; published: any | Error }): Harness {
       }),
       saveItem,
     },
+    ...(opts.packages ? { packages: opts.packages } : {}),
   };
   return { ds, saveItem, draftPuts, urls };
 }
@@ -287,5 +288,152 @@ describe('ObjectStackDataSource.updateView — draft addressing (#4139)', () => 
     // …and the protection envelope was NOT collateral damage.
     expect(body._provenance).toBe('package');
     expect(body._packageId).toBe('com.test.crm');
+  });
+});
+
+/**
+ * A view a READ-ONLY package ships is written into that package's
+ * customization pair, declaring the override (ADR-0146 D11, D2, D3).
+ *
+ * The published write named no package, and the server closes that write onto
+ * a shipped item: `PUT /meta/view/NAME` answers `403 NOT_OVERRIDABLE`, naming
+ * the fix ("save it into `BASE.custom` (`?package=`), declaring `overrides:
+ * { package, basedOn }`"). Set as Default clears the previous default with
+ * `{ isDefault: false }` through this method, so a shipped previous default
+ * was never cleared. Measured on a booted showcase: the package-less PUT of
+ * `showcase_task.default` is 403; after `POST /packages/com.example.showcase/
+ * ensure-customization` (201), the PUT `?package=com.example.showcase.custom`
+ * with the declaration is 200, and `GET /meta/view?object=showcase_task`
+ * serves the view with `isDefault: false`.
+ */
+describe('ObjectStackDataSource.updateView — a shipped view is written into its pair', () => {
+  const BASE = 'com.example.showcase';
+  const PAIR = 'com.example.showcase.custom';
+  /** The shipped view as `GET /meta/view/NAME` serves it: the package stamps on the item. */
+  const SHIPPED = {
+    name: 'showcase_task.default',
+    object: 'showcase_task',
+    viewKind: 'list',
+    label: 'All Tasks',
+    isDefault: true,
+    config: { type: 'grid', data: { provider: 'object', object: 'showcase_task' } },
+    _packageId: BASE,
+    _packageVersion: '0.1.0',
+    _provenance: 'package',
+  };
+
+  /** The two package doors, as `client.packages` answers them. */
+  function packageDoors(opts: { writable?: boolean; version?: string | null; ensure?: () => Promise<unknown> } = {}) {
+    const get = vi.fn(async (id: string) => ({
+      manifest: { id, ...(opts.version === null ? {} : { version: opts.version ?? '0.1.0' }) },
+      writable: opts.writable ?? false,
+    }));
+    const ensureCustomization = vi.fn(
+      opts.ensure ??
+        (async (id: string) => ({
+          basePackageId: id,
+          packageId: PAIR,
+          namespace: 'showcase_custom',
+          dependencyRange: '^0',
+          created: true,
+          writable: true,
+        })),
+    );
+    return { get, ensureCustomization };
+  }
+
+  it('clears a shipped default by writing it into the pair, declaring the override, and nowhere else', async () => {
+    const packages = packageDoors();
+    const { ds, saveItem, draftPuts } = makeDS({ draft: null, published: SHIPPED, packages });
+
+    await ds.updateView('showcase_task', SHIPPED.name, { isDefault: false });
+
+    expect(packages.get).toHaveBeenCalledWith(BASE);
+    expect(packages.ensureCustomization).toHaveBeenCalledWith(BASE);
+    expect(draftPuts).toHaveLength(0);
+    // ONE write, and it names the pair the ensure door answered.
+    expect(saveItem).toHaveBeenCalledTimes(1);
+    const [type, name, body, options] = saveItem.mock.calls[0] as unknown as [string, string, any, any];
+    expect(type).toBe('view');
+    expect(name).toBe(SHIPPED.name);
+    expect(options).toEqual({ packageId: PAIR });
+    expect(body.overrides).toEqual({ package: BASE, basedOn: '0.1.0' });
+    expect(body.isDefault).toBe(false);
+    // The whole document goes, not a partial (the pair's row replaces the shipped view).
+    expect(body.config).toEqual(SHIPPED.config);
+    expect(body.viewKind).toBe('list');
+  });
+
+  it('a view already customized keeps the declaration it carries', async () => {
+    const packages = packageDoors({ version: '0.2.0' });
+    const customized = { ...SHIPPED, overrides: { package: BASE, basedOn: '0.1.0' } };
+    const { ds, saveItem } = makeDS({ draft: null, published: customized, packages });
+
+    await ds.updateView('showcase_task', SHIPPED.name, { isDefault: true });
+
+    const [, , body, options] = saveItem.mock.calls[0] as unknown as [string, string, any, any];
+    expect(options).toEqual({ packageId: PAIR });
+    // `basedOn` is the version the customization was taken from, not today's.
+    expect(body.overrides).toEqual({ package: BASE, basedOn: '0.1.0' });
+  });
+
+  it('a pin of a shipped view goes through the same seam (`isPinned`)', async () => {
+    const packages = packageDoors();
+    const { ds, saveItem } = makeDS({ draft: null, published: SHIPPED, packages });
+
+    await ds.updateView('showcase_task', SHIPPED.name, { isPinned: true });
+
+    const [, , body, options] = saveItem.mock.calls[0] as unknown as [string, string, any, any];
+    expect(options).toEqual({ packageId: PAIR });
+    expect(body.isPinned).toBe(true);
+    expect(body.overrides).toEqual({ package: BASE, basedOn: '0.1.0' });
+  });
+
+  it('a refused ensure door writes nothing, and the refusal reaches the caller', async () => {
+    const walled = Object.assign(new Error('Only the platform operator may ensure a customization package here.'), { status: 403 });
+    const packages = packageDoors({ ensure: async () => { throw walled; } });
+    const { ds, saveItem, draftPuts } = makeDS({ draft: null, published: SHIPPED, packages });
+
+    await expect(ds.updateView('showcase_task', SHIPPED.name, { isDefault: false })).rejects.toBe(walled);
+    expect(saveItem).not.toHaveBeenCalled();
+    expect(draftPuts).toHaveLength(0);
+  });
+
+  it('a base that records no version is refused before the pair is asked for, and nothing is written', async () => {
+    const packages = packageDoors({ version: null });
+    const { ds, saveItem } = makeDS({ draft: null, published: SHIPPED, packages });
+
+    await expect(ds.updateView('showcase_task', SHIPPED.name, { isDefault: false })).rejects.toThrow(
+      /records no version.*Nothing was written/,
+    );
+    expect(packages.ensureCustomization).not.toHaveBeenCalled();
+    expect(saveItem).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL — a view no package ships is written package-less, and no package door is asked', async () => {
+    const packages = packageDoors();
+    const userView = { name: 'showcase_task.qa_x', object: 'showcase_task', viewKind: 'list', label: 'QA X', config: { type: 'grid' } };
+    const { ds, saveItem } = makeDS({ draft: null, published: userView, packages });
+
+    await ds.updateView('showcase_task', userView.name, { isDefault: true });
+
+    expect(packages.get).not.toHaveBeenCalled();
+    expect(packages.ensureCustomization).not.toHaveBeenCalled();
+    expect(saveItem).toHaveBeenCalledTimes(1);
+    // Exactly the three arguments it always had: no package named.
+    expect(saveItem.mock.calls[0]).toHaveLength(3);
+    const body = (saveItem.mock.calls[0] as unknown as [string, string, any])[2];
+    expect(body.isDefault).toBe(true);
+    expect(body).not.toHaveProperty('overrides');
+  });
+
+  it('CONTROL — a view a WRITABLE package ships is written as before, and no pair is ensured', async () => {
+    const packages = packageDoors({ writable: true });
+    const { ds, saveItem } = makeDS({ draft: null, published: { ...SHIPPED, _packageId: 'com.acme.mine' }, packages });
+
+    await ds.updateView('showcase_task', SHIPPED.name, { isDefault: false });
+
+    expect(packages.ensureCustomization).not.toHaveBeenCalled();
+    expect(saveItem.mock.calls[0]).toHaveLength(3);
   });
 });

@@ -9142,13 +9142,19 @@ export class SchemaRegistry {
    * package a bare-slot entry binds to, so a package holding the name only
    * through its own stored row is a holder here too. {@link overlaySlotBinding}
    * itself counts every holder, so a disable never moves the binding the
-   * registry's own readers answer.
+   * registry's own readers answer. With `includeDisabledPackages` a disabled
+   * holder counts as served, for a reader whose answer must not move with a
+   * disable (the read-side hydrator's envelope for a pair row, #32692).
    */
-  overlayRowBinding(type: string, name: string, item: unknown): string | null | undefined {
+  overlayRowBinding(type: string, name: string, item: unknown, options?: { includeDisabledPackages?: boolean }): string | null | undefined {
     const collection = this.metadata.get(type);
     if (!collection) return undefined;
+    // [#32692] `includeDisabledPackages` counts a disabled holder as served:
+    // the read-side hydrator's envelope for a pair row must not move with a
+    // reversible disable (ADR-0150 D3).
+    const off = (id: string) => !options?.includeDisabledPackages && this.isPackageDisabled(id);
     const composite = new Set(this.compositeHoldersOf(collection, name));
-    const servedComposite = new Set([...composite].filter((id) => !this.isPackageDisabled(id)));
+    const servedComposite = new Set([...composite].filter((id) => !off(id)));
     const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
     if (typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' && !composite.has(stamped)) {
       const holders = new Set(composite);
@@ -9157,7 +9163,7 @@ export class SchemaRegistry {
         if (typeof bound === 'string') holders.add(bound);
       }
       // The pair's own rows bind to it when no composite slot pairs it; it holds no name of its own here.
-      const served = new Set([...holders].filter((id) => id !== stamped && !this.isPackageDisabled(id)));
+      const served = new Set([...holders].filter((id) => id !== stamped && !off(id)));
       const settled = this.settledPairRowBinding(stamped, item, served);
       if (Array.isArray(settled)) {
         const named = this.ownersHoldingAName(type, name, collection, settled as readonly string[], item, composite, stamped);

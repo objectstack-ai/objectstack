@@ -566,7 +566,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'object_extension');
     expect(entry?.allowRuntimeCreate, "'object_extension' is runtime-creatable").toBe(true);
     expect(stackKeyForType('object_extension')).toBe('objectExtensions');
-    expect(runtimeAuthoringRulesFor('object_extension').map((r) => r.name)).toEqual(['validateSecurityRoleWord']);
+    expect(runtimeAuthoringRulesFor('object_extension').map((r) => r.name)).toEqual(['validateStackExpressions', 'validateSecurityRoleWord']);
 
     const roleSelect = { type: 'select', label: 'Group Function', options: [{ value: 'l1', label: 'Tier 1' }] };
     const refused = runRuntimeAuthoringRules({
@@ -581,7 +581,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     // positional and names it.
     expect(refused.errors[0].path).toBe('objectExtensions[0].fields.role.name');
     expect(refused.errors[0].where).toBe('field "sd_agent.role"');
-    expect(refused.rulesRun).toEqual(['validateSecurityRoleWord']);
+    expect(refused.rulesRun).toEqual(['validateStackExpressions', 'validateSecurityRoleWord']);
 
     // The two labels the entry serves, at the same door.
     const labelled = runRuntimeAuthoringRules({
@@ -601,7 +601,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     });
     expect(clean.errors).toEqual([]);
     expect(clean.advisories).toEqual([]);
-    expect(clean.rulesRun).toEqual(['validateSecurityRoleWord']);
+    expect(clean.rulesRun).toEqual(['validateStackExpressions', 'validateSecurityRoleWord']);
 
     // Not a context row: the baseline carries no `objectExtensions`, and the
     // candidate holds exactly the written item.

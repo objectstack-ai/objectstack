@@ -200,7 +200,7 @@ interface Stage {
 }
 
 /** A deployment with SSO on, a signed-in platform administrator, and the real route registration. */
-async function stage(): Promise<Stage> {
+async function stage(config: Record<string, unknown> = {}): Promise<Stage> {
   const engine = await bootEngine();
   const error = vi.fn();
   const manager = new AuthManager({
@@ -210,6 +210,7 @@ async function stage(): Promise<Stage> {
     getTenancy: () => createTenancyService({ requested: 'isolated', probeIsolation: () => true }),
     plugins: { organization: true, sso: true },
     logger: { error, warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+    ...config,
   } as never);
   const send = (r: Request) => manager.handleRequest(r);
   const signUp = async (email: string): Promise<string> => {
@@ -1016,7 +1017,7 @@ describe('a registered provider is edited in place, without unlinking anyone', (
       expect(action.target).toBe('/api/v1/auth/admin/sso/update-provider');
       expect(action.visible).toMatchObject({ source: 'current_user.isPlatformAdmin == true' });
     }
-    expect(saml.params.map((p: any) => p.name)).toEqual(['providerId', 'issuer', 'entryPoint', 'cert', 'keepCurrentCert']);
+    expect(saml.params.map((p: any) => p.name)).toEqual(['providerId', 'issuer', 'entryPoint', 'cert', 'keepCurrentCert', 'logoutUrl']);
     expect(oidc.params.map((p: any) => p.name)).toEqual(['providerId', 'clientId', 'clientSecret', 'scopes']);
     const secret = oidc.params.find((p: any) => p.name === 'clientSecret');
     expect(secret.type).toBe('password');
@@ -1068,4 +1069,140 @@ describe('providers stored colliding before the rule stay, and are judged only w
     expect((await answer('/sso/update-provider', { providerId: 'p-parent', domain: 'acme.example' })).status).toBe(200);
     expect(await domains()).toEqual({ ...stored, 'q-list': 'foo.example' });
   }, 60_000);
+});
+
+// ── Sign out of the company sign-in too: saving the switch ─────────────────
+//
+// Ruling record 6866334319 (`sso-sign-out-of-idp.ts`). Saving the switch on is
+// refused for a provider that cannot honour it, through the same
+// `/sso/update-provider` the Edit Sign-In Options action posts to; the SAML
+// IdP Logout URL is written through the register and edit doors.
+
+describe('"sign out of the company sign-in too" is saved on only for a provider that can honour it', () => {
+  const SAML = 'acme-saml';
+  const OIDC = 'acme-okta';
+  const IDP = 'https://idp.acme.example';
+  const ENTITY = `${IDP}/entity`;
+  const DISCOVERY = `${IDP}/.well-known/openid-configuration`;
+  const SLO = `${IDP}/slo`;
+
+  const samlConfig = (idpMetadata: Record<string, unknown> = { entityID: ENTITY }) => ({
+    issuer: ENTITY,
+    entryPoint: `${IDP}/sso`,
+    cert: certificate(0),
+    callbackUrl: `${AUTH}/sso/saml2/sp/acs/${SAML}`,
+    idpMetadata,
+    spMetadata: { entityID: `${AUTH}/sso/saml2/sp/metadata?providerId=${SAML}` },
+    mapping: { email: 'email', name: 'displayName' },
+  });
+  const switchOf = async (s: Stage, providerId: string) =>
+    (await rows(s, 'sys_sso_provider', { provider_id: providerId }))[0]?.sign_out_of_idp;
+  const storedConfig = async (s: Stage, providerId: string, column: 'samlConfig' | 'oidcConfig') =>
+    JSON.parse(String((await createEngineSsoProviderConfigReader(() => s.engine as never)(providerId))?.[column]));
+
+  /** The IdP's discovery document, answered over `fetch`; every other request reaches the real one. */
+  const stubDiscovery = (document: Record<string, unknown>) => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url === DISCOVERY) return new Response(JSON.stringify(document), { headers: { 'content-type': 'application/json' } });
+      return realFetch(input as never, init);
+    }) as typeof globalThis.fetch;
+    return () => {
+      globalThis.fetch = realFetch;
+    };
+  };
+
+  it('SAML with no IdP Logout URL: 400 VALIDATION_FAILED on signOutOfIdp, and the switch stays off', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: SAML, domain: 'acme.example', issuer: ENTITY, samlConfig: samlConfig() });
+    const res = await postJson(s, '/sso/update-provider', { providerId: SAML, signOutOfIdp: true });
+    const body = (await res.json()) as any;
+    expect(res.status, JSON.stringify(body)).toBe(400);
+    expect(body).toMatchObject({ code: 'VALIDATION_FAILED', field: 'signOutOfIdp' });
+    expect(await switchOf(s, SAML)).toBeFalsy();
+
+    // CONTROL: saving it off is never refused.
+    const off = await postJson(s, '/sso/update-provider', { providerId: SAML, signOutOfIdp: false });
+    expect(off.status, await off.clone().text()).toBe(200);
+  }, 30_000);
+
+  it('SAML: the edit door writes the IdP Logout URL under both bindings, and the switch then saves on', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: SAML, domain: 'acme.example', issuer: ENTITY, samlConfig: samlConfig() });
+    const edit = await bridge(s, 'POST', '/admin/sso/update-provider', { providerId: SAML, logoutUrl: SLO });
+    const text = await edit.clone().text();
+    expect(edit.status, text).toBe(200);
+    expect(JSON.parse(text).data.updated).toEqual(['logoutUrl']);
+    expect((await storedConfig(s, SAML, 'samlConfig')).idpMetadata.singleLogoutService.map((e: any) => e.Location)).toEqual([SLO, SLO]);
+
+    const refused = await bridge(s, 'POST', '/admin/sso/update-provider', { providerId: SAML, logoutUrl: 'not a url' });
+    expect(refused.status).toBe(400);
+
+    const on = await postJson(s, '/sso/update-provider', { providerId: SAML, signOutOfIdp: true });
+    expect(on.status, await on.clone().text()).toBe(200);
+    expect(await switchOf(s, SAML)).toBe(true);
+  }, 30_000);
+
+  it('SAML: the register door stores the IdP Logout URL it is given', async () => {
+    const s = await stage();
+    const res = await bridge(s, 'POST', '/admin/sso/register-saml', {
+      providerId: SAML,
+      issuer: ENTITY,
+      domain: 'acme.example',
+      entryPoint: `${IDP}/sso`,
+      cert: certificate(),
+      logoutUrl: SLO,
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await storedConfig(s, SAML, 'samlConfig')).idpMetadata.singleLogoutService.map((e: any) => e.Binding)).toEqual([
+      'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
+      'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST',
+    ]);
+  }, 30_000);
+
+  const oidcStage = async () => {
+    const s = await stage({ trustedOrigins: [BASE, IDP] });
+    await storeProvider(s, {
+      providerId: OIDC,
+      domain: 'acme.example',
+      issuer: IDP,
+      oidcConfig: { issuer: IDP, clientId: 'acme-client', clientSecret: 'stored-secret', pkce: true, discoveryEndpoint: DISCOVERY },
+    });
+    return s;
+  };
+
+  it('OIDC whose discovery publishes no end_session_endpoint: refused, and the switch stays off', async () => {
+    const s = await oidcStage();
+    const restore = stubDiscovery({ issuer: IDP, authorization_endpoint: `${IDP}/authorize`, token_endpoint: `${IDP}/token`, jwks_uri: `${IDP}/jwks` });
+    try {
+      const res = await postJson(s, '/sso/update-provider', { providerId: OIDC, signOutOfIdp: true });
+      const body = (await res.json()) as any;
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect(body).toMatchObject({ code: 'VALIDATION_FAILED', field: 'signOutOfIdp' });
+    } finally {
+      restore();
+    }
+    expect(await switchOf(s, OIDC)).toBeFalsy();
+    expect(await storedConfig(s, OIDC, 'oidcConfig')).not.toHaveProperty('endSessionEndpoint');
+  }, 30_000);
+
+  it('OIDC whose discovery publishes one: saved on, and the endpoint is kept in the stored OIDC config', async () => {
+    const s = await oidcStage();
+    const restore = stubDiscovery({
+      issuer: IDP,
+      authorization_endpoint: `${IDP}/authorize`,
+      token_endpoint: `${IDP}/token`,
+      jwks_uri: `${IDP}/jwks`,
+      end_session_endpoint: `${IDP}/oauth2/logout`,
+    });
+    try {
+      const res = await postJson(s, '/sso/update-provider', { providerId: OIDC, signOutOfIdp: true });
+      expect(res.status, await res.clone().text()).toBe(200);
+    } finally {
+      restore();
+    }
+    expect(await switchOf(s, OIDC)).toBe(true);
+    expect((await storedConfig(s, OIDC, 'oidcConfig')).endSessionEndpoint).toBe(`${IDP}/oauth2/logout`);
+  }, 30_000);
 });

@@ -73,6 +73,19 @@ export interface UploadLinkCopy extends UploadLinkRefusalCopy {
    * waits for the record the assistant creates, so nothing was attached yet.
    */
   received: string;
+  /**
+   * [#32747] What is asked for, on a link to a multi-file field: up to `max`
+   * files for a record, or exactly `n` for a record not yet created.
+   */
+  wantedSeveral(max: number): string;
+  wantedExactly(n: number): string;
+  /** [#32747] The picker's label when it takes several files. */
+  filesLabel: string;
+  /** [#32747] Done, for a submit that carried several files. */
+  attachedSeveral: string;
+  receivedSeveral: string;
+  /** [#32747] The page's own line when the files picked are not as many as the link takes. */
+  pickCount(min: number, max: number): string;
   /** The upload failed and the answer carried no sentence to show. */
   failed: string;
   connectionLost: string;
@@ -97,6 +110,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Uploading…',
     attached: 'Done. The file was attached; you can close this page.',
     received: 'Done. The file was received; go back to the assistant to finish.',
+    wantedSeveral: (max) =>
+      `Files were asked for, to be put in a file field of a record. Pick up to ${max} and send them together.`,
+    wantedExactly: (n) =>
+      `${n} files were asked for, to be put in a file field of a record. Pick all ${n} and send them together.`,
+    filesLabel: 'Files',
+    attachedSeveral: 'Done. The files were attached; you can close this page.',
+    receivedSeveral: 'Done. The files were received; go back to the assistant to finish.',
+    pickCount: (min, max) => (min === max ? `Pick exactly ${min} files.` : `Pick at most ${max} files.`),
     failed: 'The upload failed.',
     connectionLost: 'The upload failed: the connection was lost. Ask for a new link if this one no longer works.',
     unusableTitle: 'Upload link',
@@ -129,6 +150,12 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: '正在上传…',
     attached: '完成，文件已添加。你可以关闭此页面。',
     received: '完成，文件已收到。请回到助手那里完成后续操作。',
+    wantedSeveral: (max) => `有人请你提供一些文件，它们将放入一条记录的文件字段中。最多可选择 ${max} 个，一起发送。`,
+    wantedExactly: (n) => `有人请你提供 ${n} 个文件，它们将放入一条记录的文件字段中。请选择全部 ${n} 个，一起发送。`,
+    filesLabel: '文件',
+    attachedSeveral: '完成，文件已全部添加。你可以关闭此页面。',
+    receivedSeveral: '完成，文件已全部收到。请回到助手那里完成后续操作。',
+    pickCount: (min, max) => (min === max ? `请恰好选择 ${min} 个文件。` : `最多选择 ${max} 个文件。`),
     failed: '上传失败。',
     connectionLost: '上传失败：连接已中断。如果此链接已无法使用，请索取新的链接。',
     unusableTitle: '上传链接',
@@ -159,6 +186,12 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: '正在上傳…',
     attached: '完成，檔案已新增。你可以關閉此頁面。',
     received: '完成，檔案已收到。請回到助理那裡完成後續操作。',
+    wantedSeveral: (max) => `有人請你提供一些檔案，它們將放入一筆記錄的檔案欄位中。最多可選擇 ${max} 個，一起傳送。`,
+    wantedExactly: (n) => `有人請你提供 ${n} 個檔案，它們將放入一筆記錄的檔案欄位中。請選擇全部 ${n} 個，一起傳送。`,
+    filesLabel: '檔案',
+    attachedSeveral: '完成，檔案已全部新增。你可以關閉此頁面。',
+    receivedSeveral: '完成，檔案已全部收到。請回到助理那裡完成後續操作。',
+    pickCount: (min, max) => (min === max ? `請剛好選擇 ${min} 個檔案。` : `最多選擇 ${max} 個檔案。`),
     failed: '上傳失敗。',
     connectionLost: '上傳失敗：連線已中斷。如果此連結已無法使用，請索取新的連結。',
     unusableTitle: '上傳連結',
@@ -189,6 +222,15 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'アップロード中…',
     attached: '完了しました。ファイルが追加されました。このページは閉じてかまいません。',
     received: '完了しました。ファイルを受け取りました。アシスタントに戻って続きを進めてください。',
+    wantedSeveral: (max) =>
+      `レコードのファイル項目に入れるファイルが求められています。最大 ${max} 個まで選んで、まとめて送信してください。`,
+    wantedExactly: (n) =>
+      `レコードのファイル項目に入れるファイルが ${n} 個求められています。${n} 個すべてを選んで、まとめて送信してください。`,
+    filesLabel: 'ファイル',
+    attachedSeveral: '完了しました。ファイルがすべて追加されました。このページは閉じてかまいません。',
+    receivedSeveral: '完了しました。ファイルをすべて受け取りました。アシスタントに戻って続きを進めてください。',
+    pickCount: (min, max) =>
+      min === max ? `ちょうど ${min} 個のファイルを選んでください。` : `ファイルは最大 ${max} 個まで選べます。`,
     failed: 'アップロードに失敗しました。',
     connectionLost: 'アップロードに失敗しました: 接続が切れました。このリンクが使えなくなった場合は、新しいリンクを依頼してください。',
     unusableTitle: 'アップロードリンク',
@@ -219,6 +261,15 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: '업로드 중…',
     attached: '완료되었습니다. 파일이 추가되었으니 이 페이지를 닫아도 됩니다.',
     received: '완료되었습니다. 파일을 받았습니다. 어시스턴트로 돌아가 마무리하세요.',
+    wantedSeveral: (max) =>
+      `레코드의 파일 필드에 넣을 파일들이 요청되었습니다. 최대 ${max}개까지 선택해 한 번에 보내 주세요.`,
+    wantedExactly: (n) =>
+      `레코드의 파일 필드에 넣을 파일 ${n}개가 요청되었습니다. ${n}개를 모두 선택해 한 번에 보내 주세요.`,
+    filesLabel: '파일',
+    attachedSeveral: '완료되었습니다. 파일이 모두 추가되었으니 이 페이지를 닫아도 됩니다.',
+    receivedSeveral: '완료되었습니다. 파일을 모두 받았습니다. 어시스턴트로 돌아가 마무리하세요.',
+    pickCount: (min, max) =>
+      min === max ? `파일을 정확히 ${min}개 선택하세요.` : `파일은 최대 ${max}개까지 선택할 수 있습니다.`,
     failed: '업로드에 실패했습니다.',
     connectionLost: '업로드에 실패했습니다: 연결이 끊어졌습니다. 이 링크가 더 이상 작동하지 않으면 새 링크를 요청하세요.',
     unusableTitle: '업로드 링크',
@@ -249,6 +300,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Subiendo…',
     attached: 'Listo. El archivo se ha adjuntado; puedes cerrar esta página.',
     received: 'Listo. Se ha recibido el archivo; vuelve al asistente para terminar.',
+    wantedSeveral: (max) =>
+      `Se han pedido archivos para ponerlos en un campo de archivo de un registro. Elige hasta ${max} y envíalos juntos.`,
+    wantedExactly: (n) =>
+      `Se han pedido ${n} archivos para ponerlos en un campo de archivo de un registro. Elige los ${n} y envíalos juntos.`,
+    filesLabel: 'Archivos',
+    attachedSeveral: 'Listo. Los archivos se han adjuntado; puedes cerrar esta página.',
+    receivedSeveral: 'Listo. Se han recibido los archivos; vuelve al asistente para terminar.',
+    pickCount: (min, max) => (min === max ? `Elige exactamente ${min} archivos.` : `Elige como máximo ${max} archivos.`),
     failed: 'La subida ha fallado.',
     connectionLost: 'La subida ha fallado: se ha perdido la conexión. Pide un enlace nuevo si este ya no funciona.',
     unusableTitle: 'Enlace de subida',
@@ -279,6 +338,12 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'جارٍ الرفع…',
     attached: 'تم. أُرفق الملف؛ يمكنك إغلاق هذه الصفحة.',
     received: 'تم. استُلم الملف؛ عد إلى المساعد لإكمال العملية.',
+    wantedSeveral: (max) => `طُلبت ملفات لوضعها في حقل ملف ضمن سجل. اختر حتى ${max} ملفات وأرسلها معًا.`,
+    wantedExactly: (n) => `طُلب ${n} ملفات لوضعها في حقل ملف ضمن سجل. اختر الملفات الـ ${n} كلها وأرسلها معًا.`,
+    filesLabel: 'الملفات',
+    attachedSeveral: 'تم. أُرفقت الملفات؛ يمكنك إغلاق هذه الصفحة.',
+    receivedSeveral: 'تم. استُلمت الملفات؛ عد إلى المساعد لإكمال العملية.',
+    pickCount: (min, max) => (min === max ? `اختر ${min} ملفات بالضبط.` : `اختر ${max} ملفات على الأكثر.`),
     failed: 'فشل الرفع.',
     connectionLost: 'فشل الرفع: انقطع الاتصال. اطلب رابطًا جديدًا إذا لم يعد هذا الرابط يعمل.',
     unusableTitle: 'رابط الرفع',
@@ -309,6 +374,15 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Envoi en cours…',
     attached: 'Terminé. Le fichier a été joint ; vous pouvez fermer cette page.',
     received: 'Terminé. Le fichier a été reçu ; revenez à l’assistant pour terminer.',
+    wantedSeveral: (max) =>
+      `Des fichiers ont été demandés, pour être placés dans un champ fichier d’un enregistrement. Choisissez-en jusqu’à ${max} et envoyez-les ensemble.`,
+    wantedExactly: (n) =>
+      `${n} fichiers ont été demandés, pour être placés dans un champ fichier d’un enregistrement. Choisissez les ${n} et envoyez-les ensemble.`,
+    filesLabel: 'Fichiers',
+    attachedSeveral: 'Terminé. Les fichiers ont été joints ; vous pouvez fermer cette page.',
+    receivedSeveral: 'Terminé. Les fichiers ont été reçus ; revenez à l’assistant pour terminer.',
+    pickCount: (min, max) =>
+      min === max ? `Choisissez exactement ${min} fichiers.` : `Choisissez au plus ${max} fichiers.`,
     failed: 'L’envoi a échoué.',
     connectionLost: 'L’envoi a échoué : la connexion a été perdue. Demandez un nouveau lien si celui-ci ne fonctionne plus.',
     unusableTitle: 'Lien d’envoi',
@@ -339,6 +413,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Enviando…',
     attached: 'Pronto. O arquivo foi anexado; você pode fechar esta página.',
     received: 'Pronto. O arquivo foi recebido; volte ao assistente para concluir.',
+    wantedSeveral: (max) =>
+      `Foram pedidos arquivos para serem colocados em um campo de arquivo de um registro. Escolha até ${max} e envie-os juntos.`,
+    wantedExactly: (n) =>
+      `Foram pedidos ${n} arquivos para serem colocados em um campo de arquivo de um registro. Escolha os ${n} e envie-os juntos.`,
+    filesLabel: 'Arquivos',
+    attachedSeveral: 'Pronto. Os arquivos foram anexados; você pode fechar esta página.',
+    receivedSeveral: 'Pronto. Os arquivos foram recebidos; volte ao assistente para concluir.',
+    pickCount: (min, max) => (min === max ? `Escolha exatamente ${min} arquivos.` : `Escolha no máximo ${max} arquivos.`),
     failed: 'O envio falhou.',
     connectionLost: 'O envio falhou: a conexão foi perdida. Peça um novo link se este não funcionar mais.',
     unusableTitle: 'Link de envio',
@@ -369,6 +451,15 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Загрузка…',
     attached: 'Готово. Файл прикреплён; эту страницу можно закрыть.',
     received: 'Готово. Файл получен; вернитесь к ассистенту, чтобы завершить.',
+    wantedSeveral: (max) =>
+      `Запрошены файлы для поля-файла записи. Выберите до ${max} файлов и отправьте их вместе.`,
+    wantedExactly: (n) =>
+      `Запрошено файлов для поля-файла записи: ${n}. Выберите все ${n} и отправьте их вместе.`,
+    filesLabel: 'Файлы',
+    attachedSeveral: 'Готово. Файлы прикреплены; эту страницу можно закрыть.',
+    receivedSeveral: 'Готово. Файлы получены; вернитесь к ассистенту, чтобы завершить.',
+    pickCount: (min, max) =>
+      min === max ? `Выберите ровно столько файлов: ${min}.` : `Выберите не больше файлов, чем ${max}.`,
     failed: 'Не удалось загрузить файл.',
     connectionLost: 'Не удалось загрузить файл: соединение прервалось. Если эта ссылка больше не работает, попросите новую.',
     unusableTitle: 'Ссылка для загрузки',
@@ -399,6 +490,15 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Wird hochgeladen…',
     attached: 'Fertig. Die Datei wurde angehängt; Sie können diese Seite schließen.',
     received: 'Fertig. Die Datei ist angekommen; kehren Sie zum Assistenten zurück, um abzuschließen.',
+    wantedSeveral: (max) =>
+      `Es wurden Dateien angefordert, die in ein Dateifeld eines Datensatzes gelegt werden sollen. Wählen Sie bis zu ${max} aus und senden Sie sie zusammen.`,
+    wantedExactly: (n) =>
+      `Es wurden ${n} Dateien angefordert, die in ein Dateifeld eines Datensatzes gelegt werden sollen. Wählen Sie alle ${n} aus und senden Sie sie zusammen.`,
+    filesLabel: 'Dateien',
+    attachedSeveral: 'Fertig. Die Dateien wurden angehängt; Sie können diese Seite schließen.',
+    receivedSeveral: 'Fertig. Die Dateien sind angekommen; kehren Sie zum Assistenten zurück, um abzuschließen.',
+    pickCount: (min, max) =>
+      min === max ? `Wählen Sie genau ${min} Dateien aus.` : `Wählen Sie höchstens ${max} Dateien aus.`,
     failed: 'Das Hochladen ist fehlgeschlagen.',
     connectionLost: 'Das Hochladen ist fehlgeschlagen: Die Verbindung wurde unterbrochen. Fordern Sie einen neuen Link an, wenn dieser nicht mehr funktioniert.',
     unusableTitle: 'Upload-Link',

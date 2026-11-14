@@ -2111,6 +2111,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "僅從 ID 權杖讀取宣告",
         help: "僅適用於 OIDC。從身分識別提供者已驗證的 ID 權杖讀取電子郵件、名稱和群組，不呼叫其 userinfo 端點。Microsoft Entra ID 需開啟此項：它的 userinfo 回應不含群組，也不含 preferred_username。預設關閉：設定了 userinfo 端點的提供者從該回應讀取宣告。請透過「編輯登入選項」修改。"
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "註冊者",
         help: "註冊該提供方的使用者"
@@ -2221,6 +2225,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
             helpText: "可選。請求的 SAML NameID 格式。預設為 IdP 設定的格式。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "對應：電子郵件屬性",
             helpText: "可選。對應到使用者電子郵件的斷言屬性。預設為「email」，其次為 NameID。Entra ID：http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2305,6 +2313,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "繼續信任目前的憑證",
             helpText: "在 IdP 切換期間，接受由任一憑證簽署的斷言。之後不勾選此項再編輯一次，即可移除舊憑證。"
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {

@@ -8649,6 +8649,12 @@ export function AutomationsPillar({
         setFlowCopied(landed);
         openAfterListRef.current = copy.name;
         setFlowListNonce((n) => n + 1);
+        // The door stored the copy live and the engine already holds its row;
+        // the `_status` snapshot this pillar holds predates it, so it is read
+        // once more, or the copy's header reads the row it lacks as an
+        // unpublished draft. The other landing remounts the pillar keyed by
+        // package, and that mount reads `_status` itself.
+        setStatusNonce((n) => n + 1);
         return;
       }
       navigate(studioPillarItemPath(copy.packageId, 'automations', { type: 'flow', name: copy.name }), {
