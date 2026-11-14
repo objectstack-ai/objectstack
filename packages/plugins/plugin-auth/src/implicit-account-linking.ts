@@ -40,6 +40,20 @@
  *     exception is about rule 1's verification precondition, not about
  *     overriding what the user asked for.
  *
+ * ## A pending person's first sign-in (#33181)
+ *
+ * A person added on a managed environment (`pending-sso-users.ts`) is a row
+ * with `emailVerified: false` and `source: 'idp_pending'`, and no account.
+ * Their first sign-in through the platform identity provider is rule 2's
+ * exception: the link attaches to that row, and the identity-source stamp in
+ * `account.create.after` (`stampIdentitySource`) moves it to
+ * `idp_provisioned` before the session that sign-in creates, which is how the
+ * pending marker clears. An enterprise provider gets no such link (rule 1),
+ * so the pending row waits for the platform sign-in. Measured on the
+ * installed version: the link lands whatever `email_verified` the identity
+ * provider asserts, and the row's `emailVerified` then follows the identity
+ * provider's value.
+ *
  * ## Why the enforcement point is `user.validateUserInfo`
  *
  * Measured against better-auth `1.7.12` (re-measured 2026-10-21 for #25096)

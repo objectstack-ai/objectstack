@@ -78,7 +78,9 @@ import {
   resolveResetDoorUserId,
   SSO_ONLY_REFUSAL_CODE,
   SSO_ONLY_REFUSAL_MESSAGES,
+  readUserSource,
 } from './sso-only-local-password.js';
+import { isPendingSsoSource, PENDING_SSO_MESSAGES } from './pending-sso-marker.js';
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
 import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
@@ -204,11 +206,30 @@ export async function globalBeforeHook(
   // request is answered exactly as before; a reset record that cannot be
   // read fails closed (503). Ahead of the complexity check,
   // so the refusal names the real reason.
-  if (
-    (ctx?.path === RESET_PASSWORD_PATH || ctx?.path === PHONE_RESET_PASSWORD_PATH) &&
-    this.isSsoOnlyMode()
-  ) {
-    const subject = await resolveResetDoorUserId(ctx, this.config.phoneOtp?.allowedAttempts ?? 3);
+  //
+  // ── A pending person gets no local password either ──
+  // A row still reading `idp_pending` (added through `admin/add-sso-user`,
+  // `pending-sso-marker.ts`) signs in only through the hosting organisation's
+  // identity provider: both reset doors refuse it in EVERY mode, with no
+  // exception, judged by the same non-spending read of the presented token or
+  // code. A record or source that cannot be read leaves the request to the
+  // arm below exactly as before, since no row carried the marker before it.
+  const resetDoor = ctx?.path === RESET_PASSWORD_PATH || ctx?.path === PHONE_RESET_PASSWORD_PATH;
+  const resetSubject = resetDoor
+    ? await resolveResetDoorUserId(ctx, this.config.phoneOtp?.allowedAttempts ?? 3)
+    : undefined;
+  if (resetSubject?.ok && resetSubject.userId) {
+    const source = await readUserSource(this.getDataEngine(), resetSubject.userId);
+    if (source.ok && isPendingSsoSource(source.value)) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError('CONFLICT', {
+        message: PENDING_SSO_MESSAGES.resetPassword,
+        code: 'RESOURCE_CONFLICT',
+      });
+    }
+  }
+  if (resetDoor && resetSubject && this.isSsoOnlyMode()) {
+    const subject = resetSubject;
     // A reset record that cannot be read fails closed, as a source that
     // cannot be read does.
     let verdict: 'allow' | 'refuse' | 'unreadable' = subject.ok ? 'allow' : 'unreadable';

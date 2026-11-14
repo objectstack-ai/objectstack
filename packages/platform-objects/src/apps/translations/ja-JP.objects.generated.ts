@@ -120,7 +120,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "この ID の作成方法 — idp_provisioned（フェデレーション SSO の JIT）または env_native（ローカルサインアップ／アプリのエンドユーザー）。システム管理のため編集しないでください。",
         options: {
           idp_provisioned: "IdP プロビジョニング",
-          env_native: "ローカルアカウント"
+          env_native: "ローカルアカウント",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {

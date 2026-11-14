@@ -47,9 +47,20 @@ export interface SetInitialPasswordResult {
  *                  cookie that better-auth's session middleware reads, and its
  *                  body carries `{ newPassword }`.
  */
+export interface SetInitialPasswordOptions {
+  /**
+   * [#33181] Asked once the body has been read and holds a `newPassword`, and
+   * before anything is written: an answer refuses the request with it,
+   * `undefined` lets it through. A host twin that passes nothing is
+   * unchanged.
+   */
+  beforeWrite?(): Promise<SetInitialPasswordResult | undefined>;
+}
+
 export async function runSetInitialPassword(
   authApi: SetPasswordCapableApi,
   request: Request,
+  options: SetInitialPasswordOptions = {},
 ): Promise<SetInitialPasswordResult> {
   // [#24032] A declared-JSON body that does not parse is refused before
   // `setPassword` is reached: it was read as `{}`, which answered
@@ -68,6 +79,9 @@ export async function runSetInitialPassword(
       body: { success: false, error: { code: 'INVALID_REQUEST', message: 'newPassword is required' } },
     };
   }
+
+  const refused = await options.beforeWrite?.();
+  if (refused) return refused;
 
   try {
     // better-auth's session middleware reads the session from `headers`;

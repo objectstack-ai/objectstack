@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 311 |
-| Object name statically decidable | 216 |
+| Write call sites | 316 |
+| Object name statically decidable | 221 |
 | Object name chosen at run time | 95 |
-| Against a tenancy-enabled object | 209 |
+| Against a tenancy-enabled object | 214 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 240 |
+| Threading a tenant context | 245 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 59 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 174 |
+| Threading a decidably elevated context | 176 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 125 |
+| Threading a context of undecidable elevation | 128 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-13 at `fc310c98b`.
+Measured on 2026-11-14 at `01b49aa6f`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1150 |
-| engine-shaped types recognised | 136 |
+| tracked non-test sources scanned | 1162 |
+| engine-shaped types recognised | 140 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 293 |
+| same-named calls subtracted as non-engine | 296 |
 
 ## Every site
 
@@ -183,6 +183,9 @@ Measured on 2026-11-13 at `fc310c98b`.
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team_member` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/pending-sso-users.ts` | `insert` | `sys_user` | enabled | context, elevation undecidable | 1 |
+| `packages/plugins/plugin-auth/src/pending-sso-users.ts` | `insert` | `sys_user_permission_set` | enabled | context, elevation undecidable | 1 |
+| `packages/plugins/plugin-auth/src/pending-sso-users.ts` | `insert` | `sys_user_position` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/reconcile-membership.ts` | `insert` | `sys_member` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-admin.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
@@ -202,6 +205,8 @@ Measured on 2026-11-13 at `fc310c98b`.
 | `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/sys-session-revoke.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-auth/src/user-ban-write.ts` | `update` | `sys_user` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/user-session-admission.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `update` | `object` | undecidable | elevated | 1 |

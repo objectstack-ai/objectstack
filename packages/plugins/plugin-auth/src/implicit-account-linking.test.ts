@@ -720,3 +720,84 @@ describe('implicit link on external sign-in, end to end', () => {
     expect(refused.searchParams.get('error')).toBe(IMPLICIT_LINK_REFUSED);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#33181] A pending person's first platform sign-in
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('a pending person signs in through the platform identity provider', () => {
+  /** A row as `admin/add-sso-user` leaves one: no credential, unverified, `idp_pending`. */
+  const pendingRow = async (manager: AuthManager, engine: any, email: string) => {
+    await signUp(manager, email);
+    const user = userRow(engine, email);
+    engine.tables.set(
+      'sys_account',
+      (engine.tables.get('sys_account') ?? []).filter((a: any) => !(a.user_id === user.id && a.provider_id === 'credential')),
+    );
+    engine.tables.set('sys_session', (engine.tables.get('sys_session') ?? []).filter((s: any) => s.user_id !== user.id));
+    user.source = 'idp_pending';
+    user.email_verified = false;
+    return user;
+  };
+  const sessionsOf = (engine: any, userId: string) =>
+    (engine.tables.get('sys_session') ?? []).filter((s: any) => s.user_id === userId);
+
+  it('binds to the pending row, clears the marker and opens the session', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'pending.bind@example.test';
+    const user = await pendingRow(manager, engine, email);
+    idpProfile[PLATFORM_IDP_PROVIDER_ID] = { sub: 'cloud-pending-1', email, email_verified: true };
+
+    const target = await oauthRoundTrip(manager, PLATFORM_IDP_PROVIDER_ID, 'sign-in/social');
+
+    expect(target.searchParams.get('error')).toBeNull();
+    expect(accountsOf(engine, user.id, PLATFORM_IDP_PROVIDER_ID)).toHaveLength(1);
+    expect((engine.tables.get('sys_user') ?? []).filter((u: any) => u.email === email)).toHaveLength(1);
+    expect(userRow(engine, email).source).toBe('idp_provisioned');
+    expect(sessionsOf(engine, user.id)).toHaveLength(1);
+  });
+
+  it('an enterprise provider does not bind to the pending row, which stays pending with no session', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'pending.enterprise@example.test';
+    const user = await pendingRow(manager, engine, email);
+    idpProfile[EXTERNAL] = { sub: 'ext-pending-1', email, email_verified: true };
+
+    const target = await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social');
+
+    expect(target.searchParams.get('error')).toBe(IMPLICIT_LINK_REFUSED);
+    expect(accountsOf(engine, user.id, EXTERNAL)).toHaveLength(0);
+    expect(userRow(engine, email).source).toBe('idp_pending');
+    expect(sessionsOf(engine, user.id)).toHaveLength(0);
+  });
+
+  it('a session minted for the pending row by any other channel is refused, and the row stays pending', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'pending.minted@example.test';
+    const user = await pendingRow(manager, engine, email);
+    const ctx: any = await manager.getAuthContext();
+
+    await expect(ctx.internalAdapter.createSession(user.id)).rejects.toMatchObject({
+      statusCode: 403,
+      body: expect.objectContaining({ code: 'PERMISSION_DENIED' }),
+    });
+    expect(sessionsOf(engine, user.id)).toHaveLength(0);
+    expect(userRow(engine, email).source).toBe('idp_pending');
+  });
+
+  it('CONTROL: the same mint for an idp_provisioned row and an env_native row opens a session', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const ctx: any = await manager.getAuthContext();
+    const user = await pendingRow(manager, engine, 'control.mint@example.test');
+    for (const source of ['idp_provisioned', 'env_native']) {
+      user.source = source;
+      const before = sessionsOf(engine, user.id).length;
+      await ctx.internalAdapter.createSession(user.id);
+      expect(sessionsOf(engine, user.id), source).toHaveLength(before + 1);
+    }
+  });
+});

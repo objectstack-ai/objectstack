@@ -65,6 +65,28 @@
  * The refusal envelope is ObjectStack's (ADR-0112 `{success,error:{code}}`),
  * NOT better-auth's flat `{message,code}`: these routes are ObjectStack's, and
  * the dogfood sweep distinguishes the two envelopes on purpose.
+ *
+ * ── Without the admin plugin ────────────────────────────────────────────────
+ *
+ * A kernel without the vendor admin plugin (a Free or Team hosted
+ * environment, where it mounts only with SCIM) has no `banReason` /
+ * `banExpires` fields on better-auth's user model, so `internalAdapter`
+ * cannot land the write, and no vendor session hook reads `banned`. There the
+ * mount passes `getBanWriter`, which writes the same three columns through
+ * the data engine (`engineUserBanWriter`), and the session refusal in
+ * `user-session-admission.ts` enforces the ban with the vendor's own answer.
+ *
+ * ── The host seam ───────────────────────────────────────────────────────────
+ *
+ * With an environment-user host wired (`environment-user-host.ts`), a ban
+ * asks it to deactivate the person and an unban to reactivate them, BEFORE
+ * the write and outside any transaction. A typed host refusal (an
+ * organization owner or admin, `409`; the developer member cap, `403`)
+ * refuses the whole operation with the host's answer and nothing is written.
+ * Any other host failure never blocks the ban: it goes ahead and the answer
+ * carries `host: { notified: false, … }`. The event names the administrator
+ * and their cloud user id, read from their linked `objectstack-cloud`
+ * account, never from the request.
  */
 
 import {
@@ -74,8 +96,17 @@ import {
   type CredentialAccountAdapter,
 } from './last-local-credential.js';
 import type { AdminActor, EndpointResult } from './admin-user-endpoints.js';
-import { applyUserBan, applyUserUnban } from './user-ban-write.js';
+import { applyUserBan, applyUserUnban, type UserBanWriter } from './user-ban-write.js';
 import { readJsonRequestBody } from './request-json-body.js';
+import { readUserSource } from './sso-only-local-password.js';
+import {
+  notifyEnvironmentUserHost,
+  readActorCloudUserId,
+  type EnvironmentUserEventKind,
+  type EnvironmentUserHostAccessor,
+  type EnvironmentUserHostOutcome,
+  type EnvironmentUserHostRefused,
+} from './environment-user-host.js';
 
 /**
  * Minimal better-auth `$context` surface these two routes touch. Mirrors what
@@ -92,7 +123,63 @@ export interface AuthBanContextLike {
 
 export interface AdminBanEndpointDeps {
   getAuthContext(): Promise<AuthBanContextLike>;
+  /**
+   * The writer the ban columns land through, when it is not better-auth's
+   * `internalAdapter`: the engine-backed one on a kernel without the admin
+   * plugin. Absent, or answering `undefined`, means the `internalAdapter`.
+   */
+  getBanWriter?(): Promise<UserBanWriter | undefined>;
+  /** The environment-user host, asked before a ban (deactivated) or an unban (reactivated). */
+  host?: EnvironmentUserHostAccessor;
+  /** Reads the row's `source` and the administrator's linked cloud account for the host event. */
+  getDataEngine?(): any;
+  logger?: { warn(msg: string): void };
 }
+
+async function banWriterFor(deps: AdminBanEndpointDeps, ctx: AuthBanContextLike): Promise<UserBanWriter> {
+  return (await deps.getBanWriter?.()) ?? ctx.internalAdapter;
+}
+
+/**
+ * Ask the host, when one is wired; `undefined` leaves the answer as it was.
+ * A typed refusal comes back as `{ refused }` for the door to answer.
+ */
+async function askHost(
+  deps: AdminBanEndpointDeps,
+  kind: EnvironmentUserEventKind,
+  user: unknown,
+  userId: string,
+  actor: AdminActor,
+): Promise<EnvironmentUserHostOutcome | EnvironmentUserHostRefused | undefined> {
+  if (!deps.host) return undefined;
+  const row = (user && typeof user === 'object' ? user : {}) as { email?: unknown; name?: unknown };
+  const engine = deps.getDataEngine?.();
+  const source = engine ? await readUserSource(engine, userId) : undefined;
+  const actorCloudUserId = await readActorCloudUserId(engine, actor.id, deps.logger);
+  return notifyEnvironmentUserHost(
+    deps.host,
+    kind,
+    {
+      userId,
+      email: typeof row.email === 'string' ? row.email : '',
+      name: typeof row.name === 'string' ? row.name : '',
+      source: source?.ok && typeof source.value === 'string' ? source.value : null,
+      actorId: actor.id,
+      ...(actorCloudUserId ? { actorCloudUserId } : {}),
+      occurredAt: new Date().toISOString(),
+    },
+    deps.logger,
+  );
+}
+
+/** The door's answer for a host's typed refusal: its status, code and sentence; nothing was written. */
+const hostRefusal = ({ refused }: EnvironmentUserHostRefused): EndpointResult => ({
+  status: refused.status,
+  body: { success: false, error: { code: refused.code, message: refused.message } },
+});
+
+const isRefused = (outcome: unknown): outcome is EnvironmentUserHostRefused =>
+  !!outcome && typeof outcome === 'object' && 'refused' in outcome;
 
 const invalid = (message: string): EndpointResult => ({
   status: 400,
@@ -159,7 +246,8 @@ export async function runAdminBanUser(
   }
 
   const ctx = await deps.getAuthContext();
-  if (!(await ctx.internalAdapter.findUserById(userId))) return notFound();
+  const target = await ctx.internalAdapter.findUserById(userId);
+  if (!target) return notFound();
 
   // Break-glass — the guard the shadowed vendor route used to inherit from
   // `auth-manager.ts`'s before-hook, which a raw mount no longer reaches.
@@ -173,7 +261,11 @@ export async function runAdminBanUser(
     };
   }
 
-  await applyUserBan(ctx.internalAdapter, userId, {
+  // The host first: an organization owner or admin it refuses is not deactivated at all.
+  const host = await askHost(deps, 'deactivated', target, userId, actor);
+  if (isRefused(host)) return hostRefusal(host);
+
+  await applyUserBan(await banWriterFor(deps, ctx), userId, {
     banReason,
     ...(banExpires ? { banExpires } : {}),
   });
@@ -189,6 +281,7 @@ export async function runAdminBanUser(
         banned: true,
         banReason,
         ...(banExpires ? { banExpires: banExpires.toISOString() } : {}),
+        ...(host ? { host } : {}),
       },
     },
   };
@@ -197,7 +290,7 @@ export async function runAdminBanUser(
 /** `POST /api/v1/auth/admin/unban-user` — the caller is already gated. */
 export async function runAdminUnbanUser(
   deps: AdminBanEndpointDeps,
-  _actor: AdminActor,
+  actor: AdminActor,
   request: Request,
 ): Promise<EndpointResult> {
   const read = await parseJson(request);
@@ -206,9 +299,14 @@ export async function runAdminUnbanUser(
   if (!userId) return invalid('userId is required');
 
   const ctx = await deps.getAuthContext();
-  if (!(await ctx.internalAdapter.findUserById(userId))) return notFound();
+  const target = await ctx.internalAdapter.findUserById(userId);
+  if (!target) return notFound();
 
-  await applyUserUnban(ctx.internalAdapter, userId);
+  // The host first: a reactivation it refuses (the member cap) leaves the person deactivated.
+  const host = await askHost(deps, 'reactivated', target, userId, actor);
+  if (isRefused(host)) return hostRefusal(host);
 
-  return { status: 200, body: { success: true, data: { userId, banned: false } } };
+  await applyUserUnban(await banWriterFor(deps, ctx), userId);
+
+  return { status: 200, body: { success: true, data: { userId, banned: false, ...(host ? { host } : {}) } } };
 }

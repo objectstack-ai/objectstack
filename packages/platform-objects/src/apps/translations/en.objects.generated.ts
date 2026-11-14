@@ -117,10 +117,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       source: {
         label: "Identity Source",
-        help: "How this identity was created — idp_provisioned (federated SSO JIT or SCIM directory provisioning) or env_native (local signup, a local password, or an app end-user). System-managed; do not edit.",
+        help: "How this identity was created — idp_provisioned (federated SSO JIT or SCIM directory provisioning), env_native (local signup, a local password, or an app end-user), or idp_pending (added on a managed environment and waiting for the first sign-in through the hosting organisation identity provider). System-managed; do not edit.",
         options: {
           idp_provisioned: "IdP-Provisioned",
-          env_native: "Local Account"
+          env_native: "Local Account",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
