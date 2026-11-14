@@ -1464,6 +1464,16 @@ describe('with SSO domain verification on, an OIDC sign-in links to an existing 
       expect(sessions(rp)).toBe(0);
     });
 
+    it('CONTROL: to an existing account at a domain the provider does not list at all is refused as before, by the existing link refusal', async () => {
+      const rp = await verifiedRp();
+      await seedLocal(rp, 'erin@other.example');
+      const res = await signInThroughIdp(rp, await idToken({ email: 'erin@other.example' }));
+      // The answer this refusal gave before the proven-domain rule reached links.
+      expect(errorParams(res)).toMatchObject({ base: FAILED, error: 'account not linked' });
+      expect(accounts(rp)).toEqual([]);
+      expect(sessions(rp)).toBe(0);
+    });
+
     it('to an existing account at a proven domain still links and signs in', async () => {
       const rp = await verifiedRp();
       await seedLocal(rp, 'erin@acme.com');
