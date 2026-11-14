@@ -2733,6 +2733,7 @@ const ko = {
         ssoSwitchAccount: "계정 전환",
         ssoBackToConsole: "콘솔로 돌아가기",
         ssoSwitchAccountHint: "계정 전환을 누르면 새 탭에서 로그인 서비스가 열리고 그곳에서 로그아웃됩니다. 그런 다음 액세스 권한이 있는 계정으로 여기에서 다시 로그인하세요.",
+        linkEmailMismatch: "계정이 연결되지 않았습니다. 해당 계정의 이메일 주소가 현재 로그인한 계정의 이메일 주소와 일치하지 않습니다. 같은 이메일 주소를 사용하는 계정을 연결하세요.",
         twoFactorInvalidCode: "코드가 올바르지 않습니다. 인증 앱을 확인한 후 다시 시도하세요.",
         twoFactorInvalidBackupCode: "백업 코드가 올바르지 않거나 이미 사용되었습니다.",
         twoFactorTooManyAttempts: "잘못된 코드를 너무 많이 입력했습니다. 비밀번호로 다시 로그인하세요.",

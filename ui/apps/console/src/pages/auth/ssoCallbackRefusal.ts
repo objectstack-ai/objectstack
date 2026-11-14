@@ -124,6 +124,44 @@ export function ssoCallbackRefusalMessage(t: TranslateFn, code: string): string 
   return t(copy.key, { defaultValue: copy.defaultValue });
 }
 
+const LINK_EMAIL_MISMATCH: RefusalCopy = {
+  key: 'auth.login.errors.linkEmailMismatch',
+  defaultValue:
+    "The account was not linked: its email address doesn't match the one on the account you're signed in with. Link an account that uses the same email address.",
+};
+
+/**
+ * Callback `error` code → the sentence for a person who is ALREADY signed in.
+ *
+ * Linking another sign-in to your own account (`POST /link-social`, then the
+ * provider's round trip) lands on the same error URL as a sign-in when the
+ * callback refuses the link, but the person is still signed in, so this page
+ * never draws its form for them: it sends them on to the console. The sentence
+ * goes with them and is shown where they land (`../../components/LinkRefusalNotice`).
+ *
+ *  - `email_does_not_match`: better-auth refused to link a provider account
+ *    whose email differs from the signed-in account's
+ *    (`accountLinking.allowDifferentEmails` is off). No account row is written.
+ *
+ * Only these codes travel; any other `error` a signed-in person arrives with
+ * is left where it was, and nothing from the URL is ever shown as it came.
+ */
+const SIGNED_IN_LINK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
+  email_does_not_match: LINK_EMAIL_MISMATCH,
+};
+
+/** Whether `code` is a link refusal a signed-in person is told about where they land. */
+export function isSignedInLinkRefusal(code: string | null | undefined): code is string {
+  return typeof code === 'string' && Object.prototype.hasOwnProperty.call(SIGNED_IN_LINK_REFUSALS, code);
+}
+
+/** The sentence for a link refusal ({@link isSignedInLinkRefusal}), or `null` for any other code. */
+export function signedInLinkRefusalMessage(t: TranslateFn, code: string): string | null {
+  if (!isSignedInLinkRefusal(code)) return null;
+  const copy = SIGNED_IN_LINK_REFUSALS[code];
+  return t(copy.key, { defaultValue: copy.defaultValue });
+}
+
 /** The technical cause, for the details toggle: the code, then the server's description when it sent one. */
 export function ssoCallbackTechnicalDetail(error: SsoCallbackError): string {
   return error.description ? `${error.code}: ${error.description}` : error.code;
