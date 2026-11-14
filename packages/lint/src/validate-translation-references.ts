@@ -548,7 +548,8 @@ interface Universe {
    * (`HookSchema.refusals`) declares — what a `hooks.<name>.refusals.<CODE>`
    * key may name. Empty for a hook that declares no catalogue.
    */
-  hooks: Map<string, Set<string>>;
+  /** [#26170] Each hook's declared refusal codes, and (#33214) each code's declared reasons. */
+  hooks: Map<string, Map<string, Set<string>>>;
   /** Object-less actions — the ones `globalActions.*` may name. */
   globalActions: Map<string, AnyRec>;
   /** Action name → owning object, so a misfiled `globalActions` key can say where it belongs. */
@@ -1657,17 +1658,23 @@ function buildUniverse(stack: AnyRec): Universe {
 
   // ── Hooks: the refusal codes `hooks.<name>.refusals.<CODE>` may name (#26170) ──
   //
-  // The body runner reads `hooks.<hook>.refusals.<CODE>.message` for a code the
-  // hook's catalogue declares, so the universe is each hook's declared codes.
-  // `hooks` carries disposition `concat` in `COMPOSE_KEY_DISPOSITIONS`, so a
-  // sibling package's hooks are read through the artifact carrier; the
-  // declaration this leg is JUDGING keeps the slot, the flows' decision.
-  const hooks = new Map<string, Set<string>>();
+  // The hook runtime reads `hooks.<hook>.refusals.<CODE>.message` for a code the
+  // hook's catalogue declares, and (#33214) `….<CODE>.reasons.<REASON>.message`
+  // for a reason that code declares, so the universe is each hook's declared
+  // codes and each code's declared reasons. `hooks` carries disposition `concat`
+  // in `COMPOSE_KEY_DISPOSITIONS`, so a sibling package's hooks are read through
+  // the artifact carrier; the declaration this leg is JUDGING keeps the slot,
+  // the flows' decision.
+  const hooks = new Map<string, Map<string, Set<string>>>();
   const collectHookRecord = (hook: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
     const hookName = strName(hook.name);
     if (!hookName) return;
     if (!ownDeclaration && hooks.has(hookName)) return;
-    hooks.set(hookName, new Set(Object.keys(asRecord(hook.refusals))));
+    const codes = new Map<string, Set<string>>();
+    for (const [code, entry] of Object.entries(asRecord(hook.refusals))) {
+      codes.set(code, new Set(Object.keys(asRecord(isRec(entry) ? entry.reasons : undefined))));
+    }
+    hooks.set(hookName, codes);
   };
   for (const hook of recordsOf(stack.hooks)) collectHookRecord(hook, { ownDeclaration: true });
   for (const hook of artifactProvidedRecords(stack, 'hooks')) {
@@ -2496,8 +2503,27 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           continue;
         }
         if (!isRec(rawHook)) continue;
-        for (const code of Object.keys(asRecord(rawHook.refusals))) {
-          if (declared.has(code)) continue;
+        for (const [code, rawRefusal] of Object.entries(asRecord(rawHook.refusals))) {
+          const reasons = declared.get(code);
+          if (reasons) {
+            // ── hooks.<name>.refusals.<CODE>.reasons.<REASON> (#33214) ──────
+            for (const reason of Object.keys(asRecord(isRec(rawRefusal) ? rawRefusal.reasons : undefined))) {
+              if (reasons.has(reason)) continue;
+              orphan(
+                `${inLocale} · hook "${hookName}" · refusal "${code}" · reason "${reason}"`,
+                `${hookPath}.refusals.${code}.reasons.${reason}`,
+                reasons.size === 0
+                  ? `Translations are keyed to reason "${reason}" of refusal "${code}", but hook "${hookName}" ` +
+                    `declares no \`reasons\` under that code, so nothing resolves this key.`
+                  : `Translations are keyed to reason "${reason}", a reason refusal "${code}" of hook ` +
+                    `"${hookName}" does not declare under \`reasons\`, so nothing resolves this key.` +
+                    suggest(reason, reasons),
+                `Reason translations are keyed by a reason the code's \`reasons\` declares; declare it there, ` +
+                  `or drop the key.`,
+              );
+            }
+            continue;
+          }
           orphan(
             `${inLocale} · hook "${hookName}" · refusal "${code}"`,
             `${hookPath}.refusals.${code}`,
