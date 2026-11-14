@@ -466,3 +466,36 @@ describe('[#22839] lowerCallables — bodylessCallables, one row per callable no
 function moduleHelper(s: string): string {
   return String(s).toLowerCase().replace(/\s+/g, '-');
 }
+
+// objectstack#33214 (ruling 6879477573, 问一 A): a hook authored as an inline
+// TypeScript handler may declare `refusals`; the build lowers it to a `js` body
+// and the catalogue rides along, judged on the lowered body.
+describe('[#33214] lowerCallables — a handler hook\'s refusal catalogue', () => {
+  const refusals = {
+    VALIDATION_FAILED: { message: 'Cannot submit.', params: ['state'], reasons: { plan_locked: { message: 'Locked: {{ state }}.' } } },
+  };
+
+  it('keeps `refusals` beside the lowered body, and the lowered hook parses', async () => {
+    const { HookSchema } = await import('@objectstack/spec/data');
+    const handler = async (ctx: any) => {
+      if (ctx.input.locked) throw { code: 'VALIDATION_FAILED', reason: 'plan_locked', params: { state: ctx.input.state } };
+    };
+    const out = lowerCallables({ hooks: [{ name: 'plan_gate', object: 'plan', events: ['beforeUpdate'], handler, refusals }] });
+    const hook = (out.lowered.hooks as any[])[0];
+    expect(hook.body?.language).toBe('js');
+    expect(hook.body.source).toContain("reason: \"plan_locked\"".replace(/"/g, hook.body.source.includes("'plan_locked'") ? "'" : '"'));
+    expect(hook.refusals).toEqual(refusals);
+    expect(HookSchema.safeParse(hook).success).toBe(true);
+  });
+
+  it('a literal reason the code does not declare is refused on the lowered body, at `body.source`', async () => {
+    const { HookSchema } = await import('@objectstack/spec/data');
+    const handler = async () => {
+      throw { code: 'VALIDATION_FAILED', reason: 'plan_lockd' };
+    };
+    const out = lowerCallables({ hooks: [{ name: 'plan_gate', object: 'plan', events: ['beforeUpdate'], handler, refusals }] });
+    const r = HookSchema.safeParse((out.lowered.hooks as any[])[0]);
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.find((i) => i.path.join('.') === 'body.source')?.message).toContain("reason 'plan_lockd'");
+  });
+});
