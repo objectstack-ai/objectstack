@@ -27,13 +27,31 @@ export interface FakeSmtp {
   close(): Promise<void>;
 }
 
+export interface StartFakeSmtpOptions {
+  /** `false` answers every AUTH with 535. Default `true`. */
+  authOk?: boolean;
+  /**
+   * The 127.0.0.1 port to listen on. Default `0`: the OS picks a free
+   * ephemeral port, which is what an in-process suite wants. A runner that
+   * reserves a port range per run passes a port from its own range, so its
+   * sink never lands in a range another runner reserved. A port already in
+   * use rejects with the listen error (`EADDRINUSE`) — never a sink on some
+   * other port.
+   */
+  port?: number;
+}
+
 /**
  * Minimal ESMTP server: greeting, EHLO, AUTH PLAIN/LOGIN, MAIL/RCPT/DATA/QUIT.
  * Deliberately does NOT advertise STARTTLS — callers connect with
  * `secure: false` so nodemailer stays in the clear against localhost.
  */
-export async function startFakeSmtp(opts: { authOk?: boolean } = {}): Promise<FakeSmtp> {
+export async function startFakeSmtp(opts: StartFakeSmtpOptions = {}): Promise<FakeSmtp> {
   const authOk = opts.authOk !== false;
+  const requestedPort = opts.port ?? 0;
+  if (!Number.isInteger(requestedPort) || requestedPort < 0 || requestedPort > 65535) {
+    throw new RangeError(`startFakeSmtp: port must be an integer from 0 to 65535, got ${String(opts.port)}`);
+  }
   const commands: string[] = [];
   const messages: string[] = [];
   let connections = 0;
@@ -94,7 +112,13 @@ export async function startFakeSmtp(opts: { authOk?: boolean } = {}): Promise<Fa
     socket.on('error', () => { /* client hung up */ });
   });
 
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(requestedPort, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
   const port = (server.address() as net.AddressInfo).port;
   return {
     port,

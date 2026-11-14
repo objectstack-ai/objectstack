@@ -53,7 +53,13 @@ interface Harness {
  */
 function boot(
     posture: 'single' | 'group' | 'isolated' | null,
-    opts: { extraObjects?: any[]; setActionActive?: ReturnType<typeof vi.fn>; omitLedger?: boolean } = {},
+    opts: {
+        extraObjects?: any[];
+        setActionActive?: ReturnType<typeof vi.fn>;
+        omitLedger?: boolean;
+        /** A metadata plane that cannot answer (ADR-0110 D3): the loader error `loadDiagnosed` reports. */
+        metadataDegraded?: string;
+    } = {},
 ): Harness {
     const setActionActive = opts.setActionActive ?? vi.fn(async () => undefined);
     const executeAction = vi.fn(async () => ({ ran: 'script' }));
@@ -72,7 +78,11 @@ function boot(
 
     const metadata: any = {
         load: vi.fn(async () => null),
-        loadDiagnosed: vi.fn(async () => ({ data: null, degraded: false, errors: [] })),
+        loadDiagnosed: vi.fn(async () => ({
+            data: null,
+            degraded: Boolean(opts.metadataDegraded),
+            errors: opts.metadataDegraded ? [opts.metadataDegraded] : [],
+        })),
         loadMany: vi.fn(async () => []),
         listObjects: vi.fn(async () => objects),
         getObject: vi.fn(async () => objectDef),
@@ -363,6 +373,23 @@ describe('the activation door\'s own contract', () => {
         // A typo must not read as a server fault (the #7535 shape), and it must
         // certainly not mint a ledger row for an artifact that does not exist.
         expect(statusOf(res)).toBe(404);
+        expect(h.setActionActive).not.toHaveBeenCalled();
+    });
+
+    it('a metadata plane that cannot answer is 503, not the 404 a miss gets, and writes no row', async () => {
+        // The declaration is not on the object, so the lookup reaches the
+        // metadata service, which reports an outage rather than a miss.
+        const h = boot('single', { metadataDegraded: 'database-loader: ECONNREFUSED' });
+
+        const res = await h.dispatcher.handleActions(
+            `/_activation/${OBJECT}/standalone_action`, 'POST', { enabled: false }, TENANT_ADMIN(),
+        );
+
+        // An outage is not a verdict: reading it as "no declaration" would tell
+        // the administrator the action does not exist.
+        expect(statusOf(res)).toBe(503);
+        expect(codeOf(res)).toBe('SERVICE_UNAVAILABLE');
+        expect(messageOf(res)).toContain('ECONNREFUSED');
         expect(h.setActionActive).not.toHaveBeenCalled();
     });
 

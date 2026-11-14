@@ -249,6 +249,45 @@ describe('[#22578] handleActionPage — the ADR-0043 action page from a Request'
     expect(await statusOf(expiredOn)).toBe('pending');
   });
 
+  it('a link whose slot moved on — decided, or handed to someone else — is told WITH the request summary, and moves nothing', async () => {
+    const { svc, objectql, openRequest, statusOf, decisionsOf } = await bootStack({ rawApp: false });
+    // The reassign target must be a user of the request's organization.
+    objectql.registry.registerObject(
+      { name: 'sys_user', label: 'User', fields: { name: { name: 'name', label: 'Name', type: 'text' } } } as any,
+      'approvals-test', 'approvals-test',
+    );
+    await (objectql as any).syncSchemas();
+    await objectql.insert('sys_user', { id: 'u_delegate', name: 'Delegate' }, { context: SYSTEM } as any);
+
+    // not_pending: the approve link decided the request; its reject twin is still unconsumed.
+    const decidedOn = await openRequest();
+    const decided = await svc.issueActionTokens(decidedOn, APPROVER);
+    await svc.handleActionPage(postRequest(tokenForm(decided.approve)));
+    // not_approver: the bound approver's slot was handed to someone else.
+    const movedOn = await openRequest();
+    const moved = await svc.issueActionTokens(movedOn, APPROVER);
+    await svc.reassign(movedOn, { actorId: APPROVER, from: APPROVER, to: 'u_delegate' }, SYSTEM);
+
+    const cases: Array<[string, string, 'not_pending' | 'not_approver', string]> = [
+      ['not_pending', decided.reject, 'not_pending', decidedOn],
+      ['not_approver', moved.approve, 'not_approver', movedOn],
+    ];
+    for (const [label, token, kind, requestId] of cases) {
+      const row = (await svc.getRequest(requestId, SYSTEM))!;
+      for (const request of [getRequest(token), postRequest(tokenForm(token))]) {
+        const page = await snapshot(await svc.handleActionPage(request));
+        expect(page.status, `${label} ${request.method}`).toBe(200);
+        // The bearer once legitimately held this link, so the summary rows render.
+        expect(text(page), `${label} ${request.method}`).toBe(renderResultPage(kind, row));
+        expect(text(page)).not.toBe(renderResultPage(kind));
+      }
+    }
+    expect(await statusOf(decidedOn)).toBe('approved');
+    expect(await decisionsOf(decidedOn)).toHaveLength(1);
+    expect(await statusOf(movedOn)).toBe('pending');
+    expect(await decisionsOf(movedOn)).toEqual([]);
+  });
+
   it('a POST body that is not a form carries no token, and any other method is 405 with Allow', async () => {
     const { svc, openRequest, statusOf } = await bootStack({ rawApp: false });
     const requestId = await openRequest();
