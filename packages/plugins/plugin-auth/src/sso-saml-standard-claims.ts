@@ -188,7 +188,12 @@ export function samlStandardClaimMembers(
   return added;
 }
 
-/** A member the vendor reads and its fingerprint does not see. */
+/**
+ * A member the vendor reads and its fingerprint does not see: the vendor's
+ * `computeProviderAuthenticationFingerprint` (@better-auth/sso 1.7.12) hashes
+ * `serializeCanonical` of the config's `Object.entries`, which skips
+ * non-enumerable members.
+ */
 const hidden = (target: object, key: string, value: unknown): void => {
   Object.defineProperty(target, key, { value, enumerable: false, writable: true, configurable: true });
 };
