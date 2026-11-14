@@ -210,7 +210,7 @@ describe('#10965 service-package over a booted engine whose seam never answers',
   it('boot REACHES the list read — the card’s unverified half, measured', async () => {
     const stack = await bootNonAnsweringStack();
     try {
-      const listStatement = stack.statements.find((s) => /^SELECT \* FROM sys_packages WHERE \(id, created_at\) IN/.test(s));
+      const listStatement = stack.statements.find((s) => /^SELECT \* FROM sys_packages WHERE \(id, updated_at\) IN/.test(s));
       expect(listStatement, 'start() issues the latest-per-id SELECT that backs list()').toBeDefined();
 
       // …and the driver answered every one of them with no result set, which

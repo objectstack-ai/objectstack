@@ -15,7 +15,8 @@
  * @objectstack/runtime tests.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from './plugin.js';
 import { ObjectQL } from './engine.js';
 import { isServedOverrideRowOf } from '@objectstack/metadata-protocol';
@@ -511,5 +512,177 @@ describe('[#30065] a declared .custom action override rebinds the body, and rest
     await expect(ql.executeAction(OBJ, ACT, {})).resolves.toBe('alone');
     ql.removeActionsByPackage('metadata-service');
     await expect(ql.executeAction(OBJ, ACT, {})).rejects.toThrow(/not found/);
+  });
+});
+
+/**
+ * [#32990] On a booted kernel, the resync judges "artifact-shipped" against
+ * each code package's own action of the name, by the object it owns, not by
+ * the first package found under the bare name.
+ *
+ * The composition: package A ships a script action `approve` on its object,
+ * package B ships one of the same name on its own, and the environment
+ * authors its own script action `approve` on an object neither binds. The
+ * route serves the environment's declaration there (#32751), and its
+ * dispatch names no package, so it runs the handler the resync binds for
+ * that object. The bare-name filter found A's (or B's) artifact and skipped
+ * the row, so nothing ran there. Each holder binds its own handler now; a row
+ * on an object a package's action owns stays that holder's customization
+ * (ADR-0150 D4), whose handler stays the one that runs.
+ *
+ * Real: `ObjectKernel`, `ObjectQLPlugin` (its `kernel:ready` resync reads the
+ * stored rows), `ObjectQL` and its `SchemaRegistry`, the manifest service.
+ * Doubled: the driver (one row map per object) and what the runtime's
+ * AppPlugin does at start: the default action runner, and each package's
+ * handler bound under `app:PACKAGE`.
+ */
+describe('[#32990] the resync judges artifact-shipped by each holder\'s owner key, on a booted kernel', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  const PAIR_OF_B = `${B}.custom`;
+  const ON_A = 'alpha_account';
+  const ON_B = 'beta_contact';
+  const ON_ENV = 'env_lead';
+
+  const script = (label: string, objectName?: string, extra: AnyRecord = {}) => ({
+    name: 'approve', label, type: 'script',
+    ...(objectName !== undefined ? { objectName } : {}),
+    body: { language: 'js', source: `return '${label}';` },
+    ...extra,
+  });
+  const packageOf = (id: string, objectName: string, opts: { objectLess?: true } = {}) => {
+    const ns = id.split('.').pop()!;
+    return {
+      id, name: ns, namespace: ns, version: '1.0.0', type: 'app',
+      objects: [{ name: objectName, label: objectName, fields: { name: { name: 'name', label: 'Name', type: 'text' } } }],
+      actions: [script(ns, opts.objectLess ? undefined : objectName)],
+    };
+  };
+  const storedRow = (id: string, body: AnyRecord, packageId: string | null = null) => ({
+    id, type: 'action', name: body.name, state: 'active', package_id: packageId, metadata: JSON.stringify(body),
+  });
+
+  function rowStoreDriver(rows: AnyRecord[]) {
+    const matches = (row: AnyRecord, where: AnyRecord | undefined): boolean =>
+      Object.entries(where ?? {}).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`row store driver: combinator ${k} is not implemented`);
+        if (v !== null && typeof v === 'object') throw new Error(`row store driver: operator on ${k} is not implemented`);
+        return row[k] === v;
+      });
+    return {
+      name: 'row-store', version: '0.0.0', supports: {},
+      async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async syncSchema() {},
+      async find(object: string, ast: AnyRecord) {
+        if (object !== 'sys_metadata') return [];
+        const hits = rows.filter((r) => matches(r, ast?.where));
+        const page = typeof ast?.limit === 'number' ? hits.slice(0, ast.limit) : hits;
+        return page.map((r) => ({ ...r }));
+      },
+      async findOne(object: string, ast: AnyRecord) {
+        return object === 'sys_metadata' ? rows.find((r) => matches(r, ast?.where)) ?? null : null;
+      },
+      async count(object: string, ast: AnyRecord) {
+        return object === 'sys_metadata' ? rows.filter((r) => matches(r, ast?.where)).length : 0;
+      },
+      async create() { throw new Error('row store driver: no writes'); },
+      async update() { throw new Error('row store driver: no writes'); },
+      async delete() { throw new Error('row store driver: no writes'); },
+    };
+  }
+
+  const kernels: ObjectKernel[] = [];
+  afterEach(async () => {
+    while (kernels.length) {
+      const k = kernels.pop()!;
+      if (k.getState() === 'running') await k.shutdown();
+    }
+  });
+
+  /** Boot with `packages` registered in that order during the cold boot and `rows` stored; the `kernel:ready` resync binds. */
+  async function boot(packages: AnyRecord[], rows: AnyRecord[], disabled: string[] = []): Promise<ObjectQL> {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    kernels.push(kernel);
+    await kernel.use({
+      name: 'test.row-store', type: 'driver', version: '1.0.0',
+      init: async (ctx: AnyRecord) => { ctx.registerService('driver.row-store', rowStoreDriver(rows)); },
+    } as never);
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use({
+      name: 'test.app-plugin', version: '1.0.0',
+      dependencies: ['com.objectstack.engine.objectql'],
+      init: async () => {},
+      start: async (ctx: AnyRecord) => {
+        const ql = ctx.getService('objectql') as ObjectQL;
+        ql.registry.logLevel = 'silent';
+        ql.setDefaultActionRunner((action: AnyRecord) => (action?.body ? async () => `ran ${action.label}` : undefined));
+        const manifest = ctx.getService('manifest') as { register(m: unknown): Promise<void> | void };
+        for (const p of packages) {
+          await manifest.register(structuredClone(p));
+          for (const a of p.actions) ql.registerAction(a.objectName ?? 'global', a.name, async () => `ran ${a.label}`, `app:${p.id}`);
+        }
+        for (const id of disabled) ql.registry.disablePackage(id);
+      },
+    } as never);
+    await kernel.bootstrap();
+    return kernel.getService<ObjectQL>('objectql');
+  }
+
+  const ORDERS = [['A then B', [packageOf(A, ON_A), packageOf(B, ON_B)]], ['B then A', [packageOf(B, ON_B), packageOf(A, ON_A)]]] as const;
+  const run = (ql: ObjectQL, object: string) => ql.executeAction(object, 'approve', {}).then((r) => r, (e: Error) => e.message);
+
+  it('two holders and the environment\'s own action on an object neither binds: each runs its own body, in either registration order', async () => {
+    for (const [order, packages] of ORDERS) {
+      const ql = await boot([...packages], [storedRow('env-approve', script('env', ON_ENV))]);
+      expect(await run(ql, ON_ENV), order).toBe('ran env');
+      expect(await run(ql, ON_A), order).toBe('ran alpha');
+      expect(await run(ql, ON_B), order).toBe('ran beta');
+      expect(await ql.executeAction(ON_A, 'approve', {}, { packageId: A }), order).toBe('ran alpha');
+      expect(await ql.executeAction(ON_B, 'approve', {}, { packageId: B }), order).toBe('ran beta');
+    }
+  });
+
+  it('one holder and the environment\'s own action on another object: the environment\'s body runs there, the holder\'s on its own', async () => {
+    const ql = await boot([packageOf(A, ON_A)], [storedRow('env-approve', script('env', ON_ENV))]);
+    expect(await run(ql, ON_ENV)).toBe('ran env');
+    expect(await run(ql, ON_A)).toBe('ran alpha');
+  });
+
+  it('CONTROL — a DISABLED holder registered after another still owns its object: the environment\'s row there binds nothing', async () => {
+    const D = 'com.acme.delta';
+    const ql = await boot([packageOf(A, ON_A), packageOf(D, ON_ENV)], [storedRow('env-approve', script('env', ON_ENV))], [D]);
+    expect(await run(ql, ON_ENV)).toBe('ran delta');
+  });
+
+  it('CONTROL — a package-less row on an object a holder\'s action owns is that holder\'s customization: the holder\'s body keeps running, in either registration order', async () => {
+    for (const [order, packages] of ORDERS) {
+      const ql = await boot([...packages], [storedRow('env-on-b', script('env', ON_B))]);
+      expect(await run(ql, ON_B), order).toBe('ran beta');
+      expect(await run(ql, ON_A), order).toBe('ran alpha');
+    }
+  });
+
+  it('CONTROL — an object-less action a package ships owns every object: a row on another object binds nothing', async () => {
+    const ql = await boot([packageOf(A, ON_A, { objectLess: true })], [storedRow('env-approve', script('env', ON_ENV))]);
+    expect(await run(ql, ON_ENV)).toBe(`Action 'approve' on object '${ON_ENV}' not found`);
+    expect(await run(ql, 'global')).toBe('ran alpha');
+  });
+
+  it('the declared override of the holder registered SECOND binds over that holder\'s handler, in either registration order', async () => {
+    const override = storedRow('pair-approve', script('override', ON_B, { overrides: { package: B, basedOn: '1.0.0' } }), PAIR_OF_B);
+    for (const [order, packages] of ORDERS) {
+      const ql = await boot([...packages], [override]);
+      expect(await run(ql, ON_B), order).toBe('ran override');
+      expect(await run(ql, ON_A), order).toBe('ran alpha');
+    }
+  });
+
+  it('[review S1] two holders both shipping an object-less action: the declared override of B binds over B\'s handler, in either registration order', async () => {
+    const override = storedRow('pair-approve', script('override', undefined, { overrides: { package: B, basedOn: '1.0.0' } }), PAIR_OF_B);
+    const objectLess = [packageOf(A, ON_A, { objectLess: true }), packageOf(B, ON_B, { objectLess: true })];
+    for (const [order, packages] of [['A then B', objectLess], ['B then A', [...objectLess].reverse()]] as const) {
+      const ql = await boot([...packages], [override]);
+      expect(await ql.executeAction('global', 'approve', {}, { packageId: B }), order).toBe('ran override');
+      expect(await ql.executeAction('global', 'approve', {}, { packageId: A }), order).toBe('ran alpha');
+    }
   });
 });

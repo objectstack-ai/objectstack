@@ -381,7 +381,9 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'date arithmetic `DateText - DateText` — `record.start_date` is a date field, and the runtime holds a date field ' +
         'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: this ' +
         'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
-        'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. ' +
+        'For a span in hours or minutes, wrap each side in `datetime(…)` and read the Duration: ' +
+        '`(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.',
     },
   ],
   'date-text-arithmetic-fail-closed': [
@@ -398,7 +400,9 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
         'this faults at runtime, and here an expression that cannot be evaluated fails closed: the write (or the operation ' +
         'a hook guards) is refused, not skipped (it does not read null). ' +
-        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. ' +
+        'For a span in hours or minutes, wrap each side in `datetime(…)` and read the Duration: ' +
+        '`(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.',
     },
   ],
   'date-text-arithmetic-fail-open': [
@@ -416,7 +420,9 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'this faults at runtime, and here the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: ' +
         'the write proceeds, the rule is never applied (its advisory never fires), and the only trace is a log line saying ' +
         'it could not be evaluated. ' +
-        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. ' +
+        'For a span in hours or minutes, wrap each side in `datetime(…)` and read the Duration: ' +
+        '`(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.',
     },
   ],
   'date-text-arithmetic-run-fails': [
@@ -434,7 +440,9 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'this faults at runtime, and ' +
         'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
         'exists to do is not done (it does not read null). ' +
-        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. ' +
+        'For a span in hours or minutes, wrap each side in `datetime(…)` and read the Duration: ' +
+        '`(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.',
     },
   ],
   'date-text-arithmetic-run-may-fail': [
@@ -451,7 +459,9 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'this faults wherever `start_at` holds that text when the condition runs, and ' +
         'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
         'exists to do is not done (it does not read null). ' +
-        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. ' +
+        'For a span in hours or minutes, wrap each side in `datetime(…)` and read the Duration: ' +
+        '`(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.',
     },
   ],
   // [#32595] A call handed a date field's text that no overload accepts.
@@ -563,7 +573,9 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
       message:
         'date arithmetic — this computes a `google.protobuf.Duration` from `record.start_date`, and a field can\'t hold ' +
         'a duration: it reads `{}` at runtime. Use `daysBetween(a, b)` for the span in whole days, and ' +
-        '`daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        '`daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. ' +
+        'For a span in hours or minutes, wrap each side in `datetime(…)` and read the Duration: ' +
+        '`(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.',
     },
     {
       produce: () => onlyError('value', 'today() - daysAgo(3)', { scope: 'record', fieldTypes: { name: 'text' } }),
@@ -571,7 +583,9 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
       message:
         'date arithmetic — this computes a `google.protobuf.Duration`, and a field can\'t hold ' +
         'a duration: it reads `{}` at runtime. Use `daysBetween(a, b)` for the span in whole days, and ' +
-        '`daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        '`daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. ' +
+        'For a span in hours or minutes, wrap each side in `datetime(…)` and read the Duration: ' +
+        '`(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.',
     },
   ],
   'type-mismatch': [

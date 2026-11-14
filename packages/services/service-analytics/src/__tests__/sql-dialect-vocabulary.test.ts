@@ -423,7 +423,7 @@ describe('[#16206] the `unknown` arm\'s ROWS for a `sqlite3`-answering host, on 
     expect(viaSqlite3.sql).toContain('LIKE');
     // [#20025] `instr()` for `contains` since the `sqlite` arm took
     // `driver-sql`'s U+0000-safe constructs — case-exact, and never `LIKE`.
-    expect(viaSqlite.sql).toContain('instr(name, $1) > 0');
+    expect(viaSqlite.sql).toContain('instr("name", $1) > 0');
     expect(viaSqlite.sql).not.toContain('LIKE');
   });
 });

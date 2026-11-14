@@ -88,8 +88,8 @@ const SERVICE = 'approval-service.ts';
 /** Every reader of the equivalence, and what it reads (an `approver-address.ts` export, or `takenSlot` over one). */
 const READERS: ReadonlyArray<{ reader: string; method: string; reads: string }> = [
   { reader: 'acting path — may the caller act under a named address', method: 'resolveActor', reads: 'positionAddresses' },
-  { reader: '"My Pending" list filter', method: 'approverRequestIds', reads: 'equivalentApproverAddresses' },
-  { reader: 'participant gate — current approver and already acted', method: 'visibleRequestIds', reads: 'actingAddresses' },
+  { reader: '"My Pending" list filter and the current-approver probe', method: 'approverIndexWhere', reads: 'equivalentApproverAddresses' },
+  { reader: 'participant gate — current approver and already acted', method: 'participantProbes', reads: 'actingAddresses' },
   { reader: 'can_act', method: 'attachViewers', reads: 'heldSlot' },
   { reader: 'decision slot test', method: 'takenSlot', reads: 'heldSlot' },
   { reader: 'decision slot test — approve / reject', method: 'decideNode', reads: 'takenSlot' },
@@ -106,15 +106,15 @@ type SiteRole = 'reader' | 'slot-vs-slot' | 'declarative';
  * `<file> · <enclosing function> · <source text>`.
  */
 const SLOT_SITES: Readonly<Record<string, { role: SiteRole; why: string }>> = {
-  'approval-service.ts · approverRequestIds · approver: addresses[0]': {
+  'approval-service.ts · approverIndexWhere · approver: addresses[0]': {
     role: 'reader',
     why: '"My Pending": `addresses` is the caller\'s ask expanded through equivalentApproverAddresses',
   },
-  'approval-service.ts · approverRequestIds · approver: { $in: addresses }': {
+  'approval-service.ts · approverIndexWhere · approver: { $in: addresses }': {
     role: 'reader',
     why: 'the same filter, several addresses',
   },
-  'approval-service.ts · visibleRequestIds · acted_as: acting.length === 1 ? acting[0] : { $in: acting }': {
+  'approval-service.ts · participantProbes · acted_as: acting.length === 1 ? acting[0] : { $in: acting }': {
     role: 'reader',
     why: 'already-acted probe, slot half: `acting` is actingAddresses(caller), the current-approver probe\'s set',
   },
@@ -176,7 +176,7 @@ type PersonRole = 'caller-user-id' | 'display' | 'migration';
  * the caller's user id. Nothing compares it with a slot.
  */
 const PERSON_SITES: Readonly<Record<string, { count: number; role: PersonRole; why: string }>> = {
-  'approval-service.ts · visibleRequestIds · actor_id: uid': {
+  'approval-service.ts · participantProbes · actor_id: uid': {
     count: 1,
     role: 'caller-user-id',
     why: 'already-acted probe, person half: did the CALLER act on it (`uid` is the resolved caller\'s user id)',
@@ -396,9 +396,14 @@ describe('approver-address — the readers of the equivalence, and no comparison
       expect(reads(method(sf, name), helper), `${reader}: ${name}() reads ${helper}`).toBe(true);
     }
     // Both participant-gate probes read the ONE set the method builds.
-    const gate = method(sf, 'visibleRequestIds').getText(sf);
+    const gate = method(sf, 'participantProbes').getText(sf);
     expect(gate).toMatch(/const acting = actingAddresses\(/);
-    expect(gate).toMatch(/this\.approverRequestIds\(acting,/);
+    expect(gate).toMatch(/this\.approverIndexWhere\(acting,/);
+    // And both read shapes of the gate — the door's id set and the schema-read
+    // delegate's existence question — ask that one method (#33046).
+    for (const shape of ['visibleRequestIds', 'servesAnyRequest']) {
+      expect(method(sf, shape).getText(sf), shape).toMatch(/this\.participantProbes\(who, tenantOrg\)/);
+    }
   });
 
   it('every slot-comparison site outside approver-address.ts is classified — a new one fails with its location', () => {
@@ -449,9 +454,9 @@ describe('approver-address — the readers of the equivalence, and no comparison
     expect(drifted, 'a classified actor_id site changed, moved or disappeared: re-classify it').toEqual([]);
     // The one comparison is with the caller's user id, and with nothing else.
     const comparisons = Object.entries(PERSON_SITES).filter(([, v]) => v.role === 'caller-user-id').map(([k]) => k);
-    expect(comparisons).toEqual(['approval-service.ts · visibleRequestIds · actor_id: uid']);
+    expect(comparisons).toEqual(['approval-service.ts · participantProbes · actor_id: uid']);
     const service = parse(join(HERE, SERVICE));
-    expect(method(service, 'visibleRequestIds').getText(service)).toMatch(/const uid = who\.userId;/);
+    expect(method(service, 'participantProbes').getText(service)).toMatch(/const uid = who\.userId;/);
   });
 
   it('no role: slot (ADR-0090 D3): no string literal in this package carries the retired prefix — comments masked, position: found as the positive control', () => {

@@ -357,6 +357,17 @@ What verification decides, with it on:
 So if your people first sign in with addresses at a subdomain or at another
 domain, list each such domain on the provider as a bare host name and verify it.
 
+**A provider's domain list takes bare host names only.** Registering a provider,
+or editing its domain, with an entry written any other way (a URL, a port, a
+path, a user part) is refused with **400 `VALIDATION_FAILED`** on `domain`,
+naming the entry; nothing is saved. Every rule that reads the list (the account
+rule above, and SCIM adoption of an existing account) reads each entry the same
+way. A provider saved before this rule may still hold such an entry: it is not
+rewritten, and it names no domain. To correct one, send the bare host names as
+`domain` to `POST /api/v1/auth/sso/update-provider` (`https://acme.com` becomes
+`acme.com`; the console has no action that edits a provider's domain), then
+verify the domain again, since writing the list clears the verified flag.
+
 ### Why an OIDC sign-in was refused
 
 When the identity provider's ID token is not accepted, the callback redirects to

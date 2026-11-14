@@ -707,8 +707,20 @@ export function findHierarchyScopeCapabilityGaps(args: {
  * the snapshot is a one-key edit" note is next acted on: a key added there
  * arrives here typed, and {@link CLOSURE_CONTEXT_KEY_BY_TYPE} below is the
  * only thing that then needs a decision.
+ *
+ * ## `objectExtensions` — the one key that is NOT a context collection
+ *
+ * [#33152] The batch's `object_extension` drafts. They join no collection of
+ * their own: the live `objects` the gate reads are already SERVED (the
+ * registry folds every published extension onto its target), so a pending
+ * extension is folded onto its target in `objects` the same way
+ * ({@link foldPendingObjectExtensions}). Without it a formula or a hop into a
+ * field a sibling extension draft adds read as `unknown field`, and the whole
+ * batch rolled back, while `os build` accepted the same package.
  */
-export type RuntimePendingDeclarations = RuntimeStackContext;
+export type RuntimePendingDeclarations = RuntimeStackContext & {
+    objectExtensions?: readonly unknown[];
+};
 
 /**
  * Which context collection a pending draft of a given metadata type joins.
@@ -743,7 +755,11 @@ export const CLOSURE_CONTEXT_KEY_BY_TYPE = {
     // batch's objects ({@link objectWriteFlowSubjects}). They are not folded in
     // as subjects themselves, and no other write type reads them.
     flow: 'flows',
-} as const satisfies Readonly<Record<string, keyof RuntimeStackContext>>;
+    // [#33152] A batch's extension drafts, folded onto their targets in
+    // `objects` ({@link foldPendingObjectExtensions}), never a context
+    // collection of their own (see {@link RuntimePendingDeclarations}).
+    object_extension: 'objectExtensions',
+} as const satisfies Readonly<Record<string, keyof RuntimePendingDeclarations>>;
 
 /**
  * Every context collection some row above routes into.
@@ -858,6 +874,65 @@ export function mergePendingDeclarations(
         return !(typeof name === 'string' && supersededNames.has(name));
     });
     return [...kept, ...pending];
+}
+
+/**
+ * [#33152] `objects` with this batch's pending `object_extension` drafts folded
+ * onto their targets: each target is a copy whose `fields` are its own with
+ * the extension's `fields` merged in by name, a later writer replacing the
+ * whole field — the registry's `mergeObjectDefinitions` field merge, and the
+ * one part of it `objectsAsServed` in `@objectstack/lint` folds for the build.
+ *
+ * Why a fold and not a merge by name: the live objects are SERVED (every
+ * published extension already folded on), and an extension draft carries
+ * `extend` and the fields it adds, never its target's other fields. Folded, a
+ * sibling's formula or hop into a field the batch's extension adds resolves as
+ * it will once the batch has published; replacing the target by name would
+ * drop every field the extension does not repeat.
+ *
+ * `withoutTarget` leaves out the drafts extending that one target — an
+ * `object_extension` write's own: the gate's rules fold the written entry
+ * themselves, onto its target as it stands without the written package's
+ * extension (#33072), and a package holds one extension per target.
+ *
+ * Additive, as {@link mergePendingDeclarations} is: a draft can only make more
+ * fields resolvable. A draft whose target is in neither the batch nor the live
+ * universe folds onto nothing, so a hop into it still reads as unknown. Pure
+ * and total: an entry that is not an object, names no `extend`, or carries no
+ * `fields` record is skipped; a target whose `fields` is not a record is kept
+ * as it is.
+ */
+export function foldPendingObjectExtensions(
+    objects: readonly unknown[],
+    pendingExtensions: readonly unknown[] | undefined,
+    withoutTarget?: string,
+): readonly unknown[] {
+    if (!pendingExtensions || pendingExtensions.length === 0) return objects;
+    const fieldsByTarget = new Map<string, Record<string, unknown>>();
+    for (const ext of pendingExtensions) {
+        if (!isRec(ext) || typeof ext.extend !== 'string' || ext.extend === '') continue;
+        if (ext.extend === withoutTarget || !isRec(ext.fields)) continue;
+        fieldsByTarget.set(ext.extend, { ...fieldsByTarget.get(ext.extend), ...ext.fields });
+    }
+    if (fieldsByTarget.size === 0) return objects;
+    return objects.map((obj) => {
+        if (!isRec(obj) || typeof obj.name !== 'string') return obj;
+        const added = fieldsByTarget.get(obj.name);
+        if (added === undefined) return obj;
+        if (obj.fields !== undefined && !isRec(obj.fields)) return obj;
+        return { ...obj, fields: { ...obj.fields, ...added } };
+    });
+}
+
+/**
+ * [#33152] The target an `object_extension` write extends — the body's
+ * `extend`, else the row's name (the item gate holds the two equal) — and
+ * `undefined` for every other write type.
+ */
+function objectExtensionWriteTarget(type: string, name: string, body: unknown): string | undefined {
+    if (type !== 'object_extension') return undefined;
+    const extend = isRec(body) ? body.extend : undefined;
+    return typeof extend === 'string' && extend !== '' ? extend : name;
 }
 
 /**
@@ -1203,7 +1278,9 @@ export function evaluateRuntimeAuthoringGate(args: {
     /**
      * [#10377] The declarations this write's own BATCH is publishing alongside
      * it — folded into the five collections above by
-     * {@link mergePendingDeclarations} before any rule runs.
+     * {@link mergePendingDeclarations} before any rule runs, and [#33152] its
+     * `objectExtensions` onto their targets in `objects` by
+     * {@link foldPendingObjectExtensions}.
      *
      * Stated by the batch door (`publishPackageDrafts`), which is the only
      * caller that HAS a batch; the single-item door publishes one item, so its
@@ -1344,7 +1421,14 @@ export function evaluateRuntimeAuthoringGate(args: {
 
     // The object universe, folded once: the shared rules resolve names against
     // it and the #21476 rule reads a form's target object out of it.
-    const objects = mergePendingDeclarations(args.objects ?? [], args.pending?.objects);
+    // [#33152] …with the batch's extension drafts folded onto their targets,
+    // bar an extension write's own (its rules fold the written entry).
+    const extensionWriteTarget = objectExtensionWriteTarget(args.type, args.name, args.body);
+    const objects = foldPendingObjectExtensions(
+        mergePendingDeclarations(args.objects ?? [], args.pending?.objects),
+        args.pending?.objectExtensions,
+        extensionWriteTarget,
+    );
     // [#32666] The flows an object write judges as subjects; none on any other type.
     const objectWriteFlows = objectWriteFlowSubjects(args.type, args.flows, args.pending?.flows);
     // [#32666] …and, on that write, the objects the SUBJECT differential judges
@@ -1358,7 +1442,10 @@ export function evaluateRuntimeAuthoringGate(args: {
     // rule judges exactly what it judged before (a draft that breaks a live
     // sibling under them still cancels, as it always has).
     const subjectObjects = objectWriteFlows !== undefined && objectWriteFlows.length > 0
-        ? mergePendingDeclarations(args.objects ?? [], withoutWrittenItem(args.pending?.objects, args.name))
+        ? foldPendingObjectExtensions(
+            mergePendingDeclarations(args.objects ?? [], withoutWrittenItem(args.pending?.objects, args.name)),
+            args.pending?.objectExtensions,
+        )
         : undefined;
 
     const result = runRuntimeAuthoringRules({

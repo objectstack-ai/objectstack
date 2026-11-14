@@ -33,12 +33,15 @@
  * door gives the null guard on a `record.` / `previous.` read and the
  * unprovisioned-anchor warning. It never judges a bare name's null guard or a
  * root the run does not bind: those are `os validate`'s whole-flow judgments,
- * over the flow's variables, node ids and entrances. The door does warn on a
- * bare read of a name a flow variable shares with a field
- * (`warnShadowedFieldReads`), but that needs the flow's declared variables,
- * and the caller does not hand this entry any, so the probe declares none and
- * that warning never fires here. So `[]` at a flow condition is that door's
- * verdict, short of the shadowed-read warning, and not `os validate`'s.
+ * over the flow's variables, node ids and entrances. So `[]` at a flow
+ * condition is that door's verdict, and not `os validate`'s.
+ *
+ * [#33176] The door also warns on a bare read of a name a declared flow
+ * variable shares with a field of the object (`warnShadowedFieldReads`): the
+ * variable wins at run time. That reads the flow's declared `variables`, so
+ * the probe declares the ones the caller hands it, as the flow declares them,
+ * and the gate's own warning comes back. Handed none, the probe declares none
+ * and that warning cannot fire, exactly as before this key.
  */
 
 import { analyzeRelationshipTraversals } from '@objectstack/formula';
@@ -96,6 +99,15 @@ export interface AuthoredSiteExpression {
    * start condition itself, or follows none (the gate answers both alike).
    */
   startCondition?: string;
+  /**
+   * [#33176] site `flow_condition` only: the flow's declared `variables`, in
+   * the shape `FlowSchema.variables` declares them (`FlowVariableSchema`: a
+   * `name` and a `type` at least). The probe declares them, so the gate binds
+   * a bare read of one to the variable and gives its shadowed-read warning
+   * where one shares a name with a field of `objectName`. Absent: the probe
+   * declares none, as before this key.
+   */
+  variables?: readonly AnyRec[];
   /**
    * The object definitions as the registry serves them: the subject's, and
    * those of the objects its references name that the expression reads
@@ -166,7 +178,8 @@ function probeTrigger(
  * [#33147] The flow the gate judges for one flow condition: a start node
  * bound to `objectName` with the trigger the caller names (and its start
  * condition, when given), and one edge to an end node carrying the
- * condition. Exported for the read-back pin; the entry is its one caller.
+ * condition; [#33176] it declares the flow's `variables` when the caller
+ * hands them. Exported for the read-back pin; the entry is its one caller.
  */
 export function authoredFlowProbe({
   objectName,
@@ -174,12 +187,17 @@ export function authoredFlowProbe({
   triggerKind = 'record_change',
   sweepObject,
   startCondition,
-}: Pick<AuthoredSiteExpression, 'objectName' | 'expression' | 'triggerKind' | 'sweepObject' | 'startCondition'>): AnyRec {
+  variables,
+}: Pick<
+  AuthoredSiteExpression,
+  'objectName' | 'expression' | 'triggerKind' | 'sweepObject' | 'startCondition' | 'variables'
+>): AnyRec {
   const trigger = probeTrigger(triggerKind, objectName, sweepObject);
   return {
     name: AUTHORED_FLOW_NAME,
     label: AUTHORED_FLOW_NAME,
     type: trigger.type,
+    ...(variables !== undefined ? { variables: [...variables] } : {}),
     nodes: [
       {
         id: 'start',
@@ -230,6 +248,7 @@ export function judgeAuthoredSiteExpression({
   triggerKind,
   sweepObject,
   startCondition,
+  variables,
   objects,
 }: AuthoredSiteExpression): ExprIssue[] {
   const authored = objects.map((o) => stripInjectedSystemColumns(o));
@@ -249,7 +268,7 @@ export function judgeAuthoredSiteExpression({
     // rules are not what is judged here (left out, as at a validation site).
     stack = {
       objects: [body, ...others],
-      flows: [authoredFlowProbe({ objectName, expression, triggerKind, sweepObject, startCondition })],
+      flows: [authoredFlowProbe({ objectName, expression, triggerKind, sweepObject, startCondition, variables })],
     };
     runtimeWriteType = 'flow';
     // Every finding on the probe's one edge carries that edge's key path.

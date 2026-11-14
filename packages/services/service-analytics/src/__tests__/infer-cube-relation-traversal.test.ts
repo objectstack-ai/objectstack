@@ -222,7 +222,7 @@ describe('[#5739] a dotted member traverses on the ad-hoc path — the silent wr
         'WHERE "owner"."region" = $1',
     );
     // The mis-cast's statement, named so the case cannot pass by producing nothing.
-    expect(sqls[0]).not.toContain('WHERE region = ');
+    expect(sqls[0]).not.toContain('WHERE "region" = ');
   });
 
   it('③ ObjectQL / `dimensions` — FK-expands to the RELATED value, not the base column', async () => {
@@ -272,8 +272,8 @@ describe('[#5739] a dotted member traverses on the ad-hoc path — the silent wr
         'LEFT JOIN "owner" ON "crm_account"."owner" = "owner"."id" ' +
         'GROUP BY "owner"."region"',
     );
-    expect(sqls[0]).not.toContain('GROUP BY region');
-    expect(sqls[0]).not.toContain('SELECT region AS');
+    expect(sqls[0]).not.toContain('GROUP BY "region"');
+    expect(sqls[0]).not.toContain('SELECT "region" AS');
   });
 });
 
@@ -376,8 +376,8 @@ describe('[#5739] a real `<cube>.` qualifier is still stripped', () => {
     expect(dimensions).toEqual(['industry']);
     expect(measures).toEqual(['count']);
     expect(sqls[0]).toBe(
-      'SELECT industry AS "crm_account.industry", COUNT(*) AS "crm_account.count" ' +
-        'FROM "crm_account" GROUP BY industry',
+      'SELECT "industry" AS "crm_account.industry", COUNT(*) AS "crm_account.count" ' +
+        'FROM "crm_account" GROUP BY "industry"',
     );
     expect(sqls[0]).not.toContain('LEFT JOIN');
   });
@@ -389,7 +389,7 @@ describe('[#5739] a real `<cube>.` qualifier is still stripped', () => {
     );
 
     expect(dimensions).toEqual(['industry']);
-    expect(sqls[0]).toBe('SELECT COUNT(*) AS "count" FROM "crm_account" WHERE industry = $1');
+    expect(sqls[0]).toBe('SELECT COUNT(*) AS "count" FROM "crm_account" WHERE "industry" = $1');
     expect(sqls[0]).not.toContain('LEFT JOIN');
   });
 
@@ -403,7 +403,7 @@ describe('[#5739] a real `<cube>.` qualifier is still stripped', () => {
     );
 
     expect(sqls[0]).toBe(
-      'SELECT region AS "region", COUNT(*) AS "count" FROM "crm_account" GROUP BY region',
+      'SELECT "region" AS "region", COUNT(*) AS "count" FROM "crm_account" GROUP BY "region"',
     );
     expect(sqls[0]).not.toContain('LEFT JOIN');
   });
