@@ -548,10 +548,10 @@ interface FunctionHoldingEngine {
     readonly registry?: { releaseBareNameFunctions?(owner: string | undefined, stillHolds: (name: string) => boolean): void };
     unregisterFunctionsByPackage?(packageId: string): number;
     registerFunction?(name: string, handler: any, options?: { packageId?: string; effect?: unknown }): void;
-    resolveFunctionEntry?(name: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined;
     functionHoldersOf?(name: string): {
         readonly packageHolders: readonly string[];
         packageItem(packageId: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined;
+        platformItem?(): unknown;
     };
 }
 
@@ -581,7 +581,19 @@ function hookHandlersOf(groups: readonly HookBindingGroup[], owner: string): str
  * [#31700, epic seat ruling R3-B] Only for a name one package holds: two
  * namespaces' packages may each hold one function name, and the bare read of
  * such a name is refused (409, ADR-0150 D3) and answers no reader, so for it
- * `holder`'s own entry is all that is read and put back.
+ * `holder`'s own entry is all that is read and put back. [#32907] The same
+ * for a name the platform (an owner-less registration) holds beside
+ * `holder`: its bare read is refused too.
+ *
+ * [#32907, #32933] The bare slot is read off the holder set, never through
+ * the bare read: for a name `holder`'s package alone holds, the bare map's
+ * entry IS that package's holder entry (`registerFunction` stores one entry
+ * object in both, and the engine puts the holder's entry back in the bare map
+ * when another holder's last registration leaves). The bare read is a
+ * resolution, not that slot: it refuses a name the platform holds beside the
+ * package, which would abort this teardown, and answers nothing for a
+ * disabled package, which would re-register the kept function under
+ * `holder`'s spelling only and drop the spelling the slot held.
  */
 function releaseMovedFunctions(engine: FunctionHoldingEngine, holder: string, moved: readonly string[], known: Iterable<string>): void {
     if (typeof engine.registerFunction !== 'function' || typeof engine.functionHoldersOf !== 'function') return;
@@ -592,7 +604,8 @@ function releaseMovedFunctions(engine: FunctionHoldingEngine, holder: string, mo
         if (leaving.has(name)) continue;
         const holders = engine.functionHoldersOf(name);
         const entry = holders.packageItem(packageId);
-        if (entry) keep.push({ name, entry, bare: holders.packageHolders.length > 1 ? undefined : engine.resolveFunctionEntry?.(name) });
+        const shared = holders.packageHolders.length > 1 || holders.platformItem?.() !== undefined;
+        if (entry) keep.push({ name, entry, bare: shared ? undefined : entry });
     }
     engine.unregisterFunctionsByPackage?.(holder);
     for (const { name, entry, bare } of keep) {
