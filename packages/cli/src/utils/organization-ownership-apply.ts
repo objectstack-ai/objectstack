@@ -3387,23 +3387,39 @@ async function runDeclaredWebhooks(run: Run): Promise<StepReport> {
     const def = webhookDefinition(row);
     // [ADR-0150 D8] The activation row a customized copy writes names the
     // copy's own package, else the name's one holder. Of a name two or more
-    // holders declare, a copy that names no package names none of them: its
-    // row names no package, as the name-keyed switch it was — off, it keeps
-    // every holder with no row of its own off; on, it turns none on — and
-    // the run says so, naming each holder. Never the first or last one listed.
+    // package holders declare, a copy that names no package names none of
+    // them: its row names no package, as the name-keyed switch it was — off,
+    // it keeps every holder with no row of its own off; on, it turns none on —
+    // and the run says so, naming each holder. When the environment is one of
+    // those holders, a row naming no package IS the environment slot's own
+    // switch, so writing it would pick the environment: nothing is written and
+    // the run reports the copy's switch, naming each holder. Never the first or
+    // last one listed.
     const holders = declared.get(name) ?? [];
-    const packageId = ownPackageOf(row) ?? (holders.length === 1 ? holders[0] : null);
-    if (truthy(row.customized) && ownPackageOf(row) === null && holders.length > 1) {
+    const ownPackage = ownPackageOf(row);
+    const packageId = ownPackage ?? (holders.length === 1 ? holders[0] : null);
+    const unnamed = truthy(row.customized) && ownPackage === null && holders.length > 1;
+    const ambiguous = unnamed && holders.includes(null);
+    const holderList = holders.map((p) => (p === null ? 'the environment' : `'${p}'`)).join(', ');
+    if (ambiguous) {
       notes.push(
         `${table} ${id}: a customized copy of the declared webhook ${name}, which ${holders.length} holders declare ` +
-          `(${holders.map((p) => (p === null ? 'the environment' : `'${p}'`)).join(', ')}), and its definition names no ` +
+          `(${holderList}), and its definition names no package. A switch row naming no package would be the ` +
+          `environment's own, so which holder the copy's switch (${truthy(row.active) ? 'on' : 'off'}) belonged to is ` +
+          'not decided here and no switch row was written. Switch each holder at its own address ' +
+          `(POST /api/v1/security/_activation/webhook/${name}?package=PACKAGE, no package for the environment).`,
+      );
+    } else if (unnamed) {
+      notes.push(
+        `${table} ${id}: a customized copy of the declared webhook ${name}, which ${holders.length} holders declare ` +
+          `(${holderList}), and its definition names no ` +
           'package, so its switch is written as a row naming no package: switched off it keeps each holder with no row of ' +
           'its own off, switched on it turns none on. Switch each holder at its own address ' +
           `(POST /api/v1/security/_activation/webhook/${name}?package=PACKAGE).`,
       );
     }
     if (!truthy(row.customized) || isSwitchOnlyEdit(row)) {
-      if (truthy(row.customized) && (await setActivation(run, 'webhook', name, packageId, truthy(row.active)))) summary.activationRows++;
+      if (truthy(row.customized) && !ambiguous && (await setActivation(run, 'webhook', name, packageId, truthy(row.active)))) summary.activationRows++;
       summary.deliveriesResourced += await resource(id, `${DECLARED_WEBHOOK_REF_PREFIX}${name}`);
       await deleteCopy(row);
       orphaned.push(...secretIdsOf(row));
@@ -3426,11 +3442,12 @@ async function runDeclaredWebhooks(run: Run): Promise<StepReport> {
     );
     const [landed] = await sql.read(table, `SELECT ${q('name')} AS ${q('name')} FROM ${q(table)} WHERE ${q('id')} = ?`, [row.id]);
     if (text(landed?.name) !== clone) throw new Error(`The clone of the declared webhook ${name} (${id}) did not read back as ${clone}.`);
-    if (await setActivation(run, 'webhook', name, packageId, false)) summary.activationRows++;
+    if (!ambiguous && (await setActivation(run, 'webhook', name, packageId, false))) summary.activationRows++;
     summary.clones++;
     notes.push(
       `${table} ${id}: customized beyond its switch, so it is now the administrator's own webhook ${clone} (its ` +
-        `credentials and deliveries with it), and the declared ${name} is switched off.`,
+        `credentials and deliveries with it), and the declared ${name} is ` +
+        `${ambiguous ? 'not switched (see the note naming its holders)' : 'switched off'}.`,
     );
   }
 

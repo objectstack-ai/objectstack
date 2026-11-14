@@ -826,6 +826,15 @@ describe('declared webhooks — one declaration per (package, name) slot (ADR-01
             expect(said[0][0]).toContain('?package=PACKAGE');
         });
 
+        it('two holders, a departed row and a row naming no package: each is told once (review N1)', async () => {
+            const warn = vi.fn();
+            const source = sourceOver([[A, ALPHA], [B, BETA]], [slotRow(GONE, false), slotRow(null, false)], warn);
+            await source.list();
+            await source.list();
+            expect(warn.mock.calls.filter(([msg]) => String(msg).includes('no longer declares it'))).toHaveLength(1);
+            expect(warn.mock.calls.filter(([msg]) => String(msg).includes('no holder\'s own (naming no package)'))).toHaveLength(1);
+        });
+
         it('CONTROL beside the departed row, a row naming no package is still the one holder\'s switch, and its own row wins over both', async () => {
             expect(await switches(sourceOver([[A, ALPHA]], [slotRow(GONE, true), slotRow(null, false)]))).toEqual([[A, false]]);
             expect(await switches(sourceOver([[A, ALPHA]], [slotRow(GONE, false), slotRow(null, false), slotRow(A, true)]))).toEqual([[A, true]]);

@@ -429,6 +429,32 @@ describe('ownership shape generation 1 — the ceremony steps an 18.0 database o
     });
   }
 
+  /**
+   * [ADR-0150 D8, #32695 review S1] When the environment is one of the
+   * holders, a row naming no package is the environment slot's OWN switch
+   * (`webhookSlotSwitch` reads `rows.get(null)` as it), so writing one would
+   * pick the environment. Nothing is written and the run reports the copy's
+   * switch, naming each holder, in either listed order.
+   */
+  for (const [order, webhookList] of [
+    ['listed last', [...WEBHOOKS, { name: 'deal_won', packageId: null }]],
+    ['listed first', [{ name: 'deal_won', packageId: null }, ...WEBHOOKS]],
+  ] as const) {
+    it(`5a [#32695] the environment and a package hold the name (the environment ${order}), a customized copy naming no package: no switch row, said naming both`, async () => {
+      db.exec(`UPDATE sys_webhook SET definition_json = json_remove(definition_json, '$._packageId') WHERE id = 'whk_switched'`);
+      const report = await apply(ledger(), { webhookList });
+      const done = step(report, 'declared-webhooks');
+      expect(done.status).toBe('done');
+      expect(rows(`SELECT COUNT(*) AS n FROM sys_metadata_activation WHERE metadata_type = 'webhook' AND name = 'deal_won'`))
+        .toEqual([{ n: 0 }]);
+      const said = done.notes.filter((n) => n.includes('whk_switched') && n.includes('no switch row was written'));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain('the environment');
+      expect(said[0]).toContain("'com.example.app'");
+      expect(done.notes.filter((n) => n.includes('whk_switched') && n.includes('switched off it keeps'))).toHaveLength(0);
+    });
+  }
+
   it('5a [#32695] CONTROL a customized copy whose definition names its package writes that package\'s row, beside a second holder listed first', async () => {
     await apply(ledger(), { webhookList: [{ name: 'deal_won', packageId: 'com.example.other' }, ...WEBHOOKS] });
     expect(rows(`SELECT name, package_id, active FROM sys_metadata_activation WHERE metadata_type = 'webhook' AND name = 'deal_won'`))

@@ -540,9 +540,10 @@ export class DeclaredWebhookSource implements DeclaredWebhookReader {
     }
 
     /**
-     * A row no slot owns (module doc, "The switch"), said once per name: a
-     * departed package's row, which switches no holder, at any holder count;
-     * a row naming no package, under two or more slots.
+     * A row no slot owns (module doc, "The switch"), said once per name and
+     * kind: a departed package's row, which switches no holder, at any holder
+     * count; a row naming no package, under two or more slots. A name with
+     * both is told both.
      */
     private reportUnownedRows(name: string, rows: ReadonlyMap<string | null, boolean>): void {
         const slots = this.holders.get(name) ?? [];
@@ -559,7 +560,6 @@ export class DeclaredWebhookSource implements DeclaredWebhookReader {
                     `/api/v1/security/_activation/webhook/${name}?package=PACKAGE.`,
                 { name, holders: slots, rows: departed },
             );
-            return;
         }
         const unowned = [...rows.keys()].filter((packageId) => packageId === null && !slots.includes(null));
         if (slots.length < 2 || unowned.length === 0) return;
