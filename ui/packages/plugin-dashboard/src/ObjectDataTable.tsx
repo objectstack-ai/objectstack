@@ -18,7 +18,7 @@ import type { DataTableSchema, ObjectDataTableSchema, TableColumn } from '@objec
 import { normalizeTableColumnType } from '@object-ui/types';
 import { Skeleton, RefreshIndicator, cn } from '@object-ui/components';
 import { isMaskedFieldType, MaskedCellRenderer } from '@object-ui/fields';
-import { useSafeFieldLabel, useObjectTranslation, useLocalization, useDisplayLocale } from '@object-ui/i18n';
+import { useSafeFieldLabel, useObjectTranslation, useLocalization, useDisplayLocale, pickLocalized } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import { resolveFilterPlaceholders, humanizeFieldKey } from './utils';
 import type { FieldMeta } from './recordFields';
@@ -681,7 +681,9 @@ export const ObjectDataTable: React.FC<ObjectDataTableProps> = ({ schema, dataSo
   // `WidgetEmptyState`, which resolves its own copy. The no-data-SOURCE label
   // below is a different state — a misconfigured binding, not an empty result
   // — and keeps its own string.
-  const { t } = useObjectTranslation();
+  // `language` is the UI language: what a field's declared `label` (an
+  // `I18nLabel`, possibly an inline locale map) is picked in for a header.
+  const { t, language } = useObjectTranslation();
   const b = t('dashboard.noDataSourceFor');
   if (b && b !== 'dashboard.noDataSourceFor') noDataSourceLabel = b;
 
@@ -929,11 +931,20 @@ export const ObjectDataTable: React.FC<ObjectDataTableProps> = ({ schema, dataSo
     //
     // That is the defect class `56f4e34c0` rules out — "a value cannot appear
     // twice under two spellings" — so the odd one out adopts the convention
-    // rather than the convention gaining a fourth dialect. The i18n wrapper is
-    // unchanged: a bundle entry still wins, and this is only its fallback.
+    // rather than the convention gaining a fourth dialect.
+    //
+    // ⭐ HEADER PRECEDENCE, the one list views use (`objectGridGenerateColumns`):
+    // translation bundle → the field's DECLARED `label` → the humanized key. The
+    // declared label is the fallback handed to `fieldLabel`, so a bundle entry
+    // still wins over it, and the humanized key only stands in for a field that
+    // declares no label. A declared label is an `I18nLabel`: a plain string, or
+    // an inline locale map picked in the UI language by `pickLocalized` — the
+    // one locale pick the console uses for that vocabulary, not a second one.
+    const declaredLabel = (k: string): string | undefined =>
+      pickLocalized(fieldsByName[k]?.label, language) || undefined;
     const buildHeader = (k: string) => {
-      const humanized = humanizeFieldKey(k);
-      return objectName ? fieldLabel(objectName, k, humanized) : humanized;
+      const fallback = declaredLabel(k) ?? humanizeFieldKey(k);
+      return objectName ? fieldLabel(objectName, k, fallback) : fallback;
     };
 
     const enrich = (col: NormalizedColumn): EnrichedColumn => {
@@ -1070,12 +1081,19 @@ export const ObjectDataTable: React.FC<ObjectDataTableProps> = ({ schema, dataSo
     // derived case, AUTHORED LABEL for the case the condition protects.
     if (schema.columns && schema.columns.length > 0) {
       const normalized = normalizeColumns(schema.columns);
-      const withHeaders = normalized.map((col) => {
+      const withHeaders = normalized.map((col, i) => {
         // Nothing to key a lookup or a humanization on. `normalizeColumns`
         // returns such an entry untouched and so does this.
         if (!col?.accessorKey) return col;
-        const authoredHeader = col.header && col.header !== col.accessorKey ? col.header : undefined;
-        const fallback = authoredHeader ?? humanizeFieldKey(col.accessorKey);
+        // A string-shorthand entry carries no display text of its own: the
+        // header `normalizeColumns` gave it is the humanized key, not the
+        // author's, so it takes the same fallback as a raw-key header.
+        const shorthand = typeof schema.columns?.[i] === 'string';
+        const authoredHeader = !shorthand && col.header && col.header !== col.accessorKey ? col.header : undefined;
+        // Below an authored header, the same precedence as `buildHeader`: the
+        // field's declared label, then the humanized key, so a whitelisted
+        // column and the same auto-derived column never disagree.
+        const fallback = authoredHeader ?? declaredLabel(col.accessorKey) ?? humanizeFieldKey(col.accessorKey);
         // The i18n wrapper is unchanged: a bundle entry still wins, and this is
         // only its fallback — the same shape `buildHeader` above already has,
         // including its `objectName` guard.
@@ -1089,17 +1107,18 @@ export const ObjectDataTable: React.FC<ObjectDataTableProps> = ({ schema, dataSo
     if (finalData.length === 0) return [];
 
     // Auto-derived columns hide framework/system audit fields by default
-    // (shared `isSystemField` denylist). Users wanting them can pass an
-    // explicit `columns` whitelist.
-    // Prefer the objectSchema field order (declaration order = author intent)
-    // and drop system fields. Fall back to the row's keys when no schema
-    // is loaded, applying the same denylist.
+    // (shared `isSystemField` denylist) and every field the object declares
+    // `hidden: true`, as list views and record pages do. Users wanting either
+    // can pass an explicit `columns` whitelist, which is never filtered.
+    // Prefer the objectSchema field order (declaration order = author intent).
+    // Fall back to the row's keys when no schema is loaded, applying the same
+    // denylist (a row carries no `hidden` declaration to honour).
     const orderedKeys = Object.keys(fieldsByName).length > 0
-      ? Object.keys(fieldsByName).filter((k) => !isSystemField(k, fieldsByName[k]))
+      ? Object.keys(fieldsByName).filter((k) => fieldsByName[k]?.hidden !== true && !isSystemField(k, fieldsByName[k]))
       : Object.keys(finalData[0]).filter((k) => !k.startsWith('_') && !isSystemField(k));
 
     return orderedKeys.map((k) => enrich({ header: buildHeader(k), accessorKey: k }));
-  }, [schema.columns, schema.objectName, finalData, objectSchema, objectTypesPending, fieldLabel, fieldOptionLabel, tenantCurrency, displayLocale]);
+  }, [schema.columns, schema.objectName, finalData, objectSchema, objectTypesPending, fieldLabel, fieldOptionLabel, tenantCurrency, displayLocale, language]);
 
   // Note: per-cell select-label translation that used to happen here is now
   // handled by SelectCellRenderer in the shared field registry, which also

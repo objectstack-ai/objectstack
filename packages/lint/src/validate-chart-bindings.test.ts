@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import {
   validateChartBindings as validateChartBindingsUnrecorded,
   CHART_DIMENSION_UNKNOWN,
@@ -9,6 +10,7 @@ import {
   CHART_AXIS_NOT_SELECTED,
 } from './validate-chart-bindings.js';
 import { explainRule } from './rule-explanations.js';
+import { runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules } from './runtime-gate.js';
 import { REFERENCE_INTEGRITY_RULES } from './reference-integrity-suite.js';
 
@@ -1173,6 +1175,201 @@ describe('validateChartBindings — dataset-bound page chart components', () => 
       ],
     });
     expect(findings).toEqual([]);
+  });
+});
+
+// [#33128, ADR-0150 D3] The CLI's per-package pass (`packageBodyAsStack`)
+// hands each rule one package body, its own manifest, and the artifact's
+// `packages[]` as resolution context. A chart binding's `dataset` resolves as
+// the runtime resolves it for that package (every surface here sends its
+// item's served package as `callerPackage`): its own datasets, then the ONE
+// holder in its declared dependency closure — the resolution the dashboard
+// rule reads (`indexArtifactDatasetResolution`). BASE (main 47f6c939): the
+// declared-dependency report below was refused `chart-dataset-unknown`
+// ("Declared datasets: (none).") while the runtime served it.
+describe('[#33128] chart-dataset-unknown resolves through the reading package’s declared closure', () => {
+  const MODULE = 'com.example.sales';
+  const LIBRARY = 'com.example.library';
+  const SECOND = 'com.example.second';
+  const ELSEWHERE = 'com.example.elsewhere';
+
+  const libraryDataset = () => ({
+    name: 'book_metrics',
+    object: 'lib_book',
+    dimensions: [{ name: 'genre', field: 'genre' }],
+    measures: [{ name: 'book_count', aggregate: 'count' }],
+  });
+  const holder = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    name: id.split('.').pop(),
+    objects: [{ name: 'lib_book', fields: { genre: { type: 'text' } } }],
+    datasets: [libraryDataset()],
+    ...extra,
+  });
+  const report = (overrides: Record<string, unknown> = {}) => ({
+    name: 'books_by_genre',
+    dataset: 'book_metrics',
+    rows: ['genre'],
+    values: ['book_count'],
+    chart: { type: 'bar', xAxis: 'genre', yAxis: 'book_count' },
+    ...overrides,
+  });
+  const moduleBody = (dependencies: string[] | undefined, extra: Record<string, unknown> = {}) => ({
+    id: MODULE,
+    name: 'sales',
+    ...(dependencies ? { dependencies: Object.fromEntries(dependencies.map((d) => [d, '^1.0.0'])) } : {}),
+    reports: [report()],
+    ...extra,
+  });
+  /** `packageBodyAsStack`'s shape: the body, its own manifest, the artifact's entries. */
+  const asPackageStack = (body: Record<string, unknown>, siblings: Record<string, unknown>[]) => ({
+    ...body,
+    manifest: body,
+    packages: [body, ...siblings].map((manifest) => ({ manifest })),
+  });
+  const datasetUnknown = (stack: Record<string, unknown>) =>
+    validateChartBindings(stack).filter((f) => f.rule === CHART_DATASET_UNKNOWN);
+
+  it('ACCEPTS a report over the dataset of a package it declares, and judges its positions against it', () => {
+    expect(validateChartBindings(asPackageStack(moduleBody([LIBRARY]), [holder(LIBRARY)]))).toEqual([]);
+    // Resolved, not skipped: a measure the dependency's dataset lacks is still named.
+    const typo = moduleBody([LIBRARY], { reports: [report({ chart: { type: 'bar', xAxis: 'genre', yAxis: 'book_total' } })] });
+    const findings = validateChartBindings(asPackageStack(typo, [holder(LIBRARY)]));
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([[CHART_MEASURE_UNKNOWN, 'reports[0].chart.yAxis']]);
+    expect(findings[0].message).toContain('dataset "book_metrics"');
+  });
+
+  it('resolves a TRANSITIVE dependency’s dataset (the declared closure, ADR-0141)', () => {
+    const middle = { id: 'com.example.middle', name: 'middle', dependencies: { [LIBRARY]: '^1.0.0' } };
+    expect(datasetUnknown(asPackageStack(moduleBody(['com.example.middle']), [middle, holder(LIBRARY)]))).toEqual([]);
+  });
+
+  it('ACCEPTS the same dependency’s dataset on a joined block, a list-view chart and a page chart', () => {
+    const body = moduleBody([LIBRARY], {
+      reports: [{ name: 'joined_books', type: 'joined', blocks: [{ name: 'b', dataset: 'book_metrics', rows: ['genre'], values: ['book_count'] }] }],
+      views: [{ name: 'book_view', list: { chart: { dataset: 'book_metrics', dimensions: ['genre'], values: ['book_count'] } } }],
+      pages: [{
+        name: 'book_page',
+        regions: [{ name: 'main', components: [{ type: 'object-chart', properties: { dataset: 'book_metrics', dimensions: ['genre'], values: ['book_count'] } }] }],
+      }],
+    });
+    expect(validateChartBindings(asPackageStack(body, [holder(LIBRARY)]))).toEqual([]);
+    // CONTROL: the same bindings without the dependency are each refused.
+    const undeclared = { ...body, dependencies: undefined };
+    expect(datasetUnknown(asPackageStack(undeclared, [holder(LIBRARY)])).map((f) => f.path)).toEqual([
+      'reports[0].blocks[0].dataset',
+      'views[0].list.chart.dataset',
+      expect.stringMatching(/^pages\[0\]\..*\.properties\.dataset$/),
+    ]);
+  });
+
+  it('REFUSES a report over a dataset only an UNDECLARED package holds, naming the holder and the dependency to declare', () => {
+    const findings = datasetUnknown(asPackageStack(moduleBody(undefined), [holder(LIBRARY)]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: CHART_DATASET_UNKNOWN,
+      where: 'report "books_by_genre"',
+      path: 'reports[0].dataset',
+    });
+    expect(findings[0].message).toBe(
+      `dataset "book_metrics" is held by package "${LIBRARY}", outside the declared dependency closure of package ` +
+        `"${MODULE}", so the installed report's read of it is refused 409 (ADR-0150 D3).`,
+    );
+    expect(findings[0].hint).toContain(`add "${LIBRARY}" to the \`dependencies\` of package "${MODULE}"`);
+  });
+
+  it('names the move, never the dependency, when the holder already depends on the reader (a cycle)', () => {
+    const [finding] = datasetUnknown(asPackageStack(moduleBody(undefined), [holder(LIBRARY, { dependencies: { [MODULE]: '^1.0.0' } })]));
+    expect(finding.severity).toBe('error');
+    expect(finding.hint).toContain('dependency cycle');
+    expect(finding.hint).toContain('move this report into that package');
+    expect(finding.hint).not.toContain('Declare');
+  });
+
+  it('REFUSES a name two packages of the closure hold, naming both: nothing picks one (red line 2)', () => {
+    const findings = validateChartBindings(asPackageStack(moduleBody([LIBRARY, SECOND]), [holder(LIBRARY), holder(SECOND)]));
+    // One finding: the report's positions are not judged against either holder's dataset.
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ severity: 'error', rule: CHART_DATASET_UNKNOWN, path: 'reports[0].dataset' });
+    expect(findings[0].message.split(': ')[0]).toBe(
+      `dataset "book_metrics" is held by 2 packages in the declared dependency closure of package "${MODULE}" ` +
+        `("${LIBRARY}", "${SECOND}"), so the installed report's read of it is refused 409`,
+    );
+    expect(findings[0].hint).toContain('depend on only one of the packages that hold it');
+  });
+
+  it('the reading package’s own dataset wins a name its dependency also holds (ADR-0150 D3 step 1)', () => {
+    const own = moduleBody([LIBRARY, SECOND], { objects: holder(MODULE).objects, datasets: [libraryDataset()] });
+    expect(validateChartBindings(asPackageStack(own, [holder(LIBRARY), holder(SECOND)]))).toEqual([]);
+  });
+
+  it('REPORTS, not refuses, when the reader declares a dependency the artifact does not carry; never softens an ambiguity', () => {
+    const findings = datasetUnknown(asPackageStack(moduleBody([ELSEWHERE]), [holder(LIBRARY)]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toContain(`not judged: it may come from "${ELSEWHERE}", a dependency this artifact does not carry`);
+    expect(findings[0].message).not.toContain('409');
+    // Two holders in the closure stay an error whatever an outside package holds.
+    const ambiguous = datasetUnknown(asPackageStack(moduleBody([LIBRARY, SECOND, ELSEWHERE]), [holder(LIBRARY), holder(SECOND)]));
+    expect(ambiguous.map((f) => f.severity)).toEqual(['error']);
+  });
+
+  it('a name NO package declares, and any stack judged without the artifact, keep the unchanged sentence', () => {
+    const nowhere = moduleBody([LIBRARY], { reports: [report({ dataset: 'book_nowhere' })] });
+    const [finding] = datasetUnknown(asPackageStack(nowhere, [holder(LIBRARY)]));
+    expect(finding.severity).toBe('error');
+    expect(finding.message).toBe('binds dataset "book_nowhere", which resolves to no declared dataset — there is no data to render.');
+    expect(finding.hint).toContain('Declared datasets: book_metrics.');
+    // The single-package answer: the body alone, no `packages[]`.
+    expect(datasetUnknown(moduleBody([LIBRARY]))).toHaveLength(1);
+  });
+
+  it('the union run reads every body, as the dashboard rule does: a residual top-level `datasets` no longer hides the module’s own', () => {
+    // The `manifest: 'preserve'` composition with a residual top-level `datasets` (the dashboard rule's M2
+    // shape): the union keeps that key and folds the bodies' `reports`. BASE (main 47f6c939): the module's
+    // report on the module's OWN dataset was refused here, while its per-package pass accepted it.
+    const module = defineStack({
+      manifest: { id: LIBRARY, namespace: 'lib', name: 'library', version: '1.0.0', type: 'module', dependencies: { [MODULE]: '^1.0.0' } },
+      objects: holder(LIBRARY).objects,
+      datasets: [{ ...libraryDataset(), label: 'Book metrics' }],
+      reports: [{ ...report(), label: 'Books by genre' }],
+    } as never);
+    const app = defineStack({
+      manifest: { id: MODULE, namespace: 'lib', name: 'sales', version: '1.0.0', type: 'app' },
+      objects: [{ name: 'lib_account', fields: { name: { type: 'text' } } }],
+    } as never);
+    const composed = composeStacks([module, app], { manifest: 'preserve' }) as unknown as Record<string, unknown> & {
+      packages: Array<{ manifest: Record<string, unknown> }>;
+    };
+    const residual = { name: 'account_metrics', object: 'lib_account', dimensions: [{ name: 'name', field: 'name' }], measures: [{ name: 'n', aggregate: 'count' }] };
+    // `authoringRuleUnionStack` (cli): a top-level key already present is kept, an absent one is folded from the bodies.
+    const union = {
+      ...composed,
+      datasets: [residual],
+      reports: composed.packages.flatMap((p) => (p.manifest.reports as unknown[] | undefined) ?? []),
+    };
+    expect(union.reports).toHaveLength(1);
+    expect(datasetUnknown(union)).toEqual([]);
+    // CONTROL: the per-package pass of the app, reading the module's dataset, is refused (the module depends on the app).
+    const appEntry = composed.packages.find((p) => p.manifest.id === MODULE)!.manifest;
+    const appReads = { ...appEntry, reports: union.reports };
+    const entries = composed.packages.map((p) => (p.manifest.id === MODULE ? { manifest: appReads } : p));
+    const refused = datasetUnknown({ ...appReads, manifest: appReads, packages: entries });
+    expect(refused.map((f) => f.severity)).toEqual(['error']);
+    expect(refused[0].hint).toContain('dependency cycle');
+  });
+
+  it('reaches the rule table the per-package pass runs; the publish door’s snapshot is unchanged', () => {
+    const declared = asPackageStack(moduleBody([LIBRARY]), [holder(LIBRARY)]);
+    const undeclared = asPackageStack(moduleBody(undefined), [holder(LIBRARY)]);
+    const rule = (stack: Record<string, unknown>) =>
+      runAuthoringRules('validate', { normalized: stack, parsed: stack }).filter((f) => f.rule === CHART_DATASET_UNKNOWN);
+    expect(rule(declared)).toEqual([]);
+    expect(rule(undeclared).map((f) => f.severity)).toEqual(['error']);
+    // The door judges a report write against the live context's datasets, never `packages[]`.
+    const gate = runRuntimeAuthoringRules({ type: 'report', item: report(), context: { objects: holder(LIBRARY).objects, datasets: [libraryDataset()] } });
+    expect([...gate.errors, ...gate.advisories].filter((f) => f.rule === CHART_DATASET_UNKNOWN)).toEqual([]);
   });
 });
 
