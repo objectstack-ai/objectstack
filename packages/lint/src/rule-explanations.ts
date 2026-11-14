@@ -2169,12 +2169,15 @@ const FLOW_AFTER_SAVE_INLINE_RETRY_EXPLANATION: RuleExplanation = {
       'region of a `try_catch` is not retried by that node.',
     'The cure for `http` is `durable: true`. Where a messaging HTTP outbox is wired, the request is queued ' +
       'there and retried in the background with its own backoff and dead-letter, so the save does not wait. ' +
-      'Where none is wired, the node falls back to the inline call and the save waits for it as before.',
+      'Where none is wired, a run on the save path sends it once in the background, unretried, and does not ' +
+      'wait for it either; a failure is logged and the request is lost.',
     'A `connector_action` has no background path. Remove the retry around it, or run the flow on demand or ' +
       'on a schedule instead of after the save. An `http` node with `durable: true` fits only a call that ' +
       'needs no credential, because a credential must not go in an `http` node\'s url or headers.',
     'Not judged: a before-trigger flow, a scheduled, API or manual flow, and an inline call nothing retries. ' +
-      'A `subflow` node\'s callee is another flow and is judged on its own trigger, not this one\'s.',
+      'A `subflow` / `map` node\'s callee is another flow, which may register later, so this rule does not ' +
+      'read it; the automation engine declines to arm a flow whose callee retries an inline call ' +
+      '(`unboundCause: retried_callout_in_subflow`).',
     FLOW_GATE_REACH,
   ],
 };

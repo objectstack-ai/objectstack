@@ -589,7 +589,10 @@ describe('[#30379] the disable door refuses while an enabled package\'s validati
                 extend: ACCOUNT,
                 validations: [{
                     name: RULE_TENANT, type: 'script', severity: 'error', message: 'Credit is capped',
-                    condition: `record.${CREDIT} > 5000000`,
+                    // Null-guarded: the publish door judges an extension's rule by
+                    // the object's own rule pass, whose null-guard gate refuses an
+                    // unguarded nullable operand (#33154).
+                    condition: `record.${CREDIT} != null && record.${CREDIT} > 5000000`,
                 }],
             },
         });

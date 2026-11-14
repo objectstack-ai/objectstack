@@ -43,7 +43,7 @@
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/trigger-record-change": "workspace:*",
     "@types/node": "^26.6.5",
-    "hono": "^4.13.9",
+    "hono": "^4.13.16",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

@@ -21,7 +21,7 @@ export const entry: SemanticMigration = {
     'Read the declared row at the package it declares: GET /api/v1/meta/TYPE/NAME?package=X&member=M and X\'s '
     + 'list serve it, as before. To customize Z\'s own member, save a row declaring Z (overrides: { package: Z }).',
   reason:
-    'The moved-edit rule (#31593) serves a row declaring a former owner at the package that ships the item now, '
+    'The moved-edit rule (a tenant\'s edit follows its item between an App\'s packages) serves a row declaring a former owner at the package that ships the item now, '
     + 'and it asked whether the former owner still ships the item at the member\'s grain. X ships the name (another '
     + 'member), so it still holds it and serves the row at its own address; Z also served it, stamped Z, as its own '
     + 'item: one row at two packages\' addresses (ADR-0150 red line 2). The former owner is now asked at the '

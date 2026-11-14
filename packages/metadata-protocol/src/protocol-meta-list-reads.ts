@@ -52,6 +52,7 @@ import { installedManifestsOfEngine } from './installed-manifests.js';
 import {
     declinesPackageLessRowAt,
     disabledExactAddressHolder,
+    holdsNameForExactRead,
     packageLessRowWithheld,
     pairMemberWithheldAt,
 } from './protocol-exact-qualifier.js';
@@ -789,7 +790,12 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             if (!(it && typeof it === 'object' && unseated.has(it))) continue;
             const bound = boundPackageOf(it._packageId);
             if (bound === undefined || !pairsOfList.includes(bound) || typeof it.name !== 'string') continue;
-            if (host.shipsBundleName(request.type, it.name, packageId, typeShipping)
+            // [#33131 item 5] …or holds it for the exact read: a package
+            // holding the name only through its own stored row (no code
+            // artifact) is the holder its exact read serves the pair's added
+            // member at, so its list and execution list carry that member too.
+            if ((host.shipsBundleName(request.type, it.name, packageId, typeShipping)
+                || holdsNameForExactRead(host, request.type, it.name, packageId))
                 && host.baseServesBundleMember(request.type, it.name, packageId, it, typeShipping)
                 // [#31699 F2] …unless the row could be two holders' member.
                 && !pairMemberWithheldAt(host, request.type, it.name, packageId, bound, it)) {

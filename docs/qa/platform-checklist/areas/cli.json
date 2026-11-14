@@ -2315,10 +2315,10 @@
     },
     {
       "id": "cli.validate-v18-authoring-verdicts",
-      "title": "`os validate` / `os build` verdicts new on v18: an unknown seed record key (with did-you-mean), a misspelt record[…] / previous[…] field, a duplicate stack entry name, a controlled_by_parent object without exactly one required master_detail (also through objectExtensions), a component-props finding (now an error), and a credential in stack email/sms config each fail the build",
+      "title": "`os validate` / `os build` verdicts new on v18: an unknown seed record key (with did-you-mean), a misspelt record[…] / previous[…] field, a duplicate stack entry name, a controlled_by_parent object with no master_detail or with two required ones (also through objectExtensions), a component-props finding (now an error), and a credential in stack email/sms config each fail the build",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2332,8 +2332,9 @@
         ]
       },
       "steps": [
-        "for each arm run `os validate --json` and `os build`, recording exit code + rule id + path: seed key created_atx; record[\"typo\"] in a validation; two datasources named alike; a cbp object whose master_detail is not required; an object-grid with defaultFilters; email:{apiKey:\"x\"}",
-        "controls: seed key created_at, record.name == \"record.typo\", email.provider — all pass"
+        "for each arm run `os validate --json` and `os build`, recording exit code + rule id + path: seed key created_atx; record[\"typo\"] in a validation; two datasources named alike; a cbp object with no master_detail; a cbp object with two master_details both declared required: true, once inline and once with the second arriving through objectExtensions; an object-grid with defaultFilters; email:{apiKey:\"x\"}",
+        "controls: seed key created_at, record.name == \"record.typo\", email.provider, and a cbp object whose ONLY master_detail declares required: false (the optional master, ruling A of #30905) — all pass",
+        "the os lint arm: in the scratch app author a cbp object as a plain object literal (not through ObjectSchema.create(), which forces an omitted required to true) whose ONLY master_detail omits `required`; run `os lint`, then `os validate --json` and `os build`, recording each exit code and rule id"
       ],
       "acceptance": [
         {
@@ -2352,17 +2353,23 @@
           "clause": "the controls pass",
           "oracle": "build",
           "verify": "exit 0",
-          "evidence": "three lines"
+          "evidence": "four lines"
+        },
+        {
+          "clause": "the lint-only shape is `os lint`'s verdict, not the build's: a cbp object whose ONLY master_detail omits `required` fails `os lint` with relationship/master-detail-required at error, while `os validate` and `os build` accept it",
+          "oracle": "build",
+          "verify": "`os lint` exits ≠ 0 naming relationship/master-detail-required at the master_detail's path (it is a lintDataModel rule, packages/lint/src/data-model-rules.ts#RELATIONSHIP_MASTER_DETAIL_REQUIRED, which `os lint` runs and `os validate` / `os build` do not); `os validate --json` and `os build` exit 0, because the parse reads the parsed `required: false` and admits the optional master (packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal, ruling A of #30905). An explicit `required: false` on the ONLY master_detail is the optional master and passes all three (a control, steps[1]); the rule's cases are pinned at unit by packages/lint/src/data-model-rules.master-detail-required.test.ts, acceptance[0]'s pin",
+          "evidence": "the os lint, os validate and os build exits + the lint finding line"
         }
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/spec/src/data/define-seed-record-keys.test.ts + packages/formula/src/validate-field-existence-spellings.test.ts + packages/spec/src/stack-duplicate-entry.test.ts + packages/lint/src/data-model-rules.master-detail-required.test.ts + packages/spec/src/stack-cbp-extension-master.test.ts + packages/lint/src/validate-component-props.test.ts + packages/spec/src/stack-email-sms.test.ts — acceptance[0] ONLY, the clause that scores these seven spec, formula and lint unit files themselves. None of them runs `os validate` or `os build`, so no pin covers acceptance[1] (each arm's `os validate` exit and rule at its path, and the build refusing) or acceptance[2] (the controls pass): drive them by hand with the CLI"
+        "ref": "packages/spec/src/data/define-seed-record-keys.test.ts + packages/formula/src/validate-field-existence-spellings.test.ts + packages/spec/src/stack-duplicate-entry.test.ts + packages/lint/src/data-model-rules.master-detail-required.test.ts + packages/spec/src/stack-cbp-extension-master.test.ts + packages/lint/src/validate-component-props.test.ts + packages/spec/src/stack-email-sms.test.ts — acceptance[0] ONLY, the clause that scores these seven spec, formula and lint unit files themselves. None of them runs `os validate` or `os build`, so no pin covers acceptance[1] (each arm's `os validate` exit and rule at its path, and the build refusing), acceptance[2] (the controls pass) or acceptance[3] (the os lint arm's three exits): drive them by hand with the CLI"
       },
       "source": [
         "packages/spec/src/data/seed.zod.ts#defineSeed",
         "packages/spec/src/stack.zod.ts#collectDuplicateEntryErrors",
-        "packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal",
+        "packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal (the parse refuses no master_detail, two required ones, two with none required and a readonly / system master; ADR-0055 §1 as amended by ruling A of #30905 admits the ONLY master_detail declared required: false as an optional master)",
         "packages/spec/src/system/email-config.zod.ts#StackEmailConfigSchema",
         "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22149-define-seed-record-keys, 22212-lint-sibling-spellings, 22428-field-existence-every-spelling, 22386-spec-object-attached-on-read, 22386-validator-attached-on-read-leaf, 22902-stack-functions-array-duplicate-name-refused, 22934-stack-collection-duplicate-entry-refused, 23210-cbp-extension-merged-master, 9139-cbp-master-detail-required-error, 23100-cbp-one-required-master, 23026-retired-component-prop-refused, 23147-component-props-every-finding-refused, 22748-stack-email-sms-door"
       ],
@@ -2378,6 +2385,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — checklist-accuracy finding C8 of QA run #24786 (wave anchor #24579 round 13, round 6's theme-B rule): the ref listed seven spec, formula and lint unit pins with no clause qualifier, though acceptance[1] and acceptance[2] need os validate and os build. None of the seven runs the CLI (read at base 7697ddcf94). The pins are acceptance[0]'s own subject, so `automated` stays, narrowed to it. No clause changed",
           "ref": "#24850"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-14",
+          "change": "the controlled_by_parent arm re-worded and its lint-only shape moved to a new `os lint` clause, acceptance[3] (stale spec, QA run #33081 acceptance[1], card #33086 item 3). Ruling A of #30905 admits a cbp object's ONLY master_detail declared required: false as an optional master (packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal, asked by ObjectSchema's refuseControlledByParentWithoutOneMaster), so steps[0]'s arm 'a cbp object whose master_detail is not required' passes `os validate` and `os build`, as QA reproduced twice. steps[0] and the title now plant the shapes the parse refuses: no master_detail, and two required master_details, inline and through objectExtensions. steps[1] gains the optional master as a control, so acceptance[2] reads four lines. The shape only a lint rule reports, an omitted `required` on the only master_detail, is relationship/master-detail-required (packages/lint/src/data-model-rules.ts#RELATIONSHIP_MASTER_DETAIL_REQUIRED), which `os lint` runs and validate and build do not, so it moves to acceptance[3] with oracle build and a new steps[2]; automated.ref and source[2] follow. Read at base e540baf8; the os lint exits are read from the rule's reach note and its unit pin, not driven live by this edit",
+          "ref": "#33086"
         }
       ]
     },

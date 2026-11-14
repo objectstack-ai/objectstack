@@ -48,6 +48,7 @@ function fakeConnections(rows: Array<{ org: string; refreshToken?: string; statu
             id: `row_${r.org}`,
             organizationId: r.org,
             connectorName: 'crm',
+            packageId: null,
             status: r.status ?? 'connected',
             revision: 1,
             hasRefreshToken: r.refreshToken !== undefined,

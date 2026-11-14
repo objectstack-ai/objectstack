@@ -1127,6 +1127,18 @@ const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permission
 const SCHEMA_READ_DELEGATED_OBJECTS: ReadonlySet<string> = new Set(['sys_approval_request', 'sys_approval_action']);
 
 /**
+ * One read of the participant rule ({@link ApprovalService.participantProbes}):
+ * the table, its filter, the column holding the request id, and whether the
+ * filter already carries the caller's organization.
+ */
+interface ParticipantProbe {
+  object: 'sys_approval_approver' | 'sys_approval_request' | 'sys_approval_action';
+  where: Record<string, unknown>;
+  key: 'id' | 'request_id';
+  orgScoped: boolean;
+}
+
+/**
  * [#13568] Bound on the pending requests one deleted record can carry into
  * {@link ApprovalService.cancelForDeletedRecord}.
  *
@@ -9559,12 +9571,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     targets: string[],
     tenantOrg: string | null,
   ): Promise<string[] | null> {
-    if (!targets.length) return null;
-    const addresses = [...new Set(targets.flatMap(equivalentApproverAddresses))];
-    const where: any = addresses.length === 1
-      ? { approver: addresses[0] }
-      : { approver: { $in: addresses } };
-    if (tenantOrg) where.organization_id = tenantOrg;
+    const where = this.approverIndexWhere(targets, tenantOrg);
+    if (!where) return null;
     const rows = await this.engine.find('sys_approval_approver', {
       where, fields: ['request_id'],
       limit: ApprovalService.APPROVER_INDEX_CAP, context: SYSTEM_CTX,
@@ -9576,6 +9584,72 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       });
     }
     return [...new Set<string>(list.map(r => String(r.request_id)))];
+  }
+
+  /**
+   * The `sys_approval_approver` filter for "a pending slot one of `targets`
+   * holds", scoped to `tenantOrg`; `null` when `targets` is empty. One filter
+   * for both of its readers: {@link approverRequestIds} and the current-approver
+   * probe of {@link participantProbes}.
+   */
+  private approverIndexWhere(targets: string[], tenantOrg: string | null): Record<string, unknown> | null {
+    if (!targets.length) return null;
+    const addresses = [...new Set(targets.flatMap(equivalentApproverAddresses))];
+    const where: any = addresses.length === 1
+      ? { approver: addresses[0] }
+      : { approver: { $in: addresses } };
+    if (tenantOrg) where.organization_id = tenantOrg;
+    return where;
+  }
+
+  /**
+   * The participant rule's reads, as data: one per fact, each naming its
+   * table, its filter and the column that holds the request id. Two read
+   * shapes ask the one rule — {@link visibleRequestIds} collects the ids (the
+   * door needs the set), {@link servesAnyRequest} asks only whether one
+   * exists — so the rule is written here once and ⛔ copied into neither.
+   *
+   * The facts, in the order the door reads them (see {@link visibleRequestIds}
+   * for why each one is a fact):
+   *
+   *   - current approver — a pending slot under one of the caller's acting
+   *     addresses, via the normalized `sys_approval_approver` index;
+   *   - submitter — the request row itself;
+   *   - already acted — the person (`actor_id` = the caller's user id) or the
+   *     slot (`acted_as` among the caller's acting addresses). ⛔ Neither is a
+   *     fallback for the other (#21411).
+   *
+   * `orgScoped` says whether `where` already carries the caller's
+   * organization. The already-acted probe does not: the door scopes the ids it
+   * collects on the request row instead.
+   */
+  private participantProbes(who: ActingCaller, tenantOrg: string | null): ParticipantProbe[] {
+    const uid = who.userId;
+    const acting = actingAddresses(who);
+    const orgWhere = tenantOrg ? { organization_id: tenantOrg } : {};
+    const probes: ParticipantProbe[] = [];
+    const approverWhere = this.approverIndexWhere(acting, tenantOrg);
+    if (approverWhere) {
+      probes.push({ object: 'sys_approval_approver', where: approverWhere, key: 'request_id', orgScoped: true });
+    }
+    probes.push({
+      object: 'sys_approval_request',
+      where: { submitter_id: uid, ...orgWhere },
+      key: 'id',
+      orgScoped: true,
+    });
+    probes.push({
+      object: 'sys_approval_action',
+      where: {
+        $or: [
+          { actor_id: uid },
+          { acted_as: acting.length === 1 ? acting[0] : { $in: acting } },
+        ],
+      },
+      key: 'request_id',
+      orgScoped: false,
+    });
+    return probes;
   }
 
   /**
@@ -9639,54 +9713,34 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const who = caller === undefined ? await this.actingCaller(context) : caller;
     // A tokenless/anonymous caller participates in nothing. Fail closed.
     if (!who) return new Set<string>();
-    const uid = who.userId;
-    const acting = actingAddresses(who);
 
     const ids = new Set<string>();
     const cap = ApprovalService.APPROVER_INDEX_CAP;
-    const add = (rows: unknown, key: string) => {
+    const add = (rows: unknown, { object, key }: ParticipantProbe) => {
       const list: any[] = Array.isArray(rows) ? rows : [];
       for (const r of list) if (r?.[key] != null) ids.add(String(r[key]));
       if (list.length >= cap) {
         this.logger?.warn?.(
           '[approvals] participant-visibility probe hit its window — some requests may be hidden from a legitimate participant',
-          { cap, key },
+          { cap, object, key },
         );
       }
     };
 
     try {
-      // Current approver — via the normalized index, so every identity form
-      // the write path recorded is covered: the user id, the account's email,
-      // and every slot address of a position the caller holds (see the doc
-      // block above).
-      for (const id of (await this.approverRequestIds(acting, tenantOrg)) ?? []) ids.add(id);
-
-      const orgWhere = tenantOrg ? { organization_id: tenantOrg } : {};
-      add(
-        await this.engine.find('sys_approval_request', {
-          where: { submitter_id: uid, ...orgWhere },
-          fields: ['id'], limit: cap, context: SYSTEM_CTX,
-        }),
-        'id',
-      );
-      // Already acted on it: a past approver whose slot has moved on, or a
-      // commenter. They saw it legitimately; keep it that way. Two facts, each
-      // compared only with its own identity kind (see the doc block): the
-      // person who acted (`actor_id` = the caller's user id), and the slot it
-      // was taken as (`acted_as` among the current-approver probe's addresses).
-      add(
-        await this.engine.find('sys_approval_action', {
-          where: {
-            $or: [
-              { actor_id: uid },
-              { acted_as: acting.length === 1 ? acting[0] : { $in: acting } },
-            ],
-          },
-          fields: ['request_id'], limit: cap, context: SYSTEM_CTX,
-        }),
-        'request_id',
-      );
+      // The door needs the id set, so each fact is collected in its window.
+      // Current approver first — via the normalized index, so every identity
+      // form the write path recorded is covered (see the doc block above) —
+      // then the submitter, then already acted: a past approver whose slot has
+      // moved on, or a commenter, who saw it legitimately and keeps it.
+      for (const probe of this.participantProbes(who, tenantOrg)) {
+        add(
+          await this.engine.find(probe.object, {
+            where: probe.where, fields: [probe.key], limit: cap, context: SYSTEM_CTX,
+          }),
+          probe,
+        );
+      }
     } catch (err) {
       // Never widen on error: a failed probe yields whatever was collected.
       this.logger?.warn?.('[approvals] participant-visibility probe failed', {
@@ -10478,8 +10532,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * links to needs both definitions to render, so the callers the door serves
    * a request to are the callers who need them: this answers by the door's
    * own rule, asked without a named request: does the door serve the caller
-   * at least one request? {@link visibleRequestIds} (the participant rule
-   * `getRequest` and `listActions` apply), then the door's own row read
+   * at least one request? The participant rule `getRequest` and
+   * `listActions` apply ({@link participantProbes}, which
+   * {@link visibleRequestIds} reads), asked for one row rather than the id
+   * set ({@link servesAnyRequest}), then the door's own row read
    * inside the caller's organization ({@link findRequestRow}'s scope): the
    * already-acted probe is not organization-scoped, so an id it collects in
    * another organization is one the door would not serve here, and must not
@@ -10511,18 +10567,63 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     return verdict;
   }
 
-  /** {@link authorizeSchemaRead}'s question, asked once: does the door serve this caller any request? */
+  /**
+   * {@link authorizeSchemaRead}'s question, asked once: does the door serve
+   * this caller any request?
+   *
+   * An existence question, so it is asked as one: the participant rule's
+   * reads ({@link participantProbes}, the rule {@link visibleRequestIds}
+   * applies) each fetch at most ONE row, and a hit is confirmed by one row
+   * read of its request in the caller's organization — never the id windows
+   * the door collects. Every hidden-object list read by a member asks this,
+   * so its cost must not grow with the approval history: each probe is an
+   * equality read on an indexed column (`sys_approval_approver`'s
+   * `approver`, `sys_approval_request`'s `submitter_id`,
+   * `sys_approval_action`'s `actor_id` / `acted_as`).
+   *
+   * The already-acted probe, which the door scopes on the request row, is
+   * scoped here on the action row's own `organization_id` — stamped from its
+   * request's organization by every writer, and moved with it by the
+   * organization backfill — so the one row it fetches is one from this
+   * organization. Asked under no organization, nothing is scoped, as on the
+   * door.
+   *
+   * Errors as on the door: a failed participant probe reads as "nothing
+   * collected" (logged, never widened), a failed request read propagates.
+   */
   private async servesAnyRequest(context: ExecutionContext): Promise<boolean> {
     // `organizationId` is not on the envelope — see isOverrideActor().
     const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
-    const visible = await this.visibleRequestIds(context, tenantOrg);
-    if (visible === null) return true;
-    if (visible.size === 0) return false;
-    const where: any = { id: { $in: [...visible] } };
-    if (tenantOrg) where.organization_id = tenantOrg;
-    const rows = await this.engine.find('sys_approval_request', {
-      where, fields: ['id'], limit: 1, context: SYSTEM_CTX,
-    });
-    return Array.isArray(rows) && rows.length > 0;
+    if (this.isOverrideActor(context, tenantOrg)) return true;
+    const who = await this.actingCaller(context);
+    // A tokenless/anonymous caller participates in nothing. Fail closed.
+    if (!who) return false;
+    for (const probe of this.participantProbes(who, tenantOrg)) {
+      const where = tenantOrg && !probe.orgScoped ? { ...probe.where, organization_id: tenantOrg } : probe.where;
+      let hit: unknown;
+      try {
+        const rows = await this.engine.find(probe.object, {
+          where, fields: [probe.key], limit: 1, context: SYSTEM_CTX,
+        });
+        hit = Array.isArray(rows) ? rows[0]?.[probe.key] : undefined;
+      } catch (err) {
+        // Never widen on error, and ask no further fact: the door's probe
+        // stops collecting at the first failure too.
+        this.logger?.warn?.('[approvals] participant-visibility probe failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
+      if (hit == null) continue;
+      // The submitter probe reads the request row itself, in the organization.
+      if (probe.object === 'sys_approval_request') return true;
+      const requestWhere: any = { id: String(hit) };
+      if (tenantOrg) requestWhere.organization_id = tenantOrg;
+      const requests = await this.engine.find('sys_approval_request', {
+        where: requestWhere, fields: ['id'], limit: 1, context: SYSTEM_CTX,
+      });
+      if (Array.isArray(requests) && requests.length > 0) return true;
+    }
+    return false;
   }
 }

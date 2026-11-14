@@ -238,6 +238,7 @@ import { ENVIRONMENT_ADDRESS_SEGMENT } from '@objectstack/spec/kernel';
 import { FlowSlotTable, flowRunKey, flowRunPackage, isSlotKeySpelling, qualifiedFlowKey, unfiledFlowKey, stampFlowRunSlot, type FlowKeyMove, type FlowSlot } from './flow-slots.js';
 import { flowSlotRunStore } from './flow-slot-run-store.js';
 import { describeRegionSuspendingCall, regionSuspendingCall } from './subflow-region-guard.js';
+import { describeSubflowRetriedCallout, subflowRetriedCallout } from './subflow-retry-guard.js';
 // [#25222] The consumed-suspension restore's bodies: journaling a consumed
 // suspension, resolving its witnesses, and restoring, peeking at or inspecting
 // one. Each `AutomationEngine` method of the same name calls its body.
@@ -3166,6 +3167,16 @@ export class AutomationEngine implements IAutomationService {
      * {@link withdrawFlow}.
      */
     private readonly subflowRegionDeclinedFlows = new Map<string, string>();
+    /**
+     * Flows {@link activateFlowTrigger} declined to arm because they run after
+     * a record change and a `subflow` / `map` node of theirs reaches an inline
+     * outbound call that is retried, each with the reason `/_status` and the
+     * binding audit read. A record for {@link subflowRegionDeclinedFlows}'s
+     * reasons, kept the same way: deleted the moment the flow gets past the
+     * gate, re-asked by {@link rejudgeSubflowCallers}, dropped by
+     * {@link withdrawFlow}.
+     */
+    private readonly subflowRetryDeclinedFlows = new Map<string, string>();
     /** Connectors registered by integration plugins, keyed by connector name (ADR-0018 §Addendum). */
     private connectors = new Map<string, RegisteredConnector>();
     /** Connector provider factories keyed by provider name (ADR-0097 §2 — `openapi`/`mcp`/`rest`/…). */
@@ -4221,6 +4232,14 @@ export class AutomationEngine implements IAutomationService {
         // records in the same order, so a record an earlier half's decline
         // left unasked is never the one reported.
         if (this.declineOntoRegionSuspendingCall(flowName, resolved.triggerType)) return;
+        // The subflow-retry half, a decline for the same reasons: an
+        // after-record-change run waits for its `subflow` / `map` children, so
+        // an inline outbound call a child retries holds the save through the
+        // backoff ladder (ruling 6810500711, letter D). The after-save judge
+        // refuses that shape in the flow's own graph at registration; it cannot
+        // see the child, which may register after this flow. Last, and
+        // {@link describeUnboundReason} reads its record last.
+        if (this.declineOntoSubflowRetriedCallout(flowName, resolved.triggerType)) return;
         const trigger = this.triggers.get(resolved.triggerType);
         if (!trigger) return;
         try {
@@ -5018,6 +5037,7 @@ export class AutomationEngine implements IAutomationService {
             this.subflowDeclinedFlows,
             this.subflowNoticeDeclinedFlows,
             this.subflowRegionDeclinedFlows,
+            this.subflowRetryDeclinedFlows,
         ];
         for (const { from, to } of moved) {
             for (const map of maps) {
@@ -5391,6 +5411,7 @@ export class AutomationEngine implements IAutomationService {
             subflowDeclinedFlows: this.subflowDeclinedFlows,
             subflowNoticeDeclinedFlows: this.subflowNoticeDeclinedFlows,
             subflowRegionDeclinedFlows: this.subflowRegionDeclinedFlows,
+            subflowRetryDeclinedFlows: this.subflowRetryDeclinedFlows,
             flowRefusals: this.flowRefusals,
             logger: this.logger,
         };
@@ -5535,6 +5556,7 @@ export class AutomationEngine implements IAutomationService {
             subflowDeclinedFlows: this.subflowDeclinedFlows,
             subflowNoticeDeclinedFlows: this.subflowNoticeDeclinedFlows,
             subflowRegionDeclinedFlows: this.subflowRegionDeclinedFlows,
+            subflowRetryDeclinedFlows: this.subflowRetryDeclinedFlows,
             triggers: this.triggers,
         };
         return describeUnboundReason.call(host, name, resolved);
@@ -6772,6 +6794,50 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * The arming gate's subflow-retry half, asked by
+     * {@link activateFlowTrigger} of an enabled flow it is about to arm: does
+     * it run after a record change and reach, through a `subflow` / `map` node
+     * (top-level or in a region body), an inline outbound call that something
+     * on the call chain retries ({@link subflowRetriedCallout})? The save waits
+     * for the run and the run waits for its child, so a failing call would
+     * hold the user's save for the whole backoff ladder (ruling 6810500711,
+     * letter D). Then it is declined: recorded on
+     * {@link subflowRetryDeclinedFlows} for `/_status` and the binding audit,
+     * and said once as a `warn` naming the call node, the retried call and
+     * what retries it.
+     *
+     * ⛔ A decline, never a refusal, for the other halves' reasons: the child
+     * may register after this flow, so `registerFlow` cannot refuse it without
+     * depending on load order. The after-save judge refuses the same shape in
+     * the flow's own graph at registration, where no other flow is read.
+     *
+     * #4632 verdict: FUNCTIONAL, `warn`, as the other halves: the flow is
+     * visibly smaller than declared and `/_status` says why. Said once per
+     * decline reason.
+     *
+     * @returns `true` when the flow is declined and must not be armed.
+     */
+    private declineOntoSubflowRetriedCallout(flowName: string, triggerType: string): boolean {
+        const trap = subflowRetriedCallout(this.flows, flowName, this.flowCallKey);
+        if (!trap) {
+            this.subflowRetryDeclinedFlows.delete(flowName);
+            return false;
+        }
+        const why = describeSubflowRetriedCallout(trap);
+        const reason =
+            `not armed — ${why} It is armed once '${trap.callout.flow}' is republished without that retried ` +
+            `inline call`;
+        const previous = this.subflowRetryDeclinedFlows.get(flowName);
+        this.subflowRetryDeclinedFlows.set(flowName, reason);
+        if (previous === reason) return true;
+        this.logger.warn(
+            `Flow '${flowName}' is registered but NOT armed on trigger '${triggerType}' — ${why} It is armed the ` +
+                `moment '${trap.callout.flow}' is republished without that retried inline call.`,
+        );
+        return true;
+    }
+
+    /**
      * [#20725, ADR-0126 §7.3] `subflow` just changed state — (re)registered,
      * switched on or off, or read off the ledger at boot — so ask the arming
      * gate again for each packaged flow that calls it, where the answer can
@@ -6805,6 +6871,7 @@ export class AutomationEngine implements IAutomationService {
             subflowDeclinedFlows: this.subflowDeclinedFlows,
             subflowNoticeDeclinedFlows: this.subflowNoticeDeclinedFlows,
             subflowRegionDeclinedFlows: this.subflowRegionDeclinedFlows,
+            subflowRetryDeclinedFlows: this.subflowRetryDeclinedFlows,
             flows: this.flows,
             subflowTargets: (...a) => this.subflowTargets(...a),
             packagedSubflowCallers: (...a) => this.packagedSubflowCallers(...a),
