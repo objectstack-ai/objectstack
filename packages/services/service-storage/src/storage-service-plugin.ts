@@ -1378,7 +1378,10 @@ function resolveUploadLinkDoor(registry: StorageGateRegistry): () => UploadLinkD
     } catch {
       return undefined;
     }
-    return service && typeof service.inspectUploadLink === 'function' && typeof service.consumeUploadLink === 'function'
+    return service &&
+      typeof service.inspectUploadLink === 'function' &&
+      typeof service.consumeUploadLink === 'function' &&
+      typeof service.consumeUploadLinkFiles === 'function'
       ? (service as UploadLinkDoor)
       : undefined;
   };
@@ -1404,12 +1407,17 @@ function resolveUploadLinkDoor(registry: StorageGateRegistry): () => UploadLinkD
  *    now, so nothing lands. A posture read that fails throws the branded
  *    outage, never a verdict.
  *  - `getDownloadTtl`: the record-governed download lifetime the routes use.
+ *  - [#32712] `getI18n`: the i18n service, read per call, for the labels the
+ *    upload-link page names the record and field by; none ⇒ declared labels.
  */
 function bindRecordFileAccess(
   registry: StorageGateRegistry,
   getEngine: () => IDataEngine | null,
   basePath: string,
-): Pick<RecordFileAccessDeps, 'judgeFileRead' | 'isServable' | 'resolveUserContext' | 'getDownloadTtl' | 'getBasePath'> {
+): Pick<
+  RecordFileAccessDeps,
+  'judgeFileRead' | 'isServable' | 'resolveUserContext' | 'getDownloadTtl' | 'getBasePath' | 'getI18n'
+> {
   return {
     judgeFileRead: async (file, context) => {
       const engine = getEngine();
@@ -1458,6 +1466,15 @@ function bindRecordFileAccess(
     },
     getDownloadTtl: () => DEFAULT_DOWNLOAD_TTL,
     getBasePath: () => basePath,
+    // [#32712] The upload-link page's object and field labels, in its language.
+    getI18n: () => {
+      try {
+        const i18n = registry.getService<II18nService>('i18n');
+        return i18n && typeof i18n.getLocales === 'function' && typeof i18n.getTranslations === 'function' ? i18n : null;
+      } catch {
+        return null;
+      }
+    },
   };
 }
 

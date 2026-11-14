@@ -43,10 +43,10 @@ import {
   assertEngineUpdateDispatch,
   type ObjectSchemaReadDelegateSource,
 } from '@objectstack/metadata-core';
-import { createStdioDataBridge } from './stdio-data-bridge.js';
+import { callerObjectView, createStdioDataBridge, stdioObjectView } from './stdio-data-bridge.js';
 import { registerObjectTools } from './mcp-http-tools.js';
 import { MCPServerPlugin } from './plugin.js';
-import type { MCPServerRuntime } from './mcp-server-runtime.js';
+import { buildObjectSchemaResource, type MCPServerRuntime } from './mcp-server-runtime.js';
 
 const OBJECT = FLS_CONTRACT_OBJECT.name;
 const account = () => JSON.parse(JSON.stringify(FLS_CONTRACT_OBJECT));
@@ -142,7 +142,8 @@ const DECLARED_ANSWER = {
       system: false,
       options: [{ value: 'band_a', label: 'Band A' }, { value: 'band_b', label: 'Band B' }],
     },
-    { name: 'bonus_formula', type: 'formula', label: 'Bonus', required: false, readonly: false, system: false },
+    // [#32530] A formula is computed on read: a write to it never stands.
+    { name: 'bonus_formula', type: 'formula', label: 'Bonus', required: false, readonly: true, system: false },
   ],
   validations: [
     { name: 'graded_account_needs_name', type: 'script', message: 'A graded account needs a name.', fields: [] },
@@ -539,5 +540,184 @@ describe('[#32435] stdio describe_object serves what a write needs, as the calle
     expect(text).not.toContain('record.');
     // …and it is the answer a deployment with no security service gets.
     expect(text).toBe((await describeAs(undefined)).text);
+  });
+});
+
+describe('[#32530] stdio describe_object and the objects resource serve readonly where a write never stands', () => {
+  const TICKET = {
+    name: 'ticket',
+    label: 'Ticket',
+    fields: {
+      // CONTROL: an ordinary field, writable.
+      title: { type: 'text', label: 'Title' },
+      // CONTROL: a declared `readonly` stays true.
+      frozen_note: { type: 'text', label: 'Frozen note', readonly: true },
+      // A hand-authored runtime-owned literal: no `readonly` flag.
+      ticket_no: { type: 'autonumber', label: 'Ticket No' },
+      // Computed on read, no column.
+      total: { type: 'formula', label: 'Total', expression: 'record.qty * 2' },
+      // The write path strips a formula by its TYPE, an expression or not.
+      bare_formula: { type: 'formula', label: 'Bare formula' },
+      // A stored field the engine computes on every write.
+      doubled: { type: 'number', label: 'Doubled', expression: 'record.qty * 2' },
+    },
+  };
+  const EXPECTED = { title: false, frozen_note: true, ticket_no: true, total: true, bare_formula: true, doubled: true };
+  const readonlyOf = (described: any) => Object.fromEntries(described.fields.map((f: any) => [f.name, f.readonly]));
+  const metadataService = () => {
+    const object = () => JSON.parse(JSON.stringify(TICKET));
+    return {
+      listObjects: vi.fn(async () => [object()]),
+      getObject: vi.fn(async (name: string) => (name === TICKET.name ? object() : undefined)),
+    } as unknown as IMetadataService;
+  };
+
+  it('describe_object over stdio', async () => {
+    const bridge = createStdioDataBridge({
+      engine: {} as unknown as IDataEngine,
+      metadataService: metadataService(),
+      resolvePrincipal: async () => ({ userId: 'u_member' }) as unknown as ExecutionContext,
+    });
+    const server = new McpServer({ name: 'pin', version: '0' });
+    registerObjectTools(server, bridge);
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: 'pin', version: '0' });
+    await client.connect(clientSide);
+    try {
+      const res = (await client.callTool({ name: 'describe_object', arguments: { objectName: TICKET.name } })) as {
+        isError?: boolean;
+        content: Array<{ text: string }>;
+      };
+      expect(res.isError === true).toBe(false);
+      expect(readonlyOf(JSON.parse(res.content[0]!.text))).toEqual(EXPECTED);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('the objectstack://objects/{name} resource', async () => {
+    const result = await buildObjectSchemaResource(metadataService(), TICKET.name);
+    expect(readonlyOf(JSON.parse(result.contents[0]!.text))).toEqual(EXPECTED);
+  });
+});
+
+describe('stdio describe_object and the objects resource judge readonly on the DECLARED field, as the HTTP twin does', () => {
+  // The HTTP twin's fixture (`packages/runtime/src/domains/mcp-object-schema-mask.test.ts`,
+  // "describe_object serves readonly where a write never stands — the real
+  // engine and security layer"): `marked_up` is a stored expression over
+  // `hidden_cost`, which the member may not read, so the member's mask deletes
+  // `marked_up.expression` while the engine still computes the field.
+  const TICKET = {
+    name: 'ticket',
+    label: 'Ticket',
+    fields: {
+      title: { type: 'text', label: 'Title' },
+      qty: { type: 'number', label: 'Qty' },
+      frozen_note: { type: 'text', label: 'Frozen note', readonly: true },
+      ticket_no: { type: 'autonumber', label: 'Ticket No' },
+      total: { type: 'formula', label: 'Total', expression: 'record.qty * 2' },
+      bare_formula: { type: 'formula', label: 'Bare formula' },
+      doubled: { type: 'number', label: 'Doubled', expression: 'record.qty * 2' },
+      locked_note: { type: 'text', label: 'Locked note' },
+      hidden_cost: { type: 'number', label: 'Hidden cost' },
+      marked_up: { type: 'number', label: 'Marked up', expression: 'record.hidden_cost * 2' },
+    },
+  };
+  /**
+   * The member's answer, field for field: the map the HTTP twin's PARITY pin
+   * holds for the same declaration and the same mask. `hidden_cost` is not
+   * served at all; `marked_up` is served, without its expression, as readonly.
+   */
+  const MEMBER_READONLY = {
+    title: false,
+    qty: false,
+    frozen_note: true,
+    ticket_no: true,
+    total: true,
+    bare_formula: true,
+    doubled: true,
+    locked_note: false,
+    marked_up: true,
+  };
+  const READABLE = Object.keys(TICKET.fields).filter((f) => f !== 'hidden_cost');
+  const memberSecurity = {
+    getReadableFields: async () => [...READABLE],
+    getMetadataReadableFields: async () => [...READABLE],
+    canReadObject: async () => true,
+  };
+  const readonlyOf = (described: any) => Object.fromEntries(described.fields.map((f: any) => [f.name, f.readonly]));
+  const metadataService = () => {
+    const object = () => JSON.parse(JSON.stringify(TICKET));
+    return {
+      listObjects: vi.fn(async () => [object()]),
+      getObject: vi.fn(async (name: string) => (name === TICKET.name ? object() : undefined)),
+    } as unknown as IMetadataService;
+  };
+  const MEMBER = async () => ({ userId: 'u_member' }) as unknown as ExecutionContext;
+
+  async function describeOverStdio(): Promise<{ text: string; json: any }> {
+    const bridge = createStdioDataBridge({
+      engine: {} as unknown as IDataEngine,
+      metadataService: metadataService(),
+      resolvePrincipal: MEMBER,
+      security: () => memberSecurity,
+    });
+    const server = new McpServer({ name: 'pin', version: '0' });
+    registerObjectTools(server, bridge);
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: 'pin', version: '0' });
+    await client.connect(clientSide);
+    try {
+      const res = (await client.callTool({ name: 'describe_object', arguments: { objectName: TICKET.name } })) as {
+        isError?: boolean;
+        content: Array<{ text: string }>;
+      };
+      expect(res.isError === true).toBe(false);
+      return { text: res.content[0]!.text, json: JSON.parse(res.content[0]!.text) };
+    } finally {
+      await client.close();
+    }
+  }
+
+  /** The resource as the plugin wires it for a stdio principal: the caller view over `stdioObjectView`. */
+  async function describeOverResource(): Promise<{ text: string; json: any }> {
+    const service = metadataService();
+    const view = callerObjectView(stdioObjectView({ metadataService: service }), {
+      resolvePrincipal: MEMBER,
+      security: () => memberSecurity,
+    });
+    const result = await buildObjectSchemaResource(service, TICKET.name, undefined, view);
+    const text = String(result.contents[0]!.text);
+    return { text, json: JSON.parse(text) };
+  }
+
+  it('precondition: the member\'s served object carries marked_up WITHOUT its expression', async () => {
+    const view = callerObjectView(stdioObjectView({ metadataService: metadataService() }), {
+      resolvePrincipal: MEMBER,
+      security: () => memberSecurity,
+    });
+    const served = (await view.getObject(TICKET.name)) as any;
+    expect(served.fields.marked_up, 'the member is served the field').toBeDefined();
+    expect(served.fields.marked_up.expression, 'the mask deleted the expression').toBeUndefined();
+    expect(served.fields.hidden_cost, 'the field it names is not served').toBeUndefined();
+  });
+
+  for (const [door, describe] of [
+    ['describe_object over stdio', describeOverStdio],
+    ['the objectstack://objects/{name} resource', describeOverResource],
+  ] as const) {
+    it(`${door}: marked_up is readonly: true, and neither its expression nor hidden_cost is served`, async () => {
+      const { text, json } = await describe();
+      expect(readonlyOf(json)).toEqual(MEMBER_READONLY);
+      expect(mentions(text, 'hidden_cost')).toBe(false);
+      expect(text).not.toContain('record.');
+      expect(json.fields.find((f: any) => f.name === 'marked_up')).not.toHaveProperty('expression');
+    });
+  }
+
+  it('the tool and the resource answer the member the same fields', async () => {
+    expect((await describeOverResource()).json.fields).toEqual((await describeOverStdio()).json.fields);
   });
 });

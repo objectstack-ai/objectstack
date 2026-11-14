@@ -15,14 +15,17 @@
  *
  * Two halves:
  *
- *  - The page's own copy: heading, instructions, the expiry, the picker and
- *    the status lines its script writes.
+ *  - The page's own copy: heading, instructions, the record and field rows
+ *    (ruling B′), the expiry, the picker and the status lines its script
+ *    writes, the expired line included.
  *  - The refusals the link's `PUT` can answer, which the page shows as the
  *    upload's outcome. The door composes them here, by the refusal's `code`,
  *    and sends them as the envelope's `userMessage`; `message` keeps the
  *    diagnostic wording. ⛔ None of them names the record, the object or the
- *    field: the page names none of those (#30892), and the refusal is page
- *    copy. A code with no sentence here is answered with the producer's own
+ *    field: the refusal answers whoever sends the `PUT`, so it names nothing
+ *    (the page's record and field rows, ruling B′, are composed from names
+ *    read as the link's own user when the page opens, never from a refusal).
+ *    A code with no sentence here is answered with the producer's own
  *    text behind a lead-in that says the upload was refused, so the reader
  *    knows what the untranslated part is (the `storage-test-copy.ts` rule).
  */
@@ -73,6 +76,19 @@ export interface UploadLinkCopy extends UploadLinkRefusalCopy {
    * waits for the record the assistant creates, so nothing was attached yet.
    */
   received: string;
+  /**
+   * [#32747] What is asked for, on a link to a multi-file field: up to `max`
+   * files for a record, or exactly `n` for a record not yet created.
+   */
+  wantedSeveral(max: number): string;
+  wantedExactly(n: number): string;
+  /** [#32747] The picker's label when it takes several files. */
+  filesLabel: string;
+  /** [#32747] Done, for a submit that carried several files. */
+  attachedSeveral: string;
+  receivedSeveral: string;
+  /** [#32747] The page's own line when the files picked are not as many as the link takes. */
+  pickCount(min: number, max: number): string;
   /** The upload failed and the answer carried no sentence to show. */
   failed: string;
   connectionLost: string;
@@ -81,6 +97,28 @@ export interface UploadLinkCopy extends UploadLinkRefusalCopy {
   unusableHeading: string;
   /** A refusal with no sentence above; `reason` is the producer's own text, verbatim. */
   refused(reason: string): string;
+  /**
+   * [#32712] Ruling B′: the two rows that say where the file goes, shown to
+   * the link's own user with the names read as that user when the page opens
+   * (`UploadLinkNames`). The row headings.
+   */
+  recordRow: string;
+  goesIntoRow: string;
+  /** The record row: the object's label and the record's title. */
+  recordTitled(objectLabel: string, title: string): string;
+  /** The record row when no title can be shown: the object's label only. */
+  recordOfObject(objectLabel: string): string;
+  /** The record row for a link that names no record yet ([#32686]). */
+  recordNotYetCreated(objectLabel: string): string;
+  /** The goes-into row: a file field, by its label. */
+  intoField(fieldLabel: string): string;
+  /** The goes-into row: the record's attachments. */
+  intoAttachments: string;
+  /**
+   * [#32712] The page's own line once the expiry it printed has passed: the
+   * page disables Send rather than send a file into a link it knows is dead.
+   */
+  expired: string;
 }
 
 export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
@@ -97,6 +135,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Uploading…',
     attached: 'Done. The file was attached; you can close this page.',
     received: 'Done. The file was received; go back to the assistant to finish.',
+    wantedSeveral: (max) =>
+      `Files were asked for, to be put in a file field of a record. Pick up to ${max} and send them together.`,
+    wantedExactly: (n) =>
+      `${n} files were asked for, to be put in a file field of a record. Pick all ${n} and send them together.`,
+    filesLabel: 'Files',
+    attachedSeveral: 'Done. The files were attached; you can close this page.',
+    receivedSeveral: 'Done. The files were received; go back to the assistant to finish.',
+    pickCount: (min, max) => (min === max ? `Pick exactly ${min} files.` : `Pick at most ${max} files.`),
     failed: 'The upload failed.',
     connectionLost: 'The upload failed: the connection was lost. Ask for a new link if this one no longer works.',
     unusableTitle: 'Upload link',
@@ -113,6 +159,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'Nothing was attached: the record this link was made for no longer exists, or you can no longer reach it.',
     unavailable: 'The upload cannot be taken right now. Try again in a few minutes.',
     refused: (reason) => reason,
+    recordRow: 'Record',
+    goesIntoRow: 'Goes into',
+    recordTitled: (objectLabel, title) => `${objectLabel} "${title}"`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `a new ${objectLabel}, not created yet`,
+    intoField: (fieldLabel) => `the "${fieldLabel}" field`,
+    intoAttachments: 'Attachments',
+    expired: 'This link has expired. Ask for a new link.',
   },
   'zh-CN': {
     lang: 'zh-CN',
@@ -129,6 +183,12 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: '正在上传…',
     attached: '完成，文件已添加。你可以关闭此页面。',
     received: '完成，文件已收到。请回到助手那里完成后续操作。',
+    wantedSeveral: (max) => `有人请你提供一些文件，它们将放入一条记录的文件字段中。最多可选择 ${max} 个，一起发送。`,
+    wantedExactly: (n) => `有人请你提供 ${n} 个文件，它们将放入一条记录的文件字段中。请选择全部 ${n} 个，一起发送。`,
+    filesLabel: '文件',
+    attachedSeveral: '完成，文件已全部添加。你可以关闭此页面。',
+    receivedSeveral: '完成，文件已全部收到。请回到助手那里完成后续操作。',
+    pickCount: (min, max) => (min === max ? `请恰好选择 ${min} 个文件。` : `最多选择 ${max} 个文件。`),
     failed: '上传失败。',
     connectionLost: '上传失败：连接已中断。如果此链接已无法使用，请索取新的链接。',
     unusableTitle: '上传链接',
@@ -143,6 +203,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: '未添加任何文件：此链接对应的记录已不存在，或你已无法访问它。',
     unavailable: '暂时无法接收上传。请几分钟后重试。',
     refused: (reason) => `上传被拒绝：${reason}`,
+    recordRow: '记录',
+    goesIntoRow: '放入',
+    recordTitled: (objectLabel, title) => `${objectLabel}「${title}」`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `一条新的${objectLabel}（尚未创建）`,
+    intoField: (fieldLabel) => `「${fieldLabel}」字段`,
+    intoAttachments: '附件',
+    expired: '此链接已过期。请索取新的链接。',
   },
   'zh-Hant': {
     lang: 'zh-Hant',
@@ -159,6 +227,12 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: '正在上傳…',
     attached: '完成，檔案已新增。你可以關閉此頁面。',
     received: '完成，檔案已收到。請回到助理那裡完成後續操作。',
+    wantedSeveral: (max) => `有人請你提供一些檔案，它們將放入一筆記錄的檔案欄位中。最多可選擇 ${max} 個，一起傳送。`,
+    wantedExactly: (n) => `有人請你提供 ${n} 個檔案，它們將放入一筆記錄的檔案欄位中。請選擇全部 ${n} 個，一起傳送。`,
+    filesLabel: '檔案',
+    attachedSeveral: '完成，檔案已全部新增。你可以關閉此頁面。',
+    receivedSeveral: '完成，檔案已全部收到。請回到助理那裡完成後續操作。',
+    pickCount: (min, max) => (min === max ? `請剛好選擇 ${min} 個檔案。` : `最多選擇 ${max} 個檔案。`),
     failed: '上傳失敗。',
     connectionLost: '上傳失敗：連線已中斷。如果此連結已無法使用，請索取新的連結。',
     unusableTitle: '上傳連結',
@@ -173,6 +247,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: '未新增任何檔案：此連結對應的記錄已不存在，或你已無法存取它。',
     unavailable: '暫時無法接收上傳。請幾分鐘後重試。',
     refused: (reason) => `上傳遭拒：${reason}`,
+    recordRow: '記錄',
+    goesIntoRow: '放入',
+    recordTitled: (objectLabel, title) => `${objectLabel}「${title}」`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `一筆新的${objectLabel}（尚未建立）`,
+    intoField: (fieldLabel) => `「${fieldLabel}」欄位`,
+    intoAttachments: '附件',
+    expired: '此連結已過期。請索取新的連結。',
   },
   'ja-JP': {
     lang: 'ja-JP',
@@ -189,6 +271,15 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'アップロード中…',
     attached: '完了しました。ファイルが追加されました。このページは閉じてかまいません。',
     received: '完了しました。ファイルを受け取りました。アシスタントに戻って続きを進めてください。',
+    wantedSeveral: (max) =>
+      `レコードのファイル項目に入れるファイルが求められています。最大 ${max} 個まで選んで、まとめて送信してください。`,
+    wantedExactly: (n) =>
+      `レコードのファイル項目に入れるファイルが ${n} 個求められています。${n} 個すべてを選んで、まとめて送信してください。`,
+    filesLabel: 'ファイル',
+    attachedSeveral: '完了しました。ファイルがすべて追加されました。このページは閉じてかまいません。',
+    receivedSeveral: '完了しました。ファイルをすべて受け取りました。アシスタントに戻って続きを進めてください。',
+    pickCount: (min, max) =>
+      min === max ? `ちょうど ${min} 個のファイルを選んでください。` : `ファイルは最大 ${max} 個まで選べます。`,
     failed: 'アップロードに失敗しました。',
     connectionLost: 'アップロードに失敗しました: 接続が切れました。このリンクが使えなくなった場合は、新しいリンクを依頼してください。',
     unusableTitle: 'アップロードリンク',
@@ -203,6 +294,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: '何も追加されませんでした: このリンクのレコードは存在しないか、アクセスできなくなっています。',
     unavailable: '現在アップロードを受け付けられません。数分後にもう一度お試しください。',
     refused: (reason) => `アップロードが拒否されました: ${reason}`,
+    recordRow: 'レコード',
+    goesIntoRow: '保存先',
+    recordTitled: (objectLabel, title) => `${objectLabel}「${title}」`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `新しい${objectLabel}（まだ作成されていません）`,
+    intoField: (fieldLabel) => `「${fieldLabel}」フィールド`,
+    intoAttachments: '添付ファイル',
+    expired: 'このリンクは期限切れです。新しいリンクを依頼してください。',
   },
   ko: {
     lang: 'ko',
@@ -219,6 +318,15 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: '업로드 중…',
     attached: '완료되었습니다. 파일이 추가되었으니 이 페이지를 닫아도 됩니다.',
     received: '완료되었습니다. 파일을 받았습니다. 어시스턴트로 돌아가 마무리하세요.',
+    wantedSeveral: (max) =>
+      `레코드의 파일 필드에 넣을 파일들이 요청되었습니다. 최대 ${max}개까지 선택해 한 번에 보내 주세요.`,
+    wantedExactly: (n) =>
+      `레코드의 파일 필드에 넣을 파일 ${n}개가 요청되었습니다. ${n}개를 모두 선택해 한 번에 보내 주세요.`,
+    filesLabel: '파일',
+    attachedSeveral: '완료되었습니다. 파일이 모두 추가되었으니 이 페이지를 닫아도 됩니다.',
+    receivedSeveral: '완료되었습니다. 파일을 모두 받았습니다. 어시스턴트로 돌아가 마무리하세요.',
+    pickCount: (min, max) =>
+      min === max ? `파일을 정확히 ${min}개 선택하세요.` : `파일은 최대 ${max}개까지 선택할 수 있습니다.`,
     failed: '업로드에 실패했습니다.',
     connectionLost: '업로드에 실패했습니다: 연결이 끊어졌습니다. 이 링크가 더 이상 작동하지 않으면 새 링크를 요청하세요.',
     unusableTitle: '업로드 링크',
@@ -233,6 +341,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: '아무것도 추가되지 않았습니다: 이 링크의 레코드가 더 이상 없거나 더 이상 접근할 수 없습니다.',
     unavailable: '지금은 업로드를 받을 수 없습니다. 몇 분 후에 다시 시도하세요.',
     refused: (reason) => `업로드가 거부되었습니다: ${reason}`,
+    recordRow: '레코드',
+    goesIntoRow: '저장 위치',
+    recordTitled: (objectLabel, title) => `${objectLabel} “${title}”`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `새 ${objectLabel} (아직 생성되지 않음)`,
+    intoField: (fieldLabel) => `"${fieldLabel}" 필드`,
+    intoAttachments: '첨부 파일',
+    expired: '이 링크는 만료되었습니다. 새 링크를 요청하세요.',
   },
   'es-ES': {
     lang: 'es-ES',
@@ -249,6 +365,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Subiendo…',
     attached: 'Listo. El archivo se ha adjuntado; puedes cerrar esta página.',
     received: 'Listo. Se ha recibido el archivo; vuelve al asistente para terminar.',
+    wantedSeveral: (max) =>
+      `Se han pedido archivos para ponerlos en un campo de archivo de un registro. Elige hasta ${max} y envíalos juntos.`,
+    wantedExactly: (n) =>
+      `Se han pedido ${n} archivos para ponerlos en un campo de archivo de un registro. Elige los ${n} y envíalos juntos.`,
+    filesLabel: 'Archivos',
+    attachedSeveral: 'Listo. Los archivos se han adjuntado; puedes cerrar esta página.',
+    receivedSeveral: 'Listo. Se han recibido los archivos; vuelve al asistente para terminar.',
+    pickCount: (min, max) => (min === max ? `Elige exactamente ${min} archivos.` : `Elige como máximo ${max} archivos.`),
     failed: 'La subida ha fallado.',
     connectionLost: 'La subida ha fallado: se ha perdido la conexión. Pide un enlace nuevo si este ya no funciona.',
     unusableTitle: 'Enlace de subida',
@@ -263,6 +387,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'No se ha adjuntado nada: el registro de este enlace ya no existe o ya no tienes acceso a él.',
     unavailable: 'Ahora mismo no se puede recibir la subida. Vuelve a intentarlo dentro de unos minutos.',
     refused: (reason) => `Se ha rechazado la subida: ${reason}`,
+    recordRow: 'Registro',
+    goesIntoRow: 'Se guarda en',
+    recordTitled: (objectLabel, title) => `${objectLabel} «${title}»`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `Un registro nuevo de tipo ${objectLabel}, todavía sin crear`,
+    intoField: (fieldLabel) => `El campo «${fieldLabel}»`,
+    intoAttachments: 'Archivos adjuntos',
+    expired: 'Este enlace ha caducado. Pide un enlace nuevo.',
   },
   ar: {
     lang: 'ar',
@@ -279,6 +411,12 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'جارٍ الرفع…',
     attached: 'تم. أُرفق الملف؛ يمكنك إغلاق هذه الصفحة.',
     received: 'تم. استُلم الملف؛ عد إلى المساعد لإكمال العملية.',
+    wantedSeveral: (max) => `طُلبت ملفات لوضعها في حقل ملف ضمن سجل. اختر حتى ${max} ملفات وأرسلها معًا.`,
+    wantedExactly: (n) => `طُلب ${n} ملفات لوضعها في حقل ملف ضمن سجل. اختر الملفات الـ ${n} كلها وأرسلها معًا.`,
+    filesLabel: 'الملفات',
+    attachedSeveral: 'تم. أُرفقت الملفات؛ يمكنك إغلاق هذه الصفحة.',
+    receivedSeveral: 'تم. استُلمت الملفات؛ عد إلى المساعد لإكمال العملية.',
+    pickCount: (min, max) => (min === max ? `اختر ${min} ملفات بالضبط.` : `اختر ${max} ملفات على الأكثر.`),
     failed: 'فشل الرفع.',
     connectionLost: 'فشل الرفع: انقطع الاتصال. اطلب رابطًا جديدًا إذا لم يعد هذا الرابط يعمل.',
     unusableTitle: 'رابط الرفع',
@@ -293,6 +431,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'لم يُرفق شيء: سجل هذا الرابط لم يعد موجودًا، أو لم يعد بإمكانك الوصول إليه.',
     unavailable: 'لا يمكن استقبال الرفع الآن. حاول مرة أخرى بعد بضع دقائق.',
     refused: (reason) => `رُفض الرفع: ${reason}`,
+    recordRow: 'السجل',
+    goesIntoRow: 'يُحفظ في',
+    recordTitled: (objectLabel, title) => `${objectLabel} «${title}»`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `سجل جديد من نوع ${objectLabel}، لم يُنشأ بعد`,
+    intoField: (fieldLabel) => `الحقل «${fieldLabel}»`,
+    intoAttachments: 'المرفقات',
+    expired: 'انتهت صلاحية هذا الرابط. اطلب رابطًا جديدًا.',
   },
   fr: {
     lang: 'fr',
@@ -309,6 +455,15 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Envoi en cours…',
     attached: 'Terminé. Le fichier a été joint ; vous pouvez fermer cette page.',
     received: 'Terminé. Le fichier a été reçu ; revenez à l’assistant pour terminer.',
+    wantedSeveral: (max) =>
+      `Des fichiers ont été demandés, pour être placés dans un champ fichier d’un enregistrement. Choisissez-en jusqu’à ${max} et envoyez-les ensemble.`,
+    wantedExactly: (n) =>
+      `${n} fichiers ont été demandés, pour être placés dans un champ fichier d’un enregistrement. Choisissez les ${n} et envoyez-les ensemble.`,
+    filesLabel: 'Fichiers',
+    attachedSeveral: 'Terminé. Les fichiers ont été joints ; vous pouvez fermer cette page.',
+    receivedSeveral: 'Terminé. Les fichiers ont été reçus ; revenez à l’assistant pour terminer.',
+    pickCount: (min, max) =>
+      min === max ? `Choisissez exactement ${min} fichiers.` : `Choisissez au plus ${max} fichiers.`,
     failed: 'L’envoi a échoué.',
     connectionLost: 'L’envoi a échoué : la connexion a été perdue. Demandez un nouveau lien si celui-ci ne fonctionne plus.',
     unusableTitle: 'Lien d’envoi',
@@ -323,6 +478,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'Rien n’a été joint : l’enregistrement de ce lien n’existe plus, ou vous n’y avez plus accès.',
     unavailable: 'L’envoi ne peut pas être reçu pour le moment. Réessayez dans quelques minutes.',
     refused: (reason) => `L’envoi a été refusé : ${reason}`,
+    recordRow: 'Enregistrement',
+    goesIntoRow: 'Destination',
+    recordTitled: (objectLabel, title) => `${objectLabel} « ${title} »`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `Un nouvel enregistrement de type ${objectLabel}, pas encore créé`,
+    intoField: (fieldLabel) => `Le champ « ${fieldLabel} »`,
+    intoAttachments: 'Pièces jointes',
+    expired: 'Ce lien a expiré. Demandez un nouveau lien.',
   },
   'pt-BR': {
     lang: 'pt-BR',
@@ -339,6 +502,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Enviando…',
     attached: 'Pronto. O arquivo foi anexado; você pode fechar esta página.',
     received: 'Pronto. O arquivo foi recebido; volte ao assistente para concluir.',
+    wantedSeveral: (max) =>
+      `Foram pedidos arquivos para serem colocados em um campo de arquivo de um registro. Escolha até ${max} e envie-os juntos.`,
+    wantedExactly: (n) =>
+      `Foram pedidos ${n} arquivos para serem colocados em um campo de arquivo de um registro. Escolha os ${n} e envie-os juntos.`,
+    filesLabel: 'Arquivos',
+    attachedSeveral: 'Pronto. Os arquivos foram anexados; você pode fechar esta página.',
+    receivedSeveral: 'Pronto. Os arquivos foram recebidos; volte ao assistente para concluir.',
+    pickCount: (min, max) => (min === max ? `Escolha exatamente ${min} arquivos.` : `Escolha no máximo ${max} arquivos.`),
     failed: 'O envio falhou.',
     connectionLost: 'O envio falhou: a conexão foi perdida. Peça um novo link se este não funcionar mais.',
     unusableTitle: 'Link de envio',
@@ -353,6 +524,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'Nada foi anexado: o registro deste link não existe mais, ou você não tem mais acesso a ele.',
     unavailable: 'O envio não pode ser recebido agora. Tente novamente em alguns minutos.',
     refused: (reason) => `O envio foi recusado: ${reason}`,
+    recordRow: 'Registro',
+    goesIntoRow: 'Vai para',
+    recordTitled: (objectLabel, title) => `${objectLabel} “${title}”`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `Um novo registro de ${objectLabel}, ainda não criado`,
+    intoField: (fieldLabel) => `O campo "${fieldLabel}"`,
+    intoAttachments: 'Anexos',
+    expired: 'Este link expirou. Peça um novo link.',
   },
   ru: {
     lang: 'ru',
@@ -369,6 +548,15 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Загрузка…',
     attached: 'Готово. Файл прикреплён; эту страницу можно закрыть.',
     received: 'Готово. Файл получен; вернитесь к ассистенту, чтобы завершить.',
+    wantedSeveral: (max) =>
+      `Запрошены файлы для поля-файла записи. Выберите до ${max} файлов и отправьте их вместе.`,
+    wantedExactly: (n) =>
+      `Запрошено файлов для поля-файла записи: ${n}. Выберите все ${n} и отправьте их вместе.`,
+    filesLabel: 'Файлы',
+    attachedSeveral: 'Готово. Файлы прикреплены; эту страницу можно закрыть.',
+    receivedSeveral: 'Готово. Файлы получены; вернитесь к ассистенту, чтобы завершить.',
+    pickCount: (min, max) =>
+      min === max ? `Выберите ровно столько файлов: ${min}.` : `Выберите не больше файлов, чем ${max}.`,
     failed: 'Не удалось загрузить файл.',
     connectionLost: 'Не удалось загрузить файл: соединение прервалось. Если эта ссылка больше не работает, попросите новую.',
     unusableTitle: 'Ссылка для загрузки',
@@ -383,6 +571,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'Ничего не прикреплено: записи этой ссылки больше нет, или у вас больше нет к ней доступа.',
     unavailable: 'Сейчас загрузку принять невозможно. Попробуйте ещё раз через несколько минут.',
     refused: (reason) => `Загрузка отклонена: ${reason}`,
+    recordRow: 'Запись',
+    goesIntoRow: 'Куда',
+    recordTitled: (objectLabel, title) => `${objectLabel} «${title}»`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `Новая запись типа «${objectLabel}», ещё не создана`,
+    intoField: (fieldLabel) => `Поле «${fieldLabel}»`,
+    intoAttachments: 'Вложения',
+    expired: 'Срок действия этой ссылки истёк. Попросите новую ссылку.',
   },
   de: {
     lang: 'de',
@@ -399,6 +595,15 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     uploading: 'Wird hochgeladen…',
     attached: 'Fertig. Die Datei wurde angehängt; Sie können diese Seite schließen.',
     received: 'Fertig. Die Datei ist angekommen; kehren Sie zum Assistenten zurück, um abzuschließen.',
+    wantedSeveral: (max) =>
+      `Es wurden Dateien angefordert, die in ein Dateifeld eines Datensatzes gelegt werden sollen. Wählen Sie bis zu ${max} aus und senden Sie sie zusammen.`,
+    wantedExactly: (n) =>
+      `Es wurden ${n} Dateien angefordert, die in ein Dateifeld eines Datensatzes gelegt werden sollen. Wählen Sie alle ${n} aus und senden Sie sie zusammen.`,
+    filesLabel: 'Dateien',
+    attachedSeveral: 'Fertig. Die Dateien wurden angehängt; Sie können diese Seite schließen.',
+    receivedSeveral: 'Fertig. Die Dateien sind angekommen; kehren Sie zum Assistenten zurück, um abzuschließen.',
+    pickCount: (min, max) =>
+      min === max ? `Wählen Sie genau ${min} Dateien aus.` : `Wählen Sie höchstens ${max} Dateien aus.`,
     failed: 'Das Hochladen ist fehlgeschlagen.',
     connectionLost: 'Das Hochladen ist fehlgeschlagen: Die Verbindung wurde unterbrochen. Fordern Sie einen neuen Link an, wenn dieser nicht mehr funktioniert.',
     unusableTitle: 'Upload-Link',
@@ -413,6 +618,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'Es wurde nichts angehängt: Der Datensatz dieses Links existiert nicht mehr, oder Sie haben keinen Zugriff mehr darauf.',
     unavailable: 'Der Upload kann gerade nicht angenommen werden. Versuchen Sie es in einigen Minuten erneut.',
     refused: (reason) => `Der Upload wurde abgelehnt: ${reason}`,
+    recordRow: 'Datensatz',
+    goesIntoRow: 'Ziel',
+    recordTitled: (objectLabel, title) => `${objectLabel} „${title}“`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `Ein neuer Datensatz vom Typ ${objectLabel}, noch nicht angelegt`,
+    intoField: (fieldLabel) => `Das Feld „${fieldLabel}“`,
+    intoAttachments: 'Anhänge',
+    expired: 'Dieser Link ist abgelaufen. Fordern Sie einen neuen Link an.',
   },
 };
 

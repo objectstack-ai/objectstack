@@ -222,21 +222,21 @@ const de = {
     },
     codex: {
       body: 'In der Codex-App: Einstellungen → MCP-Server → Server hinzufügen, dann ausfüllen:',
-      hint: 'Speichern, bei Aufforderung neu starten, dann neben objectstack auf Authenticate klicken und im Browser anmelden. Mit /mcp im Eingabefeld prüfen Sie die Verbindung. Bietet Ihre Version keine Browser-Anmeldung, fügen Sie den Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten im Bereich Erweitert: Skripte und CI erstellen).',
+      hint: 'Speichern, bei Aufforderung neu starten, dann neben objectstack auf Authenticate klicken und im Browser anmelden. Mit /mcp im Eingabefeld prüfen Sie die Verbindung. Bietet Ihre Version keine Browser-Anmeldung, fügen Sie den Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten im Bereich Erweitert: Skripte und CI erstellen). Mit einem Schlüssel arbeitet Ihr Assistent nur mit Datensätzen und Aktionen und kann keine Apps erstellen.',
     },
     workbuddy: {
       body: 'Connectors → Benutzerdefinierter Connector → MCP konfigurieren, dann diesen Eintrag in mcpServers übernehmen (gespeichert in ~/.workbuddy/mcp.json):',
-      hint: 'Speichern und anschließend beim Connector objectstack auf Vertrauen klicken – erst danach ist er aktiv. Erscheint keine Anmeldung, fügen Sie den Request-Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten im Bereich Erweitert: Skripte und CI erstellen).',
+      hint: 'Speichern und anschließend beim Connector objectstack auf Vertrauen klicken – erst danach ist er aktiv. Erscheint keine Anmeldung, fügen Sie den Request-Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten im Bereich Erweitert: Skripte und CI erstellen). Mit einem Schlüssel arbeitet Ihr Assistent nur mit Datensätzen und Aktionen und kann keine Apps erstellen.',
     },
     doubao: {
       title: 'Doubao Work',
       body: 'Skills · Connectors → Neu → Neuer benutzerdefinierter Connector, dann ausfüllen:',
-      hint: 'Melden Sie sich bei Aufforderung im Browser an. Erscheint keine Anmeldung, fügen Sie den benutzerdefinierten Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten im Bereich Erweitert: Skripte und CI erstellen). Aufgaben, die in der Cloud laufen, brauchen eine über öffentliches HTTPS erreichbare Bereitstellung.',
+      hint: 'Melden Sie sich bei Aufforderung im Browser an. Erscheint keine Anmeldung, fügen Sie den benutzerdefinierten Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten im Bereich Erweitert: Skripte und CI erstellen). Mit einem Schlüssel arbeitet Ihr Assistent nur mit Datensätzen und Aktionen und kann keine Apps erstellen. Aufgaben, die in der Cloud laufen, brauchen eine über öffentliches HTTPS erreichbare Bereitstellung.',
     },
     qwenwork: {
       title: 'QwenWork',
       body: 'Erweiterungen → Connectors → + Hinzufügen → JSON-Konfiguration einfügen:',
-      hint: 'Oder manuell als Streamable HTTP mit dieser URL hinzufügen. Bietet Ihre Version keine Browser-Anmeldung, fügen Sie den Request-Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten im Bereich Erweitert: Skripte und CI erstellen).',
+      hint: 'Oder manuell als Streamable HTTP mit dieser URL hinzufügen. Bietet Ihre Version keine Browser-Anmeldung, fügen Sie den Request-Header Authorization: Bearer <API-Schlüssel> hinzu (Schlüssel unten im Bereich Erweitert: Skripte und CI erstellen). Mit einem Schlüssel arbeitet Ihr Assistent nur mit Datensätzen und Aktionen und kann keine Apps erstellen.',
     },
     client: {
       title: 'Welchen KI-Assistenten verwenden Sie?',
@@ -255,7 +255,7 @@ const de = {
     apiKey: {
       title: 'API-Schlüssel',
       badge: 'headless',
-      body: 'Für CI, Skripte und Agenten ohne Browser. Der Schlüssel handelt als Sie — wie ein Passwort behandeln. Er wird nur EINMAL angezeigt.',
+      body: 'Für CI, Skripte und Agenten ohne Browser. Der Schlüssel handelt als Sie — wie ein Passwort behandeln. Ein mit einem Schlüssel verbundener KI-Assistent arbeitet nur mit Datensätzen und Aktionen und kann keine Apps erstellen. Der Schlüssel wird nur EINMAL angezeigt.',
       namePlaceholder: 'Schlüsselname (z. B. ci-agent)',
       mint: 'Schlüssel erstellen',
       confirmTitle: 'API-Schlüssel „{{name}}“ erstellen?',

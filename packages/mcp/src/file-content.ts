@@ -345,8 +345,10 @@ export interface McpFileBridge {
    * [#32686] A single-use upload link for a file field of a record the caller
    * is about to create. Optional on its own: a host without it serves links
    * for existing records only, and `create_upload_link` then needs `recordId`.
+   * [#32747] `count`: how many files the user will upload through it (a
+   * multi-file field), answered as that many `fileIds`.
    */
-  createUploadLinkForNewRecord?(object: string, target: { field: string }): Promise<McpNewRecordUploadLink>;
+  createUploadLinkForNewRecord?(object: string, target: { field: string; count?: number }): Promise<McpNewRecordUploadLink>;
 }
 
 /** One MCP tool-result content block `read_file` answers with. */

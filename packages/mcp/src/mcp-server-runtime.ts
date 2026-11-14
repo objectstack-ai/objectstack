@@ -59,6 +59,7 @@ import { z } from 'zod';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
+import { RUNTIME_OWNED_FIELD_TYPES, isVirtualSearchField } from '@objectstack/spec/data';
 
 /**
  * Configuration for the MCP Server Runtime.
@@ -104,6 +105,7 @@ interface ServedFieldDef {
   system?: boolean;
   options?: unknown[];
   defaultValue?: unknown;
+  expression?: unknown;
 }
 
 /**
@@ -113,10 +115,11 @@ interface ServedFieldDef {
  * that names a denied field anywhere, its message included) is not described.
  *
  * Per field: `required`, `readonly` and `system` (an auto-injected column such
- * as `created_at` is `readonly` and `system`), the allowed `options` as value +
- * label for a field that declares them (a picklist-bound field carries its
- * list's resolved options on the served object, {@link declaresOptions}), and
- * the `defaultValue` an INSERT applies. Per active validation rule: its name,
+ * as `created_at` is `readonly` and `system`; [#32530] `readonly` is also true
+ * where a write never sets the value, {@link writeNeverSetsField}), the allowed
+ * `options` as value + label for a field that declares them (a picklist-bound
+ * field carries its list's resolved options on the served object,
+ * {@link declaresOptions}), and the `defaultValue` an INSERT applies. Per active validation rule: its name,
  * kind, message, severity, the write events it runs on, and the fields it names
  * — ⛔ never its condition, pattern or transition table: the rule's message is
  * what a refused write answers with, and its expression is server policy.
@@ -124,13 +127,16 @@ interface ServedFieldDef {
  * One projection for this package's two readers of it: the stdio bridge's
  * `describeObject` (`stdio-data-bridge.ts`) and the `objectstack://objects/{name}`
  * resource ({@link buildObjectSchemaResource}), each handing it the object as
- * the caller is served it, so the two answer alike (#25245). The HTTP bridge's
+ * the caller is served it, so the two answer alike (#25245), and the
+ * declaration that object was projected from ({@link readObjectWithDeclaration}):
+ * `readonly` is judged on the declared field, {@link writeNeverSetsField}, and
+ * nothing else is read from it. The HTTP bridge's
  * twin is `describeServedObject` in `packages/runtime/src/domains/mcp.ts`
  * (`@objectstack/runtime` does not depend on this package): the transports
  * answer one shape, and the `describe_object` description (`mcp-http-tools.ts`)
  * states it.
  */
-export function describeServedObject(def: ServedObjectDef): Record<string, unknown> {
+export function describeServedObject(def: ServedObjectDef, declared: ServedObjectDef = def): Record<string, unknown> {
   return {
     name: def.name,
     label: def.label ?? def.name,
@@ -139,7 +145,12 @@ export function describeServedObject(def: ServedObjectDef): Record<string, unkno
       type: f?.type,
       label: f?.label ?? key,
       required: f?.required ?? false,
-      readonly: f?.readonly === true,
+      // Judged on the DECLARED field, never the served one: the caller's mask
+      // deletes a readable field's `expression` when it names a field they
+      // cannot read, and the engine still computes the field. Only the boolean
+      // is read there; the served definition, without that expression, is
+      // what the answer is built from.
+      readonly: writeNeverSetsField(declared.fields?.[key]),
       system: f?.system === true,
       ...(declaresOptions(f) ? { options: describedOptions(f.options as unknown[]) } : {}),
       ...(f?.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
@@ -147,6 +158,41 @@ export function describeServedObject(def: ServedObjectDef): Record<string, unkno
     validations: describedRules(def.validations),
     enableFeatures: def.enable ?? {},
   };
+}
+
+/**
+ * [#32530] `readonly` as {@link describeServedObject} serves it: a caller's
+ * write can never set this field's value. True for the declared flag, and for
+ * a value the engine owns whatever the payload says:
+ *
+ * - a runtime-owned type (`RUNTIME_OWNED_FIELD_TYPES`, today `autonumber`):
+ *   the write path strips a caller's value even with no `readonly` flag, and a
+ *   hand-authored literal carries none (the field builder injects it);
+ * - a `formula`, virtual — computed on read, no column (`isVirtualSearchField`,
+ *   the spec's one statement of that set): the write path strips it;
+ * - a stored field declaring an `expression`: the engine computes it from the
+ *   row the write stores, so a client-sent value never stands (the spec's
+ *   `expression` contract).
+ *
+ * ⛔ Not the caller's field edit permission: a field the caller may read but
+ * not edit is served the schema's answer, and the write naming it is refused
+ * at the field-level write gate. The served object carries the read projection
+ * only, and the `describe_object` description says so.
+ *
+ * Asked of the DECLARED field ({@link describeServedObject}'s `declared`),
+ * as the HTTP twin asks it: the caller's mask deletes an `expression` that
+ * names a field the caller cannot read, while the engine still computes the
+ * column from it, so the served field alone would answer `readonly: false`.
+ *
+ * The twin is `writeNeverSetsField` in `packages/runtime/src/domains/mcp.ts`.
+ */
+function writeNeverSetsField(f: ServedFieldDef | undefined): boolean {
+  if (!f) return false;
+  if (f.readonly === true) return true;
+  if (typeof f.type === 'string' && RUNTIME_OWNED_FIELD_TYPES.has(f.type)) return true;
+  if (isVirtualSearchField(f)) return true;
+  // Truthy, the engine's own test for a stored expression it plans.
+  return Boolean(f.expression);
 }
 
 /** A field's options as value + label: the stored value a write sends, and what a person reads. */
@@ -1203,6 +1249,47 @@ export type McpObjectView = Pick<IMetadataService, 'listObjects' | 'getObject'>;
  */
 const runtimeObjectViews = new WeakMap<MCPServerRuntime, McpObjectView>();
 
+/** One object as a view serves it, beside the declaration it was projected from. */
+export interface ObjectWithDeclaration {
+  served: unknown;
+  declared: unknown;
+}
+
+/**
+ * The read a MASKING view ({@link setDeclaredObjectRead}) answers both halves
+ * of {@link ObjectWithDeclaration} with, from one read of the definition it
+ * masks. Keyed weakly by the view, so a view and its read are collected
+ * together; package-internal, like {@link setRuntimeObjectView}.
+ */
+const declaredObjectReads = new WeakMap<McpObjectView, (name: string) => Promise<ObjectWithDeclaration>>();
+
+/**
+ * Register `read` as the declared-object read of `view`, a view that serves a
+ * caller a projection of each definition (the stdio caller view,
+ * `callerObjectView` in `stdio-data-bridge.ts`). Package-internal; not
+ * re-exported from `index.ts`.
+ */
+export function setDeclaredObjectRead(view: McpObjectView, read: (name: string) => Promise<ObjectWithDeclaration>): void {
+  declaredObjectReads.set(view, read);
+}
+
+/**
+ * `name` as `view` serves it, and the declaration it was projected from: what
+ * {@link describeServedObject} needs to judge `readonly` on the declared field
+ * while serving only the projection. A view that registered no declared read
+ * masks nothing, so the object it serves IS the declaration.
+ *
+ * ⛔ The declaration never leaves this package's two describe readers: only
+ * {@link writeNeverSetsField}'s boolean is read off it, so nothing the caller's
+ * mask withholds (an expression naming a field they cannot read) is served.
+ */
+export async function readObjectWithDeclaration(view: McpObjectView, name: string): Promise<ObjectWithDeclaration> {
+  const read = declaredObjectReads.get(view);
+  if (read) return read(name);
+  const def = await view.getObject(name);
+  return { served: def, declared: def };
+}
+
 /**
  * [#31605] The long-lived server's principal: the `OS_MCP_STDIO_API_KEY`
  * identity the plugin resolves per call (ADR-0101), bound by the plugin once
@@ -1284,9 +1371,12 @@ export async function buildObjectSchemaResource(
   // refuses a schema whose field visibility it could not evaluate) answers
   // in this resource's `{ error, code, status }` vocabulary
   // ({@link objectResourceRefusal}); an uncoded throw travels, as before.
+  // …beside the declaration it was projected from, for `readonly` alone
+  // ({@link readObjectWithDeclaration}).
   let objectDef: unknown;
+  let declared: unknown;
   try {
-    objectDef = await objects.getObject(objectName);
+    ({ served: objectDef, declared } = await readObjectWithDeclaration(objects, objectName));
   } catch (err) {
     const refusal = objectResourceRefusal(err);
     if (refusal) return body(refusal);
@@ -1321,7 +1411,7 @@ export async function buildObjectSchemaResource(
     contents: [{
       uri,
       mimeType: 'application/json',
-      text: JSON.stringify(describeServedObject(objectDef as ServedObjectDef), null, 2),
+      text: JSON.stringify(describeServedObject(objectDef as ServedObjectDef, declared as ServedObjectDef), null, 2),
     }],
   };
 }

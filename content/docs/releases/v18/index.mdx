@@ -134,6 +134,14 @@ every flag is in
 Each release below is a self-contained page: what it changed, what breaks, and
 its own upgrade checklist.
 
+- **[18.4.0](/docs/releases/v18/18-4)** — names held per namespace with
+  exact addresses (ADR-0150), a recycle bin, one-way sync-in from a datasource,
+  mobile push and declared field renames. 282 of its 1,252 entries are
+  declared breaking: 244 need you to act and 38 are converted by
+  `os migrate meta`. Its
+  [upgrade checklist](/docs/releases/v18/18-4#upgrade-checklist) moves an
+  18.3.0 app to 18.4.0; it is compiled from the changesets, and its commands
+  were run once, on one small app.
 - **[18.3.0](/docs/releases/v18/18-3)** — customization pairs for installed
   packages (ADR-0146), ownership queues, per-organization connector
   credentials and a whole-deployment export. 305 of its 1,379 entries are

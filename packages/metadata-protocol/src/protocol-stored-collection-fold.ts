@@ -48,12 +48,24 @@ export interface StoredCollectionFoldHost {
     readonly foldObjectExtendersFromRegistry: ObjectStackProtocolImplementation['foldObjectExtendersFromRegistry'];
 }
 
+/**
+ * [#33072] One stored row's fold narrowed for the runtime authoring gate's
+ * `object_extension` write: the row named `target` is folded without
+ * `withoutExtensionsOf`'s `extend` contributions (the written package's
+ * stored self, which the write replaces). Nothing else moves.
+ */
+export interface StoredCollectionTargetFold {
+    readonly target: string;
+    readonly withoutExtensionsOf: string;
+}
+
 /** The body of `ObjectStackProtocolImplementation#foldStoredCollection`; the method's docblock there is its contract. */
 export async function foldStoredCollection(
     this: Pick<StoredCollectionFoldHost, 'convertStoredItem' | 'engine' | 'findEnvironmentRows' | 'foldObjectExtendersFromRegistry'>,
     registered: unknown[],
     singularType: string,
     pluralType: string,
+    targetFold?: StoredCollectionTargetFold,
 ): Promise<unknown[]> {
     if (typeof this.engine?.find !== 'function') return registered;
     let rows: Record<string, unknown>[];
@@ -134,11 +146,17 @@ export async function foldStoredCollection(
     // the point: the gate's universe is now the same universe the platform
     // answers `GET /meta/:type` from, by construction rather than by
     // agreement.
-    const merged = mergePackageAwareOverlay(singularType, registered, overlays, (data) =>
-        this.foldObjectExtendersFromRegistry(
-            singularType, (data as { name?: unknown } | null)?.name, data,
-        ),
-    );
+    //
+    // [#33072] `targetFold`, when given, changes the fold of ONE row: the one
+    // named `targetFold.target` is folded without `withoutExtensionsOf`'s
+    // contributions. Every other row, and every call without it, reaches
+    // exactly the call above.
+    const merged = mergePackageAwareOverlay(singularType, registered, overlays, (data) => {
+        const name = (data as { name?: unknown } | null)?.name;
+        return targetFold !== undefined && name === targetFold.target
+            ? this.foldObjectExtendersFromRegistry(singularType, name, data, undefined, targetFold.withoutExtensionsOf)
+            : this.foldObjectExtendersFromRegistry(singularType, name, data);
+    });
 
     // A registry entry with no `name` is not addressable by any reference,
     // so the merge above has no slot for it and drops it. It is carried

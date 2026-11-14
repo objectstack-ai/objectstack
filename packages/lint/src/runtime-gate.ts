@@ -289,6 +289,11 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // written word on its own, and a write's own collection holds exactly one
   // member — its own item (an extension carries `extend` and no `name`, so it is
   // never name-keyed).
+  //
+  // [#33072] `validateStackExpressions` crosses with this row too, for one
+  // pass: the extension walk over the written entry's fields. It resolves
+  // `record.FIELD` into `objects`, which every snapshot already carries, so the
+  // row still needs no context collection of its own.
   object_extension: 'objectExtensions',
 };
 

@@ -92,6 +92,12 @@ export interface AdminUserEndpointDeps {
   /** Is the better-auth phoneNumber plugin wired (#2766 V1.5)? */
   phoneNumberEnabled?(): boolean;
   /**
+   * Is SSO-only mode on (`AuthManager.isSsoOnlyMode()`)? Read per call. Under
+   * it, set-user-password refuses an IdP-provisioned target other than the
+   * administrator themselves (`sso-only-local-password.ts`). Absent ⇒ off.
+   */
+  ssoOnlyMode?(): boolean;
+  /**
    * ADR-0093 D3 — accessor for the `tenancy` service. When present, the
    * create-user membership bind resolves its target org through
    * `tenancy.defaultOrgId()` (single → default org; MULTI → null, never
@@ -232,6 +238,7 @@ import { resolveDefaultOrgId } from './tenancy-service.js';
 import type { AddMemberCapableApi } from './organization-add-member.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
+import { identitySourceUnreadable, judgeSsoOnlyLocalPassword, readUserSource, ssoOnlyPasswordRefusal } from './sso-only-local-password.js';
 import { temporaryPasswordLength } from './temporary-password-length.js';
 import { isCloudManaged } from '@objectstack/core';
 import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
@@ -408,32 +415,6 @@ async function resolvePassword(
  * fail-open gate, so a failed stamp must not fail the whole operation; we
  * surface the *actual* stamped state in the response instead.
  */
-/**
- * [#25083] The target's `sys_user.source` (`idp_provisioned` | `env_native`),
- * read as the system. `ok: false` when it cannot be read at all (no engine,
- * no read surface, or the read throws), so the cloud-managed check above
- * fails closed instead of reading an outage as a local account.
- */
-async function readUserSource(
-  deps: AdminUserEndpointDeps,
-  userId: string,
-): Promise<{ ok: true; value: string | null } | { ok: false }> {
-  const engine = deps.getDataEngine();
-  if (!engine?.find) return { ok: false };
-  try {
-    const rows = await engine.find('sys_user', {
-      where: { id: userId },
-      fields: ['id', 'source'],
-      limit: 1,
-      context: SYSTEM_CTX,
-    });
-    const row = Array.isArray(rows) ? (rows[0] as { source?: unknown } | undefined) : undefined;
-    return { ok: true, value: typeof row?.source === 'string' ? row.source : null };
-  } catch {
-    return { ok: false };
-  }
-}
-
 async function stampMustChangePassword(
   deps: AdminUserEndpointDeps,
   userId: string,
@@ -1118,7 +1099,7 @@ export async function runAdminSetUserPassword(
     // `env_native` row (the break-glass administrator among them) still
     // answers, because ADR-0135 D5.2 narrows by population, never wholesale.
     if (isCloudManaged()) {
-      const source = await readUserSource(deps, userId);
+      const source = await readUserSource(deps.getDataEngine(), userId);
       if (!source.ok) {
         return {
           status: 503,
@@ -1135,6 +1116,20 @@ export async function runAdminSetUserPassword(
       }
       if (source.value === 'idp_provisioned') return cloudManagedRefusal('setUserPassword');
     }
+
+    // With SSO-only mode on, an IdP-provisioned user signs in through the
+    // identity provider and is given no local password here; the one exception
+    // is a platform administrator (this route's gate admitted the actor as
+    // one) setting their own break-glass password. `sso-only-local-password.ts`
+    // states the rule; an environment-native target answers as before.
+    const ssoOnly = await judgeSsoOnlyLocalPassword({
+      ssoOnly: deps.ssoOnlyMode?.() === true,
+      engine: deps.getDataEngine(),
+      userId,
+      selfPlatformAdmin: () => actor.id === userId,
+    });
+    if (ssoOnly === 'unreadable') return identitySourceUnreadable('this SSO-only environment may set their password here');
+    if (ssoOnly === 'refuse') return ssoOnlyPasswordRefusal('setUserPassword');
 
     // Mirrors the stock /admin/set-user-password core: hash, then update the
     // credential account or create one for SSO/invite-onboarded users.

@@ -16,13 +16,14 @@ import {
   isSsoProviderSource,
   readSsoProviderSignInOptions,
   runWithSamlIdpInitiated,
+  runWithSamlProviderScope,
   ssoProviderIdOfSource,
   restoreUserInfoEndpointOnWrite,
   ssoSamlOptions,
   stripIdpInitiatedFromOidcConfigOnWrite,
 } from './sso-sign-in-options';
 
-const OFF = { allowIdpInitiated: false, allowJit: false };
+const OFF = { allowIdpInitiated: false, allowJit: false, signOutOfIdp: false };
 
 describe('the vendor declaration', () => {
   it('every toggle is a boolean provider field, default off, writable through the vendor doors', () => {
@@ -30,6 +31,7 @@ describe('the vendor declaration', () => {
       allowIdpInitiated: { type: 'boolean', required: false, defaultValue: false, input: true },
       allowJit: { type: 'boolean', required: false, defaultValue: false, input: true },
       skipUserInfo: { type: 'boolean', required: false, defaultValue: false, input: true },
+      signOutOfIdp: { type: 'boolean', required: false, defaultValue: false, input: true },
     });
   });
 });
@@ -45,12 +47,13 @@ describe('reading one provider', () => {
   });
 
   it('reads the row by provider_id, in the carrier better-auth stores (1 / 0) or as booleans', async () => {
-    const r = reader([{ provider_id: 'acme', allow_idp_initiated: 1, allow_jit: 0 }]);
-    expect(await readSsoProviderSignInOptions(r, 'acme')).toEqual({ allowIdpInitiated: true, allowJit: false });
+    const r = reader([{ provider_id: 'acme', allow_idp_initiated: 1, allow_jit: 0, sign_out_of_idp: 1 }]);
+    expect(await readSsoProviderSignInOptions(r, 'acme')).toEqual({ allowIdpInitiated: true, allowJit: false, signOutOfIdp: true });
     expect(r.calls).toEqual([['sys_sso_provider', { where: { provider_id: 'acme' }, limit: 1 }]]);
     expect(await readSsoProviderSignInOptions(reader([{ provider_id: 'acme', allow_idp_initiated: false, allow_jit: true }]), 'acme')).toEqual({
       allowIdpInitiated: false,
       allowJit: true,
+      signOutOfIdp: false,
     });
   });
 
@@ -61,7 +64,7 @@ describe('reading one provider', () => {
     expect(await readSsoProviderSignInOptions(undefined, 'acme')).toEqual(OFF);
     expect(await readSsoProviderSignInOptions(reader([{ provider_id: '', allow_jit: 1 }]), '')).toEqual(OFF);
     for (const value of ['1', 'true', 2, null, undefined, {}]) {
-      expect(await readSsoProviderSignInOptions(reader([{ provider_id: 'acme', allow_jit: value }]), 'acme'), String(value)).toEqual(OFF);
+      expect(await readSsoProviderSignInOptions(reader([{ provider_id: 'acme', allow_jit: value, sign_out_of_idp: value }]), 'acme'), String(value)).toEqual(OFF);
     }
   });
 });
@@ -173,5 +176,35 @@ describe('SAML: the vendor option answers the ACS request in scope', () => {
     const descriptor = Object.getOwnPropertyDescriptor(saml, 'allowIdpInitiated');
     expect(typeof descriptor?.get).toBe('function');
     expect(descriptor?.enumerable).toBe(true);
+  });
+});
+
+describe('SAML: single logout answers the request’s provider, and logout messages must be signed', () => {
+  it('enableSingleLogout is off outside a scope and answers the scope’s switch inside it', async () => {
+    const saml = ssoSamlOptions();
+    expect(saml.enableSingleLogout).toBe(false);
+    const read = async () => {
+      await new Promise((r) => setTimeout(r, 1));
+      return [saml.enableSingleLogout, saml.allowIdpInitiated];
+    };
+    expect(
+      await Promise.all([
+        runWithSamlProviderScope({ singleLogout: true }, read),
+        runWithSamlProviderScope({ allowIdpInitiated: true }, read),
+        runWithSamlIdpInitiated(true, read),
+      ]),
+    ).toEqual([[true, false], [false, true], [false, true]]);
+    expect(saml.enableSingleLogout).toBe(false);
+    const descriptor = Object.getOwnPropertyDescriptor(saml, 'enableSingleLogout');
+    expect(typeof descriptor?.get).toBe('function');
+    expect(descriptor?.enumerable).toBe(true);
+  });
+
+  it('wantLogoutRequestSigned and wantLogoutResponseSigned are always true', async () => {
+    const saml = ssoSamlOptions();
+    expect([saml.wantLogoutRequestSigned, saml.wantLogoutResponseSigned]).toEqual([true, true]);
+    await runWithSamlProviderScope({ singleLogout: true }, async () => {
+      expect([saml.wantLogoutRequestSigned, saml.wantLogoutResponseSigned]).toEqual([true, true]);
+    });
   });
 });

@@ -14,6 +14,13 @@ import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
 import { isAiReadExposed } from '@objectstack/spec/data';
+import {
+    BUILTIN_MEMBERSHIP_ROLES,
+    MEMBERSHIP_REACH,
+    mapMembershipRole,
+    type BuiltinMembershipRole,
+    type MembershipReachEntry,
+} from '@objectstack/spec/identity';
 import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
 import {
     FEDERATION_READ_CAPABILITY,
@@ -36,6 +43,7 @@ import { readDispatchedBody } from '../deferred-request-body.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
+import { RUNTIME_OWNED_FIELD_TYPES, isVirtualSearchField } from '@objectstack/spec/data';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
@@ -53,6 +61,67 @@ import { actionRunFieldVisibilityRefusal, actionRunMasker, projectActionForCalle
 
 /** Typed as the registered vocabulary, so a misspelling fails to compile. */
 const FIELD_VISIBILITY_UNRESOLVED: ErrorCode = 'FIELD_VISIBILITY_UNRESOLVED';
+
+/**
+ * The code `run_action` answers when an organization endpoint refuses the
+ * caller's membership role: the forward relays the endpoint's 403, served as
+ * the standard code for that status (ADR-0112).
+ */
+const MEMBERSHIP_REACH_REFUSAL_CODE: ErrorCode = 'PERMISSION_DENIED';
+
+/** An identity-route target on better-auth's organization plugin, captured relative to the auth base path. */
+const ORGANIZATION_ENDPOINT_TARGET = /^\/api\/v1\/auth(\/organization\/[^?#]+)/;
+
+/**
+ * [ruling record 6812625052, letter E: list and mark, do not hide] Why
+ * `run_action` would be refused for a listed `api` action whose target is an
+ * organization endpoint the caller's membership role does not reach, or
+ * `undefined` when it would not, or when this listing cannot tell.
+ *
+ * The reach is read from the action's declared `target` against the spec's
+ * reach table ({@link MEMBERSHIP_REACH}, pinned equal to the vendor doors in
+ * plugin-auth), never from a local list: the grades that reach the endpoint
+ * are those of every row naming it (`/organization/update-member-role` is two
+ * rows, so its reach is their union). A target no row names is no grade's to
+ * judge (`/organization/create` is judged on the deployment's tenancy posture,
+ * an SSO provider or OAuth application on record ownership), so it is never
+ * marked.
+ *
+ * The caller's grades are its `positions` in the organization this listing
+ * reads, by the names {@link mapMembershipRole} projects them to: the reading
+ * the action's `requiresMembershipReach` sugar is lowered to. Only a principal
+ * whose envelope carries its own positions is judged: the system context, a
+ * delegated agent (its envelope carries the agent ceiling, not the delegating
+ * person's grades) and an envelope with no `positions` are left unmarked.
+ *
+ * This is a mark and nothing else. The run doors do not read it: the endpoint
+ * stays the authority, and a call naming another organization is judged there.
+ */
+function membershipReachRefusal(action: any, objectName: string | undefined, ec: any): { code: string; message: string } | undefined {
+    if (action?.type !== 'api' || typeof action?.target !== 'string') return undefined;
+    const endpoint = ORGANIZATION_ENDPOINT_TARGET.exec(action.target)?.[1]?.replace(/\/+$/, '');
+    if (!endpoint) return undefined;
+    const reaching = new Set<BuiltinMembershipRole>();
+    for (const row of Object.values(MEMBERSHIP_REACH) as MembershipReachEntry[]) {
+        if (row.endpoint === endpoint) for (const grade of row.grades) reaching.add(grade);
+    }
+    if (reaching.size === 0) return undefined;
+    if (!ec || ec.isSystem === true || ec.onBehalfOf || !Array.isArray(ec.positions)) return undefined;
+    const grades = BUILTIN_MEMBERSHIP_ROLES.filter((grade) => reaching.has(grade));
+    if (grades.some((grade) => ec.positions.includes(mapMembershipRole(grade)))) return undefined;
+
+    const names = grades.map((grade) => grade.replace(/_/g, ' '));
+    const roles = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}` : names[0];
+    const on = objectName ? ` on '${objectName}'` : '';
+    const where = ec.tenantId ? 'in this organization' : 'in any organization you belong to';
+    return {
+        code: MEMBERSHIP_REACH_REFUSAL_CODE,
+        message:
+            `Action '${String(action?.name ?? '')}'${on} needs an organization ${roles}: its endpoint ` +
+            `(${endpoint}) refuses every other membership role, and your role ${where} is none of those. ` +
+            `Ask a person who holds one of those roles to run it.`,
+    };
+}
 
 /**
  * [ADR-0106 D6 tier 3] The refusal an MCP object-schema read answers when the
@@ -598,13 +667,18 @@ async function warnIfSkillListIncomplete(
  * that names a denied field anywhere, its message included) is not described.
  *
  * Per field: `required`, `readonly` and `system` (an auto-injected column such
- * as `created_at` is `readonly` and `system`), the allowed `options` as value +
- * label for a field that declares them (a picklist-bound field carries its
- * list's resolved options on the served object, `declaresOptions`), and the
- * `defaultValue` an INSERT applies. Per active validation rule: its name, kind,
+ * as `created_at` is `readonly` and `system`; [#32530] `readonly` is also true
+ * where a write never sets the value, {@link writeNeverSetsField}), the allowed
+ * `options` as value + label for a field that declares them (a picklist-bound
+ * field carries its list's resolved options on the served object,
+ * `declaresOptions`), and the `defaultValue` an INSERT applies. Per active validation rule: its name, kind,
  * message, severity, the write events it runs on, and the fields it names —
  * ⛔ never its condition, pattern or transition table: the rule's message is
  * what a refused write answers with, and its expression is server policy.
+ *
+ * `declared` is the object `def` was projected from (the caller's mask
+ * applied to it gives `def`): `readonly` is judged on it,
+ * {@link writeNeverSetsField}. Nothing else is read from it.
  *
  * The twin is `describeServedObject` in `packages/mcp/src/mcp-server-runtime.ts`,
  * which the stdio bridge and the `objectstack://objects/{name}` resource serve
@@ -612,7 +686,7 @@ async function warnIfSkillListIncomplete(
  * one shape, and the `describe_object` description (`mcp-http-tools.ts`)
  * states it.
  */
-function describeServedObject(def: any): Record<string, unknown> {
+function describeServedObject(def: any, declared: any): Record<string, unknown> {
     return {
         name: def.name,
         label: def.label ?? def.name,
@@ -621,7 +695,12 @@ function describeServedObject(def: any): Record<string, unknown> {
             type: f?.type,
             label: f?.label ?? k,
             required: f?.required ?? false,
-            readonly: f?.readonly === true,
+            // [#32530] Judged on the DECLARED field, never the served one: the
+            // caller's mask deletes a readable field's `expression` when it
+            // names a field they cannot read, and the engine still computes the
+            // field. Only the boolean is read there; the served definition,
+            // without that expression, is what the answer is built from.
+            readonly: writeNeverSetsField(declared?.fields?.[k]),
             system: f?.system === true,
             ...(declaresOptions(f) ? { options: describedOptions(f.options) } : {}),
             ...(f?.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
@@ -629,6 +708,44 @@ function describeServedObject(def: any): Record<string, unknown> {
         validations: describedRules(def.validations),
         enableFeatures: def.enable ?? {},
     };
+}
+
+/**
+ * [#32530] `readonly` as {@link describeServedObject} serves it: a caller's
+ * write can never set this field's value. True for the declared flag, and for
+ * a value the engine owns whatever the payload says:
+ *
+ * - a runtime-owned type (`RUNTIME_OWNED_FIELD_TYPES`, today `autonumber`):
+ *   the write path strips a caller's value even with no `readonly` flag, and a
+ *   hand-authored literal carries none (the field builder injects it);
+ * - a `formula`, virtual — computed on read, no column (`isVirtualSearchField`,
+ *   the spec's one statement of that set): the write path strips it;
+ * - a stored field declaring an `expression`: the engine computes it from the
+ *   row the write stores, so a client-sent value never stands (the spec's
+ *   `expression` contract).
+ *
+ * ⛔ Not the caller's field edit permission: a field the caller may read but
+ * not edit is served the schema's answer, and the write naming it is refused
+ * at the field-level write gate. The served object carries the read projection
+ * only ({@link servedToCaller}), and the `describe_object` description says so.
+ *
+ * Asked of the DECLARED field ({@link describeServedObject}'s `declared`),
+ * because the caller's mask deletes an `expression` that names a field the
+ * caller cannot read, while the engine still computes the column from it.
+ *
+ * The twin is `writeNeverSetsField` in `packages/mcp/src/mcp-server-runtime.ts`,
+ * which the stdio bridge and the `objectstack://objects/{name}` resource ask of
+ * the declared field too: the stdio caller view hands the declaration it masked
+ * beside the served object (`readObjectWithDeclaration`), so every transport
+ * answers this verdict alike.
+ */
+function writeNeverSetsField(f: any): boolean {
+    if (!f || typeof f !== 'object') return false;
+    if (f.readonly === true) return true;
+    if (typeof f.type === 'string' && RUNTIME_OWNED_FIELD_TYPES.has(f.type)) return true;
+    if (isVirtualSearchField(f)) return true;
+    // Truthy, the engine's own test for a stored expression it plans.
+    return Boolean(f.expression);
 }
 
 /** A field's options as value + label: the stored value a write sends, and what a person reads. */
@@ -955,10 +1072,13 @@ export function buildMcpBridge(
             return isAiReadExposed(def);
         },
         describeObject: async (name: string) => {
-            const def: any = await readObjectForCaller(name);
+            // {@link readObjectForCaller}'s two steps, kept apart so the
+            // declaration it masks is in hand ([#32530] `readonly`).
+            const declared: any = await readServedObject(name);
+            const def: any = declared ? await servedToCaller(declared) : declared;
             if (!def) return null;
             // [#32435] …each field and rule carrying what a write needs.
-            return describeServedObject(def);
+            return describeServedObject(def, declared);
         },
         // [#28715] The fields `validate_expression` judges a `label()` call
         // against, from the object `describeObject` reads: the served object,
@@ -1172,7 +1292,14 @@ export function buildMcpBridge(
                 const confirmation = actionExec.isAiServiceAccountCaller(ec)
                     ? actionExec.actionConfirmationRefusal(deps, action, undefined, objectName, ec)
                     : undefined;
-                const refusal = confirmation ?? actionExec.apiForwardCredentialRefusal(context, action);
+                // [ruling record 6812625052, letter E] …and an organization
+                // endpoint the caller's membership role does not reach: the
+                // forward reaches it and it refuses 403. Asked last, because
+                // `run_action` meets it last: after the admission sequence and
+                // the forward's credential table. Listed, never hidden: the
+                // run doors do not read the mark ({@link membershipReachRefusal}).
+                const refusal = confirmation ?? actionExec.apiForwardCredentialRefusal(context, action)
+                    ?? membershipReachRefusal(action, actionExec.isObjectLessActionKey(objectName) ? undefined : objectName, ec);
                 // [ADR-0106 D1] Summarised against the object as this caller is
                 // served it, and not listed where `/meta` withholds it.
                 const served = await servedActionObject(action, objectName, obj, objectsByName);
@@ -1426,7 +1553,7 @@ export interface McpRecordFileService {
      */
     createUploadLinkForNewRecordAs?(
         object: string,
-        target: { field: string },
+        target: { field: string; count?: number },
         context: unknown,
     ): Promise<{ path: string; expiresAt: string; fileIds: string[] }>;
 }
@@ -1543,7 +1670,8 @@ function recordFileMembers(
         // object's create verdict and the field's writability for the caller.
         ...(newRecordLinkAs
             ? {
-                createUploadLinkForNewRecord: async (object: string, target: { field: string }) => {
+                // [#32747] `count`: how many files the user will upload, each id answered now.
+                createUploadLinkForNewRecord: async (object: string, target: { field: string; count?: number }) => {
                     const grant = await newRecordLinkAs(object, target, ec);
                     return {
                         url: absoluteUrl(grant.path, await publicOrigin(deps, context)),

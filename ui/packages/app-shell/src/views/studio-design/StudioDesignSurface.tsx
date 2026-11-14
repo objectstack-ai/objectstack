@@ -8649,6 +8649,12 @@ export function AutomationsPillar({
         setFlowCopied(landed);
         openAfterListRef.current = copy.name;
         setFlowListNonce((n) => n + 1);
+        // The door stored the copy live and the engine already holds its row;
+        // the `_status` snapshot this pillar holds predates it, so it is read
+        // once more, or the copy's header reads the row it lacks as an
+        // unpublished draft. The other landing remounts the pillar keyed by
+        // package, and that mount reads `_status` itself.
+        setStatusNonce((n) => n + 1);
         return;
       }
       navigate(studioPillarItemPath(copy.packageId, 'automations', { type: 'flow', name: copy.name }), {
@@ -10363,48 +10369,51 @@ export function AccessPillar({
           (isDefault sets shipped by the package) and the deployment's
           decision on each. Renders nothing when there are none or for a
           caller without manage_metadata (the list answers 403); accept and
-          revoke are enforced server-side by the anchor gates. */}
-      {!packageReadOnly && (
-        <SuggestedBindingsPanel
-          packageId={railPackageId}
-          className="mx-3 mt-2"
-          strings={{
-            describe: (s) =>
-              tFormat(
-                s.anchor === 'guest'
-                  ? 'engine.studio.access.suggestPromptGuest'
-                  : 'engine.studio.access.suggestPromptEveryone',
-                locale,
-                { set: s.permission_set_name },
-              ),
-            confirm: t('engine.studio.access.suggestConfirm', locale),
-            confirming: t('engine.studio.access.suggestConfirming', locale),
-            dismiss: t('engine.studio.access.suggestDismiss', locale),
-            confirmedToast: (s) =>
-              tFormat('engine.studio.access.suggestConfirmedToast', locale, {
-                set: s.permission_set_name,
-                anchor: s.anchor,
-              }),
-            dismissedToast: (s) =>
-              tFormat('engine.studio.access.suggestDismissedToast', locale, { set: s.permission_set_name }),
-            guestUnsupported: t('engine.studio.access.suggestGuestUnsupported', locale),
-            acceptedState: (s) =>
-              tFormat('engine.studio.access.suggestAcceptedState', locale, { set: s.permission_set_name }),
-            notInForceState: (s) =>
-              tFormat('engine.studio.access.suggestNotInForceState', locale, { set: s.permission_set_name }),
-            dismissedState: (s) =>
-              tFormat('engine.studio.access.suggestDismissedState', locale, { set: s.permission_set_name }),
-            revoke: t('engine.studio.access.suggestRevoke', locale),
-            revoking: t('engine.studio.access.suggestRevoking', locale),
-            revokedToast: (s) =>
-              tFormat('engine.studio.access.suggestRevokedToast', locale, { set: s.permission_set_name }),
-            reopen: t('engine.studio.access.suggestReopen', locale),
-            reopening: t('engine.studio.access.suggestReopening', locale),
-            reopenedToast: (s) =>
-              tFormat('engine.studio.access.suggestReopenedToast', locale, { set: s.permission_set_name }),
-          }}
-        />
-      )}
+          revoke are enforced server-side by the anchor gates. Drawn on a
+          read-only package too: accepting or dismissing a suggestion is a
+          deployment decision about the package, not an edit of it, and a
+          marketplace-installed package — read-only here — is the one that
+          ships an isDefault set. Only this strip ignores `packageReadOnly`;
+          every affordance that edits the package keeps its gate. */}
+      <SuggestedBindingsPanel
+        packageId={railPackageId}
+        className="mx-3 mt-2"
+        strings={{
+          describe: (s) =>
+            tFormat(
+              s.anchor === 'guest'
+                ? 'engine.studio.access.suggestPromptGuest'
+                : 'engine.studio.access.suggestPromptEveryone',
+              locale,
+              { set: s.permission_set_name },
+            ),
+          confirm: t('engine.studio.access.suggestConfirm', locale),
+          confirming: t('engine.studio.access.suggestConfirming', locale),
+          dismiss: t('engine.studio.access.suggestDismiss', locale),
+          confirmedToast: (s) =>
+            tFormat('engine.studio.access.suggestConfirmedToast', locale, {
+              set: s.permission_set_name,
+              anchor: s.anchor,
+            }),
+          dismissedToast: (s) =>
+            tFormat('engine.studio.access.suggestDismissedToast', locale, { set: s.permission_set_name }),
+          guestUnsupported: t('engine.studio.access.suggestGuestUnsupported', locale),
+          acceptedState: (s) =>
+            tFormat('engine.studio.access.suggestAcceptedState', locale, { set: s.permission_set_name }),
+          notInForceState: (s) =>
+            tFormat('engine.studio.access.suggestNotInForceState', locale, { set: s.permission_set_name }),
+          dismissedState: (s) =>
+            tFormat('engine.studio.access.suggestDismissedState', locale, { set: s.permission_set_name }),
+          revoke: t('engine.studio.access.suggestRevoke', locale),
+          revoking: t('engine.studio.access.suggestRevoking', locale),
+          revokedToast: (s) =>
+            tFormat('engine.studio.access.suggestRevokedToast', locale, { set: s.permission_set_name }),
+          reopen: t('engine.studio.access.suggestReopen', locale),
+          reopening: t('engine.studio.access.suggestReopening', locale),
+          reopenedToast: (s) =>
+            tFormat('engine.studio.access.suggestReopenedToast', locale, { set: s.permission_set_name }),
+        }}
+      />
 
       <div className="relative flex min-h-0 flex-1">
         {isMobile && railOpen && (

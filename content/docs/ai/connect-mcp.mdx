@@ -275,7 +275,7 @@ storage service is installed:
 | `list_actions` / `run_action` | Discover and invoke your business actions by name |
 | `resume_run` | Finish a flow action that paused on a screen, by submitting the screen's values |
 | `read_file` | Read a file a record carries: its text (text files, PDF, Word `.docx`) or the image itself, with its size, the byte cap and a short-lived download link |
-| `create_upload_link` | Hand the user a single-use link that uploads one file onto a record's file field or its attachments |
+| `create_upload_link` | Hand the user a single-use link that uploads a file onto a record's file field or its attachments (up to 10 files, sent together, for a multi-file field) |
 
 ### Files: `read_file` and `create_upload_link`
 
@@ -301,7 +301,15 @@ record means no file**, refused with the same `RECORD_NOT_FOUND`.
   write). It answers a link and its expiry (ten minutes). The user opens the
   link in a browser where they are signed in to this deployment, picks one
   file, and it lands on exactly that record and field, or as an attachment of
-  that record. On a phone, they sign in there first. The link works only for
+  that record. On a phone, they sign in there first. A link for a
+  `multiple: true` file field takes several files in its one use: the user
+  picks up to 10 and sends them together, every file of the send, however
+  many, is checked (the maximum upload size, and the field's own `accept` and
+  `maxSize`) before the link is spent, and the field gains all of them in one write, or none: one file the
+  field cannot take, or more than 10 (`400` `VALIDATION_ERROR`), refuses the
+  whole send with the link still usable, and a failure after that leaves the
+  record as it was. A single-file field link and an attachments link take one
+  file. The link works only for
   the user it was made for, and only once: without a session it answers
   `401`, and a second use, an expired link, an unknown link and another user's
   link all get the same `404`. The upload is stored as that user, with their
@@ -326,10 +334,13 @@ record means no file**, refused with the same `RECORD_NOT_FOUND`.
   `recordId`. That needs a user who may create records of the object and
   write the field, and a field that is not `readonly`; an attachments link
   still needs its record. The answer carries `fileIds`, the id the upload is
-  stored under. Once the user has uploaded (the page says the file was
+  stored under. For several files into a multi-file field, the agent sends
+  `count` (up to 10): `fileIds` then holds that many ids, and the user must
+  pick exactly that many. Once the user has uploaded (the page says the file was
   received), the agent calls `create_record` with the field set to
   `fileIds[0]`, or the array for a multi-file field; before the upload that
-  create is refused as an upload that never completed. The field's own
+  create is refused as an upload that never completed, as is every other
+  write naming one of the ids. The field's own
   `accept` and `maxSize` are checked when the file arrives, before the link is
   spent. Until a record holds the file, the id works only for that user's own
   `create_record` or `update_record` into that field of that object, within
@@ -373,6 +384,15 @@ can reach is the **default exposure policy (v1)**:
   list the approvals waiting on you with `pending_approvers` contains
   `{current_user_id}` — answered for a slot that names you by email, position
   or team too, not only by user id.
+  `sys_user` declares it too, so an agent can fill a person field (an owner, an
+  approver, an employee): it finds a colleague with `query_records` on
+  `sys_user`, by `email` for exactly one person or by `name` (`$contains`), and
+  gets their id. It reads exactly what your console's person picker shows you:
+  your own row and your organization's members, never another organization's
+  users, with the `Admin` field group (sign-in trail, lockout, ban reason,
+  sign-in phone) withheld, on results and on filters. Names repeat, so where
+  several people share one, the agent tells them apart by email. No write tool
+  opens it.
 - **Actions require the author's opt-in**: `ai: { exposed: true }` plus an
   `ai.description` of at least 40 characters, and the action must be callable
   without a UI. In the open framework that means three types — `script`

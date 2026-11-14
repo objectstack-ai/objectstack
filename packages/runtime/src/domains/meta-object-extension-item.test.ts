@@ -62,7 +62,7 @@ const OTHER = 'com.acme.other';
 const TARGET = 'crm_account';
 const TYPE = 'object_extension';
 
-const baseManifest = () => ({
+const baseManifest = (extraObjects: readonly Record<string, unknown>[] = []) => ({
     id: BASE,
     name: 'crm',
     version: '3.4.1',
@@ -72,7 +72,7 @@ const baseManifest = () => ({
         name: TARGET,
         label: 'Account',
         fields: { name: { name: 'name', label: 'Name', type: 'text' } },
-    }],
+    }, ...extraObjects],
 });
 
 /** Studio's add-field body: an extension in the pair, its field suffixed. */
@@ -89,7 +89,7 @@ afterEach(async () => {
     }
 });
 
-async function freshEngine(): Promise<ObjectQL> {
+async function freshEngine(extraObjects: readonly Record<string, unknown>[] = []): Promise<ObjectQL> {
     const engine = new ObjectQL();
     liveEngines.push(engine);
     engine.registerDriver(new SqlDriver({
@@ -102,13 +102,13 @@ async function freshEngine(): Promise<ObjectQL> {
     engine.registry.registerObject(SysMetadataHistoryObject as any, TEST_PACKAGE_ID);
     engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
     (engine.registry as unknown as { logLevel: string }).logLevel = 'silent';
-    engine.registerApp(baseManifest());
+    engine.registerApp(baseManifest(extraObjects));
     await engine.syncSchemas();
     return engine;
 }
 
-async function boot() {
-    const engine = await freshEngine();
+async function boot(extraObjects: readonly Record<string, unknown>[] = []) {
+    const engine = await freshEngine(extraObjects);
     const protocol = new ObjectStackProtocolImplementation(engine as any, () => new Map());
     const p = protocol as any;
     await p.installPackage({
@@ -350,6 +350,115 @@ describe('[#28574] refused at the door, leaving no row', () => {
         await expect(rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: regionBody(), mode: 'draft', packageId: PAIR }))
             .resolves.toBeDefined();
         expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+    }, 60_000);
+});
+
+describe('[#33072] the publish door judges an extension field\'s formula as `os build` does', () => {
+    /** Studio's add-field body for a computed field on the account. */
+    const scoreBody = (expression: string) => ({
+        extend: TARGET,
+        fields: { score__c: { type: 'formula', label: 'Score', expression } },
+    });
+    const WHERE = "object 'crm_account' · objectExtensions[0] · field 'score__c' expression";
+
+    it('⭐ LIT — a formula calling an unregistered function is refused with the build\'s rule id and location; the field is not served', async () => {
+        const rig = await boot();
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: scoreBody('sqrt(record.name)'), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+
+        expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue, JSON.stringify(err.issues)).toBeDefined();
+        expect({ where: issue.where, path: issue.path }).toEqual({ where: WHERE, path: WHERE });
+        expect((await rig.fieldsOn()).registry).not.toContain('score__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+    }, 60_000);
+
+    it('⭐ LIT — a formula reading a field the account does not serve is refused, judged against the extended object', async () => {
+        const rig = await boot();
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: scoreBody("record.nmae + '!'"), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue?.where, JSON.stringify(err.issues)).toBe(WHERE);
+        expect(issue.message).toContain('nmae');
+    }, 60_000);
+
+    it('⭐ CONTROL — a valid formula over the account\'s own field publishes and is served', async () => {
+        const rig = await boot();
+        await rig.saveAndPublish(PAIR, scoreBody("record.name + '!'"));
+
+        expect((await rig.fieldsOn()).registry).toContain('score__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+    }, 60_000);
+
+    // [#33072 r1] A REPUBLISH replaces the package's stored extension, so the
+    // target is judged without it: the written body is the package's whole
+    // extension, exactly as `os build` sees its one `objectExtensions` entry.
+    // Judging against the target as served BEFORE the write read the stored
+    // self as well, which erred both ways — the two pins below.
+    const totalBody = (fields: Record<string, unknown> = {}, extend = TARGET) => ({
+        extend,
+        fields: { ...fields, total__c: { type: 'formula', label: 'Total', expression: 'record.bonus__c + 1' } },
+    });
+    const BONUS = { bonus__c: { type: 'number', label: 'Bonus' } };
+
+    it('⭐ LIT (republish, lenient direction) — dropping a field the extension\'s own formula still reads is refused', async () => {
+        const rig = await boot();
+        await rig.saveAndPublish(PAIR, totalBody(BONUS));
+        expect((await rig.fieldsOn()).registry).toEqual(expect.arrayContaining(['bonus__c', 'total__c']));
+
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: totalBody(), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }, 'the stored self still lent bonus__c').toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue?.where, JSON.stringify(err.issues))
+            .toBe("object 'crm_account' · objectExtensions[0] · field 'total__c' expression");
+        expect(issue.message).toContain('bonus__c');
+        // The served extension is the one published before, untouched.
+        expect((await rig.fieldsOn()).registry).toContain('bonus__c');
+    }, 60_000);
+
+    it('⭐ LIT (republish, strict direction) — re-targeting the extension\'s own lookup is judged over its new target', async () => {
+        const region = { name: 'crm_region', label: 'Region', fields: { code: { name: 'code', label: 'Code', type: 'text' } } };
+        const rig = await boot([region]);
+        await rig.saveAndPublish(PAIR, {
+            extend: TARGET,
+            fields: { ref__c: { type: 'lookup', label: 'Ref', reference: 'crm_region' } },
+        });
+
+        const out = await rig.saveAndPublish(PAIR, {
+            extend: TARGET,
+            fields: {
+                ref__c: { type: 'lookup', label: 'Ref', reference: TARGET },
+                via__c: { type: 'formula', label: 'Via', expression: 'record.ref__c.name' },
+            },
+        }).catch((e: any) => e);
+
+        expect(out, JSON.stringify((out as any)?.issues ?? out?.message)).not.toBeInstanceOf(Error);
+        expect((await rig.fieldsOn()).registry).toContain('via__c');
+    }, 60_000);
+
+    it('⭐ LIT (republish, target with a stored object row) — the stored fold leaves the written package\'s extension out too', async () => {
+        const rig = await boot();
+        const LEAD = 'crm_custom_lead';
+        await rig.protocol.saveMetaItem({
+            type: 'object', name: LEAD, mode: 'draft', packageId: PAIR,
+            item: { name: LEAD, label: 'Lead', sharingModel: 'private', fields: { title: { name: 'title', label: 'Title', type: 'text' } } },
+        });
+        await rig.protocol.publishMetaItem({ type: 'object', name: LEAD, packageId: PAIR });
+        await rig.saveAndPublish(PAIR, totalBody(BONUS, LEAD), LEAD);
+
+        await rig.protocol.saveMetaItem({ type: TYPE, name: LEAD, item: totalBody({}, LEAD), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: LEAD, packageId: PAIR }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }, 'the stored row\'s fold still lent bonus__c').toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue?.where, JSON.stringify(err.issues))
+            .toBe(`object '${LEAD}' · objectExtensions[0] · field 'total__c' expression`);
     }, 60_000);
 });
 

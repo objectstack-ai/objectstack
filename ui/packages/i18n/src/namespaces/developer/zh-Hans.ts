@@ -222,21 +222,21 @@ const zh = {
     },
     codex: {
       body: '在 Codex 客户端中:设置 → MCP 服务器 → 添加服务器,按下表填写:',
-      hint: '保存后按提示重启,在 objectstack 旁点击「Authenticate」并在浏览器登录。在输入框中输入 /mcp 可查看是否已连接。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。',
+      hint: '保存后按提示重启,在 objectstack 旁点击「Authenticate」并在浏览器登录。在输入框中输入 /mcp 可查看是否已连接。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。使用密钥时,助手只能处理记录和运行操作,不能构建应用。',
     },
     workbuddy: {
       body: '腾讯 WorkBuddy:连接器 → 自定义连接器 → 配置 MCP,把以下条目合并进 mcpServers(配置保存在 ~/.workbuddy/mcp.json):',
-      hint: '保存后在 objectstack 连接器上点击「信任」——未信任前不会生效。如果你的版本没有弹出登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。',
+      hint: '保存后在 objectstack 连接器上点击「信任」——未信任前不会生效。如果你的版本没有弹出登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。使用密钥时,助手只能处理记录和运行操作,不能构建应用。',
     },
     doubao: {
       title: '豆包工作',
       body: '技能 · 连接器 → 新建 → 新建自定义连接器,按下表填写:',
-      hint: '按提示在浏览器登录。若未出现登录,在自定义 Headers 中添加 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。云端运行的任务要求部署可通过公网 HTTPS 访问。',
+      hint: '按提示在浏览器登录。若未出现登录,在自定义 Headers 中添加 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。使用密钥时,助手只能处理记录和运行操作,不能构建应用。云端运行的任务要求部署可通过公网 HTTPS 访问。',
     },
     qwenwork: {
       title: '千问办公',
       body: '扩展 → 连接器 → + 添加 → 粘贴 JSON 配置:',
-      hint: '也可手动添加:传输类型选 Streamable HTTP 并填写此 URL。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。',
+      hint: '也可手动添加:传输类型选 Streamable HTTP 并填写此 URL。如果你的版本不支持浏览器登录,请添加请求头 Authorization: Bearer <API 密钥>(在下方「高级：脚本与 CI」中创建)。使用密钥时,助手只能处理记录和运行操作,不能构建应用。',
     },
     client: {
       title: '你用的是哪个 AI 助手？',
@@ -255,7 +255,7 @@ const zh = {
     apiKey: {
       title: 'API 密钥',
       badge: '无头场景',
-      body: '用于 CI、脚本和无浏览器的智能体。密钥等同于你的身份,请像密码一样保管,且仅显示一次。',
+      body: '用于 CI、脚本和无浏览器的智能体。密钥等同于你的身份,请像密码一样保管。用密钥连接的 AI 助手只能处理记录和运行操作,不能构建应用。密钥仅显示一次。',
       namePlaceholder: '密钥名称(如 ci-agent)',
       mint: '创建密钥',
       confirmTitle: '创建 API 密钥「{{name}}」？',
