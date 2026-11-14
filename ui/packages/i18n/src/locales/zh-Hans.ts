@@ -134,6 +134,7 @@ const zh = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: '仅显示 {{total}} 条记录中的前 {{shown}} 条。请缩小筛选范围。',
     rowCeilingNoteUnknownTotal: '仅显示前 {{shown}} 条记录。请缩小筛选范围。',
+    ungroupedSection: '其他',
   },
   actions: {
     decisionOutput: {
@@ -2800,6 +2801,10 @@ const zh = {
         directSignInIncomplete: "登录没有完成：你从单点登录返回时仍未登录。请确认浏览器允许本站点的 Cookie，然后重试。",
         directSignInUnavailable: "无法为本系统发起单点登录。请联系管理员检查本系统使用的登录服务。",
         directSignInRateLimited: "刚刚从此网络发起的登录过多。请等待几秒后再试。",
+        ssoAccessDenied: "你登录所用的账号无权访问本系统。请使用有权访问的账号登录，或请本系统所属组织的管理员将你添加为成员。",
+        ssoSwitchAccount: "切换账号",
+        ssoBackToConsole: "返回控制台",
+        ssoSwitchAccountHint: "“切换账号”会在新标签页中打开你的登录服务并在那里退出登录。之后请在此处使用有权访问的账号重新登录。",
         twoFactorInvalidCode: '验证码无效，请检查身份验证器应用后重试。',
         twoFactorInvalidBackupCode: '该备用码无效或已被使用。',
         twoFactorTooManyAttempts: '错误次数过多，请重新使用密码登录。',
@@ -3483,6 +3488,11 @@ const zh = {
     back: '返回',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: '发布后这里会显示记录',
+      message: '你正在预览一个尚未发布的对象，它在发布前还没有任何记录。发布后即可开始录入数据，或载入示例数据。',
+    },
     empty: {
       loadFailedTitle: '草稿预览加载失败',
       loadFailedDescription: '无法读取草稿数据。请重试，或检查网络连接。',
@@ -4210,6 +4220,11 @@ const zh = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: '发送消息',
     scrollToBottom: '滚动到最新消息',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: '当前回复结束后发送',
+      queuedCancel: '取消',
+    },
     answer: {
       showFull: '展开全文',
       collapse: '收起',
@@ -4303,6 +4318,9 @@ const zh = {
       countSeedData: '示例数据',
       extendTarget: '添加到现有应用：{{app}}',
       awaitingConfirm: '等待确认',
+      // objectstack#32984 — the plan card's build states.
+      confirmed: '已确认',
+      buildFailed: '未搭建成功 · 没有创建任何内容',
       iterateOrNew: {
         question: '这个方案和你已有的应用「{{app}}」重叠。要在它上面继续完善，还是另建一个独立应用？',
         questionUnnamed: '这个方案和你已有的一个应用重叠。要在那个应用上继续完善，还是另建一个独立应用？',
@@ -4335,6 +4353,15 @@ const zh = {
       verifying: '正在检查改动…',
       verifyStep: '第 {{n}} 步',
       verified: '已检查改动',
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: '{{count}} 处待修复',
+      issuesSummary: '这次搭建有部分内容需要修复后才能使用。回复「修复这些问题」，助手会帮你处理。',
+      warningsSummary: '应用已搭建好，有几处值得检查。想进一步完善的话，可以问问助手具体是哪些。',
+      issuesDetails: '技术详情',
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: '{{count}} 项需要处理',
+      needsAttention_one: '{{count}} 项需要处理',
+      needsAttention_other: '{{count}} 项需要处理',
       unknownPhase: '未知的构建阶段',
       nextStepsLead: '接下来可以说：{{steps}}',
       nextStepQuote: '「{{step}}」',

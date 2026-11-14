@@ -26,6 +26,7 @@ import { SysMember, SysNotification } from '@objectstack/platform-objects';
 import { ApiErrorSchema, envelopeViolations } from '@objectstack/spec/api';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import {
+    IN_APP_MESSAGE_RECIPIENT_ID_MAX,
     IN_APP_MESSAGE_RECIPIENTS_MAX,
     IN_APP_MESSAGE_ROUTE,
     IN_APP_MESSAGE_TITLE_MAX,
@@ -36,6 +37,8 @@ import {
 import { resolveMessagingCaller } from './messaging-request-caller.js';
 import { MessagingService } from './messaging-service.js';
 import { createInboxChannel, INBOX_OBJECT } from './inbox-channel.js';
+import type { MessagingChannel } from './channel.js';
+import { currentCredentialUseClient, hashApiKey } from '@objectstack/core';
 import { InboxMessage, NotificationDelivery, NotificationPreference, NotificationReceipt } from './objects/index.js';
 
 const SYSTEM = { context: { isSystem: true } as ExecutionContext };
@@ -96,6 +99,10 @@ async function boot(): Promise<ObjectQL> {
 interface DoorOptions {
     resolveCaller?: InAppMessageRoutesDeps['resolveCaller'];
     messaging?: 'none' | 'throws';
+    /** The inbox channel the service registers, built over the real one; `null` registers none. */
+    inbox?: ((real: MessagingChannel) => MessagingChannel) | null;
+    /** Every `sys_member` read throws: the fan-out's member lookup included. */
+    memberReadFails?: boolean;
 }
 
 async function door(opts: DoorOptions = {}) {
@@ -106,10 +113,18 @@ async function door(opts: DoorOptions = {}) {
         get: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn(), use: vi.fn(),
     };
     const messaging = new MessagingService({ logger: silent, getData: () => ql as any });
-    messaging.registerChannel(createInboxChannel({ getData: () => ql as any }));
+    const realInbox = createInboxChannel({ getData: () => ql as any });
+    if (opts.inbox !== null) messaging.registerChannel(opts.inbox ? opts.inbox(realInbox) : realInbox);
     const emit = vi.spyOn(messaging, 'emit');
     if (opts.messaging === 'throws') emit.mockRejectedValue(new Error('the outbox is down'));
+    const realFind = ql.find.bind(ql);
     const find = vi.spyOn(ql, 'find');
+    if (opts.memberReadFails) {
+        find.mockImplementation((async (object: string, ...rest: unknown[]) => {
+            if (object === 'sys_member') throw new Error('the membership table is unreachable');
+            return (realFind as (...args: unknown[]) => unknown)(object, ...rest);
+        }) as never);
+    }
 
     registerInAppMessageRoutes(http as never, {
         resolveCaller: opts.resolveCaller ?? (async (req) => {
@@ -343,6 +358,7 @@ describe('the in-app message door — the form is a closed set, and every refusa
         ['everyone false and no recipients', { ...MESSAGE, everyone: false, recipients: [] }, 'at least one recipient'],
         ['everyone not a boolean', { ...MESSAGE, everyone: 'yes' }, "'everyone'"],
         ['recipients not a list of ids', { ...MESSAGE, recipients: 'u_member' }, "'recipients'"],
+        ['a recipient id past its bound', { ...MESSAGE, recipients: ['u_member', 'x'.repeat(IN_APP_MESSAGE_RECIPIENT_ID_MAX + 1)] }, `'recipients' item 2 is ${IN_APP_MESSAGE_RECIPIENT_ID_MAX + 1} characters long`],
         ['too many recipients', { ...MESSAGE, recipients: Array.from({ length: IN_APP_MESSAGE_RECIPIENTS_MAX + 1 }, (_, i) => `u_${i}`) }, `at most ${IN_APP_MESSAGE_RECIPIENTS_MAX}`],
         ['no title', { body: MESSAGE.body, everyone: true }, "'title' is required"],
         ['a blank title', { ...MESSAGE, title: '   ', everyone: true }, "'title' is required"],
@@ -382,5 +398,164 @@ describe('the in-app message door — what this host cannot do', () => {
     it('answers a send that throws as a 500 fault, never a success', async () => {
         const d = await door({ messaging: 'throws' });
         expect(envelope(await d.call({ bearer: 'admin_a', body: { ...MESSAGE, everyone: true } }))).toEqual(['INTERNAL_ERROR', 500]);
+    });
+});
+
+describe('the in-app message door — one recipient id is bounded', () => {
+    it('refuses an id past the bound by its position, never echoing it, before any read', async () => {
+        const d = await door();
+        const long = `u_${'y'.repeat(IN_APP_MESSAGE_RECIPIENT_ID_MAX)}`;
+        const answer = await d.call({ bearer: 'admin_a', body: { ...MESSAGE, recipients: [long] } });
+        expect(envelope(answer)).toEqual(['VALIDATION_ERROR', 400]);
+        expect(String(answer.body.error.message)).toContain("'recipients' item 1");
+        expect(String(answer.body.error.message)).not.toContain(long);
+        expect(d.memberReads()).toEqual([]);
+        expect(d.emit).not.toHaveBeenCalled();
+    });
+
+    it('reads an id at the bound, and refuses it as no member like any other unknown id', async () => {
+        const d = await door();
+        const atBound = 'z'.repeat(IN_APP_MESSAGE_RECIPIENT_ID_MAX);
+        const answer = await d.call({ bearer: 'admin_a', body: { ...MESSAGE, recipients: [atBound] } });
+        expect(envelope(answer)).toEqual(['VALIDATION_ERROR', 400]);
+        expect(String(answer.body.error.message)).toContain('not a member');
+        expect(d.memberReads()).toHaveLength(1);
+        expect(d.emit).not.toHaveBeenCalled();
+    });
+});
+
+describe('the in-app message door — the answer counts only accepted deliveries', () => {
+    it('counts a recipient whose delivery failed in `failed`, never in `recipients`', async () => {
+        const d = await door({
+            inbox: (real) => ({
+                id: real.id,
+                send: (ctx, delivery) => (delivery.recipient === 'u_no_role'
+                    ? Promise.resolve({ ok: false, error: 'the inbox row could not be written' })
+                    : real.send(ctx, delivery)),
+            }),
+        });
+        const answer = await d.call({ bearer: 'admin_a', body: { ...MESSAGE, recipients: ['u_member', 'u_no_role'] } });
+        expect(answer.status).toBe(200);
+        expect(answer.body.data).toMatchObject({ recipients: 1, delivered: 1, failed: 1 });
+        expect((await d.inbox()).map((r) => r.user_id)).toEqual(['u_member']);
+    });
+
+    it('answers 503 SERVICE_UNAVAILABLE, never a 200, when this host has no inbox channel', async () => {
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const d = await door({ inbox: null });
+        const answer = await d.call({ bearer: 'admin_a', body: { ...MESSAGE, recipients: ['u_member', 'u_no_role'] } });
+        expect(envelope(answer)).toEqual(['SERVICE_UNAVAILABLE', 503]);
+        expect(String(answer.body.error.message)).toContain('No one received this message.');
+        // The delivery errors go to the fault log, never onto the wire.
+        expect(String(answer.body.error.message)).not.toContain('not registered');
+        expect(answer.body.data).toBeUndefined();
+        expect(d.emit).toHaveBeenCalledTimes(1);
+        expect(await d.inbox()).toEqual([]);
+        error.mockRestore();
+    });
+
+    it("answers 503 SERVICE_UNAVAILABLE naming the reason when the inbox is unavailable in the sender's organization", async () => {
+        const d = await door({
+            inbox: (real) => ({ id: real.id, send: real.send.bind(real), isAvailable: () => ({ available: false, reason: 'transport_not_configured' }) }),
+        });
+        const answer = await d.call({ bearer: 'admin_a', body: { ...MESSAGE, everyone: true } });
+        expect(envelope(answer)).toEqual(['SERVICE_UNAVAILABLE', 503]);
+        expect(String(answer.body.error.message)).toContain('inbox: transport_not_configured');
+        expect(await d.inbox()).toEqual([]);
+    });
+
+    it("answers 503 SERVICE_UNAVAILABLE, never a 200 with 0 recipients, when everyone's member lookup fails", async () => {
+        const d = await door({ memberReadFails: true });
+        const answer = await d.call({ bearer: 'admin_a', body: { ...MESSAGE, everyone: true } });
+        expect(envelope(answer)).toEqual(['SERVICE_UNAVAILABLE', 503]);
+        expect(String(answer.body.error.message)).toContain('could not be read');
+        expect(d.emit).toHaveBeenCalledTimes(1);
+        expect(await d.inbox()).toEqual([]);
+    });
+
+    it('answers 409 RESOURCE_CONFLICT when every picked member turned the topic off', async () => {
+        const d = await door();
+        for (const user of ['u_member', 'u_no_role']) {
+            await d.ql.insert('sys_notification_preference', {
+                id: `pref_${user}`, user_id: user, organization_id: 'org_a', topic: IN_APP_MESSAGE_TOPIC, channel: 'inbox', enabled: false,
+            }, SYSTEM);
+        }
+        const answer = await d.call({ bearer: 'admin_a', body: { ...MESSAGE, recipients: ['u_member', 'u_no_role'] } });
+        expect(envelope(answer)).toEqual(['RESOURCE_CONFLICT', 409]);
+        expect(String(answer.body.error.message)).toContain('turned off');
+        expect(await d.inbox()).toEqual([]);
+    });
+});
+
+/** A data engine that knows one API key, and records the client facts its use stamp runs with. */
+function keyEngine(key: string, owner: string, stamps: unknown[]) {
+    const keyHash = hashApiKey(key);
+    return {
+        find: async (object: string, q: any = {}) =>
+            object === 'sys_api_key' && q?.where?.key === keyHash
+                ? [{ id: 'key_in_app', key: keyHash, user_id: owner, revoked: false, scopes: '[]', expires_at: '2999-01-01T00:00:00Z' }]
+                : object === 'sys_user' && (q?.where?.id === owner || q?.where?.id?.$in?.includes?.(owner))
+                    ? [{ id: owner }]
+                    : [],
+        findOne: async () => null,
+        update: async () => {
+            stamps.push(currentCredentialUseClient() ?? null);
+            return {};
+        },
+    };
+}
+
+/**
+ * The in-app door hands where the request came from to the key's use stamp,
+ * through the shared caller module, as the preference options door does: the
+ * transport's peer and the headers go to the auth service's trust rule, and the
+ * address it establishes is what the `credential_use` row records, with the
+ * user agent. The door reads no forwarded header itself.
+ */
+describe('the in-app message door — an API key hands its client facts to the key\'s use stamp', () => {
+    it('the stamp runs with the address the trust rule established from the peer, and the user agent', async () => {
+        const stamps: unknown[] = [];
+        const handed: Array<{ headers?: Record<string, unknown>; remoteAddress?: string }> = [];
+        const KEY = 'osk_in_app_message_door';
+        const d = await door({
+            resolveCaller: (req) => resolveMessagingCaller(req, {
+                getEngine: () => keyEngine(KEY, 'u_key_owner', stamps),
+                getAuth: () => ({
+                    api: { getSession: async () => null },
+                    resolveClientAddress: (transport: { headers?: Record<string, unknown>; remoteAddress?: string }) => {
+                        handed.push(transport);
+                        return '203.0.113.7';
+                    },
+                }) as never,
+                tenancy: undefined,
+            }),
+        });
+        const handler = d.http.post.mock.calls[0][1] as (req: unknown, res: unknown) => Promise<void>;
+        const answer: { status: number; body: any } = { status: 0, body: undefined };
+        const res = {
+            status: (code: number) => { answer.status = code; return res; },
+            json: (body: unknown) => { answer.body = body; },
+            header: () => res,
+            send: () => undefined,
+        };
+        await handler(
+            {
+                params: {},
+                query: {},
+                headers: { 'user-agent': 'ci-agent/3.1', 'x-forwarded-for': '198.51.100.9', 'x-api-key': KEY },
+                remoteAddress: '10.0.0.5',
+                method: 'POST',
+                path: IN_APP_MESSAGE_ROUTE,
+                body: { ...MESSAGE, everyone: true },
+            },
+            res,
+        );
+        expect(handed).toHaveLength(1);
+        expect(handed[0].remoteAddress).toBe('10.0.0.5');
+        expect(handed[0].headers?.['x-forwarded-for'], 'handed over raw: the auth service decides whether it counts').toBe('198.51.100.9');
+        expect(stamps).toEqual([{ ipAddress: '203.0.113.7', userAgent: 'ci-agent/3.1' }]);
+        // The key admitted its owner, who holds no `setup.write` here: refused, nothing sent.
+        expect(envelope(answer)).toEqual(['PERMISSION_DENIED', 403]);
+        expect(d.emit).not.toHaveBeenCalled();
     });
 });

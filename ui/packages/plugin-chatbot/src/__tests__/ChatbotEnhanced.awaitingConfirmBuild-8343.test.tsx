@@ -128,7 +128,9 @@ describe('ChatbotEnhanced — apply_blueprint that only asked for confirmation (
     expect(screen.queryByTestId('proposed-plan-approve')).not.toBeInTheDocument();
   });
 
-  it('collapses to Built while the real build is still running (no result yet)', () => {
+  // objectstack#32984 — running is not built: the card says 正在搭建… while
+  // the turn is live, and still offers no second Build it (#432).
+  it('reads Building (no button) while the real build is still running (no result yet)', () => {
     const messages = uiMessagesToChatMessages([
       {
         id: 'a1',
@@ -150,11 +152,12 @@ describe('ChatbotEnhanced — apply_blueprint that only asked for confirmation (
         ],
       },
     ]);
-    render(<ChatbotEnhanced messages={messages} onSendMessage={vi.fn()} />);
+    render(<ChatbotEnhanced messages={messages} onSendMessage={vi.fn()} isLoading />);
 
-    // An in-flight build is a build: the plan card must not offer a second
-    // "Build it" that would re-trigger it.
-    expect(screen.getByTestId('proposed-plan-built')).toBeInTheDocument();
+    // An in-flight build must not be offered a second "Build it" that would
+    // re-trigger it — and it is not 已搭建 either: nothing is built yet.
+    expect(screen.getByTestId('proposed-plan-building')).toBeInTheDocument();
+    expect(screen.queryByTestId('proposed-plan-built')).not.toBeInTheDocument();
     expect(screen.queryByTestId('proposed-plan-approve')).not.toBeInTheDocument();
   });
 });

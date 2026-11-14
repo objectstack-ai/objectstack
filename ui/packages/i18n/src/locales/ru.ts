@@ -132,6 +132,7 @@ const ru = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "Показаны первые {{shown}} из {{total}} записей. Сузьте фильтр.",
     rowCeilingNoteUnknownTotal: "Показаны первые {{shown}} записей. Сузьте фильтр.",
+    ungroupedSection: "Прочее",
   },
   actions: {
     decisionOutput: {
@@ -2873,6 +2874,10 @@ const ru = {
         directSignInIncomplete: "Вход не завершён: вы вернулись после единого входа, но не вошли в систему. Убедитесь, что этот браузер разрешает файлы cookie для этого сайта, и повторите попытку.",
         directSignInUnavailable: "Не удалось начать единый вход в эту систему. Попросите администратора проверить, какую службу входа она использует.",
         directSignInRateLimited: "Только что из этой сети было начато слишком много входов. Подождите несколько секунд и повторите попытку.",
+        ssoAccessDenied: "У учётной записи, с которой вы вошли, нет доступа к этой среде. Войдите с учётной записью, у которой есть доступ, или попросите администратора организации этой среды добавить вас в участники.",
+        ssoSwitchAccount: "Сменить учётную запись",
+        ssoBackToConsole: "Вернуться в консоль",
+        ssoSwitchAccountHint: "«Сменить учётную запись» открывает вашу службу входа в новой вкладке и выполняет там выход. Затем снова войдите здесь с учётной записью, у которой есть доступ.",
         twoFactorInvalidCode: "Неверный код. Проверьте приложение-аутентификатор и попробуйте ещё раз.",
         twoFactorInvalidBackupCode: "Резервный код неверен или уже использован.",
         twoFactorTooManyAttempts: "Слишком много неверных кодов. Войдите с паролем ещё раз.",
@@ -4146,6 +4151,11 @@ const ru = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Отправить сообщение',
     scrollToBottom: 'Перейти к последнему сообщению',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "Отправится, когда закончится текущий ответ",
+      queuedCancel: "Отмена",
+    },
     answer: {
       showFull: 'Показать ответ полностью',
       collapse: 'Свернуть',
@@ -4247,6 +4257,9 @@ const ru = {
       countSeedData: "демоданные",
       extendTarget: "Добавление в существующее приложение: {{app}}",
       awaitingConfirm: "Ожидает подтверждения",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "Подтверждено",
+      buildFailed: "Не создано — ничего не было создано",
       iterateOrNew: {
         question: "Это пересекается с «{{app}}» — приложением, которое у вас уже есть. Продолжить улучшать его или создать отдельное приложение?",
         questionUnnamed: "Это пересекается с приложением, которое у вас уже есть. Продолжить улучшать его или создать отдельное приложение?",
@@ -4279,6 +4292,17 @@ const ru = {
       verifying: "Проверка изменения…",
       verifyStep: "шаг {{n}}",
       verified: "Изменение проверено",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "Нужно исправить: {{count}}",
+      issuesSummary: "Часть этой сборки нужно исправить, прежде чем ею можно будет пользоваться. Ответьте «исправь проблемы», и ассистент всё починит.",
+      warningsSummary: "Приложение собрано, но несколько моментов стоит проверить. Спросите ассистента, какие именно, если хотите его улучшить.",
+      issuesDetails: "Технические подробности",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "{{count}} требуют внимания",
+      needsAttention_one: "{{count}} требует внимания",
+      needsAttention_few: "{{count}} требуют внимания",
+      needsAttention_many: "{{count}} требуют внимания",
+      needsAttention_other: "{{count}} требуют внимания",
       unknownPhase: "Неизвестный этап сборки",
       nextStepsLead: "Дальше можно сказать: {{steps}}",
       nextStepQuote: "«{{step}}»",
@@ -4649,6 +4673,11 @@ const ru = {
     daysAgo_other: '{{count}} дн назад',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "Записи появятся здесь после публикации",
+      message: "Вы просматриваете ещё не опубликованный объект, поэтому в нём нет записей. Опубликуйте его, чтобы добавлять записи или загрузить примеры данных.",
+    },
     empty: {
       loadFailedTitle: 'Не удалось загрузить предпросмотр черновика',
       loadFailedDescription: 'Не удалось прочитать слой черновика. Повторите попытку или проверьте соединение.',
