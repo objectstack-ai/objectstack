@@ -630,15 +630,41 @@ function buildPlatformStampedIndex(objects: AnyRec[]): Map<string, Set<string>> 
 
 /**
  * [#33246] The null-guard verdicts the door leaves out: an ORDERING comparison
- * (`<`, `<=`, `>`, `>=`) whose operand is a platform-stamped column, which a
- * stored row never holds `null` in. An arithmetic operand (`+`, `-`, `*`,
- * `/`, `%`) keeps its verdict: at a record-triggered flow's `record.` read the
- * null guard is the only refusal date arithmetic on the column meets (the
- * flattened site type-checks only the bare spelling).
+ * (`<`, `<=`, `>`, `>=`) whose operand is a platform-stamped column of the
+ * CURRENT row, spelled bare (a record-triggered flow's flattened trigger
+ * record) or `record.<column>`, which a stored row never holds `null` in.
+ * Every other finding keeps its verdict:
+ *
+ * - an arithmetic operand (`+`, `-`, `*`, `/`, `%`): at a record-triggered
+ *   flow's `record.` read the null guard is the only refusal date arithmetic
+ *   on the column meets (the flattened site type-checks only the bare
+ *   spelling);
+ * - a `previous.<column>` operand: an insert binds `previous` itself to
+ *   `null`, so the read faults there whatever the column holds, and the
+ *   finding's message names the full guard (`PREVIOUS_GUARD_CLAUSE`).
  */
 const STAMPED_COMPARISON_OPERATORS: ReadonlySet<string> = new Set(['<', '<=', '>', '>=']);
 function isStampedComparisonFinding(stamped: ReadonlySet<string> | undefined, finding: NullGuardFinding): boolean {
-  return !!stamped && stamped.has(finding.field) && STAMPED_COMPARISON_OPERATORS.has(finding.operator);
+  if (!stamped || !stamped.has(finding.field) || !STAMPED_COMPARISON_OPERATORS.has(finding.operator)) return false;
+  return finding.operand === finding.field || finding.operand === 'record.' + finding.field;
+}
+
+/**
+ * [#33246] The hook events on which a hook condition reads a STORED row the
+ * platform has already stamped: `record` is the stored row (overlaid with the
+ * write's payload) after the stamp on an `afterInsert`, and the prior row on
+ * an update or a delete. Not here: `beforeInsert`, which a hook can run on
+ * ahead of `sys_stamp_audit_insert` (priority 10) and read both columns as
+ * `null`, at any priority; `beforeFind` / `afterFind`, which carry no record
+ * at all. A hook keeps every stamped-column verdict unless each of its events
+ * is listed.
+ */
+const STAMPED_ROW_HOOK_EVENTS: ReadonlySet<string> = new Set([
+  'afterInsert', 'beforeUpdate', 'afterUpdate', 'beforeDelete', 'afterDelete',
+]);
+function hookReadsStampedRow(hookEvents: unknown): boolean {
+  return Array.isArray(hookEvents) && hookEvents.length > 0
+    && hookEvents.every((e) => typeof e === 'string' && STAMPED_ROW_HOOK_EVENTS.has(e));
 }
 
 function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
@@ -4381,11 +4407,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // run on every record (or never) instead of the intended subset.
   for (const hook of objectWrite ? [] : recordsOf(stack.hooks)) {
     const hookName = (hook.name as string) ?? '?';
-    // [#33246] The platform stamps `created_at` / `updated_at` in its own
-    // `beforeInsert` hook (`sys_stamp_audit_insert`, priority 10), so a
-    // `beforeInsert` hook ordered ahead of it reads both as `null`. On such a
-    // hook (any priority) the stamped columns keep their null-guard verdict.
-    const stampedComparisons = !(Array.isArray(hook.events) && hook.events.includes('beforeInsert'));
+    // [#33246] Only a hook whose every event reads a stamped stored row may
+    // leave out an ordering over `created_at` / `updated_at`
+    // ({@link hookReadsStampedRow}): not on `beforeInsert`, `beforeFind` or
+    // `afterFind`.
+    const stampedComparisons = hookReadsStampedRow(hook.events);
     if (typeof hook.object === 'string') {
       check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'hook condition' }));
       // #4763 — the third instance the issue found lived on exactly this path.

@@ -235,11 +235,17 @@ describe('flow conditions under the null-guard gate (#29026)', () => {
 // #33246 — the runtime publish door hands the rules every object as the
 // registry SERVES it: the system columns the registry injects (`created_at`,
 // `updated_at`, `owner_id`, …) are declared fields there, `required: false`
-// with no default. The two the platform stamps on every stored row
-// (`created_at`, `updated_at`) are never null, so the door's null-guard gate
-// does not judge them, as `os build` does not. The other injected columns can
-// hold null on a stored row and stay judged at the door. The type verdicts on
-// an injected column are untouched: the door keeps the served types.
+// with no default. The platform stamps two of them (`created_at`,
+// `updated_at`) on every stored row, so the door's null-guard gate leaves out
+// one shape over them, the one `os build` accepts and a stored row cannot
+// fault: an ordering comparison (`<`, `<=`, `>`, `>=`) on the CURRENT row's
+// column (bare in a flow, or `record.`), in a record-triggered flow or in a
+// hook whose every event reads a stamped stored row. Everything else keeps
+// `main`'s verdict: arithmetic over either column, a `previous.` read (null on
+// an insert), a `beforeInsert` hook (it can run before the stamp), a read-event
+// hook (no record), and the other injected columns, which can hold null on a
+// stored row. The type verdicts on an injected column are untouched: the door
+// keeps the served types.
 describe('the publish door judges a flow or hook condition over an injected system column by what a stored row holds (#33246)', () => {
   /** The trigger object as authored; `sharingModel` keeps `security-owd-unset` quiet. */
   const account = {
@@ -252,14 +258,14 @@ describe('the publish door judges a flow or hook condition over an injected syst
   const served = applyInjectedSystemColumns(account);
 
   /** A record-triggered flow with the condition at one of the three slots the gate judges. */
-  const flowAt = (slot: 'start' | 'edge' | 'branch', condition: string, objectName = 'crm_account'): Rec => ({
+  const flowAt = (slot: 'start' | 'edge' | 'branch', condition: string, objectName = 'crm_account', triggerType = 'record-after-update'): Rec => ({
     name: `at_${slot}`,
     label: 'Probe',
     type: 'autolaunched',
     nodes: [
       {
         id: 'start', type: 'start', label: 'Start',
-        config: { objectName, triggerType: 'record-after-update', ...(slot === 'start' ? { condition } : {}) },
+        config: { objectName, triggerType, ...(slot === 'start' ? { condition } : {}) },
       },
       {
         id: 'triage', type: 'decision', label: 'Triage',
@@ -372,6 +378,29 @@ describe('the publish door judges a flow or hook condition over an injected syst
     // The same condition on an `afterInsert` hook: the row is stamped by then.
     const after: Write = { type: 'hook', item: { ...hookOn('crm_account', condition), events: ['afterInsert'] }, collection: 'hooks' };
     expect(atDoor(after)).toEqual([]);
+  });
+
+  it('⭐ LIT — an ordering over `previous.updated_at` is still refused: `previous` is null on an insert', () => {
+    const condition = 'record.updated_at > previous.updated_at';
+    const cases: Write[] = [
+      { type: 'hook', item: { ...hookOn('crm_account', condition), events: ['afterInsert'] }, collection: 'hooks' },
+      { type: 'flow', item: flowAt('start', condition, 'crm_account', 'record-after-create'), collection: 'flows' },
+    ];
+    for (const write of cases) {
+      const door = atDoor(write);
+      // Only the `previous.` read: the current row's `record.updated_at` is stamped.
+      expect(door, label(write, condition)).toHaveLength(1);
+      expect(door[0]!.message, label(write, condition)).toContain('`previous.updated_at`');
+      expect(door[0]!.message, label(write, condition)).toContain('previous != null && previous.updated_at != null');
+    }
+  });
+
+  it('⭐ LIT — a hook on a read event is still judged on `created_at`: a read carries no record', () => {
+    const condition = "record.created_at > timestamp('2025-01-01T00:00:00Z')";
+    for (const events of [['beforeFind'], ['afterFind'], ['afterFind', 'afterUpdate']]) {
+      const write: Write = { type: 'hook', item: { ...hookOn('crm_account', condition), events }, collection: 'hooks' };
+      expect(atDoor(write).filter(nullGuardOn('created_at')), `${events.join(',')}: ${condition}`).toHaveLength(1);
+    }
   });
 
   it('⭐ CONTROL — `created_at` stays judged where it is not the platform\'s own definition on platform-provisioned storage: an author\'s own declaration, an `external` object', () => {

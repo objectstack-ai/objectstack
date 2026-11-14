@@ -11,8 +11,9 @@
  * with the system columns it injects declared as `required: false` fields, so
  * the door's null-guard gate refused both, while `os build` of the same items
  * accepts them. The platform stamps `created_at` and `updated_at` on every
- * stored row; the door now leaves those two unjudged under an ordering
- * comparison, except on a `beforeInsert` hook, which can run before the stamp.
+ * stored row; the door now leaves the current row's read of either unjudged
+ * under an ordering comparison, but not a `previous.` read, nor on a
+ * `beforeInsert` hook (it can run before the stamp) or a read-event hook.
  * The injected columns a stored row can hold `null` in (`owner_id`,
  * `created_by`, …) stay judged.
  *

@@ -4474,6 +4474,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // Map / Set methods, never metadata keys; the metadata keys the index is
       // built from are read off the tabled `obj` / `def` receivers.
       'platformStampedIndex', 'stamped',
+      // [#33246] A hook's `events` value, handed whole to the stamped-row
+      // check; its keys are Array methods. The metadata read is `hook.events`,
+      // on the tabled `hook` receiver.
+      'hookEvents',
       // [#29926] The fault-outcome ledger's own site descriptor (`kind`,
       // `severity`, `triggerKind`, `sweepsTypedObject`), built at each call site from the
       // tabled receivers (`rule.severity`) — never read off metadata itself.
