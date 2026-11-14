@@ -302,6 +302,32 @@ export const TRANSITIVE_ALLOWLIST: Record<string, readonly string[]> = {
     'shared/http.zod.ts',
     'shared/suggestions.zod.ts',
   ],
+  // The closure as it stood when `automation/execution.zod.ts` (core) gained
+  // one import edge -- `data/data-engine.zod.ts`, for the drop events a flow
+  // step log carries -- that alone dragged five pointers into this index (the
+  // data engine, the Unified Query DSL's filter and query, the execution
+  // context, the access explanation) that the objectstack-automation SKILL.md
+  // does not teach. These are the transitive pointers the index already
+  // published; a new one joins by a row here, not by an import edge.
+  'objectstack-automation': [
+    'automation/api-trigger-secret-ref.zod.ts',
+    'automation/api-trigger-signature.zod.ts',
+    'automation/control-flow.zod.ts',
+    'automation/schedule-organization.zod.ts',
+    'automation/schemaless-node-config.zod.ts',
+    'data/context-tokens.zod.ts',
+    'data/date-macros.zod.ts',
+    'data/hook-body.zod.ts',
+    'kernel/metadata-protection.zod.ts',
+    'kernel/override-declaration.zod.ts',
+    'shared/expression.zod.ts',
+    'shared/identifiers.zod.ts',
+    'shared/protection.zod.ts',
+    'shared/retry-policy.zod.ts',
+    'shared/suggestions.zod.ts',
+    'shared/value-domain.zod.ts',
+    'system/job.zod.ts',
+  ],
 };
 
 /** Whether a `packages/spec/src`-relative path exists on disk; injected so the guard stays pure. */

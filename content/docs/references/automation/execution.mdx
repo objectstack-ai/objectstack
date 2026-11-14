@@ -147,6 +147,8 @@ const result = CheckpointSchema.parse(data);
 | **regionKind** | `string` | optional | Region kind the step ran in: loop-body \| parallel-branch \| try \| catch. Stays `try` / `catch` for a step inside a try/catch region nested in a loop body; the loop is reported through `iteration`. For `parallel-branch` the branch index is reported through `branch`, and the enclosing loop iteration — when the parallel node sits inside a loop body — through `iteration`. |
 | **metrics** | `{ selected?: integer; acted?: integer; unmeasuredEffect?: boolean; failures?: integer }` | optional | Records this step selected / acted on — and, for a step that delegated to a child run (`subflow`, a `map` item), the failures that child contained — as reported by the node executor |
 | **skippedBy** | `{ nodeId: string; edgeId?: string; label?: string }` | optional | The gate that closed, when `status` is `skipped` |
+| **warnings** | `string[]` | optional | Advisory warnings from the node executor. A `success` step may carry them — e.g. a write whose requested fields the data engine legally stripped — so a step that partially did not land never reads as a clean success. Absent when the executor raised none |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed' \| 'stored_expression'> }[]` | optional | The data engine's own drop events behind those warnings: which caller-supplied fields of which object the write did not store, and why. Absent when the step dropped nothing |
 
 ### Nested Shape: `ExecutionLog.summary`
 
@@ -205,6 +207,8 @@ const result = CheckpointSchema.parse(data);
 | **regionKind** | `string` | optional | Region kind the step ran in: loop-body \| parallel-branch \| try \| catch. Stays `try` / `catch` for a step inside a try/catch region nested in a loop body; the loop is reported through `iteration`. For `parallel-branch` the branch index is reported through `branch`, and the enclosing loop iteration — when the parallel node sits inside a loop body — through `iteration`. |
 | **metrics** | `{ selected?: integer; acted?: integer; unmeasuredEffect?: boolean; failures?: integer }` | optional | Records this step selected / acted on — and, for a step that delegated to a child run (`subflow`, a `map` item), the failures that child contained — as reported by the node executor |
 | **skippedBy** | `{ nodeId: string; edgeId?: string; label?: string }` | optional | The gate that closed, when `status` is `skipped` |
+| **warnings** | `string[]` | optional | Advisory warnings from the node executor. A `success` step may carry them — e.g. a write whose requested fields the data engine legally stripped — so a step that partially did not land never reads as a clean success. Absent when the executor raised none |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed' \| 'stored_expression'> }[]` | optional | The data engine's own drop events behind those warnings: which caller-supplied fields of which object the write did not store, and why. Absent when the step dropped nothing |
 
 ### Nested Shape: `ExecutionStepLog.error`
 
@@ -230,6 +234,16 @@ const result = CheckpointSchema.parse(data);
 | **nodeId** | `string` | ✅ | Node whose out-edge did not open (the gate) |
 | **edgeId** | `string` | optional | Edge whose condition evaluated false |
 | **label** | `string` | optional | Edge label, when the flow names its branches |
+
+### Nested Shape: `ExecutionStepLog.droppedFields[number]`
+
+A write-path strip event: caller-supplied fields legally dropped from the payload, or written with the engine's computed value in place of the caller's
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object the write targeted (resolved object name) |
+| **fields** | `string[]` | ✅ | Caller-supplied field names whose value the engine did not store: removed from the write payload, or (`stored_expression`) written with the computed value in place of the caller's |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key' \| 'computed' \| 'stored_expression'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, the primary-key strip of a payload id the engine ruled is not an identifier, a computed (formula) field no driver has a column for, or a stored field whose declared expression the engine computes on every write, so the caller's different value was replaced by the computed one |
 
 
 ---
