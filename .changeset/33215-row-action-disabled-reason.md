@@ -5,7 +5,7 @@
 
 fix: a row action's declared `disabled` predicate greys its inline row button, and every row surface gives its `disabledReason`
 
-Clause-②: yes (widening) — new exports `useDisabledReason`, `DisabledReasonTrigger`, `DisabledReasonMenuLabel`, `menuItemReasonAria` and the type `DisabledReason` from `@object-ui/components`, the helper the `action:*` renderers already used, now shared with `@object-ui/plugin-grid`'s row menu. Nothing that rendered before is refused.
+Clause-②: yes (widening) — new exports `useDisabledReason`, `DisabledReasonTrigger`, `DisabledReasonMenuLabel`, `menuItemReasonAria` and the type `DisabledReason` from `@object-ui/components`, the helper the `action:*` renderers already used, now shared with `@object-ui/plugin-grid`'s row menu. Nothing stops rendering; the inline row button is now disabled where its `disabled` predicate is true or faults, as the record header's button already is.
 Metadata-protocol: none
 
 An action placed on list rows (`list_item`, or `record_related` on a parent's related list) with `variant: 'primary'` renders as the row's inline button. That button ignored the action's `disabled` predicate: it stayed enabled and clickable on a row whose record made `disabled` true, while the same action in the record header rendered disabled. `ActionSchema.disabled` reads "shown but refused when it evaluates TRUE", so the row now does what the header does:
