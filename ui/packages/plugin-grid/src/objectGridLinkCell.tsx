@@ -50,6 +50,15 @@ const LINK_CELL_CLASS =
 const LINK_CELL_CLASS_WRAP = LINK_CELL_CLASS.replace('truncate', 'whitespace-normal break-words');
 
 /**
+ * The box a record-link cell keeps when its row opens nothing
+ * (objectstack#33317, {@link LinkCell}'s `opens: false`): the link class's
+ * clamp and width, without its colour, weight, underline or pointer, so the
+ * value sits where the link would and reads as the plain text it is.
+ */
+const PLAIN_CELL_CLASS = 'truncate block max-w-full';
+const PLAIN_CELL_CLASS_WRAP = PLAIN_CELL_CLASS.replace('truncate', 'whitespace-normal break-words');
+
+/**
  * A row's primary key — the value the host's record-URL builder addresses.
  * Mirrors what `useNavigationOverlay.handleClick` reads off the same row, so
  * the anchor's href and the click path can never point at different records.
@@ -109,9 +118,18 @@ export const LinkCell: React.FC<{
    * `false`) ⇒ the cell is exactly the link, as before.
    */
   trailing?: React.ReactNode;
+  /**
+   * Whether a click on the row opens anything (objectstack#33317, `ObjectGrid`'s
+   * `rowOpensRecord`). `false` ⇒ the value is drawn as plain text: no anchor,
+   * no `role="link"`, no click or key handler of its own, so a click falls
+   * through to the row. Absent / `true` ⇒ the link, as before.
+   */
+  opens?: boolean;
   children: React.ReactNode;
-}> = ({ trailing, ...link }) => {
-  const own = <RecordLink {...link} />;
+}> = ({ trailing, opens, ...link }) => {
+  const own = opens === false
+    ? <span className={link.wrap ? PLAIN_CELL_CLASS_WRAP : PLAIN_CELL_CLASS}>{link.children}</span>
+    : <RecordLink {...link} />;
   if (trailing === null || trailing === undefined || trailing === false) return own;
   // The link keeps its own one-line clamp: its box may shrink (`min-w-0`),
   // the trailing node never does.
