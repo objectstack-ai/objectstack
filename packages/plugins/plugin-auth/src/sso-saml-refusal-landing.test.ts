@@ -934,10 +934,10 @@ describe('a SAML provider keyed on a stable attribute: the app and the IdP porta
       .map((a: any) => `${a.account_id} -> ${(rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.id === a.user_id)?.email}`);
   /** The users the live sessions belong to. */
   const sessionUsers = (rp: Rp) => [...new Set((rp.engine.tables.get('sys_session') ?? []).map((s: any) => s.user_id))];
-  const keyedRp = async (opts: { issuer?: string; mapping?: Record<string, unknown> } = {}) => {
+  const keyedRp = async (opts: { issuer?: string; mapping?: Record<string, unknown>; allowJit?: boolean } = {}) => {
     const issuer = opts.issuer ?? ENTRA;
     const rp = await makeRp({
-      provider: { allowJit: true, allowIdpInitiated: true, issuer },
+      provider: { allowJit: opts.allowJit ?? true, allowIdpInitiated: true, issuer },
       samlConfig: { issuer, idpMetadata: { entityID: issuer }, ...(opts.mapping ? { mapping: opts.mapping } : {}) },
     });
     await seedAdmin(rp);
@@ -1022,6 +1022,53 @@ describe('a SAML provider keyed on a stable attribute: the app and the IdP porta
       Buffer.from(Buffer.from(posted, 'base64').toString('utf8').replace(OID, `${OID.slice(0, 8)}<!---->${OID.slice(8)}`)).toString('base64');
     admitted(await idpInitiated(rp, UPN, split, portal));
     expect(accounts(rp)).toEqual([`${OPAQUE} -> mia.chen@acme.com`]);
+  });
+
+  // An account made before the key applied: the row a SP-initiated Entra
+  // sign-in wrote under the old rule, keyed on its NameID (the UPN), for a
+  // user JIT made unverified. It is not rewritten; these three pins measure
+  // what reaches it now.
+  const seedLegacy = async (rp: Rp) => {
+    await rp.engine.insert('sys_user', { id: 'usr_legacy', email: UPN, name: 'Mia Chen', email_verified: false });
+    await rp.engine.insert('sys_account', { id: 'acc_legacy', user_id: 'usr_legacy', provider_id: PROVIDER_ID, account_id: UPN });
+  };
+
+  it('a legacy NameID-keyed account, same NameID and same email: signs in to it (found by email, then by its NameID), nothing new written', async () => {
+    const rp = await keyedRp();
+    await seedLegacy(rp);
+    admitted(await signInThroughIdp(rp, UPN, undefined, undefined, spInitiated));
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    expect(accounts(rp)).toEqual([`${UPN} -> mia.chen@acme.com`]);
+    expect(sessionUsers(rp)).toEqual(['usr_legacy']);
+  });
+
+  it('a legacy NameID-keyed account, from the other entry (another NameID): the linking rule refuses it account_not_linked, as before; nothing written', async () => {
+    const rp = await keyedRp();
+    await seedLegacy(rp);
+    const res = await idpInitiated(rp, UPN, undefined, portal);
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'account_not_linked' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    expect(accounts(rp)).toEqual([`${UPN} -> mia.chen@acme.com`]);
+  });
+
+  it('a legacy NameID-keyed account, after an email change at the IdP (same NameID): not reached; with JIT a new user is made, without JIT the sign-in is refused', async () => {
+    const renamed: IdpAs = { ...spInitiated, attributes: { ...CLAIMS, [`${C}/emailaddress`]: 'mia.wong@acme.com' } };
+
+    const jit = await keyedRp();
+    await seedLegacy(jit);
+    admitted(await signInThroughIdp(jit, 'mia.wong@acme.com', undefined, undefined, renamed));
+    expect(people(jit).sort()).toEqual(['mia.chen@acme.com (Mia Chen)', 'mia.wong@acme.com (Mia Chen)']);
+    expect(accounts(jit).sort()).toEqual([`${OID} -> mia.wong@acme.com`, `${UPN} -> mia.chen@acme.com`]);
+    expect(sessionUsers(jit)).not.toContain('usr_legacy');
+
+    const noJit = await keyedRp({ allowJit: false });
+    await seedLegacy(noJit);
+    const res = await signInThroughIdp(noJit, 'mia.wong@acme.com', undefined, undefined, renamed);
+    expect(landing(res)).toEqual({ base: FAILED, error: 'SELF_REGISTRATION_CLOSED' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(people(noJit)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    expect(accounts(noJit)).toEqual([`${UPN} -> mia.chen@acme.com`]);
   });
 
   it('CONTROL: an IdP that is not Entra and names no attribute keys on the NameID, whatever the assertion carries', async () => {
