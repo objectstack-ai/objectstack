@@ -6880,10 +6880,71 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     }
 
     const merged = mergeViewPatch(current, partial, viewName, objectName);
-    const result: any = await this.client.meta.saveItem('view', viewName, merged);
+    // A view a read-only package ships is written into that package's
+    // customization pair, declaring the override ({@link viewCustomizationHome}).
+    // Every other view is written where it always was, naming no package.
+    const home = await this.viewCustomizationHome(current, viewName);
+    const body = home ? { ...merged, overrides: home.overrides } : merged;
+    const result: any = home
+      ? await this.client.meta.saveItem('view', viewName, body, { packageId: home.packageId })
+      : await this.client.meta.saveItem('view', viewName, body);
     this.invalidateViewKeys(objectName, viewName);
     if (result && result.item) return result.item;
-    return merged;
+    return body;
+  }
+
+  /**
+   * Where {@link updateView}'s published write of a view must land: `null`
+   * for the package-less row it has always written, or the customization pair
+   * of the read-only package that ships the view, with the override
+   * declaration that write must carry.
+   *
+   * ADR-0146 D11 closes a write naming no package onto an item a read-only
+   * package ships: `PUT /meta/view/NAME` answers `403 NOT_OVERRIDABLE` and
+   * names the fix, "save it into `BASE.custom` (`?package=`), declaring
+   * `overrides: { package, basedOn }`". So a row-state edit of a shipped view
+   * (Set as Default clearing the shipped default's `isDefault`, a pin, a
+   * rename) was refused, while the write beside it in the same click still
+   * landed. This takes that fix, through the doors the server already serves:
+   *
+   * 1. The read named the shipping package (`_packageId`). No `_packageId`
+   *    means no package ships the view: written package-less, as before.
+   * 2. `GET /packages/BASE` says whether that package is read-only. A
+   *    writable package takes its changes directly (ADR-0146 D3), so its view
+   *    is written as before too; only `writable: false` routes.
+   * 3. The declaration: the one the read already carries when the view is a
+   *    customization in the pair (`overrides` naming this base, kept as it
+   *    is), else this base's served `manifest.version` as `basedOn` (D2, the
+   *    version Studio's Customize declares). A base that records no version
+   *    cannot be overridden: the write is refused here and nothing is sent.
+   * 4. The pair is the ensure door's answer
+   *    (`POST /packages/BASE/ensure-customization`, D3), which creates it on
+   *    first use and answers it unchanged after; its id is never spelled here.
+   *
+   * Every read or door refusal propagates: nothing is written when the pair
+   * cannot be had, and the caller says why.
+   */
+  private async viewCustomizationHome(
+    current: Record<string, any>,
+    viewName: string,
+  ): Promise<{ packageId: string; overrides: { package: string; basedOn: string } } | null> {
+    const base = current?._packageId;
+    if (typeof base !== 'string' || base === '') return null;
+    const shipping: any = await this.client.packages.get(base);
+    if (shipping?.writable !== false) return null;
+    const declared = current?.overrides;
+    const basedOn =
+      declared && declared.package === base && typeof declared.basedOn === 'string' && declared.basedOn
+        ? declared.basedOn
+        : shipping?.manifest?.version;
+    if (typeof basedOn !== 'string' || basedOn === '') {
+      throw new Error(
+        `updateView: view "${viewName}" ships in the read-only package "${base}", which records no version,` +
+          ' so it cannot be customized: a customization declares the version it was taken from. Nothing was written.',
+      );
+    }
+    const pair = await this.client.packages.ensureCustomization(base);
+    return { packageId: pair.packageId, overrides: { package: base, basedOn } };
   }
 
   /**

@@ -494,7 +494,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | | `os validate` | `os build` | `os lint` | runtime publish |
 |---|---|---|---|---|
 | Protocol schema (Zod) | ✓ | ✓ | — | ✓ |
-| CEL / predicate validation (ADR-0032) | ✓ | ✓ | ✓ | ✓ᶠᵃᶜʰᵒᵛᵖ |
+| CEL / predicate validation (ADR-0032) | ✓ | ✓ | ✓ | ✓ᶠᵃᶜʰᵒˣᵒᵛᵖ |
 | List-view navigation modes (ADR-0053) | ✓ | ✓ | ✓ | — |
 | Zod-valid but functionally inert declarations — a `summary` with no operations (ADR-0078), a managed object advertising an API method its affordances refuse (#7521) | ✓ | ✓ | ✓ | ✓ᵒ |
 | Retired object title template — an object that declares `titleFormat`, retired by ADR-0079 for `nameField` (`title-format-retired`, #29007) | ✓ | ✓ | ✓ | ✓ᵒ |
@@ -606,7 +606,10 @@ located at the entry (`objectExtensions[0].fields.FIELD.name`). The
 `object_extension` publish door (Studio's add-field on a customization package,
 `/api/v1/meta`) runs the same rule. A field an extension adds to a `sys_*`
 object is judged too: the system-object exemption covers the platform's own
-declarations, not words an app adds.
+declarations, not words an app adds. The same door runs the build's
+field-formula pass on each computed field the written entry adds (#33072),
+against the target as served without the package's own stored extension, which
+the write replaces, and refuses with the build's rule id (`expression-invalid`).
 
 **Declared enforcement that cannot run** is two rows for the mirror-image
 reason, and #4716 is where it split. That heading covers four rule ids, and
