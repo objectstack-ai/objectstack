@@ -774,12 +774,11 @@ export default defineHook({
       const r = Object.assign({}, ctx.previous, ctx.input); // update: stored row under the patch
       const off = ['rejected', 'cancelled'];
       if (!r.owner_id || !r.start_at || !r.end_at || off.includes(r.status)) return;
-      const day = (v) => String(v).slice(0, 10); // the day a date field stores, however it was written
       const where = {
         owner_id: r.owner_id,
         status: { $nin: off },  // fail closed: a new status counts until listed here
-        start_at: DATE_ONLY ? { $lte: day(r.end_at) } : { $lt: r.end_at },  // datetime is half-open:
-        end_at: DATE_ONLY ? { $gte: day(r.start_at) } : { $gt: r.start_at }, // 18:00 end, 18:00 start is no overlap
+        start_at: DATE_ONLY ? { $lte: r.end_at } : { $lt: r.end_at },  // datetime is half-open:
+        end_at: DATE_ONLY ? { $gte: r.start_at } : { $gt: r.start_at }, // 18:00 end, 18:00 start is no overlap
       };
       if (ctx.previous) where.id = { $ne: ctx.previous.id }; // not the record itself
       if (await ctx.api.object(ctx.object).count({ where }) > 0)
