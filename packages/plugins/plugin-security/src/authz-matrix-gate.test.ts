@@ -771,15 +771,22 @@ describe('ADR-0099 P0 — probe vs carried-rung equivalence (#3211 M1)', () => {
       const h = makeHarness({
         ...OBJECTS.task,
         orgScoping: true,
-        findOneImpl: (q: any) => (q?.where?.$and ? null : { id: 'r1' }),
+        // [#33051] The stamp rides the operation's own envelope, handed on at
+        // `next()`, so the update must reach it: its pre-image re-read answers
+        // a row `portal_rows` and the owner check admit, whatever row predicate
+        // the gate composes.
+        findOneImpl: () => ({ id: 'r1', status: 'portal', organization_id: 'org-1', created_by: 'x1' }),
       });
       await plugin.init(h.ctx); await plugin.start(h.ctx);
       const context = { ...roleCtx };
       const opCtx: any = operation === 'find'
         ? { object: 'task', operation, ast: { where: undefined }, context }
-        : { object: 'task', operation, data: { id: 'r1', name: 'x' }, options: { where: { id: 'r1' } }, context };
-      try { await h.run(opCtx); } catch { /* the stamp is made before any refusal */ }
-      return { read: context.__externalReadGrant, write: context.__externalWriteGrant };
+        : { object: 'task', operation, data: { id: 'r1', name: 'x', status: 'portal' }, options: { where: { id: 'r1' } }, context };
+      try { await h.run(opCtx); } catch { /* a refusal before `next()` hands nothing on */ }
+      // [#33051] Handed on the OPERATION's own envelope; the caller's is never written.
+      expect(context.__externalReadGrant).toBe(roleCtx.__externalReadGrant);
+      expect(context.__externalWriteGrant).toBe(roleCtx.__externalWriteGrant);
+      return { read: opCtx.context.__externalReadGrant, write: opCtx.context.__externalWriteGrant };
     };
 
     // A stamp names the object it was resolved for, so a nested operation on
