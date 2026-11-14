@@ -429,7 +429,10 @@ const RowActionMenuItem: React.FC<{
       {/* Resolved from the shared icon seam, not a component created during render. */}
       {/* eslint-disable-next-line react-hooks/static-components */}
       {ActionIcon && <ActionIcon className="mr-2 h-4 w-4" />}
-      <DisabledReasonMenuLabel reason={disabledReason}>{def.label ?? formatActionLabel(def.name)}</DisabledReasonMenuLabel>
+      {/* An item with no reason keeps its bare label, as before. */}
+      {disabledReason
+        ? <DisabledReasonMenuLabel reason={disabledReason}>{def.label ?? formatActionLabel(def.name)}</DisabledReasonMenuLabel>
+        : def.label ?? formatActionLabel(def.name)}
     </DropdownMenuItem>
   );
 };

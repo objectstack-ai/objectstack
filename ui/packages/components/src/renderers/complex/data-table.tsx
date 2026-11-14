@@ -681,7 +681,10 @@ export const DataTableRowActionItem: React.FC<{
       {/* Dynamic icon resolution from Lucide, not component creation during render */}
       {/* eslint-disable-next-line react-hooks/static-components */}
       {ActionIcon && <ActionIcon className="mr-2 h-4 w-4" />}
-      <DisabledReasonMenuLabel reason={disabledReason}>{action.label || action.name}</DisabledReasonMenuLabel>
+      {/* An item with no reason keeps its bare label, as before. */}
+      {disabledReason
+        ? <DisabledReasonMenuLabel reason={disabledReason}>{action.label || action.name}</DisabledReasonMenuLabel>
+        : action.label || action.name}
     </DropdownMenuItem>
   );
 };
