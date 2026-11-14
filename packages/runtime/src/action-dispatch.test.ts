@@ -483,12 +483,29 @@ describe('dispatchAction on a multi-kernel host runs on the environment\'s own k
 describe('a same-origin api action on a hosted environment kernel forwards as the REST door forwards it', () => {
     const ENV_T = 'env_t';
     const TENANT_HOST = 'acme.example.test';
+    /** The host's shared origin: no environment is bound to it, so only a scoped URL places a request. */
+    const SHARED_HOST = 'shared.example.test';
     const SESSION = 'os.session=member';
     const probe = { name: 'probe_api', label: 'Probe', type: 'api', target: '/api/v1/probe/echo', method: 'POST', ai: EXPOSED };
     const auth = { api: { getSession: async () => ({ user: { id: MEMBER_EC.userId } }) } };
 
     function hostedEnvironment() {
-        const env = makeRig([probe], { services: { auth } });
+        // The environment's MCP runtime: one `run_action` call over the
+        // dispatcher's real bridge, its answer (or the throw, read as the MCP
+        // tool reads it) written back as JSON.
+        const mcp = {
+            handleHttpRequest: async (_req: Request, opts: { bridge: any }) => {
+                let answer: unknown;
+                try {
+                    answer = { ok: true, result: await opts.bridge.runAction(probe.name, { objectName: OBJECT }) };
+                } catch (err) {
+                    const read = actionsDoorAnswerOf(err, OBJECT);
+                    answer = { ok: false, status: read.status, code: read.code };
+                }
+                return new Response(JSON.stringify(answer), { status: 200, headers: { 'content-type': 'application/json' } });
+            },
+        };
+        const env = makeRig([probe], { services: { auth, mcp } });
         const place = (ctx: any) => {
             const headers = ctx.request?.headers ?? {};
             const named = headers.host === TENANT_HOST || headers['x-environment-id'] === ENV_T || ctx.urlEnvironmentId === ENV_T;
@@ -517,8 +534,56 @@ describe('a same-origin api action on a hosted environment kernel forwards as th
         const viaHost = (kernel: unknown, call: Partial<ActionDispatchRequest> = {}) => dispatchAction(kernel as any, {
             executionContext: MEMBER_EC as any, objectName: OBJECT, actionName: probe.name, credentialHeaders: { cookie: SESSION }, ...call,
         });
-        return { env, host, forwards, viaRest, viaHost };
+        /**
+         * A request on the host's SHARED origin (no hostname binding), placed
+         * only by its scoped URL `/environments/:env/…`, through the real
+         * `dispatch()`: the REST action route, or the MCP endpoint's `run_action`.
+         */
+        const viaScoped = async (route: string, headers: Record<string, string> = {}) => ((await new HttpDispatcher(host.kernel).dispatch(
+            'POST', `/environments/${ENV_T}${route}`, {}, {},
+            { request: { method: 'POST', url: `/api/v1/environments/${ENV_T}${route}`, headers: { host: SHARED_HOST, cookie: SESSION, ...headers } } } as any,
+        )) as any).response as { status: number; body: any };
+        return { env, host, forwards, viaRest, viaHost, viaScoped };
     }
+
+    // [#32887] The REST and MCP doors run the api arm on the dispatch request
+    // itself: on a shared origin a request placed only by its scoped URL
+    // carried no routing identity into its forward (no bound `Host`, no
+    // environment header), so the raw app placed the forward nowhere and the
+    // target answered the member 401.
+    it('a REST call placed only by its scoped URL forwards into the environment it was placed in', async () => {
+        const h = hostedEnvironment();
+
+        const answer = await h.viaScoped(`/actions/${OBJECT}/${probe.name}`);
+
+        expect({ status: answer.status, data: answer.body?.data }).toEqual({ status: 200, data: { echoed: {} } });
+        expect(h.forwards.map((f) => ({ url: f.url, placed: f.placed, environment: f.headers['x-environment-id'] })))
+            .toEqual([{ url: `http://${SHARED_HOST}${probe.target}`, placed: true, environment: ENV_T }]);
+        expect(h.env.rows.map((r) => r.outcome)).toEqual(['succeeded']);
+    });
+
+    it('an MCP `run_action` placed only by its scoped URL forwards into the environment it was placed in', async () => {
+        const h = hostedEnvironment();
+
+        const answer = await h.viaScoped('/mcp');
+
+        expect({ status: answer.status, body: answer.body }).toEqual({ status: 200, body: { ok: true, result: { echoed: {} } } });
+        expect(h.forwards.map((f) => ({ url: f.url, placed: f.placed, environment: f.headers['x-environment-id'] })))
+            .toEqual([{ url: `http://${SHARED_HOST}${probe.target}`, placed: true, environment: ENV_T }]);
+    });
+
+    it('the scoped forward names the environment the request was placed in, never the caller\'s environment header', async () => {
+        const h = hostedEnvironment();
+
+        // The rig's resolver places by the bound hostname, then the header,
+        // then the scoped URL: a header naming another environment is not one
+        // it places, so the URL places the call and the forward names ENV_T.
+        const answer = await h.viaScoped(`/actions/${OBJECT}/${probe.name}`, { 'x-environment-id': 'env_elsewhere' });
+
+        expect(answer.status).toBe(200);
+        expect(h.forwards.map((f) => ({ placed: f.placed, environment: f.headers['x-environment-id'] })))
+            .toEqual([{ placed: true, environment: ENV_T }]);
+    });
 
     it('a call naming the environment on the host kernel forwards into that environment and answers what the REST door answers, with its invocation row', async () => {
         const h = hostedEnvironment();
