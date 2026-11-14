@@ -143,6 +143,17 @@ function ceremonyCommand(opts: OrganizationOwnershipBootGuardOptions): string {
 }
 
 /**
+ * The apply the refusal names, complete: the reviewed plan, the backup
+ * acknowledgement, and `--out REPORT`. Without `--out` the apply writes its
+ * report into the directory the operator ran it from, an application tree
+ * as often as not; the plan step already names its file (`--out PLAN`), and
+ * the apply names its own the same way.
+ */
+function applyCommand(ceremony: string): string {
+  return `${ceremony} --apply --plan-file PLAN --backup-taken --out REPORT`;
+}
+
+/**
  * What a shell running a printed command without `OS_DATABASE_AUTH_TOKEN`
  * says, and stops at, when the boot's libSQL auth token came from
  * `--database-auth-token` (#31547): the commands read the token from that
@@ -423,7 +434,7 @@ export function organizationOwnershipRefusalMessage(
   const ceremony = ceremonyCommand(opts);
   const run =
     `Run '${ceremony} --out PLAN' to write and review its plan, take a backup, then run ` +
-    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}${databaseNote(opts)}${authTokenNote(opts)}`;
+    `'${applyCommand(ceremony)}', and start again.${secretNote(opts)}${databaseNote(opts)}${authTokenNote(opts)}`;
   const columns = tables.length > 0
     ? ` ${tables.join(', ')} still carr${tables.length === 1 ? 'ies' : 'y'} a physical organization_id column its ` +
       'object no longer declares.'
@@ -455,7 +466,7 @@ export function organizationOwnershipRefusalMessage(
     `'${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') is not verified, so the post-check still found rows the ceremony has ` +
     `not carried.${columns} The server refuses to start rather than serve rows of an organization-owned object with ` +
     `no organization. Resolve what the apply report names, then run '${ceremony} --out PLAN' again, review it, run ` +
-    `'${ceremony} --apply --plan-file PLAN --backup-taken', and start again.${secretNote(opts)}${databaseNote(opts)}${authTokenNote(opts)}`
+    `'${applyCommand(ceremony)}', and start again.${secretNote(opts)}${databaseNote(opts)}${authTokenNote(opts)}`
   );
 }
 
@@ -697,7 +708,7 @@ export async function assertOrganizationOwnershipMigrated(
       `The server refuses to start: it could not read whether this database is still in an earlier organization-` +
         `ownership shape (${error instanceof Error ? error.message : String(error)}), and an unread answer is never ` +
         `taken for a migrated database. Fix the read, or run the ceremony ('${ceremony} --out PLAN', then ` +
-        `'${ceremony} --apply --plan-file PLAN --backup-taken'), then start again.`,
+        `'${applyCommand(ceremony)}'), then start again.`,
       [],
     );
   }
@@ -722,7 +733,7 @@ export async function assertOrganizationOwnershipMigrated(
           `marker (sys_migration '${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') could not be written ` +
           `(${error instanceof Error ? error.message : String(error)}). Without it the next boot would take this ` +
           `store for a database an earlier release created. Fix the write and start again, or run the ceremony ` +
-          `('${ceremony} --out PLAN', then '${ceremony} --apply --plan-file PLAN --backup-taken').`,
+          `('${ceremony} --out PLAN', then '${applyCommand(ceremony)}').`,
         [],
       );
     }

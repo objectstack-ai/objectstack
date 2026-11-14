@@ -116,13 +116,19 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'domain', label: 'Email Domain', type: 'text', required: true, helpText: 'Users with this email domain are routed to this IdP, e.g. acme.com.' },
         { name: 'clientId', label: 'Client ID', type: 'text', required: true, helpText: 'OAuth client ID issued by the IdP for this system.' },
         { name: 'clientSecret', label: 'Client Secret', type: 'password', required: true, helpText: 'OAuth client secret (stored encrypted by better-auth).' },
-        // The two endpoints a registration can name explicitly (#32297). The bridge
-        // passes each under the same name into `oidcConfig`, and an endpoint the
+        // The endpoints a registration can name explicitly (#32297, #33395): the
+        // five members of plugin-auth `OIDC_NAMED_ENDPOINTS`. The bridge passes
+        // each under the same name into `oidcConfig`, and an endpoint the
         // registration names is trusted for that registration (plugin-auth
-        // `AuthManager.ssoDiscoveryTrustedOrigins` reads the issuer, the discovery
-        // URL and the userinfo URL alike), so both help texts say so: it is the
-        // remedy the refusal of an untrusted discovery endpoint names.
+        // `AuthManager.ssoDiscoveryTrustedOrigins` reads the issuer and every
+        // named endpoint alike), so each help text says so: it is the remedy the
+        // refusal of an untrusted discovery endpoint names. An IdP whose token,
+        // key or userinfo endpoint sits on another host than its issuer (Google)
+        // registers from this form only when each of them is named.
         { name: 'discoveryEndpoint', label: 'Discovery URL', type: 'url', required: false, helpText: 'Optional. OIDC discovery document URL (https). Leave blank to derive `<issuer>/.well-known/openid-configuration`. An endpoint named here is trusted for this provider.' },
+        { name: 'authorizationEndpoint', label: 'Authorization URL', type: 'url', required: false, helpText: 'Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust.' },
+        { name: 'tokenEndpoint', label: 'Token URL', type: 'url', required: false, helpText: 'Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token' },
+        { name: 'jwksEndpoint', label: 'JWKS URL', type: 'url', required: false, helpText: 'Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs' },
         { name: 'userInfoEndpoint', label: 'Userinfo URL', type: 'url', required: false, helpText: 'Optional. OIDC userinfo endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a userinfo host the server does not trust.' },
         // The OIDC userinfo opt-out, stored as the provider's `skip_user_info`
         // (plugin-auth `sso-sign-in-options.ts`): claims come from the verified
