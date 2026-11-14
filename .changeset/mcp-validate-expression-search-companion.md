@@ -1,6 +1,6 @@
 ---
 '@objectstack/mcp': patch
-'@objectstack/spec': minor
+'@objectstack/spec': patch
 '@objectstack/objectql': patch
 ---
 
