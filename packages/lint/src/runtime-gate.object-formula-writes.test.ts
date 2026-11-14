@@ -598,3 +598,132 @@ describe('#33154 — an extension\'s validation rules are judged at the build an
     expect(expressionFindings(result.errors).map((f) => f.where)).toEqual(["object 'fx_ticket' · validation 'own_typo'"]);
   });
 });
+
+describe('#33216 — the one-hop leaf through a lookup an extension adds is judged as one through a declared lookup', () => {
+  /** The extended object, as the door's live universe carries it: one declared lookup. */
+  const target = {
+    name: 'fx_ticket',
+    label: 'Ticket',
+    sharingModel: 'private',
+    fields: {
+      employee: { type: 'lookup', label: 'Employee', reference: 'fx_staff' },
+      amount: { type: 'number', label: 'Amount' },
+    },
+  };
+  const staff = {
+    name: 'fx_staff', label: 'Staff', sharingModel: 'private',
+    fields: { daily_hours: { type: 'number', label: 'Daily Hours' } },
+  };
+  /** The lookup the extension adds, to the same target as the declared one. */
+  const MANAGER = { manager__c: { type: 'lookup', label: 'Manager', reference: 'fx_staff' } };
+  /** A rule reading `record.REF.LEAF`, gated on the reference as the traversal check prescribes. */
+  const hopRule = (ref: string, leaf: string) => ({
+    name: 'long_day', type: 'conditional', message: 'Refused.',
+    when: `record.${ref} != null`,
+    then: { name: 'hours', type: 'script', condition: `record.${ref}.${leaf} > 12`, message: 'Refused.' },
+  });
+  const ruleExtension = (ref: string, leaf: string) =>
+    ({ extend: 'fx_ticket', fields: { ...MANAGER }, validations: [hopRule(ref, leaf)] });
+  const formulaExtension = (ref: string, leaf: string) => ({
+    extend: 'fx_ticket',
+    fields: { ...MANAGER, hours__c: { type: 'formula', label: 'Hours', expression: `record.${ref}.${leaf}` } },
+  });
+  const RULE_WHERE = "object 'fx_ticket' · objectExtensions[0] · validation rule 'long_day' then → 'hours'";
+  const FORMULA_WHERE = "object 'fx_ticket' · objectExtensions[0] · field 'hours__c' expression";
+  const gateExtension = (item: unknown, objects: unknown[] = [target, staff]) =>
+    runRuntimeAuthoringRules({ type: 'object_extension', item, context: { objects } });
+  const buildFindings = (stack: Record<string, unknown>) =>
+    runAuthoringRules('build', { normalized: stack, parsed: stack }).filter((f) => f.where.includes('objectExtensions'));
+  /** The verdict with the reference's name taken out, so a declared and an added lookup compare. */
+  const anonymous = (message: string, ref: string) => message.split(ref).join('REF');
+
+  it('⭐ LIT — a RULE reading a misspelt leaf through the added lookup is REFUSED at the door and the build, with the declared-lookup verdict', () => {
+    const item = ruleExtension('manager__c', 'daly_hours');
+    const atDoor = gateExtension(item);
+    const errs = expressionFindings(atDoor.errors);
+    expect(errs, dump(atDoor)).toHaveLength(1);
+    expect(errs[0]).toMatchObject({
+      severity: 'error',
+      where: RULE_WHERE,
+      path: 'objectExtensions[0].validations[0].then.condition',
+    });
+    expect(errs[0]!.message).toContain('daly_hours');
+    expect(errs[0]!.message).toContain('fx_staff');
+
+    // The build gives the same finding, byte for byte.
+    expect(buildFindings({ objects: [target, staff], objectExtensions: [item] })).toEqual([...atDoor.errors, ...atDoor.advisories]);
+
+    // The same misspelling through the lookup the target DECLARES gets the same verdict.
+    const declared = expressionFindings(gateExtension(ruleExtension('employee', 'daly_hours')).errors);
+    expect(declared, dump(declared)).toHaveLength(1);
+    expect(anonymous(errs[0]!.message, 'manager__c')).toBe(anonymous(declared[0]!.message, 'employee'));
+  });
+
+  it('⭐ LIT — a FORMULA an extension adds reading a misspelt leaf through the added lookup is REFUSED at the door and the build', () => {
+    const item = formulaExtension('manager__c', 'daly_hours');
+    const atDoor = gateExtension(item);
+    const errs = expressionFindings(atDoor.errors);
+    expect(errs, dump(atDoor)).toHaveLength(1);
+    expect(errs[0]).toMatchObject({ severity: 'error', where: FORMULA_WHERE });
+    expect(errs[0]!.message).toContain('daly_hours');
+    expect(buildFindings({ objects: [target, staff], objectExtensions: [item] })).toEqual([...atDoor.errors, ...atDoor.advisories]);
+
+    const declared = expressionFindings(gateExtension(formulaExtension('employee', 'daly_hours')).errors);
+    expect(declared, dump(declared)).toHaveLength(1);
+    expect(anonymous(errs[0]!.message, 'manager__c')).toBe(anonymous(declared[0]!.message, 'employee'));
+  });
+
+  it('⭐ LIT — the object\'s OWN formula reading through a lookup a package\'s extension adds is refused at the build, at the object', () => {
+    const own = { ...target, fields: { ...target.fields, hours: { type: 'formula', label: 'Hours', expression: 'record.manager__c.daly_hours' } } };
+    const stack = { objects: [own, staff], objectExtensions: [{ extend: 'fx_ticket', fields: { ...MANAGER } }] };
+    const found = validateStackExpressions(stack).filter((i) => i.severity === 'error');
+    expect(found.map((i) => i.where), dump(found)).toEqual(["object 'fx_ticket' · field 'hours' expression"]);
+    expect(found[0]!.message).toContain('daly_hours');
+
+    // CONTROL — the leaf the target declares.
+    const ok = { ...own, fields: { ...own.fields, hours: { type: 'formula', label: 'Hours', expression: 'record.manager__c.daily_hours' } } };
+    expect(validateStackExpressions({ ...stack, objects: [ok, staff] }).filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
+  it('⭐ LIT — a hop through an added lookup into a stored-metadata-body table is refused as through a declared one', () => {
+    const item = {
+      extend: 'fx_ticket',
+      fields: {
+        meta__c: { type: 'lookup', label: 'Meta', reference: 'sys_metadata' },
+        body__c: { type: 'formula', label: 'Body', expression: 'record.meta__c.metadata' },
+      },
+    };
+    const found = buildFindings({ objects: [target, staff], objectExtensions: [item] });
+    expect(found.map((f) => f.where), dump(found)).toEqual(["object 'fx_ticket' · objectExtensions[0] · field 'body__c' expression"]);
+    expect(found[0]!.message).toContain('sys_metadata');
+  });
+
+  it('⭐ CONTROL — the correct leaf through the added lookup is accepted at the door and the build, rule and formula alike', () => {
+    for (const item of [ruleExtension('manager__c', 'daily_hours'), formulaExtension('manager__c', 'daily_hours')]) {
+      const result = gateExtension(item);
+      expect(expressionFindings(result.errors), dump(result)).toEqual([]);
+      expect(buildFindings({ objects: [target, staff], objectExtensions: [item] }).filter((f) => f.severity === 'error'), dump(item)).toEqual([]);
+    }
+  });
+
+  it('a lookup two packages add at the same priority is left unjudged: which definition is served is registration order', () => {
+    const twin = { extend: 'fx_ticket', fields: { ...MANAGER } };
+    const stack = {
+      objects: [target, staff],
+      packages: [
+        { manifest: { objects: [target, staff] } },
+        { manifest: { objectExtensions: [twin] } },
+        { manifest: { objectExtensions: [ruleExtension('manager__c', 'daly_hours')] } },
+      ],
+    };
+    expect(buildFindings(stack).filter((f) => f.message.includes('daly_hours')), dump(buildFindings(stack))).toEqual([]);
+  });
+
+  it('CONTROL — the object\'s own hop through a declared lookup is unchanged, at the object save door and the build', () => {
+    const own = { ...target, validations: [hopRule('employee', 'daly_hours')] };
+    const atDoor = expressionFindings(runRuntimeAuthoringRules({ type: 'object', item: own, context: { objects: [staff] } }).errors);
+    expect(atDoor.map((f) => f.where), dump(atDoor)).toEqual(["object 'fx_ticket' · validation rule 'long_day' then → 'hours'"]);
+    expect(validateStackExpressions({ objects: [own, staff] }).filter((i) => i.severity === 'error').map((i) => i.where))
+      .toEqual(["object 'fx_ticket' · validation rule 'long_day' then → 'hours'"]);
+  });
+});

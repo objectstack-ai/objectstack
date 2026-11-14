@@ -2272,8 +2272,9 @@ export interface StackExpressionOptions {
    * build locates it. [#33154] The same walk judges each validation rule the
    * written entry adds, by the object walk's own rule pass
    * (`judgeValidationRule`), its `record.FIELD` reads resolved against the
-   * same served fields (the leaf of a hop through a reference an extension
-   * adds is not judged; see the walk), and located at the entry
+   * same served fields (#33216: and a one-hop leaf through a reference an
+   * extension adds judged as one through a declared reference), and located
+   * at the entry
    * (`object 'T' · objectExtensions[0] · validation 'N'`). On this write the
    * live objects are read without the system columns the registry injects
    * (`stripInjectedSystemColumns`), as the build reads them. The
@@ -2398,13 +2399,26 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // the walk reaches the object's fields, whichever comes first — never before
   // the walk reaches the object, so a carrier the spec cannot read is refused
   // by the pass that owned that verdict before this one existed.
+  //
+  // [#33216] Two readings, one per question. A HOP (`served`) is planned by
+  // the engine over the registered schema, so a site that serves one reads the
+  // object as served (`typedObjects`: every `objectExtensions` field folded in,
+  // a field two packages tie on left out): a reference an extension adds is
+  // refused like a declared one. The object walk's #24677 field verdict judges
+  // the object's OWN fields and stays on the declared body, so a field an
+  // extension adds is never charged to the object's location.
+  // One map holds both readings; a served reading is keyed `served:NAME` (an
+  // object name carries no `:`).
   const storedMetadataBodyReferenceIndex = new Map<string, Map<string, string>>();
-  const storedMetadataBodyReferencesFor = (objectName: string): Map<string, string> => {
-    let familyRefs = storedMetadataBodyReferenceIndex.get(objectName);
+  const storedMetadataBodyReferencesFor = (objectName: string, served = false): Map<string, string> => {
+    const key = served ? `served:${objectName}` : objectName;
+    let familyRefs = storedMetadataBodyReferenceIndex.get(key);
     if (!familyRefs) {
       familyRefs = new Map();
-      for (const obj of objects) if (obj.name === objectName) familyRefs = storedMetadataBodyReferencesOf(obj);
-      storedMetadataBodyReferenceIndex.set(objectName, familyRefs);
+      for (const obj of served ? typedObjects : objects) {
+        if (obj.name === objectName) familyRefs = storedMetadataBodyReferencesOf(obj);
+      }
+      storedMetadataBodyReferenceIndex.set(key, familyRefs);
     }
     return familyRefs;
   };
@@ -2427,7 +2441,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     if (!source) return;
     const traversals = analyzeRelationshipTraversals(source, 'record')?.traversals;
     if (!traversals || traversals.size === 0) return;
-    const familyRefs = storedMetadataBodyReferencesFor(objectName);
+    // [#33216] The hop's reference as served: one an extension adds counts.
+    const familyRefs = storedMetadataBodyReferencesFor(objectName, true);
     for (const [field, columns] of traversals) {
       const target = familyRefs.get(field);
       if (!target) continue;
@@ -2454,7 +2469,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    *
    * Judged against the target's field index — its declared fields and the
    * system columns the platform injects on it, the set the registry carries —
-   * and the primary key, which no field map carries and the loader reads. A
+   * and the primary key, which no field map carries and the loader reads.
+   *
+   * [#33216] The reference itself is read off the hopping object AS SERVED
+   * (`typedObjects`), as the engine plans the hop over the registered schema:
+   * a lookup an `objectExtensions` entry adds is judged like a declared one,
+   * and so is a leaf an extension adds to the target (`fieldIndex` is built
+   * over the served objects too). A reference two packages tie on is left
+   * out, since which definition the registry serves is registration order. A
    * target outside the stack (or the door's snapshot, which carries the live
    * registry's objects, another package's included) has no index here and is
    * not judged; a hop into the stored-metadata-body family is refused by
@@ -2471,7 +2493,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const analysis = analyzeRelationshipTraversals(source, 'record');
     const traversals = analysis?.traversals;
     if (!traversals || traversals.size === 0) return;
-    for (const obj of objects) {
+    for (const obj of typedObjects) {
       if (obj.name !== objectName) continue;
       for (const [field, def] of fieldEntries(obj)) {
         // [#24468] A reference read more than one hop deep is refused whole by
@@ -4129,12 +4151,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // over `objectsAsServed`), so a field this or a sibling extension adds
       // resolves and a field nothing serves is unknown; an undeclared target
       // is judged on what does not depend on its fields, as its fields'
-      // formulas are. Not every check reads the fold: the hop checks
-      // (`refuseUndeclaredHopField`, `storedMetadataBodyReferencesFor`) read
-      // the declared objects, so the leaf of a one-hop read through a
-      // reference an extension ADDS is not judged here (`record.manager__c.
-      // nmae` passes), while a hop through a reference the target declares
-      // is. Located at the entry (`object 'T' · objectExtensions[0] ·
+      // formulas are. [#33216] The hop checks (`refuseUndeclaredHopField`,
+      // `storedMetadataBodyReferencesFor`) read the fold too, so the leaf of
+      // a one-hop read through a reference an extension ADDS
+      // (`record.manager__c.nmae`) is refused as one through a reference the
+      // target declares is. Located at the entry (`object 'T' · objectExtensions[0] ·
       // validation 'N'`), the key path at the rule's slot under the entry
       // (`objectExtensions[0].validations[0].condition`): the door's 422
       // carries that path as is, and only a draft read's `_diagnostics`

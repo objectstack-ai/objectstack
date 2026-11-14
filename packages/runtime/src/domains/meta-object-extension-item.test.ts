@@ -548,6 +548,81 @@ describe('[#33154] the publish door judges an extension\'s validation rule as `o
     }, 60_000);
 });
 
+describe('[#33216] the publish door judges the one-hop leaf through a lookup the extension adds, as `os build` does', () => {
+    /** The lookup's target, a second object of the base. */
+    const contact = {
+        name: 'crm_contact',
+        label: 'Contact',
+        fields: { daily_hours: { name: 'daily_hours', label: 'Daily Hours', type: 'number' } },
+    };
+    const MANAGER = { manager__c: { type: 'lookup', label: 'Manager', reference: 'crm_contact' } };
+    /** A rule reading `record.manager__c.LEAF`, gated on the reference as the traversal check prescribes. */
+    const ruleBody = (leaf: string) => ({
+        extend: TARGET,
+        fields: { ...MANAGER },
+        validations: [{
+            name: 'long_day', type: 'conditional', message: 'Refused.',
+            when: 'record.manager__c != null',
+            then: { name: 'hours', type: 'script', condition: `record.manager__c.${leaf} > 12`, message: 'Refused.' },
+        }],
+    });
+    const formulaBody = (leaf: string) => ({
+        extend: TARGET,
+        fields: { ...MANAGER, hours__c: { type: 'formula', label: 'Hours', expression: `record.manager__c.${leaf}` } },
+    });
+    /** `os build`'s expression findings at the extension, over the base as authored. */
+    const atBuild = (item: unknown) => {
+        const stack = { objects: baseManifest([contact]).objects, objectExtensions: [item] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack } as any)
+            .filter((f) => f.where.includes('objectExtensions') && f.rule === 'expression-invalid')
+            .map((f) => ({ rule: f.rule, where: f.where, path: f.path }));
+    };
+    const refusedAtDoor = async (rig: Awaited<ReturnType<typeof boot>>, item: unknown) => {
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item, mode: 'draft', packageId: PAIR });
+        return rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+    };
+
+    for (const [label, body, where, path] of [
+        [
+            'a rule',
+            ruleBody,
+            "object 'crm_account' · objectExtensions[0] · validation rule 'long_day' then → 'hours'",
+            'objectExtensions[0].validations[0].then.condition',
+        ],
+        [
+            'a formula',
+            formulaBody,
+            "object 'crm_account' · objectExtensions[0] · field 'hours__c' expression",
+            "object 'crm_account' · objectExtensions[0] · field 'hours__c' expression",
+        ],
+    ] as const) {
+        it(`⭐ LIT — ${label} reading a misspelt leaf through the added lookup is refused with the build's rule id, location and path`, async () => {
+            const expected = [{ rule: 'expression-invalid', where, path }];
+            expect(atBuild(body('daly_hours'))).toEqual(expected);
+
+            const rig = await boot([contact]);
+            const err: any = await refusedAtDoor(rig, body('daly_hours'));
+            expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            const issues = (err.issues ?? []).filter((i: any) => i.rule === 'expression-invalid');
+            expect(issues.map((i: any) => ({ rule: i.rule, where: i.where, path: i.path })), JSON.stringify(err.issues)).toEqual(expected);
+            expect(issues[0].message).toContain('daly_hours');
+            expect(issues[0].message).toContain('crm_contact');
+            expect((await rig.fieldsOn()).registry).not.toContain('manager__c');
+            expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+        }, 60_000);
+
+        it(`⭐ CONTROL — ${label} reading the leaf the target declares, through the added lookup, publishes`, async () => {
+            expect(atBuild(body('daily_hours'))).toEqual([]);
+
+            const rig = await boot([contact]);
+            await rig.saveAndPublish(PAIR, body('daily_hours'));
+            expect((await rig.fieldsOn()).registry).toContain('manager__c');
+            expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+        }, 60_000);
+    }
+});
+
 describe('[ADR-0146 D10] a module\'s extension that re-declares the base\'s field beyond its display properties', () => {
     /** A writable module package that depends on the base: the account is inside its closure. */
     const MODULE = 'com.acme.module';
