@@ -4,7 +4,7 @@
 /**
  * qa-fixture — the platform checklist's four recurring fixtures, one command each.
  *
- *   node scripts/qa/qa-fixture.mjs contributor-member [--base-url URL] [--email ADDR] [--task]
+ *   node scripts/qa/qa-fixture.mjs contributor-member [--base-url URL] [--email ADDR] [--position NAME] [--task]
  *   node scripts/qa/qa-fixture.mjs walled-boot [--posture isolated|group] [--organization SLUG | --no-organization] [--port N] [--dir DIR]
  *   node scripts/qa/qa-fixture.mjs external-database [--port N] [--dir DIR]
  *   node scripts/qa/qa-fixture.mjs broken-upstream-app [--variant missing-script|config-fault] [--dir DIR]
@@ -27,11 +27,20 @@
  *   (`docs/qa/platform-checklist/areas/search.json`), steps 1–5 in order, against
  *   a RUNNING stock boot: invite, invited sign-up, the `showcase_contributor`
  *   position row, the subset proof (zero seeded invoices, INV-1003 not served)
- *   and an own-row invoice. `--task` adds one showcase_task assigned to the
- *   member (records-forms.calendar-interactions steps[2]). Prints the persona's
- *   credentials and ids.
+ *   and an own-row invoice. `--position NAME` then binds one more position by
+ *   the same `sys_user_position` POST step 3 sends, after the subset proof so a
+ *   wider position cannot fail it — `--position showcase_finance` is the
+ *   approvals persona (approvals.account-app-entry), a pending approver on the
+ *   invoice sign-off. A name the security catalog does not hold is refused by
+ *   the server, and the fixture exits 1 naming the answer. `--task` adds one
+ *   showcase_task assigned to the member (records-forms.calendar-interactions
+ *   steps[2]). Prints the persona's credentials and ids.
  * - `walled-boot` — RUNNER.md's "A walled boot is a fixture of its own": boots the
- *   showcase from this tree through `os dev` on its own port and file DB with
+ *   showcase from this tree through `os dev --no-compile --no-watch` on its own
+ *   port and file DB — so it serves the showcase's `dist/objectstack.json` as
+ *   built and neither rewrites that shared artifact nor recompiles it on a
+ *   source save (RUNNER.md, "On a shared checkout, boot with `--no-compile`";
+ *   `os dev` still compiles it when it is missing) — with
  *   `OS_TENANCY_POSTURE`, `OS_PLATFORM_OWNER_EMAIL` and
  *   `OS_AUTH_MEMBERSHIP_POLICY` exported, waits for health and the ready banner,
  *   and proves the wall took: no DEGRADED banner, and `GET /api/v1/auth/config`
@@ -190,6 +199,11 @@ async function contributorMember(flags) {
   const admin = adminOf(flags);
   const email = String(flags.email || `qa-contributor-${stamp()}@verify.test`);
   const password = freshSecret();
+  // `--position NAME` takes a value; a bare flag is an input error, refused
+  // before anything is written.
+  if (flags.position !== undefined && (flags.position === true || !String(flags.position).trim())) {
+    throw new Refusal('--position needs a position name, e.g. --position showcase_finance');
+  }
   log(`replaying search:qa-contributor-bound-member against ${base} for ${email}`);
 
   const adminToken = await signIn(base, admin.email, admin.password);
@@ -247,6 +261,26 @@ async function contributorMember(flags) {
   const ownInvoiceId = recordOf(own)?.id;
   expectStatus('step 5: member re-reads the own invoice', await call(base, 'GET', `/api/v1/data/showcase_invoice/${encodeURIComponent(ownInvoiceId)}`, { token: memberToken }), 200);
 
+  // `--position NAME`: one more position row, by the door step 3 used, bound
+  // only after the subset proof above so a wider position cannot fail step 4.
+  // The server refuses a name its security catalog does not hold, so a 201 is
+  // the binding; the admin re-read proves the row was stored as sent.
+  let extraPosition = null;
+  if (flags.position !== undefined) {
+    const name = String(flags.position).trim();
+    const bound = expectStatus(`position: bind ${name}`, await call(base, 'POST', '/api/v1/data/sys_user_position', {
+      token: adminToken, body: { user_id: userId, position: name, organization_id: organizationId },
+    }), 200, 201);
+    const rowId = recordOf(bound)?.id;
+    if (!rowId) throw new StepFailure(`position: bind ${name} answered no row id — ${bound.text.slice(0, 300)}`);
+    const row = recordOf(expectStatus(`position: admin re-reads the ${name} row`,
+      await call(base, 'GET', `/api/v1/data/sys_user_position/${encodeURIComponent(rowId)}`, { token: adminToken }), 200));
+    if (row?.position !== name || row?.user_id !== userId) {
+      throw new StepFailure(`position: the stored row reads position ${row?.position}, user_id ${row?.user_id}; expected ${name}, ${userId}`);
+    }
+    extraPosition = { position: name, rowId };
+  }
+
   // `--task`: one showcase_task assigned to the member, due in three days, for
   // records-forms.calendar-interactions steps[2] (task_own_rows selects
   // `assignee == current_user.email`, examples/app-showcase/src/security/permission-sets.ts).
@@ -272,10 +306,11 @@ async function contributorMember(flags) {
     organizationId,
     invitationId,
     positionRowId,
+    extraPosition,
     invisibleRow: { object: 'showcase_invoice', name: 'INV-1003', id: inv1003.id },
     ownInvoiceId,
     assignedTask,
-    teardown: 'discard the run\'s own file DB, or delete the sys_user_position row and the own invoice (the recipe\'s teardown)',
+    teardown: 'discard the run\'s own file DB, or delete the sys_user_position row(s) and the own invoice (the recipe\'s teardown)',
   };
 }
 
@@ -332,7 +367,13 @@ async function walledBoot(flags) {
     OS_PLATFORM_OWNER_EMAIL: admin.email,
     OS_AUTH_MEMBERSHIP_POLICY: String(flags['membership-policy'] || 'invite-only'),
   };
-  const argv = ['-C', SHOWCASE, 'exec', 'objectstack', 'dev', '--ui', '--seed-admin', '-p', String(port), '-d', `file:${join(dir, 'data.db')}`];
+  // `--no-compile --no-watch`: on a shared checkout a default `os dev` rewrites the
+  // showcase's dist/objectstack.json under every other runner and recompiles it on
+  // a source save (RUNNER.md, "On a shared checkout, boot with `--no-compile`").
+  const argv = [
+    '-C', SHOWCASE, 'exec', 'objectstack', 'dev', '--ui', '--seed-admin', '--no-compile', '--no-watch',
+    '-p', String(port), '-d', `file:${join(dir, 'data.db')}`,
+  ];
   log(`booting the showcase walled (${posture}) on :${port}, DB and log under ${dir}`);
   const out = openSync(logFile, 'a');
   const child = spawn('pnpm', argv, { env, detached: true, stdio: ['ignore', out, out] });
