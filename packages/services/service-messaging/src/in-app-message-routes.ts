@@ -64,10 +64,12 @@ import { ORGANIZATION_MEMBERS_AUDIENCE } from './recipient-resolver.js';
  *  - `everyone: true` — every member of the caller's current organization
  *    (`org:members`, resolved in that organization only), or
  *  - `recipients` — the user ids picked, at most
- *    {@link IN_APP_MESSAGE_RECIPIENTS_MAX}, each a member of the caller's
- *    current organization: a picked id that is not is refused `400` naming
- *    it, and nothing is sent. Exactly one of the two: both, or neither, is
- *    refused.
+ *    {@link IN_APP_MESSAGE_RECIPIENTS_MAX}, each at most
+ *    {@link IN_APP_MESSAGE_RECIPIENT_ID_MAX} characters (an id past it is
+ *    refused by its position in the list, never echoed) and each a member of
+ *    the caller's current organization: a picked id that is not is refused
+ *    `400` naming it, and nothing is sent. Exactly one of the two: both, or
+ *    neither, is refused.
  *  - `title` (required, at most {@link IN_APP_MESSAGE_TITLE_MAX} characters,
  *    the inbox title column's width) and `body` (required, at most
  *    {@link IN_APP_MESSAGE_BODY_MAX} characters, Markdown).
@@ -84,11 +86,40 @@ import { ORGANIZATION_MEMBERS_AUDIENCE } from './recipient-resolver.js';
  *  - **Success:** `200` with `{ notificationId, recipients, delivered,
  *    enqueued, failed }`: the event `emit()` wrote, how many people the
  *    message went to, and `emit()`'s own counts (`delivered` observed inline,
- *    `enqueued` handed to the outbox).
+ *    `enqueued` handed to the outbox, `failed` neither). `recipients` counts
+ *    a person only when at least one of their deliveries was ACCEPTED
+ *    (delivered or enqueued); a recipient whose every delivery failed is in
+ *    `failed`, never in `recipients`. Success means at least one person.
+ *  - **Nobody reached** — `emit()` returned, the event is written as the
+ *    record of the attempt, and no delivery was accepted. Never a `200`: the
+ *    Setup action reads a `200` as "Message sent". Which refusal depends on
+ *    what `emit()` reports:
+ *     - every delivery it attempted failed (no inbox channel on this host, an
+ *       outbox write that failed): `SERVICE_UNAVAILABLE` / `503`, the delivery
+ *       errors in the fault log, never on the wire;
+ *     - the inbox channel answered unavailable for this organization:
+ *       `SERVICE_UNAVAILABLE` / `503` naming its reason;
+ *     - nothing was attempted for `everyone`: the members could not be read
+ *       (the resolver degrades a failed read to none), or every member turned
+ *       the topic off. The result cannot tell the two apart, so the answer is
+ *       the one a failure owes, `SERVICE_UNAVAILABLE` / `503`, naming both;
+ *     - nothing was attempted for picked recipients: their membership was
+ *       read a step earlier and a picked id resolves to itself, so every one
+ *       of them turned the topic off — `RESOURCE_CONFLICT` / `409`.
  *  - **No messaging service or data engine on this host:**
  *    `SERVICE_UNAVAILABLE` / `503`, before anything is sent.
  *  - **A membership read or the send that throws** is a fault: `500` /
  *    `INTERNAL_ERROR` with this door's sentence and the error in the fault log.
+ *
+ * ## No send rate, by decision
+ *
+ * The door sets no per-organization or per-caller send rate. The ruling that
+ * opened it (6810324463) asked for none; what one request can cost is already
+ * bounded — the request-body limit, {@link IN_APP_MESSAGE_RECIPIENTS_MAX}
+ * picked ids, the title, body, link and per-id bounds above, and a sender who
+ * must hold `setup.write` in the organization they message. How often an
+ * administrator may message their own organization is a product decision, for
+ * a later ruling; a rate added here without one would be a guess.
  */
 
 /** The route the door is mounted at. */
@@ -123,6 +154,13 @@ export const IN_APP_MESSAGE_BODY_MAX = 10_000;
 
 /** At most this many picked recipients; beyond it, a message for everyone is the one that fits. */
 export const IN_APP_MESSAGE_RECIPIENTS_MAX = 1000;
+
+/**
+ * At most this many characters in one picked recipient id: `sys_member.user_id`
+ * is a lookup the SQL driver stores as a varchar(255), so a longer id can name
+ * no member. Bounded here because a non-member id is echoed in the refusal.
+ */
+export const IN_APP_MESSAGE_RECIPIENT_ID_MAX = 255;
 
 /** The one member of the messaging service the door calls. */
 export interface InAppMessageSender {
@@ -274,13 +312,71 @@ async function handleInAppMessage(req: IHttpRequest, res: IHttpResponse, deps: I
         sendServerFault(res, 500, 'INTERNAL_ERROR', 'The in-app message could not be sent.', err, FAULT_AT);
         return;
     }
+
+    // ⑩ The answer counts the people a delivery was ACCEPTED for, and a send
+    //    that reached nobody is never a success.
+    const reached = new Set(result.deliveries.filter((d) => d.ok).map((d) => d.recipient)).size;
+    if (reached === 0) {
+        answerNobodyReached(res, result, parsed.everyone);
+        return;
+    }
     sendOk(res, {
         notificationId: result.notificationId,
-        recipients: new Set(result.deliveries.map((d) => d.recipient)).size,
+        recipients: reached,
         delivered: result.delivered,
         enqueued: result.enqueued,
         failed: result.failed,
     });
+}
+
+/** The sentence every nobody-reached refusal ends with: the event row stands, no inbox row was written. */
+const NOBODY_RECEIVED = 'No one received this message.';
+
+/**
+ * Answer an `emit()` that accepted no delivery — see the door's docblock,
+ * "Nobody reached", for which refusal each outcome takes and why.
+ */
+function answerNobodyReached(res: IHttpResponse, result: EmitResult, everyone: boolean): void {
+    if (result.deliveries.length > 0) {
+        const errors = [...new Set(result.deliveries.map((d) => d.error ?? 'refused'))];
+        sendServerFault(
+            res,
+            503,
+            'SERVICE_UNAVAILABLE',
+            `This server could not hand the in-app message to any recipient's inbox. ${NOBODY_RECEIVED} Retry later; ` +
+                'if it persists, an operator finds the cause in the server log.',
+            new Error(`in-app message ${result.notificationId}: every delivery failed (${errors.join('; ')})`),
+            FAULT_AT,
+        );
+        return;
+    }
+    if (result.suppressed.length > 0) {
+        sendError(
+            res,
+            503,
+            'SERVICE_UNAVAILABLE',
+            `The in-app inbox is not available in your organization ` +
+                `(${result.suppressed.map((s) => `${s.channel}: ${s.reason}`).join(', ')}). ${NOBODY_RECEIVED}`,
+        );
+        return;
+    }
+    if (everyone) {
+        sendError(
+            res,
+            503,
+            'SERVICE_UNAVAILABLE',
+            'No member of your organization could be reached: its members could not be read, or every member has turned ' +
+                `off in-app messages of this kind (${IN_APP_MESSAGE_TOPIC}). ${NOBODY_RECEIVED} Retry later; if it persists, ` +
+                'an operator finds which in the server log.',
+        );
+        return;
+    }
+    sendError(
+        res,
+        409,
+        'RESOURCE_CONFLICT',
+        `Every recipient you picked has turned off in-app messages of this kind (${IN_APP_MESSAGE_TOPIC}). ${NOBODY_RECEIVED}`,
+    );
 }
 
 /**
@@ -337,6 +433,12 @@ export function parseInAppMessageBody(raw: unknown): InAppMessageRequest | strin
     if (body.recipients !== undefined && body.recipients !== null) {
         if (!Array.isArray(body.recipients) || body.recipients.some((id) => typeof id !== 'string' || id.trim() === '')) {
             return `'recipients' must be a list of user ids.${nothingSent}`;
+        }
+        // Judged by position, never echoed: the id is the thing that is too long.
+        const overlong = (body.recipients as string[]).findIndex((id) => id.trim().length > IN_APP_MESSAGE_RECIPIENT_ID_MAX);
+        if (overlong >= 0) {
+            return `'recipients' item ${overlong + 1} is ${(body.recipients as string[])[overlong].trim().length} characters long, ` +
+                `and a user id can be at most ${IN_APP_MESSAGE_RECIPIENT_ID_MAX}.${nothingSent}`;
         }
         recipients = [...new Set((body.recipients as string[]).map((id) => id.trim()))];
     }

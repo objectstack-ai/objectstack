@@ -58,7 +58,10 @@ export interface StudioItemToolsProps {
   type: string;
   /** The item's machine name. */
   name: string;
-  /** The package the item belongs to: scopes the layers read (ADR-0048). */
+  /**
+   * The package the item belongs to: scopes the layers read (ADR-0048), and
+   * the history and rollback doors' `?package=` (objectstack#32905).
+   */
   packageId?: string | null;
   /** The pillar's read-only gate: no rollback, and Source is read-only. */
   readOnly?: boolean;
@@ -256,6 +259,10 @@ function StudioItemToolsFor({
               name={name}
               client={client}
               locale={locale}
+              // The holder the layers read names (objectstack#32905): a
+              // by-package name two holders hold lists and restores this
+              // package's versions, never the name's interleaved log.
+              packageId={packageId ?? undefined}
               // Setup's gate: the rollback door asks the capability and wall
               // verdicts the save door asks, so it is offered where Save is.
               onRollback={

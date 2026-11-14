@@ -21,6 +21,7 @@ import { z } from 'zod';
  * Tracks the lifecycle of a flow execution instance.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
 export const ExecutionStatus = z.enum([
   'pending',     // Queued, not yet started
   'running',     // Currently executing
@@ -204,6 +205,17 @@ export const ExecutionStepLogSchema = lazySchema(() => z.object({
     .describe('Records this step selected / acted on — and, for a step that delegated to a child run (`subflow`, a `map` item), the failures that child contained — as reported by the node executor'),
   skippedBy: ExecutionStepSkipReasonSchema.optional()
     .describe('The gate that closed, when `status` is `skipped`'),
+  // What the node executor flagged about a step that still ran. Both members
+  // were written onto the step by the engine, persisted with the run and
+  // served verbatim by the run-history routes before this schema named them;
+  // declaring them makes the published step log say what the wire carries.
+  // `droppedFields` reuses the data engine's own strip event, so there is no
+  // second vocabulary, and it is the per-step source the run's terminal
+  // answer (`AutomationResult.droppedFields`) is folded from.
+  warnings: z.array(z.string()).optional()
+    .describe('Advisory warnings from the node executor. A `success` step may carry them — e.g. a write whose requested fields the data engine legally stripped — so a step that partially did not land never reads as a clean success. Absent when the executor raised none'),
+  droppedFields: z.array(DroppedFieldsEventSchema).optional()
+    .describe('The data engine\'s own drop events behind those warnings: which caller-supplied fields of which object the write did not store, and why. Absent when the step dropped nothing'),
 }));
 export type ExecutionStepLog = z.input<typeof ExecutionStepLogSchema>;
 

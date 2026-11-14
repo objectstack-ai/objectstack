@@ -60,7 +60,7 @@
 - 定级按北极星「Priority」1–3 条;首行 `Path: <定义项> | <清单项 id/缺项> | P<路步> | none`。
 - 定义项取北极星「What gets built」或仪器卡的车队决定;无则关;`none` 非分诊缺口。
 - 「无则关」= 首触即关 not_planned,带理由与入队三门,⛔ 不定 p3、不 hold;下行同此。
-- 所入车道队列 P0/P1 开着(= 未派发,在飞不算)时,三门皆无的 p2/p3 `tooling` 卡同样关。
+- 所入车道队列 P0/P1 未派时,三门皆无的 p2/p3 `tooling` 卡同样关;「Priority」第 3 条豁免除外。
 - 路由属分诊技术判断,⛔ 不升级哪个仓的问题;父单永不派发,`pm:epic` 卡 `pm:retriage` 即答。
 - 算涉 cloud:亦含托管面(objectos-runtime)、修复待其改动的 `Blocked-by:` cloud 卡、病因在 cloud。
 - 不算涉 cloud:修复与验收全在本仓,只在 cloud 测得或只缺其事实读数;仅引 cloud 卡作历史。

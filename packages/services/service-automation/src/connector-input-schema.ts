@@ -21,6 +21,12 @@ import type { ConnectorDescriptor } from '@objectstack/spec/integration';
 /** Where a door reads an action's declared `inputSchema` — the automation engine's descriptor list. */
 export interface ConnectorInputSchemaSource {
     getConnectorDescriptors(): ConnectorDescriptor[];
+    /**
+     * [#31699] The schema of one instance's action, by its package: the
+     * engine's (`AutomationEngine.resolveConnectorActionInputSchema`). A
+     * source without it is read through its descriptor list, by name.
+     */
+    resolveConnectorActionInputSchema?(connectorId: string, actionId: string, packageId?: string | null): unknown;
 }
 
 /** What one judgment found: the violations as one sentence, and whether any was text where a number or boolean is declared. */
@@ -46,7 +52,11 @@ export function findConnectorActionInputSchema(
     source: ConnectorInputSchemaSource,
     connectorId: string,
     actionId: string,
+    packageId?: string | null,
 ): unknown {
+    if (typeof source.resolveConnectorActionInputSchema === 'function') {
+        return source.resolveConnectorActionInputSchema(connectorId, actionId, packageId);
+    }
     return source
         .getConnectorDescriptors()
         .find((d) => d.name === connectorId)

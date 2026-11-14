@@ -127,6 +127,7 @@ const fr = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "Affichage des {{shown}} premiers enregistrements sur {{total}}. Affinez le filtre.",
     rowCeilingNoteUnknownTotal: "Affichage des {{shown}} premiers enregistrements. Affinez le filtre.",
+    ungroupedSection: "Autres",
   },
   actions: {
     decisionOutput: {
@@ -2764,6 +2765,10 @@ const fr = {
     },
     login: {
       signingIn: "Connexion en cours…",
+      directSignIn: {
+        description: "Connectez-vous avec l'authentification unique de votre organisation.",
+        retry: "Continuer avec l'authentification unique",
+      },
       ssoHandoff: "Continuer vers {{target}}",
       devAdminHint: {
         title: "Instance de développement locale",
@@ -2787,6 +2792,9 @@ const fr = {
         ssoResponseRejected: "Le service de connexion de votre organisation a envoyé une réponse que ce système n'a pas pu accepter. Demandez à votre administrateur de vérifier la configuration de l'authentification unique.",
         ssoStartFromLoginPage: "La connexion doit commencer sur la page de connexion de ce système. Saisissez ici votre adresse e-mail professionnelle et choisissez « Se connecter avec le SSO ».",
         ssoTechnicalDetails: "Détails techniques",
+        directSignInIncomplete: "La connexion n'a pas abouti : vous êtes revenu de l'authentification unique sans être connecté. Vérifiez que ce navigateur autorise les cookies pour ce site, puis réessayez.",
+        directSignInUnavailable: "L'authentification unique n'a pas pu être lancée pour ce système. Demandez à votre administrateur de vérifier le service de connexion utilisé.",
+        directSignInRateLimited: "Trop de connexions ont été lancées depuis ce réseau à l'instant. Patientez quelques secondes, puis réessayez.",
         twoFactorInvalidCode: "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
         twoFactorInvalidBackupCode: "Ce code de secours n'est pas valide ou a déjà été utilisé.",
         twoFactorTooManyAttempts: "Trop de codes incorrects. Reconnectez-vous avec votre mot de passe.",
@@ -4041,6 +4049,11 @@ const fr = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Envoyer le message',
     scrollToBottom: 'Aller au dernier message',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "Sera envoyé à la fin de la réponse en cours",
+      queuedCancel: "Annuler",
+    },
     answer: {
       showFull: 'Afficher toute la réponse',
       collapse: 'Réduire',
@@ -4138,6 +4151,9 @@ const fr = {
       countSeedData: "données d’exemple",
       extendTarget: "Ajout à l’app existante : {{app}}",
       awaitingConfirm: "En attente de confirmation",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "Confirmé",
+      buildFailed: "Non construit — rien n’a été créé",
       iterateOrNew: {
         question: "Ce plan recoupe « {{app}} », une app que vous avez déjà. Continuer à l’améliorer, ou créer une app distincte ?",
         questionUnnamed: "Ce plan recoupe une app que vous avez déjà. Continuer à améliorer cette app, ou en créer une distincte ?",
@@ -4170,6 +4186,16 @@ const fr = {
       verifying: "Vérification de la modification…",
       verifyStep: "étape {{n}}",
       verified: "Modification vérifiée",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "{{count}} à corriger",
+      issuesSummary: "Certaines parties de cette construction doivent être corrigées avant d’être utilisables. Répondez « corrige les problèmes » et l’assistant s’en chargera.",
+      warningsSummary: "L’application est construite, avec quelques points à vérifier. Demandez à l’assistant lesquels si vous voulez l’améliorer.",
+      issuesDetails: "Détails techniques",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "{{count}} nécessitent une vérification",
+      needsAttention_one: "{{count}} nécessite une vérification",
+      needsAttention_many: "{{count}} d’éléments nécessitent une vérification",
+      needsAttention_other: "{{count}} nécessitent une vérification",
       unknownPhase: "Phase de création inconnue",
       nextStepsLead: "Ensuite, vous pouvez dire : {{steps}}",
       nextStepQuote: "« {{step}} »",
@@ -4525,6 +4551,11 @@ const fr = {
     daysAgo_other: 'il y a {{count}} jours',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "Les enregistrements apparaîtront ici après la publication",
+      message: "Vous prévisualisez un objet qui n’est pas encore publié : il n’a donc aucun enregistrement. Publiez-le pour commencer à ajouter des enregistrements ou charger ses données d’exemple.",
+    },
     empty: {
       loadFailedTitle: "Échec du chargement de l'aperçu du brouillon",
       loadFailedDescription: "Impossible de lire la surcouche de brouillon. Réessayez ou vérifiez votre connexion.",

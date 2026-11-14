@@ -600,6 +600,17 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
    * objectstack#32774 — a refusal naming the name's holders (either error
    * body, read by `holderCandidatesOfError`) becomes the pick, with the users
    * not yet granted; ⛔ no holder is chosen here.
+   *
+   * objectstack#32868 — the environment's button sends the grant by the name
+   * alone. Whether that is accepted is the server's answer, never assumed
+   * here. Where the registry serves the name, the environment's own set
+   * answers it, and the grant is stored. Where the registry holds the name
+   * nowhere and the security catalog falls back to the metadata service, that
+   * store refuses a name two packages hold, read by the name alone, even
+   * beside the environment's own row (`409 ambiguous-in-environment`, naming
+   * the packages only). That refusal is shown as the next pick, in the
+   * server's words, with the users still to grant: the environment is no
+   * longer offered, and nothing is sent until a holder is chosen.
    */
   const addUsers = React.useCallback(
     async (userIds: string[], packageId: string | undefined) => {
@@ -836,13 +847,16 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
                     <X className="h-4 w-4" />
                   </Button>
                 )
-              ) : r.via.some((v) => v.kind === 'direct') ? null : (
-                // Held only through positions. A direct grant read with no
-                // `id` (objectstack#32807) gets neither a Remove nor this hint.
+              ) : r.via.some((v) => v.kind === 'position') ? (
+                // No removable grant, and a position holds the set: the hint
+                // says where to remove it. objectstack#32868 — whatever the
+                // direct grant's shape: one read with no `id`
+                // (objectstack#32807) has no Remove, so beside a position the
+                // row still says the position holds the set.
                 <span className="shrink-0 text-[10px] text-muted-foreground/70" title={c.positionHeldHint}>
                   —
                 </span>
-              )}
+              ) : null}
             </li>
           ))}
         </ul>

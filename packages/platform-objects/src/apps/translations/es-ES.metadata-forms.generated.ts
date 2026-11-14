@@ -377,6 +377,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "El propietario puede editar",
         helpText: "Activado: el propietario de una fila de detalle (su owner_id) puede actualizar esa fila por id con acceso de lectura al registro principal; todos los demás, y cada inserción, eliminación, actualización de varias filas y escritura en nombre de otro, siguen necesitando acceso de edición al registro principal. Desactivado (el predeterminado): cada escritura de un detalle necesita acceso de edición a su registro principal."
       },
+      "sharing.controlledByParent.writeRequiresMasterRead": {
+        label: "Leer el registro principal basta para escribir",
+        helpText: "Activado: quien pueda leer el registro principal puede insertar, actualizar y eliminar filas de detalle, según lo permitan los permisos propios del detalle, la seguridad a nivel de fila y la seguridad a nivel de campo. Desactivado (el predeterminado): cada escritura de un detalle necesita acceso de edición a su registro principal. No lo active junto con «El propietario puede editar», que esta opción ya cubre."
+      },
       access: {
         label: "Acceso",
         helpText: "Postura ante las concesiones comodín (ADR-0066 D2). Si se omite, se resuelve como public. Decide si la concesión de objeto '*' de un conjunto de permisos cubre este objeto; la visibilidad de registros entre usuarios la decide sharingModel."

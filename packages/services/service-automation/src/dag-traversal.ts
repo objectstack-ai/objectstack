@@ -41,6 +41,7 @@ import {
     type StepLogEntry,
 } from './engine.js';
 import { createEvalUser, type EvalUserParsed } from '@objectstack/spec/identity';
+import { DroppedFieldsEventSchema, type DroppedFieldsEvent } from '@objectstack/spec/data';
 import { structuralConditionRefusal } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half of the ledger. Both halves of "is this envelope
 // well-formed?" are IMPORTED, never re-spelled here: the shape rule is
@@ -96,6 +97,41 @@ export function runUserOf(context: AutomationContext | undefined): EvalUserParse
         positions: Array.isArray(context?.positions) ? context.positions : [],
         ...(typeof context?.tenantId === 'string' ? { organizationId: context.tenantId } : {}),
     });
+}
+
+/**
+ * The step-log copy of an executor's advisory members, in exactly the shape
+ * `ExecutionStepLogSchema` declares for them. The step is persisted with the
+ * run and served verbatim by the run-history routes, so what reaches it is
+ * what a reader of the run is handed: a host-registered executor's malformed
+ * value must not be copied onto it as-is (a truthy `length` is not a list of
+ * drop events).
+ *
+ * `droppedFields` keeps each element that is a well-typed
+ * `DroppedFieldsEventSchema` event and skips the rest: the same per-element
+ * filter the run's terminal answer applies when it folds the step log
+ * (`foldDropEvents`), so the step and the answer can never disagree about
+ * which events were real. `warnings` keeps its string entries. A member with
+ * nothing well-typed left is omitted, never `[]`. Total, never throwing: it
+ * runs inside the step's `try`, where a throw would read as a node failure.
+ */
+function stepAdvisoriesOf(result: NodeExecutionResult): { warnings?: string[]; droppedFields?: DroppedFieldsEvent[] } {
+    const out: { warnings?: string[]; droppedFields?: DroppedFieldsEvent[] } = {};
+    const rawWarnings: unknown = result.warnings;
+    if (Array.isArray(rawWarnings)) {
+        const warnings = rawWarnings.filter((w): w is string => typeof w === 'string');
+        if (warnings.length > 0) out.warnings = warnings;
+    }
+    const rawDrops: unknown = result.droppedFields;
+    if (Array.isArray(rawDrops)) {
+        const droppedFields: DroppedFieldsEvent[] = [];
+        for (const raw of rawDrops) {
+            const parsed = DroppedFieldsEventSchema.safeParse(raw);
+            if (parsed.success) droppedFields.push(parsed.data);
+        }
+        if (droppedFields.length > 0) out.droppedFields = droppedFields;
+    }
+    return out;
 }
 
 /**
@@ -414,8 +450,8 @@ export async function executeNode(
                 completedAt: new Date().toISOString(),
                 durationMs: Date.now() - stepStart,
                 error: { code: 'NODE_FAILURE', message: errMsg },
-                ...(result.warnings?.length ? { warnings: result.warnings } : {}),
-                ...(result.droppedFields?.length ? { droppedFields: result.droppedFields } : {}),
+                // In the declared step-log shape only (`stepAdvisoriesOf`).
+                ...stepAdvisoriesOf(result),
                 // #4354 — a node that failed PART WAY may still have written
                 // rows; dropping its counts would understate what the run did.
                 ...(result.metrics ? { metrics: result.metrics } : {}),
@@ -495,10 +531,11 @@ export async function executeNode(
             startedAt: stepStartedAt,
             completedAt: new Date().toISOString(),
             durationMs: Date.now() - stepStart,
-            ...(result.warnings?.length ? { warnings: result.warnings } : {}),
-            // #32861 — the structured events behind those warnings, folded
-            // onto the run's terminal answer (`dropEventsOf`).
-            ...(result.droppedFields?.length ? { droppedFields: result.droppedFields } : {}),
+            // #32861 — `droppedFields`, the structured events behind those
+            // warnings, is folded onto the run's terminal answer
+            // (`dropEventsOf`). Both members are copied in the declared
+            // step-log shape only (`stepAdvisoriesOf`).
+            ...stepAdvisoriesOf(result),
             ...(result.metrics ? { metrics: result.metrics } : {}),
         });
 

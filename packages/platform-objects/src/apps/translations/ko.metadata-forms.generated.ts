@@ -377,6 +377,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "소유자 편집 허용",
         helpText: "켜짐: 세부 행의 소유자(owner_id)는 마스터에 대한 읽기 액세스만으로 ID로 그 행을 업데이트할 수 있습니다. 그 외 모든 사람과 모든 삽입, 삭제, 다중 행 업데이트, 대리 쓰기에는 여전히 마스터에 대한 편집 액세스가 필요합니다. 꺼짐(기본값): 세부 행의 모든 쓰기에 마스터에 대한 편집 액세스가 필요합니다."
       },
+      "sharing.controlledByParent.writeRequiresMasterRead": {
+        label: "마스터 읽기만으로 쓰기 허용",
+        helpText: "켜짐: 마스터를 읽을 수 있는 사람은 세부 객체 자체의 권한, 행 수준 보안, 필드 수준 보안이 허용하는 범위에서 세부 행을 삽입, 업데이트, 삭제할 수 있습니다. 꺼짐(기본값): 세부 행의 모든 쓰기에 마스터에 대한 편집 액세스가 필요합니다. '소유자 편집 허용'과 함께 켜지 마십시오. 이 설정이 이미 그것을 포함합니다."
+      },
       access: {
         label: "액세스",
         helpText: "와일드카드 부여 정책(ADR-0066 D2)입니다. 없으면 public으로 해석됩니다. 권한 세트의 '*' 객체 부여가 이 객체에 미치는지를 결정하며, 사용자 간 레코드 가시성은 sharingModel이 결정합니다."
