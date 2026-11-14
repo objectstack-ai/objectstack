@@ -60,7 +60,7 @@ function renderPage(language: 'en' | 'zh' = 'en') {
 }
 
 /** The star of the named app, found by its accessible name in that pack. */
-function star(pack: typeof en, name: string): HTMLButtonElement {
+function star(pack: { appManagement: { setDefaultNamed: string } }, name: string): HTMLButtonElement {
   const label = pack.appManagement.setDefaultNamed.replace('{{name}}', name);
   return screen.getByRole('button', { name: label }) as HTMLButtonElement;
 }
