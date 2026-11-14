@@ -300,6 +300,35 @@ function declaredContentLength(req: IHttpRequest): number | undefined {
 }
 
 /**
+ * A byte door's read of its body, held to the door's own bound: `rawBody`
+ * gets `maxBytes`, so a body with no declared length is counted against the
+ * bound as it is read and refused once it passes it, exactly as a declared
+ * length is (`IHttpRequest.rawBody`). `{ over: true }` when the read was
+ * refused for passing `maxBytes`; any other failure is thrown. With no bound
+ * (`max_upload_mb` unset) the whole body is read, as before.
+ *
+ * `null` when the request offers no raw bytes and its body is not a buffer:
+ * the door answers that it needs a binary body.
+ */
+async function readDoorBytes(
+  req: IHttpRequest,
+  maxBytes: number | undefined,
+  opts: { arrayBufferBody?: boolean } = {},
+): Promise<{ bytes: Buffer; over?: undefined } | { bytes?: undefined; over: true } | null> {
+  if (req.rawBody) {
+    try {
+      return { bytes: await req.rawBody(maxBytes === undefined ? undefined : { maxBytes: Math.max(0, maxBytes) }) };
+    } catch (err) {
+      if (isBodyTooLarge(err)) return { over: true };
+      throw err;
+    }
+  }
+  if (Buffer.isBuffer(req.body)) return { bytes: req.body };
+  if (opts.arrayBufferBody && req.body instanceof ArrayBuffer) return { bytes: Buffer.from(req.body) };
+  return null;
+}
+
+/**
  * The answer a `_local/raw/:token` byte route gives a throw. A token
  * `verifyToken` refused — malformed, forged, minted for the other verb, or
  * expired — is the caller's to fix: `401 INVALID_TOKEN`, with one message for
@@ -1456,18 +1485,21 @@ export function registerStorageFamily(
       const declaredChunk = declaredContentLength(req);
       if (declaredChunk !== undefined && !requireWithinUploadLimit(receivedSoFar + declaredChunk, maxUploadBytes, reaches, res)) return;
 
-      // Get raw body (binary data)
-      let data: Buffer;
-      if (req.rawBody) {
-        data = await req.rawBody();
-      } else if (Buffer.isBuffer(req.body)) {
-        data = req.body;
-      } else if (req.body instanceof ArrayBuffer) {
-        data = Buffer.from(req.body);
-      } else {
+      // Get raw body (binary data), held to what the limit leaves this chunk:
+      // a chunk with no declared length is refused once it passes that, read
+      // no further, exactly as a declared one is.
+      const read = await readDoorBytes(req, maxUploadBytes === undefined ? undefined : maxUploadBytes - receivedSoFar, {
+        arrayBufferBody: true,
+      });
+      if (read === null) {
         sendError(res, 400, 'INVALID_REQUEST', 'Binary body required');
         return;
       }
+      if (read.over) {
+        requireWithinUploadLimit(maxUploadBytes! + 1, maxUploadBytes, () => `This chunk would bring the upload to more than ${maxUploadBytes} bytes`, res);
+        return;
+      }
+      const data = read.bytes;
       if (!requireWithinUploadLimit(receivedSoFar + data.byteLength, maxUploadBytes, reaches, res)) return;
 
       // Upload the chunk (S3 uses 1-based part numbers)
@@ -1891,22 +1923,29 @@ export function registerStorageFamily(
         });
         return;
       }
-      // The declared length first: this door refuses a body that declares more
-      // than it takes before this door reads it. The service judges the bytes
-      // read again, before the link is spent, so an oversized upload never uses
-      // it up. [#32747] A body is the page's several-file form only when it
-      // says so (`multipart/form-data` carrying the form header) AND the link
-      // takes several files; that form may declare up to as many files as the
-      // link takes, each within the limit, plus the form's framing. Any other
-      // body, on any link, is the file itself, whatever its content type,
-      // under the one-file limit, with the checks and order it had before
-      // links took several.
+      // The link is judged before a byte of the body is read: open, unexpired
+      // and this caller's, the judgement its spend makes first (a read that
+      // writes nothing). A link the caller cannot use answers the one
+      // unusable-link refusal with the body unread.
+      //
+      // Then the declared length: this door refuses a body that declares more
+      // than it takes before this door reads it, and a body with no declared
+      // length is held to the same bound while it is read. The service judges
+      // the bytes read again, before the link is spent, so an oversized upload
+      // never uses it up. [#32747] A body is the page's several-file form only
+      // when it says so (`multipart/form-data` carrying the form header) AND
+      // the link takes several files; that form may declare up to as many
+      // files as the link takes, each within the limit, plus the form's
+      // framing. Any other body, on any link, is the file itself, whatever its
+      // content type, under the one-file limit.
       const token = String(req.params.token ?? '');
+      const link = await door.inspectUploadLink(token, caller.userId as string);
       const { maxUploadBytes } = currentLimits();
       const declaredBody = declaredContentLength(req);
-      const linkFiles = isUploadLinkForm(req.headers?.['content-type'], req.headers?.[UPLOAD_LINK_FORM_HEADER])
-        ? await severalFilesOf(door, token, caller.userId as string)
-        : undefined;
+      const linkFiles =
+        isUploadLinkForm(req.headers?.['content-type'], req.headers?.[UPLOAD_LINK_FORM_HEADER]) && link.files.max > 1
+          ? link.files
+          : undefined;
       const formLimit =
         linkFiles !== undefined && maxUploadBytes !== undefined
           ? maxUploadBytes * linkFiles.max + UPLOAD_LINK_FORM_OVERHEAD_BYTES
@@ -1946,16 +1985,18 @@ export function registerStorageFamily(
         });
         return;
       }
-      let data: Buffer;
-      if (req.rawBody) {
-        data = await req.rawBody();
-      } else if (Buffer.isBuffer(req.body)) {
-        data = req.body;
-      } else {
+      const read = await readDoorBytes(req, maxUploadBytes);
+      if (read === null) {
         const message = 'Binary body required: the file bytes, as the request body';
         sendError(res, 400, 'INVALID_REQUEST', message, { userMessage: copy.refused(message) });
         return;
       }
+      if (read.over) {
+        const message = uploadSizeRefusal(maxUploadBytes! + 1, maxUploadBytes, () => `The upload body is more than ${maxUploadBytes} bytes`)!;
+        sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, message, { userMessage: copy.tooLarge });
+        return;
+      }
+      const data = read.bytes;
       const outcome = await door.consumeUploadLink(
         token,
         {
@@ -2000,15 +2041,17 @@ export function registerStorageFamily(
       const bodyIs = (n: number) => `The upload body is ${n} bytes`;
       const declaredBody = declaredContentLength(req);
       if (declaredBody !== undefined && !requireWithinUploadLimit(declaredBody, maxUploadBytes, bodyIs, res)) return;
-      let data: Buffer;
-      if (req.rawBody) {
-        data = await req.rawBody();
-      } else if (Buffer.isBuffer(req.body)) {
-        data = req.body;
-      } else {
+      // Held to the same limit while it is read, declared length or not.
+      const read = await readDoorBytes(req, maxUploadBytes);
+      if (read === null) {
         sendError(res, 400, 'INVALID_REQUEST', 'Binary body required');
         return;
       }
+      if (read.over) {
+        requireWithinUploadLimit(maxUploadBytes! + 1, maxUploadBytes, () => `The upload body is more than ${maxUploadBytes} bytes`, res);
+        return;
+      }
+      const data = read.bytes;
       if (!requireWithinUploadLimit(data.byteLength, maxUploadBytes, bodyIs, res)) return;
 
       await storage.upload(payload.k, data, { contentType: payload.ct });
@@ -2476,27 +2519,6 @@ function relayUploadLinkRefusal(res: IHttpResponse, err: unknown, copy: UploadLi
 const UPLOAD_LINK_FORM_OVERHEAD_BYTES = 64 * 1024;
 
 /**
- * [#32747] How many files a link that takes several takes, read before a
- * multipart body is judged (a read that writes nothing), or `undefined` for a
- * link that takes one file. A link that cannot be read is `undefined` too: it
- * takes the one-file path, whose spend answers the refusal it answered before
- * links took several, in the order it did.
- */
-async function severalFilesOf(
-  door: UploadLinkDoor,
-  token: string,
-  callerUserId: string,
-): Promise<{ min: number; max: number } | undefined> {
-  let files: { min: number; max: number };
-  try {
-    files = (await door.inspectUploadLink(token, callerUserId)).files;
-  } catch {
-    return undefined;
-  }
-  return files.max > 1 ? files : undefined;
-}
-
-/**
  * [#32747] Is the submit the page's several-file form: `multipart/form-data`
  * carrying {@link UPLOAD_LINK_FORM_HEADER}? A multipart body without it is a
  * file, as it was before links took several.
@@ -2513,11 +2535,12 @@ function isUploadLinkForm(contentType: string | string[] | undefined, marker: st
 }
 
 /**
- * Whether a read of `req.body` was refused by the transport's request-body
- * limit (`PAYLOAD_TOO_LARGE`), a limit that bounds what the HTTP door reads, not
- * what this door accepts.
+ * Whether a body read was refused for size (`PAYLOAD_TOO_LARGE`): a read of
+ * `req.body` refused by the transport's request-body limit, which bounds what
+ * the HTTP door reads and not what this door accepts, or a `rawBody` read
+ * refused past the bound this door stated (`maxBytes`).
  */
-function isTransportBodyTooLarge(err: unknown): boolean {
+function isBodyTooLarge(err: unknown): boolean {
   return !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'PAYLOAD_TOO_LARGE';
 }
 
@@ -2536,16 +2559,16 @@ async function uploadLinkFormBody(
   try {
     return { body: req.body };
   } catch (err) {
-    if (!isTransportBodyTooLarge(err) || !req.rawBody) throw err;
+    if (!isBodyTooLarge(err) || !req.rawBody) throw err;
   }
-  const bytes = await req.rawBody();
-  if (formLimit !== undefined && bytes.byteLength > formLimit) {
-    return {
-      refused:
-        `The upload body is ${bytes.byteLength} bytes, over the ${formLimit} bytes this link's upload can carry ` +
-        '(its files, each within the "Max upload size (MB)" storage setting).',
-    };
-  }
+  // Held to this door's form limit while it is read, declared length or not.
+  const read = await readDoorBytes(req, formLimit);
+  const overForm = (size: string) =>
+    `The upload body is ${size} bytes, over the ${formLimit} bytes this link's upload can carry ` +
+    '(its files, each within the "Max upload size (MB)" storage setting).';
+  if (read?.over) return { refused: overForm(`more than ${formLimit}`) };
+  const bytes = read!.bytes;
+  if (formLimit !== undefined && bytes.byteLength > formLimit) return { refused: overForm(String(bytes.byteLength)) };
   const contentType = req.headers?.['content-type'];
   let parsed: FormData;
   try {

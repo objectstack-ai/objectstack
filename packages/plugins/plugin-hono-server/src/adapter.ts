@@ -41,7 +41,10 @@ import { matchesRoutePattern } from './route-pattern';
 import { readRequestBody, type RequestBodyReading, type RequestBodyRefusal } from './request-body';
 import {
     assertMaxRequestBodyBytes,
+    declaredLength,
     installRequestBodyLimit,
+    RawBodyTooLarge,
+    rawBodyMaxBytes,
     requestBodyGuardOf,
     requestBodyTooLargeAnswer,
     requestBodyTooLargeEnvelope,
@@ -868,6 +871,8 @@ export class HonoHttpServer implements IHttpServer {
         let bodyReading: RequestBodyReading = await readRequestBody(c);
         let refusedBodyRead: RequestBodyRefusal | RequestBodyTooLarge | undefined;
         let rawBodyRead: Promise<Buffer> | undefined;
+        /** Set once a `rawBody({ maxBytes })` read was refused past the door's own bound. */
+        let refusedRawBodyRead: RawBodyTooLarge | undefined;
 
         _endParse?.();
 
@@ -912,24 +917,50 @@ export class HonoHttpServer implements IHttpServer {
              * (`./body-limit.ts`). Hono's body cache once a pre-read of a body
              * within the limit went through it.
              *
+             * The door states its bound as `maxBytes`, and it is held whether
+             * or not a length is declared: a declared length over it is
+             * refused unread, a body with no declared length is refused once
+             * it passes the bound, read no further (`RawBodyTooLarge`). A
+             * refusal the door lets escape is answered 413 below.
+             *
              * A route that read `body`, was refused it for size, and then
              * reads `rawBody()` is a door taking over the read under its own
              * bound (an upload door's form larger than the request-body
              * limit), so that refusal no longer stands as the answer. Every
              * other refusal still does.
              */
-            rawBody: () => {
+            rawBody: (options?: { maxBytes?: number }) => {
+                const maxBytes = rawBodyMaxBytes(options);
                 if (refusedBodyRead instanceof RequestBodyTooLarge) refusedBodyRead = undefined;
-                // Repeatable: a second call answers the same bytes as the first.
+                // Repeatable: a later call answers the bytes the first read,
+                // judged against its own bound, or the first call's refusal.
                 rawBodyRead ??= (async () => {
-                    const original = requestBodyGuardOf(c)?.readOriginal();
+                    const declared = declaredLength(c.req.raw);
+                    if (maxBytes !== undefined && declared !== undefined && declared > maxBytes) {
+                        throw new RawBodyTooLarge(maxBytes);
+                    }
+                    const original = requestBodyGuardOf(c)?.readOriginal(maxBytes);
                     if (original) {
                         const bytes = await original;
                         return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
                     }
+                    // Already read by a pre-read within the request-body
+                    // limit (Hono's body cache), so judged once read.
                     return Buffer.from(await c.req.arrayBuffer());
                 })();
-                return rawBodyRead;
+                return rawBodyRead.then(
+                    (bytes) => {
+                        if (maxBytes !== undefined && bytes.byteLength > maxBytes) {
+                            refusedRawBodyRead = new RawBodyTooLarge(maxBytes);
+                            throw refusedRawBodyRead;
+                        }
+                        return bytes;
+                    },
+                    (err: unknown) => {
+                        if (err instanceof RawBodyTooLarge) refusedRawBodyRead = err;
+                        throw err;
+                    },
+                );
             },
             /**
              * The transport's own peer address (`IHttpRequest.remoteAddress`)
@@ -1092,6 +1123,15 @@ export class HonoHttpServer implements IHttpServer {
         // overwrite a response the handler had already produced.
         let response = outcome.response ?? capturedResponse ?? null;
         let rendered: { status: number; code: unknown } | undefined;
+
+        // A door whose `rawBody({ maxBytes })` read was refused and that
+        // answered nothing itself: the refusal is the caller's 413, not this
+        // handler's failure to report. A door that answered keeps its answer.
+        if (response === null && refusedRawBodyRead) {
+            const envelope = requestBodyTooLargeAnswer(refusedRawBodyRead)!;
+            closeStream();
+            return { response: c.json(envelope.body, envelope.status), failed: false };
+        }
 
         if (outcome.failed && response === null && opts.renderDeclaredEnvelope) {
             const envelope = declaredEnvelopeForThrow(outcome.thrown);

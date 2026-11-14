@@ -256,10 +256,66 @@ async function readRequestBody(
     };
 }
 
-function readBody(req: IncomingMessage): Promise<Buffer> {
+/**
+ * A byte door's read refused past the door's own bound (`rawBody({ maxBytes })`),
+ * as on the standard transport: status `413`, the registered `PAYLOAD_TOO_LARGE`.
+ * Module-private: the contract names the status and the code, not the class.
+ */
+class RawBodyTooLarge extends Error {
+    readonly status = 413;
+    readonly statusCode = 413;
+    readonly code = 'PAYLOAD_TOO_LARGE';
+
+    constructor(readonly maxBytes: number) {
+        super(
+            `The request body is larger than this endpoint accepts (${maxBytes} bytes). It was refused, and not read `
+            + 'past that bound: send a smaller body.',
+        );
+        this.name = 'RawBodyTooLarge';
+    }
+}
+
+/** The bound a `rawBody({ maxBytes })` call states, judged as the standard transport judges it. */
+function rawBodyMaxBytes(options: { maxBytes?: number } | undefined): number | undefined {
+    const maxBytes = options?.maxBytes;
+    if (maxBytes === undefined) return undefined;
+    if (typeof maxBytes !== 'number' || !Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+        throw new TypeError(
+            `rawBody({ maxBytes }) must be a non-negative whole number of bytes (got ${JSON.stringify(maxBytes) ?? String(maxBytes)}).`,
+        );
+    }
+    return maxBytes;
+}
+
+/**
+ * Read the request stream to its end. With `maxBytes`, a declared length over
+ * it is refused before a byte is read, and a body with no declared length is
+ * refused once the bytes read pass it: the stream is paused and no further
+ * byte is buffered.
+ */
+function readBody(req: IncomingMessage, maxBytes?: number): Promise<Buffer> {
     return new Promise((resolve, reject) => {
+        if (maxBytes !== undefined) {
+            const raw = req.headers['content-length'];
+            const declared = raw === undefined || raw.trim() === '' ? undefined : Number(raw.trim());
+            if (declared !== undefined && Number.isFinite(declared) && declared > maxBytes) {
+                reject(new RawBodyTooLarge(maxBytes));
+                return;
+            }
+        }
         const chunks: Buffer[] = [];
-        req.on('data', (c) => chunks.push(c));
+        let total = 0;
+        const onData = (c: Buffer) => {
+            total += c.byteLength;
+            if (maxBytes !== undefined && total > maxBytes) {
+                req.off('data', onData);
+                req.pause();
+                reject(new RawBodyTooLarge(maxBytes));
+                return;
+            }
+            chunks.push(c);
+        };
+        req.on('data', onData);
         req.on('end', () => resolve(Buffer.concat(chunks)));
         req.on('error', reject);
     });
@@ -448,7 +504,7 @@ export class NodeHttpServer implements IHttpServer {
      * the handler's answer until the handler returns) still replaces. Here
      * what was sent stands, and the response is closed.
      */
-    private writeBodyRefusal(nodeRes: ServerResponse, refusal: RequestBodyRefusal) {
+    private writeBodyRefusal(nodeRes: ServerResponse, refusal: RequestBodyRefusal | RawBodyTooLarge) {
         if (nodeRes.headersSent) {
             if (!nodeRes.writableEnded) nodeRes.end();
             return;
@@ -558,6 +614,10 @@ export class NodeHttpServer implements IHttpServer {
         let bufferedBody: Promise<Buffer> | undefined = bytes;
         /** Set once a READ of `req.body` met the refusal; see the route branch below. */
         let refusedBodyRead: RequestBodyRefusal | undefined;
+        /** The first `rawBody()` read: the bytes, or its refusal. */
+        let rawBodyRead: Promise<Buffer> | undefined;
+        /** Set once a `rawBody({ maxBytes })` read was refused past the door's own bound. */
+        let refusedRawBodyRead: RawBodyTooLarge | undefined;
 
         // node:http exposes headers as a lowercased record already, Host
         // included — no backfill needed (the Fetch-API Host backfill in the
@@ -586,8 +646,27 @@ export class NodeHttpServer implements IHttpServer {
             headers: nodeReq.headers as Record<string, string | string[]>,
             method,
             path,
-            // The bytes of every body, a refused one included.
-            rawBody: () => (bufferedBody ??= readBody(nodeReq)),
+            // The bytes of every body, a refused one included. A door's own
+            // bound (`maxBytes`) is held whether or not a length is declared,
+            // as on the standard transport; a later call answers the bytes the
+            // first read, judged against its own bound, or the first refusal.
+            rawBody: (options?: { maxBytes?: number }) => {
+                const maxBytes = rawBodyMaxBytes(options);
+                rawBodyRead ??= bufferedBody ?? readBody(nodeReq, maxBytes);
+                return rawBodyRead.then(
+                    (bytes) => {
+                        if (maxBytes !== undefined && bytes.byteLength > maxBytes) {
+                            refusedRawBodyRead = new RawBodyTooLarge(maxBytes);
+                            throw refusedRawBodyRead;
+                        }
+                        return bytes;
+                    },
+                    (err: unknown) => {
+                        if (err instanceof RawBodyTooLarge) refusedRawBodyRead = err;
+                        throw err;
+                    },
+                );
+            },
         };
 
         /**
@@ -652,6 +731,11 @@ export class NodeHttpServer implements IHttpServer {
             // caught and silent), as on the primary adapter, whose fallback
             // runs through the same `runHandler` as its routes.
             if (refusedBodyRead) return this.writeBodyRefusal(nodeRes, refusedBodyRead);
+            // A door's own bound refused its `rawBody()` read and it answered
+            // nothing: the refusal is the caller's 413, as on the primary adapter.
+            if (refusedRawBodyRead && !nodeRes.writableEnded && !streaming) {
+                return this.writeBodyRefusal(nodeRes, refusedRawBodyRead);
+            }
             if (threw) {
                 // Prefer failing to falling back: a fallback that THREW is a
                 // broken consumer, and reporting its failure as this adapter's
@@ -688,6 +772,10 @@ export class NodeHttpServer implements IHttpServer {
                 this.writeBodyRefusal(nodeRes, refusedBodyRead);
                 return;
             }
+            if (refusedRawBodyRead && !nodeRes.writableEnded && !streaming) {
+                this.writeBodyRefusal(nodeRes, refusedRawBodyRead);
+                return;
+            }
             // Handler resolved without producing a response and without
             // starting a stream (SSE handlers legitimately resolve while the
             // stream is still open — dispatcher drains it in the background).
@@ -702,6 +790,10 @@ export class NodeHttpServer implements IHttpServer {
         } catch (err: any) {
             if (refusedBodyRead) {
                 this.writeBodyRefusal(nodeRes, refusedBodyRead);
+                return;
+            }
+            if (refusedRawBodyRead && !nodeRes.writableEnded && !streaming) {
+                this.writeBodyRefusal(nodeRes, refusedRawBodyRead);
                 return;
             }
             if (!nodeRes.writableEnded) {

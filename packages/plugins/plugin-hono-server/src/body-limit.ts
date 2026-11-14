@@ -39,6 +39,14 @@
  * which `plugin-hono-server` serves from the ORIGINAL body (see
  * {@link RequestBodyGuard.readOriginal}), so they keep their own bound.
  *
+ * ## A byte door's own bound
+ *
+ * A door states its bound as `rawBody({ maxBytes })`, and it is held exactly
+ * as this limit is: a declared length over it is refused unread, a body with
+ * no declared length is counted while it is read and refused once it passes
+ * the bound, with its source cancelled so the rest is never read, and exactly
+ * the bound is read whole. The refusal is {@link RawBodyTooLarge}.
+ *
  * Nothing here echoes the body.
  */
 
@@ -110,6 +118,43 @@ export class RequestBodyTooLarge extends Error {
     }
 }
 
+/**
+ * A byte door's read refused past the door's OWN bound (`rawBody({ maxBytes })`),
+ * not the transport's limit: status `413`, code `PAYLOAD_TOO_LARGE`. The door
+ * answers it with its own refusal; when it escapes the door, the request is
+ * answered with {@link requestBodyTooLargeAnswer}'s envelope for it.
+ */
+export class RawBodyTooLarge extends Error {
+    readonly status = 413;
+    readonly statusCode = 413;
+    readonly code = PAYLOAD_TOO_LARGE_CODE;
+
+    constructor(readonly maxBytes: number) {
+        super(
+            `The request body is larger than this endpoint accepts (${maxBytes} bytes). It was refused, and not read `
+            + 'past that bound: send a smaller body.',
+        );
+        this.name = 'RawBodyTooLarge';
+    }
+}
+
+/**
+ * The bound a `rawBody({ maxBytes })` call states: `undefined` when it states
+ * none, else a non-negative whole number of bytes. Anything else is the
+ * calling door's bug and throws a `TypeError`, so a bad bound never reads as
+ * no bound.
+ */
+export function rawBodyMaxBytes(options: { maxBytes?: number } | undefined): number | undefined {
+    const maxBytes = options?.maxBytes;
+    if (maxBytes === undefined) return undefined;
+    if (typeof maxBytes !== 'number' || !Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+        throw new TypeError(
+            `rawBody({ maxBytes }) must be a non-negative whole number of bytes (got ${JSON.stringify(maxBytes) ?? String(maxBytes)}).`,
+        );
+    }
+    return maxBytes;
+}
+
 /** The ADR-0112 envelope both doors answer a body over the limit with. */
 export function requestBodyTooLargeEnvelope(limit: number): {
     status: 413;
@@ -121,13 +166,20 @@ export function requestBodyTooLargeEnvelope(limit: number): {
     };
 }
 
-/** The envelope for `thrown` when it is a {@link RequestBodyTooLarge}; `undefined` otherwise. */
+/**
+ * The envelope for `thrown` when it is a {@link RequestBodyTooLarge} or a
+ * {@link RawBodyTooLarge}; `undefined` otherwise.
+ */
 export function requestBodyTooLargeAnswer(thrown: unknown): ReturnType<typeof requestBodyTooLargeEnvelope> | undefined {
-    return thrown instanceof RequestBodyTooLarge ? requestBodyTooLargeEnvelope(thrown.limit) : undefined;
+    if (thrown instanceof RequestBodyTooLarge) return requestBodyTooLargeEnvelope(thrown.limit);
+    if (thrown instanceof RawBodyTooLarge) {
+        return { status: 413, body: { success: false, error: { code: PAYLOAD_TOO_LARGE_CODE, message: thrown.message } } };
+    }
+    return undefined;
 }
 
 /** The `Content-Length` a request declares, as a number; `undefined` when it declares none. */
-function declaredLength(request: Request): number | undefined {
+export function declaredLength(request: Request): number | undefined {
     const value = request.headers.get('content-length');
     if (value === null || value.trim() === '') return undefined;
     const length = Number(value.trim());
@@ -143,8 +195,36 @@ export interface HeldRequestBody {
     readonly bytes: Uint8Array | undefined;
     /** Whether the body passed the bound (and so `bytes` is undefined). */
     readonly overLimit: boolean;
-    /** Every byte of the body: those held, then the rest of the stream, unbounded. */
-    readAll(): Promise<Uint8Array>;
+    /**
+     * Every byte of the body: those held, then the rest of the stream. With
+     * `maxBytes`, refused with {@link RawBodyTooLarge} once the body passes it,
+     * the source cancelled so the rest is never read.
+     */
+    readAll(maxBytes?: number): Promise<Uint8Array>;
+}
+
+/**
+ * Read `reader` to its end into `chunks` (which may already hold bytes). With
+ * `maxBytes`, stop once the bytes held pass it: the source is cancelled, so the
+ * rest is never read, and the read answers `false`. `true` once the body ended.
+ */
+async function readInto(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    chunks: Uint8Array[],
+    maxBytes: number | undefined,
+): Promise<boolean> {
+    let total = 0;
+    for (const chunk of chunks) total += chunk.byteLength;
+    for (;;) {
+        if (maxBytes !== undefined && total > maxBytes) {
+            await reader.cancel().catch(() => undefined);
+            return false;
+        }
+        const next = await reader.read();
+        if (next.done) return true;
+        chunks.push(next.value);
+        total += next.value.byteLength;
+    }
 }
 
 function concat(chunks: Uint8Array[]): Uint8Array {
@@ -181,10 +261,12 @@ export interface RequestBodyGuard {
     hold(): Promise<HeldRequestBody>;
     /**
      * Every byte of the ORIGINAL body, unbounded by this limit: the reader is a
-     * byte door that bounds the body by its own limit. `undefined` when the
-     * original can no longer be read here (something read through the guard).
+     * byte door that bounds the body by its own limit, `maxBytes`, held as this
+     * limit is (refused with {@link RawBodyTooLarge} once passed, the source
+     * cancelled). `undefined` when the original can no longer be read here
+     * (something read through the guard).
      */
-    readOriginal(): Promise<Uint8Array> | undefined;
+    readOriginal(maxBytes?: number): Promise<Uint8Array> | undefined;
     /**
      * At the end of the request: a held body that passed the limit and that no
      * byte door went on to read whole has its source cancelled, as a read
@@ -238,27 +320,33 @@ function guardRequest(original: Request, limit: number): { guard: RequestBodyGua
                 return {
                     bytes: overLimit ? undefined : concat(chunks),
                     overLimit,
-                    async readAll() {
+                    async readAll(maxBytes?: number) {
                         // A byte door claimed the rest: `release` leaves it to this read.
                         heldOpen = false;
                         if (!done) {
-                            for (;;) {
-                                const next = await reader.read();
-                                if (next.done) break;
-                                chunks.push(next.value);
-                            }
+                            if (!(await readInto(reader, chunks, maxBytes))) throw new RawBodyTooLarge(maxBytes!);
                             done = true;
                         }
-                        return concat(chunks);
+                        const all = concat(chunks);
+                        if (maxBytes !== undefined && all.byteLength > maxBytes) throw new RawBodyTooLarge(maxBytes);
+                        return all;
                     },
                 };
             })();
             return held;
         },
-        readOriginal() {
-            if (held) return held.then((h) => h.readAll());
+        readOriginal(maxBytes?: number) {
+            if (held) return held.then((h) => h.readAll(maxBytes));
             if (pulled || original.bodyUsed || original.body?.locked) return undefined;
-            return original.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+            if (maxBytes === undefined) return original.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+            if (declared !== undefined && declared > maxBytes) return Promise.reject(new RawBodyTooLarge(maxBytes));
+            if (!original.body) return Promise.resolve(new Uint8Array(0));
+            const reader = original.body.getReader();
+            const chunks: Uint8Array[] = [];
+            return readInto(reader, chunks, maxBytes).then((complete) => {
+                if (!complete) throw new RawBodyTooLarge(maxBytes);
+                return concat(chunks);
+            });
         },
         async release() {
             if (!held) return;
