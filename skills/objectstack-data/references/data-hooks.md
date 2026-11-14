@@ -211,16 +211,10 @@ in neither). So:
 ⚠️ **An unevaluable condition ABORTS the operation.** A typo'd key
 (`record.stauts`), a column read off `previous` on an insert, or a comparison
 CEL has no overload for does **not** degrade to "the hook did not fire" — it
-**fails the write**. Until protocol 17 the gate emitted a `logger.warn` and
-returned `false`, which is why the `previous`-on-insert and `has(...)` bullets
-above are load-bearing rather than stylistic: a `before*` guard swallowed into
-`false` silently let writes through, and an audit hook swallowed into `false`
-silently dropped records.
+**fails the write**.
 
-Practical consequence when authoring: spell keys against the object's **declared**
-fields, and on an insert event read `previous` only against `null` — a column
-read off it there is the mistake that used to cost you a hook that quietly never
-ran, and now costs you every write the hook is attached to.
+So spell keys against the object's **declared** fields, and on an insert event
+read `previous` only against `null`: the mistake fails every write the hook is on.
 
 ---
 
@@ -834,8 +828,8 @@ the layout both real hook modules in the repo use.
 
 ✅ **DO** — use `before*` for validation and `after*` for side effects; set
 `async: true` for non-critical background work; go through `ctx.api` for
-cross-object operations; give a thrown error a message the caller can act on;
-test hooks in isolation.
+cross-object operations; refuse a business rule by a
+[declared code](#declared-refusals-refusals); test hooks in isolation.
 
 ❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); let a
 hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
@@ -848,25 +842,39 @@ hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
 ## Error Handling
 
 A throw aborts the operation and rolls back its transaction; `onError: 'log'`
-(above) makes an `after*` hook log and continue instead.
+(above) makes an `after*` hook log and continue instead; neither gives a code.
 
 ### Declared refusals (`refusals`)
 
-With a `refusals` catalogue, a sandboxed `body` refuses **by code only** and the
-runtime answers with that entry:
+A hook that enforces a business rule declares a `refusals` catalogue, one
+SCREAMING_SNAKE code per rule, and its body throws the code. A throw with no code
+is answered `HOOK_ABORTED`, the platform's: keep that for failures you did not
+plan. A cross-object guard a validation rule cannot read:
 
+<!-- os:check -->
 ```typescript
-refusals: {
-  CREDIT_LIMIT: { message: 'Over the credit limit.' },
-  ON_HOLD: { message: 'Account on hold.', status: 409 }, // default 400
-},
-body: { language: 'js', source: `
-  if (ctx.input.amount > 100000) throw Object.assign(new Error(), { code: 'CREDIT_LIMIT' });
-` },
+import { defineHook } from '@objectstack/spec/data';
+
+export default defineHook({
+  name: 'checkout_requires_stock',
+  object: 'asset_checkout',
+  events: ['beforeInsert'],
+  refusals: { ASSET_NOT_IN_STOCK: { message: 'Only an in-stock asset can be checked out.', status: 409 } },
+  body: {
+    language: 'js',
+    capabilities: ['api.read'],
+    source: `
+      const id = ctx.input.asset_id;
+      const asset = id && await ctx.api.object('asset').findOne({ where: { id } });
+      if (asset?.status !== 'in_stock') throw Object.assign(new Error(), { code: 'ASSET_NOT_IN_STOCK' });
+    `,
+  },
+});
 ```
 
-- Codes are SCREAMING_SNAKE; the envelope carries one as `declaredCode`.
-- Refused at save without a `js` body (e.g. a bare `handler`).
+- Only a `js` `body` can declare one: a `handler` hook, inline TS included, is
+  refused at save.
+- The wire `code` is the status's (default 400), with the hook's as `declaredCode`.
 - The message is plain text (a `{{ }}` hole is refused), translated via
   `hooks.<hook>.refusals.<CODE>.message`; the body's own text and `status` are unused.
 - An undeclared code, or none, is refused: at save if thrown literally, else as
