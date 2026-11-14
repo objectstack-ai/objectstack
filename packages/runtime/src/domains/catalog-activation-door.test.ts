@@ -887,6 +887,97 @@ describe('the catalog activation door — a declared webhook two packages declar
         expect(h.writes).toEqual([]);
     });
 
+    // [#33016 S3] The lone case above is 404; beside an enabled holder of another
+    // namespace, the disabled namespace holds nothing and is refused naming the holder.
+    it('B disabled beside A enabled: B\'s namespace address is 409 `not-held-by-qualifier` naming A, nothing written', async () => {
+        const h = bootWith([A], [], [A, B]);
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/beta/${HOOK}`);
+        expect([statusOf(res), codeOf(res), candidatesOf(res)]).toEqual([409, 'RESOURCE_CONFLICT', [A]]);
+        expect(res.response?.body?.error?.details?.reason ?? res.response?.body?.error?.reason).toBe('not-held-by-qualifier');
+        expect(messageOf(res)).toContain('is not held by package "com.acme.beta"');
+        expect(h.writes).toEqual([]);
+    });
+
+    // [#33016 S1] Two holders the namespace address cannot tell apart: two
+    // co-owners of one namespace (or a package with no namespace beside another
+    // holder, which has only the bare address). Both are served, the bare and
+    // the namespace address both refuse naming both, and `?package=PKG`, the
+    // exact qualifier, switches exactly one. Both registration orders.
+    describe('[FROM 409 TO switched] two holders one namespace cannot tell apart: `webhook/:name?package=PKG`', () => {
+        const flipAt = (h: Harness, path: string, query: Record<string, unknown>, body: unknown = { enabled: false }) =>
+            h.dispatcher.handleSecurity(path, 'POST', body, query, TENANT_ADMIN());
+        for (const order of [[A, B], [B, A]]) {
+            it(`registered ${order.map((p) => p.split('.').pop()).join(', ')}: both doors refuse naming both, and \`?package=\` switches each holder's own row`, async () => {
+                const h = bootWith(order, [{ package_id: null, active: false }]);
+                for (const path of [`/_activation/webhook/${HOOK}`, `/_activation/webhook/shared/${HOOK}`]) {
+                    const refused = await flip(h, TENANT_ADMIN(), path);
+                    expect([statusOf(refused), [...candidatesOf(refused)].sort()], path).toEqual([409, [A, B]]);
+                }
+                expect(h.writes).toEqual([]);
+
+                const res = await flipAt(h, `/_activation/webhook/${HOOK}`, { package: A }, { enabled: true });
+                expect(statusOf(res)).toBe(200);
+                expect(res.response?.body?.data).toEqual({ type: 'webhook', name: HOOK, packageId: A, enabled: true });
+                expect(ledger(h)).toEqual([[null, false], [A, true]]);
+
+                expect(statusOf(await flipAt(h, `/_activation/webhook/${HOOK}`, { package: B }))).toBe(200);
+                expect(ledger(h)).toEqual([[null, false], [A, true], [B, false]]);
+                expect(statusOf(await flipAt(h, `/_activation/webhook/${HOOK}`, { package: A }))).toBe(200);
+                expect(ledger(h)).toEqual([[null, false], [A, false], [B, false]]);
+            });
+        }
+
+        it('a package that does not hold the name is 409 naming the holders; nothing served is 404; nothing written', async () => {
+            const h = bootWith([A, B]);
+            const notHeld = await flipAt(h, `/_activation/webhook/${HOOK}`, { package: 'com.acme.gamma' });
+            expect([statusOf(notHeld), codeOf(notHeld), candidatesOf(notHeld)]).toEqual([409, 'RESOURCE_CONFLICT', [A, B]]);
+            expect(messageOf(notHeld)).toContain('is not held by package "com.acme.gamma"');
+            expect(statusOf(await flipAt(h, '/_activation/webhook/our_own_hook', { package: A }))).toBe(404);
+            expect(h.writes).toEqual([]);
+        });
+
+        it('a disabled package holds nothing: beside an enabled holder 409 naming it, alone 404', async () => {
+            const beside = bootWith([A], [], [A, B]);
+            const res = await flipAt(beside, `/_activation/webhook/${HOOK}`, { package: B });
+            expect([statusOf(res), candidatesOf(res)]).toEqual([409, [A]]);
+            expect(beside.writes).toEqual([]);
+            const alone = bootWith([], [], [B]);
+            expect(statusOf(await flipAt(alone, `/_activation/webhook/${HOOK}`, { package: B }))).toBe(404);
+            expect(alone.writes).toEqual([]);
+        });
+
+        it('CONTROL — one holder: `?package=` writes the row the bare address writes, taking the row naming no package over (D8)', async () => {
+            const h = bootWith([A], [{ package_id: null, active: true }], [A]);
+            expect(statusOf(await flipAt(h, `/_activation/webhook/${HOOK}`, { package: A }))).toBe(200);
+            expect(ledger(h)).toEqual([[A, false]]);
+        });
+
+        it('the query is closed: an empty or repeated `package`, an unknown name, or `package` on the namespace address is 400, nothing written', async () => {
+            const h = bootWith([A, B]);
+            for (const [path, query] of [
+                [`/_activation/webhook/${HOOK}`, { package: '' }],
+                [`/_activation/webhook/${HOOK}`, { package: [A, B] }],
+                [`/_activation/webhook/${HOOK}`, { packages: A }],
+                [`/_activation/webhook/alpha/${HOOK}`, { package: A }],
+                [`/_activation/sharing_rule/${HOOK}`, { package: A }],
+            ] as const) {
+                const res = await flipAt(h, path, query as Record<string, unknown>);
+                expect([statusOf(res), codeOf(res)], `${path} ${JSON.stringify(query)}`).toEqual([400, 'VALIDATION_ERROR']);
+            }
+            expect(h.writes).toEqual([]);
+        });
+    });
+
+    // [#33016 nit 4] The one-holder widening the #31699 changeset declares: a
+    // row naming no package beside the holder's own row was a 409; the holder's
+    // own row is written, and the row naming no package is left as it is.
+    it('[FROM 409 TO written] one holder with its own row beside a row naming no package: the bare address writes the holder\'s own row', async () => {
+        const h = bootWith([A], [{ package_id: null, active: false }, { package_id: A, active: false }], [A]);
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`, { enabled: true });
+        expect(statusOf(res)).toBe(200);
+        expect(ledger(h)).toEqual([[null, false], [A, true]]);
+    });
+
     it('the namespace address is the webhook\'s alone: any other type with four segments is the shape 400', async () => {
         const h = bootWith([A]);
         expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/sharing_rule/alpha/${HOOK}`))).toBe(400);
