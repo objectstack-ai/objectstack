@@ -1995,14 +1995,53 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
     });
   const agentRow = async () => (await driver.findOne('sys_metadata', { where: { type: 'agent' } } as never)) as Record<string, any>;
 
-  it('[R7-A] an agent legacy row (empty column, stamped body): the column is bound, body, version and history unchanged', async () => {
-    await seedAgent({ _packageId: ALPHA });
+  it('[R7-A] an agent legacy row (empty column, body naming its package by its own `packageId`): the column is bound, body, version and history unchanged', async () => {
+    await seedAgent({ packageId: ALPHA });
     const before = await agentRow();
-    const manager = await bootPass([new DatabaseLoader({ driver })], { packageId: 'com.host.app' });
+    await bootPass([new DatabaseLoader({ driver })], { packageId: 'com.host.app' });
     expect(await agentRow()).toEqual({ ...before, package_id: ALPHA });
     expect(vi.mocked(driver.update).mock.calls).toEqual([['sys_metadata', 'legacy', { package_id: ALPHA }]]);
     expect(driver.create).toHaveBeenCalledTimes(1);
-    expect(registered(manager, 'agent')).toEqual([{ name: 'helper', label: 'Helper', _packageId: ALPHA, _provenance: 'package' }]);
+  });
+
+  /**
+   * [#32985; maintainer decision 2026-11-14] A body that names its package by
+   * the `_packageId` stamp alone may be the environment's row a 17.0.0–18.3.0
+   * boot stamped with the host; binding the column would make it the host's
+   * for every reader of `package_id`. FROM bound (R7-A) TO left, for the host's
+   * stamp and any other package's alike: the row alone cannot tell them apart.
+   */
+  it.each([['the host\'s', 'com.host.app'], ['another package\'s', ALPHA]] as const)('[#32985] an agent legacy row (empty column, body naming %s package by the `_packageId` stamp alone): not bound, no update, read as before (BEFORE: the column bound to the stamp\'s package)', async (_whose, stamp) => {
+    await seedAgent({ _packageId: stamp, _provenance: 'package' });
+    const before = await agentRow();
+    const manager = await bootPass([new DatabaseLoader({ driver })], { packageId: 'com.host.app' });
+    expect(await agentRow()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+    expect(registered(manager, 'agent')).toEqual([{ name: 'helper', label: 'Helper', _packageId: stamp, _provenance: 'package' }]);
+  });
+
+  /**
+   * [#32985] What skipping the stamp-only bind costs a genuine legacy row: a
+   * row of a package's item whose code still ships is bound by that item's own
+   * save, the column only, on the boot that reads both.
+   */
+  it('[#32985] CONTROL a legacy row the host\'s file item seeded (empty column, the host\'s stamp alone): the file item\'s own save binds its column on the next boot, body and version unchanged', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'e2-32985-'));
+    try {
+      mkdirSync(join(rootDir, 'email_template'));
+      const body = { name: 'welcome', locale: 'en-US', subject: 'from file', bodyHtml: '<p/>' };
+      writeFileSync(join(rootDir, 'email_template', 'welcome.email-template.json'), JSON.stringify(body));
+      await driver.create('sys_metadata', {
+        id: 'seeded', type: 'email_template', name: 'welcome', state: 'active', version: 1, checksum: 'seeded', source: 'database',
+        package_id: null, metadata: JSON.stringify({ ...body, _packageId: ALPHA, _provenance: 'package' }),
+      });
+      await bootPass([new DatabaseLoader({ driver })], { rootDir, packageId: ALPHA });
+      const row = (await driver.findOne('sys_metadata', { where: { type: 'email_template' } } as never)) as Record<string, any>;
+      expect([row.id, row.package_id, row.version, JSON.parse(row.metadata).subject]).toEqual(['seeded', ALPHA, 1, 'from file']);
+      expect(vi.mocked(driver.update).mock.calls.map(([, id, data]) => [id, data])).toEqual([['seeded', { package_id: ALPHA }]]);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
   });
 
   it('[R7-A, R7-B] a package-less row on a host with a packageId stays package-less, no update; the loader\'s cache keeps it unstamped', async () => {
@@ -3284,11 +3323,22 @@ describe('[#32986] unregisterPackage of the host package keeps the environment\'
     expect(await state(m)).toEqual(primed);
   });
 
-  it('CONTROL the host\'s own rows (their bodies carry the host\'s stamp, as a host item the pass seeded is stored): unregisterPackage(host) still removes each, from the registry and storage', async () => {
+  /**
+   * [#32985; maintainer decision 2026-11-14] FROM removed TO kept and reported
+   * unless forced: a row whose body names the host by the `_packageId` stamp
+   * alone, its column empty, cannot be told from the environment's row a
+   * 17.0.0–18.3.0 boot stamped with the host, so the removal is fail-closed.
+   */
+  it('[#32985] the host\'s own rows stored with its stamp alone (as a host item the pass seeded is stored): unregisterPackage(host) keeps and reports each (BEFORE: each removed); with `force` it removes each, from the registry and storage', async () => {
     for (const [type, name] of ITEMS) await seed(type, name, null, { _packageId: HOST });
     const m = await bootPass(HOST);
     expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
-    await m.unregisterPackage(HOST);
+    const kept = await m.unregisterPackage(HOST);
+    expect(kept.kept.map(({ type, name, reason }) => [type, name, reason])).toEqual(ITEMS.map(([type, name]) => [type, name, 'stamp-only-row']));
+    expect(kept.removed).toEqual([]);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
+    const forced = await m.unregisterPackage(HOST, { force: true });
+    expect([forced.kept, forced.removed.map(({ type }) => type)]).toEqual([[], ITEMS.map(([type]) => type)]);
     expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, null, 0]));
   });
 
@@ -3322,6 +3372,122 @@ describe('[#32986] unregisterPackage of the host package keeps the environment\'
     const bare = await bootPass();
     await bare.unregisterPackage(HOST);
     expect(await state(bare)).toEqual(ITEMS.map(([type]) => [type, null, 'env', 1]));
+  });
+});
+
+/**
+ * [#32985; maintainer decision 2026-11-14 on #32985] `@objectstack/metadata`
+ * 17.0.0–18.3.0, on a host declaring its package (eager, no `artifactSource`,
+ * a `DatabaseLoader`), saved each package-less row its boot pass read back
+ * stamped with the host (`_packageId`, `_provenance`, a new version). Such a
+ * row names the host by the stamp alone, its `package_id` column empty, and
+ * the #32986 mark does not reach it (its stored body already names the host).
+ * Rows seeded here as 18.3.0 left them, for types stored per `(package,
+ * name)` and types that are not, and for a row another writer stored.
+ *
+ * BEFORE (`main` at this branch's base, same fixtures; measured over a real
+ * 18.3.0-built SQLite database: 34 of 37 rows deleted, a never-stamped control
+ * 0): the boot bound each by-package row's column to the host, and
+ * `unregisterPackage(host)` deleted every row and registry entry.
+ */
+describe('[#32985] unregisterPackage keeps the rows that name the package by the `_packageId` stamp alone, and the boot binds no column from them', () => {
+  const HOST = 'com.host.app';
+  const OTHER = 'com.other.app';
+  const ITEMS: ReadonlyArray<readonly [type: string, name: string]> = [
+    ['object', 'env_account'], ['view', 'env_account.all'], ['app', 'env_app'], ['agent', 'env_agent'], ['flow', 'env_flow'], ['tool', 'env_tool'],
+  ];
+  let driver: IDataDriver;
+
+  /** A row as an 18.3.0 boot left it: its body stamped by the boot, version 2, column empty. */
+  const seed = (type: string, name: string, body: Record<string, unknown>, source = 'database') =>
+    driver.create('sys_metadata', {
+      id: `${type}_${name}`, type, name, state: 'active', version: 2, checksum: `${type}_${name}`,
+      source, package_id: null, metadata: JSON.stringify({ name, label: 'env', ...body }),
+    });
+  const stamped = { _packageId: HOST, _provenance: 'package' };
+  const bootPass = async () => {
+    const plugin = new MetadataPlugin({ packageId: HOST, watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /** Per item: what a read answers, and its stored rows' columns. */
+  const state = async (m: MetadataManager) => {
+    const out: unknown[] = [];
+    for (const [type, name] of ITEMS) {
+      const read = (await m.get(type, name)) as { label?: string } | undefined;
+      const rows = (await driver.find('sys_metadata', { where: { type, name } } as never)) as Array<Record<string, unknown>>;
+      out.push([type, read?.label ?? null, rows.map((row) => row.package_id ?? null)]);
+    }
+    return out;
+  };
+  const asLeft = ITEMS.map(([type]) => [type, 'env', [null]]);
+
+  beforeEach(() => {
+    driver = createMockDriver();
+    logger.warn.mockClear();
+  });
+
+  it('rows as an 18.3.0 boot left them: the boot binds no column (BEFORE: each by-package row bound to the host), and unregisterPackage(host) keeps every item and row, reporting each (BEFORE: every one deleted)', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, stamped);
+    const m = await bootPass();
+    expect(await state(m), 'no column bound by the boot').toEqual(asLeft);
+    expect(driver.update).not.toHaveBeenCalled();
+    const result = await m.unregisterPackage(HOST);
+    expect(result.removed).toEqual([]);
+    expect(result.kept).toEqual(ITEMS.map(([type, name]) => ({ type, name, reason: 'stamp-only-row', rows: [{ loader: 'database', id: `${type}_${name}`, source: 'database' }] })));
+    expect(await state(m)).toEqual(asLeft);
+    expect(driver.delete).not.toHaveBeenCalled();
+    const warned = logger.warn.mock.calls.filter(([message]) => String(message).includes(`unregisterPackage(${HOST}) kept`));
+    expect(warned.map(([, meta]) => meta)).toEqual([{ packageId: HOST, kept: ITEMS.map(([type, name]) => `${type}/${name}`) }]);
+  });
+
+  it('a stamped row another writer stored (`source` other than database): kept the same (BEFORE: deleted)', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, stamped, 'api');
+    const m = await bootPass();
+    const result = await m.unregisterPackage(HOST);
+    expect(result.kept.map(({ rows }) => rows.map(({ source }) => source))).toEqual(ITEMS.map(() => ['api']));
+    expect(await state(m)).toEqual(asLeft);
+  });
+
+  it('with `force`, unregisterPackage(host) removes each item and row, as before', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, stamped);
+    const m = await bootPass();
+    const result = await m.unregisterPackage(HOST, { force: true });
+    expect([result.kept, result.removed]).toEqual([[], ITEMS.map(([type, name]) => ({ type, name }))]);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, []]));
+  });
+
+  it('CONTROL rows naming the host by their own `packageId`: removed without `force`, from the registry and storage', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, { packageId: HOST });
+    const m = await bootPass();
+    const result = await m.unregisterPackage(HOST);
+    expect([result.kept, result.removed.length]).toEqual([[], ITEMS.length]);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, []]));
+  });
+
+  it('CONTROL unregisterPackage of another package: nothing kept, nothing removed, every row as it was', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, stamped);
+    const m = await bootPass();
+    expect(await m.unregisterPackage(OTHER)).toEqual({ removed: [], kept: [] });
+    expect(await state(m)).toEqual(asLeft);
+  });
+
+  it('a check that fails removes nothing: the read error is thrown before the first removal', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, { packageId: HOST });
+    await seed('page', 'env_page', stamped);
+    const m = await bootPass();
+    const loader = [...(m as any).loaders.values()][0] as DatabaseLoader;
+    vi.spyOn(loader, 'stampOnlyRows').mockImplementation(async (type) => {
+      if (type === 'page') throw new Error('connection reset');
+      return [];
+    });
+    const before = await state(m);
+    await expect(m.unregisterPackage(HOST)).rejects.toThrow('connection reset');
+    expect(driver.delete).not.toHaveBeenCalled();
+    expect(await state(m)).toEqual(before);
   });
 });
 
