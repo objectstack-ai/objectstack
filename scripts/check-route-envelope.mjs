@@ -1422,6 +1422,9 @@ const PLUGIN_ROUTE_MODULES = {
   // `NodeHttpServer` mirrors these bodies byte-for-byte, locked cross-adapter
   // by `fallback-seam.conformance.test.ts`.
   'packages/plugins/plugin-hono-server/src/adapter.ts': {},
+  // The request-body limit's 413 answer: `requestBodyTooLargeEnvelope`, the
+  // declared envelope with the registered `PAYLOAD_TOO_LARGE` code.
+  'packages/plugins/plugin-hono-server/src/body-limit.ts': {},
 
   // Converted by #9364: `{ error: 'environment_not_found', message, hostname }`
   // became the declared envelope with `ENVIRONMENT_NOT_FOUND` in the semantic
