@@ -151,3 +151,45 @@ describe('the live home-amount preview (ADR-0144 D5)', () => {
     expect(ds.calls).toHaveLength(0);
   });
 });
+
+describe('the read-only face of a record-mode amount carries the same preview (objectstack#32941)', () => {
+  // An `expression`-computed amount reaches the widget `readonly` in an edit
+  // form; the save still re-stores its home amount at the form's currency and
+  // document date, so the line is owed there too.
+  function readonlyPreview(record: Record<string, unknown>, ds: unknown, extra: { disabled?: boolean } = {}) {
+    return (
+      <LocalizationProvider value={{ locale: 'en-US', currency: 'CNY' }}>
+        <CurrencyField value={record.amount as number} onChange={() => {}} field={AMOUNT} readonly {...extra} dependentValues={record} dataSource={ds} />
+      </LocalizationProvider>
+    );
+  }
+
+  it('draws the amount as text, no input, with the converted line, and follows a changed currency and date', async () => {
+    const ds = rates({ EUR: [['2025-01-01', 0.92], ['2026-10-01', 0.9]], JPY: [['2025-01-01', 151.5]] });
+    const record = { amount: 450, currency_code: 'EUR', invoice_date: '2026-11-12' };
+    const view = render(readonlyPreview(record, ds));
+    expect(screen.queryByRole('spinbutton')).toBeNull();
+    await waitFor(() => expect(line()).toBe('≈ CN¥500.00 at 0.9 on Nov 12, 2026'));
+    expect(screen.getByTestId('home-amount-preview')).toHaveAttribute('data-state', 'converted');
+    view.rerender(readonlyPreview({ ...record, currency_code: 'JPY', invoice_date: '2026-01-15' }, ds));
+    await waitFor(() => expect(line()).toBe('≈ CN¥2.97 at 151.5 on Jan 15, 2026'));
+    view.rerender(readonlyPreview({ ...record, invoice_date: '' }, ds));
+    expect(line()).toBe('Set the document date to see the home amount');
+    expect(screen.getByTestId('home-amount-preview')).toHaveAttribute('data-state', 'awaitingDate');
+  });
+
+  it('CONTROL: a disabled read-only face (a view-mode form) and a read-only amount with no homeAmount draw the amount alone and read nothing', async () => {
+    const ds = rates({ EUR: [['2025-01-01', 0.92]] });
+    const record = { amount: 450, currency_code: 'EUR', invoice_date: '2026-11-12' };
+    render(readonlyPreview(record, ds, { disabled: true }));
+    render(
+      <LocalizationProvider value={{ locale: 'en-US', currency: 'CNY' }}>
+        <CurrencyField value={450} onChange={() => {}} field={{ ...AMOUNT, currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } }} readonly dependentValues={record} dataSource={ds} />
+      </LocalizationProvider>,
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryAllByTestId('home-amount-preview')).toHaveLength(0);
+    expect(ds.calls).toHaveLength(0);
+    expect(document.body.textContent?.replace(/ /g, ' ')).toContain('€450.00€450.00');
+  });
+});
