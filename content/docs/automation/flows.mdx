@@ -1259,13 +1259,20 @@ delay while the outside system is down. Such a flow is refused at publish
 registration at the engine, an error at `objectstack validate`). Give the
 `http` node `durable: true` instead. Where a messaging HTTP outbox is wired,
 the request is queued there and retried in the background, so the save does
-not wait; where none is wired, the node falls back to the inline call and the
-save waits for it as before. A `connector_action` has no background path:
+not wait; where none is wired, a run on the save path sends it once in the
+background, unretried, and does not wait for it either (a failure is logged and
+the request is lost). A `connector_action` has no background path:
 remove the retry around it, or run the flow on demand or on a schedule. A
 durable `http` node fits only a call that needs no credential, because a
 credential must not go in an `http` node's url or headers. A before-trigger,
 scheduled, API or on-demand flow, and an inline call nothing retries, are
-unaffected.
+unaffected. The same holds through a `subflow` or `map` node: the run waits for
+its child, so a child flow (or a flow it calls) whose inline call is retried,
+by its own retry or by one around the call, holds the save too. The child may
+be published after the caller, so this is judged when the trigger arms: such a
+flow is registered but not armed, and `GET /automation/_status` reports it
+`bound: false` with `unboundCause: retried_callout_in_subflow`. It arms once
+the child's call is durable or nothing retries it.
 
 > BPMN `parallel_gateway` / `join_gateway` / `boundary_event` remain in the
 > protocol as the **interop** representation and map onto these constructs on

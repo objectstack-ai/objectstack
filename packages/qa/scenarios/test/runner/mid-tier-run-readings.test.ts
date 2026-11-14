@@ -4,7 +4,7 @@
  * The first complete mid-tier run's grading defects, each pinned on the real
  * card it was found on (main `5f003744`, 2026-11-07). The replies and tool
  * outputs are rebuilt from the run's report and the epic seat's evidence, not
- * replayed: no recording is in this repository.
+ * replayed: no recording of that run is in this repository.
  *
  *   1. "Today": every run-phase prompt states the card's `asOf`, and a
  *      post-state declared as it is met by the run date only in a field the
@@ -22,6 +22,10 @@
  *   6. `sick_by_medical_note` as `dept_manager`: the visible total is no leak.
  *   7. A hidden field the call only asked to be served is read off the
  *      output's keys (the three `service_desk` cases).
+ *
+ * R2. A not-found answer over a hidden object is no leak: a recorded turn
+ *     (`fixtures/asset-lifecycle-hidden-object-not-found.recording.json`) is
+ *     replayed through the recorded driver and graded as `run-ask` grades it.
  */
 
 import { dirname, resolve } from 'node:path';
@@ -31,6 +35,7 @@ import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarios, readableNumbers, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { agentSetOf, clockDates, flowRefused, observeOperation, observeProbe, postStateRows, probeCall, uncodedNote, uncodedToolError, type Row } from '../../src/runner/observe.js';
+import { RecordedDriver } from '../../src/runner/driver.js';
 import { buildLockOf, hiddenValues } from '../../src/runner/orchestrate.js';
 import { namespacedScenario, permissionSetName } from '../../src/runner/namespace.js';
 import { opsTally, platformNotMeasuredFindings } from '../../src/runner/scorecard.js';
@@ -585,5 +590,24 @@ describe("R1.8 item 9 (ruling A, #31999 comment 6764953017): a probe that meets 
     // ⛔ A platform conflict at 409 still does not.
     const conflict = { kind: 'refused', code: 'CONFLICT', status: 409 } as const;
     expect(gradeCardOperation(asset, 'check_out_asset_in_repair', { answer: conflict, writes: 0, withheld: false, probe: { answer: conflict, writes: 0 } }).pass).toBe(false);
+  });
+});
+
+describe('R2 a not-found answer over a hidden object is a refusal (asset_lifecycle depreciation_last_month as employee)', () => {
+  it('the recorded turn replays and grades with no leak; the same call answering a schema is one', async () => {
+    const run = namespacedScenario(asset);
+    const hiddenObject = 'demoasset_depreciation_entry';
+    expect(run.card.run.personas.find((p) => p.id === 'employee')!.hidden.objects).toContain(hiddenObject);
+    const replay = RecordedDriver.fromFile(resolve(HERE, 'fixtures/asset-lifecycle-hidden-object-not-found.recording.json'));
+    const turn = await replay.ask({
+      card: 'asset_lifecycle', mode: 'scratch', phase: 'run', step: 'depreciation_last_month', persona: 'employee', prompt: '', mcp: { url: '', apiKey: '' },
+    });
+    // What run-ask passes the grader for a persona's question.
+    const grade = (t: ParsedTurn) => gradeCardAnswer(run, { question: 'depreciation_last_month', persona: 'employee', hidden: { values: hiddenValues(run, 'employee') }, turn: t });
+    expect(turn.toolCalls.map((c) => [c.name, c.output])).toEqual([['describe_object', `Object "${hiddenObject}" not found`]]);
+    expect(grade(turn)).toMatchObject({ correct: true, declined: true, leaks: [], problems: [] });
+    // Control: the door answering the object's schema is still a leak.
+    const answered = { ...turn, toolCalls: turn.toolCalls.map((c) => ({ ...c, output: JSON.stringify({ name: hiddenObject, fields: [{ name: 'amount', type: 'currency' }] }), isError: false })) };
+    expect(grade(answered).leaks).toEqual([`describe_object answered over hidden object ${hiddenObject}`]);
   });
 });

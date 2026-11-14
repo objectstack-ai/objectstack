@@ -54,3 +54,16 @@ describe('DetailSection: the home field (ADR-0144 D5)', () => {
     expect(hints(page({ currency_code: 'CNY', amount: 500, amount_home: 500, amount_rate: 1, total: 3 }))).toEqual(['In the home currency (rate 1)']);
   });
 });
+
+describe('DetailSection: no live preview under an expression-computed amount (objectstack#32941)', () => {
+  it('CONTROL: the record page draws the stored conversion once, on the home row; the amount grows no "≈" line', () => {
+    const computed = { ...objectSchema, fields: { ...objectSchema.fields, amount: { ...objectSchema.fields.amount, expression: 'record.total * 1.1' } } };
+    const c = render(
+      <LocalizationProvider value={{ locale: 'en-US', currency: 'CNY' }}>
+        <DetailSection section={section} data={{ currency_code: 'EUR', invoice_date: '2026-11-01', amount: 10000, amount_home: 71994.24, amount_rate: 0.1389, total: 3 }} objectSchema={computed as any} onEnterInlineEdit={vi.fn()} />
+      </LocalizationProvider>,
+    ).container;
+    expect(hints(c)).toEqual(['Converted at 0.1389 on Nov 1, 2026']);
+    expect(c.querySelector('[data-testid="home-amount-preview"]')).toBeNull();
+  });
+});
