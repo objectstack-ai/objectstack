@@ -763,6 +763,12 @@ const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION: RuleExplanation = {
       'keyed only on another user field — `owner == current_user.id`, where `owner` is the detail\'s own ' +
       'accountable-person field — stays a narrowing with or without the opt-in, and the rule says so in ' +
       'both states instead of prescribing an opt-in that would not admit that user.',
+    'The second opt-in, `sharing: { controlledByParent: { writeRequiresMasterRead: true } }`, makes READ ' +
+      'access to the master the gate\'s question for every write of the detail: insert, update and delete, ' +
+      'by anyone the detail\'s own permissions admit. On such a detail a policy keyed on the caller no longer ' +
+      'narrows master editors; it decides among everyone who reads the master, as authored, whichever user ' +
+      'field it keys. So the rule is not reported there. It is refused beside `ownerMayEdit: true`, which ' +
+      'it already covers.',
     'This is a warning, not an error: a narrowing can be meant (only the owner among the master\'s ' +
       'editors may update), and no runtime door refuses the shape. To fix a policy keyed on `owner_id`, ' +
       'declare the opt-in on the detail when the owner is meant to write with read on the master, or ' +
@@ -779,15 +785,15 @@ const SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION: RuleExplanation = {
   covers: 'why a hidden master reference still decides a detail write',
   paragraphs: [
     'A `controlled_by_parent` detail derives its record access from its master (ADR-0055). Creating, ' +
-      'editing or deleting a detail row needs edit access to the master record its master reference names, ' +
-      'and the platform reads that reference from the stored row, whatever the writer may read. So a ' +
+      'editing or deleting a detail row needs edit access to the master record its master reference names ' +
+      '(read access, on a detail that declares `writeRequiresMasterRead`), and the platform reads that reference from the stored row, whatever the writer may read. So a ' +
       'permission set\'s `readable: false` on the master reference hides the field from the set\'s holders ' +
       'and does not take it out of the decision: the master it names still decides whether each holder may ' +
       'write the row.',
     'What the field-level security does change is the refusal. A writer who can read the master reference ' +
       'is told which master\'s edit access the write needs and which check refused it. A writer who cannot ' +
       'read it gets the same `403 PERMISSION_DENIED` with a generic sentence, "no edit permission on the ' +
-      'parent record of this detail", which names no master object, no master record and no check. The ' +
+      'parent record of this detail" ("no read permission" where read is the question), which names no master object, no master record and no check. The ' +
       'writer has no way to tell from the refusal which record to ask for access to.',
     'Reported for each permission set whose own entry for the master reference reads `readable: false` (an ' +
       'omitted `readable` is `true`), on a detail this stack declares with one master. Not reported when the ' +
