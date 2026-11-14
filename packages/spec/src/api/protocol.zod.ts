@@ -4473,6 +4473,8 @@ export type FindReferencesToMetaResponse = z.input<typeof FindReferencesToMetaRe
 /** Post-parse shape of {@link FindReferencesToMetaResponse} — defaults applied, transforms run (ADR-0122). */
 export type FindReferencesToMetaResponseParsed = z.infer<typeof FindReferencesToMetaResponseSchema>;
 export type RollbackMetaItemRequest = z.input<typeof RollbackMetaItemRequestSchema>;
+/** Post-parse shape of {@link RollbackMetaItemRequest} — defaults applied, transforms run (ADR-0122). */
+export type RollbackMetaItemRequestParsed = z.infer<typeof RollbackMetaItemRequestSchema>;
 export type RollbackMetaItemResponse = z.input<typeof RollbackMetaItemResponseSchema>;
 /** Post-parse shape of {@link RollbackMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
 export type RollbackMetaItemResponseParsed = z.infer<typeof RollbackMetaItemResponseSchema>;

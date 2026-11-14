@@ -10,6 +10,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+// The source reaches `@objectstack/lint` lazily; pay that load at collection, never in a clocked case.
+import '@objectstack/lint';
 import { PackageScopedNameRefusedError, packageScopedRefusalMessage } from '@objectstack/core';
 import { historySlotOf } from './protocol-history-slots.js';
 
