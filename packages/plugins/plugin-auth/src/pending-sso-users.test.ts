@@ -861,10 +861,10 @@ describe('[#33181] a re-add of a still-pending person names what it did not appl
 describe('[#33181] an import row that faults answers the generic sentence', () => {
   it('a fault while writing one row answers INTERNAL_ERROR_MESSAGE on that row, never the fault\'s own text', async () => {
     const s = await managedStage();
-    const insert = s.engine.insert.bind(s.engine);
-    (s.engine as any).insert = async (object: string, doc: any, opts?: unknown) => {
+    const insert = (s.engine as any).insert.bind(s.engine) as (...args: unknown[]) => Promise<unknown>;
+    (s.engine as any).insert = async (object: string, doc: any, ...rest: unknown[]) => {
       if (object === 'sys_user' && doc?.email === 'faulty@example.com') throw new Error('driver detail: relation sys_user_7 is locked');
-      return insert(object, doc, opts);
+      return insert(object, doc, ...rest);
     };
     const csv = ['email,name,positions,permission_sets,manager_id', 'faulty@example.com,Faulty,,,', 'fine@example.com,Fine,,,'].join('\n');
     const body: any = await (await s.fire('/admin/import-sso-users', { csv }, s.bearers.admin)).json();
