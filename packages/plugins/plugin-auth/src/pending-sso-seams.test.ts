@@ -70,7 +70,11 @@ function rowEngine(
       if (opts.readFails) throw new Error('store down');
       if (object === 'sys_account') {
         return (opts.accounts ?? []).filter((a) =>
-          Object.entries(query?.where ?? {}).every(([k, v]) => a[k] === v),
+          Object.entries(query?.where ?? {}).every(([k, v]) => {
+            // Scalar equality only: a combinator is refused, never read as a field name.
+            if (k.startsWith('$')) throw new Error(`rowEngine double: unsupported where operator ${k}`);
+            return a[k] === v;
+          }),
         );
       }
       return row ? [row] : [];

@@ -80,7 +80,12 @@ export interface EnvironmentUserHost {
   userReactivated(event: EnvironmentUserEvent): void | Promise<void>;
 }
 
-/** How the plugin reaches the host: read per call, so a host wired late is still found. */
+/**
+ * How the plugin reaches the host: read per call, so a host wired late is still
+ * found. An accessor that answers no host is treated as no host wired, and a
+ * deactivation then goes ahead. A managed host must therefore answer a host or
+ * throw; it must never answer `undefined` while it is still starting.
+ */
 export type EnvironmentUserHostAccessor = () =>
   | EnvironmentUserHost
   | undefined
