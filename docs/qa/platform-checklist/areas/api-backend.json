@@ -1159,7 +1159,7 @@
       "title": "Package REST lifecycle: POST /packages creates (201), a duplicate name is refused 409 (no silent manifest clobber), PATCH partial-patches the manifest, and an explicit overwrite re-install replaces in place without duplicating",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1182,7 +1182,8 @@
         "PATCH three malformed bodies: { name: '' }, { version: 'not-semver' }, and {} (nothing to update); capture each rejection",
         "re-install with the explicit opt-in: POST /api/v1/packages?overwrite=true (or body { overwrite: true }) carrying the same id and a changed manifest (version 2.0.0); capture status",
         "GET /api/v1/packages and count rows whose id == com.example.qa-pkg-lifecycle-probe — must be exactly one",
-        "confirm the LIVE routing seam: POST /api/v1/packages resolves to the dispatcher install route (REST moved marketplace publish OFF the bare path to POST /api/v1/packages/publish in #3610), and PATCH /api/v1/packages/:id answers non-404 though it is absent from packages/rest/src/rest-route-ledger.ts (dispatcher-only)"
+        "confirm the LIVE routing seam: POST /api/v1/packages resolves to the dispatcher install route (REST moved marketplace publish OFF the bare path to POST /api/v1/packages/publish in #3610), and PATCH /api/v1/packages/:id answers non-404 though it is absent from packages/rest/src/rest-route-ledger.ts (dispatcher-only)",
+        "restart: after steps[6], stop the server and boot it again on the SAME database (the same file DB, never --fresh); then GET /api/v1/packages/com.example.qa-pkg-lifecycle-probe and GET /api/v1/packages, and set both beside the same reads taken just before the stop"
       ],
       "acceptance": [
         {
@@ -1220,12 +1221,19 @@
           "oracle": "api",
           "verify": "POST /api/v1/packages installs (not a 400 publish-shape rejection); PATCH /api/v1/packages/:id answers non-routing-404",
           "evidence": "the two traces"
+        },
+        {
+          "clause": "the manifest served after a restart equals the last one written: once the server restarts on the same database, GET /api/v1/packages/com.example.qa-pkg-lifecycle-probe answers the manifest of the steps[5] overwrite (version 2.0.0 and the fields it changed), never the PATCHed 1.1.0 manifest or the 1.0.0 install, and GET /api/v1/packages still lists exactly one row for the id",
+          "oracle": "api",
+          "verify": "compare the post-restart GET with the pre-restart GET of the same id: name, description, version and dependencies equal. The registry is rebuilt at boot from sys_packages: installPackage and updatePackage each persist the merged manifest through the package service's publish (packages/metadata-protocol/src/protocol-package-install.ts#updatePackage; a failed persist fails the write, #21243), publish stamps updated_at to the millisecond (packages/services/service-package/src/package-table.ts#packageWriteStamp), and the boot hydrates each id from its row written last (packages/services/service-package/src/index.ts, list() and the hydration loop that calls registry.installPackage). A pre-restart read that matches while the post-restart read shows an earlier version or name is the FAIL this clause exists for",
+          "evidence": "the pre- and post-restart GET bodies + the post-restart list count"
         }
       ],
       "negative": [
         "a second POST of the same id answering 2xx and silently replacing the manifest is the #2995 data-loss FAIL (the whole reason the 409 guard exists)",
         "a PATCH that resets enabled/status/installedAt (a full replace masquerading as a partial patch) is a FAIL",
-        "an overwrite re-install that leaves two rows for one id in GET /api/v1/packages is a FAIL (duplication, not replacement). Two sys_packages rows for one id at two versions are not this FAIL: the table is (id, version)-keyed by design (packages/services/service-package/src/package-table.ts)"
+        "an overwrite re-install that leaves two rows for one id in GET /api/v1/packages is a FAIL (duplication, not replacement). Two sys_packages rows for one id at two versions are not this FAIL: the table is (id, version)-keyed by design (packages/services/service-package/src/package-table.ts)",
+        "a restart that serves an earlier manifest than the last write (the PATCH or the overwrite lost, or an older version's row winning the boot hydration) is a FAIL: the edit was answered as stored and is gone"
       ],
       "traps": [
         "dispatcher-vs-hono-route"
@@ -1267,6 +1275,12 @@
           "date": "2026-11-14",
           "change": "acceptance[0].clause and negative[2] re-pointed (stale spec, card #33332; QA run #33081 comment 6850173588). sys_packages is keyed by (id, version) by design (service-package package-table.ts, PRIMARY KEY (id, version)), so after the 2.0.0 overwrite the table can hold two rows for the id. The item now names the list door GET /api/v1/packages, which reads the registry (one entry per id), as the oracle for every one-row count, and says two version rows in the table are not the duplication FAIL. The run's other note, a clause that the manifest served after a restart equals the last one written, is a new clause and is left for a coverage pass. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "steps[8], acceptance[6] and negative[3] added (coverage, card #33353 row 196; card-B-api-4 of QA run #33081, comment 6850173588, ledger row 196 of #32908). No clause said the manifest served after a restart equals the last one written, and the in-memory registry would pass every other clause while the durable copy was wrong. The new clause reads the detail door after a restart on the same database against the read before it. Source on main: updatePackage and installPackage persist through the package service's publish and fail the write when the persist fails (protocol-package-install.ts), publish stamps updated_at to the millisecond (package-table.ts packageWriteStamp), and the boot hydrates each id from its latest row (service-package index.ts list() and its hydration loop). The existing clauses are unchanged. Read from source at base bd439f17, not driven live",
+          "ref": "#33353"
         }
       ]
     },
