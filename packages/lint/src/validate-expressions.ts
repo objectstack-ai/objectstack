@@ -2275,9 +2275,10 @@ export interface StackExpressionOptions {
    * same served fields (#33216: and a one-hop leaf through a reference an
    * extension adds judged as one through a declared reference), and located
    * at the entry
-   * (`object 'T' · objectExtensions[0] · validation 'N'`). On this write the
-   * live objects are read without the system columns the registry injects
-   * (`stripInjectedSystemColumns`), as the build reads them. The
+   * (`object 'T' · objectExtensions[0] · validation 'N'`). On this write, as
+   * on every runtime write (#33246), the live objects are read without the
+   * system columns the registry injects (`stripInjectedSystemColumns`), as
+   * the build reads them. The
    * object walk reads an empty list (the carried objects are the universe the
    * field or rule resolves in, not the subject) and so does every other pass;
    * the function returns after the extension walk.
@@ -2365,17 +2366,25 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   if (options.runtimeWriteType === 'page') {
     return actionCopyTemplateIssues(stack, { actions: false, objects: false, pages: true });
   }
-  // [#33154] The extension door hands the objects as the registry SERVES
-  // them, and a served definition carries the system columns the registry
-  // injects (`created_at`, `owner_id`, …) as declared fields; the build reads
-  // the objects as authored. Unstripped, the null-guard gate judged
-  // `record.created_at` as a declared nullable field and refused at the door
-  // an extension rule `os build` accepts. So on that write each object is read
-  // through `stripInjectedSystemColumns` (`@objectstack/metadata-core`, the
-  // write path's own strip of exactly those, as `authored-site-expression.ts`
-  // reads the served objects), and the indexes re-derive the injected columns
-  // themselves, as they do at the build.
-  if (extensionWrite) stack = { ...stack, objects: recordsOf(stack.objects).map((o) => stripInjectedSystemColumns(o)) };
+  // [#33154, #33246] Every runtime publish door hands the objects as the
+  // registry SERVES them (the gate's one `listRegisteredCollection` read,
+  // whatever the written type), and a served definition carries the system
+  // columns the registry injects (`created_at`, `owner_id`, …) as declared
+  // fields; the build reads the objects as authored. Unstripped, the
+  // null-guard gate judged `record.created_at` as a declared nullable field
+  // and refused at the door a flow condition, a hook `condition` or an
+  // extension rule that `os build` accepts. So on every runtime write each
+  // object is read through `stripInjectedSystemColumns`
+  // (`@objectstack/metadata-core`, the write path's own strip of exactly
+  // those, as `authored-site-expression.ts` reads the served objects), and
+  // the indexes re-derive the injected columns themselves, as they do at the
+  // build: known fields, never judged nullable (`buildNullableFieldIndex`).
+  // One reading for every write type, not one per walk, so no pass at any
+  // door reads a column the build does not. The build passes no write type
+  // and reads its objects as they are.
+  if (options.runtimeWriteType !== undefined) {
+    stack = { ...stack, objects: recordsOf(stack.objects).map((o) => stripInjectedSystemColumns(o)) };
+  }
   const objects = recordsOf(stack.objects);
   // [#30471] The field indexes read the objects as the registry SERVES them,
   // every `objectExtensions` field of any body folded in (`objectsAsServed`,
