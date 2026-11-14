@@ -201,6 +201,10 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'mapLastName', label: 'Map: Last name attribute', type: 'text', required: false, placeholder: 'surname', helpText: 'Optional. Assertion attribute mapped to the user’s last name. Defaults to "surname". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname' },
         { name: 'mapName', label: 'Map: Display name attribute', type: 'text', required: false, placeholder: 'displayName', helpText: 'Optional. Assertion attribute mapped to the user’s full name, used when the first and last name attributes are absent. Defaults to "displayName", then the NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname' },
         { name: 'mapGroups', label: 'Map: Groups attribute', type: 'text', required: false, placeholder: 'groups', helpText: 'Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.' },
+        // The attribute the provider keys its accounts on instead of the
+        // NameID, stored as `mapping.extraFields.accountKey` (plugin-auth
+        // `sso-saml-account-key.ts`). Blank keeps the default.
+        { name: 'mapAccountKey', label: 'Map: Account key attribute', type: 'text', required: false, placeholder: 'http://schemas.microsoft.com/identity/claims/objectidentifier', helpText: 'Optional. Assertion attribute with one stable value per person (an employee id, an immutable user id), used as the account key instead of the NameID, so a sign-in from your sign-in page and one from the IdP’s app portal reach the same account, and an email change keeps it. Leave blank for the default: Microsoft Entra ID (IdP Entity ID on sts.windows.net or login.microsoftonline.com) uses http://schemas.microsoft.com/identity/claims/objectidentifier, every other IdP the NameID. Set it when the provider is registered: accounts already made keep the key they were made with.' },
       ],
     },
     {
