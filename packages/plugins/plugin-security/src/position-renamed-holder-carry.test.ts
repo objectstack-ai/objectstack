@@ -22,15 +22,18 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { SysMetadataActivation } from '@objectstack/platform-objects/system';
-import { createSecurityCatalogReader, type SecurityCatalogEntry } from '@objectstack/core';
+import { SysMember, SysOrganization, SysUser } from '@objectstack/platform-objects/identity';
+import { ObjectKernel, createSecurityCatalogReader, type Plugin, type PluginContext, type SecurityCatalogEntry } from '@objectstack/core';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
+import { SecurityPlugin } from './security-plugin.js';
 import {
   carryRenamedPositionHolders,
   carryRenamedPositionHoldersAtBoot,
+  createPositionRenameCarryRuns,
   logPositionRenameCarry,
 } from './position-renamed-holder-carry.js';
 
@@ -422,5 +425,195 @@ describe('at boot', () => {
     expect(report).toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0][0])).toContain('did not finish');
+  });
+});
+
+/**
+ * [#33238] After the boot, in a RUNNING kernel: a real `ObjectKernel` with the
+ * SQL driver, `ObjectQLPlugin` and the real `SecurityPlugin`, and a door that
+ * does what the marketplace install-local door does — a hot install
+ * `manifest.register`s the package and then announces `metadata:reloaded`
+ * naming it (`announceHotInstall`, pinned on that door in
+ * `marketplace-install-local-hot-resync.test.ts`); an uninstall withdraws it
+ * through `SchemaRegistry.uninstallPackage`.
+ */
+const HOT = 'com.acme.hot';
+
+/** The package at `version`: v1 ships `hot_sales_rep`; v2 renames it, declaring the old name. Both ship the CONTROL `hot_auditor`. */
+const hotPackage = (version: '1.0.0' | '2.0.0') => ({
+  id: HOT,
+  name: 'Hot install',
+  version,
+  type: 'app',
+  namespace: 'hot',
+  positions: [
+    version === '1.0.0' ? { name: 'hot_sales_rep', label: 'Sales rep' } : { name: 'hot_crm_sales_rep', label: 'Sales rep', renamedFrom: ['hot_sales_rep'] },
+    { name: 'hot_auditor', label: 'Auditor' },
+  ],
+});
+
+async function runningKernel() {
+  const kernel = new ObjectKernel({ logger: { level: 'silent' } });
+  const logger = (kernel as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger;
+  const warnings: string[] = [];
+  vi.spyOn(logger, 'warn').mockImplementation((...a: unknown[]) => void warnings.push(String(a[0])));
+  let door: PluginContext | undefined;
+  await kernel.use({
+    name: 'test.hot.driver',
+    type: 'standard',
+    version: '1.0.0',
+    async init(ctx: PluginContext) {
+      ctx.registerService('driver.default', new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }));
+    },
+  } as Plugin);
+  await kernel.use(new ObjectQLPlugin());
+  await kernel.use(new SecurityPlugin({ fallbackPermissionSet: null }));
+  await kernel.use({
+    name: 'test.hot.door',
+    type: 'standard',
+    version: '1.0.0',
+    dependencies: ['com.objectstack.engine.objectql'],
+    async init(ctx: PluginContext) {
+      door = ctx;
+      const manifest = ctx.getService<{ register(m: unknown): unknown }>('manifest');
+      // The identity objects the security plugin's store reads (a test kit's `createIdentityObjectsPlugin`).
+      await manifest.register({ id: 'test.hot.identity', name: 'Identity', version: '1.0.0', type: 'plugin', objects: [SysUser, SysMember, SysOrganization] });
+      await manifest.register(hotPackage('1.0.0'));
+    },
+  } as Plugin);
+  await kernel.bootstrap();
+  const ql = kernel.getService<ObjectQL>('objectql');
+  const served = async (): Promise<string[]> =>
+    (await createSecurityCatalogReader({ registry: (ql as any).registry, metadata: { get: async () => undefined, list: async () => [] } }).list('position')).map((e) => e.name);
+  return {
+    kernel,
+    ql,
+    warnings,
+    served,
+    /** The door's hot install (or upgrade): register `version`, then announce it. */
+    async hotInstall(version: '1.0.0' | '2.0.0'): Promise<void> {
+      await door!.getService<{ register(m: unknown): unknown }>('manifest').register(hotPackage(version));
+      await door!.trigger('metadata:reloaded', { changed: [`app/${HOT}`] });
+    },
+    /** The door's uninstall: the running kernel withdraws the package; its holder rows stay. */
+    uninstall(): void {
+      (ql as any).registry.uninstallPackage(HOT);
+    },
+  };
+}
+
+const renameWarnings = (warnings: readonly string[]) => warnings.filter((w) => w.includes('position rename'));
+
+describe('after the boot: a hot install carries its holders without a restart (#33238)', () => {
+  it('a running kernel, v1 uninstalled, v2 hot-installed renaming a position: its holder holds the new name at once; the CONTROL is untouched; a second install is a no-op', async () => {
+    const k = await runningKernel();
+    try {
+      await seed(k.ql, 'sys_user_position', [holder('h1', 'u1', 'hot_sales_rep', 'org_a'), holder('h2', 'u2', 'hot_auditor', 'org_a')]);
+      k.uninstall();
+      expect(await k.served()).not.toContain('hot_sales_rep');
+
+      await k.hotInstall('2.0.0');
+
+      expect(await positionsById(k.ql)).toEqual({ h1: 'hot_crm_sales_rep', h2: 'hot_auditor' });
+      expect(renameWarnings(k.warnings)).toEqual([]);
+
+      // Idempotent: the same install again reads the old name, finds nobody on it, writes nothing and says nothing.
+      const update = vi.spyOn(k.ql, 'update');
+      const before = k.warnings.length;
+      await k.hotInstall('2.0.0');
+      expect(update.mock.calls.filter(([object]) => object === 'sys_user_position')).toEqual([]);
+      expect(renameWarnings(k.warnings.slice(before))).toEqual([]);
+      expect(await positionsById(k.ql)).toEqual({ h1: 'hot_crm_sales_rep', h2: 'hot_auditor' });
+    } finally {
+      await Promise.race([k.kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+    }
+  }, 60_000);
+
+  it('a hot upgrade over v1, which the running kernel still serves: no holder is left on a position the catalog does not serve', async () => {
+    const k = await runningKernel();
+    try {
+      await seed(k.ql, 'sys_user_position', [holder('h1', 'u1', 'hot_sales_rep', 'org_a'), holder('h2', 'u2', 'hot_auditor', 'org_a')]);
+
+      await k.hotInstall('2.0.0');
+
+      // Measured: a re-register of an installed id withdraws nothing of the
+      // version before it, so `hot_sales_rep` still serves until the restart
+      // and the old name reads as still declared (no move); the boot after
+      // the restart carries it. Either way, no holder names nothing.
+      const served = new Set(await k.served());
+      const positions = await positionsById(k.ql);
+      expect(Object.values(positions).filter((p) => !served.has(String(p)))).toEqual([]);
+      expect(positions.h2).toBe('hot_auditor');
+    } finally {
+      await Promise.race([k.kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+    }
+  }, 60_000);
+});
+
+describe('the runner: one boot run, then one run per reload', () => {
+  const quietEngine = () => ({ find: vi.fn(async () => []), update: vi.fn(async () => ({})) });
+
+  it('a reload heard before the boot run reads nothing: the catalog is still being filled', async () => {
+    const engine = quietEngine();
+    const list = vi.fn(async () => [entry('crm_sales_rep', CRM, ['sales_rep'])]);
+    const runs = createPositionRenameCarryRuns(engine as any, () => ({ catalog: { list }, switchedOff: async () => new Set() }), { warn: vi.fn() });
+
+    expect(await runs.afterReload()).toBeUndefined();
+    expect(list).not.toHaveBeenCalled();
+    expect(engine.find).not.toHaveBeenCalled();
+
+    await runs.atBoot();
+    expect(list).toHaveBeenCalledTimes(1);
+    await runs.afterReload();
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it('a refusal said at boot is not said again while it stands, and is said again once it has cleared and comes back', async () => {
+    const engine = quietEngine();
+    let catalog = [entry('crm_sales_rep', CRM, ['sales_rep']), entry('sales_rep', HR)];
+    const warn = vi.fn();
+    const runs = createPositionRenameCarryRuns(engine as any, () => ({ catalog: { list: async () => catalog }, switchedOff: async () => new Set() }), { warn });
+
+    await runs.atBoot();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain("'sales_rep' → 'crm_sales_rep'");
+    await runs.afterReload();
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    catalog = [entry('crm_sales_rep', CRM, ['sales_rep'])];
+    await runs.afterReload();
+    expect(warn).toHaveBeenCalledTimes(1);
+    catalog = [entry('crm_sales_rep', CRM, ['sales_rep']), entry('sales_rep', HR)];
+    await runs.afterReload();
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('runs never overlap: a reload that lands during a run waits for it', async () => {
+    const engine = quietEngine();
+    let open = 0;
+    let most = 0;
+    const list = async () => {
+      open += 1;
+      most = Math.max(most, open);
+      await new Promise((r) => setTimeout(r, 5));
+      open -= 1;
+      return [];
+    };
+    const runs = createPositionRenameCarryRuns(engine as any, () => ({ catalog: { list } }), { warn: vi.fn() });
+    await Promise.all([runs.atBoot(), runs.afterReload(), runs.afterReload()]);
+    expect(most).toBe(1);
+  });
+
+  it('never throws past the runner: a failed run is said, and the next run still runs', async () => {
+    const engine = quietEngine();
+    let fail = true;
+    const warn = vi.fn();
+    const runs = createPositionRenameCarryRuns(engine as any, () => ({
+      catalog: { list: async () => { if (fail) throw new Error('catalog down'); return []; } },
+    }), { warn });
+    expect(await runs.atBoot()).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    fail = false;
+    expect(await runs.afterReload()).toEqual({ carried: [], refused: [], failed: [], leftBehind: [], notRead: [] });
   });
 });
