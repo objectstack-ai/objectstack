@@ -392,6 +392,30 @@ describe('[#32517] two packages\' same-named actions: the metadata-service-only 
         expect(h.rows).toEqual([]);
     });
 
+    /**
+     * [#32689] One holder of the object-less name: the flip writes its row
+     * naming that package, in both directions — each on a fresh ledger, since
+     * the double writes FIRST rows only (see {@link makeLedgerTable}).
+     */
+    it('CONTROL — one package\'s object-less action: the flip writes its row, on and off (unchanged)', async () => {
+        for (const enabled of [false, true]) {
+            const door = new MemoryLoader();
+            await door.save('action', 'shared_ping', shipped('com.acme.alpha', undefined));
+            const manager = new MetadataManager({ formats: ['json'], loaders: [door] });
+            const h = boot({ metadata: {
+                load: (type: string, name: string) => manager.load(type, name),
+                loadDiagnosed: (type: string, name: string) => manager.loadDiagnosed(type, name),
+                loadMany: (type: string) => manager.loadMany(type),
+                listObjects: async () => [],
+                getObject: async () => undefined,
+            } });
+            const res = await flip(h, 'global', 'shared_ping', enabled);
+            expect(statusOf(res), bodyOf(res)).toBe(200);
+            expect(h.rows.map((r) => [r.name, r.package_id, r.active]))
+                .toEqual([['shared_ping', 'com.acme.alpha', enabled]]);
+        }
+    });
+
     it('NARROWING — the bare execution door, both object-less: 409 naming both packages, nothing runs (BASE: 200, the one saved last ran)', async () => {
         const h = await bootWithDoor([undefined, undefined]);
         const res = await h.dispatcher.handleActions('/global/shared_ping', 'POST', {}, ADMIN());
