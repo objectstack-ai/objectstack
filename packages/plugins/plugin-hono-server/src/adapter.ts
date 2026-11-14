@@ -861,6 +861,7 @@ export class HonoHttpServer implements IHttpServer {
         // media type answers and why the refusal waits for `req.body` to be read.
         let bodyReading: RequestBodyReading = await readRequestBody(c);
         let refusedBodyRead: RequestBodyRefusal | RequestBodyTooLarge | undefined;
+        let rawBodyRead: Promise<Buffer> | undefined;
 
         _endParse?.();
 
@@ -911,15 +912,18 @@ export class HonoHttpServer implements IHttpServer {
              * limit), so that refusal no longer stands as the answer. Every
              * other refusal still does.
              */
-            rawBody: async () => {
+            rawBody: () => {
                 if (refusedBodyRead instanceof RequestBodyTooLarge) refusedBodyRead = undefined;
-                const original = requestBodyGuardOf(c)?.readOriginal();
-                if (original) {
-                    const bytes = await original;
-                    return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-                }
-                const ab = await c.req.arrayBuffer();
-                return Buffer.from(ab);
+                // Repeatable: a second call answers the same bytes as the first.
+                rawBodyRead ??= (async () => {
+                    const original = requestBodyGuardOf(c)?.readOriginal();
+                    if (original) {
+                        const bytes = await original;
+                        return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+                    }
+                    return Buffer.from(await c.req.arrayBuffer());
+                })();
+                return rawBodyRead;
             },
             /**
              * The transport's own peer address (`IHttpRequest.remoteAddress`)

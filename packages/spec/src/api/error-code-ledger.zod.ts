@@ -1287,7 +1287,8 @@ export const ERROR_CODE_LEDGER = {
     // over the limit (10 MiB by default, `maxRequestBodyBytes` /
     // `OS_HTTP_MAX_BODY_BYTES`) is not read past it, on the self-hosted server
     // and on `@objectstack/hono`'s `createHonoApp`, which imports the
-    // constant. Third EMITTER of the code `@objectstack/rest` registers; one
+    // refusal (`RequestBodyTooLarge`) and its answer
+    // (`requestBodyTooLargeAnswer`) from here. Third EMITTER of the code `@objectstack/rest` registers; one
     // condition, the request carries more than the door accepts. Provenance,
     // not identity (see above).
     'PAYLOAD_TOO_LARGE',

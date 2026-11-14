@@ -172,3 +172,74 @@ describe('over a real listener, a body over the limit is refused unread and a by
         expect(await res.json()).toEqual({ success: true, data: { where: { status: 'open' } } });
     });
 });
+
+describe('a body refused past the limit releases its source, and a byte door reads the same bytes twice', () => {
+    const LIMIT = 1024;
+    const CHUNK = 256;
+
+    /** An endless body that records what was pulled from it and whether it was cancelled. */
+    function endlessBody() {
+        const state = { pulled: 0, cancelled: false };
+        const stream = new ReadableStream<Uint8Array>({
+            pull(controller) {
+                state.pulled += CHUNK;
+                controller.enqueue(new TextEncoder().encode('x'.repeat(CHUNK)));
+            },
+            cancel() {
+                state.cancelled = true;
+            },
+        }, { highWaterMark: 0 });
+        return { stream, state };
+    }
+
+    function serverWithRoutes() {
+        const server = new HonoHttpServer(0);
+        server.setMaxRequestBodyBytes(LIMIT);
+        server.post('/api/v1/data/:object/query', (req, res) => { res.json({ success: true, data: req.body }); });
+        server.put('/api/v1/bytes/:id', async (req, res) => {
+            const first = await req.rawBody!();
+            const second = await req.rawBody!();
+            res.json({ success: true, data: { first: first.byteLength, second: second.byteLength, same: first.equals(second) } });
+        });
+        return server;
+    }
+
+    it.each([['application/json'], ['application/x-www-form-urlencoded']])(
+        'a %s body with no declared length is answered 413 and its source is cancelled after the refusal',
+        async (contentType) => {
+            const { stream, state } = endlessBody();
+            const res = await serverWithRoutes().getRawApp().request('http://localhost/api/v1/data/task/query', {
+                method: 'POST',
+                headers: { 'content-type': contentType },
+                body: stream,
+                duplex: 'half',
+            } as RequestInit);
+            expect(res.status).toBe(413);
+            expect(((await res.json()) as any).error.code).toBe('PAYLOAD_TOO_LARGE');
+            expect(state.cancelled).toBe(true);
+            expect(state.pulled).toBeLessThanOrEqual(LIMIT + 2 * CHUNK);
+        },
+    );
+
+    it.each([['declared', true], ['not declared', false]])(
+        'rawBody() called twice answers the same bytes both times, length %s',
+        async (_label, declare) => {
+            const bytes = new Uint8Array(LIMIT * 4).fill(0x63);
+            const res = await serverWithRoutes().getRawApp().request('http://localhost/api/v1/bytes/f_1', {
+                method: 'PUT',
+                headers: { 'content-type': 'application/json', ...(declare ? { 'content-length': String(bytes.byteLength) } : {}) },
+                body: declare
+                    ? bytes
+                    : new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(bytes);
+                            controller.close();
+                        },
+                    }),
+                duplex: 'half',
+            } as RequestInit);
+            expect(res.status, await res.clone().text()).toBe(200);
+            expect(((await res.json()) as any).data).toEqual({ first: bytes.byteLength, second: bytes.byteLength, same: true });
+        },
+    );
+});

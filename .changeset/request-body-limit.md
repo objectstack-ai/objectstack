@@ -2,6 +2,7 @@
 '@objectstack/plugin-hono-server': patch
 '@objectstack/hono': patch
 '@objectstack/service-storage': patch
+'@objectstack/spec': patch
 ---
 
 fix(plugin-hono-server, hono)!: a request body over the server's limit is answered 413 PAYLOAD_TOO_LARGE and is not read past the limit

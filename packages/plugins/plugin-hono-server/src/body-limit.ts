@@ -185,6 +185,12 @@ export interface RequestBodyGuard {
      * original can no longer be read here (something read through the guard).
      */
     readOriginal(): Promise<Uint8Array> | undefined;
+    /**
+     * At the end of the request: a held body that passed the limit and that no
+     * byte door went on to read whole has its source cancelled, as a read
+     * refused through the guard has, so the rest of it is never read.
+     */
+    release(): Promise<void>;
 }
 
 const guards = new WeakMap<Request, RequestBodyGuard>();
@@ -200,6 +206,8 @@ function guardRequest(original: Request, limit: number): { guard: RequestBodyGua
     let tripped = false;
     let pulled = false;
     let held: Promise<HeldRequestBody> | undefined;
+    let heldReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let heldOpen = false;
     let sourceReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     const guard: RequestBodyGuard = {
@@ -212,6 +220,7 @@ function guardRequest(original: Request, limit: number): { guard: RequestBodyGua
         hold() {
             held ??= (async (): Promise<HeldRequestBody> => {
                 const reader = original.body!.getReader();
+                heldReader = reader;
                 const chunks: Uint8Array[] = [];
                 let total = 0;
                 let done = false;
@@ -225,10 +234,13 @@ function guardRequest(original: Request, limit: number): { guard: RequestBodyGua
                     total += next.value.byteLength;
                 }
                 const overLimit = !done && total > limit;
+                heldOpen = !done;
                 return {
                     bytes: overLimit ? undefined : concat(chunks),
                     overLimit,
                     async readAll() {
+                        // A byte door claimed the rest: `release` leaves it to this read.
+                        heldOpen = false;
                         if (!done) {
                             for (;;) {
                                 const next = await reader.read();
@@ -247,6 +259,14 @@ function guardRequest(original: Request, limit: number): { guard: RequestBodyGua
             if (held) return held.then((h) => h.readAll());
             if (pulled || original.bodyUsed || original.body?.locked) return undefined;
             return original.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+        },
+        async release() {
+            if (!held) return;
+            const reading = await held.catch(() => undefined);
+            if (reading?.overLimit && heldOpen && heldReader) {
+                heldOpen = false;
+                await heldReader.cancel().catch(() => undefined);
+            }
         },
     };
 
@@ -306,7 +326,11 @@ export function installRequestBodyLimit(app: Hono<any, any, any>, limit: () => n
             c.req.raw = guarded;
             guards.set(guarded, guard);
         }
-        await next();
+        try {
+            await next();
+        } finally {
+            await guard.release();
+        }
         if (guard.tripped()) {
             const envelope = requestBodyTooLargeEnvelope(guard.limit);
             c.res = c.json(envelope.body, envelope.status);
