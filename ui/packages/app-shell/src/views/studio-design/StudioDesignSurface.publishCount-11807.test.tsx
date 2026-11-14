@@ -79,6 +79,10 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 }));
 
 import { toast } from 'sonner';
+// The source under test reaches `@objectstack/lint` through a dynamic import; its
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t, tFormat } from '../metadata-admin/i18n';
 

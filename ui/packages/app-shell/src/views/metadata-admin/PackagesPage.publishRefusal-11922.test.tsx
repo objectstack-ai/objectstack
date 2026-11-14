@@ -32,6 +32,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
+// The source under test reaches `@objectstack/formula` and `@objectstack/lint` through a dynamic import; its
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { PackageDetailSheet, type InstalledPackageRow } from './PackagesPage';
 import { t, tFormat } from './i18n';
 
