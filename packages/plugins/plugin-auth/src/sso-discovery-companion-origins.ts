@@ -34,8 +34,9 @@
  * ⛔ An origin a fetched discovery document names is never trusted because the
  * document names it: an unknown issuer whose discovery points at a foreign
  * userinfo host is still refused. The remedy for any other IdP is the explicit
- * `oidcConfig.userInfoEndpoint` (or the Register SSO Provider bridge's
- * `userInfoEndpoint`), whose origin the request body already makes trusted.
+ * `oidcConfig` endpoint (`userInfoEndpoint`, `tokenEndpoint`, `jwksEndpoint`,
+ * `authorizationEndpoint`; the Register SSO Provider bridge takes each as a
+ * field of the same name), whose origin the request body already makes trusted.
  *
  * Sovereign-cloud Entra hosts are deliberately absent: an entry is added only
  * with the IdP's own documentation of the origin its discovery document names.
@@ -132,7 +133,7 @@ export function explainUntrustedDiscoveryEndpoint(message: string): string {
   }
   return `${message} To trust it for this provider, name it explicitly in the registration: `
     + `"${field}": "${url}" (oidcConfig.${field} on POST /sso/register; the Register SSO Provider bridge, `
-    + 'POST /admin/sso/register, takes userInfoEndpoint and discoveryEndpoint as fields of the same names). '
+    + `POST /admin/sso/register, takes it as the field "${field}"). `
     + 'An endpoint the registration names is trusted for that registration.';
 }
 

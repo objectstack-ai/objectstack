@@ -158,11 +158,34 @@ their userinfo endpoint explicitly, as below.
 foreign host is refused **400 `discovery_untrusted_origin`**. The message names
 the endpoint and the registration member that names it explicitly, for example
 `"userInfoEndpoint": "https://profile.example.com/userinfo"`. A host is never
-trusted only because a discovery document names it. Pass the endpoint as
-`oidcConfig.userInfoEndpoint` (or as `userInfoEndpoint` on the Register SSO Provider
-bridge, `POST /api/v1/auth/admin/sso/register`, which the **Userinfo URL** field of
-**Setup → SSO Providers → Register SSO Provider** fills), and the
-registration trusts it.
+trusted only because a discovery document names it. Pass the endpoint as the
+`oidcConfig` member the message names (`authorizationEndpoint`, `tokenEndpoint`,
+`jwksEndpoint` or `userInfoEndpoint`), or as the field of the same name on the
+Register SSO Provider bridge, `POST /api/v1/auth/admin/sso/register` (the
+**Userinfo URL** field of **Setup → SSO Providers → Register SSO Provider** fills
+`userInfoEndpoint`), and the registration trusts it.
+
+Google is one such provider: its discovery document names the token endpoint,
+the key set and the userinfo endpoint each on a host of its own, so a Google
+registration names all three:
+
+```typescript
+await fetch('http://localhost:3000/api/v1/auth/admin/sso/register', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'include',
+  body: JSON.stringify({
+    providerId: 'google',
+    issuer: 'https://accounts.google.com',
+    domain: 'acme.com',
+    clientId: 'YOUR_CLIENT_ID',
+    clientSecret: 'YOUR_CLIENT_SECRET',
+    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+    jwksEndpoint: 'https://www.googleapis.com/oauth2/v3/certs',
+    userInfoEndpoint: 'https://openidconnect.googleapis.com/v1/userinfo',
+  }),
+});
+```
 
 **Claims.** Microsoft Graph's userinfo answer carries `sub`, `name`, `email` and
 `picture`, but no `groups`, `preferred_username` or `upn`. Two things follow:
@@ -292,17 +315,20 @@ domain is being claimed for:
    could not.
 
 ```typescript
-// Step 1 — ask for the TXT record to publish.
-// Body: { providerId, domain? }. `domain` only shapes the record NAME shown back
-// to you; omit it and you get the bare label to place on the zone yourself.
+// Step 1 — ask for the TXT record to publish. Body: { providerId }.
+// The record goes under the provider's registered domain, which the answer
+// carries as `domain`; dnsRecordName is the full record name under it.
 const req = await fetch('http://localhost:3000/api/v1/auth/admin/sso/request-domain-verification', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   credentials: 'include',
-  body: JSON.stringify({ providerId: 'okta', domain: 'acme.example' })
+  body: JSON.stringify({ providerId: 'okta' })
 });
 // → { success: true, data: { providerId, domain, token,
-//                            dnsRecordType: 'TXT', dnsRecordName, dnsRecordValue } }
+//                            dnsRecordType: 'TXT', dnsRecordName, dnsRecordValue,
+//                            dnsRecords: [{ domain, type: 'TXT', name, value }] } }
+// A provider listing several domains needs the record under each of them:
+// dnsRecords has one entry per domain, and dnsRecordName names them all.
 
 // …publish dnsRecordName / dnsRecordValue, wait for DNS to propagate, then:
 
