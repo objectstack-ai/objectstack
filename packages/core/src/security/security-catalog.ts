@@ -105,8 +105,10 @@
  *  - **The list** answers one entry per `(package, name)` holder, plus the
  *    environment's own item — never one entry per name picked among holders,
  *    on the registry's answer and, for a name the registry holds nowhere, on
- *    the metadata service's alike, in an order that does not follow the
- *    service's row order.
+ *    the metadata service's alike, packages in id order and the
+ *    environment's own item last. A package-less row and a row carrying the
+ *    `sys_metadata` provenance are both the environment's item, so they are
+ *    one holder, and the first of them the service lists is the one kept.
  *  - **Positions are unchanged** (ADR-0150 D7, ruled Q2 = A): one
  *    environment-wide slot per name, by the registry's own read, and the
  *    one-holder refusal (`@objectstack/objectql`,
