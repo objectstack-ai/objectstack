@@ -34,6 +34,7 @@ import { Database } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { isSystemManagedField } from '@object-ui/types';
 import { leadWithNameField } from '@object-ui/core';
+import { usePermissions } from '@object-ui/permissions';
 import type { ActionBarSchema, ListViewSchema } from '@object-ui/types';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { metadataText } from '../hooks/useNavTargetLabel.js';
@@ -42,6 +43,7 @@ import { useNavigationContext } from '../context/NavigationContext.js';
 import { matchAppBySegment } from '../utils/index.js';
 import { parseUserFilterParams, applyUserFilterParams } from './userFilterUrlState.js';
 import { RecordDetailView } from './RecordDetailView.js';
+import { servesRecordRead } from '../utils/recordReadServed.js';
 
 interface InterfaceListPageProps {
   page: any;
@@ -327,9 +329,14 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
   // clickable. Restores record-opening on interface pages (previously a no-op)
   // and makes it author-configurable. `modal` was retired from the spec's
   // `recordAction` (objectstack#26677): the drawer, which expands to the full
-  // page, is the one overlay.
-  const recordAction: 'drawer' | 'page' | 'none' =
-    cfg.recordAction === 'page' || cfg.recordAction === 'none'
+  // page, is the one overlay. A source object the server does not read one
+  // record of (`servesRecordRead`, a list-only object) has no record surface,
+  // so its records are not clickable whatever the page declares.
+  const perms = usePermissions();
+  const recordServed = servesRecordRead(cfg.source, perms);
+  const recordAction: 'drawer' | 'page' | 'none' = !recordServed
+    ? 'none'
+    : cfg.recordAction === 'page' || cfg.recordAction === 'none'
       ? cfg.recordAction
       : 'drawer';
   const recordUrl = React.useCallback(
@@ -365,11 +372,13 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
   const closeRecordDrawer = React.useCallback(() => {
     setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('recordId'); return n; });
   }, [setSearchParams]);
+  // A `?recordId=` link opens nothing on an object with no record surface.
+  const openedRecordId = recordServed ? drawerRecordId : null;
   React.useEffect(() => {
-    if (drawerRecordId && !navOverlay.isOpen) navOverlay.open({ id: drawerRecordId });
-    else if (!drawerRecordId && navOverlay.isOpen) navOverlay.close();
+    if (openedRecordId && !navOverlay.isOpen) navOverlay.open({ id: openedRecordId });
+    else if (!openedRecordId && navOverlay.isOpen) navOverlay.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawerRecordId]);
+  }, [openedRecordId]);
 
   // The view list endpoint can serve hollow expansion items (no columns);
   // the full body lives behind the per-view overlay API — the same
