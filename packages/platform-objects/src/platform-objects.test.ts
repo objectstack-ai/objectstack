@@ -287,7 +287,7 @@ describe('@objectstack/platform-objects', () => {
       ]);
     });
 
-    it('SysSsoProvider register_sso_provider collects the fields the register bridge reads, under the bridge\'s names (#32297)', () => {
+    it('SysSsoProvider register_sso_provider collects the fields the register bridge reads, under the bridge\'s names (#32297, #33395)', () => {
       // The bridge (plugin-auth `register-sso-provider.ts`,
       // `runRegisterSsoProviderFromForm`) reads these flat body members and
       // nothing else; a param under another name is dropped on the wire. The
@@ -302,6 +302,9 @@ describe('@objectstack/platform-objects', () => {
         ['clientId', 'text', true],
         ['clientSecret', 'password', true],
         ['discoveryEndpoint', 'url', false],
+        ['authorizationEndpoint', 'url', false],
+        ['tokenEndpoint', 'url', false],
+        ['jwksEndpoint', 'url', false],
         ['userInfoEndpoint', 'url', false],
         ['skipUserInfo', 'boolean', false],
         ['scopes', 'text', false],
@@ -321,8 +324,8 @@ describe('@objectstack/platform-objects', () => {
       // The Entra ID mapping is suggested in words, beside the issuer host it applies to.
       expect(help('mapEmail')).toContain('login.microsoftonline.com');
       expect(help('mapEmail')).toContain('"preferred_username"');
-      // Both nameable endpoints say a named endpoint is trusted for this provider.
-      for (const name of ['discoveryEndpoint', 'userInfoEndpoint']) {
+      // Every nameable endpoint says a named endpoint is trusted for this provider.
+      for (const name of ['discoveryEndpoint', 'authorizationEndpoint', 'tokenEndpoint', 'jwksEndpoint', 'userInfoEndpoint']) {
         expect(help(name), name).toContain('An endpoint named here is trusted for this provider');
       }
     });

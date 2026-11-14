@@ -223,7 +223,7 @@ export function samlSigningConfigOf(samlConfig: unknown): SamlSigningConfig | un
 }
 
 /** The XML a posted `SAMLResponse` carries, decoded as the vendor decodes it; `undefined` when it is not base64 XML. */
-function responseXmlOf(samlResponse: string): string | undefined {
+export function responseXmlOf(samlResponse: string): string | undefined {
   const compact = samlResponse.replace(/\s+/g, '');
   if (!compact || !/^[A-Za-z0-9+/=]+$/.test(compact)) return undefined;
   const xml = Buffer.from(compact, 'base64').toString('utf8');
@@ -278,7 +278,7 @@ export function classifySamlRefusal(samlResponse: string, config: SamlSigningCon
 }
 
 /** The `SAMLResponse` of an ACS `POST`, form-encoded or JSON (the two media types the vendor admits). */
-async function postedSamlResponseOf(request: Request): Promise<string | undefined> {
+export async function postedSamlResponseOf(request: Request): Promise<string | undefined> {
   const text = await request.text();
   const type = request.headers.get('content-type') ?? '';
   let samlResponse: unknown;
