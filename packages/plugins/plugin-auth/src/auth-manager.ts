@@ -796,6 +796,45 @@ export interface AuthRouteSurface {
   owns(method: string, pathname: string): boolean;
 }
 
+/**
+ * What {@link AuthManagerOptions.organizationDeleteGate} is asked with: one
+ * organization delete the platform has already admitted.
+ */
+export interface OrganizationDeleteGateRequest {
+  /** The organization being deleted: the `organizationId` better-auth parsed from the request body. */
+  organizationId: string;
+  /** The signed-in caller, a member of that organization whose role holds `organization: ['delete']`. */
+  session: {
+    userId: string;
+    /** The session's active organization, when it has one. */
+    activeOrganizationId?: string;
+    /** The administrator an impersonation session names, when the session is one. */
+    impersonatedBy?: string;
+  };
+  /** The request's `Accept-Language` header, for a refusal's `userMessage` in the request's language. */
+  acceptLanguage?: string;
+}
+
+/**
+ * A refusal {@link AuthManagerOptions.organizationDeleteGate} answers with.
+ * The platform answers `status` and `body` unchanged and deletes nothing.
+ */
+export interface OrganizationDeleteGateRefusal {
+  /** A client-error status, `400`–`499` (e.g. `409` for a delete refused while something remains). */
+  status: number;
+  /**
+   * The response body. `code` and `message` are required (ADR-0112),
+   * `userMessage` is the end-user text in the request's language; any other
+   * field the host adds (`steps`, …) is answered as it is.
+   */
+  body: {
+    code: string;
+    message: string;
+    userMessage?: string;
+    readonly [field: string]: unknown;
+  };
+}
+
 export interface AuthManagerOptions extends Partial<AuthConfig> {
   /**
    * Better-Auth instance (for advanced use cases)
@@ -916,6 +955,44 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * multi-tenant issuer) = allow. Host is expected to fail CLOSED on error.
    */
   oidcAuthorizeGate?: (params: { userId: string; clientId: string }) => boolean | Promise<boolean>;
+
+  /**
+   * The host's own check on `POST /organization/delete`: answer a
+   * {@link OrganizationDeleteGateRefusal} to refuse the delete, or nothing
+   * (`undefined` / `null`) to let it go ahead. The cloud control plane uses it
+   * to refuse while a subscription will charge again or environments remain.
+   *
+   * It is called once per delete, from the delete admission in better-auth's
+   * `hooks.before` (`assertOrganizationDeletable`), so it runs:
+   *
+   *  - only for a request the auth mount admitted: the IP allow-list and the
+   *    one-account refusal answer first, and a request they refuse never
+   *    reaches it;
+   *  - only for a delete the platform itself would let through: a caller who
+   *    is signed in and a member whose role holds `organization: ['delete']`,
+   *    an organization that exists, and none of the platform's own refusals
+   *    (`403 PERMISSION_DENIED` on the Default Organization's last
+   *    administrator, `409 DELETE_RESTRICTED` while records remain, `503` on a
+   *    read that failed);
+   *  - before better-auth's first write, so a refusal deletes nothing.
+   *
+   * It receives the `organizationId` better-auth parsed from the body, so a
+   * host needs no body reader of its own.
+   *
+   * A refusal is answered unchanged: its `status` (`400`–`499`) and its
+   * `body`. Fail-closed on anything else: a check that throws, or answers
+   * something that is neither nothing nor such a refusal, is answered
+   * `503 SERVICE_UNAVAILABLE` and nothing is deleted; the throw rides the
+   * error's `cause`.
+   *
+   * Read per call, so a value set by an `auth:configure` handler or
+   * `updateConfig` is the one asked. Unset = no host check. Asked only where
+   * the delete admission runs: a manager with no data engine (an in-memory
+   * composition) runs no admission, so the check is not asked there either.
+   */
+  organizationDeleteGate?: (
+    request: OrganizationDeleteGateRequest,
+  ) => OrganizationDeleteGateRefusal | null | undefined | void | Promise<OrganizationDeleteGateRefusal | null | undefined | void>;
 
   /**
    * Base path for auth routes
@@ -6126,15 +6203,23 @@ export class AuthManager {
    * Default Organization is asked the last-administrator guard's question
    * first (a 403), then its own record count (the same 409), both here, before
    * the first write.
+   *
+   * Last, a delete all of that admits is asked the host's own check
+   * ({@link AuthManagerOptions.organizationDeleteGate}, read per call), with
+   * the parsed organization id and the caller: its refusal is answered
+   * unchanged, and a check that throws or answers anything else refuses with
+   * 503 (`organizationDeleteGateAnswer` in `auth-manager-actor-guards.ts`).
    */
   private assertOrganizationDeletable(ctx: any): Promise<void> {
     // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
     const readOrgRolesMap = () => this.orgRolesMap;
     const readOrganizationDeleteStandingJudge = () => this.organizationDeleteStandingJudge;
-    const host: Pick<ActorGuardHost, 'getAudience' | 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'> = {
+    const readOrganizationDeleteGate = () => this.config.organizationDeleteGate;
+    const host: Pick<ActorGuardHost, 'getAudience' | 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteGate' | 'organizationDeleteStandingJudge' | 'resolveActor'> = {
       getAudience: (...a) => this.getAudience(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       get orgRolesMap() { return readOrgRolesMap(); },
+      get organizationDeleteGate() { return readOrganizationDeleteGate(); },
       get organizationDeleteStandingJudge() { return readOrganizationDeleteStandingJudge(); },
       resolveActor: (...a) => this.resolveActor(...a),
     };
