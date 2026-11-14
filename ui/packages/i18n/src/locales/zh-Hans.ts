@@ -4846,6 +4846,7 @@ const zh = {
     disableAppNamed: '停用 {{name}}',
     setDefault: '设为默认',
     setDefaultNamed: '将 {{name}} 设为默认',
+    alreadyDefault: '已是默认应用',
     deleteApp: '删除应用',
     deleteAppNamed: '删除 {{name}}',
     confirmDelete: '再次点击以确认删除',

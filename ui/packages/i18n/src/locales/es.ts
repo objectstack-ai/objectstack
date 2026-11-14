@@ -4929,6 +4929,7 @@ const es = {
     disableAppNamed: "Deshabilitar {{name}}",
     setDefault: "Establecer como predeterminada",
     setDefaultNamed: "Establecer {{name}} como predeterminada",
+    alreadyDefault: "Ya es la aplicación predeterminada",
     deleteApp: "Eliminar aplicación",
     deleteAppNamed: "Eliminar {{name}}",
     confirmDelete: "Haga clic de nuevo para confirmar la eliminación",

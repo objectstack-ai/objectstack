@@ -4846,6 +4846,7 @@ const zhHant = {
     disableAppNamed: '停用 {{name}}',
     setDefault: '設為預設',
     setDefaultNamed: '將 {{name}} 設為預設',
+    alreadyDefault: '已是預設應用',
     deleteApp: '刪除應用',
     deleteAppNamed: '刪除 {{name}}',
     confirmDelete: '再次點選以確認刪除',

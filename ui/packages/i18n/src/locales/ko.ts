@@ -4786,6 +4786,7 @@ const ko = {
     disableAppNamed: "{{name}} 비활성화",
     setDefault: "기본값으로 설정",
     setDefaultNamed: "{{name}}을(를) 기본값으로 설정",
+    alreadyDefault: "이미 기본 앱입니다",
     deleteApp: "앱 삭제",
     deleteAppNamed: "{{name}} 삭제",
     confirmDelete: "삭제하려면 다시 클릭하세요",

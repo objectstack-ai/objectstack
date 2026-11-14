@@ -5610,6 +5610,9 @@ const en = {
     disableAppNamed: 'Disable {{name}}',
     setDefault: 'Set as default',
     setDefaultNamed: 'Set {{name}} as default',
+    // The disabled star's reason (its tooltip and accessible description)
+    // when the app already is the default.
+    alreadyDefault: 'Already the default app',
     deleteApp: 'Delete app',
     deleteAppNamed: 'Delete {{name}}',
     // Delete is a two-click control: the first click arms it and the label

@@ -4787,6 +4787,7 @@ const de = {
     disableAppNamed: "{{name}} deaktivieren",
     setDefault: "Als Standard festlegen",
     setDefaultNamed: "{{name}} als Standard festlegen",
+    alreadyDefault: "Bereits die Standard-App",
     deleteApp: "App löschen",
     deleteAppNamed: "{{name}} löschen",
     confirmDelete: "Zum Bestätigen erneut klicken",

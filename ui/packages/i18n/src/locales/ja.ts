@@ -4789,6 +4789,7 @@ const ja = {
     disableAppNamed: "{{name}} を無効化",
     setDefault: "デフォルトに設定",
     setDefaultNamed: "{{name}} をデフォルトに設定",
+    alreadyDefault: "すでにデフォルトのアプリです",
     deleteApp: "アプリを削除",
     deleteAppNamed: "{{name}} を削除",
     confirmDelete: "もう一度クリックすると削除します",
