@@ -16,7 +16,8 @@
  * fields, the home field included (`filterSystemFields`), unchanged.
  */
 import { describe, it, expect } from 'vitest';
-import { render, waitFor, cleanup } from '@testing-library/react';
+import { render, waitFor, cleanup, fireEvent } from '@testing-library/react';
+import '@testing-library/jest-dom';
 import { afterEach } from 'vitest';
 import React from 'react';
 import { LocalizationProvider } from '@object-ui/i18n';
@@ -99,5 +100,71 @@ describe('the live preview under the amount, through the form (ADR-0144 D5)', ()
       expect(line?.textContent?.replace(/\u00a0/g, ' ')).toBe('≈ CN¥71,994.24 at 0.1389 on Nov 1, 2026');
     }, { timeout: 5000 });
     expect(finds).toEqual(['sys_exchange_rate']);
+  });
+});
+
+describe('an expression-computed record-mode amount keeps the live preview on its read face (objectstack#32941)', () => {
+  // The showcase invoice's `amount`: an `expression` makes the form draw it
+  // read-only (objectstack#31759), and the save still re-stores its home
+  // amount at the currency and document date the form holds.
+  const COMPUTED = { ...OBJ, fields: { ...OBJ.fields, amount: { ...OBJ.fields.amount, expression: 'record.subtotal * 1.1' }, subtotal: { type: 'number', label: 'Subtotal' } } };
+  const EUR_ROW = { ...ROW, currency_code: 'EUR', invoice_date: '2026-11-12', amount: 450, subtotal: 409.09, amount_home: 500, amount_rate: 0.9 };
+  const RATES: Record<string, Array<[string, number]>> = { EUR: [['2025-01-01', 0.92], ['2026-10-01', 0.9]], JPY: [['2025-01-01', 151.5]] };
+
+  function open(mode: 'edit' | 'view') {
+    const ds = {
+      getObjectSchema: async () => COMPUTED, findOne: async () => EUR_ROW, create: async () => EUR_ROW, update: async () => EUR_ROW,
+      find: async (_resource: string, params: any) => {
+        const { currency, effective_date } = params.$filter;
+        const row = (RATES[currency] ?? []).filter(([d]) => d <= effective_date.$lte).sort(([a], [b]) => (a < b ? 1 : -1))[0];
+        return { data: row ? [{ effective_date: row[0], rate: row[1] }] : [] };
+      },
+    };
+    render(
+      <SchemaRendererProvider dataSource={ds as any}>
+        <LocalizationProvider value={{ locale: 'en-US', currency: 'USD' }}>
+          <ObjectForm schema={{ type: 'object-form', objectName: 'fx_invoice', mode, recordId: 'r1', sections: [{ label: 'S', fields: ['currency_code', 'invoice_date', 'subtotal', 'amount', 'amount_home'] }] } as any} dataSource={ds as any} />
+        </LocalizationProvider>
+      </SchemaRendererProvider>,
+    );
+  }
+  const amountRow = () => document.querySelector('[data-field="amount"]');
+  const preview = () => amountRow()?.querySelector('[data-testid="home-amount-preview"]');
+
+  it('edit form: the amount draws read-only (no input) with the converted line, and follows a changed document date and currency', async () => {
+    open('edit');
+    await waitFor(() => {
+      expect(preview()?.textContent?.replace(/\u00a0/g, ' ')).toBe('≈ $500.00 at 0.9 on Nov 12, 2026');
+    }, { timeout: 5000 });
+    expect(preview()).toHaveAttribute('data-state', 'converted');
+    expect(amountRow()!.querySelector('input')).toBeNull();
+    // The document date, typed into the form's own date box and committed.
+    const date = document.querySelector('[data-field="invoice_date"] input') as HTMLInputElement;
+    fireEvent.change(date, { target: { value: '01/15/2026' } });
+    fireEvent.blur(date);
+    await waitFor(() => {
+      expect(preview()?.textContent?.replace(/\u00a0/g, ' ')).toBe('≈ $489.13 at 0.92 on Jan 15, 2026');
+    }, { timeout: 5000 });
+    // The currency, picked in the form's own currency select.
+    fireEvent.click(document.querySelector('[data-field="currency_code"] [role="combobox"]')!);
+    const jpy = await waitFor(() => {
+      const option = Array.from(document.querySelectorAll('[role="option"]')).find((o) => o.textContent?.startsWith('JPY'));
+      if (!option) throw new Error('no JPY option');
+      return option as HTMLElement;
+    }, { timeout: 5000 });
+    fireEvent.click(jpy);
+    await waitFor(() => {
+      expect(preview()?.textContent?.replace(/\u00a0/g, ' ')).toBe('≈ $2.97 at 151.5 on Jan 15, 2026');
+    }, { timeout: 5000 });
+  });
+
+  it('CONTROL: the view-mode form draws the amount with no preview; the home field keeps its "Converted at" line', async () => {
+    open('view');
+    await waitFor(() => {
+      expect(document.querySelector('[data-field="amount_home"] [data-testid="home-amount-hint"]')?.textContent).toBe('Converted at 0.9 on Nov 12, 2026');
+    }, { timeout: 5000 });
+    expect(amountRow()?.textContent?.replace(/\u00a0/g, ' ')).toContain('€450.00');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(preview()).toBeFalsy();
   });
 });

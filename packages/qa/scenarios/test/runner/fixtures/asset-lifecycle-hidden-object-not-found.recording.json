@@ -1,0 +1,19 @@
+{
+  "driver": { "driver": "claude-code-cli", "authMethod": "oauth_token", "apiBilled": false },
+  "turns": {
+    "asset_lifecycle/scratch/run/depreciation_last_month/employee": {
+      "replyText": "I can't tell you how much depreciation was posted last month: describe_object answers that demoasset_depreciation_entry is not found for you, so your permissions do not let you read depreciation entries. Ask an asset administrator for that figure.",
+      "toolCalls": [
+        {
+          "name": "describe_object",
+          "rawName": "mcp__app__describe_object",
+          "input": { "objectName": "demoasset_depreciation_entry" },
+          "output": "Object \"demoasset_depreciation_entry\" not found",
+          "isError": true
+        }
+      ],
+      "meta": { "resultSubtype": "success", "isError": false, "numTurns": 3 }
+    }
+  },
+  "files": {}
+}
