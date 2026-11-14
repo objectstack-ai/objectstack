@@ -132,6 +132,8 @@ const ctxFor = (dialect?: string): DatasetScopedStrategyContext =>
 
 const TRANSLATE_FOLD =
   "translate(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')";
+/** The native compiler's spelling: it writes the column quoted (#33138); the echo writes it bare. */
+const TRANSLATE_FOLD_NATIVE = TRANSLATE_FOLD.replace('translate(name,', 'translate("name",');
 
 /**
  * [#16028] The `unknown` arm's fold, rebuilt HERE from the ruled domain rather
@@ -162,7 +164,7 @@ describe('[#15780] the compiled TEXT, per dialect — all three compilers', () =
     // #15780 and through #16028 alike.
     const out = await nativeSql({ name: { $icontains: 'acme' } }, 'postgres');
     expect(out.sql).toContain(
-      `WHERE ${TRANSLATE_FOLD} LIKE translate($1, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') ESCAPE $2`,
+      `WHERE ${TRANSLATE_FOLD_NATIVE} LIKE translate($1, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') ESCAPE $2`,
     );
     expect(out.params).toEqual(['%acme%', '\\']);
 
@@ -193,13 +195,13 @@ describe('[#15780] the compiled TEXT, per dialect — all three compilers', () =
       // `normalizeSqlDialect` does not model. One arm, reached three ways.
       const out = await nativeSql({ name: { $icontains: 'acme' } }, dialect);
       expect(out.sql, String(dialect)).toContain(
-        `WHERE ${replaceFold('name')} LIKE ${replaceFold('$1')} ESCAPE $2`,
+        `WHERE ${replaceFold('"name"')} LIKE ${replaceFold('$1')} ESCAPE $2`,
       );
       expect(out.sql, String(dialect)).not.toMatch(/translate\(/);
       // The chain's endpoints, verbatim — and the innermost operand is the bare
       // column, which is what tells this arm apart from MySQL's `CAST(… AS
       // BINARY)` one.
-      expect(out.sql, String(dialect)).toContain("REPLACE(name, 'A', 'a')");
+      expect(out.sql, String(dialect)).toContain(`REPLACE("name", 'A', 'a')`);
       expect(out.sql, String(dialect)).toContain("'Z', 'z')");
       expect(out.sql, String(dialect)).not.toMatch(/CAST\(/);
       expect(out.params, String(dialect)).toEqual(['%acme%', '\\']);
@@ -239,7 +241,7 @@ describe('[#15780] the compiled TEXT, per dialect — all three compilers', () =
     for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith'] as const) {
       const out = await nativeSql({ name: { [op]: 'acme' } }, undefined);
       expect(out.sql, op).not.toMatch(/REPLACE\(|translate\(|lower\(/);
-      expect(out.sql, op).toMatch(/name (NOT )?LIKE \$1 ESCAPE \$2/);
+      expect(out.sql, op).toMatch(/"name" (NOT )?LIKE \$1 ESCAPE \$2/);
     }
     expect(compileScopedFilterToSql({ name: { $contains: 'acme' } } as FilterCondition, 't')).toEqual({
       sql: '"t"."name" LIKE ? ESCAPE ?',
@@ -253,7 +255,7 @@ describe('[#15780] the compiled TEXT, per dialect — all three compilers', () =
     // #19999 / #20024). The fold is the same `lower()` on both sides, and the
     // comparand binds raw: `instr()` has no pattern language to escape.
     const out = await nativeSql({ name: { $icontains: 'acme' } }, 'sqlite');
-    expect(out.sql).toContain('WHERE instr(lower(name), lower($1)) > 0');
+    expect(out.sql).toContain('WHERE instr(lower("name"), lower($1)) > 0');
     expect(out.sql).not.toMatch(/translate\(/);
     expect(out.sql).not.toMatch(/ESCAPE| GLOB /);
     expect(out.params).toEqual(['acme']);
@@ -272,7 +274,7 @@ describe('[#15780] the compiled TEXT, per dialect — all three compilers', () =
     // REPLACEs over `CAST(… AS BINARY)`, so the fold is ASCII-only and the
     // comparison is byte-wise whatever the column's collation says.
     const out = await nativeSql({ name: { $icontains: 'acme' } }, 'mysql');
-    expect(out.sql).toContain("REPLACE(REPLACE(CAST(name AS BINARY), 'A', 'a')");
+    expect(out.sql).toContain(`REPLACE(REPLACE(CAST("name" AS BINARY), 'A', 'a')`);
     expect(out.sql).toContain("REPLACE(REPLACE(CAST($1 AS BINARY), 'A', 'a')");
     expect(out.sql).toContain(' LIKE ');
     expect(out.sql).toContain('ESCAPE $2');
@@ -298,11 +300,11 @@ describe('[#15780] the compiled TEXT, per dialect — all three compilers', () =
     // [#20025] `instr()` on SQLite since the arm left `GLOB` for `contains`;
     // what this control guards — no fold on the case-EXACT row — is unchanged.
     const sqlite = await nativeSql({ name: { $contains: 'acme' } }, 'sqlite');
-    expect(sqlite.sql).toContain('WHERE instr(name, $1) > 0');
+    expect(sqlite.sql).toContain('WHERE instr("name", $1) > 0');
     expect(sqlite.sql).not.toMatch(/lower\(/);
     expect(sqlite.params).toEqual(['acme']);
     const pg = await nativeSql({ name: { $contains: 'acme' } }, 'postgres');
-    expect(pg.sql).toContain('WHERE name LIKE $1 ESCAPE $2');
+    expect(pg.sql).toContain('WHERE "name" LIKE $1 ESCAPE $2');
     expect(pg.sql).not.toMatch(/translate\(/);
   });
 });
