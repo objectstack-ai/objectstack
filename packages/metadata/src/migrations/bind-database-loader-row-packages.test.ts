@@ -79,20 +79,30 @@ const row = (id: string, type: string, body: Record<string, unknown>, extra: Rec
 });
 
 describe('migrateDatabaseLoaderRowPackages (ADR-0150 D4, #32246)', () => {
-  it.each(SLOTTED)('%s: binds a loader row whose body names a package — by the `_packageId` stamp or the envelope\'s `packageId` — and leaves a package-less one', async (type) => {
+  /**
+   * [#32985; maintainer decision 2026-11-14] FROM bound TO left `stamp-only`:
+   * a row whose body names its package by the `_packageId` stamp alone may be
+   * the environment's row a 17.0.0–18.3.0 boot stamped with the host. The
+   * stamp beside the item's own `packageId` binds as before.
+   */
+  it.each(SLOTTED)('%s: binds a loader row whose body names a package by its own `packageId` — flat, the envelope\'s, or beside the stamp — leaves one named by the `_packageId` stamp alone `stamp-only` (BEFORE: bound) and a package-less one', async (type) => {
     const { store, packageOf } = rowStore([
-      row('stamp', type, { name: 'x', _packageId: A }),
+      row('own', type, { name: 'x', packageId: A }),
       { ...row('envelope', type, { packageId: B, metadata: { name: 'y' } }), name: 'other' },
       { ...row('env', type, { name: 'z' }), name: 'third' },
+      { ...row('stamp', type, { name: 's', _packageId: A, _provenance: 'package' }), name: 'fourth' },
+      { ...row('stamp-wrapped', type, { metadata: { name: 'w', _packageId: B } }), name: 'fifth' },
+      { ...row('stamp-beside-own', type, { name: 'o', packageId: B, _packageId: B }), name: 'sixth' },
     ]);
     const result = await migrateDatabaseLoaderRowPackages(store);
-    expect([packageOf('stamp'), packageOf('envelope'), packageOf('env')]).toEqual([A, B, null]);
-    expect(result.bound.map((bound) => [bound.id, bound.packageId])).toEqual([['stamp', A], ['envelope', B]]);
-    expect(result.left.map((left) => [left.id, left.reason])).toEqual([['env', 'package-less']]);
+    expect([packageOf('own'), packageOf('envelope'), packageOf('env'), packageOf('stamp'), packageOf('stamp-wrapped'), packageOf('stamp-beside-own')])
+      .toEqual([A, B, null, null, null, B]);
+    expect(result.bound.map((bound) => [bound.id, bound.packageId])).toEqual([['own', A], ['envelope', B], ['stamp-beside-own', B]]);
+    expect(result.left.map((left) => [left.id, left.reason])).toEqual([['env', 'package-less'], ['stamp', 'stamp-only'], ['stamp-wrapped', 'stamp-only']]);
   });
 
   it.each(SLOTTED)('%s: re-runnable — a second run binds nothing and leaves the same rows', async (type) => {
-    const { store } = rowStore([row('stamp', type, { name: 'x', _packageId: A }), { ...row('env', type, { name: 'z' }), name: 'third' }]);
+    const { store } = rowStore([row('own', type, { name: 'x', packageId: A }), { ...row('env', type, { name: 'z' }), name: 'third' }]);
     await migrateDatabaseLoaderRowPackages(store);
     const second = await migrateDatabaseLoaderRowPackages(store);
     expect(second.bound).toEqual([]);
@@ -101,8 +111,8 @@ describe('migrateDatabaseLoaderRowPackages (ADR-0150 D4, #32246)', () => {
 
   it.each(SLOTTED)('%s: never makes a second row of one slot — a row whose package already has a row of the name is left', async (type) => {
     const { store, packageOf } = rowStore([
-      row('bound', type, { name: 'x', _packageId: A }, { package_id: A }),
-      row('legacy', type, { name: 'x', _packageId: A }),
+      row('bound', type, { name: 'x', packageId: A }, { package_id: A }),
+      row('legacy', type, { name: 'x', packageId: A }),
     ]);
     const result = await migrateDatabaseLoaderRowPackages(store);
     expect(packageOf('legacy')).toBeNull();
@@ -124,12 +134,12 @@ describe('migrateDatabaseLoaderRowPackages (ADR-0150 D4, #32246)', () => {
   // the webhook rows not being candidates.
   it('[#31699 PR 2, FROM left TO bound] a webhook loader row whose body names a package is bound to it; a package-less one is left', async () => {
     const { store, packageOf } = rowStore([
-      row('stamp', 'webhook', { name: 'x', _packageId: A }),
+      row('own', 'webhook', { name: 'x', packageId: A }),
       { ...row('env', 'webhook', { name: 'z' }), name: 'third' },
     ]);
     const result = await migrateDatabaseLoaderRowPackages(store);
-    expect([packageOf('stamp'), packageOf('env')]).toEqual([A, null]);
-    expect(result.bound.map((bound) => [bound.id, bound.packageId])).toEqual([['stamp', A]]);
+    expect([packageOf('own'), packageOf('env')]).toEqual([A, null]);
+    expect(result.bound.map((bound) => [bound.id, bound.packageId])).toEqual([['own', A]]);
     expect(result.left.map((left) => [left.id, left.reason])).toEqual([['env', 'package-less']]);
   });
 
@@ -162,9 +172,9 @@ describe('migrateDatabaseLoaderRowPackages — a bundled type\'s slot is per mem
   it.each(BUNDLED)('%s: an unbound member binds beside another member\'s column-bound row of the same name — by its body, or by its `bundle_member` column', async (type) => {
     const { field, canonical } = ITEM_KEY_DISCRIMINATORS[type]!;
     const { store, packageOf } = rowStore([
-      row('canonical', type, { name: 'x', [field]: canonical, _packageId: A }, { package_id: A }),
-      row('by-body', type, { name: 'x', [field]: 'fr-FR', _packageId: A }),
-      row('by-column', type, { name: 'x', _packageId: A }, { bundle_member: 'de-DE' }),
+      row('canonical', type, { name: 'x', [field]: canonical, packageId: A }, { package_id: A }),
+      row('by-body', type, { name: 'x', [field]: 'fr-FR', packageId: A }),
+      row('by-column', type, { name: 'x', packageId: A }, { bundle_member: 'de-DE' }),
     ]);
     const result = await migrateDatabaseLoaderRowPackages(store);
     expect([packageOf('by-body'), packageOf('by-column')]).toEqual([A, A]);
@@ -175,12 +185,12 @@ describe('migrateDatabaseLoaderRowPackages — a bundled type\'s slot is per mem
   it.each(BUNDLED)('%s: a member whose own slot is taken is still left `slot-taken` — the canonical one spelled by value or by omission, and a member bound earlier in the same run', async (type) => {
     const { field, canonical } = ITEM_KEY_DISCRIMINATORS[type]!;
     const { store, packageOf } = rowStore([
-      row('canonical-bound', type, { name: 'x', _packageId: A }, { package_id: A }),
-      row('canonical-legacy', type, { name: 'x', [field]: canonical, _packageId: A }),
-      row('fr-bound', type, { name: 'x', [field]: 'fr-FR', _packageId: A }, { package_id: A, bundle_member: 'fr-FR' }),
-      row('fr-legacy', type, { name: 'x', [field]: 'fr-FR', _packageId: A }),
-      row('de-first', type, { name: 'x', [field]: 'de-DE', _packageId: A }),
-      row('de-second', type, { name: 'x', _packageId: A }, { bundle_member: 'de-DE' }),
+      row('canonical-bound', type, { name: 'x', packageId: A }, { package_id: A }),
+      row('canonical-legacy', type, { name: 'x', [field]: canonical, packageId: A }),
+      row('fr-bound', type, { name: 'x', [field]: 'fr-FR', packageId: A }, { package_id: A, bundle_member: 'fr-FR' }),
+      row('fr-legacy', type, { name: 'x', [field]: 'fr-FR', packageId: A }),
+      row('de-first', type, { name: 'x', [field]: 'de-DE', packageId: A }),
+      row('de-second', type, { name: 'x', packageId: A }, { bundle_member: 'de-DE' }),
     ]);
     const result = await migrateDatabaseLoaderRowPackages(store);
     expect([packageOf('canonical-legacy'), packageOf('fr-legacy'), packageOf('de-first'), packageOf('de-second')]).toEqual([null, null, A, null]);
@@ -194,8 +204,8 @@ describe('migrateDatabaseLoaderRowPackages — a bundled type\'s slot is per mem
 
   it(`a type that declares no member keeps one row per slot, whatever its body carries (${UNBUNDLED})`, async () => {
     const { store, packageOf } = rowStore([
-      row('bound', UNBUNDLED, { name: 'x', locale: 'en-US', _packageId: A }, { package_id: A }),
-      row('legacy', UNBUNDLED, { name: 'x', locale: 'fr-FR', _packageId: A }, { bundle_member: 'fr-FR' }),
+      row('bound', UNBUNDLED, { name: 'x', locale: 'en-US', packageId: A }, { package_id: A }),
+      row('legacy', UNBUNDLED, { name: 'x', locale: 'fr-FR', packageId: A }, { bundle_member: 'fr-FR' }),
     ]);
     const result = await migrateDatabaseLoaderRowPackages(store);
     expect(packageOf('legacy')).toBeNull();
@@ -214,9 +224,9 @@ describe('migrateDatabaseLoaderRowPackages — a bundled type\'s slot is per mem
 describe('migrateDatabaseLoaderRowPackages: an action\'s slot names the object it is bound to (#32540)', () => {
   it('binds a legacy row of a package\'s action on o1 beside the package\'s bound row on o2, and still leaves a second legacy row on o1', async () => {
     const { store, packageOf } = rowStore([
-      row('bound-o2', 'action', { name: 'shared_action', objectName: 'o2', _packageId: A }, { package_id: A, bundle_member: 'o2' }),
-      row('legacy-o1', 'action', { name: 'shared_action', objectName: 'o1', _packageId: A }),
-      row('legacy-o1-again', 'action', { name: 'shared_action', objectName: 'o1', _packageId: A }),
+      row('bound-o2', 'action', { name: 'shared_action', objectName: 'o2', packageId: A }, { package_id: A, bundle_member: 'o2' }),
+      row('legacy-o1', 'action', { name: 'shared_action', objectName: 'o1', packageId: A }),
+      row('legacy-o1-again', 'action', { name: 'shared_action', objectName: 'o1', packageId: A }),
     ]);
     const result = await migrateDatabaseLoaderRowPackages(store as unknown as IDataDriver);
     expect(result.bound.map((entry) => entry.id)).toEqual(['legacy-o1']);
@@ -226,12 +236,12 @@ describe('migrateDatabaseLoaderRowPackages: an action\'s slot names the object i
 
   // [#32540 C3; contract record 6820015366 item 1] Rows as every released writer left them: `bundle_member` NULL on all.
   it.each([
-    ['the package\'s bound row on o2', { name: 'shared_action', objectName: 'o2', _packageId: A }, 'o2'],
-    ['the package\'s object-less row', { name: 'shared_action', _packageId: A }, null],
+    ['the package\'s bound row on o2', { name: 'shared_action', objectName: 'o2', packageId: A }, 'o2'],
+    ['the package\'s object-less row', { name: 'shared_action', packageId: A }, null],
   ] as const)('with every `bundle_member` NULL under the unique key, a legacy row on o1 beside %s is bound, its object named in the same update, the package\'s row named first (BEFORE this fix: update-failed on the unique key)', async (_shape, body, named) => {
     const { store, packageOf, memberOf } = rowStore([
       row('bound', 'action', body, { package_id: A }),
-      row('legacy-o1', 'action', { name: 'shared_action', objectName: 'o1', _packageId: A }),
+      row('legacy-o1', 'action', { name: 'shared_action', objectName: 'o1', packageId: A }),
     ], { uniqueKey: true });
     const result = await migrateDatabaseLoaderRowPackages(store as unknown as IDataDriver);
     expect(result.left).toEqual([]);
@@ -242,8 +252,8 @@ describe('migrateDatabaseLoaderRowPackages: an action\'s slot names the object i
 
   it('an object-less legacy row beside the package\'s bound row on o2, every `bundle_member` NULL: the bound row is named o2 first, then the legacy row is bound object-less', async () => {
     const { store, packageOf, memberOf } = rowStore([
-      row('bound-o2', 'action', { name: 'shared_action', objectName: 'o2', _packageId: A }, { package_id: A }),
-      row('legacy', 'action', { name: 'shared_action', _packageId: A }),
+      row('bound-o2', 'action', { name: 'shared_action', objectName: 'o2', packageId: A }, { package_id: A }),
+      row('legacy', 'action', { name: 'shared_action', packageId: A }),
     ], { uniqueKey: true });
     const result = await migrateDatabaseLoaderRowPackages(store as unknown as IDataDriver);
     expect(result).toEqual({ bound: [{ id: 'legacy', type: 'action', name: 'shared_action', packageId: A }], left: [] });
@@ -253,8 +263,8 @@ describe('migrateDatabaseLoaderRowPackages: an action\'s slot names the object i
   it('C8 — a legacy row bound to an object longer than `bundle_member` stores keeps the object-less place: left `slot-taken` beside the package\'s object-less row, nothing truncated', async () => {
     const long = `o_${'x'.repeat(99)}`;
     const { store, packageOf, memberOf } = rowStore([
-      row('bound', 'action', { name: 'shared_action', _packageId: A }, { package_id: A }),
-      row('legacy-long', 'action', { name: 'shared_action', objectName: long, _packageId: A }),
+      row('bound', 'action', { name: 'shared_action', packageId: A }, { package_id: A }),
+      row('legacy-long', 'action', { name: 'shared_action', objectName: long, packageId: A }),
     ], { uniqueKey: true });
     const result = await migrateDatabaseLoaderRowPackages(store as unknown as IDataDriver);
     expect(result.left).toEqual([{ id: 'legacy-long', type: 'action', name: 'shared_action', reason: 'slot-taken' }]);
