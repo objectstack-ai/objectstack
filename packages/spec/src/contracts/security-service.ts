@@ -476,6 +476,17 @@ export interface PlatformBaselineSetAdmission {
  * The first three legs run on every hop, so `object_permission` can name the
  * master's own master. A closed vocabulary: a consumer branches on it and
  * never parses the refusal's prose.
+ *
+ * [ADR-0055 §3 as amended for #33250] A hop whose detail declares
+ * `sharing.controlledByParent.writeRequiresMasterRead: true` asks READ on its
+ * master instead of the three edit legs, and the walk ends there (the read of
+ * a `controlled_by_parent` master composes its own chain). Its refusals use two
+ * legs of this same vocabulary: `object_permission` when the read is refused
+ * (no object-level read grant on the master, or a capability it requires not
+ * held), and `row_level_security` when the master row is not readable to the
+ * principal (hidden by its read scope: row-level security, record sharing and,
+ * for a `controlled_by_parent` master, its own chain, which the read door does
+ * not tell apart). `record_sharing` is never the leg of such a hop.
  */
 export type ControlledByParentWriteDenialLeg =
   | 'object_permission'
@@ -526,8 +537,12 @@ export type ControlledByParentWriteUnresolvedReason =
  *   the context is not on behalf of another user, the record's stored
  *   `owner_id` is the principal's own `userId`, and the principal can READ the
  *   master the record names, so no leg asks EDIT on that master or any master
- *   above it. Or the context is a system one, which the write path never
- *   checks.
+ *   above it. Or the detail (or a `controlled_by_parent` master above it)
+ *   declares `sharing.controlledByParent.writeRequiresMasterRead: true`
+ *   (ADR-0055 §3 as amended for #33250) and the principal can READ the master
+ *   that hop names: the walk asks the read in place of the edit legs there,
+ *   for the owner and for everyone else alike. Or the context is a system
+ *   one, which the write path never checks.
  * - `deny`: the check refuses, on the {@link ControlledByParentWriteDenialLeg}
  *   it names.
  * - `not_applicable`: the object does not declare `controlled_by_parent`, so
@@ -1221,7 +1236,15 @@ export interface ISecurityService {
    * every body naming a new master does. Every other caller, and every
    * insert, delete, predicate update and on-behalf-of write, keeps the edit
    * rule. The leg is part of the check, so such an owner who can read the
-   * master gets `allow` here as on the update. This member exposes that check
+   * master gets `allow` here as on the update. A detail that declares
+   * `sharing.controlledByParent.writeRequiresMasterRead: true` (ADR-0055 §3 as
+   * amended for #33250) is asked READ on its master in place of EDIT for every
+   * write, by every principal, and so is any hop of the chain whose detail
+   * declares it; the check answers `allow` for a principal who can read that
+   * master, as the update gets, and `deny` on `object_permission` or
+   * `row_level_security` for one who cannot (see
+   * {@link ControlledByParentWriteDenialLeg}). On an on-behalf-of context each
+   * principal is asked the read, the agent and then the delegator. This member exposes that check
    * to code outside the write path, such as a gate on a record's attachments or
    * comments that must judge the record as its own update is judged. It adds no
    * verdict: every outcome it resolves with is one the check already reaches,

@@ -591,7 +591,9 @@ refuses first, and that depends on how the reference is declared:
 On an optional master, an insert that names no master is admitted, and its creator becomes
 the row's owner; an update that empties the reference asks edit access on the master it
 leaves, and without it answers `403 PERMISSION_DENIED`;
-`sharing.controlledByParent.ownerMayEdit` does not cover emptying it.
+`sharing.controlledByParent.ownerMayEdit` does not cover emptying it. On a detail that
+declares `sharing.controlledByParent.writeRequiresMasterRead: true`, emptying it asks read
+access on the master it leaves instead.
 
 Only the first two rows are declarations the parse accepts. A master reference marked
 `readonly` or `system` is not one an author's write supplies, so it cannot be the master,

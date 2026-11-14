@@ -441,3 +441,55 @@ describe('[#22792] a by-id write of a record the principal cannot read, explaine
     });
   }
 });
+
+// [ADR-0055 §3 as amended for #33250 · ruling A+] A record whose chain asks
+// READ of a master (its object, or a `controlled_by_parent` master above it,
+// declares `sharing.controlledByParent.writeRequiresMasterRead`) is refused on
+// the same two legs a read refusal reports, so the report's prose names the
+// read question beside the edit one; a record whose chain asks edit only is
+// narrated as before.
+describe('[#33250] a chain that asks READ of a master narrates both questions a leg can answer', () => {
+  const MASTER_OBJECT = 'cbx_account';
+  const schemas: Record<string, Record<string, unknown>> = {
+    [OBJECT]: {
+      name: OBJECT,
+      sharingModel: 'controlled_by_parent',
+      fields: { account: { type: 'master_detail', reference: MASTER_OBJECT, required: true } },
+      sharing: { controlledByParent: { writeRequiresMasterRead: true } },
+    },
+    [MASTER_OBJECT]: { name: MASTER_OBJECT, sharingModel: 'private', fields: {} },
+  };
+  const withSchemas = (map: Record<string, Record<string, unknown>>, outcome: ControlledByParentWriteOutcome) => ({
+    ...deps({ master: answering(outcome) }),
+    ql: { getSchema: (name: string) => map[name] ?? null },
+  });
+
+  it.each([
+    ['object_permission', 'read, for a master whose detail declares writeRequiresMasterRead'],
+    ['row_level_security', 'its read scope, for a master whose detail declares writeRequiresMasterRead'],
+  ] as const)('the record declares it: a %s refusal names the read question', async (leg, prose) => {
+    const d = await explainAs(withSchemas(schemas, { outcome: 'deny', leg }), 'update');
+    expect(d.record).toEqual({ recordId: 'r1', visible: false, decidedBy: 'sharing' });
+    expect(sharingRecordOf(d)?.detail).toContain(`refuses this update on its '${leg}' leg`);
+    expect(sharingRecordOf(d)?.detail).toContain(prose);
+  });
+
+  it('a master above the record declares it: the record is narrated with the read question too', async () => {
+    const LINE = 'cbx_line';
+    const chain = {
+      ...schemas,
+      [LINE]: { name: LINE, sharingModel: 'controlled_by_parent', fields: { contract: { type: 'master_detail', reference: OBJECT, required: true } } },
+    };
+    const d = await explainAccess(withSchemas(chain, { outcome: 'deny', leg: 'object_permission' }), {
+      object: LINE, operation: 'update', context: EXPLAINED, recordId: 'r1',
+    });
+    expect(sharingRecordOf(d)?.detail).toContain('read, for a master whose detail declares writeRequiresMasterRead');
+  });
+
+  it('CONTROL — no object on the chain declares it: the edit-only prose, as before', async () => {
+    const plain = { ...schemas, [OBJECT]: { ...schemas[OBJECT], sharing: undefined } };
+    const d = await explainAs(withSchemas(plain, { outcome: 'deny', leg: 'object_permission' }), 'update');
+    expect(sharingRecordOf(d)?.detail).toContain('the principal holds no object-level update grant on a master.');
+    expect(sharingRecordOf(d)?.detail).not.toContain('writeRequiresMasterRead');
+  });
+});

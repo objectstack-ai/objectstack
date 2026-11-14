@@ -5,7 +5,7 @@ import { ZodError } from 'zod';
 
 // Read through the `@objectstack/spec/data` entry, not the module: the pin is
 // on the PUBLISHED reader the gate and the lint import.
-import { controlledByParentOwnerMayEdit } from './index';
+import { controlledByParentOwnerMayEdit, controlledByParentWriteRequiresMasterRead } from './index';
 import { ObjectSchema } from './object.zod';
 
 /**
@@ -117,6 +117,97 @@ describe('sharing.controlledByParent.ownerMayEdit (ADR-0055 §3 amendment)', () 
   it('the reader fails closed on every unreadable shape', () => {
     for (const shape of [null, undefined, 42, 'x', {}, { sharing: null }, { sharing: { controlledByParent: null } }, { sharing: { controlledByParent: { ownerMayEdit: 1 } } }]) {
       expect(controlledByParentOwnerMayEdit(shape)).toBe(false);
+    }
+  });
+});
+
+/**
+ * [ADR-0055 §3 as amended for #33250 · ruling A+]
+ * `sharing.controlledByParent.writeRequiresMasterRead` is the block's second
+ * authorable key: reachable on a `controlled_by_parent` detail, refused off one
+ * at the key's own path with the fix, and refused beside `ownerMayEdit: true`
+ * at `ownerMayEdit`'s path with the fix that deletes it. Its exported reader
+ * answers `true` for the boolean `true` alone.
+ */
+describe('sharing.controlledByParent.writeRequiresMasterRead (ADR-0055 §3 as amended, #33250)', () => {
+  const MASTER_READ = { sharing: { controlledByParent: { writeRequiresMasterRead: true } } };
+  const KEY_PATH = 'sharing.controlledByParent.writeRequiresMasterRead';
+
+  it('is an authorable key of a controlled_by_parent detail: the parse keeps it and refuses nothing', () => {
+    const parsed = ObjectSchema.safeParse(detail(MASTER_READ));
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.sharing?.controlledByParent?.writeRequiresMasterRead).toBe(true);
+    expect(controlledByParentWriteRequiresMasterRead(parsed.data)).toBe(true);
+    // The sibling reader is not moved by it.
+    expect(controlledByParentOwnerMayEdit(parsed.data)).toBe(false);
+    expect(issuesOf(detail(MASTER_READ))).toEqual([]);
+  });
+
+  it('`ObjectSchema.create()` keeps it too', () => {
+    expect(controlledByParentWriteRequiresMasterRead(ObjectSchema.create(detail(MASTER_READ) as never))).toBe(true);
+  });
+
+  it.each([
+    ['private', "under 'private'"],
+    ['public_read', "under 'public_read'"],
+    ['public_read_write', "under 'public_read_write'"],
+  ])('is refused on a %s object, at the key, with the fix', (sharingModel, under) => {
+    const issues = issuesOf({ name: 'omd_contract', label: 'Contract', sharingModel, fields: {}, ...MASTER_READ });
+    const own = issues.filter((i) => i.path === KEY_PATH);
+    expect(own).toHaveLength(1);
+    expect(own[0]!.code).toBe('custom');
+    expect(own[0]!.message.startsWith(
+      `Object "omd_contract" declares sharing.controlledByParent.writeRequiresMasterRead: true ${under}.`,
+    )).toBe(true);
+    expect(own[0]!.message).toContain("sharingModel: 'controlled_by_parent' plus one required master_detail field");
+    expect(issues).toHaveLength(1);
+  });
+
+  it('is refused on an object that declares no sharingModel at all, saying so', () => {
+    const own = issuesOf({ name: 'omd_contract', label: 'Contract', fields: {}, ...MASTER_READ })
+      .filter((i) => i.path === KEY_PATH);
+    expect(own).toHaveLength(1);
+    expect(own[0]!.message).toContain('under no sharingModel.');
+  });
+
+  it('beside ownerMayEdit: true it is refused at ownerMayEdit, with the fix that deletes it', () => {
+    const both = detail({ sharing: { controlledByParent: { ownerMayEdit: true, writeRequiresMasterRead: true } } });
+    const issues = issuesOf(both);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe('custom');
+    expect(issues[0]!.path).toBe(OWNER_MAY_EDIT_PATH);
+    expect(issues[0]!.message).toContain('Delete ownerMayEdit; writeRequiresMasterRead already admits the owner.');
+    expect(() => ObjectSchema.create(both as never)).toThrow(ZodError);
+  });
+
+  it('either key `false` beside the other is no pair, and is not refused', () => {
+    expect(issuesOf(detail({ sharing: { controlledByParent: { ownerMayEdit: false, writeRequiresMasterRead: true } } }))).toEqual([]);
+    expect(issuesOf(detail({ sharing: { controlledByParent: { ownerMayEdit: true, writeRequiresMasterRead: false } } }))).toEqual([]);
+  });
+
+  it('`writeRequiresMasterRead: false` on a private object is not an opt-in and is not refused', () => {
+    const obj = { name: 'omd_contract', label: 'Contract', sharingModel: 'private', fields: {}, sharing: { controlledByParent: { writeRequiresMasterRead: false } } };
+    expect(issuesOf(obj)).toEqual([]);
+    expect(controlledByParentWriteRequiresMasterRead(obj)).toBe(false);
+  });
+
+  it('one level up it is refused as an unknown key, naming its level', () => {
+    const unknown = issuesOf(detail({ sharing: { writeRequiresMasterRead: true } })).filter((i) => i.code === 'unrecognized_keys');
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0]!.path).toBe('sharing');
+    expect(unknown[0]!.message).toContain('sharing.controlledByParent');
+  });
+
+  it('only the boolean opts in: a string is refused by the parse, and the reader reads it as off', () => {
+    const raw = detail({ sharing: { controlledByParent: { writeRequiresMasterRead: 'true' } } });
+    expect(issuesOf(raw).some((i) => i.path === KEY_PATH && i.code === 'invalid_type')).toBe(true);
+    expect(controlledByParentWriteRequiresMasterRead(raw)).toBe(false);
+  });
+
+  it('the reader fails closed on every unreadable shape', () => {
+    for (const shape of [null, undefined, 42, 'x', {}, { sharing: null }, { sharing: { controlledByParent: null } }, { sharing: { controlledByParent: { writeRequiresMasterRead: 1 } } }]) {
+      expect(controlledByParentWriteRequiresMasterRead(shape)).toBe(false);
     }
   });
 });
