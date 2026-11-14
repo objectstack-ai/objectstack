@@ -264,7 +264,7 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.previous` | object \| `undefined` | Pre-write record on update/delete. **`undefined` on insert** → use `!ctx.previous` to detect *create*. |
 | `ctx.result` | object \| `undefined` | `after*` only. ⚠️ **partial** on afterUpdate — see gotcha 1. |
 | `ctx.user` | object \| `undefined` | `{ id, name, email, organizationId }`. `undefined` for system / unauthenticated writes. |
-| `ctx.session` | object \| `undefined` | `{ userId, organizationId, isSystem, … }`. **No role list** — `session.roles` was retired in 17.0.0 (declared, never produced). |
+| `ctx.session` | object \| `undefined` | `{ userId, organizationId, isSystem, … }`. **No role list** — `session.roles` was retired in 17.0.0. |
 | `ctx.event` | string | e.g. `'afterUpdate'` — dispatch on it when one hook subscribes to several events. |
 | `ctx.object` | string | The target object name. |
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
@@ -278,10 +278,6 @@ The sandbox is handed a **JSON snapshot** of these (built by
 (Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
 wrap is `(async (input, ctx) => { … })(input, ctx)` — the action params arrive as
 the first arg.)
-
-Because the VM only holds a snapshot, mutating `ctx.previous` / `ctx.result` is
-local and thrown away; the only way to change the persisted write is
-`ctx.input.x = …` or `return { … }`.
 
 ### `ctx.api.object(name)` — the cross-object repo
 
@@ -629,17 +625,20 @@ const protectStrategicAccounts = defineHook({
   name: 'crm_protect_strategic_accounts',
   object: 'account',
   events: ['beforeDelete'],
+  refusals: {
+    STRATEGIC_ACCOUNT: { message: 'A strategic account cannot be deleted.' },
+    OPEN_OPPORTUNITIES: { message: 'Close its open opportunities first.', status: 409 },
+  },
   body: {
     language: 'js',
     source: `
       // A delete's ctx.input is empty: ctx.previous is the row being deleted.
       if (ctx.previous && ctx.previous.type === 'Strategic')
-        throw new Error('Cannot delete Strategic accounts');
+        throw Object.assign(new Error(), { code: 'STRATEGIC_ACCOUNT' });
       const open = await ctx.api.object('opportunity').count({
         where: { account_id: ctx.previous.id, stage: { $in: ['Prospecting', 'Negotiation'] } },
       });
-      if (open > 0)
-        throw new Error('Cannot delete an account with ' + open + ' open opportunities');
+      if (open > 0) throw Object.assign(new Error(), { code: 'OPEN_OPPORTUNITIES' });
     `,
     capabilities: ['api.read'],
   },
@@ -842,13 +841,13 @@ hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
 ## Error Handling
 
 A throw aborts the operation and rolls back its transaction; `onError: 'log'`
-(above) makes an `after*` hook log and continue instead; neither gives a code.
+(above) makes an `after*` hook log and continue instead; neither gives the hook's own code.
 
 ### Declared refusals (`refusals`)
 
 A hook that enforces a business rule declares a `refusals` catalogue, one
-SCREAMING_SNAKE code per rule, and its body throws the code. Without one, a throw
-is answered `HOOK_ABORTED`, the platform's code: fine for a failure you did not
+SCREAMING_SNAKE code per rule, and its body throws the code. Without one, a `body`'s
+throw is answered `HOOK_ABORTED`, the platform's code: fine for a failure you did not
 plan, not for a rule the user can act on. A cross-object guard a validation rule
 cannot read:
 
