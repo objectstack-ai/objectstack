@@ -17,7 +17,7 @@
  * the person's `sys_user` row, memberships, grants and positions, and then the
  * person's permission sets for a context object nobody had seen before, so the
  * per-context set memo never hit. Measured on `origin/main` 68972cd2 with this
- * composition: 26 statements per listed object (2 questions x 13), so an
+ * composition: 22 statements per listed object (2 questions x 11), so an
  * environment owner listing about 170 objects paid thousands of round trips —
  * tens of seconds against a remote database.
  *
@@ -26,18 +26,24 @@
  *  1. ⭐ Statements per `list_objects` do not grow with the object count: the
  *     same call, the same callers, before and after the environment gains
  *     140 objects, differ by at most {@link STATEMENT_SLACK}.
- *  2. ⭐ The answers are the ones `origin/main` gave, byte for byte
- *     ({@link GOLDEN}, measured there): every caller, both sizes — the same
- *     objects, the same field counts, the same order, the same `sys_*`
- *     read opt-in verdicts.
- *  3. CONTROL — `describe_object` answers the same, and costs no more.
+ *  2. ⭐ The answers are the ones the per-object resolution gives, in THIS
+ *     tree: every caller, both sizes, is read twice — once as shipped and once
+ *     with the delegator memo bypassed ({@link bypassingDelegatorMemo}, the
+ *     per-object resolution `origin/main` 68972cd2 ran) — and the two answers
+ *     are deep-equal: the same objects, the same field counts, the same order,
+ *     the same `sys_*` read opt-in verdicts. Compared within one tree, not
+ *     against a frozen hash, so a label or object `main` adds later moves
+ *     both readings alike.
+ *  3. CONTROL — with the memo bypassed the delegated callers' statements DO
+ *     grow with the object count, so pin 1 measures the memo and not a rig
+ *     that cannot see the growth; `describe_object` answers the same both
+ *     ways, at both sizes, and costs no more.
  *
  * Counted: every statement the SQL driver issues inside the call's own async
  * context (knex's `query` event), as the statements golden counts them.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { createHash } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectKernel, assembleExecutionContext, type Plugin, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
@@ -91,6 +97,30 @@ let engine: any;
 let app: any;
 let prevNodeEnv: string | undefined;
 let prevMcp: string | undefined;
+let security: SecurityPlugin;
+
+/**
+ * Runs `fn` with the delegator memo bypassed: every
+ * `resolveDelegatorForContext` ask forgets what the context held and resolves
+ * afresh, as each object-schema read site did before the memo — the
+ * per-object resolution, in this tree, for the answer-identity comparison.
+ * Both read sites ask through the plugin instance, so an own-property
+ * override on it reaches them; it is removed whatever `fn` does.
+ */
+async function bypassingDelegatorMemo<T>(fn: () => Promise<T>): Promise<T> {
+    const plugin = security as any;
+    const shipped = Object.getPrototypeOf(plugin).resolveDelegatorForContext;
+    expect(typeof shipped, 'precondition: the memo this bypasses exists').toBe('function');
+    plugin.resolveDelegatorForContext = function (this: any, context: any) {
+        if (context && typeof context === 'object') this.delegatorMemo.delete(context);
+        return shipped.call(this, context);
+    };
+    try {
+        return await fn();
+    } finally {
+        delete plugin.resolveDelegatorForContext;
+    }
+}
 
 /** The MCP service: records the bridge and caller the real `/mcp` entry hands it. */
 const mcp: any = {
@@ -187,24 +217,29 @@ async function describeObject(executionContext: Record<string, any>, name: strin
     return { answer, statements: sql.length };
 }
 
-const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+type Who = 'owner' | 'member' | 'ownerAgent' | 'memberAgent';
+type Mode = 'memo' | 'bypass';
+type Reading = { answer: any; statements: number };
 
-/** What a reading is compared on: how many objects, and the answer's bytes. */
-const fingerprint = (answer: { diagnosed: { objects: unknown[] } }) => ({ objects: answer.diagnosed.objects.length, sha256: digest(answer) });
+let callers: Record<Who, Record<string, any>>;
+/** `list_objects` per size, caller and mode. */
+const readings: Record<string, Record<string, Record<Mode, Reading>>> = {};
+/** `describe_object pin_lo_000` per size, caller and mode. */
+const described: Record<string, Record<string, Record<Mode, Reading>>> = {};
 
-let callers: Record<'owner' | 'member' | 'ownerAgent' | 'memberAgent', Record<string, any>>;
-const readings: Record<string, Record<string, { objects: number; sha256: string; statements: number }>> = {};
-const described: Record<string, Record<string, { sha256: string; statements: number }>> = {};
+async function readOnce(ctx: Record<string, any>) {
+    await listObjects(ctx); // warm: the session, the served metadata and the listing caches
+    return { list: await listObjects(ctx), describe: await describeObject(ctx, 'pin_lo_000') };
+}
 
 async function read(size: string) {
     readings[size] = {};
     described[size] = {};
     for (const [who, ctx] of Object.entries(callers)) {
-        await listObjects(ctx); // warm: the session, the served metadata and the listing caches
-        const { answer, statements: n } = await listObjects(ctx);
-        readings[size][who] = { ...fingerprint(answer), statements: n };
-        const d = await describeObject(ctx, 'pin_lo_000');
-        described[size][who] = { sha256: digest(d.answer), statements: d.statements };
+        const memo = await readOnce(ctx);
+        const bypass = await bypassingDelegatorMemo(() => readOnce(ctx));
+        readings[size][who] = { memo: memo.list, bypass: bypass.list };
+        described[size][who] = { memo: memo.describe, bypass: bypass.describe };
     }
 }
 
@@ -222,7 +257,8 @@ beforeAll(async () => {
     await kernel.use(new AppPlugin(PIN_APP));
     await kernel.use(new PlatformObjectsPlugin());
     await kernel.use(new AuthPlugin({ secret: 'list-objects-statements-33179-pin-secret' }));
-    await kernel.use(new SecurityPlugin(appSecurityPluginOptions(PIN_APP)));
+    security = new SecurityPlugin(appSecurityPluginOptions(PIN_APP));
+    await kernel.use(security);
     await kernel.use(new SharingServicePlugin());
     await kernel.use(createRestApiPlugin({}));
     await kernel.use(createDispatcherPlugin({}));
@@ -261,71 +297,58 @@ afterAll(async () => {
     else process.env.OS_MCP_SERVER_ENABLED = prevMcp;
 }, 60_000);
 
-/**
- * The answers `origin/main` 68972cd2 gave on this composition, before the
- * delegator memo: per caller and size, the listed object count and the
- * sha256 of the whole answer (the diagnosed listing and the `sys_*` read
- * opt-in verdicts) — and, for `describe_object`, of its answer. Measured by
- * this file's own readings at that commit.
- *
- * The statements `origin/main` paid there, for the record (not asserted —
- * {@link STATEMENT_SLACK} is): `ownerAgent` 1540 at 10 objects and 4620 at
- * 150, `memberAgent` 1260 and 3780; `describe_object` 22 and 18; the two
- * session callers 0.
+/*
+ * The statements `origin/main` 68972cd2 paid on this composition, for the
+ * record (not asserted — the bypassed readings below re-measure them in the
+ * tree under test): `ownerAgent` 1540 at 10 objects and 4620 at 150,
+ * `memberAgent` 1260 and 3780; `describe_object` 22 and 18; the two session
+ * callers 0.
  */
-const GOLDEN = {
-    list: {
-        10: {
-            owner: { objects: 68, sha256: '304fb285b8c37106383843881c205155106c18037979f0720a0e3e921e196332' },
-            member: { objects: 29, sha256: '1c5b772ff78f4bc882df5692d40800ad5f130e2cab755e4227f027b8590da93d' },
-            ownerAgent: { objects: 49, sha256: 'f4e77a4d252e88493df36c4d01369efeb8ad5c431edeaa2bc3ec9c014e1800dc' },
-            memberAgent: { objects: 23, sha256: '6e73539aaedd9f3612896c867f621327273103a626633c62b14eb41735af2a1c' },
-        },
-        150: {
-            owner: { objects: 208, sha256: '9edb5243e5bcdf3fa149420ad5799e6360ec8eea1df5349368678058c2c58e0d' },
-            member: { objects: 29, sha256: '1c5b772ff78f4bc882df5692d40800ad5f130e2cab755e4227f027b8590da93d' },
-            ownerAgent: { objects: 189, sha256: 'd03424429fc1b2502e1c07604d17689b22b6adce7991282935a52e38902e9fd6' },
-            memberAgent: { objects: 23, sha256: '6e73539aaedd9f3612896c867f621327273103a626633c62b14eb41735af2a1c' },
-        },
-    },
-    describe: {
-        owner: 'f61a6720fe797e325ff07a4fdf61571fe993ed13d1e3cc40743b4ae7712fb705',
-        member: '74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b',
-        ownerAgent: 'f61a6720fe797e325ff07a4fdf61571fe993ed13d1e3cc40743b4ae7712fb705',
-        memberAgent: '74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b',
-    },
-    /** `describe_object`'s statements on `origin/main` for the two delegated callers. */
-    describeStatements: { ownerAgent: 22, memberAgent: 18 },
-} as const;
 
-const WHO = ['owner', 'member', 'ownerAgent', 'memberAgent'] as const;
+const WHO: readonly Who[] = ['owner', 'member', 'ownerAgent', 'memberAgent'];
+const DELEGATED = ['ownerAgent', 'memberAgent'] as const;
+const count = (r: Reading) => r.answer.diagnosed.objects.length;
+const record = (who: string) => JSON.stringify(Object.fromEntries(['10', '150'].map((s) => [s, {
+    memo: { objects: count(readings[s][who].memo), statements: readings[s][who].memo.statements },
+    bypass: { objects: count(readings[s][who].bypass), statements: readings[s][who].bypass.statements },
+}])));
 
 describe('[ADR-0090 D10] MCP list_objects statements do not grow with the object count (real kernel)', () => {
     it('precondition: the environment grew from 10 to 150 objects, and the owner\'s agent is listed every one', () => {
-        expect(readings['150'].owner.objects - readings['10'].owner.objects).toBe(140);
-        expect(readings['150'].ownerAgent.objects - readings['10'].ownerAgent.objects).toBe(140);
+        expect(count(readings['150'].owner.memo) - count(readings['10'].owner.memo)).toBe(140);
+        expect(count(readings['150'].ownerAgent.memo) - count(readings['10'].ownerAgent.memo)).toBe(140);
     });
 
     for (const who of WHO) {
         it(`⭐ ${who}: statements per list_objects at 150 objects are those at 10, within ${STATEMENT_SLACK}`, () => {
-            const grown = readings['150'][who].statements - readings['10'][who].statements;
-            expect(Math.abs(grown), JSON.stringify({ 10: readings['10'][who], 150: readings['150'][who] })).toBeLessThanOrEqual(STATEMENT_SLACK);
+            const grown = readings['150'][who].memo.statements - readings['10'][who].memo.statements;
+            expect(Math.abs(grown), record(who)).toBeLessThanOrEqual(STATEMENT_SLACK);
         });
     }
 
-    it('⭐ the delegated callers pay their delegator once, not once per object: at most one describe_object\'s worth', () => {
-        for (const who of ['ownerAgent', 'memberAgent'] as const) {
-            expect(readings['150'][who].statements, who).toBeLessThanOrEqual(GOLDEN.describeStatements[who]);
+    it('CONTROL: with the memo bypassed, the delegated callers\' statements grow with the object count', () => {
+        // The owner's agent is listed 140 more objects, two delegator reads each.
+        expect(readings['150'].ownerAgent.bypass.statements - readings['10'].ownerAgent.bypass.statements, record('ownerAgent'))
+            .toBeGreaterThanOrEqual(140 * 2);
+        // The member's agent is listed no new object, yet is still asked of each.
+        expect(readings['150'].memberAgent.bypass.statements, record('memberAgent'))
+            .toBeGreaterThan(readings['10'].memberAgent.bypass.statements + STATEMENT_SLACK);
+    });
+
+    it('⭐ the delegated callers pay their delegator once, not once per object: at most one bypassed describe_object\'s worth', () => {
+        for (const who of DELEGATED) {
+            expect(readings['150'][who].memo.statements, record(who)).toBeLessThanOrEqual(described['150'][who].bypass.statements);
         }
     });
 });
 
-describe('[ADR-0106 D1/D5, ruling record 6787890900] the answers are origin/main\'s, byte for byte', () => {
+describe('[ADR-0106 D1/D5, ruling record 6787890900] the answers are the per-object resolution\'s, in this tree', () => {
     for (const size of ['10', '150'] as const) {
         for (const who of WHO) {
-            it(`⭐ ${who} at ${size} objects: list_objects lists what it listed before, in the same order`, () => {
-                const { objects, sha256 } = readings[size][who];
-                expect({ objects, sha256 }).toEqual(GOLDEN.list[size][who]);
+            it(`⭐ ${who} at ${size} objects: list_objects lists what the per-object resolution lists, in the same order`, () => {
+                const { memo, bypass } = readings[size][who];
+                expect(count(memo), 'precondition: the caller is listed objects').toBeGreaterThan(0);
+                expect(memo.answer).toEqual(bypass.answer);
             });
         }
     }
@@ -333,10 +356,13 @@ describe('[ADR-0106 D1/D5, ruling record 6787890900] the answers are origin/main
 
 describe('CONTROL — describe_object', () => {
     for (const who of WHO) {
-        it(`${who}: the same answer at both sizes, the one origin/main gave, for no more statements`, () => {
-            expect(described['10'][who].sha256).toBe(GOLDEN.describe[who]);
-            expect(described['150'][who].sha256).toBe(GOLDEN.describe[who]);
-            expect(described['150'][who].statements).toBe(described['10'][who].statements);
+        it(`${who}: the same answer with and without the memo, at both sizes, for no more statements`, () => {
+            for (const size of ['10', '150'] as const) {
+                expect(described[size][who].memo.answer, size).toEqual(described[size][who].bypass.answer);
+                expect(described[size][who].memo.statements, size).toBeLessThanOrEqual(described[size][who].bypass.statements);
+            }
+            expect(described['150'][who].memo.answer).toEqual(described['10'][who].memo.answer);
+            expect(described['150'][who].memo.statements).toBe(described['10'][who].memo.statements);
         });
     }
 });
