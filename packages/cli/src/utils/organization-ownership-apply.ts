@@ -3214,6 +3214,12 @@ export interface DeclaredWebhooksPort {
   list(): Promise<ReadonlyArray<{ name: string; packageId: string | null }>>;
 }
 
+/** The package a `sys_webhook` row's own definition names (`_packageId`), or `null`. */
+function ownPackageOf(row: Record<string, unknown>): string | null {
+  const def = webhookDefinition(row);
+  return typeof def?._packageId === 'string' && def._packageId ? def._packageId : null;
+}
+
 /** A `sys_webhook` row's `definition_json`, parsed, or `null`. */
 function webhookDefinition(row: Record<string, unknown>): Record<string, unknown> | null {
   const raw = row.definition_json;
@@ -3317,7 +3323,13 @@ async function runDeclaredWebhooks(run: Run): Promise<StepReport> {
         "deployment's own composition, then re-run.",
     ]);
   }
-  const declared = new Map((await run.opts.declaredWebhooks.list()).map((d) => [d.name, d.packageId] as const));
+  // [ADR-0150 D4/D8] Every holder of each declared name, never the one listed last.
+  const declared = new Map<string, Array<string | null>>();
+  for (const d of await run.opts.declaredWebhooks.list()) {
+    const holders = declared.get(d.name) ?? [];
+    if (!holders.includes(d.packageId)) holders.push(d.packageId);
+    declared.set(d.name, holders);
+  }
   const held = rows.filter((r) => declared.has(String(r.name)));
   summary.undeclaredKept = rows.length - held.length;
   if (summary.undeclaredKept > 0) {
@@ -3373,7 +3385,23 @@ async function runDeclaredWebhooks(run: Run): Promise<StepReport> {
     const name = String(row.name);
     const id = String(row.id);
     const def = webhookDefinition(row);
-    const packageId = (typeof def?._packageId === 'string' && def._packageId ? def._packageId : null) ?? declared.get(name) ?? null;
+    // [ADR-0150 D8] The activation row a customized copy writes names the
+    // copy's own package, else the name's one holder. Of a name two or more
+    // holders declare, a copy that names no package names none of them: its
+    // row names no package, as the name-keyed switch it was — off, it keeps
+    // every holder with no row of its own off; on, it turns none on — and
+    // the run says so, naming each holder. Never the first or last one listed.
+    const holders = declared.get(name) ?? [];
+    const packageId = ownPackageOf(row) ?? (holders.length === 1 ? holders[0] : null);
+    if (truthy(row.customized) && ownPackageOf(row) === null && holders.length > 1) {
+      notes.push(
+        `${table} ${id}: a customized copy of the declared webhook ${name}, which ${holders.length} holders declare ` +
+          `(${holders.map((p) => (p === null ? 'the environment' : `'${p}'`)).join(', ')}), and its definition names no ` +
+          'package, so its switch is written as a row naming no package: switched off it keeps each holder with no row of ' +
+          'its own off, switched on it turns none on. Switch each holder at its own address ' +
+          `(POST /api/v1/security/_activation/webhook/${name}?package=PACKAGE).`,
+      );
+    }
     if (!truthy(row.customized) || isSwitchOnlyEdit(row)) {
       if (truthy(row.customized) && (await setActivation(run, 'webhook', name, packageId, truthy(row.active)))) summary.activationRows++;
       summary.deliveriesResourced += await resource(id, `${DECLARED_WEBHOOK_REF_PREFIX}${name}`);
