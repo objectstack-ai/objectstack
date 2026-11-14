@@ -706,6 +706,49 @@ describe('[#33216] the publish door judges the one-hop leaf through a lookup the
     }
 });
 
+describe('[#33153] the publish door refuses a formula cycle the extension adds, as `os build` does', () => {
+    const formula = (expression: string) => ({ type: 'formula', label: 'F', expression, returnType: 'number' });
+    const where = (field: string) => `object 'crm_account' · objectExtensions[0] · field '${field}' expression`;
+    /** `os build`'s cycle findings at the extension, over the base as authored. */
+    const atBuild = (item: unknown) => {
+        const stack = { objects: baseManifest().objects, objectExtensions: [item] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack } as any)
+            .filter((f) => f.rule === 'expression-invalid' && f.message.includes('reads its own value'))
+            .map((f) => ({ rule: f.rule, where: f.where, path: f.path }));
+    };
+
+    for (const [label, fields, members] of [
+        ['a formula reading itself', { a__c: formula('record.a__c') }, ['a__c']],
+        ['two formulas reading each other', { a__c: formula('record.b__c'), b__c: formula('record.a__c') }, ['a__c', 'b__c']],
+    ] as const) {
+        it(`⭐ LIT — ${label} is refused with the build's rule id and location on each member; no field is served`, async () => {
+            const item = { extend: TARGET, fields };
+            const expected = members.map((m) => ({ rule: 'expression-invalid', where: where(m), path: where(m) }));
+            expect(atBuild(item)).toEqual(expected);
+
+            const rig = await boot();
+            await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item, mode: 'draft', packageId: PAIR });
+            const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+            expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            const issues = (err.issues ?? []).filter((i: any) => i.rule === 'expression-invalid');
+            expect(issues.map((i: any) => ({ rule: i.rule, where: i.where, path: i.path })), JSON.stringify(err.issues)).toEqual(expected);
+            expect((await rig.fieldsOn()).registry).not.toContain('a__c');
+            expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+        }, 60_000);
+    }
+
+    it('⭐ CONTROL — a chain of formulas the extension adds publishes and is served', async () => {
+        const item = { extend: TARGET, fields: { b__c: formula('record.a__c * 2'), a__c: formula('1 + 1') } };
+        expect(atBuild(item)).toEqual([]);
+
+        const rig = await boot();
+        await rig.saveAndPublish(PAIR, item);
+        expect((await rig.fieldsOn()).registry).toContain('b__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+    }, 60_000);
+});
+
 describe('[#33217] the publish door judges an extension\'s `format` regex and `json_schema` schema as `os build` does', () => {
     const ruleBody = (rule: Record<string, unknown>) => ({
         extend: TARGET,
