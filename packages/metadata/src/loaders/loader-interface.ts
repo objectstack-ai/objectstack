@@ -43,7 +43,9 @@ export interface MetadataKeyedItem<T = any> {
    * item for; absent for an item it holds for no package. A customization of
    * a package's item (D4) is held for that package though its body names
    * none, which is why the package travels beside the body rather than being
-   * read off it.
+   * read off it. [#32458, #32680] Also on a `loadManyKeyed` entry of a type
+   * stored per `(package, name)` (a loader's own, and `MetadataManager`'s,
+   * which hands on its loaders' packages).
    */
   readonly packageId?: string;
 }

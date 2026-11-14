@@ -2169,12 +2169,15 @@ const FLOW_AFTER_SAVE_INLINE_RETRY_EXPLANATION: RuleExplanation = {
       'region of a `try_catch` is not retried by that node.',
     'The cure for `http` is `durable: true`. Where a messaging HTTP outbox is wired, the request is queued ' +
       'there and retried in the background with its own backoff and dead-letter, so the save does not wait. ' +
-      'Where none is wired, the node falls back to the inline call and the save waits for it as before.',
+      'Where none is wired, a run on the save path sends it once in the background, unretried, and does not ' +
+      'wait for it either; a failure is logged and the request is lost.',
     'A `connector_action` has no background path. Remove the retry around it, or run the flow on demand or ' +
       'on a schedule instead of after the save. An `http` node with `durable: true` fits only a call that ' +
       'needs no credential, because a credential must not go in an `http` node\'s url or headers.',
     'Not judged: a before-trigger flow, a scheduled, API or manual flow, and an inline call nothing retries. ' +
-      'A `subflow` node\'s callee is another flow and is judged on its own trigger, not this one\'s.',
+      'A `subflow` / `map` node\'s callee is another flow, which may register later, so this rule does not ' +
+      'read it; the automation engine declines to arm a flow whose callee retries an inline call ' +
+      '(`unboundCause: retried_callout_in_subflow`).',
     FLOW_GATE_REACH,
   ],
 };
@@ -4979,6 +4982,27 @@ const FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FLOW_MULTI_UPDATE_MOVES_STORED_INPUT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-multi-update-moves-stored-input',
+  covers: 'a multi update that moves a stored expression input',
+  paragraphs: [
+    'A stored computed field is any field but a `formula` that declares an `expression`: the engine computes it ' +
+      'from the row each write stores. A predicate update (`multi: true`) is one statement that writes one patch ' +
+      'to every matched row, and it is never split into single-row writes, so the computed value can be stored ' +
+      'only when it is the same on every matched row. When the patch moves an input to values that compute ' +
+      'differently on different rows, the whole update is refused with `VALIDATION_FAILED` and nothing is written.',
+    'The shape that always works reads the rows, loops and updates each by id: a `get_record` with the same ' +
+      'filter and a `limit` above 1 bound to an `outputVariable`, a `loop` over that list, and inside the loop ' +
+      'an `update_record` with `filter: { id: item.id }` (the loop\'s `iteratorVariable`) and no `multi`. Each row ' +
+      'is then computed from its own stored row. Wrap the loop body in a `try_catch` if one refused row should ' +
+      'not end the sweep.',
+    'An input is a field the `expression` reads as `record.FIELD`, or through a reference field, or through ' +
+      'another stored field that reads it. Setting a stored field itself is not reported: its value is computed, ' +
+      'never taken from the patch. This is a warning, not a gate: a patch that sets the inputs to values that ' +
+      'compute the same result on every matched row is stored, and which case a run meets depends on its rows.',
+  ],
+};
+
 const FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION: RuleExplanation = {
   rule: 'flow-decision-inclusive-overlap',
   covers: 'when an inclusive decision runs more than one branch',
@@ -6285,6 +6309,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION.rule]: FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION,
   [FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION.rule]: FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION,
   [FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION.rule]: FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION,
+  [FLOW_MULTI_UPDATE_MOVES_STORED_INPUT_EXPLANATION.rule]: FLOW_MULTI_UPDATE_MOVES_STORED_INPUT_EXPLANATION,
   [FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION.rule]: FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION,
   [FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION.rule]: FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION,
   [FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION.rule]: FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION,

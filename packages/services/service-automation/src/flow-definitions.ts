@@ -76,6 +76,7 @@ export interface FlowDefinitionsHost {
     readonly subflowDeclinedFlows: AutomationEngine['subflowDeclinedFlows'];
     readonly subflowNoticeDeclinedFlows: AutomationEngine['subflowNoticeDeclinedFlows'];
     readonly subflowRegionDeclinedFlows: AutomationEngine['subflowRegionDeclinedFlows'];
+    readonly subflowRetryDeclinedFlows: AutomationEngine['subflowRetryDeclinedFlows'];
     readonly triggers: AutomationEngine['triggers'];
     readonly flowCredentialSource: AutomationEngine['flowCredentialSource'];
     readonly flowVersionHistory: AutomationEngine['flowVersionHistory'];
@@ -296,7 +297,7 @@ export function getFlowRuntimeStates(this: Pick<FlowDefinitionsHost, 'flows' | '
 
 /** The body of {@link AutomationEngine.describeUnboundReason}; that method's docblock is its contract. */
 export function describeUnboundReason(
-    this: Pick<FlowDefinitionsHost, 'isFlowEnabled' | 'boundFlowTriggers' | 'policyDisabledFlows' | 'subflowDeclinedFlows' | 'subflowNoticeDeclinedFlows' | 'subflowRegionDeclinedFlows' | 'triggers'>,
+    this: Pick<FlowDefinitionsHost, 'isFlowEnabled' | 'boundFlowTriggers' | 'policyDisabledFlows' | 'subflowDeclinedFlows' | 'subflowNoticeDeclinedFlows' | 'subflowRegionDeclinedFlows' | 'subflowRetryDeclinedFlows' | 'triggers'>,
     name: string,
     resolved: { triggerType: string } | undefined,
 ): { reason: string; cause: FlowUnboundCause } | undefined {
@@ -324,6 +325,12 @@ export function describeUnboundReason(
     // Read last, the gate's own order.
     const regionDeclined = this.subflowRegionDeclinedFlows.get(name);
     if (regionDeclined !== undefined) return { reason: regionDeclined, cause: 'suspending_subflow_in_region' };
+    // The gate's subflow-retry half declined it: it runs after a record change
+    // and a `subflow` / `map` child of it retries an inline outbound call, so
+    // the save would wait through the backoff ladder. Its own cause, for its
+    // own remedy (the child drops the retry or makes the call durable).
+    const retryDeclined = this.subflowRetryDeclinedFlows.get(name);
+    if (retryDeclined !== undefined) return { reason: retryDeclined, cause: 'retried_callout_in_subflow' };
     return this.triggers.has(resolved.triggerType)
         ? {
             reason: `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`,
@@ -436,7 +443,7 @@ export function unregisterConnectorProvider(this: Pick<FlowDefinitionsHost, 'con
 }
 
 /** The body of {@link AutomationEngine.withdrawFlow}; that method's docblock is its contract. */
-export function withdrawFlow(this: Pick<FlowDefinitionsHost, 'deactivateFlowTrigger' | 'flows' | 'flowStatusDisabled' | 'flowVersionHistory' | 'policyDisabledFlows' | 'subflowDeclinedFlows' | 'subflowNoticeDeclinedFlows' | 'subflowRegionDeclinedFlows' | 'flowRefusals' | 'logger'>, name: string): void {
+export function withdrawFlow(this: Pick<FlowDefinitionsHost, 'deactivateFlowTrigger' | 'flows' | 'flowStatusDisabled' | 'flowVersionHistory' | 'policyDisabledFlows' | 'subflowDeclinedFlows' | 'subflowNoticeDeclinedFlows' | 'subflowRegionDeclinedFlows' | 'subflowRetryDeclinedFlows' | 'flowRefusals' | 'logger'>, name: string): void {
     this.deactivateFlowTrigger(name);
     this.flows.delete(name);
     // [ADR-0126 §7.2] `flowLedgerDisabled` is deliberately NOT cleared. It
@@ -455,6 +462,7 @@ export function withdrawFlow(this: Pick<FlowDefinitionsHost, 'deactivateFlowTrig
     this.subflowDeclinedFlows.delete(name);
     this.subflowNoticeDeclinedFlows.delete(name);
     this.subflowRegionDeclinedFlows.delete(name);
+    this.subflowRetryDeclinedFlows.delete(name);
     // [#23316] A withdrawal ends a refusal as it ends a registration: the
     // record's subject is gone. A host that withdraws BECAUSE it refused
     // records the refusal after this — see {@link recordFlowRefusal}.

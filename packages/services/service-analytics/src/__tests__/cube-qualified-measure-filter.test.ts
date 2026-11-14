@@ -85,7 +85,7 @@ describe('[#25906] the cube door answers `CUBE.MEASURE` as the bare measure, its
     await service.query(ask('sales.won_amount'), MEMBER);
     expect(statements).toHaveLength(2);
     const [bare, qualified] = statements;
-    expect(bare.sql).toContain('CASE WHEN stage = $1 THEN amount END');
+    expect(bare.sql).toContain('CASE WHEN "stage" = $1 THEN "amount" END');
     expect(qualified.sql).toBe(bare.sql.replace('AS "won_amount"', 'AS "sales.won_amount"'));
     expect(qualified.params).toEqual(bare.params);
     expect(qualified.params).toEqual(['won']);

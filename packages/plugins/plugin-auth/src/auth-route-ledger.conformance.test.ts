@@ -260,6 +260,12 @@ describe('auth route ledger hygiene', () => {
       // holds it to the same proof — better-auth's own read is
       // `/organization/get-invitation`, a different path.
       'GET /api/v1/auth/organization/invitation-preview',
+      // Direct sign-in's start door, on this pin's own terms: `auth-plugin.ts`
+      // mounts it itself (a `rawApp.get` on the `${basePath}/sign-in/direct`
+      // template, ahead of the catch-all, while the setting is on), and the
+      // `live.has(route)` loop below holds it to the same proof — better-auth's
+      // own starts are `/sign-in/social` and `/sign-in/sso`, POSTs.
+      'GET /api/v1/auth/sign-in/direct',
       // [#31048] Both withdraws, on this pin's own terms: `auth-plugin.ts`
       // mounts each itself (a `rawApp.post` on the
       // `${basePath}/admin/authorized-clients/withdraw` and
