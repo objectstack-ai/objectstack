@@ -377,6 +377,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "所有者可编辑",
         helpText: "开启：子记录的所有者（其 owner_id）只要对父记录有读权限，就可以按 id 更新该行；其他人，以及所有新增、删除、多行更新和代办写入，仍需要对父记录的编辑权限。关闭（默认）：子记录的每一次写入都需要对其父记录的编辑权限。"
       },
+      "sharing.controlledByParent.writeRequiresMasterRead": {
+        label: "可读父记录即可写入",
+        helpText: "开启：凡能读取父记录的人，都可以在子对象自身的权限、行级安全和字段级安全允许的范围内，新增、更新和删除子记录。关闭（默认）：子记录的每一次写入都需要对其父记录的编辑权限。不要与“所有者可编辑”同时开启，本开关已涵盖它。"
+      },
       access: {
         label: "访问策略",
         helpText: "通配授权策略（ADR-0066 D2）。不声明时按 public 处理。它决定权限集的 '*' 对象授权是否覆盖本对象；用户之间的记录可见性由 sharingModel 决定。"

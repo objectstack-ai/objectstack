@@ -93,7 +93,7 @@ describe('a dataset filter key that names an object field binds to that field â€
 
     expect(captured.sql).toHaveLength(1);
     const { sql, params } = captured.sql[0];
-    expect(whereOf(sql)).toBe('department = $1');
+    expect(whereOf(sql)).toBe('"department" = $1');
     expect(params).toEqual(['bu_1']);
     // Nothing reads the related object any more: the join was the dimension's.
     expect(sql).not.toContain('JOIN');
@@ -155,7 +155,7 @@ describe('a dataset filter key that names an object field binds to that field â€
     expect(captured.sql.length).toBeGreaterThan(0);
     for (const { sql } of captured.sql) {
       expect(sql).not.toContain('JOIN');
-      expect(whereOf(sql)).toMatch(/(^|\()department = \$\d/);
+      expect(whereOf(sql)).toMatch(/(^|\()"department" = \$\d/);
       expect(whereOf(sql)).not.toContain('"department".');
     }
   });
@@ -225,7 +225,7 @@ describe('the field-read admission judges the field the filter binds to', () => 
 
     expect(captured.sql).toHaveLength(1);
     expect(captured.sql[0].sql).not.toContain('JOIN');
-    expect(whereOf(captured.sql[0].sql)).toBe('department = $1');
+    expect(whereOf(captured.sql[0].sql)).toBe('"department" = $1');
   });
 
   it('refuses the same filter when the lookup field itself is not readable', async () => {

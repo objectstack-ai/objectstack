@@ -395,6 +395,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           message: "声明一条不在岗委派，休假期间审批自动改派给候补人。"
         }
       }
+    },
+    _validations: {
+      validity_window_order: {
+        message: "失效时间必须晚于生效时间。委派从生效时间起生效，到失效时间为止（不含失效时间），结束不晚于开始的时间段永远不会改派任何审批。若不设结束或开始，可将其中一项留空。"
+      },
+      delegate_not_delegator: {
+        message: "候补人必须是委派人以外的人。委派是在你不在岗期间把你的审批交给另一位用户，把自己设为候补人永远不会改派任何审批。"
+      }
     }
   }
 };

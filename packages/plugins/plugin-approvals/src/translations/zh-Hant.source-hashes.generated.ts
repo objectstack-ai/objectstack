@@ -18,4 +18,6 @@
  */
 
 export const zhHantGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_approval_delegation._validations.delegate_not_delegator.message": "e4924bc4008bd3b5",
+  "objects.sys_approval_delegation._validations.validity_window_order.message": "e6a6433d70cb122d",
 };

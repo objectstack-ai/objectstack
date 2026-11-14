@@ -765,3 +765,134 @@ describe('ADR-0150 D3 — an environment override of a packaged flow names its r
         expect(engine.armedFlowPackage('never_registered')).toBeUndefined();
     });
 });
+
+// ── [ADR-0150 D4, #31699] the engine holds a connector instance by package and name ──
+
+describe('ADR-0150 D4 — the engine holds a connector instance by (package, name) and dispatches the one a flow addresses (#31699)', () => {
+    const B = 'com.acme.beta';
+    const P2 = 'com.acme.caller2';
+    const def = (name: string, inputSchema: unknown = { type: 'object' }) =>
+        ({ name, label: name, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping', inputSchema }] }) as never;
+    /** A declarative instance of `name` of package `packageId`; `pings` records `name@package` per dispatch. */
+    const instance = (name: string, packageId: string | null, opts: { soleOfName?: boolean; inputSchema?: unknown } = {}) =>
+        engine.registerConnector(
+            def(name, opts.inputSchema),
+            { ping: async () => { pings.push(`${name}@${packageId ?? '-'}`); return { ok: true }; } },
+            'declarative',
+            { packageId, ...(opts.soleOfName ? { soleOfName: true } : {}) },
+        );
+
+    beforeEach(() => {
+        pings = [];
+        const ctx = { getService(name: string) { if (name === 'objectql') return { registry }; throw new Error(`no ${name}`); } };
+        engine.setConnectorNameResolver(connectorNameResolver(ctx as never));
+    });
+
+    it("two packages' instances of one name are both held; each package's flow dispatches the one its closure resolves to", async () => {
+        install(A);
+        install(B);
+        install(P, [A]);
+        install(P2, [B]);
+        declareConnector('billing', A);
+        declareConnector('billing', B);
+        instance('billing', A);
+        instance('billing', B);
+        expect(engine.getRegisteredConnectors()).toEqual(['billing']);
+        expect(engine.getConnectorDescriptors().filter((d) => d.name === 'billing')).toHaveLength(2);
+        ship(P, dispatcher('charge', 'billing'));
+        ship(P2, dispatcher('charge2', 'billing'));
+        expect((await engine.execute('charge')).success).toBe(true);
+        expect((await engine.execute('charge2')).success).toBe(true);
+        expect(pings).toEqual([`billing@${A}`, `billing@${B}`]);
+    });
+
+    it("each flow's input is judged against the inputSchema of the instance it dispatches, not another package's of the name", async () => {
+        install(A);
+        install(B);
+        install(P, [A]);
+        install(P2, [B]);
+        declareConnector('billing', A);
+        declareConnector('billing', B);
+        instance('billing', A);
+        instance('billing', B, { inputSchema: { type: 'object', required: ['amount'], properties: { amount: { type: 'number' } } } });
+        ship(P, dispatcher('charge', 'billing'));
+        ship(P2, dispatcher('charge2', 'billing'));
+        expect((await engine.execute('charge')).success).toBe(true);
+        const refused = await engine.execute('charge2');
+        expect(refused.success).toBe(false);
+        expect(String(refused.error)).toContain('amount');
+        expect(pings).toEqual([`billing@${A}`]);
+    });
+
+    it('⛔ two instances and a caller with nothing to choose by: no dispatch, never one of them', async () => {
+        install(A);
+        install(B);
+        declareConnector('billing', A);
+        declareConnector('billing', B);
+        instance('billing', A);
+        instance('billing', B);
+        author(dispatcher('my_charge', 'billing'));
+        const result = await engine.execute('my_charge');
+        expect(result.success).toBe(false);
+        expect(pings).toEqual([]);
+        // The bare-name reads answer no instance; the addressed ones answer each.
+        expect(engine.resolveConnectorAction('billing', 'ping')).toBeUndefined();
+        expect(engine.getConnectorOrigin('billing')).toBeUndefined();
+        expect(engine.resolveConnectorAction('billing', 'ping', A)).toBeTypeOf('function');
+        expect(engine.resolveConnectorActionInputSchema('billing', 'ping', B)).toEqual({ type: 'object' });
+        expect(engine.resolveConnectorInstanceFor('billing', null)).toEqual({ status: 'none' });
+    });
+
+    it('a package caller whose closure holds two is refused with the resolver\'s message, naming both', () => {
+        install(A);
+        install(B);
+        install(P, [A, B]);
+        declareConnector('billing', A);
+        declareConnector('billing', B);
+        instance('billing', A);
+        instance('billing', B);
+        const answer = engine.resolveConnectorInstanceFor('billing', P);
+        expect(answer.status).toBe('refused');
+        const message = answer.status === 'refused' ? answer.refusal.message : '';
+        expect(message).toContain(A);
+        expect(message).toContain(B);
+    });
+
+    it('fallback (the connection door\'s rule, until the narrowing): a package caller whose holder has no instance registered is answered by the one instance of the name', async () => {
+        install(A);
+        install(P, [A]);
+        declareConnector('billing', A);
+        // The one instance is registered under no package (an unstamped entry
+        // whose holder could not be read when it was registered).
+        instance('billing', null);
+        expect(engine.resolveConnectorInstanceFor('billing', P)).toEqual({ status: 'instance', packageId: null });
+        ship(P, dispatcher('charge', 'billing'));
+        expect((await engine.execute('charge')).success).toBe(true);
+        expect(pings).toEqual(['billing@-']);
+        // A second instance: no sole one, so no fallback: none, never one of them.
+        instance('billing', B);
+        expect(engine.resolveConnectorInstanceFor('billing', P)).toEqual({ status: 'none' });
+    });
+
+    it('soleOfName (the reconcile today): a declarative registration drops the other declarative instance of the name', () => {
+        instance('billing', A, { soleOfName: true });
+        instance('billing', B, { soleOfName: true });
+        expect(engine.resolveConnectorInstanceFor('billing', null)).toEqual({ status: 'instance', packageId: B });
+        expect(engine.resolveConnectorAction('billing', 'ping', A)).toBeUndefined();
+    });
+
+    it('a plugin connector and a declarative instance never share a name, whatever package the instance is of', () => {
+        engine.registerConnector(def('slack'), { ping: async () => ({}) });
+        expect(() => instance('slack', A)).toThrow(/Connector name conflict: 'slack'/);
+    });
+
+    it('unregister removes the addressed instance, or every instance of the name when none is addressed', () => {
+        instance('billing', A);
+        instance('billing', B);
+        engine.unregisterConnector('billing', A);
+        expect(engine.resolveConnectorInstanceFor('billing', null)).toEqual({ status: 'instance', packageId: B });
+        instance('billing', A);
+        engine.unregisterConnector('billing');
+        expect(engine.getRegisteredConnectors()).toEqual([]);
+    });
+});

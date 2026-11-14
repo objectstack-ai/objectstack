@@ -1056,6 +1056,13 @@ background job — so a lapsed delegation simply stops applying. Chains
 identity**; the reroute is recorded as an `ooo_substitute` audit action and both
 the delegate and the skipped approver are notified.
 
+A delegation that could never reroute anything is refused at the write with
+`400 VALIDATION_FAILED`, naming the field: a window whose `valid_until` is at or
+before its `valid_from` (on `valid_until`), and a `delegate_id` equal to the
+`delegator_id` (on `delegate_id`). Leave either bound empty for an open-ended
+window. A row stored with either shape before this check existed stays inert:
+correct its dates or its delegate, or delete it.
+
 A delegation belongs to the organization it is created in, and reroutes only the
 approvals opened in that organization; a request's organization is its record's.
 To cover approvals in two organizations, create a delegation in each. A
