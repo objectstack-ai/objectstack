@@ -158,6 +158,19 @@ export const CONSOLE_ROUTE_LEDGER: readonly ConsoleRouteLedgerEntry[] = [
             + 'reveals nothing that door does not, and the decision stays in one place.',
     },
     {
+        route: 'GET /robots.txt',
+        family: 'console-static',
+        mountedIn: 'utils/console.ts',
+        disposition: 'static-asset',
+        note:
+            'the site\'s default robots.txt, a fixed text file for crawlers: it disallows `/api/` and `/_console/` and '
+            + 'allows the public form surface (`/forms/`, `/_console/f/`, the bundle\'s `/_console/assets/` and the '
+            + 'anonymous form door `/api/v1/forms/`). A FALLBACK, not a claim on the path: it asks the rest of the chain '
+            + 'first and answers only when that chain ends in the unmatched-request 404, so an app\'s own robots.txt '
+            + 'wins whichever registered first. Mounted with the Console because the Console is what claims the site '
+            + 'root; a boot without one serves the API alone, whose answers carry `X-Robots-Tag` from the HTTP server.',
+    },
+    {
         route: 'GET /_console/*',
         family: 'console-static | console-unavailable',
         mountedIn: 'utils/console.ts',
