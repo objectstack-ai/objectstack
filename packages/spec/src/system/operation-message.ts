@@ -14,7 +14,8 @@
  * the sharing middleware's by-id write denial (`record_write_denied`; emitter
  * conversion is #12260's half) and plugin-approvals' non-submitter recall
  * refusal (`approval_recall_not_submitter`; emitter conversion is #11993's
- * half). The catalog is the seat for the rest of the family as they are
+ * half) — and the unique-constraint refusal (`409 UNIQUE_VIOLATION` on the
+ * wire, the engine's `DuplicateRecordError`). The catalog is the seat for the rest of the family as they are
  * localized — a second mechanism for the second producer is exactly what this
  * module exists to prevent.
  *
@@ -238,6 +239,26 @@ export function operationMessageTranslationKey(messageKey: string): string {
  * carries its list rules in the same edit — the every-locale-defines-every-key
  * test refuses a locale that omits them — and so they resolve by the same
  * ladder as the sentence, a deployment's `errors.<key>` override included.
+ *
+ * The three `duplicate_record*` keys are the end user's sentence of a
+ * unique-constraint refusal — one wire code (`UNIQUE_VIOLATION`), three
+ * sentences, chosen by how much of the key the engine can name honestly:
+ *
+ *   - `duplicate_record_field` takes `{{field}}`, the one conflicting field's
+ *     LABEL in the caller's locale, named only when the store determinably
+ *     named that column and the field has a label (a translation, else its
+ *     declared `label`; never the API name);
+ *   - `duplicate_record_fields` takes `{{fields}}`, the labels of a composite
+ *     unique index's fields spelled by `field_label_quoted` and
+ *     `field_label_list_separator`, named only when the columns the store
+ *     named match a unique index the object declares and every one of those
+ *     fields has a label;
+ *   - `duplicate_record` names nothing — every other case, because a wrong
+ *     field name is worse than none.
+ *
+ * The English sentences are byte-identical to the fixed text the HTTP doors
+ * answered before they were localized, so an English deployment reads no
+ * change for a single field or none.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -275,6 +296,9 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'This {{object}} is still referenced by {{dependentObject}} record(s) through “{{field}}”. Delete or reassign them first.',
     delete_restricted_required_opaque:
       'This {{object}} is still referenced by {{dependentObject}} record(s) through “{{field}}”, which is required and cannot be cleared. Delete or reassign them first.',
+    duplicate_record: 'A record with this value already exists',
+    duplicate_record_field: 'A record with this {{field}} already exists',
+    duplicate_record_fields: 'A record with the same {{fields}} already exists',
   },
   'zh-CN': {
     permission_denied: '您没有执行此操作的权限，如需访问请联系管理员。',
@@ -299,6 +323,9 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       '该{{object}}正被{{dependentObject}}记录通过「{{field}}」引用，请先删除或改派这些记录。',
     delete_restricted_required_opaque:
       '该{{object}}正被{{dependentObject}}记录通过「{{field}}」引用，且该字段为必填、无法清空，请先删除或改派这些记录。',
+    duplicate_record: '已存在相同值的记录',
+    duplicate_record_field: '已存在相同{{field}}的记录',
+    duplicate_record_fields: '已存在{{fields}}均相同的记录',
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
@@ -334,6 +361,9 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'この{{object}}は{{dependentObject}}レコードから「{{field}}」で参照されています。先にそれらを削除するか、参照先を変更してください。',
     delete_restricted_required_opaque:
       'この{{object}}は{{dependentObject}}レコードから「{{field}}」で参照されています。この項目は必須のため空にできません。先にそれらを削除するか、参照先を変更してください。',
+    duplicate_record: '同じ値のレコードがすでに存在します',
+    duplicate_record_field: '同じ{{field}}のレコードがすでに存在します',
+    duplicate_record_fields: '{{fields}}がすべて同じレコードがすでに存在します',
   },
   'es-ES': {
     permission_denied:
@@ -370,6 +400,9 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'Todavía hay registros de {{dependentObject}} que hacen referencia a este {{object}} mediante «{{field}}». Elimínelos o reasígnelos primero.',
     delete_restricted_required_opaque:
       'Todavía hay registros de {{dependentObject}} que hacen referencia a este {{object}} mediante «{{field}}», un campo obligatorio que no puede vaciarse. Elimínelos o reasígnelos primero.',
+    duplicate_record: 'Ya existe un registro con este valor',
+    duplicate_record_field: 'Ya existe un registro con el mismo valor de {{field}}',
+    duplicate_record_fields: 'Ya existe un registro con los mismos valores de {{fields}}',
   },
 };
 
