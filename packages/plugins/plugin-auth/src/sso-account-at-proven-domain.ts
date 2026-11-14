@@ -182,22 +182,37 @@ export interface SsoDomainEntryNotBareRefusal {
  * so an entry named here is at most a host name long.
  */
 export function ssoDomainEntryNotBare(domain: unknown): SsoDomainEntryNotBareRefusal | undefined {
-  if (typeof domain !== 'string') return undefined;
+  const [trimmed] = ssoDomainEntriesNotBare(domain);
+  if (trimmed === undefined) return undefined;
+  const message =
+    `The SSO provider domain entry '${trimmed}' is not a bare host name. Write each email domain as a host name `
+    + "alone, such as 'acme.com': no scheme, port, path or user part, separated by commas. Nothing was saved.";
+  return {
+    status: 'BAD_REQUEST',
+    code: 'VALIDATION_FAILED',
+    message,
+    field: 'domain',
+    fields: [{ field: 'domain', code: 'invalid_value', message }],
+  };
+}
+
+/**
+ * Every entry of a comma-separated `domain` value that is not written as a
+ * bare host name ({@link ssoDomainEntryHost} accepts none), trimmed, in list
+ * order; blank entries skipped. The one predicate behind the register / edit
+ * refusal ({@link ssoDomainEntryNotBare}, which names the first) and the boot
+ * report of stored providers saved before that refusal existed
+ * (`sso-stored-domain-entries.ts`).
+ */
+export function ssoDomainEntriesNotBare(domain: unknown): string[] {
+  if (typeof domain !== 'string') return [];
+  const entries: string[] = [];
   for (const entry of domain.split(',')) {
     const trimmed = entry.trim();
     if (!trimmed || ssoDomainEntryHost(trimmed) !== null) continue;
-    const message =
-      `The SSO provider domain entry '${trimmed}' is not a bare host name. Write each email domain as a host name `
-      + "alone, such as 'acme.com': no scheme, port, path or user part, separated by commas. Nothing was saved.";
-    return {
-      status: 'BAD_REQUEST',
-      code: 'VALIDATION_FAILED',
-      message,
-      field: 'domain',
-      fields: [{ field: 'domain', code: 'invalid_value', message }],
-    };
+    entries.push(trimmed);
   }
-  return undefined;
+  return entries;
 }
 
 /**
