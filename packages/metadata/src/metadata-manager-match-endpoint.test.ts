@@ -930,9 +930,19 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
       }
     });
 
-    it('`unregisterPackage` removes a `_packageId`-only item and deletes its row by name (BASE: it removed nothing)', async () => {
+    /**
+     * [#32985] `DatabaseLoader` writes no `package_id` column for a type
+     * outside the set, so the row of a `_packageId`-only item names its
+     * package by the stamp alone: `unregisterPackage` keeps it until forced,
+     * as it keeps an environment row a 17.0.0–18.3.0 boot stamped (the row
+     * alone cannot tell the two apart).
+     */
+    it('`unregisterPackage` keeps a `_packageId`-only item whose row names the package by the stamp alone, reporting it (FROM removed, #32985); with `force` it removes the item and deletes its row by name (BASE: it removed nothing)', async () => {
       const ctx = await boot(CONTROL_TYPE, [A]);
-      await ctx.manager.unregisterPackage(A);
+      const kept = await ctx.manager.unregisterPackageWithReport(A);
+      expect([kept.removed, kept.kept.map(({ type, name, reason }) => [type, name, reason])]).toEqual([[], [[CONTROL_TYPE, ctx.name, 'stamp-only-row']]]);
+      expect(ctx.rowBodies()).toHaveLength(1);
+      await ctx.manager.unregisterPackage(A, { force: true });
       expect(ctx.rowBodies()).toEqual([]);
       expect(ctx.watched.map((event) => [event.type, event.name])).toEqual([['deleted', ctx.name]]);
     });
@@ -1429,9 +1439,10 @@ describe('per-package loader storage for every type stored per package (ADR-0150
       expect(labelsOf(await peer.list(CONTROL_TYPE))).toEqual([label(CONTROL_TYPE, B)]);
     });
 
+    // [#32985] Forced: the item's row names its package by the stamp alone (see the CONTROL above).
     it('a removal deletes from the door\'s store too: nothing answers (#32353; BASE: its copy kept answering)', async () => {
       const ctx = await boot(CONTROL_TYPE, [A]);
-      await ctx.manager.unregisterPackage(A);
+      await ctx.manager.unregisterPackage(A, { force: true });
       expect(ctx.rows()).toEqual([]);
       expect(await ctx.door.loadManyKeyed(CONTROL_TYPE)).toEqual([]);
       expect(await ctx.manager.get(CONTROL_TYPE, ctx.name)).toBeUndefined();
@@ -1716,8 +1727,10 @@ describe('[#32540] one package\'s action name bound to several objects keeps a r
         id: 'bound', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item(objectName)),
         state: 'active', version: 1, source: 'database', checksum: 'x',
       });
+      // [#32985] The legacy row names its package by its own `packageId`: one naming it by the
+      // `_packageId` stamp alone is bound to nothing (`DatabaseLoader.bindReadRowPackage`).
       await driver.create('sys_metadata', {
-        id: 'legacy-o1', type: 'action', name: NAME, metadata: JSON.stringify(item('o1')),
+        id: 'legacy-o1', type: 'action', name: NAME, metadata: JSON.stringify({ ...item('o1'), packageId: A }),
         state: 'active', version: 2, source: 'database', checksum: 'y',
       });
     });

@@ -164,7 +164,8 @@ export interface MetadataUnregisterOptions extends MetadataWriteOptions {
 
 /**
  * [#32985; maintainer decision 2026-11-14 on #32985]
- * {@link MetadataManager.unregisterPackage}'s options. Class-level, as
+ * {@link MetadataManager.unregisterPackage}'s and
+ * {@link MetadataManager.unregisterPackageWithReport}'s options. Class-level, as
  * {@link MetadataUnregisterOptions} is: the spec's `IMetadataService`
  * signature is not widened here.
  */
@@ -181,7 +182,7 @@ export interface MetadataUnregisterPackageOptions {
   force?: boolean;
 }
 
-/** [#32985] What {@link MetadataManager.unregisterPackage} removed and what it kept. */
+/** [#32985] What {@link MetadataManager.unregisterPackageWithReport} removed and what it kept. */
 export interface MetadataUnregisterPackageResult {
   /** Each item removed, from the registry and from every loader. */
   removed: Array<{ type: string; name: string }>;
@@ -2704,11 +2705,22 @@ export class MetadataManager implements IMetadataService {
    * (`MetadataLoader.stampOnlyRows`), whichever writer stored the row. The row
    * may be the environment's own, and from the row alone it cannot be told
    * from the package's: a package's row may be kept, an environment row is
-   * never deleted. Each kept item is reported, in the result and in one `warn`;
-   * `force` removes them too. Every row is checked before anything is removed,
-   * so a failed check removes nothing.
+   * never deleted. Each kept item is reported in one `warn`, and in the
+   * result {@link unregisterPackageWithReport} answers; `force` removes them
+   * too. Every row is checked before anything is removed, so a failed check
+   * removes nothing.
    */
-  async unregisterPackage(packageName: string, options?: MetadataUnregisterPackageOptions): Promise<MetadataUnregisterPackageResult> {
+  async unregisterPackage(packageName: string, options?: MetadataUnregisterPackageOptions): Promise<void> {
+    await this.unregisterPackageWithReport(packageName, options);
+  }
+
+  /**
+   * [#32985] {@link unregisterPackage}, answering what it removed and what it
+   * kept ({@link MetadataUnregisterPackageResult}). A method of its own because
+   * the spec's `IMetadataService.unregisterPackage` answers `void`, and the
+   * published contract is not widened here.
+   */
+  async unregisterPackageWithReport(packageName: string, options?: MetadataUnregisterPackageOptions): Promise<MetadataUnregisterPackageResult> {
     // Collect all items to delete (type and name pairs). [#32517] One entry
     // per slot: a bundled type's members of one slot are removed together,
     // with the one `deleted` announcement the slot made before.

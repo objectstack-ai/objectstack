@@ -3333,12 +3333,13 @@ describe('[#32986] unregisterPackage of the host package keeps the environment\'
     for (const [type, name] of ITEMS) await seed(type, name, null, { _packageId: HOST });
     const m = await bootPass(HOST);
     expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
-    const kept = await m.unregisterPackage(HOST);
-    expect(kept.kept.map(({ type, name, reason }) => [type, name, reason])).toEqual(ITEMS.map(([type, name]) => [type, name, 'stamp-only-row']));
+    const kept = await m.unregisterPackageWithReport(HOST);
+    const sorted = (pairs: unknown[][]) => [...pairs].sort((a, b) => String(a).localeCompare(String(b)));
+    expect(sorted(kept.kept.map(({ type, name, reason }) => [type, name, reason]))).toEqual(sorted(ITEMS.map(([type, name]) => [type, name, 'stamp-only-row'])));
     expect(kept.removed).toEqual([]);
     expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
-    const forced = await m.unregisterPackage(HOST, { force: true });
-    expect([forced.kept, forced.removed.map(({ type }) => type)]).toEqual([[], ITEMS.map(([type]) => type)]);
+    const forced = await m.unregisterPackageWithReport(HOST, { force: true });
+    expect([forced.kept, forced.removed.map(({ type }) => type).sort()]).toEqual([[], ITEMS.map(([type]) => type).sort()]);
     expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, null, 0]));
   });
 
@@ -3424,6 +3425,8 @@ describe('[#32985] unregisterPackage keeps the rows that name the package by the
     return out;
   };
   const asLeft = ITEMS.map(([type]) => [type, 'env', [null]]);
+  /** The registry's order of types is not the fixture's: compare by item. */
+  const sortedByItem = <T extends { type: string; name: string }>(items: T[]) => [...items].sort((a, b) => `${a.type}/${a.name}`.localeCompare(`${b.type}/${b.name}`));
 
   beforeEach(() => {
     driver = createMockDriver();
@@ -3435,35 +3438,36 @@ describe('[#32985] unregisterPackage keeps the rows that name the package by the
     const m = await bootPass();
     expect(await state(m), 'no column bound by the boot').toEqual(asLeft);
     expect(driver.update).not.toHaveBeenCalled();
-    const result = await m.unregisterPackage(HOST);
+    const result = await m.unregisterPackageWithReport(HOST);
     expect(result.removed).toEqual([]);
-    expect(result.kept).toEqual(ITEMS.map(([type, name]) => ({ type, name, reason: 'stamp-only-row', rows: [{ loader: 'database', id: `${type}_${name}`, source: 'database' }] })));
+    expect(sortedByItem(result.kept)).toEqual(sortedByItem(ITEMS.map(([type, name]) => ({ type, name, reason: 'stamp-only-row', rows: [{ loader: 'database', id: `${type}_${name}`, source: 'database' }] }))));
     expect(await state(m)).toEqual(asLeft);
     expect(driver.delete).not.toHaveBeenCalled();
     const warned = logger.warn.mock.calls.filter(([message]) => String(message).includes(`unregisterPackage(${HOST}) kept`));
-    expect(warned.map(([, meta]) => meta)).toEqual([{ packageId: HOST, kept: ITEMS.map(([type, name]) => `${type}/${name}`) }]);
+    expect(warned.map(([, meta]) => ({ ...meta, kept: [...meta.kept].sort() }))).toEqual([{ packageId: HOST, kept: ITEMS.map(([type, name]) => `${type}/${name}`).sort() }]);
   });
 
   it('a stamped row another writer stored (`source` other than database): kept the same (BEFORE: deleted)', async () => {
     for (const [type, name] of ITEMS) await seed(type, name, stamped, 'api');
     const m = await bootPass();
-    const result = await m.unregisterPackage(HOST);
+    const result = await m.unregisterPackageWithReport(HOST);
     expect(result.kept.map(({ rows }) => rows.map(({ source }) => source))).toEqual(ITEMS.map(() => ['api']));
     expect(await state(m)).toEqual(asLeft);
   });
 
-  it('with `force`, unregisterPackage(host) removes each item and row, as before', async () => {
+  it('the contract\'s door (`unregisterPackage`, answering nothing) keeps them the same; with `force` it removes each item and row, as before', async () => {
     for (const [type, name] of ITEMS) await seed(type, name, stamped);
     const m = await bootPass();
-    const result = await m.unregisterPackage(HOST, { force: true });
-    expect([result.kept, result.removed]).toEqual([[], ITEMS.map(([type, name]) => ({ type, name }))]);
+    expect(await m.unregisterPackage(HOST)).toBeUndefined();
+    expect(await state(m)).toEqual(asLeft);
+    await m.unregisterPackage(HOST, { force: true });
     expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, []]));
   });
 
   it('CONTROL rows naming the host by their own `packageId`: removed without `force`, from the registry and storage', async () => {
     for (const [type, name] of ITEMS) await seed(type, name, { packageId: HOST });
     const m = await bootPass();
-    const result = await m.unregisterPackage(HOST);
+    const result = await m.unregisterPackageWithReport(HOST);
     expect([result.kept, result.removed.length]).toEqual([[], ITEMS.length]);
     expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, []]));
   });
@@ -3471,7 +3475,7 @@ describe('[#32985] unregisterPackage keeps the rows that name the package by the
   it('CONTROL unregisterPackage of another package: nothing kept, nothing removed, every row as it was', async () => {
     for (const [type, name] of ITEMS) await seed(type, name, stamped);
     const m = await bootPass();
-    expect(await m.unregisterPackage(OTHER)).toEqual({ removed: [], kept: [] });
+    expect(await m.unregisterPackageWithReport(OTHER)).toEqual({ removed: [], kept: [] });
     expect(await state(m)).toEqual(asLeft);
   });
 
@@ -3485,7 +3489,7 @@ describe('[#32985] unregisterPackage keeps the rows that name the package by the
       return [];
     });
     const before = await state(m);
-    await expect(m.unregisterPackage(HOST)).rejects.toThrow('connection reset');
+    await expect(m.unregisterPackageWithReport(HOST)).rejects.toThrow('connection reset');
     expect(driver.delete).not.toHaveBeenCalled();
     expect(await state(m)).toEqual(before);
   });
@@ -3522,6 +3526,11 @@ describe('[#32985] unregisterPackage keeps the rows that name the package by the
  * `(package, name)` and is not under this rule).
  *
  * BEFORE (#32999's head): every case below not marked CONTROL lost the row.
+ *
+ * [#32985] A CONTROL whose host row is stored with the host's stamp alone
+ * passes `force`: without it `unregisterPackage` keeps every such row
+ * (`MetadataLoader.stampOnlyRows`), and these CONTROLs pin what the mark
+ * alone keeps, which `force` does not lift.
  */
 describe('[#33003] a write that rewrites an environment row the boot pass stamped keeps it the environment\'s: unregisterPackage(host) keeps it in process and after a reboot', () => {
   const HOST = 'com.host.app';
@@ -3632,16 +3641,16 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
       expect(await state(rebooted)).toEqual(kept());
     });
 
-    it(`CONTROL ${writer}: the host's own rows (stored bodies carrying its stamp) are still removed, in the same process and after a reboot`, async () => {
+    it(`CONTROL ${writer}: the host's own rows (stored bodies carrying its stamp) are still removed with \`force\`, in the same process and after a reboot`, async () => {
       for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, { _packageId: HOST });
       const m = await bootPass();
       await write(m);
       const rebooted = await bootPass();
       expect(await state(rebooted)).toEqual(kept());
-      await rebooted.unregisterPackage(HOST);
+      await rebooted.unregisterPackage(HOST, { force: true });
       expect(await state(rebooted)).toEqual(gone());
       // The same rows, removed by the first process too (already gone from storage).
-      await m.unregisterPackage(HOST);
+      await m.unregisterPackage(HOST, { force: true });
       expect(await state(m)).toEqual(gone());
     });
   }
@@ -3654,7 +3663,7 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
     expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
   });
 
-  it('CONTROL a stored row that now names the host in its own body, read again by the pass over the marked entry, is the host\'s: unregisterPackage(host) removes it', async () => {
+  it('CONTROL a stored row that now names the host in its own body, read again by the pass over the marked entry, is the host\'s: unregisterPackage(host) with `force` removes it', async () => {
     for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
     const plugin = new MetadataPlugin({ packageId: HOST, watch: false, config: { bootstrap: 'eager' } });
     const m = (plugin as any).manager as MetadataManager;
@@ -3669,15 +3678,15 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
     m.registerLoader(new DatabaseLoader({ driver }));
     await (plugin as any)._loadFromFileSystem({ logger });
     expect((m as any).registry.get('object').get('env_account')).toMatchObject({ label: 'host', _packageId: HOST });
-    await m.unregisterPackage(HOST);
+    await m.unregisterPackage(HOST, { force: true });
     expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
   });
 
-  it('CONTROL a copy stamped with another package is that package\'s item: unregisterPackage of that package removes it', async () => {
+  it('CONTROL a copy stamped with another package is that package\'s item: unregisterPackage of that package with `force` removes it', async () => {
     for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
     const m = await bootPass();
     await m.register('object', 'env_account', { name: 'env_account', label: 'env', _packageId: EXT }, { notify: false });
-    await m.unregisterPackage(EXT);
+    await m.unregisterPackage(EXT, { force: true });
     expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
   });
 
@@ -3720,14 +3729,14 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
     expect(await state(m)).toEqual(kept());
   });
 
-  it('CONTROL rollback of the host\'s own row to a stamped version: removed after a reboot', async () => {
+  it('CONTROL rollback of the host\'s own row to a stamped version: removed with `force` after a reboot', async () => {
     for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, { _packageId: HOST });
     const m = await bootPass();
     await (m as any).getDatabaseLoader().save('object', 'env_account', { name: 'env_account', label: 'stamped', _packageId: HOST });
     await m.register('object', 'env_account', { name: 'env_account', label: 'later', _packageId: HOST });
     await m.rollback('object', 'env_account', 2);
     const rebooted = await bootPass();
-    await rebooted.unregisterPackage(HOST);
+    await rebooted.unregisterPackage(HOST, { force: true });
     expect(await state(rebooted)).toEqual(gone());
   });
 
