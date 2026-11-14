@@ -64,6 +64,8 @@ import { readRequestClientAddress } from './request-client-address.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
 import { readSessionUserRow, refuseAgentAccountCredential } from './service-account-identity.js';
 import { refuseInactiveUserSession, SESSION_ADMISSION_ROW_FIELDS } from './user-session-admission.js';
+import { PLATFORM_IDP_PROVIDER_ID } from './implicit-account-linking.js';
+import { PENDING_SSO_SOURCE } from './pending-sso-marker.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -600,6 +602,16 @@ export async function stampIdentitySource(this: Pick<DatabaseHooksHost, 'getData
         await engine.update('sys_user', { id: userId, source: 'env_native' }, { context: SYSTEM_CTX } as any);
       }
       return;
+    }
+
+    // [#33181] A pending person (`idp_pending`) becomes a person only through
+    // the platform identity provider: any other federated link leaves the
+    // marker, so the session admission keeps refusing the row.
+    if (providerId !== PLATFORM_IDP_PROVIDER_ID) {
+      const current = await engine.findOne('sys_user', {
+        where: { id: userId }, fields: ['id', 'source'], context: SYSTEM_CTX,
+      });
+      if (current && current.source === PENDING_SSO_SOURCE) return;
     }
 
     // Federated link → managed, unless a local credential already exists.

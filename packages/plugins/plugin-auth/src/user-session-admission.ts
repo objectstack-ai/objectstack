@@ -10,14 +10,17 @@
  *    — opens one for it. The platform sign-in itself passes: its link lands in
  *    `account.create.after`, whose identity-source stamp
  *    (`stampIdentitySource`) moves the row to `idp_provisioned` before the
- *    session that sign-in creates.
+ *    session that sign-in creates. That stamp is fail-soft and runs once, at
+ *    the link; a row that still reads `idp_pending` while it already holds a
+ *    platform (`objectstack-cloud`) account is therefore stamped here and
+ *    admitted, so a stamp that did not land never locks the person out. Only
+ *    the platform account clears the marker: any other link leaves it.
  *
  * 2. **A ban holds without the better-auth admin plugin.** The vendor's admin
  *    plugin refuses a banned user's session from its own `session.create`
- *    hook, and that hook is all that enforces a ban. A kernel without the
- *    plugin (a Free or Team hosted environment, where it mounts only with
- *    SCIM) had nothing reading the column, so `admin/ban-user` could not be
- *    offered there. This refusal is the vendor's, field for field — `403`,
+ *    hook. On a kernel without the plugin (a Free or Team hosted
+ *    environment, where it mounts only with SCIM) this refusal enforces the
+ *    ban instead. It is the vendor's, field for field — `403`,
  *    `BANNED_USER`, the vendor's default sentence; an expired ban is lifted
  *    and the session admitted — and it runs only when the plugin is NOT
  *    mounted, so a kernel with the plugin answers exactly as before (the
@@ -32,6 +35,7 @@
  */
 
 import { isPendingSsoSource, PENDING_SSO_MESSAGES } from './pending-sso-marker.js';
+import { PLATFORM_IDP_PROVIDER_ID } from './implicit-account-linking.js';
 import { USER_ROW_READ_FAULT_REFUSAL } from './service-account-identity.js';
 
 /** The refusal a pending person's session meets. */
@@ -68,6 +72,40 @@ export interface SessionAdmissionOptions {
   row?: Record<string, unknown> | undefined;
 }
 
+/** The `503` a session meets when a row this refusal must read or write cannot be. */
+async function serviceUnavailable(cause: unknown): Promise<Error> {
+  const { APIError } = await import('better-auth/api');
+  const err = new APIError('SERVICE_UNAVAILABLE', {
+    code: 'SERVICE_UNAVAILABLE',
+    message: USER_ROW_READ_FAULT_REFUSAL.message,
+  });
+  (err as { cause?: unknown }).cause = cause;
+  return err;
+}
+
+/**
+ * Whether a pending row already holds its platform account, and so only
+ * missed its stamp; when it does, stamp it `idp_provisioned` now. A read or a
+ * write that throws refuses the session `503`.
+ */
+async function healPendingPlatformLink(engine: any, userId: string): Promise<boolean> {
+  if (typeof engine.find !== 'function' || typeof engine.update !== 'function') return false;
+  try {
+    let found: any = await engine.find('sys_account', {
+      where: { user_id: userId, provider_id: PLATFORM_IDP_PROVIDER_ID },
+      fields: ['id'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    if (found && found.value) found = found.value;
+    if (!Array.isArray(found) || found.length === 0) return false;
+    await engine.update('sys_user', { id: userId, source: 'idp_provisioned' }, { context: SYSTEM_CTX });
+    return true;
+  } catch (cause) {
+    throw await serviceUnavailable(cause);
+  }
+}
+
 /** Read the row this refusal judges; a read that throws refuses the session `503`. */
 async function readAdmissionRow(engine: any, userId: string): Promise<Record<string, unknown> | undefined> {
   if (typeof engine.find !== 'function') return undefined;
@@ -81,13 +119,7 @@ async function readAdmissionRow(engine: any, userId: string): Promise<Record<str
     if (found && found.value) found = found.value;
     return Array.isArray(found) && found[0] && typeof found[0] === 'object' ? found[0] : undefined;
   } catch (cause) {
-    const { APIError } = await import('better-auth/api');
-    const err = new APIError('SERVICE_UNAVAILABLE', {
-      code: 'SERVICE_UNAVAILABLE',
-      message: USER_ROW_READ_FAULT_REFUSAL.message,
-    });
-    (err as { cause?: unknown }).cause = cause;
-    throw err;
+    throw await serviceUnavailable(cause);
   }
 }
 
@@ -102,7 +134,7 @@ export async function refuseInactiveUserSession(
   const row = 'row' in options ? options.row : await readAdmissionRow(engine, userId);
   if (!row) return;
 
-  if (isPendingSsoSource(row.source)) {
+  if (isPendingSsoSource(row.source) && !(await healPendingPlatformLink(engine, userId))) {
     const { APIError } = await import('better-auth/api');
     throw new APIError('FORBIDDEN', { code: 'PERMISSION_DENIED', message: PENDING_SSO_SESSION_REFUSAL.message });
   }
@@ -111,11 +143,15 @@ export async function refuseInactiveUserSession(
     const expires = row.ban_expires ? new Date(row.ban_expires as string | number | Date) : undefined;
     if (expires && !Number.isNaN(expires.getTime()) && expires.getTime() < Date.now()) {
       // The vendor lifts an expired ban as it admits the session; so does this.
-      await engine.update(
-        'sys_user',
-        { id: userId, banned: false, ban_reason: null, ban_expires: null },
-        { context: SYSTEM_CTX },
-      );
+      try {
+        await engine.update(
+          'sys_user',
+          { id: userId, banned: false, ban_reason: null, ban_expires: null, updated_at: new Date() },
+          { context: SYSTEM_CTX },
+        );
+      } catch (cause) {
+        throw await serviceUnavailable(cause);
+      }
       return;
     }
     const { APIError } = await import('better-auth/api');

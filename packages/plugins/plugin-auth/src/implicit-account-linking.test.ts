@@ -788,6 +788,64 @@ describe('a pending person signs in through the platform identity provider', () 
     expect(userRow(engine, email).source).toBe('idp_pending');
   });
 
+  it('a link from a provider other than the platform one leaves the marker, so no session opens', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'pending.verified@example.test';
+    const user = await pendingRow(manager, engine, email);
+    setVerified(engine, email, true);
+    idpProfile[EXTERNAL] = { sub: 'ext-pending-verified', email, email_verified: true };
+
+    await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social');
+
+    expect(userRow(engine, email).source).toBe('idp_pending');
+    expect(sessionsOf(engine, user.id)).toHaveLength(0);
+  });
+
+  it('CONTROL: the platform link on the same verified pending row clears the marker and opens the session', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'pending.verified.platform@example.test';
+    const user = await pendingRow(manager, engine, email);
+    setVerified(engine, email, true);
+    idpProfile[PLATFORM_IDP_PROVIDER_ID] = { sub: 'cloud-pending-verified', email, email_verified: true };
+
+    expect((await oauthRoundTrip(manager, PLATFORM_IDP_PROVIDER_ID, 'sign-in/social')).searchParams.get('error')).toBeNull();
+
+    expect(userRow(engine, email).source).toBe('idp_provisioned');
+    expect(sessionsOf(engine, user.id)).toHaveLength(1);
+  });
+
+  it('a pending row that already holds its platform account (its stamp did not land) is stamped and admitted', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'pending.missed.stamp@example.test';
+    const user = await pendingRow(manager, engine, email);
+    const accounts = engine.tables.get('sys_account') ?? [];
+    accounts.push({ id: 'acc-missed-stamp', user_id: user.id, provider_id: PLATFORM_IDP_PROVIDER_ID, account_id: 'cloud-missed-1' });
+    engine.tables.set('sys_account', accounts);
+    const ctx: any = await manager.getAuthContext();
+
+    await ctx.internalAdapter.createSession(user.id);
+
+    expect(sessionsOf(engine, user.id)).toHaveLength(1);
+    expect(userRow(engine, email).source).toBe('idp_provisioned');
+  });
+
+  it('CONTROL: a pending row holding only another provider\'s account is still refused', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const email = 'pending.other.account@example.test';
+    const user = await pendingRow(manager, engine, email);
+    const accounts = engine.tables.get('sys_account') ?? [];
+    accounts.push({ id: 'acc-other', user_id: user.id, provider_id: EXTERNAL, account_id: 'ext-other-1' });
+    engine.tables.set('sys_account', accounts);
+    const ctx: any = await manager.getAuthContext();
+
+    await expect(ctx.internalAdapter.createSession(user.id)).rejects.toMatchObject({ statusCode: 403 });
+    expect(userRow(engine, email).source).toBe('idp_pending');
+  });
+
   it('CONTROL: the same mint for an idp_provisioned row and an env_native row opens a session', async () => {
     const engine = createMemoryEngine();
     const manager = makeManager(engine);

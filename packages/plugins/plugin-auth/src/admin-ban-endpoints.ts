@@ -83,10 +83,13 @@
  * the write and outside any transaction. A typed host refusal (an
  * organization owner or admin, `409`; the developer member cap, `403`)
  * refuses the whole operation with the host's answer and nothing is written.
- * Any other host failure never blocks the ban: it goes ahead and the answer
- * carries `host: { notified: false, … }`. The event names the administrator
- * and their cloud user id, read from their linked `objectstack-cloud`
- * account, never from the request.
+ * Any other host failure refuses a deactivation (`503`, nothing written):
+ * only the host can say whether the person is an organization owner or
+ * admin, whom ruling 5 keeps out of reach from the environment side. It
+ * never blocks a reactivation, which goes ahead with `host: { notified:
+ * false, … }` on the answer. The event names the administrator, the one at
+ * the keyboard on an impersonation session, and their cloud user id read
+ * from their linked `objectstack-cloud` account, never from the request.
  */
 
 import {
@@ -100,8 +103,9 @@ import { applyUserBan, applyUserUnban, type UserBanWriter } from './user-ban-wri
 import { readJsonRequestBody } from './request-json-body.js';
 import { readUserSource } from './sso-only-local-password.js';
 import {
+  environmentUserAttribution,
   notifyEnvironmentUserHost,
-  readActorCloudUserId,
+  type EnvironmentUserActor,
   type EnvironmentUserEventKind,
   type EnvironmentUserHostAccessor,
   type EnvironmentUserHostOutcome,
@@ -149,13 +153,13 @@ async function askHost(
   kind: EnvironmentUserEventKind,
   user: unknown,
   userId: string,
-  actor: AdminActor,
+  actor: AdminActor & EnvironmentUserActor,
 ): Promise<EnvironmentUserHostOutcome | EnvironmentUserHostRefused | undefined> {
   if (!deps.host) return undefined;
   const row = (user && typeof user === 'object' ? user : {}) as { email?: unknown; name?: unknown };
   const engine = deps.getDataEngine?.();
   const source = engine ? await readUserSource(engine, userId) : undefined;
-  const actorCloudUserId = await readActorCloudUserId(engine, actor.id, deps.logger);
+  const attribution = await environmentUserAttribution(engine, actor, deps.logger);
   return notifyEnvironmentUserHost(
     deps.host,
     kind,
@@ -164,8 +168,7 @@ async function askHost(
       email: typeof row.email === 'string' ? row.email : '',
       name: typeof row.name === 'string' ? row.name : '',
       source: source?.ok && typeof source.value === 'string' ? source.value : null,
-      actorId: actor.id,
-      ...(actorCloudUserId ? { actorCloudUserId } : {}),
+      ...attribution,
       occurredAt: new Date().toISOString(),
     },
     deps.logger,
@@ -177,6 +180,20 @@ const hostRefusal = ({ refused }: EnvironmentUserHostRefused): EndpointResult =>
   status: refused.status,
   body: { success: false, error: { code: refused.code, message: refused.message } },
 });
+
+/** The answer when a wired host could not be asked whether the person may be deactivated. */
+const HOST_UNANSWERED_DEACTIVATION: EndpointResult = {
+  status: 503,
+  body: {
+    success: false,
+    error: {
+      code: 'SERVICE_UNAVAILABLE',
+      message:
+        'The hosting organisation could not be asked whether this person may be deactivated, so they were not. '
+        + 'Nothing was changed; try again.',
+    },
+  },
+};
 
 const isRefused = (outcome: unknown): outcome is EnvironmentUserHostRefused =>
   !!outcome && typeof outcome === 'object' && 'refused' in outcome;
@@ -264,6 +281,9 @@ export async function runAdminBanUser(
   // The host first: an organization owner or admin it refuses is not deactivated at all.
   const host = await askHost(deps, 'deactivated', target, userId, actor);
   if (isRefused(host)) return hostRefusal(host);
+  // A wired host that did not answer: the owner / admin question is open, so
+  // the deactivation does not happen (ruling 5).
+  if (host && !host.notified && host.reason === 'host_failed') return HOST_UNANSWERED_DEACTIVATION;
 
   await applyUserBan(await banWriterFor(deps, ctx), userId, {
     banReason,

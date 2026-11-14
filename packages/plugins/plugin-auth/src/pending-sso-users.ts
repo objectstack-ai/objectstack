@@ -42,9 +42,15 @@
  * platform provider link to an unverified local row, and the federated branch
  * of `stampIdentitySource` (`auth-manager-database-hooks.ts`) then stamps
  * `idp_provisioned` on a row that holds no local password, which clears the
- * marker in the same request, before the session is created. An enterprise
- * provider registered in the environment is refused by rule 1 (the row is not
- * verified), so only the platform provider binds a pending row.
+ * marker in the same request, before the session is created. Only the
+ * platform provider's link clears the marker: the stamp leaves `idp_pending`
+ * on a link from any other provider, so such a row is still refused a
+ * session. A platform link whose stamp did not land is healed at the next
+ * session (`user-session-admission.ts`).
+ *
+ * Adding a person who is still pending again re-tells the host and changes
+ * nothing else: positions, permission sets or a manager sent with the re-add
+ * are named on the answer as `notApplied` (set them on the record instead).
  *
  * ## What a pending row is refused
  *
@@ -78,7 +84,7 @@
  */
 
 import { parseCsvToRows } from '@objectstack/rest';
-import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
+import { INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
 import {
   bindUserToSoleOrganization,
   CreationRefused,
@@ -104,7 +110,8 @@ import {
 } from './pending-sso-marker.js';
 import {
   notifyEnvironmentUserHost,
-  readActorCloudUserId,
+  environmentUserAttribution,
+  type EnvironmentUserActor,
   type EnvironmentUserEvent,
   type EnvironmentUserHostAccessor,
   type EnvironmentUserHostOutcome,
@@ -176,6 +183,8 @@ type AddOutcome =
   | { ok: false; result: EndpointResult };
 
 const ADD_KEYS = new Set(['email', 'name', 'positions', 'permissionSets', 'manager']);
+const ADD_FIELD_NAMES = { positions: 'positions', permissionSets: 'permissionSets', manager: 'manager' } as const;
+const IMPORT_FIELD_NAMES = { positions: 'positions', permissionSets: 'permission_sets', manager: 'manager_id' } as const;
 
 /** A list cell: an array of names, or one `;`-separated string. Empty entries are dropped. */
 function readNameList(raw: unknown, label: string): string[] | string {
@@ -252,22 +261,19 @@ function grantRefused(what: string, error: unknown): EndpointResult {
  * for the grants, and the organization a multi-organization deployment joins.
  */
 interface RequestSettlement {
-  /** The administrator's cloud user id, read once when a host is wired. */
-  actorCloudUserId?: string;
+  /** The event's attribution (cloud id, impersonator), read once when a host is wired. */
+  attribution?: Pick<EnvironmentUserEvent, 'actorId' | 'actorCloudUserId' | 'impersonatedBy'>;
   grant?: { seam: AdminCreateGrantSeam; engine: PendingSsoUserEngine; context: Record<string, unknown> };
   join?: { addMember: AddMemberCapableApi['addMember']; organizationId: string };
 }
 
 async function settleRequest(
   deps: PendingSsoUserDeps,
-  actor: AdminActor,
+  actor: AdminActor & EnvironmentUserActor,
   needsGrant: boolean,
 ): Promise<RequestSettlement | EndpointResult> {
   const settlement: RequestSettlement = {};
-  if (deps.host) {
-    const actorCloudUserId = await readActorCloudUserId(deps.getDataEngine(), actor.id, deps.logger);
-    if (actorCloudUserId) settlement.actorCloudUserId = actorCloudUserId;
-  }
+  if (deps.host) settlement.attribution = await environmentUserAttribution(deps.getDataEngine(), actor, deps.logger);
   if (multiOrgCreationJoinsCurrentOrganization(deps)) {
     const organizationId = await deps.getCallerActiveOrganizationId!();
     if (typeof organizationId !== 'string' || organizationId.length === 0) {
@@ -411,6 +417,19 @@ async function addOnePendingPerson(
   return { ok: true, userId: written.userId, alreadyPending: false, organizationId: written.organizationId, host };
 }
 
+/**
+ * What a re-add of a still-pending person did not apply: the add never
+ * changes an existing person's grants or manager (set those on the record),
+ * so each one sent is named on the answer rather than silently dropped.
+ */
+function notAppliedOn(person: PendingPersonInput, names: { positions: string; permissionSets: string; manager: string }): string[] {
+  return [
+    ...(person.positions.length > 0 ? [names.positions] : []),
+    ...(person.permissionSets.length > 0 ? [names.permissionSets] : []),
+    ...(person.manager ? [names.manager] : []),
+  ];
+}
+
 function eventFor(
   userId: string,
   email: string,
@@ -424,7 +443,7 @@ function eventFor(
     name,
     source: PENDING_SSO_SOURCE,
     actorId: actor.id,
-    ...(settlement.actorCloudUserId ? { actorCloudUserId: settlement.actorCloudUserId } : {}),
+    ...settlement.attribution,
     occurredAt: new Date().toISOString(),
   };
 }
@@ -519,6 +538,9 @@ export async function runAddSsoUser(
         source: PENDING_SSO_SOURCE,
         alreadyPending: outcome.alreadyPending,
         ...(outcome.alreadyPending ? {} : { positions: person.positions, permissionSets: person.permissionSets }),
+        ...(outcome.alreadyPending && notAppliedOn(person, ADD_FIELD_NAMES).length > 0
+          ? { notApplied: notAppliedOn(person, ADD_FIELD_NAMES) }
+          : {}),
         ...(outcome.organizationId ? { organizationId: outcome.organizationId } : {}),
         ...(manager ? manager : {}),
         host: outcome.host,
@@ -538,6 +560,8 @@ export interface ImportSsoUserRowResult {
   ok: boolean;
   userId?: string;
   alreadyPending?: boolean;
+  /** On a re-add of a still-pending person: the columns sent that were not applied. */
+  notApplied?: string[];
   error?: { code: string; message: string };
   manager?: ManagerOutcome;
   managerError?: string;
@@ -615,7 +639,10 @@ export async function runImportSsoUsers(
       outcome = await addOnePendingPerson(deps, actor, person, settlement);
     } catch (error) {
       const thrown = resolveThrownHttpError(error, 500);
-      results.push({ row, email: person.email, ok: false, error: { code: thrown.code, message: `This row was not added. ${thrown.message}` } });
+      // A declared refusal keeps its own sentence; any other fault answers the
+      // generic one, as the single-add door does, so no driver text leaks.
+      const message = thrown.status >= 500 ? INTERNAL_ERROR_MESSAGE : thrown.message;
+      results.push({ row, email: person.email, ok: false, error: { code: thrown.code, message: `This row was not added. ${message}` } });
       continue;
     }
     if (!outcome.ok) {
@@ -623,7 +650,16 @@ export async function runImportSsoUsers(
       results.push({ row, email: person.email, ok: false, error: { code: err?.code ?? 'INTERNAL_ERROR', message: err?.message ?? 'not added' } });
       continue;
     }
-    results.push({ row, email: person.email, ok: true, userId: outcome.userId, alreadyPending: outcome.alreadyPending, host: outcome.host });
+    const notApplied = outcome.alreadyPending ? notAppliedOn(person, IMPORT_FIELD_NAMES) : [];
+    results.push({
+      row,
+      email: person.email,
+      ok: true,
+      userId: outcome.userId,
+      alreadyPending: outcome.alreadyPending,
+      ...(notApplied.length > 0 ? { notApplied } : {}),
+      host: outcome.host,
+    });
   }
 
   // Second pass: the manager links, now that every row of the file exists.

@@ -17,9 +17,13 @@
  *    BEFORE their write, so a refusal leaves the row as it was; an add asks
  *    after its write and undoes that one person. The door answers with the
  *    host's own status, code and sentence.
- *  - any other throw (the host is unreachable, times out, fails) never undoes
- *    or blocks the operation: the answer carries `host: { notified: false,
- *    reason: 'host_failed' }` and the plugin logs it at `warn`.
+ *  - any other throw (the host is unreachable, times out, fails) is logged at
+ *    `warn`. On a deactivation it refuses the deactivation (`503`, nothing
+ *    written): only the host can say whether the person is an organization
+ *    owner or admin, whom ruling 5 keeps out of reach from the environment
+ *    side. On an add or a reactivation it never undoes or blocks the
+ *    operation: the answer carries `host: { notified: false, reason:
+ *    'host_failed' }`.
  *
  * The host is never called inside a database transaction: each door calls it
  * outside its unit of work.
@@ -34,8 +38,16 @@ export interface EnvironmentUserEvent {
   name: string;
   /** The row's `sys_user.source` when the event fired (`idp_pending` for an added person). */
   source: string | null;
-  /** The administrator who acted. */
+  /** The administrator who acted: the session's user. */
   actorId: string;
+  /**
+   * The administrator at the keyboard when the session is an impersonation
+   * (`session.impersonatedBy`, read from the session, never the request);
+   * absent otherwise. The host attributes the operation to this person.
+   * A session minted by a host's own sign-in handoff carries no record of
+   * who entered through it: the host that minted it attributes those.
+   */
+  impersonatedBy?: string;
   /**
    * The administrator's cloud user id: the `account_id` of their linked
    * `objectstack-cloud` account, read from `sys_account` on every call and
@@ -43,7 +55,11 @@ export interface EnvironmentUserEvent {
    * self-hosted deployment, or a local administrator).
    */
   actorCloudUserId?: string;
-  /** ISO-8601 time the operation committed. */
+  /**
+   * ISO-8601 time the host was called: after the person was written for an
+   * add, before the ban or unban is written for a deactivation or
+   * reactivation.
+   */
   occurredAt: string;
 }
 
@@ -51,8 +67,9 @@ export interface EnvironmentUserEvent {
  * The host's side of the seam. `userAdded` is called after the person is
  * written; `userDeactivated` and `userReactivated` before the ban or unban is
  * written. A member that throws {@link EnvironmentUserHostRefusal} refuses
- * the operation; any other throw is reported to the caller and never undoes
- * or blocks it.
+ * the operation. Any other throw refuses a deactivation (`503`) and is
+ * reported on the answer for an add or a reactivation, which it never undoes
+ * or blocks.
  */
 export interface EnvironmentUserHost {
   /** A person was added (or re-added while still pending) to this environment. */
@@ -153,6 +170,29 @@ export async function readActorCloudUserId(
   }
 }
 
+/** The acting administrator, as the platform-admin gate admits them. */
+export interface EnvironmentUserActor {
+  id: string;
+  /** Present on an impersonation session: the administrator at the keyboard. */
+  impersonatedBy?: string;
+}
+
+/** The event's attribution fields for `actor`: never read from the request. */
+export async function environmentUserAttribution(
+  engine: ActorCloudIdReader | undefined | null,
+  actor: EnvironmentUserActor,
+  logger?: { warn(msg: string): void },
+): Promise<Pick<EnvironmentUserEvent, 'actorId' | 'actorCloudUserId' | 'impersonatedBy'>> {
+  const actorCloudUserId = await readActorCloudUserId(engine, actor.id, logger);
+  const impersonatedBy =
+    typeof actor.impersonatedBy === 'string' && actor.impersonatedBy.trim() !== '' ? actor.impersonatedBy.trim() : undefined;
+  return {
+    actorId: actor.id,
+    ...(actorCloudUserId ? { actorCloudUserId } : {}),
+    ...(impersonatedBy ? { impersonatedBy } : {}),
+  };
+}
+
 /**
  * Tell the host, once. Never throws. A typed refusal is answered as
  * `{ refused }` for the door to return; any other failure as `host_failed`
@@ -194,6 +234,10 @@ export async function notifyEnvironmentUserHost(
 }
 
 const goesAhead = (kind: EnvironmentUserEventKind): string =>
-  kind === 'added' ? 'The addition itself stands.' : 'The change goes ahead.';
+  kind === 'added'
+    ? 'The addition itself stands.'
+    : kind === 'deactivated'
+      ? 'The deactivation is refused: only the host can say whether this person may be removed.'
+      : 'The change goes ahead.';
 
 const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error));

@@ -28,6 +28,9 @@ import { CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed';
 import { PENDING_SSO_MESSAGES, PENDING_SSO_SOURCE } from './pending-sso-marker';
 import { BANNED_USER_SESSION_REFUSAL, PENDING_SSO_SESSION_REFUSAL } from './user-session-admission';
 import { EnvironmentUserHostRefusal, type EnvironmentUserEvent, type EnvironmentUserHost } from './environment-user-host';
+import { runAdminUnbanUser } from './admin-ban-endpoints';
+import { runAddSsoUser } from './pending-sso-users';
+import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 
@@ -755,7 +758,7 @@ describe('[#33181] a host\'s typed refusal refuses the operation', () => {
     expect(s.row('again@example.com')!.source).toBe(PENDING_SSO_SOURCE);
   });
 
-  it('CONTROL: a host error that is not a typed refusal never blocks the ban, even one carrying a status', async () => {
+  it('a wired host that does not answer refuses the deactivation with 503, and nothing is written', async () => {
     const s = await managedStage({
       host: {
         userAdded: () => {},
@@ -765,14 +768,35 @@ describe('[#33181] a host\'s typed refusal refuses the operation', () => {
         userReactivated: () => {},
       },
     });
-    const res = await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin);
+    expect((await s.signIn(EMAILS.member)).status).toBe(200);
+    const v = await verdict(await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin));
+    expect(v.status, v.text).toBe(503);
+    expect(v.code).toBe('SERVICE_UNAVAILABLE');
+    expect(Boolean(s.row(EMAILS.member)!.banned)).toBe(false);
+    expect((await s.signIn(EMAILS.member)).status).toBe(200);
+  });
+
+  it('CONTROL: a host that does not answer never blocks a reactivation; the answer says host_failed', async () => {
+    let failing = false;
+    const s = await managedStage({
+      host: {
+        userAdded: () => {},
+        userDeactivated: () => {},
+        userReactivated: () => {
+          if (failing) throw new Error('gateway timeout');
+        },
+      },
+    });
+    expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
+    failing = true;
+    const res = await s.fire('/admin/unban-user', { userId: s.ids.member }, s.bearers.admin);
     const body: any = await res.json();
     expect(res.status, JSON.stringify(body)).toBe(200);
     expect(body.data.host).toEqual({ notified: false, reason: 'host_failed' });
-    expect(s.row(EMAILS.member)!.banned).toBe(true);
+    expect(s.row(EMAILS.member)!.banned).toBe(false);
   });
 
-  it('CONTROL: a typed refusal with a status the seam does not honour is a host failure, and the ban goes ahead', async () => {
+  it('CONTROL: a typed refusal with a status the seam does not honour is a host failure, not that status', async () => {
     const s = await managedStage({
       host: {
         userAdded: () => {},
@@ -782,10 +806,139 @@ describe('[#33181] a host\'s typed refusal refuses the operation', () => {
         userReactivated: () => {},
       },
     });
+    const v = await verdict(await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin));
+    expect(v.status, v.text).toBe(503);
+    expect(v.code).toBe('SERVICE_UNAVAILABLE');
+  });
+
+  it('CONTROL: with no host wired the deactivation goes ahead', async () => {
+    const s = await managedStage({ host: 'none' });
     const res = await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin);
     const body: any = await res.json();
     expect(res.status, JSON.stringify(body)).toBe(200);
-    expect(body.data.host).toEqual({ notified: false, reason: 'host_failed' });
+    expect(body.data).not.toHaveProperty('host');
+    expect(s.row(EMAILS.member)!.banned).toBe(true);
+  });
+});
+
+describe('[#33181] a re-add of a still-pending person names what it did not apply', () => {
+  it('add-sso-user answers notApplied for the positions, permission sets and manager it did not apply', async () => {
+    const s = await managedStage();
+    const email = 'readd@example.com';
+    expect((await s.fire('/admin/add-sso-user', { email, name: 'Re Add' }, s.bearers.admin)).status).toBe(201);
+    const id = String(s.row(email)!.id);
+
+    const res = await s.fire(
+      '/admin/add-sso-user',
+      { email, name: 'Re Add', positions: ['sales_rep'], permissionSets: ['crm_user'], manager: EMAILS.member },
+      s.bearers.admin,
+    );
+    const body: any = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data).toMatchObject({ alreadyPending: true, notApplied: ['positions', 'permissionSets', 'manager'] });
+    expect(s.rowsOf('sys_user_position', id)).toHaveLength(0);
+    expect(s.row(email)!.manager_id ?? null).toBeNull();
+  });
+
+  it('import-sso-users names the columns a re-added row did not apply', async () => {
+    const s = await managedStage();
+    expect((await s.fire('/admin/add-sso-user', { email: 'readd.csv@example.com', name: 'Re Add' }, s.bearers.admin)).status).toBe(201);
+    const csv = ['email,name,positions,permission_sets,manager_id', `readd.csv@example.com,Re Add,,crm_user,${EMAILS.member}`].join('\n');
+    const body: any = await (await s.fire('/admin/import-sso-users', { csv }, s.bearers.admin)).json();
+    expect(body.data.rows[0]).toMatchObject({ ok: true, alreadyPending: true, notApplied: ['permission_sets', 'manager_id'] });
+  });
+
+  it('CONTROL: a re-add that sends no grants or manager carries no notApplied', async () => {
+    const s = await managedStage();
+    expect((await s.fire('/admin/add-sso-user', { email: 'readd.plain@example.com', name: 'Plain' }, s.bearers.admin)).status).toBe(201);
+    const body: any = await (await s.fire('/admin/add-sso-user', { email: 'readd.plain@example.com', name: 'Plain' }, s.bearers.admin)).json();
+    expect(body.data.alreadyPending).toBe(true);
+    expect(body.data).not.toHaveProperty('notApplied');
+  });
+});
+
+describe('[#33181] an import row that faults answers the generic sentence', () => {
+  it('a fault while writing one row answers INTERNAL_ERROR_MESSAGE on that row, never the fault\'s own text', async () => {
+    const s = await managedStage();
+    const insert = s.engine.insert.bind(s.engine);
+    (s.engine as any).insert = async (object: string, doc: any, opts?: unknown) => {
+      if (object === 'sys_user' && doc?.email === 'faulty@example.com') throw new Error('driver detail: relation sys_user_7 is locked');
+      return insert(object, doc, opts);
+    };
+    const csv = ['email,name,positions,permission_sets,manager_id', 'faulty@example.com,Faulty,,,', 'fine@example.com,Fine,,,'].join('\n');
+    const body: any = await (await s.fire('/admin/import-sso-users', { csv }, s.bearers.admin)).json();
+    expect(body.data.rows[0].ok).toBe(false);
+    expect(body.data.rows[0].error.message).toContain(INTERNAL_ERROR_MESSAGE);
+    expect(body.data.rows[0].error.message).not.toContain('driver detail');
+    expect(body.data.rows[1]).toMatchObject({ ok: true });
+  });
+
+  it('CONTROL: a declared refusal on a row keeps its own sentence', async () => {
+    const s = await managedStage();
+    const csv = ['email,name,positions,permission_sets,manager_id', `${EMAILS.member},Taken,,,`].join('\n');
+    const body: any = await (await s.fire('/admin/import-sso-users', { csv }, s.bearers.admin)).json();
+    expect(body.data.rows[0].error.message).toBe(PENDING_SSO_MESSAGES.alreadyExists);
+  });
+});
+
+describe('[#33181] the host event names the administrator at the keyboard on an impersonation session', () => {
+  const recording = () => {
+    const told: EnvironmentUserEvent[] = [];
+    const host: EnvironmentUserHost = {
+      userAdded: (e) => void told.push(e),
+      userDeactivated: (e) => void told.push(e),
+      userReactivated: (e) => void told.push(e),
+    };
+    return { told, host };
+  };
+  const unbanRequest = () =>
+    new Request(`${ORIGIN}${BASE}/admin/unban-user`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'target-1', impersonatedBy: 'forged' }),
+    });
+  const banDeps = (host: EnvironmentUserHost) => ({
+    getAuthContext: async () => ({
+      internalAdapter: {
+        findUserById: async () => ({ id: 'target-1', email: 'target@example.com', name: 'Target' }),
+        updateUser: async () => ({}),
+        deleteUserSessions: async () => ({}),
+      },
+      adapter: {} as any,
+    }),
+    host: () => host,
+    getDataEngine: () => ({ find: async () => [], findOne: async () => null }),
+  });
+
+  it('carries impersonatedBy from the session actor, never from the body', async () => {
+    const { told, host } = recording();
+    const res = await runAdminUnbanUser(banDeps(host) as any, { id: 'admin-1', impersonatedBy: 'real-admin-9' } as any, unbanRequest());
+    expect(res.status).toBe(200);
+    expect(told[0]).toMatchObject({ actorId: 'admin-1', impersonatedBy: 'real-admin-9' });
+  });
+
+  it('CONTROL: an ordinary session carries no impersonatedBy, whatever the body says', async () => {
+    const { told, host } = recording();
+    const res = await runAdminUnbanUser(banDeps(host) as any, { id: 'admin-1' }, unbanRequest());
+    expect(res.status).toBe(200);
+    expect(told[0]).not.toHaveProperty('impersonatedBy');
+  });
+
+  it('the add door carries it too', async () => {
+    const { told, host } = recording();
+    const engine = createMemoryEngine();
+    const res = await runAddSsoUser(
+      { isCloudManaged: () => true, getDataEngine: () => engine as any, host: () => host } as any,
+      { id: 'admin-1', impersonatedBy: 'real-admin-9' } as any,
+      new Request(`${ORIGIN}${BASE}/admin/add-sso-user`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'imp.added@example.com', name: 'Imp Added' }),
+      }),
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(told[0]).toMatchObject({ actorId: 'admin-1', impersonatedBy: 'real-admin-9' });
   });
 });
 

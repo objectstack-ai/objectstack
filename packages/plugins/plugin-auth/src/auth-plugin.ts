@@ -380,12 +380,15 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
   hostSignInHandoff?: boolean;
 
   /**
-   * [#33181] The environment-user host: told when a person is added through
-   * `admin/add-sso-user` or `admin/import-sso-users`, deactivated through
-   * `admin/ban-user`, or reactivated through `admin/unban-user`, after the
-   * operation has committed (`environment-user-host.ts`). Read per call, so a
-   * host wired after boot is still found. A host that fails never undoes the
-   * operation; the answer carries `host: { notified: false, reason }`.
+   * [#33181] The environment-user host (`environment-user-host.ts`): told
+   * after a person is added through `admin/add-sso-user` or
+   * `admin/import-sso-users`, and asked before a person is deactivated
+   * through `admin/ban-user` or reactivated through `admin/unban-user`. Read
+   * per call, so a host wired after boot is still found. A typed
+   * `EnvironmentUserHostRefusal` refuses the operation (a refused add is
+   * taken back out); any other failure refuses a deactivation (`503`) and is
+   * reported on an add or a reactivation as `host: { notified: false,
+   * reason }`, which it never undoes.
    */
   environmentUserHost?: EnvironmentUserHostAccessor;
 
@@ -4055,8 +4058,8 @@ export class AuthPlugin implements Plugin {
         // only through the hosting organisation's identity provider and is
         // given no local password, in every mode and with no exception — a
         // platform administrator's standing included. Such a row is refused a
-        // session too (`user-session-admission.ts`), so this answers a session
-        // that predates the marker. Judged once the body holds a password and
+        // session too (`user-session-admission.ts`); this arm holds the door on
+        // its own, whatever session reaches it. Judged once the body holds a password and
         // before anything is written; a source that cannot be read is judged
         // by the arms above as before.
         const { status, body } = await runSetInitialPassword(authApi as any, c.req.raw, {
