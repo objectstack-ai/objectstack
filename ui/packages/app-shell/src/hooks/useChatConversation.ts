@@ -136,6 +136,14 @@ export interface UseChatConversationReturn {
    * send retries).
    */
   ensureConversation: () => Promise<string | undefined>;
+  /**
+   * Why the last create failed, while no conversation is held. Tagged like a
+   * refused chat send (`notSent: true`, plus `status` when the server answered),
+   * because the first message waiting on it never left the client: a host
+   * hands it to the composer as its send error. Cleared when the next create
+   * starts and whenever a conversation is held.
+   */
+  createError: Error | undefined;
   /** Delete the current conversation; the next send starts a fresh one. */
   reset: () => Promise<void>;
   /**
@@ -852,8 +860,13 @@ async function createConversation(apiBase: string): Promise<ServerConversation> 
     headers: { 'Content-Type': 'application/json' },
     body: '{}',
   });
-  if (!res.ok) throw new Error(`POST conversation failed: ${res.status}`);
+  if (!res.ok) throw notSentCreateError(`POST conversation failed: ${res.status}`, res.status);
   return (await res.json()) as ServerConversation;
+}
+
+/** A create failure, tagged the way `useObjectChat` tags a send that never left the client. */
+function notSentCreateError(message: string, status?: number): Error {
+  return Object.assign(new Error(message), { notSent: true as const }, status === undefined ? {} : { status });
 }
 
 async function deleteConversation(apiBase: string, id: string): Promise<void> {
@@ -886,6 +899,7 @@ export function useChatConversation(
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const [initialMessages, setInitialMessages] = useState<HydratedUIMessage[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(Boolean(userId));
+  const [createError, setCreateError] = useState<Error | undefined>(undefined);
   const mountedRef = useRef(true);
   // Tracks the (user, scope) we have already resolved a no-activeId
   // conversation for. Keyed by SCOPE as well as user so a deliberate agent
@@ -924,6 +938,7 @@ export function useChatConversation(
       const inflight = inflightRef.current;
       if (inflight && inflight.key === key) return inflight.promise;
       const entry = { key, promise: Promise.resolve<string | undefined>(undefined) };
+      if (mountedRef.current) setCreateError(undefined);
       entry.promise = (async (): Promise<string | undefined> => {
         try {
           const fresh = await createConversation(base);
@@ -940,9 +955,16 @@ export function useChatConversation(
             setInitialMessages(toUIMessages(fresh.messages));
           }
           return fresh.id;
-        } catch {
-          // No row, no id: the stashed send stays stashed and the host's next
-          // send retries the create.
+        } catch (err) {
+          // No row, no id. Reported to the host, whose first message waits on
+          // this create; the next send retries it.
+          if (mountedRef.current) {
+            setCreateError(
+              err instanceof Error && (err as { notSent?: unknown }).notSent === true
+                ? err
+                : notSentCreateError(err instanceof Error ? err.message : 'POST conversation failed'),
+            );
+          }
           return undefined;
         } finally {
           if (inflightRef.current === entry) inflightRef.current = null;
@@ -1302,6 +1324,7 @@ export function useChatConversation(
     initialMessages,
     isLoading,
     ensureConversation,
+    createError: conversationId ? undefined : createError,
     reset,
     startNew,
     rekeyScope,
