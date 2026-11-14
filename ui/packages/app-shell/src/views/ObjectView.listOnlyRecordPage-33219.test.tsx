@@ -19,7 +19,7 @@
  * the served operation set differs:
  *
  *   - a row click opens nothing: no `?recordId=`, no drawer, no route change;
- *   - a ⌘-click opens no tab;
+ *   - a ⌘-click opens no tab, and the name is no anchor a new tab follows;
  *   - the name cell draws no 「Open as full page」 ↗;
  *   - a `?recordId=` link opens no drawer and reads no record;
  *   - the row menu still offers the object's `list_item` action (Revoke);
@@ -236,12 +236,15 @@ describe('objectstack#33219 — a list-only object\'s rows open no record page',
     expect(findOne).not.toHaveBeenCalled();
   });
 
-  it('a ⌘-click opens no tab', async () => {
+  it('a ⌘-click on the row opens no tab, and its name is no anchor a new tab could follow', async () => {
     await mountList(LIST_ONLY_OPERATIONS);
-    fireEvent.click(screen.getByText('okta-staging'), { metaKey: true });
+    // A cell outside the name link: the row's own click, with the modifier.
+    fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
     await settle();
     expect(openSpy).not.toHaveBeenCalled();
     expect(search()).toBe('');
+    const row = screen.getByText('okta-staging').closest('tr')!;
+    expect(row.querySelector('a[href]')).toBeNull();
   });
 
   it('the row draws no 「Open as full page」', async () => {
@@ -265,6 +268,9 @@ describe('objectstack#33219 — a list-only object\'s rows open no record page',
   it('CONTROL — the same object served with no restriction: the row click opens the drawer', async () => {
     await mountList(undefined);
     expect(screen.getAllByTestId('record-open-as-page').length).toBeGreaterThan(0);
+    expect(screen.getByText('okta-staging').closest('tr')!.querySelector('a[href]')).not.toBeNull();
+    fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
+    expect(openSpy).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByText('okta-staging'));
     await waitFor(() => expect(search()).toBe('?recordId=c1'));
     expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
