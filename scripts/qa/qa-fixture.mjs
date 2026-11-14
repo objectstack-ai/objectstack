@@ -5,7 +5,7 @@
  * qa-fixture — the platform checklist's four recurring fixtures, one command each.
  *
  *   node scripts/qa/qa-fixture.mjs contributor-member [--base-url URL] [--email ADDR] [--position NAME] [--task]
- *   node scripts/qa/qa-fixture.mjs walled-boot [--posture isolated|group] [--organization SLUG | --no-organization] [--port N] [--dir DIR]
+ *   node scripts/qa/qa-fixture.mjs walled-boot [--posture isolated|group] [--organization SLUG] [--member-less [EMAIL] | --no-organization] [--port N] [--dir DIR]
  *   node scripts/qa/qa-fixture.mjs external-database [--port N] [--dir DIR]
  *   node scripts/qa/qa-fixture.mjs broken-upstream-app [--variant missing-script|config-fault] [--dir DIR]
  *   node scripts/qa/qa-fixture.mjs restore-upstream --dir DIR
@@ -48,6 +48,11 @@
  *   `degradedTenancy: false`. Then the operator creates an organization and
  *   makes it current (`--no-organization` skips it), so its printed session
  *   token can mint walled personas through admin create-user at once.
+ *   `--member-less [EMAIL]` then mints one persona who holds no membership
+ *   (`access-security.no-active-org-session-semantics` producer (1)): created,
+ *   its membership removed by the operator, its forced password change
+ *   cleared, signed in afresh, and proved by a null `activeOrganizationId` and
+ *   an empty `organization/list`.
  * - `external-database` — the credentialed PostgreSQL that
  *   `integration-system.datasource-credential-refusal-matrix` knownGaps[2]
  *   describes: a scratch cluster with scram-sha-256 auth on 127.0.0.1 (TCP only),
@@ -426,6 +431,61 @@ async function walledBoot(flags) {
     organization = { id: activeId, slug };
   }
 
+  // `--member-less`: a user who holds NO membership, the no-active-org item's
+  // producer (1). Create User always joins the operator's organization (#25626),
+  // so the persona is minted there, the operator (the organization's owner)
+  // removes that membership, and the persona signs in afresh: a removed member is
+  // never bound again by signing in (ADR-0093 D7; packages/qa/dogfood's
+  // membership-decided-at-creation suite drives the same three calls).
+  let memberLess = null;
+  if (flags['member-less']) {
+    if (!organization) throw new Refusal('--member-less needs the operator\'s organization: drop --no-organization');
+    const email = typeof flags['member-less'] === 'string' ? flags['member-less'] : `qa-memberless-${stamp()}@verify.test`;
+    let password = freshSecret();
+    const created = expectStatus(
+      'mint the persona (POST /api/v1/auth/admin/create-user)',
+      await call(base, 'POST', '/api/v1/auth/admin/create-user', { token: operatorToken, body: { email, password, name: 'QA Member-less' } }),
+      200,
+    );
+    const userId = created.json?.data?.user?.id;
+    expectStatus(
+      'remove its membership (POST /api/v1/auth/organization/remove-member)',
+      await call(base, 'POST', '/api/v1/auth/organization/remove-member', {
+        token: operatorToken,
+        body: { memberIdOrEmail: email, organizationId: organization.id },
+      }),
+      200,
+    );
+    // Create User stamps must_change_password, so every data read answers 403
+    // PASSWORD_RESET_REQUIRED until the persona changes it; the change clears the
+    // stamp (stampPasswordChangedAt), and the persona signs in again on the new one.
+    const firstPassword = password;
+    password = freshSecret();
+    expectStatus(
+      'clear the forced change (POST /api/v1/auth/change-password)',
+      await call(base, 'POST', '/api/v1/auth/change-password', {
+        token: await signIn(base, email, firstPassword),
+        body: { currentPassword: firstPassword, newPassword: password, revokeOtherSessions: true },
+      }),
+      200,
+    );
+    const token = await signIn(base, email, password);
+    const read = await call(base, 'GET', '/api/v1/data/showcase_task?limit=1', { token });
+    if (read.json?.error?.code === 'PASSWORD_RESET_REQUIRED') {
+      throw new StepFailure('the persona still answers 403 PASSWORD_RESET_REQUIRED after change-password');
+    }
+    const session = expectStatus('read the persona session', await call(base, 'GET', '/api/v1/auth/get-session', { token }), 200);
+    const memberships = expectStatus('list the persona\'s organizations', await call(base, 'GET', '/api/v1/auth/organization/list', { token }), 200);
+    const held = Array.isArray(memberships.json) ? memberships.json : (memberships.json?.data ?? []);
+    if ((session.json?.session?.activeOrganizationId ?? null) !== null || held.length !== 0) {
+      throw new StepFailure(
+        `the persona is not member-less: activeOrganizationId reads ${session.json?.session?.activeOrganizationId}, `
+        + `organization/list holds ${held.length}`,
+      );
+    }
+    memberLess = { email, password, userId, token, activeOrganizationId: null, organizations: 0, firstDataRead: read.status };
+  }
+
   return {
     fixture: 'walled-boot',
     replays: 'docs/qa/platform-checklist/RUNNER.md, "A walled boot is a fixture of its own"',
@@ -436,6 +496,7 @@ async function walledBoot(flags) {
     operator: admin,
     operatorToken,
     organization,
+    memberLess,
     pid: child.pid,
     dir,
     log: logFile,
