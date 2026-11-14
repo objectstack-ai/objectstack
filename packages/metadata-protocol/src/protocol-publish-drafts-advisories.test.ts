@@ -37,6 +37,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Pay @objectstack/lint's first transform at collection, not inside a clocked case.
+import '@objectstack/lint';
 
 interface Row {
     id: string;
