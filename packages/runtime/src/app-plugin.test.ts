@@ -494,7 +494,7 @@ describe('AppPlugin', () => {
                 code: 'OS_PROTOCOL_INCOMPATIBLE',
                 diagnostic: expect.objectContaining({
                     packageId: 'com.test.stale',
-                    migrateCommand: `objectstack migrate meta --from ${PROTOCOL_MAJOR - 5}`,
+                    targetMajor: PROTOCOL_MAJOR - 5,
                 }),
             });
             expect(mockManifest.register).not.toHaveBeenCalled();
