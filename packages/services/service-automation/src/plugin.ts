@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
+import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
 import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type {
@@ -1183,6 +1183,40 @@ function withFailureTextRewritten(
  * **instance** the automation service materializes at boot (ADR-0097);
  * its absence marks a catalog **descriptor** (#2612).
  */
+/**
+ * [#31699] The package a declared connector entry belongs to: its
+ * `_packageId`, or `null` for an entry no package ships (the environment's,
+ * a stored row's provenance sentinel, the compatibility API's default).
+ */
+function declaredEntryPackage(entry: unknown): string | null {
+    const stamp = (entry as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (typeof stamp !== 'string' || stamp.length === 0) return null;
+    return stamp === 'sys_metadata' || stamp === RUNTIME_COMPATIBILITY_PACKAGE_ID ? null : stamp;
+}
+
+/**
+ * [#31699] The package a declared connector instance's connections are read
+ * and written by. An entry stamped with a real package is that package's; the
+ * environment's stored entry (`sys_metadata`) is no package's. An entry with
+ * no stamp, or the compatibility API's default, is the name's durable holder's
+ * when that is a package: the package the boot backfill binds a package-less
+ * row of the name to, so a row the instance connected is still its row once
+ * bound. With no registry to ask, or no package holder, it is no package's.
+ */
+function connectorInstancePackage(
+    resolve: ReturnType<typeof connectorNameResolver>,
+    entry: unknown,
+): string | null {
+    const own = declaredEntryPackage(entry);
+    if (own !== null) return own;
+    const stamp = (entry as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (stamp === 'sys_metadata') return null;
+    const name = (entry as { name?: unknown } | null | undefined)?.name;
+    if (typeof name !== 'string' || name.length === 0) return null;
+    const holder = resolve(name, null, { includeDisabledPackages: true });
+    return holder?.status === 'resolved' && holder.holder.kind === 'package' ? holder.holder.packageId : null;
+}
+
 interface DeclaredConnectorItem {
     name?: string;
     label?: string;
@@ -2036,7 +2070,13 @@ export class AutomationServicePlugin implements Plugin {
         this.connectorCredentialStore = new ConnectorCredentialStore(() => this.resolveDataEngine(ctx));
         // ADR-0143 D3 / D5 — the connector connection store, and the door the
         // `automation` service's connection members answer through.
-        this.connectorConnectionStore = new ConnectorConnectionStore(() => this.resolveDataEngine(ctx));
+        // [#31699] A row naming no package is the package the name's durable
+        // resolution binds it to: the question the boot backfill asks.
+        const connectionNullRowHolder = connectorNameResolver(ctx);
+        this.connectorConnectionStore = new ConnectorConnectionStore(
+            () => this.resolveDataEngine(ctx),
+            (name) => connectionNullRowHolder(name, null, { includeDisabledPackages: true }),
+        );
         this.engine.setConnectorConnectionDoor({
             get: (request) => this.getConnectorConnection(ctx, request),
             begin: (request) => this.beginConnectorConnection(ctx, request),
@@ -3360,7 +3400,9 @@ export class AutomationServicePlugin implements Plugin {
             if (auth?.type !== 'oauth2' || auth.grant !== 'authorization_code') continue;
             let state: ConnectionStateOfInstance;
             try {
-                const rows = await this.connectorConnectionStoreOrNone().listFor(name);
+                // [#31699] An organization whose read is refused has no connection to materialize with.
+                const rows = (await this.connectorConnectionStoreOrNone().listFor(name, connectorInstancePackage(connectorNameResolver(ctx), d.entry)))
+                    .filter((r) => r.conflict === undefined);
                 const reconnectRequired = rows.filter((r) => r.status === 'reconnect_required').map((r) => r.organizationId).sort();
                 const discovery = discoveryOrganizationOf(rows);
                 const discoveryConnectedAt = rows.find((r) => r.organizationId === discovery)?.connectedAt;
@@ -4128,6 +4170,7 @@ export class AutomationServicePlugin implements Plugin {
         // the client its administrator entered (`clientSource: 'installer'`).
         return createOAuth2GrantHandle({
             connector: name,
+            packageId: connectorInstancePackage(connectorNameResolver(ctx), entry),
             config: {
                 grant: auth.grant,
                 ...(takesInstallerClient(auth) ? { clientSource: 'installer' as const } : {}),
@@ -4186,7 +4229,7 @@ export class AutomationServicePlugin implements Plugin {
         let marked = false;
         try {
             const store = this.connectorConnectionStoreOrNone();
-            const record = await store.read(connection.organizationId, name);
+            const record = await store.read(connection.organizationId, name, connectorInstancePackage(connectorNameResolver(ctx), info.entry));
             if (record && record.status === 'connected' && record.connectedAt === connection.connectedAt) {
                 await store.markReconnectRequired(record, reason);
                 marked = true;
@@ -4332,7 +4375,7 @@ export class AutomationServicePlugin implements Plugin {
         const serverUrl = mcpDiscoveryServerUrl(entry, auth);
         if (serverUrl === undefined) return undefined;
         const store = this.connectorConnectionStoreOrNone();
-        const existing = installerClient ? undefined : await store.readOrRefuse(organizationId, name);
+        const existing = installerClient ? undefined : await store.readOrRefuse(organizationId, name, connectorInstancePackage(connectorNameResolver(ctx), entry));
         if (existing?.hasRegisteredClient) {
             let kept: McpAuthorizationClient | undefined;
             try {
@@ -4383,9 +4426,17 @@ export class AutomationServicePlugin implements Plugin {
     private async connectionDoorSubject(
         ctx: PluginContext,
         request: ConnectorConnectionRequest | undefined,
+        /**
+         * [#31699, M7] The instance's package as the pending authorization
+         * recorded it: a package id, `null` for the environment's or the
+         * platform's instance. Absent, the door resolves the name.
+         */
+        recordedPackage?: string | null,
     ): Promise<{
         name: string;
         entry: DeclaredConnectorItem;
+        /** [#31699] The instance's package (`null`: the environment's or the platform's instance). */
+        packageId: string | null;
         auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>;
         organizationId: string;
         userId?: string;
@@ -4395,7 +4446,7 @@ export class AutomationServicePlugin implements Plugin {
             throw credentialDoorRefusal('A connector instance name is required.', 'VALIDATION_ERROR', 400);
         }
         const declared = await this.readDeclaredConnectorItems(ctx, { post: true });
-        const entry = (declared ?? []).find((raw) => (raw as DeclaredConnectorItem | null)?.name === name) as DeclaredConnectorItem | undefined;
+        const { entry, packageId } = this.connectionDoorInstance(ctx, name, declared ?? [], recordedPackage);
         if (!entry || typeof entry.provider !== 'string' || entry.provider.length === 0) {
             throw credentialDoorRefusal(
                 `No installed package declares a provider-bound connector instance '${name}'.`,
@@ -4426,7 +4477,61 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const userId = typeof request?.context?.userId === 'string' && request.context.userId.length > 0 ? request.context.userId : undefined;
-        return { name, entry, auth, organizationId, userId };
+        return { name, entry, packageId, auth, organizationId, userId };
+    }
+
+    /**
+     * [ADR-0150 D3/D4, #31699; design review M6] Which declared instance the
+     * connection door's name means, and its package. The resolver decides
+     * identity; the entry always comes from the declared list, matched on name
+     * and package:
+     *
+     * - a package the pending authorization recorded (`recordedPackage`) is
+     *   read exactly, never re-resolved: an entry of that package, else none;
+     * - `refused` (two packages hold the name) answers `409` naming them;
+     * - `resolved` takes the entry whose instance package
+     *   ({@link connectorInstancePackage}) is the resolved one (`null`: the
+     *   environment's or the platform's); when no declared entry is, the rule
+     *   below;
+     * - `not-found`, or no registry to ask (a code-registered instance, one only
+     *   a dev reload declares, a composition with no ObjectQL), serves the one
+     *   declared entry of the name as before, with the package that entry
+     *   carries; two declared entries are refused `409`, never picked.
+     */
+    private connectionDoorInstance(
+        ctx: PluginContext,
+        name: string,
+        declared: readonly unknown[],
+        recordedPackage: string | null | undefined,
+    ): { entry: DeclaredConnectorItem | undefined; packageId: string | null } {
+        const ofName = declared.filter((raw) => (raw as DeclaredConnectorItem | null)?.name === name) as DeclaredConnectorItem[];
+        const resolve = connectorNameResolver(ctx);
+        const exactly = (packageId: string | null) => ({
+            entry: ofName.find((entry) => connectorInstancePackage(resolve, entry) === packageId),
+            packageId,
+        });
+        if (recordedPackage !== undefined) return exactly(recordedPackage);
+        const resolution = resolve(name, null);
+        if (resolution?.status === 'refused') {
+            throw credentialDoorRefusal(resolution.message, 'RESOURCE_CONFLICT', 409);
+        }
+        if (resolution?.status === 'resolved') {
+            const held = exactly(resolution.holder.kind === 'package' ? resolution.holder.packageId : null);
+            // A holder no declared entry is the instance of (an entry stamped
+            // with another package than the one the name resolves to) falls to
+            // the one declared entry below, with that entry's own package: the
+            // package the dispatch reads the same instance's connection by.
+            if (held.entry !== undefined) return held;
+        }
+        if (ofName.length > 1) {
+            throw credentialDoorRefusal(
+                `${ofName.length} declared connector instances are named '${name}', and the connection door connects one: `
+                    + 'address the instance by its package.',
+                'RESOURCE_CONFLICT',
+                409,
+            );
+        }
+        return { entry: ofName[0], packageId: ofName[0] ? connectorInstancePackage(resolve, ofName[0]) : null };
     }
 
     /** ADR-0143 D3 — a connection row (or its absence) as the door answers it. Never a token. */
@@ -4480,6 +4585,7 @@ export class AutomationServicePlugin implements Plugin {
      */
     private async installerClientOfBegin(
         name: string,
+        packageId: string | null,
         auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>,
         request: ConnectorConnectionRequest,
         organizationId: string,
@@ -4496,7 +4602,7 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         if (offered === undefined) {
-            const kept = await this.keptInstallerClient(name, organizationId);
+            const kept = await this.keptInstallerClient(name, packageId, organizationId);
             if (kept) return kept;
             throw refuse(
                 `Connector instance '${name}' takes its OAuth client from the installer (\`clientSource: 'installer'\`), and this `
@@ -4538,9 +4644,9 @@ export class AutomationServicePlugin implements Plugin {
      * encrypted client column, or `undefined` when it keeps none. A store
      * that cannot read or decrypt it refuses (`503`), never "keeps none".
      */
-    private async keptInstallerClient(name: string, organizationId: string): Promise<InstallerClient | undefined> {
+    private async keptInstallerClient(name: string, packageId: string | null, organizationId: string): Promise<InstallerClient | undefined> {
         const store = this.connectorConnectionStoreOrNone();
-        const record = await store.readOrRefuse(organizationId, name);
+        const record = await store.readOrRefuse(organizationId, name, packageId);
         if (record?.installerClientId === undefined) return undefined;
         const kept = parseKeptConnectionClient(await store.resolveRegisteredClient(record));
         if (!kept?.installer) return undefined;
@@ -4555,9 +4661,13 @@ export class AutomationServicePlugin implements Plugin {
      * is absent, never a refusal: the read still answers the status.
      */
     private async getConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
-        const { name, organizationId } = await this.connectionDoorSubject(ctx, request);
+        const { name, packageId, organizationId } = await this.connectionDoorSubject(ctx, request);
         this.refuseClientOffLeg(name, request, 'read');
-        const state = this.describeConnection(name, organizationId, await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name));
+        const state = this.describeConnection(
+            name,
+            organizationId,
+            await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name, packageId),
+        );
         const redirectUri = this.derivedConnectorOAuthRedirectUri();
         return redirectUri === undefined ? state : { ...state, redirectUri };
     }
@@ -4568,7 +4678,7 @@ export class AutomationServicePlugin implements Plugin {
      * the authorization URL. Nothing is written to the connection record.
      */
     private async beginConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin> {
-        const { name, entry, auth, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
+        const { name, entry, packageId, auth, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
         if (userId === undefined) {
             throw credentialDoorRefusal(
                 `Connecting connector instance '${name}' needs a signed-in user: the callback is accepted only from the user `
@@ -4578,13 +4688,13 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const redirectUri = this.connectorOAuthRedirectUri();
-        const installerClient = await this.installerClientOfBegin(name, auth, request, organizationId, redirectUri);
+        const installerClient = await this.installerClientOfBegin(name, packageId, auth, request, organizationId, redirectUri);
         const client = await this.mcpAuthorizationClient(ctx, name, entry, auth, organizationId, redirectUri, installerClient);
         const state = createAuthorizationState();
         const { verifier, challenge } = createPkcePair();
         const expiresAt = Date.now() + PENDING_AUTHORIZATION_TTL_SECONDS * 1000;
         await this.pendingAuthorizations(ctx).put(state, {
-            connector: name, organizationId, userId, verifier, redirectUri, expiresAt,
+            connector: name, packageId, organizationId, userId, verifier, redirectUri, expiresAt,
             ...(client ? { client } : {}),
             ...(installerClient ? { installerClient } : {}),
         });
@@ -4659,10 +4769,14 @@ export class AutomationServicePlugin implements Plugin {
         }
         // The declaration is read again: the instance may have changed while
         // the browser was away.
-        const { name, auth, organizationId } = await this.connectionDoorSubject(ctx, {
+        // [#31699, M7] Exactly the instance the connect was begun for: the
+        // package it recorded (`null`: the environment's or the platform's
+        // instance), never the bare name resolved again. A record from before
+        // the package was recorded (no key, within its TTL) resolves the name.
+        const { name, packageId, auth, organizationId } = await this.connectionDoorSubject(ctx, {
             connector: pending.connector,
             context: request.context,
-        });
+        }, pending.packageId);
         const client = pending.client;
         // ADR-0143 D2.1 (2026-11-02 amendment): an instance that takes the
         // installer's client exchanges as the client its connect was begun
@@ -4723,6 +4837,7 @@ export class AutomationServicePlugin implements Plugin {
             const stored = await this.connectorConnectionStoreOrNone().connect({
                 organizationId,
                 connectorName: name,
+                packageId,
                 ...(userId ? { userId } : {}),
                 ...(token.refreshToken === undefined ? {} : { refreshToken: token.refreshToken }),
                 ...(token.scope === undefined ? {} : { scopes: token.scope }),
@@ -4758,10 +4873,10 @@ export class AutomationServicePlugin implements Plugin {
 
     /** ADR-0143 D5 — `IAutomationService.revokeConnectorConnection`. */
     private async revokeConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
-        const { name, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
+        const { name, packageId, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
         this.refuseClientOffLeg(name, request, 'revoke');
         const removed = await this.onReconcileQueue(async () => {
-            const gone = await this.connectorConnectionStoreOrNone().revoke(organizationId, name, userId);
+            const gone = await this.connectorConnectionStoreOrNone().revoke(organizationId, name, userId, packageId);
             if (!gone) return false;
             this.grantHandles.get(name)?.forget(organizationId);
             ctx.logger.info(

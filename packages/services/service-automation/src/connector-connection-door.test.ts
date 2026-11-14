@@ -25,7 +25,7 @@ import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, SchemaRegistry } from '@objectstack/objectql';
 import { collectMaskedReadFields } from '@objectstack/objectql/core';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysSecret } from '@objectstack/platform-objects';
@@ -237,7 +237,14 @@ async function dataEngine(): Promise<ObjectQL> {
     return ql;
 }
 
-async function boot(declared: unknown[] = [crm()], opts: { redirectUri?: string | null; cluster?: unknown; noData?: boolean } = {}) {
+/**
+ * `opts.registry` (#31699): a real package-scoped registry the door's name
+ * resolution asks; the declared list stays `declared` either way.
+ */
+async function boot(
+    declared: unknown[] = [crm()],
+    opts: { redirectUri?: string | null; cluster?: unknown; noData?: boolean; registry?: SchemaRegistry } = {},
+) {
     const ql = await dataEngine();
     const provider = grantedProvider();
     const kernel = new LiteKernel({ logger: { level: 'debug', format: 'json' } } as never);
@@ -253,7 +260,9 @@ async function boot(declared: unknown[] = [crm()], opts: { redirectUri?: string 
         version: '1.0.0',
         dependencies: ['com.objectstack.service-automation'],
         async init(ctx: any) {
-            ctx.registerService('objectql', { registry: { listItems: (t: string) => (t === 'connector' ? declared : []) } });
+            const listItems = (t: string) => (t === 'connector' ? declared : []);
+            const registry = opts.registry ? Object.assign(Object.create(opts.registry), { listItems }) : { listItems };
+            ctx.registerService('objectql', { registry });
             if (!opts.noData) ctx.registerService('data', ql);
             if (opts.cluster) ctx.registerService('cluster', opts.cluster);
             ctx.getService('automation').registerConnectorProvider('granted', provider.factory, { credentialHandle: true });
@@ -917,5 +926,182 @@ describe("ADR-0143 D2.1 — an instance that takes the installer's OAuth client"
         expect(collectMaskedReadFields(SysConnectorConnection as never)).toEqual(['refresh_token', 'registered_client']);
         expect(SysConnectorConnection.fields.client_id.type).toBe('text');
         expect(SysConnectorConnection.fields.client_has_secret.type).toBe('boolean');
+    });
+});
+
+// ─── ADR-0150 D4: one instance by package ────────────────────────────
+
+describe('ADR-0150 D4 [#31699] — the connection door connects one instance, by package', () => {
+    const OTHER = 'com.example.other';
+    const rowPackages = async (ql: ObjectQL) => (await rowsOf(ql)).map((r) => r.connector_package ?? null);
+
+    /** `registry` holds `crm` under `id` too (installed, shipped). */
+    function hold(r: SchemaRegistry, id: string): SchemaRegistry {
+        r.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() } as never, 'code');
+        r.registerItem('connector', crm({ _packageId: id }) as never, 'name' as never, id);
+        return r;
+    }
+    /** A real registry holding `crm` under package `id`. */
+    const registryHolding = (id: string) => hold(new SchemaRegistry({ multiTenant: false }), id);
+
+    it('the name resolves to one package: the connect stamps that package on the row, and the read answers it', async () => {
+        const { engine, connect, ql } = await boot([crm()], { registry: registryHolding('com.example.crm') });
+        await (await connect()).done();
+        expect(await rowPackages(ql)).toEqual(['com.example.crm']);
+        expect(await engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
+            .toMatchObject({ status: 'connected' });
+    });
+
+    it('⛔ two packages hold the name: the read, the begin and the revoke are refused 409 naming both, and nothing is written', async () => {
+        // A boot refuses a second holder (the one-holder backstop this card
+        // narrows last), so the second package arrives after the boot.
+        const declared: unknown[] = [crm()];
+        const registry = registryHolding('com.example.crm');
+        const { engine, ql } = await boot(declared, { registry });
+        declared.push(crm({ _packageId: OTHER }));
+        hold(registry, OTHER);
+        for (const leg of [
+            () => engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never }),
+            () => engine.beginConnectorConnection({ connector: 'crm', context: ADMIN_A as never }),
+            () => engine.revokeConnectorConnection({ connector: 'crm', context: ADMIN_A as never }),
+        ]) {
+            const err = (await leg().catch((e: unknown) => e)) as Record<string, unknown>;
+            expect(err).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+            expect(String(err.message)).toContain('com.example.crm');
+            expect(String(err.message)).toContain(OTHER);
+        }
+        expect(idp.requests).toHaveLength(0);
+        expect(await rowsOf(ql)).toHaveLength(0);
+    });
+
+    it('no registry to ask: the one declared entry is served with the package it carries; the environment’s entry stamps no package', async () => {
+        const packaged = await boot([crm()]);
+        await (await packaged.connect()).done();
+        expect(await rowPackages(packaged.ql)).toEqual(['com.example.crm']);
+
+        const environment = await boot([crm({ _packageId: 'sys_metadata' })]);
+        await (await environment.connect()).done();
+        expect(await rowPackages(environment.ql)).toEqual([null]);
+    });
+
+    it('⛔ no registry and two declared entries of the name: refused 409, never the first one picked', async () => {
+        const declared: unknown[] = [crm()];
+        const { engine } = await boot(declared);
+        declared.push(crm({ _packageId: OTHER }));
+        await expect(engine.beginConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
+            .rejects.toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+    });
+
+    it('the callback completes exactly the package the begin recorded, never the name resolved again', async () => {
+        // Begun with one declared entry; a second package declares the name
+        // while the browser is away. Resolved again, the name is refused (409):
+        // the recorded package completes.
+        const declared: unknown[] = [crm()];
+        const { connect, ql } = await boot(declared);
+        const { done } = await connect();
+        declared.push(crm({ _packageId: OTHER }));
+        await expect(done()).resolves.toMatchObject({ status: 'connected' });
+        expect(await rowPackages(ql)).toEqual(['com.example.crm']);
+    });
+
+    it('the recorded package is kept when it is none: an environment instance’s callback completes with no package beside a package’s entry', async () => {
+        const declared: unknown[] = [crm({ _packageId: 'sys_metadata' })];
+        const { connect, ql } = await boot(declared);
+        const { done } = await connect();
+        declared.push(crm({ _packageId: OTHER }));
+        await expect(done()).resolves.toMatchObject({ status: 'connected' });
+        expect(await rowPackages(ql)).toEqual([null]);
+    });
+
+    it('⛔ the recorded package no longer declares the instance: the callback is refused before its code is used', async () => {
+        const declared: unknown[] = [crm()];
+        const { connect, ql } = await boot(declared);
+        const { done } = await connect();
+        declared.splice(0, 1, crm({ _packageId: OTHER }));
+        await expect(done()).rejects.toMatchObject({ status: 404 });
+        expect(idp.requests).toHaveLength(0);
+        expect(await rowsOf(ql)).toHaveLength(0);
+    });
+
+    /** A row the guard admits beside a package's own: one naming no package (an upgraded database's). */
+    const packagelessRow = (ql: ObjectQL, id: string, organizationId: string) => ql.insert(CONNECTOR_CONNECTION_OBJECT, {
+        id, organization_id: organizationId, connector_name: 'crm', connector_package: null,
+        grant: 'authorization_code', status: 'connected', revision: 1,
+    } as never, { context: SYSTEM } as never);
+
+    it('⛔ two rows answer the instance in the one organization: a dispatch with or without the organization is refused 503, never one row used', async () => {
+        const { call, connect, provider, ql } = await boot([crm()], { registry: registryHolding('com.example.crm') });
+        await (await connect()).done();
+        await call('org_a');
+        await call();
+        const sent = [...provider.state.sent];
+        await packagelessRow(ql, 'conn_stray', 'org_a');
+        for (const organizationId of ['org_a', undefined]) {
+            await expect(call(organizationId)).rejects.toMatchObject({ status: 503, message: expect.stringContaining('has 2 connections') });
+        }
+        expect(provider.state.sent).toEqual(sent);
+    });
+
+    it('⛔ an organization whose read is refused still counts: a dispatch with no organization is refused 422, not run with the other organization', async () => {
+        const declared: unknown[] = [crm()];
+        const registry = registryHolding('com.example.crm');
+        const { call, connect, provider, ql } = await boot(declared, { registry });
+        await (await connect(ADMIN_B)).done();
+        await packagelessRow(ql, 'conn_a', 'org_a');
+        declared.push(crm({ _packageId: OTHER }));
+        hold(registry, OTHER);
+        await expect(call()).rejects.toMatchObject({ status: 422, message: expect.stringContaining('connected for 2 organizations') });
+        expect(provider.state.sent).toEqual([]);
+    });
+
+    it('⛔ a package-less row a second (disabled) holder makes no one package’s: the read and the revoke are both refused 409, and the row stays', async () => {
+        const registry = registryHolding('com.example.crm');
+        const { engine, ql } = await boot([crm()], { registry });
+        await packagelessRow(ql, 'conn_a', 'org_a');
+        hold(registry, OTHER);
+        registry.disablePackage(OTHER);
+        for (const leg of [
+            () => engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never }),
+            () => engine.revokeConnectorConnection({ connector: 'crm', context: ADMIN_A as never }),
+        ]) {
+            const err = (await leg().catch((e: unknown) => e)) as Record<string, unknown>;
+            expect(err).toMatchObject({ status: 409, message: expect.stringContaining('stored-references bind') });
+        }
+        expect(await rowsOf(ql)).toHaveLength(1);
+    });
+
+    it('an entry with no package stamp, or the compatibility default, is the instance of the package the name resolves to: its row stays its own once the backfill binds it', async () => {
+        for (const stamp of [undefined, '__runtime__']) {
+            const { connect, call, engine, ql } = await boot([crm({ _packageId: stamp })], { registry: registryHolding('com.example.crm') });
+            // A connection the instance kept from before the key carried a package.
+            await packagelessRow(ql, 'conn_old', 'org_a');
+            const read = () => engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never });
+            await expect(read(), String(stamp)).resolves.toMatchObject({ status: 'connected' });
+            // The boot backfill binds it to the name's one holder: still this instance's.
+            await ql.update(CONNECTOR_CONNECTION_OBJECT, { id: 'conn_old', connector_package: 'com.example.crm' } as never, { context: SYSTEM } as never);
+            await expect(read(), String(stamp)).resolves.toMatchObject({ status: 'connected' });
+            // A connect writes the holder's package, and replaces the row in place.
+            await (await connect()).done();
+            expect(await rowPackages(ql), String(stamp)).toEqual(['com.example.crm']);
+            await expect(call('org_a'), String(stamp)).resolves.toMatchObject({ status: 200 });
+        }
+    });
+
+    it('a resolved holder no declared entry is the instance of: the one declared entry is served, with its own package', async () => {
+        const { connect, ql } = await boot([crm({ _packageId: OTHER })], { registry: registryHolding('com.example.crm') });
+        await expect((await connect()).done()).resolves.toMatchObject({ status: 'connected' });
+        expect(await rowPackages(ql)).toEqual([OTHER]);
+    });
+
+    it('a row naming no package is adopted by the resolved package’s connect (M2): one row, stamped in place', async () => {
+        const { connect, ql } = await boot([crm()], { registry: registryHolding('com.example.crm') });
+        await (await connect()).done();
+        // Strip the stamp: the row an environment connected before the key carried a package.
+        const [row] = await rowsOf(ql);
+        await ql.update(CONNECTOR_CONNECTION_OBJECT, { id: row.id, connector_package: null } as never, { context: SYSTEM } as never);
+        expect(await rowPackages(ql)).toEqual([null]);
+        await (await connect()).done();
+        const rows = await rowsOf(ql);
+        expect(rows.map((r) => [r.id, r.connector_package])).toEqual([[row.id, 'com.example.crm']]);
     });
 });
