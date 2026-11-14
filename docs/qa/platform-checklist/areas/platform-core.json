@@ -437,11 +437,16 @@
       "title": "The metadata registry is served over REST: /meta lists every registered type with its spec-derived create seed",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
-      "fixtures": { "app": "showcase" },
+      "fixtures": {
+        "app": "showcase",
+        "knownGaps": [
+          "acceptance[6]'s form screenshot needs the browser slice: a Console built from this tree (`pnpm console:build`; RUNNER.md, 'One container builds one tree at a time') and a browser driving it. A run without them, an API-only slice, scores the PATCH + GET round-trip and records the screenshot half blocked(environment) naming this line, never a FAIL (QA runs #33025 and #33081)"
+        ]
+      },
       "steps": [
         "authenticated GET /api/v1/meta — the types listing (entries[]); capture the response",
         "check the entries against DEFAULT_METADATA_TYPE_REGISTRY (packages/spec/src/kernel/metadata-plugin.zod.ts): the built-in kinds the showcase registers are present (object, view, page, dashboard, app, action, report, dataset, flow, seed, mapping, permission, position, translation, email_template, doc, book, datasource, api, …)",
@@ -524,7 +529,8 @@
           "date": "2026-10-31",
           "change": "steps[2], acceptance[2] and acceptance[0].verify corrected. Checklist-accuracy findings of QA run #27438 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): GET /meta/types is not a richer listing distinct from GET /meta, it is the same handler at a second path, and packages/qa/dogfood/test/meta-types-create-seed.dogfood.test.ts pins the two bodies equal (a live read at 3fd80337 answered byte-identical bodies); and that pin asserts more than acceptance[0].verify said (every seeded registered type's exact seed, and the parity). acceptance[2] is now the stronger parity clause. The stale route-ledger note is outside this file and is reported, not edited here. Re-read at 3fd80337",
           "ref": "#27438"
-        }
+        },
+        { "revision": 5, "date": "2026-11-14", "change": "fixtures.knownGaps added (environment, ledger row 79 of #32908): acceptance[6]'s form screenshot needs a Console build and a browser, so an API-only slice records that half blocked(environment) and scores the round-trip", "ref": "#33351" }
       ]
     },
     {
@@ -3986,7 +3992,7 @@
       "title": "POST /packages/:id/ensure-customization is the one idempotent creation path of <base>.custom — explicit <base namespace>_custom, a ^major dependency, 201 then 200, walled 403 — and a base is not uninstalled while its pair is installed",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4001,7 +4007,8 @@
           "for the uninstall leg: a writable project base of the run's own and its pair installed as an exported pair — POST /api/v1/packages { manifest: { id: 'com.example.qa-pair-base', name: 'QA pair base', version: '1.0.0', type: 'app', namespace: 'qapb', scope: 'project' } }, then POST /api/v1/packages { manifest: { id: 'com.example.qa-pair-base.custom', name: 'QA pair base (custom)', version: '0.1.0', type: 'module', namespace: 'qapb_custom', dependencies: { 'com.example.qa-pair-base': '^1' } } }; both deleted at teardown, the pair first"
         ],
         "knownGaps": [
-          "MEASURED FROM SOURCE (base eb123b7ccc): the pair-naming 409 is unreachable for a read-only base at DELETE /api/v1/packages/:id. The door refuses every read-only package first — a booted code package or an installed package of scope system or cloud — with 422 WRITABLE_PACKAGE_REQUIRED (requireWritablePackage runs before deletePackage, which is where assertPackageUninstallable is asked), so DELETE /api/v1/packages/com.example.showcase answers 422 whether its pair exists or not; packages/runtime/src/domains/packages-uninstall-refuse-before-mutate.test.ts pins exactly that ('a base the deployment ships … still answers the read-only 422 first'). The ensure door, meanwhile, refuses a writable base (409, customize it directly). So the open REST door reaches the pair-naming refusal only for a writable base whose pair was installed as an exported pair (fixtures.requires[2]); the epic's 「卸载 HotCRM 被拒并点名 hotcrm.custom」 holds at the registry (SchemaRegistry.assertPackageUninstallable), which every uninstall path asks. Recorded in FOLLOW-UPS.md §14b for the seat"
+          "MEASURED FROM SOURCE (base eb123b7ccc): the pair-naming 409 is unreachable for a read-only base at DELETE /api/v1/packages/:id. The door refuses every read-only package first — a booted code package or an installed package of scope system or cloud — with 422 WRITABLE_PACKAGE_REQUIRED (requireWritablePackage runs before deletePackage, which is where assertPackageUninstallable is asked), so DELETE /api/v1/packages/com.example.showcase answers 422 whether its pair exists or not; packages/runtime/src/domains/packages-uninstall-refuse-before-mutate.test.ts pins exactly that ('a base the deployment ships … still answers the read-only 422 first'). The ensure door, meanwhile, refuses a writable base (409, customize it directly). So the open REST door reaches the pair-naming refusal only for a writable base whose pair was installed as an exported pair (fixtures.requires[2]); the epic's 「卸载 HotCRM 被拒并点名 hotcrm.custom」 holds at the registry (SchemaRegistry.assertPackageUninstallable), which every uninstall path asks. Recorded in FOLLOW-UPS.md §14b for the seat",
+          "the live spec in automated.ref (ui/e2e/live/studio-customize-journey.spec.ts) needs the browser slice: a Console built from this tree (`pnpm console:build`) and Playwright against a booted showcase. A run without them drives acceptance[4]'s DELETE itself over HTTP, which is the clause's oracle, and records the spec as not run, blocked(environment) naming this line, never a FAIL (QA run #33081)"
         ]
       },
       "steps": [
@@ -4074,6 +4081,12 @@
           "date": "2026-11-02",
           "change": "automated adds the slice 3 live spec (ui/e2e/live/studio-customize-journey.spec.ts) for acceptance[4]: the showcase's uninstall answers 422 WRITABLE_PACKAGE_REQUIRED live, as knownGaps[0] measured from source; the slice 3 run (base 128681f4) measured the same. No clause, step or fixture changed",
           "ref": "#28579"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-14",
+          "change": "fixtures.knownGaps[1] added (environment, ledger row 79 of #32908): the live studio-customize-journey spec needs a Console build and Playwright; a run without them drives acceptance[4] over HTTP and records the spec not run",
+          "ref": "#33351"
         }
       ]
     },

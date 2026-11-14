@@ -1345,7 +1345,7 @@
       "title": "Linked accounts: link a social/OIDC identity through the redirect round-trip → a sys_account row appears in mine-view; unlink removes it; provider-less boot degrades honestly",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a signed-in user linking a second identity", "the same user after unlinking"],
@@ -1357,7 +1357,8 @@
           "the Account app's 'Linked Accounts' surface (nav_account_linked → sys_account) reachable"
         ],
         "knownGaps": [
-          "CLOSED for runs by the local OIDC provider in requires (#21845): stock showcase ships no social/OIDC IdP, so linking is not drivable without it — the same fixture class as identity-auth.sso-enforced-first-paint / oauth-app-consent-loop. A run states that its link clauses rest on the local provider; the provider-less clause (acceptance[3]) runs on a boot WITHOUT the fixture"
+          "CLOSED for runs by the local OIDC provider in requires (#21845): stock showcase ships no social/OIDC IdP, so linking is not drivable without it — the same fixture class as identity-auth.sso-enforced-first-paint / oauth-app-consent-loop. A run states that its link clauses rest on the local provider; the provider-less clause (acceptance[3]) runs on a boot WITHOUT the fixture",
+          "a REAL social provider is environment-bound: the Google door (OS_AUTH_GOOGLE_ENABLED with GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, fixtures.requires[0]) needs a client registered with that provider, and no QA runner holds one. Google is reachable from the QA container, so the blocker is the credentials, not the network. The link clauses are scored on the local OIDC provider (knownGaps[0]); a run records a real-provider round-trip blocked(environment) naming this line, never a FAIL (QA runs #33058 and #33093)"
         ]
       },
       "steps": [
@@ -1421,7 +1422,8 @@
         { "revision": 3, "date": "2026-10-05", "change": "blocked lifted: run #21845 passed the link, mine-view, unlink and read-only clauses against a local authorization-code + PKCE OIDC provider registered through the auth manager's applyConfigPatch from a scratch app plugin ('auth:configure' fires too early); the provider recipe is written into fixtures.requires, not committed as code, and the missing-IdP gap is kept as a CLOSED-for-runs knownGap. Step 2 now links through the authenticated POST /api/v1/auth/link-social and navigates to the URL it returns — the old step drove the sign-in door, which signs in rather than links. The step, the provider-less clause and its negative no longer name a specific sys_account action: they describe the link affordance, so the clause indices stay stable while the action itself is handled on its own card. The user's nav label is 'Linked Accounts' in the Account app (nav_account_linked); 'Identity Links' is the Setup app's admin entry (card #21851 entry 3)", "ref": "#21845" },
         { "revision": 4, "date": "2026-10-16", "change": "PROVENANCE, no clause change: #23803 removed Setup's nav_accounts ('Identity Links') entry, so the source anchor that cited it no longer resolved. Re-pointed it at SysUserDetailPage, whose Linked Accounts tab (a related list over sys_account keyed on user_id) is where an administrator reaches a user's identity links now. Steps, acceptance clauses, oracles and negatives are unchanged: they drive the user's Account-app surface, which did not move", "ref": "#23803" },
         { "revision": 5, "date": "2026-10-17", "change": "steps[1] and [5] and acceptance[3].verify and [4].verify corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The slice read sys_account's live methods as [get, list, aggregate, export]; the re-run on #24036 found the meta read still serving ['get','list'] while the aggregate and export routes pass the method gate (400 VALIDATION_ERROR / 403 EXPORT_NOT_PERMITTED, never 405), so the step now says both — reads only either way, and writes still 405; link_social is retired, so a provider-less boot's missing link action is the same absence every boot shows and clause 3 cannot discriminate on it; and the link callback lands on the 'All' tab. Not loosened: a forged write must still answer 405", "ref": "#24036" },
-        { "revision": 6, "date": "2026-11-14", "change": "steps[3], acceptance[2].verify and fixtures.requires[0] re-pointed (stale spec, QA runs #33058 and #33093, comments 6846283471 and 6850899929; ledger row 168 of #32908). The console's unlink is a declared api action, so it posts the action door, which forwards to /auth/unlink-account (apiActionDoor.ts); both doors are named. A social provider can be switched on from env or settings (auth-plugin.ts), but no real client credentials exist for a run, so the local OIDC fixture stays. The clause is unchanged. Read at base 82838e83", "ref": "#33328" }
+        { "revision": 6, "date": "2026-11-14", "change": "steps[3], acceptance[2].verify and fixtures.requires[0] re-pointed (stale spec, QA runs #33058 and #33093, comments 6846283471 and 6850899929; ledger row 168 of #32908). The console's unlink is a declared api action, so it posts the action door, which forwards to /auth/unlink-account (apiActionDoor.ts); both doors are named. A social provider can be switched on from env or settings (auth-plugin.ts), but no real client credentials exist for a run, so the local OIDC fixture stays. The clause is unchanged. Read at base 82838e83", "ref": "#33328" },
+        { "revision": 7, "date": "2026-11-14", "change": "fixtures.knownGaps[1] added (environment, ledger row 154 of #32908): a real social provider needs client credentials no QA runner holds; the link clauses stay on the local OIDC provider", "ref": "#33351" }
       ]
     },
     {
@@ -3355,7 +3357,7 @@
       "title": "A directory deactivation through SCIM revokes the user's API keys: each key then answers 403 API_KEY_REVOKED, a re-activation re-arms none, and no one restores them",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3370,7 +3372,8 @@
           "a SCIM-provisioned user that holds an API key: POST /api/v1/auth/scim/v2/Users {userName, emails, active: true} with the bearer (record the SCIM id it answers); as admin POST /api/v1/auth/admin/set-user-password {userId, newPassword} (refused only under SSO-only mode, which is off by default); sign in as the user and POST /api/v1/auth/change-password, since set-user-password stamps must_change_password and every other call answers 403 PASSWORD_RESET_REQUIRED until it is changed (packages/plugins/plugin-auth/src/admin-user-endpoints.ts); then POST /api/v1/keys as the user and keep the raw key it answers once"
         ],
         "knownGaps": [
-          "the key-holding SCIM user is assembled from source and has not been driven yet: a run that cannot mint the key (a refused sign-in, set-user-password or POST /api/v1/keys for a SCIM-provisioned user) records the item blocked(fixture) naming the step and its answer, and cites packages/plugins/plugin-auth/src/scim-deactivation-reconcile-user.test.ts per rule 6. That pin drives the SCIM door and the key door's admission in process over a real engine, with keys inserted directly rather than minted over HTTP, so it scores acceptance[0]–[2] partial, never pass"
+          "the key-holding SCIM user is assembled from source and has not been driven yet: a run that cannot mint the key (a refused sign-in, set-user-password or POST /api/v1/keys for a SCIM-provisioned user) records the item blocked(fixture) naming the step and its answer, and cites packages/plugins/plugin-auth/src/scim-deactivation-reconcile-user.test.ts per rule 6. That pin drives the SCIM door and the key door's admission in process over a real engine, with keys inserted directly rather than minted over HTTP, so it scores acceptance[0]–[2] partial, never pass",
+          "an SSO just-in-time account that SCIM then adopts and deactivates is not a leg of this item, and it is environment-bound: SCIM adopts an SSO account only when its provider reads domain_verified and the address is on that verified domain (packages/plugins/plugin-auth/src/scim-sso-adoption.ts, condition 4). domain_verified is written only by the vendor's verify-domain route (POST /sso/verify-domain under the auth prefix), which is mounted only with OS_SSO_DOMAIN_VERIFICATION and looks up a DNS TXT record on the provider's registered domain (packages/plugins/plugin-auth/src/register-sso-provider.ts). A QA runner controls no public DNS zone, so a run that tries that variant records it blocked(environment) naming this line; packages/plugins/plugin-auth/src/scim-sso-adoption.test.ts pins the adoption rule in process (QA run #33093)"
         ]
       },
       "steps": [
@@ -3421,6 +3424,12 @@
           "date": "2026-11-14",
           "change": "new (coverage, card #33353 row 232; ledger row 232 of #32908, QA run #33092 comment 6850793622): no item asserted #33075's SCIM-deactivation key revocation live. Placed beside identity-auth.scim-refused-audit-row because the trigger is the SCIM door. The three clauses are the rule as main states it: the revocation and its 403 API_KEY_REVOKED message (scim-deactivation-key-revocation.ts, core api-key.ts), no re-arm on re-activation (AuthManager reconcileScimUserLifecycle), and no restorer (api-key-restore-guard.ts rule 1). The key-holding SCIM user is a source-read recipe, recorded as a knownGap until a run drives it. Read from source at base bd439f17, not driven live",
           "ref": "#33353"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "fixtures.knownGaps[1] added (environment, ledger row 238 of #32908): SCIM adopts an SSO account only on a DNS-verified domain, which a QA runner cannot prove, so the SSO just-in-time variant records blocked(environment)",
+          "ref": "#33351"
         }
       ]
     },
