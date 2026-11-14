@@ -135,7 +135,7 @@ describe('ADR-0143 D4 — a refresh is written only over the revision it read', 
     it('⛔ a row revoked since the refresh read it is not written', async () => {
         const ql = await dataEngine();
         const { store, record } = await connected(ql);
-        expect(await store.revoke('org_a', 'crm')).toBe(true);
+        expect(await store.revoke('org_a', 'crm', undefined, null)).toBe(true);
         expect(await store.recordRefresh(record, { refreshToken: 'dummy-rt-stale' })).toBe(false);
         expect(await store.read('org_a', 'crm')).toBeUndefined();
     });
@@ -198,7 +198,7 @@ describe('ADR-0143 D5 — a connection store that cannot be read refuses 503, ne
 
     it.each([
         ['connect', (s: ConnectorConnectionStore) => s.connect({ organizationId: 'org_a', connectorName: 'crm', refreshToken: 'dummy-rt' })],
-        ['revoke', (s: ConnectorConnectionStore) => s.revoke('org_a', 'crm')],
+        ['revoke', (s: ConnectorConnectionStore) => s.revoke('org_a', 'crm', undefined, null)],
     ] as const)('⛔ %s', async (_verb, act) => {
         const err = await act(new ConnectorConnectionStore(unreadable)).catch((e: unknown) => e);
         expect(err).toMatchObject({ name: 'ConnectorCredentialUnavailableError', status: 503 });
