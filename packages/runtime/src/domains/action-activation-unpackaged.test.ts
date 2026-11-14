@@ -121,7 +121,12 @@ interface Harness {
  * engine carries the REAL action activation projection over the REAL durable
  * store, and that store writes into {@link makeLedgerTable}.
  */
-function boot(opts: { writeError?: Error; metadata?: unknown } = {}): Harness {
+function boot(opts: {
+    writeError?: Error;
+    metadata?: unknown;
+    /** [#32714] The engine's handler registry (`listRegisteredActions`), for the MCP bridge's listing probe. */
+    handlers?: ReadonlyArray<{ objectName: string; actionName: string }>;
+} = {}): Harness {
     const { rows, engine: ledger } = makeLedgerTable(opts.writeError);
     let executed = 0;
     const objectDef = {
@@ -143,6 +148,7 @@ function boot(opts: { writeError?: Error; metadata?: unknown } = {}): Harness {
         isActionEnabled: (name: string) => projection.isEnabled(name),
         describeDisabledAction: (name: string) => projection.describeDisabled(name),
         setActionActive: (row: any, options?: any) => projection.setActive(row, options),
+        ...(opts.handlers ? { listRegisteredActions: () => [...opts.handlers!] } : {}),
     };
     projection.attach(new ObjectStoreActionActivationStore(ql));
 
@@ -384,5 +390,113 @@ describe('[#32517] two packages\' same-named actions: the metadata-service-only 
         const res = await flip(h, OTHER, 'shared_ping', false);
         expect(statusOf(res), bodyOf(res)).toBe(200);
         expect(h.rows.map((r) => [r.name, r.package_id, r.active])).toEqual([['shared_ping', 'com.acme.alpha', false]]);
+    });
+});
+
+/**
+ * [#32714 item 4] The rest of the metadata-service-only host's action doors,
+ * over the same real `MetadataManager` and `MemoryLoader`: two packages'
+ * same-named action bound to ONE object (the activation and execution doors),
+ * and the MCP doors PR #32687's changeset declared and left unpinned —
+ * `list_actions` (one row per package) and the bare `run_action` (the D3
+ * refusal naming both packages, nothing run). Each case beside its one-holder
+ * CONTROL, which answers as before.
+ */
+describe('[#32714] the metadata-service-only host: two packages on one object, and the MCP doors', () => {
+    const OTHER = 'crm_contact';
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+    const shipped = (packageId: string, objectName: string | undefined) => ({
+        name: 'shared_ping', label: `ping ${packageId}`, type: 'script', target: 'shared_ping',
+        ai: { exposed: true, description: 'Ping.' },
+        ...(objectName === undefined ? {} : { objectName }),
+        _packageId: packageId, _provenance: 'package',
+    });
+
+    async function host(holders: ReadonlyArray<readonly [string, string | undefined]>): Promise<Harness> {
+        const door = new MemoryLoader();
+        for (const [packageId, objectName] of holders) await door.save('action', 'shared_ping', shipped(packageId, objectName));
+        const manager = new MetadataManager({ formats: ['json'], loaders: [door] });
+        const objects = [
+            { name: OBJECT, _packageId: PACKAGE, _provenance: 'package', actions: [] },
+            { name: OTHER, _packageId: PACKAGE, _provenance: 'package', actions: [] },
+        ];
+        const metadata: any = {
+            load: (type: string, name: string) => manager.load(type, name),
+            loadDiagnosed: (type: string, name: string) => manager.loadDiagnosed(type, name),
+            loadMany: (type: string) => manager.loadMany(type),
+            listObjects: async () => objects,
+            getObject: async (name: string) => objects.find((o) => o.name === name),
+        };
+        const handlers = [...new Set(holders.map(([, objectName]) => objectName ?? 'global'))]
+            .map((objectName) => ({ objectName, actionName: 'shared_ping' }));
+        return boot({ metadata, handlers });
+    }
+    const bridgeOf = (h: Harness): any => (h.dispatcher as any).buildMcpBridge(ADMIN());
+    const listedPings = async (h: Harness) =>
+        ((await bridgeOf(h).listActions()) as any[]).filter((row) => row.name === 'shared_ping');
+
+    /**
+     * Refused, and no row: the flip of a name two packages hold on this object
+     * switches neither. It answers 404 "has no declaration", the answer the
+     * object-less pair gets above: the declaration read refuses the name
+     * (the execution door's 409 below) and the activation door drops that
+     * refusal for its "no declaration" branch. That door's 404 → 409 is
+     * #32689's, for every key; this pin moves with it.
+     */
+    it('two packages bound to ONE object — the activation door: refused, 404 RESOURCE_NOT_FOUND, and no row', async () => {
+        const h = await host([[ALPHA, OTHER], [BETA, OTHER]]);
+        for (const enabled of [false, true]) {
+            const res = await flip(h, OTHER, 'shared_ping', enabled);
+            expect(statusOf(res), bodyOf(res)).toBe(404);
+            expect(codeOf(res)).toBe('RESOURCE_NOT_FOUND');
+        }
+        expect(h.rows).toEqual([]);
+    });
+
+    it('two packages bound to ONE object — the execution door: 409 RESOURCE_CONFLICT naming both packages, nothing runs', async () => {
+        const h = await host([[ALPHA, OTHER], [BETA, OTHER]]);
+        const res = await h.dispatcher.handleActions(`/${OTHER}/shared_ping`, 'POST', {}, ADMIN());
+        expect(statusOf(res), bodyOf(res)).toBe(409);
+        expect(codeOf(res)).toBe('RESOURCE_CONFLICT');
+        expect(bodyOf(res)).toContain(ALPHA);
+        expect(bodyOf(res)).toContain(BETA);
+        expect(h.executed()).toBe(0);
+    });
+
+    it('CONTROL — one package on that object: the execution door runs it, the flip writes its row', async () => {
+        const h = await host([[ALPHA, OTHER]]);
+        const ran = await h.dispatcher.handleActions(`/${OTHER}/shared_ping`, 'POST', {}, ADMIN());
+        expect(statusOf(ran), bodyOf(ran)).toBe(200);
+        expect(h.executed()).toBe(1);
+        const res = await flip(h, OTHER, 'shared_ping', false);
+        expect(statusOf(res), bodyOf(res)).toBe(200);
+        expect(h.rows.map((r) => [r.name, r.package_id, r.active])).toEqual([['shared_ping', ALPHA, false]]);
+    });
+
+    it('MCP `list_actions`, both object-less: one row per package (as the changeset declares)', async () => {
+        const rows = await listedPings(await host([[ALPHA, undefined], [BETA, undefined]]));
+        expect(rows.map((row) => row.label).sort()).toEqual([`ping ${ALPHA}`, `ping ${BETA}`]);
+    });
+
+    it('CONTROL — MCP `list_actions`, one package: one row', async () => {
+        const rows = await listedPings(await host([[ALPHA, undefined]]));
+        expect(rows.map((row) => row.label)).toEqual([`ping ${ALPHA}`]);
+    });
+
+    it('MCP bare `run_action`, both object-less: the D3 refusal naming both packages (409 RESOURCE_CONFLICT), nothing runs', async () => {
+        const h = await host([[ALPHA, undefined], [BETA, undefined]]);
+        const thrown: any = await bridgeOf(h).runAction('shared_ping', {}).catch((e: unknown) => e);
+        expect(thrown).toBeInstanceOf(Error);
+        expect([thrown?.code, thrown?.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+        expect(String(thrown?.message)).toContain(ALPHA);
+        expect(String(thrown?.message)).toContain(BETA);
+        expect(h.executed()).toBe(0);
+    });
+
+    it('CONTROL — MCP bare `run_action`, one package: it runs', async () => {
+        const h = await host([[ALPHA, undefined]]);
+        await expect(bridgeOf(h).runAction('shared_ping', {})).resolves.toMatchObject({ ok: true });
+        expect(h.executed()).toBe(1);
     });
 });

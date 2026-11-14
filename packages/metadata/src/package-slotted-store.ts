@@ -239,8 +239,27 @@ export function keyIdentityOf(key: string): string {
  */
 const writeOrder = new WeakMap<ReadonlyMap<string, unknown>, Map<string, number>>();
 let writeSequence = 0;
-/** [#32560, #32517] The views whose write order {@link inheritStoreWriteOrder} took from another store. */
-const inheritedViews = new WeakSet<ReadonlyMap<string, unknown>>();
+/**
+ * [#32517, #32714] The stores that are VIEWS: assembled from what other stores
+ * hold ({@link newSlotView}), never written through {@link recordStoreWrite}.
+ * {@link latestMemberOf} reads a view's first member of a slot where the view
+ * has no write order for it; every other store answers by its write order.
+ */
+const slotViews = new WeakSet<ReadonlyMap<string, unknown>>();
+
+/**
+ * [#32714] A new, empty view: a store a reader assembles from other stores'
+ * items (the manager's view of a name over the registry and the loaders,
+ * {@link slotStoreOf}'s map of the loaders' stored items). It is declared a
+ * view here, where it is made, so {@link latestMemberOf} never has to infer it
+ * from a missing write order. Its sources hand each slot's member written last
+ * first, so the view's first member of a slot is that member.
+ */
+export function newSlotView<T>(): Map<string, T> {
+  const view = new Map<string, T>();
+  slotViews.add(view);
+  return view;
+}
 
 /** Record that `key` of `store` was just written ({@link readStoreEntry}'s "written last"). */
 export function recordStoreWrite(store: ReadonlyMap<string, unknown>, key: string): void {
@@ -272,11 +291,12 @@ function writtenLast(store: ReadonlyMap<string, unknown>, keys: readonly string[
  * does not hold counts as written before every key it does.
  */
 export function inheritStoreWriteOrder(view: ReadonlyMap<string, unknown>, from: ReadonlyMap<string, unknown> | undefined): void {
+  // [#32517] A store that takes another's order is a view: a slot none of
+  // whose members came from `from` still answers its first member in it
+  // ({@link latestMemberOf}).
+  slotViews.add(view);
   const order = from ? writeOrder.get(from) : undefined;
   if (!order) return;
-  // [#32517] A slot none of whose members came from `from` still answers its
-  // first member in the view ({@link latestMemberOf}).
-  inheritedViews.add(view);
   const inherited = new Map<string, number>();
   for (const key of view.keys()) {
     const at = order.get(key);
@@ -339,7 +359,7 @@ export function slotStoreOf<T>(
   name: string,
   items: Iterable<{ readonly packageId?: string; readonly data: T }>,
 ): Map<string, T> {
-  const store = new Map<string, T>();
+  const store = newSlotView<T>();
   for (const { packageId, data } of items) {
     const key = storeSlotKey(type, name, packageId, data);
     if (!store.has(key)) store.set(key, data);
@@ -540,22 +560,25 @@ function holdsSlot(store: ReadonlyMap<string, unknown>, slot: string): boolean {
  * ({@link writtenLast}) — the one item the slot held before a bundle's members
  * had keys of their own; the slot itself when none is held.
  *
- * A store no write was recorded on is a VIEW assembled from what others hold
- * (the manager's {@link slotStoreOf}-built view of a name the registry cannot
- * answer): its first member of the slot answers, the item that view kept for
- * the slot when one key held it. Its sources hand a slot's member written
- * last first (the registry by its write order, the `MemoryLoader`'s
- * `loadSlots`), so the view answers what they answer. [#32560] A view that
- * inherited the registry's write order ({@link inheritStoreWriteOrder})
- * answers by it for a slot the registry holds, and its first member for a
- * slot only a loader holds.
+ * A VIEW ({@link newSlotView}: a store assembled from what others hold, the
+ * manager's view of a name the registry cannot answer) answers its first
+ * member of the slot, the item that view kept for the slot when one key held
+ * it. Its sources hand a slot's member written last first (the registry by
+ * its write order, the `MemoryLoader`'s `loadSlots`), so the view answers what
+ * they answer. [#32560] A view that inherited the registry's write order
+ * ({@link inheritStoreWriteOrder}) answers by it for a slot the registry
+ * holds, and its first member for a slot only a loader holds.
+ *
+ * [#32714] A view is declared where it is made, never inferred from a store
+ * no write was recorded on: a store that is not a view answers by its write
+ * order, as {@link lastWrittenKeyOf} does (the last member in the store's
+ * order when none was recorded).
  */
 export function latestMemberOf(store: ReadonlyMap<string, unknown>, slot: string): string {
   const members = [...store.keys()].filter((key) => slotOfKey(key) === slot);
   if (members.length === 0) return slot;
   const order = writeOrder.get(store);
-  if (!order) return members[0]!;
-  if (inheritedViews.has(store) && !members.some((key) => order.has(key))) return members[0]!;
+  if (slotViews.has(store) && !members.some((key) => order?.has(key) === true)) return members[0]!;
   return writtenLast(store, members);
 }
 
@@ -862,14 +885,17 @@ export function refuseSeveralSlots(store: ReadonlyMap<string, unknown> | undefin
  * package a rollback names, or the package whose version it restores; `null`
  * for the environment's package-less slot) when `store` holds no slot of
  * `name` for it: no row is that holder's to write, and ⛔ never another
- * holder's. The refusal names every slot the store holds, packages first, then
- * the environment (the exact-qualifier door's order). The caller answers a
+ * holder's. The refusal names every holder of the name once, packages first,
+ * then the environment (the exact-qualifier door's order). The caller answers a
  * name with no slot at all as its own miss and never asks this.
  *
  * @throws {PackageScopedNameRefusedError} always (`not-held-by-qualifier`).
  */
 export function refuseSlotNotHeld(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string, packageId: string | null): never {
-  const holders = storeKeysNamed(store, type, name).map(slotPackageOf);
+  // [#32714] Each holder once, as `packageSlotsOf` and `refuseSeveralSlots`
+  // count them: one package's two members of a bundle (or two bindings of an
+  // action) are one holder, never two candidates.
+  const holders = [...new Set(storeKeysNamed(store, type, name).map(slotPackageOf))];
   const base: Omit<PackageScopedRefusal, 'message'> = {
     status: 'refused',
     reason: 'not-held-by-qualifier',
