@@ -127,6 +127,7 @@ const es = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "Mostrando los primeros {{shown}} de {{total}} registros. Acota el filtro.",
     rowCeilingNoteUnknownTotal: "Mostrando los primeros {{shown}} registros. Acota el filtro.",
+    ungroupedSection: "Otros",
   },
   actions: {
     decisionOutput: {
@@ -2768,6 +2769,10 @@ const es = {
     },
     login: {
       signingIn: "Iniciando sesión…",
+      directSignIn: {
+        description: "Inicia sesión con el inicio de sesión único de tu organización.",
+        retry: "Continuar con el inicio de sesión único",
+      },
       ssoHandoff: "Continuar a {{target}}",
       devAdminHint: {
         title: "Instancia de desarrollo local",
@@ -2791,6 +2796,13 @@ const es = {
         ssoResponseRejected: "El servicio de inicio de sesión de tu organización envió una respuesta que este sistema no pudo aceptar. Pide a tu administrador que revise la configuración del inicio de sesión único.",
         ssoStartFromLoginPage: "El inicio de sesión debe empezar en la página de acceso de este sistema. Introduce aquí tu correo de trabajo y elige «Iniciar sesión con SSO».",
         ssoTechnicalDetails: "Detalles técnicos",
+        directSignInIncomplete: "No se completó el inicio de sesión: volviste del inicio de sesión único sin haber iniciado sesión. Comprueba que este navegador permite cookies para este sitio y vuelve a intentarlo.",
+        directSignInUnavailable: "No se pudo iniciar el inicio de sesión único para este sistema. Pide a tu administrador que revise qué servicio de inicio de sesión usa.",
+        directSignInRateLimited: "Se iniciaron demasiados inicios de sesión desde esta red hace un momento. Espera unos segundos y vuelve a intentarlo.",
+        ssoAccessDenied: "La cuenta con la que iniciaste sesión no tiene acceso a este entorno. Inicia sesión con una cuenta que tenga acceso o pide a un administrador de la organización de este entorno que te añada como miembro.",
+        ssoSwitchAccount: "Cambiar de cuenta",
+        ssoBackToConsole: "Volver a la consola",
+        ssoSwitchAccountHint: "Cambiar de cuenta abre tu servicio de inicio de sesión en una pestaña nueva y cierra allí tu sesión. Después, vuelve a iniciar sesión aquí con una cuenta que tenga acceso.",
         twoFactorInvalidCode: "Ese código no es válido. Revise su aplicación de autenticación e inténtelo de nuevo.",
         twoFactorInvalidBackupCode: "Ese código de respaldo no es válido o ya se ha utilizado.",
         twoFactorTooManyAttempts: "Demasiados códigos incorrectos. Vuelva a iniciar sesión con su contraseña.",
@@ -4045,6 +4057,11 @@ const es = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Enviar mensaje',
     scrollToBottom: 'Ir al último mensaje',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "Se enviará cuando termine la respuesta actual",
+      queuedCancel: "Cancelar",
+    },
     answer: {
       showFull: 'Mostrar respuesta completa',
       collapse: 'Contraer',
@@ -4142,6 +4159,9 @@ const es = {
       countSeedData: "datos de ejemplo",
       extendTarget: "Se añade a la app existente: {{app}}",
       awaitingConfirm: "Pendiente de confirmación",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "Confirmado",
+      buildFailed: "No construido: no se creó nada",
       iterateOrNew: {
         question: "Esto se solapa con «{{app}}», una app que ya tiene. ¿Seguir mejorándola o crear una app independiente?",
         questionUnnamed: "Esto se solapa con una app que ya tiene. ¿Seguir mejorando esa app o crear una independiente?",
@@ -4174,6 +4194,16 @@ const es = {
       verifying: "Comprobando el cambio…",
       verifyStep: "paso {{n}}",
       verified: "Cambio comprobado",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "{{count}} por corregir",
+      issuesSummary: "Algunas partes de esta construcción deben corregirse antes de poder usarse. Responde «corrige los problemas» y el asistente las reparará.",
+      warningsSummary: "La aplicación está construida, con algunos puntos que conviene revisar. Pregunta al asistente cuáles son si quieres mejorarla.",
+      issuesDetails: "Detalles técnicos",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "{{count}} requieren atención",
+      needsAttention_one: "{{count}} requiere atención",
+      needsAttention_many: "{{count}} de elementos requieren atención",
+      needsAttention_other: "{{count}} requieren atención",
       unknownPhase: "Fase de creación desconocida",
       nextStepsLead: "A continuación puede decir: {{steps}}",
       nextStepQuote: "«{{step}}»",
@@ -4529,6 +4559,11 @@ const es = {
     daysAgo_other: 'hace {{count}} días',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "Los registros aparecerán aquí al publicar",
+      message: "Estás previsualizando un objeto que aún no se ha publicado, por lo que no tiene registros. Publícalo para empezar a añadir registros o cargar sus datos de ejemplo.",
+    },
     empty: {
       loadFailedTitle: 'No se pudo cargar la vista previa del borrador',
       loadFailedDescription: 'No se pudo leer la capa de borrador. Reintenta o comprueba tu conexión.',

@@ -457,6 +457,44 @@ describe('ObjectChart — the option-color probe reads the dataset as the host p
     expect(lastSchema?.categoryColors ?? null).toBeNull();
   });
 
+  /*
+   * The probe's non-2xx guard is judged by the STATUS, never by the body. The
+   * 409 above names no object (an ADR-0112 envelope), so a probe with no guard
+   * reads it as a definition with no `object` and stops there anyway: that pin
+   * cannot tell the guard apart. This refusal's body ALSO carries a definition
+   * naming `task`, so without the guard the chart would read `task` and draw
+   * its option labels from a dataset the server refused to resolve.
+   */
+  it('a refusal whose body names the object is still a refusal: no object read, theme palette kept', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === '/api/v1/meta/dataset/showcase_task_metrics?callerPackage=com.acme.app') {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            success: false,
+            error: { code: 'RESOURCE_CONFLICT', message: 'held by 2 packages' },
+            item: { name: 'showcase_task_metrics', object: 'task', dimensions: [{ name: 'status', field: 'status' }] },
+          }),
+        };
+      }
+      if (url === '/api/v1/meta/object/task') return { ok: true, status: 200, json: async () => TASK_DOC };
+      return { ok: true, status: 200, json: async () => ({}) };
+    }));
+    const source = datasetSource();
+    render(<ObjectChart schema={DATASET_SCHEMA} dataSource={source} packageId="com.acme.app" />);
+    await waitFor(() => expect(source.queryDataset).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(lastSchema?.data?.[0]?.status).toBe('todo'));
+    // Let the probe's effect settle, so an object read it made would be recorded.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).toEqual(['/api/v1/meta/dataset/showcase_task_metrics?callerPackage=com.acme.app']);
+    expect(lastSchema?.data?.[0]?.status).toBe('todo');
+    expect(lastSchema?.categoryColors ?? null).toBeNull();
+  });
+
   it('CONTROL: a host with no package reads the definition with no caller', async () => {
     const calls = installResolvingFetch();
     render(<ObjectChart schema={DATASET_SCHEMA} dataSource={datasetSource()} />);

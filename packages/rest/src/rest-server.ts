@@ -754,8 +754,10 @@ export const META_ITEM_RESET_PARAMS: readonly string[] = ['state', 'dropStorage'
  * **Measured**: the paging pair `sinceSeq` and `limit`, each read through its
  * declaration (`readDeclaredQueryNumber`); the authoring-door and per-caller
  * refusals read the session, not the query. Plus {@link META_ITEM_MEMBER_PARAM}.
+ * [ADR-0150 D3/D4, #32905] And `package`, the holder whose versions to read,
+ * through {@link metaItemPackageBinding} as `/layers?package=` reads it.
  */
-export const META_ITEM_HISTORY_PARAMS: readonly string[] = ['sinceSeq', 'limit', META_ITEM_MEMBER_PARAM];
+export const META_ITEM_HISTORY_PARAMS: readonly string[] = ['sinceSeq', 'limit', 'package', META_ITEM_MEMBER_PARAM];
 
 /**
  * [#22877] The closed set of `POST {metaPath}/:type/:name/publish`.
@@ -769,9 +771,10 @@ export const META_ITEM_PUBLISH_PARAMS: readonly string[] = ['package', META_ITEM
  * [#22877] The closed set of `POST {metaPath}/:type/:name/rollback`.
  * **Measured**: `toVersion`, the query fallback after the body's `toVersion` /
  * `version`; the message rides the body, the actor the session. Plus
- * {@link META_ITEM_MEMBER_PARAM}.
+ * {@link META_ITEM_MEMBER_PARAM}. [ADR-0150 D3/D4, #32905] And `package`, the
+ * holder whose row is restored, through {@link metaItemPackageBinding}.
  */
-export const META_ITEM_ROLLBACK_PARAMS: readonly string[] = ['toVersion', META_ITEM_MEMBER_PARAM];
+export const META_ITEM_ROLLBACK_PARAMS: readonly string[] = ['toVersion', 'package', META_ITEM_MEMBER_PARAM];
 
 // [#23072] The by-name `/meta` doors OUTSIDE ruling 6116165299's list, each
 // with the closed set measured from its own read points (AGENTS.md route rule

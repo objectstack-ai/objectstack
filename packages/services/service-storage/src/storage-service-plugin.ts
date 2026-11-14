@@ -91,6 +91,11 @@ import {
 } from './attachment-access-hooks.js';
 import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
 import { contributeAttachmentMemberGrant } from './attachment-member-grant.js';
+import {
+  ATTACHMENT_REMOVE_ROUTE,
+  attachmentRemovalCallerResolver,
+  registerAttachmentRemovalRoutes,
+} from './attachment-removal-routes.js';
 import { installAttachmentFilesOptInGate } from './attachment-files-opt-in.js';
 import {
   FileAttachmentService,
@@ -775,6 +780,12 @@ export class StorageServicePlugin implements Plugin {
               'File storage is still accessible programmatically via kernel.getService("storage").',
           );
         }
+
+        // The uploader's removal door (maintainer ruling 6879388034): a member
+        // removes an attachment they uploaded, with no delete bit on the
+        // member grant. Beside the storage family, not in it — its route is
+        // fixed and its ledger its own (`attachment-removal-routes.ts`).
+        if (httpServer) mountAttachmentRemovalDoor(httpServer, toGateRegistry(ctx), engine, ctx.logger);
       }
 
       // ── Bind to the `storage` settings namespace ──────────────────
@@ -1782,6 +1793,42 @@ async function resolveAdmissionTenancyPosture(
 ): Promise<TenancyPosture | undefined> {
   const tenancy = tenancyServiceResolver(registry);
   return tenancy ? classifyAdmissionTenancyPosture(tenancy) : undefined;
+}
+
+/**
+ * Mount the uploader's removal door (`attachment-removal-routes.ts`) on the
+ * kernel's HTTP server, over this kernel: the data engine the row is read as
+ * the caller and removed through, and the caller resolution every own-row door
+ * shares, reading this registry's `auth` service and `tenancy` posture per
+ * request, as the storage family's own doors do. No engine leaves the door up
+ * and answering `503`; no `auth` service leaves it refusing every request as
+ * anonymous (`401`). An HTTP server that registers no DELETE routes mounts
+ * nothing, and says so: a member then cannot remove an attachment they
+ * uploaded.
+ */
+function mountAttachmentRemovalDoor(
+  http: IHttpServer,
+  registry: StorageGateRegistry,
+  engine: IDataEngine | null,
+  logger: { info(msg: string): void; warn(msg: string): void },
+): void {
+  if (typeof (http as Partial<IHttpServer>).delete !== 'function') {
+    logger.warn(
+      `StorageServicePlugin: the HTTP server registers no DELETE routes, so the attachment removal door ` +
+        `(DELETE ${ATTACHMENT_REMOVE_ROUTE}) is not mounted, and a member cannot remove an attachment they uploaded.`,
+    );
+    return;
+  }
+  const getEngine = (): IDataEngine | undefined => engine ?? undefined;
+  registerAttachmentRemovalRoutes(http, {
+    getEngine,
+    resolveCaller: attachmentRemovalCallerResolver({
+      getEngine,
+      getAuth: () => resolveGateAuthService(registry),
+      tenancy: tenancyServiceResolver(registry),
+    }),
+  });
+  logger.info(`StorageServicePlugin: attachment removal door mounted at DELETE ${ATTACHMENT_REMOVE_ROUTE}`);
 }
 
 /**

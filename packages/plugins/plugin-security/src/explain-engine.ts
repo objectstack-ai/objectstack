@@ -48,7 +48,7 @@ import type {
   ControlledByParentWriteUnresolvedReason,
 } from '@objectstack/spec/contracts';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
-import { controlledByParentMasterOf } from '@objectstack/spec/data';
+import { controlledByParentMasterOf, controlledByParentWriteRequiresMasterRead } from '@objectstack/spec/data';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type {
   AuthzPosture,
@@ -1198,6 +1198,52 @@ const MASTER_DENIAL_LEG_DETAIL: Record<ControlledByParentWriteDenialLeg, string>
 };
 
 /**
+ * [ADR-0055 §3 as amended for #33250 · ruling A+] {@link MASTER_DENIAL_LEG_DETAIL}
+ * for a record whose chain asks READ of a master somewhere: a hop whose detail
+ * declares `sharing.controlledByParent.writeRequiresMasterRead` asks the read
+ * door instead of the edit legs, and a refusal there is reported on the
+ * `object_permission` leg (the read is refused) or the `row_level_security`
+ * leg (the master row is not readable). The served member reports the leg
+ * alone, so the prose states both questions a leg can answer in such a chain,
+ * never only the edit one. {@link chainAsksMasterRead} decides which map.
+ */
+const MASTER_DENIAL_LEG_DETAIL_WITH_READ: Record<ControlledByParentWriteDenialLeg, string> = {
+  object_permission:
+    'the principal holds no object-level grant on a master that the check asks of it (update; read, for a ' +
+    'master whose detail declares writeRequiresMasterRead)',
+  row_level_security:
+    "a master row is outside the principal's row scope on that master (its write row-level security; its " +
+    'read scope, for a master whose detail declares writeRequiresMasterRead)',
+  record_sharing: MASTER_DENIAL_LEG_DETAIL.record_sharing,
+  master_chain: MASTER_DENIAL_LEG_DETAIL.master_chain,
+};
+
+/**
+ * [ADR-0055 §3 as amended for #33250] Does the master-detail write check ask
+ * READ of any master on `object`'s chain? True when `object`, or a
+ * `controlled_by_parent` master above it, declares
+ * `sharing.controlledByParent.writeRequiresMasterRead` (read through the
+ * spec's one reader). Walked over the registry's schemas with the spec's own
+ * master resolver, bounded and cycle-guarded; an unreadable schema ends the
+ * walk with what it found. It picks report prose only, never a verdict.
+ */
+function chainAsksMasterRead(deps: Pick<ExplainEngineDeps, 'ql'>, object: string): boolean {
+  const visited = new Set<string>();
+  let current: string | undefined = object;
+  while (current !== undefined && !visited.has(current) && visited.size < 16) {
+    visited.add(current);
+    let schema: any;
+    try { schema = deps.ql?.getSchema?.(current) ?? null; } catch { schema = null; }
+    if (!schema || schema.sharingModel !== 'controlled_by_parent') return false;
+    if (controlledByParentWriteRequiresMasterRead(schema)) return true;
+    const master = controlledByParentMasterOf(schema.fields);
+    const reference = master ? schema.fields?.[master.field]?.reference : undefined;
+    current = typeof reference === 'string' ? reference : undefined;
+  }
+  return false;
+}
+
+/**
  * [ADR-0055] Why the master-detail write check reached no verdict, and what the
  * write answers instead. The answer is the same for every by-id write the check
  * runs on: each condition throws one error class whatever the verb.
@@ -1251,7 +1297,10 @@ function nullMasterReferenceOf(
  * One answer serves every verb here. Whatever the record's own verb, the check
  * judges EDIT access to the master (the object-level `update` grant, the
  * master's write row-level security and record sharing, on every hop up the
- * chain) and reads the verb only to pick its `insert` branch.
+ * chain) and reads the verb only to pick its `insert` branch. [ADR-0055 §3 as
+ * amended for #33250] On a hop whose detail declares
+ * `writeRequiresMasterRead` it judges READ on that master instead, for every
+ * verb alike, so the one answer still serves them all.
  * `masterGateCoversOperation` states the same fact for the ownership floor's
  * hand-over: deleting a child does not delete its master. So the answer the
  * served member computes for an update is the answer step 2.8 gives each of
@@ -1289,6 +1338,12 @@ function masterWriteCheckRefusal(
    * its `master_chain` refusal is narrated as that rule.
    */
   nullMasterFk?: string,
+  /**
+   * [ADR-0055 §3 as amended for #33250] The record's chain asks READ of a
+   * master somewhere ({@link chainAsksMasterRead}): a `deny` leg is narrated
+   * with {@link MASTER_DENIAL_LEG_DETAIL_WITH_READ}.
+   */
+  asksMasterRead = false,
 ): { outcome: ExplainRecordAttribution['outcome']; detail: string } | undefined {
   switch (outcome?.outcome) {
     case 'allow':
@@ -1307,7 +1362,7 @@ function masterWriteCheckRefusal(
       return {
         outcome: 'excluded',
         detail: `${MASTER_DERIVED}: the master-detail write check the by-id ${verb} runs refuses this ${verb} on its ` +
-          `'${outcome.leg}' leg — ${MASTER_DENIAL_LEG_DETAIL[outcome.leg] ?? 'a leg this report does not describe'}. ` +
+          `'${outcome.leg}' leg — ${(asksMasterRead ? MASTER_DENIAL_LEG_DETAIL_WITH_READ : MASTER_DENIAL_LEG_DETAIL)[outcome.leg] ?? 'a leg this report does not describe'}. ` +
           `The ${verb} answers 403 PERMISSION_DENIED.`,
       };
     case 'unresolvable': {
@@ -2108,7 +2163,12 @@ async function applyRecordAttribution(
   const masterFault = masterOrFault === DEPENDENCY_FAULT;
   const masterRefusal = masterOrFault === undefined || masterOrFault === DEPENDENCY_FAULT
     ? undefined
-    : masterWriteCheckRefusal(masterOrFault, engineOp, nullMasterReferenceOf(deps, object, record as Record<string, unknown>));
+    : masterWriteCheckRefusal(
+        masterOrFault,
+        engineOp,
+        nullMasterReferenceOf(deps, object, record as Record<string, unknown>),
+        chainAsksMasterRead(deps, object),
+      );
   // [ADR-0055] A record-grained read of a `controlled_by_parent` record meets
   // a master leg too: the read door ANDs the record's master-derived read scope
   // (the master ids the principal can read, the chain included) into the find,

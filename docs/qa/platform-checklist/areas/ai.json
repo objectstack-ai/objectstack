@@ -134,7 +134,7 @@
       "title": "MCP HTTP transport (/mcp) and the public /mcp/skill endpoint gate exactly as documented: 404 when opted out, 501 when unimplemented, 401 anonymous, 403 scopeless-OAuth, full tool list when keyed",
       "since": "v15",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -146,7 +146,7 @@
       },
       "variants": [
         "OAuth scope data:read → read-family tools: list_objects, describe_object, validate_expression, query_records, get_record, and aggregate_records where the bridge implements aggregate (packages/mcp/src/mcp-http-tools.ts canRead block; packages/spec/src/ai/mcp.zod.ts MCP_OAUTH_SCOPE_DATA_READ)",
-        "OAuth scope data:write → write-family tools: create_record, update_record, delete_record",
+        "OAuth scope data:write → write-family tools: create_record, update_record, delete_record and create_upload_link; delete_records registers only beside data:read, because it selects through a list-class read (packages/mcp/src/mcp-http-tools.ts, #30891), so data:write alone does not serve it",
         "OAuth scope actions:execute → list_actions, run_action, and resume_run where the host can resume runs (the same scope grants all three: packages/mcp/src/mcp-http-tools.ts registerActionTools, canResume)",
         "OAuth scope metadata:write → the authoring tools the host injects (packages/mcp/src/mcp-server-runtime.ts registerAuthoringTools; packages/spec/src/ai/mcp.zod.ts MCP_OAUTH_SCOPE_METADATA_WRITE), served only to an OAuth grant naming metadata:write — a key or a session is served none"
       ],
@@ -227,7 +227,8 @@
         },
         { "revision": 8, "date": "2026-10-31", "change": "acceptance[4] names its transport. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the HTTP door listed the twelve, while the stdio door on the same build listed 9 with no action family, and the clause did not say which door 'the documented twelve' meant. It now names /api/v1/mcp and says why stdio serves 9. Re-read at base 488b3ed0: packages/mcp/src/mcp-http-tools.ts wireBridgeTools (the action pair registers only when the bridge implements listActions and runAction), packages/mcp/src/stdio-data-bridge.ts createStdioDataBridge (an McpDataBridge, no action methods). The HTTP assertion is unchanged", "ref": "#27409" },
         { "revision": 9, "date": "2026-11-08", "change": "acceptance[4].clause and .verify name the HTTP tool set as 15: delete_records, read_file and create_upload_link joined the 12 it listed, and the stdio door serves 10 (its former 9 plus delete_records). Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb): tools/list answered 15 on a keyed session. Read at base 4894cfe1", "ref": "#31499" },
-        { "revision": 10, "date": "2026-11-10", "change": "acceptance[4].clause and .verify name the HTTP tool set as 17 and the stdio set as 12: list_datasets and query_dataset (ADR-0149 D2) register on both doors where the bridge carries the dataset executor, and analytics is foundational, so the showcase serves them. Read from source at 9091955b (packages/mcp/src/mcp-http-tools.ts registerDatasetTools; packages/mcp/src/stdio-data-bridge.ts, the datasetTools members; packages/mcp/src/plugin.ts datasetToolsService); no live count was made. The dataset tools themselves are ai.mcp-dataset-tools. Scoped sweep #32269 (epic #32022 M3, theme 7)", "ref": "#32269" }
+        { "revision": 10, "date": "2026-11-10", "change": "acceptance[4].clause and .verify name the HTTP tool set as 17 and the stdio set as 12: list_datasets and query_dataset (ADR-0149 D2) register on both doors where the bridge carries the dataset executor, and analytics is foundational, so the showcase serves them. Read from source at 9091955b (packages/mcp/src/mcp-http-tools.ts registerDatasetTools; packages/mcp/src/stdio-data-bridge.ts, the datasetTools members; packages/mcp/src/plugin.ts datasetToolsService); no live count was made. The dataset tools themselves are ai.mcp-dataset-tools. Scoped sweep #32269 (epic #32022 M3, theme 7)", "ref": "#32269" },
+        { "revision": 11, "date": "2026-11-14", "change": "variants[1] re-pointed (stale spec, QA run #33081, comment 6850173588; ledger row 183 of #32908): data:write alone serves create_upload_link beside the three record writes, and delete_records only with data:read (mcp-http-tools.ts canWrite / canRead). The record's metadata:write-alone -32601 reading is left to a live drive. No clause changed. Read at base 82838e83", "ref": "#33328" }
       ]
     },
     {
@@ -235,7 +236,7 @@
       "title": "MCP stdio auto-start fails closed without OS_MCP_STDIO_API_KEY; with a member-bound key, reads AND aggregates honor RLS/FLS and revocation bites on the next call",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "cli",
       "personas": ["restricted member API key (for the RLS half — on showcase, a contributor-bound member)", "a second restricted member API key for the FLS half (on showcase, a client_liaison-bound member — see fixtures.requires)", "admin API key (for the full-row comparison)"],
@@ -243,7 +244,7 @@
         "app": "any",
         "requires": [
           "an OWD-private object with rows owned by two different users (the showcase task/invoice seeds qualify when run against the showcase)",
-          "two osk_ API keys: one bound to a restricted member, one to an admin (Setup → Connect an Agent, or POST /api/v1/keys). Minting them on the os start boot: an auth POST that carries a Cookie header and no Origin (a curl cookie jar, for one) is refused there with 403 MISSING_OR_NULL_ORIGIN, while os dev accepts it, so send an Origin header naming the boot (Origin: http://localhost:PORT) or sign in without a cookie jar, then POST /api/v1/keys with the bearer token",
+          "two osk_ API keys: one bound to a restricted member, one to an admin (Setup → Connect an Agent, or POST /api/v1/keys). Minting them on the os start boot: an auth POST that carries a Cookie header and no Origin (a curl cookie jar, for one) is refused there with 403 MISSING_OR_NULL_ORIGIN, while os dev accepts it, so send an Origin header naming the boot (Origin: http://localhost:PORT) or sign in without a cookie jar, then POST /api/v1/keys with the bearer token. Simpler: mint the users and keys on an os dev boot of the same DB and use the keys on os start; a stored key is the plain sha256 of the raw key, independent of the auth secret (hashApiKey, packages/core/src/security/api-key.ts), so it verifies on both boots (QA run #32953 R6)",
           "for the aggregate half: a field on that object the restricted member cannot read (the same FLS-masked field the row/field clause relies on), plus at least one readable field to group a count by",
           "⚠️ on showcase NO single persona carries both RLS-hidden rows and an FLS-masked field on one object, so the RLS and FLS halves take two personas. RLS: a contributor-bound member (the search:qa-contributor-bound-member recipe) reads only its own showcase_invoice rows. FLS: the only `readable: false` grants are showcase_client_liaison's on showcase_project.budget / spent / budget_remaining (permission-sets.ts ClientLiaisonPermissionSet), and showcase_project is public_read_write, so that persona has no RLS-hidden rows there. Mint a key for each; score the RLS legs of acceptance[3] and acceptance[4] on the first, the FLS legs of acceptance[3] and acceptance[5] on the second"
         ],
@@ -367,6 +368,12 @@
           "date": "2026-11-01",
           "change": "QA run #28545 (W3-C1R) finding: steps[7]'s revoke 'as the admin' failed when the admin used an API key, which answers 403 PERMISSION_DENIED 'Changing an API key requires a signed-in session' since #27692 (api-key-management-credential.ts: every non-read sys_api_key operation from an API-key credential is refused). The step now says to revoke from the admin's signed-in session, or Setup's API Keys page, and names that refusal. No clause changed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[1] re-pointed (fixture recipe, QA run #32953 R6, comment 6840067290; ledger row 21 of #32908): keys minted on an os dev boot verify on os start over the same DB, because the stored key is sha256 of the raw key (hashApiKey, api-key.ts), which avoids the Origin-header detour. No clause changed. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -909,7 +916,7 @@
       "title": "MCP on v18: a coded refusal on the data tools, list_actions and the record resource renders {error:{code,message,status}} (not the bare message), both MCP doors honour a runtime-authored object's apiEnabled:false including after a restart, and run_action withholds PERMISSION_DENIED details",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -939,7 +946,7 @@
         {
           "clause": "get_record for a missing id renders {error:{code:\"RECORD_NOT_FOUND\",status:404}}",
           "oracle": "api",
-          "verify": "tool result body",
+          "verify": "the tool result body on the HTTP door, POST /api/v1/mcp: the coded refusal is the HTTP face's (QA run #33025 measured it there; packages/mcp/src/mcp-coded-refusal.test.ts drives that face), so a stdio call does not score this clause",
           "evidence": "the excerpt"
         },
         {
@@ -978,7 +985,8 @@
           "ref": "#24649"
         },
         { "revision": 3, "date": "2026-10-26", "change": "automated.ref extended — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807). acceptance[1]: mcp-coded-refusal.test.ts asserts the clause at plugin-unit layer but was not in the ref. acceptance[2]: the record found no pin driving query_records on an apiEnabled false runtime object across a restart; re-read on main at b4199c96, packages/qa/dogfood/test/mcp-stdio-runtime-object-exposure.test.ts does, on the stdio door at engine layer, so it joins the ref and the ref now names each pin's layer. No clause changed, no status changed", "ref": "#25836" },
-        { "revision": 4, "date": "2026-10-31", "change": "fixtures.requires[3] and steps[2] name acceptance[3]'s producer. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the fixtures named no recipe for the PERMISSION_DENIED arm, and the run staged it with a runtime declarative update action on showcase_task, ai-exposed, run as auditor.demo. Re-read at base 488b3ed0: packages/runtime/src/action-execution.ts (the declarative update writes as the caller), packages/spec/src/ui/action.zod.ts (ai.exposed requires a description). The clause is unchanged", "ref": "#27409" }
+        { "revision": 4, "date": "2026-10-31", "change": "fixtures.requires[3] and steps[2] name acceptance[3]'s producer. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the fixtures named no recipe for the PERMISSION_DENIED arm, and the run staged it with a runtime declarative update action on showcase_task, ai-exposed, run as auditor.demo. Re-read at base 488b3ed0: packages/runtime/src/action-execution.ts (the declarative update writes as the caller), packages/spec/src/ui/action.zod.ts (ai.exposed requires a description). The clause is unchanged", "ref": "#27409" },
+        { "revision": 5, "date": "2026-11-14", "change": "acceptance[1].verify names the door (stale spec, QA run #33025, comment 6844741021; ledger row 70 of #32908): the bare 'tool result body' named none, and the coded refusal holds on the HTTP /mcp face that mcp-coded-refusal.test.ts drives. The clause is unchanged. Read at base 82838e83", "ref": "#33328" }
       ]
     },
     {
@@ -986,14 +994,14 @@
       "title": "MCP names package items by their face: prompts/list serves NS-NAME for a package skill and the bare name for an environment skill, list_actions rows carry namespace and face, run_action takes namespace, and a name two holders share is refused naming the faces",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin holding an osk_ API key, over MCP HTTP"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a skill qa_triage with instructions (skill is narrowed to one holder per namespace, so two namespaces may each hold it); qa_a also holds an object-less action qa_a_ping and an object qa_a_ticket with an embedded action escalate. One skill name long enough that NS-NAME passes 64 characters",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a skill qa_triage with instructions (skill is narrowed to one holder per namespace, so two namespaces may each hold it); qa_a also holds an object-less action qa_a_ping and an object qa_a_ticket with an embedded action escalate, each exposed to AI so list_actions lists it (ai: { exposed: true, description }: the action schema requires a description of at least 40 characters on an exposed action, packages/spec/src/ui/action.zod.ts). One skill name long enough that NS-NAME passes 64 characters",
           "an environment skill qa_env_triage (PUT /api/v1/meta/skill/qa_env_triage with tools: [] and instructions)",
           "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)"
         ]
@@ -1043,7 +1051,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/mcp/src/skill-prompts.test.ts, packages/spec/src/ai/face-name.test.ts, packages/runtime/src/mcp-action-namespace.test.ts; no live spec drives the scratch-package pair"
+        "ref": "packages/mcp/src/skill-prompts.test.ts, packages/spec/src/ai/face-name.test.ts, packages/runtime/src/mcp-action-namespace.test.ts, packages/mcp/src/mcp-action-tools.test.ts (negative[2]: 'a face two actions derive is refused once, naming both', refusedFaces of length 1); no live spec drives the scratch-package pair"
       },
       "source": [
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D6 (the ruled faces NS-NAME and OBJECT-ACTION, the 64-character cut) and D5 (MCP)",
@@ -1065,6 +1073,12 @@
           "date": "2026-11-10",
           "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
           "ref": "#32330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[0] and automated.ref re-pointed (stale spec, QA runs #33025 and #33081, comments 6844741021 and 6850173588; ledger row 71 of #32908). An exposed action needs an ai.description of 40 characters or more (action.zod.ts), which the fixture did not say. negative[2]'s pin, packages/mcp/src/mcp-action-tools.test.ts, was missing from automated.ref. No clause changed. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -1321,7 +1335,7 @@
       "title": "A host-installed MCP tool-call interceptor sees every call with its door, transport, name and principal, may deny one with a coded refusal the tool never runs past, is told of a call to an unregistered name, and a verdict it cannot render refuses the call as a server fault",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1336,7 +1350,7 @@
           "one seeded showcase_task id for the delete call"
         ],
         "knownGaps": [
-          "no stock plugin installs an interceptor: the seam is for a host (packages/mcp/src/mcp-server-runtime.ts, setToolInterceptor). The inline plugin above is read from the kernel's plugin contract and the showcase config's `plugins` list, and has not been booted. A run that cannot boot it records blocked(fixture) for acceptance[0]-[4] and still scores acceptance[5]. FOLLOW-UPS §18c"
+          "no stock plugin installs an interceptor: the seam is for a host (packages/mcp/src/mcp-server-runtime.ts, setToolInterceptor). The inline plugin above is read from the kernel's plugin contract and the showcase config's `plugins` list, and was booted by QA runs #33025 and #33089, where all five legs held; in a typed config the inline literal needs an `as any` cast. A run that cannot boot it records blocked(fixture) for acceptance[0]-[4] and still scores acceptance[5]. FOLLOW-UPS §18c"
         ]
       },
       "steps": [
@@ -1344,7 +1358,7 @@
         "call delete_record { objectName: 'showcase_task', recordId: TASK }; then GET /api/v1/data/showcase_task/TASK",
         "call describe_object { objectName: 'showcase_task' }; read the server log",
         "send tools/call for qa_no_such_tool; read the log",
-        "start the same scratch copy over stdio the way ai.mcp-stdio-fail-closed does (`os start` with OS_MCP_STDIO_ENABLED=true and OS_MCP_STDIO_API_KEY set to the osk_ key, never `os dev`, whose banner owns stdout) and call list_objects there"
+        "start the same scratch copy over stdio the way ai.mcp-stdio-fail-closed does (`os start` with OS_MCP_STDIO_ENABLED=true and OS_MCP_STDIO_API_KEY set to the osk_ key, never `os dev`, whose banner owns stdout); wait until the server is ready (GET /api/v1/health answers 200) before the stdio calls, because a call sent inside the boot window is dropped (QA run #33089); then call list_objects there"
       ],
       "acceptance": [
         {
@@ -1374,7 +1388,7 @@
         {
           "clause": "the stdio door passes through the same seam",
           "oracle": "log",
-          "verify": "the stdio list_objects call logs transport 'stdio'",
+          "verify": "the stdio list_objects call, sent after the server is ready (steps[4]), logs transport 'stdio'",
           "evidence": "the log line"
         },
         {
@@ -1408,6 +1422,12 @@
           "date": "2026-11-10",
           "change": "initial — the MCP tool-call interceptor seam (#31605) and the unregistered-name observation (#31838). Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "knownGaps[0], steps[4] and acceptance[4].verify re-pointed (stale spec, QA runs #33025 and #33089, comments 6844741021 and 6850460138; ledger row 72 of #32908). The inline interceptor plugin has been booted and all five legs held, so knownGaps[0] no longer says it was not; the typed-config cast is named. The stdio call waits for readiness. No clause changed. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },

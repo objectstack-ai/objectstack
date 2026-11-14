@@ -12,7 +12,9 @@
  * re-indented one level and otherwise unedited: the same reads, in the same
  * order, answering with the same receipts and the same degradations.
  * Edited since the move: `applySeedBodies`' failure receipt counts the rows the
- * loader wrote before it threw and names the seed that stopped it.
+ * loader wrote before it threw and names the seed that stopped it; and
+ * [#33152] `collectBatchPendingDeclarations` collects the batch's
+ * `object_extension` drafts too.
  *
  * ## How the moved bodies reach the class
  *
@@ -212,8 +214,13 @@ export async function collectBatchPendingDeclarations(
     // at this line instead — and [#17063]'s NARROWING was one too, which is
     // how `pages` left this literal in the same edit it left
     // `RuntimeStackContext`.
+    //
+    // [#33152] `objectExtensions` is the batch's `object_extension` drafts,
+    // which the gate folds onto their targets in `objects` rather than joining
+    // a collection: without them a sibling's formula or hop into a field the
+    // batch's own extension adds read as unknown and rolled the batch back.
     const pending: { [K in keyof RuntimePendingDeclarations]-?: unknown[] } = {
-        objects: [], permissions: [], books: [], datasets: [], flows: [],
+        objects: [], permissions: [], books: [], datasets: [], flows: [], objectExtensions: [],
     };
     let any = false;
     // [#32666] A flow draft is read only to subtract it from the live flows an

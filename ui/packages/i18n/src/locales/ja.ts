@@ -125,6 +125,7 @@ const ja = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "{{total}} 件中、最初の {{shown}} 件を表示しています。フィルターを絞り込んでください。",
     rowCeilingNoteUnknownTotal: "最初の {{shown}} 件を表示しています。フィルターを絞り込んでください。",
+    ungroupedSection: "その他",
   },
   actions: {
     decisionOutput: {
@@ -2700,6 +2701,10 @@ const ja = {
     },
     login: {
       signingIn: "サインインしています…",
+      directSignIn: {
+        description: "組織のシングルサインオンでサインインします。",
+        retry: "シングルサインオンで続行",
+      },
       ssoHandoff: "{{target}} に進む",
       devAdminHint: {
         title: "ローカル開発インスタンス",
@@ -2723,6 +2728,13 @@ const ja = {
         ssoResponseRejected: "所属組織のサインインサービスから、このシステムが受け付けられない応答が返されました。管理者にシングルサインオンの設定を確認するよう依頼してください。",
         ssoStartFromLoginPage: "サインインはこのシステムのサインインページから開始する必要があります。ここに勤務先のメールアドレスを入力し、「SSO でサインイン」を選んでください。",
         ssoTechnicalDetails: "技術的な詳細",
+        directSignInIncomplete: "サインインが完了しませんでした。シングルサインオンから戻りましたが、サインインされていません。このブラウザーでこのサイトの Cookie が許可されているか確認して、もう一度お試しください。",
+        directSignInUnavailable: "このシステムのシングルサインオンを開始できませんでした。使用しているサインインサービスの確認を管理者に依頼してください。",
+        directSignInRateLimited: "このネットワークから短時間に多くのサインインが開始されました。数秒待ってから、もう一度お試しください。",
+        ssoAccessDenied: "サインインしたアカウントには、この環境へのアクセス権がありません。アクセス権のあるアカウントでサインインするか、この環境の組織の管理者にメンバーとして追加するよう依頼してください。",
+        ssoSwitchAccount: "アカウントを切り替える",
+        ssoBackToConsole: "コンソールに戻る",
+        ssoSwitchAccountHint: "「アカウントを切り替える」を選ぶと、新しいタブでサインインサービスが開き、そこでサインアウトします。その後、アクセス権のあるアカウントでここから再度サインインしてください。",
         twoFactorInvalidCode: "コードが無効です。認証アプリを確認して、もう一度お試しください。",
         twoFactorInvalidBackupCode: "このバックアップコードは無効か、すでに使用されています。",
         twoFactorTooManyAttempts: "誤ったコードの入力が多すぎます。パスワードでもう一度サインインしてください。",
@@ -3962,6 +3974,11 @@ const ja = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'メッセージを送信',
     scrollToBottom: '最新のメッセージまでスクロール',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "現在の返信が終わると送信されます",
+      queuedCancel: "キャンセル",
+    },
     answer: {
       showFull: '全文を表示',
       collapse: '折りたたむ',
@@ -4055,6 +4072,9 @@ const ja = {
       countSeedData: "サンプルデータ",
       extendTarget: "既存のアプリに追加：{{app}}",
       awaitingConfirm: "確認待ち",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "確認済み",
+      buildFailed: "構築されませんでした · 何も作成されていません",
       iterateOrNew: {
         question: "このプランは既存のアプリ「{{app}}」と重なっています。このアプリを引き続き改善しますか、それとも別のアプリを作成しますか？",
         questionUnnamed: "このプランは既存のアプリと重なっています。そのアプリを引き続き改善しますか、それとも別のアプリを作成しますか？",
@@ -4087,6 +4107,15 @@ const ja = {
       verifying: "変更を確認しています…",
       verifyStep: "ステップ {{n}}",
       verified: "変更を確認しました",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "要修正 {{count}} 件",
+      issuesSummary: "この構築には、使えるようになる前に修正が必要な部分があります。「問題を修正して」と返信すると、アシスタントが修正します。",
+      warningsSummary: "アプリは構築済みですが、確認したほうがよい点がいくつかあります。改善したい場合は、アシスタントに内容を尋ねてください。",
+      issuesDetails: "技術的な詳細",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "要確認 {{count}} 件",
+      needsAttention_one: "要確認 {{count}} 件",
+      needsAttention_other: "要確認 {{count}} 件",
       unknownPhase: "不明なビルドフェーズ",
       nextStepsLead: "次はこう話しかけられます：{{steps}}",
       nextStepQuote: "「{{step}}」",
@@ -4427,6 +4456,11 @@ const ja = {
     daysAgo_other: '{{count}} 日前',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "公開するとここにレコードが表示されます",
+      message: "まだ公開されていないオブジェクトをプレビューしているため、レコードはありません。公開するとレコードを追加したり、サンプルデータを読み込んだりできます。",
+    },
     empty: {
       loadFailedTitle: 'ドラフトプレビューを読み込めませんでした',
       loadFailedDescription: 'ドラフトオーバーレイを読み取れませんでした。再試行するか、接続を確認してください。',

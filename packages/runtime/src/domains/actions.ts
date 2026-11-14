@@ -86,6 +86,9 @@ import {
     activationWriteContext,
     ACTION_ACTIVATION_SUBJECT,
 } from './activation-gate.js';
+// [ADR-0150 D3/D5] The one 409 answer to a refused name, the envelope the
+// `/actions` execution door answers its own refusal with.
+import { refusedNameAnswer } from './catalog-activation.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
@@ -152,7 +155,10 @@ function isActionActivationWrite(parts: string[], method: string): boolean {
  *  3. **Declaration**, through the SAME `resolveRouteActionDeclaration` the
  *     invocation door uses, so the two can never disagree about which actions
  *     exist. Unknown → 404 (the #7535 shape: a typo must not read as a server
- *     fault), metadata plane unavailable → 503 (an outage is not a verdict).
+ *     fault), metadata plane unavailable → 503 (an outage is not a verdict),
+ *     a name two holders declare on the key → the reading's refusal, 409
+ *     naming every candidate (ADR-0150 D3: ambiguity is reported, never
+ *     answered as absence).
  *  4. **Ambiguity refusal.** The ledger addresses an artifact by machine name
  *     (§4). Two objects declaring the same action name therefore address ONE
  *     row, so this refuses instead of silently switching both off.
@@ -232,6 +238,13 @@ async function handleActionActivationWrite(
             ),
         };
     }
+    // [ADR-0150 D3/D5, #32689] A name two holders declare on this route's key
+    // resolves to no one declaration: the reading carries the refusal naming
+    // every candidate, and this door answers it as the execution door does
+    // (`409 RESOURCE_CONFLICT`, the candidates in the envelope) — in both
+    // directions, before the "no declaration" branch below, which would read
+    // the ambiguity as absence. Nothing is written.
+    if (declaration.refusal) return refusedNameAnswer(deps, declaration.refusal);
     if (!declaration.action) {
         return {
             handled: true,

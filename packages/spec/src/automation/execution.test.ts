@@ -132,6 +132,63 @@ describe('ExecutionStepLogSchema', () => {
     expect(step.retryAttempt).toBe(2);
   });
 
+  // The run-history routes serve the step log the engine wrote, and the
+  // engine writes both of these on a step that ran: the schema has to name
+  // them, or a reader parsing the run strips them away.
+  describe('warnings / droppedFields', () => {
+    const base = {
+      nodeId: 'mark_approved',
+      nodeType: 'update_record',
+      status: 'success' as const,
+      startedAt: '2026-02-01T10:00:00Z',
+    };
+    const drop = { object: 'expense_report', fields: ['status'], reason: 'readonly' as const };
+
+    it('a step carrying both members parses and keeps them', () => {
+      const step = ExecutionStepLogSchema.parse({
+        ...base,
+        warnings: ['update_record: field "status" on expense_report is readonly and was not written'],
+        droppedFields: [drop],
+      });
+      expect(step.warnings).toEqual(['update_record: field "status" on expense_report is readonly and was not written']);
+      expect(step.droppedFields).toEqual([drop]);
+    });
+
+    it('a step without either member still parses, and neither is invented', () => {
+      const step = ExecutionStepLogSchema.parse(base);
+      expect('warnings' in step).toBe(false);
+      expect('droppedFields' in step).toBe(false);
+    });
+
+    it('the run log a run-history route serves keeps both members on its steps', () => {
+      const log = ExecutionLogSchema.parse({
+        id: 'exec_drop',
+        flowName: 'approve_expense',
+        status: 'completed',
+        trigger: { type: 'manual' },
+        steps: [{ ...base, warnings: ['w'], droppedFields: [drop] }],
+        startedAt: '2026-02-01T10:00:00Z',
+      });
+      expect(log.steps[0].warnings).toEqual(['w']);
+      expect(log.steps[0].droppedFields).toEqual([drop]);
+    });
+
+    it('droppedFields is the data engine\'s own event: an element off that shape is refused at its path', () => {
+      const res = ExecutionStepLogSchema.safeParse({
+        ...base,
+        droppedFields: [{ object: 'expense_report', fields: ['status'], reason: 'no_such_reason' }],
+      });
+      expect(res.success).toBe(false);
+      expect(res.error?.issues[0].path).toEqual(['droppedFields', 0, 'reason']);
+    });
+
+    it('warnings are strings: a non-string entry is refused at its path', () => {
+      const res = ExecutionStepLogSchema.safeParse({ ...base, warnings: [{ message: 'w' }] });
+      expect(res.success).toBe(false);
+      expect(res.error?.issues[0].path).toEqual(['warnings', 0]);
+    });
+  });
+
   it('should accept a step log with input/output', () => {
     const step = ExecutionStepLogSchema.parse({
       nodeId: 'transform',

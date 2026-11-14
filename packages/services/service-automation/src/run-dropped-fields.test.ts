@@ -15,7 +15,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { AutomationContext } from '@objectstack/spec/contracts';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
+import { defineActionDescriptor, ExecutionStepLogSchema } from '@objectstack/spec/automation';
 import { AutomationEngine } from './engine.js';
 import type { NodeExecutor, StepLogEntry } from './engine.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
@@ -470,6 +470,97 @@ describe('delegated writes roll their drops up onto the parent\'s answer (#33019
         expect(res.success).toBe(true);
         expect(res.status).toBeUndefined();
         expect('droppedFields' in res).toBe(false);
+    });
+});
+
+// The step itself is persisted with the run and served verbatim by the
+// run-history routes, so it must carry `warnings` / `droppedFields` only in the
+// shape `ExecutionStepLogSchema` declares — the same per-element filter the
+// answer's fold applies, so step and answer agree about which events were real.
+describe('the step log carries the advisory members only in the declared shape', () => {
+    const SLOPPY_DROPS = [
+        null,
+        'status',
+        { object: 'expense_report', fields: 'status', reason: 'readonly' },
+        { object: 'expense_report', fields: ['status'], reason: 'no_such_reason' },
+        { object: 'expense_line', fields: ['amount'], reason: 'readonly' },
+    ];
+    const stepOf = async (engine: AutomationEngine, flow: string, nodeId: string) => {
+        const [run] = await engine.listRuns(flow);
+        return run.steps.find((s) => s.nodeId === nodeId)!;
+    };
+
+    it('a host executor\'s malformed elements are not copied onto its success step; the well-typed ones are, and the step parses', async () => {
+        const engine = makeEngine();
+        engine.registerNodeExecutor({
+            type: 'sloppy_write',
+            async execute() {
+                return { success: true, warnings: ['amount was not written', 42, { text: 'x' }], droppedFields: SLOPPY_DROPS };
+            },
+        } as never);
+        engine.registerFlow('sloppy', chain('sloppy', [{ id: 'w', type: 'sloppy_write', label: 'W' }]));
+
+        await engine.execute('sloppy', CALLER);
+        const step = await stepOf(engine, 'sloppy', 'w');
+
+        expect(step.droppedFields).toEqual([{ object: 'expense_line', fields: ['amount'], reason: 'readonly' }]);
+        expect(step.warnings).toEqual(['amount was not written']);
+        expect(ExecutionStepLogSchema.safeParse(step).success).toBe(true);
+    });
+
+    it('a failure step applies the same filter', async () => {
+        const engine = makeEngine();
+        engine.registerNodeExecutor({
+            type: 'sloppy_fail',
+            async execute() {
+                return { success: false, error: 'boom', warnings: [7], droppedFields: SLOPPY_DROPS };
+            },
+        } as never);
+        engine.registerFlow('sloppy_fail', chain('sloppy_fail', [{ id: 'f', type: 'sloppy_fail', label: 'F' }]));
+
+        await engine.execute('sloppy_fail', CALLER);
+        const step = await stepOf(engine, 'sloppy_fail', 'f');
+
+        expect(step.status).toBe('failure');
+        expect(step.droppedFields).toEqual([{ object: 'expense_line', fields: ['amount'], reason: 'readonly' }]);
+        expect('warnings' in step).toBe(false);
+        expect(ExecutionStepLogSchema.safeParse(step).success).toBe(true);
+    });
+
+    it('a value that is not a list at all (array-like, a truthy `length`) leaves neither member on the step', async () => {
+        const engine = makeEngine();
+        engine.registerNodeExecutor({
+            type: 'sloppy_write',
+            async execute() {
+                return {
+                    success: true,
+                    warnings: 'status was not written',
+                    droppedFields: { length: 1, 0: { object: 'expense_report', fields: ['status'], reason: 'readonly' } },
+                };
+            },
+        } as never);
+        engine.registerFlow('sloppy', chain('sloppy', [{ id: 'w', type: 'sloppy_write', label: 'W' }]));
+
+        await engine.execute('sloppy', CALLER);
+        const step = await stepOf(engine, 'sloppy', 'w');
+
+        expect('droppedFields' in step).toBe(false);
+        expect('warnings' in step).toBe(false);
+        expect(ExecutionStepLogSchema.safeParse(step).success).toBe(true);
+    });
+
+    it('control: the in-tree write node\'s well-typed members reach its step unchanged', async () => {
+        const engine = makeEngine();
+        engine.registerFlow('submit_for_approval', submitFlow('submit_for_approval', { status: 'submitted', note: 'please' }));
+
+        await engine.execute('submit_for_approval', CALLER);
+        const [run] = await engine.listRuns('submit_for_approval');
+        const step = run.steps.find((s) => s.nodeType === 'update_record')!;
+
+        expect(step.droppedFields).toEqual([{ object: 'expense_report', fields: ['status'], reason: 'readonly' }]);
+        expect(step.warnings).toHaveLength(1);
+        expect(typeof step.warnings![0]).toBe('string');
+        expect(ExecutionStepLogSchema.safeParse(step).success).toBe(true);
     });
 });
 

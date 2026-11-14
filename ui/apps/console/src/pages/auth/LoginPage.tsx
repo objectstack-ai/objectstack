@@ -66,6 +66,7 @@ import {
   AuthFormHeader,
   AuthSpinner,
   AUTH_PRIMARY_BUTTON_CLASS,
+  AUTH_LINK_CLASS,
 } from '@object-ui/auth';
 import type { AuthPublicConfig } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
@@ -83,16 +84,26 @@ import {
   useInvitationArrival,
   hasSignInLanguagePick,
   saveSignInLanguagePick,
+  getRuntimeConfig,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { AuthFooter, readLegalLinks } from './AuthFooter';
 import { followOauthAuthorize } from './followAuthorize';
 import { handoffMarkQuery, useHandoffRedirect } from './handoffRedirect';
-import { ssoCallbackRefusalMessage, ssoCallbackTechnicalDetail } from './ssoCallbackRefusal';
+import {
+  accessDeniedExits,
+  ssoCallbackRefusalMessage,
+  ssoCallbackTechnicalDetail,
+  type AccessDeniedExits,
+} from './ssoCallbackRefusal';
+import { decideDirectSignIn, directSignInStartUrl } from './directSignIn';
 // Was module-private here; lifted to a shared module so `SetupPage` (whose
 // first-run exits went without it) and `RegisterPage` (which had copied it)
 // share ONE implementation — objectui#4181. Behaviour here is unchanged.
 import { withConsoleBase } from '../../utils/consoleBase';
+
+/** The auth API base the direct sign-in door lives under (`main.tsx`'s `AUTH_URL`). */
+const AUTH_URL = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
 
 /** Restrict the post-login redirect to same-origin paths. */
 function isSafeRedirect(target: string | null): target is string {
@@ -126,6 +137,7 @@ export function LoginPage() {
     activeOrganization,
     switchOrganization,
     getAuthConfig,
+    sessionEndedBySignOut,
   } = useAuth();
   // #29971 — a `redirect` naming the mobile sign-in hand-off: where to go
   // after sign-in, and whether the signed-in session is too old for it, in
@@ -264,6 +276,35 @@ export function LoginPage() {
     };
   }, [getAuthConfig, configReadAttempt]);
 
+  // Direct sign-in (`./directSignIn`): decided once the server's config is
+  // known, from the server's own flag and this URL. `start` navigates a
+  // signed-out visitor straight to the identity provider; `hold`,
+  // `incomplete` and `signedOut` (an explicit sign-out in this tab) draw the
+  // page with a sign-in button instead (the loop guard); `off`, `local` and
+  // `handoff` draw today's page.
+  const directSignIn =
+    configRead === 'known' && typeof window !== 'undefined'
+      ? decideDirectSignIn({
+          features: authConfig?.features,
+          search: window.location.search,
+          signedOut: sessionEndedBySignOut,
+        })
+      : 'off';
+  const directSignInStartedRef = useRef(false);
+  const startDirectSignIn = () => {
+    directSignInStartedRef.current = true;
+    window.location.replace(
+      directSignInStartUrl(AUTH_URL, window.location.pathname, window.location.search),
+    );
+  };
+  useEffect(() => {
+    if (directSignIn !== 'start' || !hasBootstrapped || !signInNeeded) return;
+    if (directSignInStartedRef.current) return;
+    startDirectSignIn();
+  }, [directSignIn, hasBootstrapped, signInNeeded]);
+  const directSignInRetry =
+    directSignIn === 'hold' || directSignIn === 'incomplete' || directSignIn === 'signedOut';
+
   // Post-login orchestration — fires once we observe an authenticated user.
   useEffect(() => {
     if (!user) return;
@@ -358,7 +399,7 @@ export function LoginPage() {
     signInPickSaved,
   ]);
 
-  if ((isLoading && !hasBootstrapped) || !signInNeeded) {
+  if ((isLoading && !hasBootstrapped) || !signInNeeded || directSignIn === 'start') {
     return (
       <AuthLayout>
         <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
@@ -380,6 +421,16 @@ export function LoginPage() {
   // this visitor's sign-up: lead with creating the owner account.
   const firstOwner = offerSignUp && !invitationRedirect && ownerProbe.noOwner;
   const emailDelivery = authConfig?.features?.emailDelivery;
+  // objectstack#32992 — an `access_denied` return from the control plane's
+  // identity provider: switch account and back to the console, where the page
+  // can name them (`accessDeniedExits`).
+  const refusalExits = callbackError
+    ? accessDeniedExits({
+        code: callbackError.code,
+        cloudManaged: authConfig?.features?.cloudManaged,
+        cloudBase: getRuntimeConfig().cloudUrl ?? '',
+      })
+    : null;
 
   return (
     <AuthLayout formWidth="base">
@@ -390,6 +441,7 @@ export function LoginPage() {
           // behind a toggle the person can open and pass on.
           <div className="flex flex-col gap-1.5" data-testid="sso-callback-refusal">
             <AuthErrorBanner message={ssoCallbackRefusalMessage(t, callbackError.code)} />
+            {refusalExits ? <AccessDeniedActions exits={refusalExits} /> : null}
             <details className="px-1 text-xs text-muted-foreground">
               <summary className="cursor-pointer select-none">
                 {t('auth.login.errors.ssoTechnicalDetails', { defaultValue: 'Technical details' })}
@@ -398,6 +450,16 @@ export function LoginPage() {
                 {ssoCallbackTechnicalDetail(callbackError)}
               </p>
             </details>
+          </div>
+        ) : null}
+        {directSignIn === 'incomplete' && !callbackError ? (
+          <div data-testid="direct-sign-in-incomplete">
+            <AuthErrorBanner
+              message={t('auth.login.errors.directSignInIncomplete', {
+                defaultValue:
+                  'Sign-in did not complete: you came back from single sign-on without being signed in. Check that this browser allows cookies for this site, then try again.',
+              })}
+            />
           </div>
         ) : null}
         {ssoTarget ? (
@@ -423,6 +485,8 @@ export function LoginPage() {
               retrying={configRead === 'loading'}
               onRetry={retryConfigRead}
             />
+          ) : directSignInRetry ? (
+            <DirectSignInRetry onRetry={startDirectSignIn} />
           ) : invitationGone ? (
             <InvitationGoneNotice />
           ) : (
@@ -468,8 +532,11 @@ export function LoginPage() {
               <InvitationLinkHint offer={signUpOffer} />
               {/* The row signs in with email and password: with that sign-in
                   off (the same answer `LoginForm` reads) the server refuses
-                  it, so the row is not drawn. */}
-              {devSeedAdmin && authConfig?.emailPassword?.enabled !== false ? (
+                  it, and with the local sign-in path `off` the sign-in form
+                  draws no local way in, so neither does this row. */}
+              {devSeedAdmin
+                && authConfig?.emailPassword?.enabled !== false
+                && authConfig?.features?.localSignIn !== 'off' ? (
                 <DevAdminRow seed={devSeedAdmin} emailDelivery={emailDelivery} />
               ) : null}
             </>
@@ -478,6 +545,82 @@ export function LoginPage() {
         <AuthFooter privacyUrl={legalLinks.privacyUrl} termsUrl={legalLinks.termsUrl} />
       </div>
     </AuthLayout>
+  );
+}
+
+/**
+ * The ways on from an `access_denied` return (objectstack#32992), beside its
+ * sentence: the same two the identity provider's own refusal page offers.
+ * Switch account opens the provider's end-session door in a new tab, because
+ * the provider stays on its own page after it ends the session; this page
+ * stays put, with the sign-in below it, for the account that has access.
+ */
+function AccessDeniedActions({ exits }: { exits: AccessDeniedExits }) {
+  const { t } = useObjectTranslation();
+  const linkClass = `${AUTH_LINK_CLASS} inline-flex min-h-[44px] items-center sm:min-h-0`;
+  return (
+    <div data-testid="sso-access-denied-actions" className="flex flex-col gap-1 px-1 text-sm">
+      <div className="flex flex-wrap gap-x-4">
+        <a
+          data-action="switch-account"
+          href={exits.switchAccountUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={linkClass}
+        >
+          {t('auth.login.errors.ssoSwitchAccount', { defaultValue: 'Switch account' })}
+        </a>
+        <a data-action="back-to-console" href={exits.consoleUrl} className={linkClass}>
+          {t('auth.login.errors.ssoBackToConsole', { defaultValue: 'Back to console' })}
+        </a>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t('auth.login.errors.ssoSwitchAccountHint', {
+          defaultValue:
+            'Switch account opens your sign-in service in a new tab and signs you out there. Then sign in here again with an account that has access.',
+        })}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Direct sign-in's retry, in place of the form when the last attempt came back
+ * with an error or without a session, or the person just signed out (the loop
+ * guard in `./directSignIn`): the page says why above where there is a why,
+ * and this starts the sign-in again only when the person asks. No password form: under direct sign-in that page lives at
+ * `/login?local=1`, when the deployment keeps it at all.
+ */
+function DirectSignInRetry({ onRetry }: { onRetry: () => void }) {
+  const { t } = useObjectTranslation();
+  const [pending, setPending] = useState(false);
+  return (
+    <div data-testid="direct-sign-in-retry" className="flex flex-col gap-4">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          {t('auth.login.welcomeTitle', { defaultValue: 'Welcome back' })}
+        </h1>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          {t('auth.login.directSignIn.description', {
+            defaultValue: "Sign in with your organization's single sign-on.",
+          })}
+        </p>
+      </div>
+      <button
+        type="button"
+        data-testid="direct-sign-in-retry-button"
+        disabled={pending}
+        aria-busy={pending}
+        onClick={() => {
+          setPending(true);
+          onRetry();
+        }}
+        className={AUTH_PRIMARY_BUTTON_CLASS}
+      >
+        {pending ? <AuthSpinner /> : null}
+        {t('auth.login.directSignIn.retry', { defaultValue: 'Continue with single sign-on' })}
+      </button>
+    </div>
   );
 }
 

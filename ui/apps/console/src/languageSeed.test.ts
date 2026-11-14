@@ -8,11 +8,32 @@
  * instead of yanking the language out from under a user mid-session.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { LOCALE_STORAGE_KEY, LOCALE_SEED_STORAGE_KEY } from '@object-ui/i18n';
-import { seedTenantLanguage } from './languageSeed';
+import { createElement } from 'react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import {
+  I18nProvider,
+  LOCALE_STORAGE_KEY,
+  LOCALE_SEED_STORAGE_KEY,
+  preloadBootstrapLocale,
+  useObjectTranslation,
+} from '@object-ui/i18n';
+import { clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
+import { __resetAppDefaultLocaleForTests, seedTenantLanguage } from './languageSeed';
 
 const BASE = '';
 const TENANT_LOCALE = 'zh-CN';
+const DISCOVERY = '/api/v1/discovery';
+
+/**
+ * Discovery as a server that serves no `locale.default` (a 404): the browser
+ * rung, which is what every test above the objectstack#33231 block exercises.
+ */
+const noDiscovery = { ok: false, status: 404, json: async () => ({}) };
+
+/** How many `/auth/me/localization` requests went out. */
+function meCalls(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter(([url]) => !String(url).endsWith(DISCOVERY)).length;
+}
 
 /** A fetch whose answer this test controls the timing of. */
 function deferredFetch(body: unknown, ok = true) {
@@ -20,7 +41,8 @@ function deferredFetch(body: unknown, ok = true) {
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const fetchMock = vi.fn(async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (String(url).endsWith(DISCOVERY)) return noDiscovery;
     await gate;
     return { ok, status: ok ? 200 : 500, json: async () => body };
   });
@@ -29,13 +51,19 @@ function deferredFetch(body: unknown, ok = true) {
 }
 
 function immediateFetch(body: unknown, ok = true) {
-  const fetchMock = vi.fn(async () => ({ ok, status: ok ? 200 : 500, json: async () => body }));
+  const fetchMock = vi.fn(async (url: string) =>
+    String(url).endsWith(DISCOVERY)
+      ? noDiscovery
+      : { ok, status: ok ? 200 : 500, json: async () => body },
+  );
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
 
 beforeEach(() => {
   window.localStorage.clear();
+  __resetAppDefaultLocaleForTests();
+  clearSharedDiscoveryCache();
 });
 
 afterEach(() => {
@@ -61,7 +89,7 @@ describe('seedTenantLanguage', () => {
     // in flight. If it were unbounded, a slow endpoint would hold first paint —
     // which is what the ruling forbids.
     await seedTenantLanguage(BASE, 1);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(meCalls(fetchMock)).toBe(1));
     expect(window.localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBeNull();
 
     // The answer is not thrown away — it lands in the cache, so the NEXT boot
@@ -93,8 +121,9 @@ describe('seedTenantLanguage', () => {
 
     // The cached seed applies at boot immediately. Revalidation is the in-app
     // `LocalizationFetchProvider` fetch's job — which already runs on every
-    // boot, so racing a second request here would buy nothing.
-    expect(fetchMock).not.toHaveBeenCalled();
+    // boot, so racing a second request here would buy nothing. (The discovery
+    // read it starts is the data adapter's own request, shared.)
+    expect(meCalls(fetchMock)).toBe(0);
     expect(window.localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe(TENANT_LOCALE);
   });
 
@@ -144,5 +173,82 @@ describe('seedTenantLanguage', () => {
 
     // The explicit choice is untouched, and it is what the next boot reads.
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('ja');
+  });
+});
+
+describe("the app's declared default outranks the browser (objectstack#33231)", () => {
+  /**
+   * A server that answers `/auth/me/localization` by its three rungs: the
+   * user's own `sys_user.locale`, else the request's `Accept-Language`, else
+   * the deployment default. A request that states no `Accept-Language` carries
+   * the browser's own, which is what a bare `fetch` sends.
+   */
+  function fakeServer(opts: { appDefault?: string; userLocale?: string; browser: string }) {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith(DISCOVERY)) {
+        if (!opts.appDefault) return noDiscovery;
+        const data = { locale: { default: opts.appDefault, supported: [opts.appDefault], timezone: 'UTC' } };
+        return { ok: true, status: 200, json: async () => ({ success: true, data }) };
+      }
+      const stated = (init?.headers as Record<string, string> | undefined)?.['Accept-Language'];
+      const locale = opts.userLocale ?? stated ?? opts.browser;
+      return { ok: true, status: 200, json: async () => ({ authenticated: true, locale }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(window.navigator, 'language', 'get').mockReturnValue(opts.browser);
+    return fetchMock;
+  }
+
+  /** The console's first paint after the boot's seed: language, `<html lang>`, a label. */
+  function Probe() {
+    const { t, language } = useObjectTranslation();
+    return createElement('span', { 'data-testid': 'probe' }, `${language}|${t('common.cancel')}`);
+  }
+
+  async function bootConsole(): Promise<{ text: string; htmlLang: string }> {
+    await seedTenantLanguage(BASE, 1_000);
+    await preloadBootstrapLocale({ hasLoader: true });
+    render(createElement(I18nProvider, null, createElement(Probe)));
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).not.toContain('common.cancel'));
+    return { text: screen.getByTestId('probe').textContent ?? '', htmlLang: document.documentElement.lang };
+  }
+
+  afterEach(() => {
+    cleanup();
+    document.documentElement.lang = '';
+  });
+
+  it('a user with no personal locale gets the declared zh-CN in an en-US browser', async () => {
+    const fetchMock = fakeServer({ appDefault: 'zh-CN', browser: 'en-US' });
+
+    const seen = await bootConsole();
+
+    expect(seen.text).toBe('zh-CN|取消');
+    expect(seen.htmlLang).toBe('zh-CN');
+    expect(window.localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('zh-CN');
+    // One discovery read, one localization read; nothing chosen on the device.
+    expect(meCalls(fetchMock)).toBe(1);
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBeNull();
+  });
+
+  it("a personal locale still outranks the app's declared default", async () => {
+    fakeServer({ appDefault: 'zh-CN', userLocale: 'en', browser: 'zh-CN' });
+
+    const seen = await bootConsole();
+
+    expect(seen.text).toBe('en|Cancel');
+    expect(seen.htmlLang).toBe('en');
+  });
+
+  it('with no default served, the browser language decides', async () => {
+    const fetchMock = fakeServer({ browser: 'ja' });
+
+    const seen = await bootConsole();
+
+    expect(seen.text).toBe('ja|キャンセル');
+    expect(seen.htmlLang).toBe('ja');
+    // No default to state, so the request carried the browser's own header.
+    const meInit = fetchMock.mock.calls.find(([url]) => !String(url).endsWith(DISCOVERY))?.[1];
+    expect((meInit?.headers as Record<string, string>)['Accept-Language']).toBeUndefined();
   });
 });

@@ -127,6 +127,7 @@ const pt = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "Mostrando os primeiros {{shown}} de {{total}} registros. Restrinja o filtro.",
     rowCeilingNoteUnknownTotal: "Mostrando os primeiros {{shown}} registros. Restrinja o filtro.",
+    ungroupedSection: "Outros",
   },
   actions: {
     decisionOutput: {
@@ -2763,6 +2764,10 @@ const pt = {
     },
     login: {
       signingIn: "Entrando…",
+      directSignIn: {
+        description: "Entre com o login único da sua organização.",
+        retry: "Continuar com login único",
+      },
       ssoHandoff: "Continuar para {{target}}",
       devAdminHint: {
         title: "Instância de desenvolvimento local",
@@ -2786,6 +2791,13 @@ const pt = {
         ssoResponseRejected: "O serviço de login da sua organização enviou uma resposta que este sistema não pôde aceitar. Peça ao seu administrador para verificar a configuração do logon único.",
         ssoStartFromLoginPage: "O login precisa começar pela página de acesso deste sistema. Informe aqui seu e-mail de trabalho e escolha “Entrar com SSO”.",
         ssoTechnicalDetails: "Detalhes técnicos",
+        directSignInIncomplete: "O login não foi concluído: você voltou do login único sem estar conectado. Verifique se este navegador permite cookies para este site e tente novamente.",
+        directSignInUnavailable: "Não foi possível iniciar o login único para este sistema. Peça ao seu administrador para verificar qual serviço de login ele usa.",
+        directSignInRateLimited: "Muitos logins foram iniciados a partir desta rede agora há pouco. Aguarde alguns segundos e tente novamente.",
+        ssoAccessDenied: "A conta com a qual você entrou não tem acesso a este ambiente. Entre com uma conta que tenha acesso ou peça a um administrador da organização deste ambiente para adicionar você como membro.",
+        ssoSwitchAccount: "Trocar de conta",
+        ssoBackToConsole: "Voltar ao console",
+        ssoSwitchAccountHint: "Trocar de conta abre seu serviço de login em uma nova aba e encerra sua sessão lá. Depois, entre aqui novamente com uma conta que tenha acesso.",
         twoFactorInvalidCode: "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
         twoFactorInvalidBackupCode: "Esse código de backup não é válido ou já foi usado.",
         twoFactorTooManyAttempts: "Muitos códigos incorretos. Faça login novamente com sua senha.",
@@ -4040,6 +4052,11 @@ const pt = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Enviar mensagem',
     scrollToBottom: 'Ir para a mensagem mais recente',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "Será enviada quando a resposta atual terminar",
+      queuedCancel: "Cancelar",
+    },
     answer: {
       showFull: 'Mostrar resposta completa',
       collapse: 'Recolher',
@@ -4137,6 +4154,9 @@ const pt = {
       countSeedData: "dados de exemplo",
       extendTarget: "Adicionando ao app existente: {{app}}",
       awaitingConfirm: "Aguardando confirmação",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "Confirmado",
+      buildFailed: "Não construído — nada foi criado",
       iterateOrNew: {
         question: "Isto se sobrepõe a “{{app}}”, um app que você já tem. Continuar melhorando esse app ou criar um app separado?",
         questionUnnamed: "Isto se sobrepõe a um app que você já tem. Continuar melhorando esse app ou criar um separado?",
@@ -4169,6 +4189,16 @@ const pt = {
       verifying: "Verificando a alteração…",
       verifyStep: "etapa {{n}}",
       verified: "Alteração verificada",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "{{count}} para corrigir",
+      issuesSummary: "Algumas partes desta construção precisam ser corrigidas antes de ficarem prontas. Responda \"corrija os problemas\" e o assistente vai repará-las.",
+      warningsSummary: "O app está construído, com alguns pontos que vale a pena verificar. Pergunte ao assistente quais são se quiser melhorá-lo.",
+      issuesDetails: "Detalhes técnicos",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "{{count}} precisam de atenção",
+      needsAttention_one: "{{count}} precisa de atenção",
+      needsAttention_many: "{{count}} de itens precisam de atenção",
+      needsAttention_other: "{{count}} precisam de atenção",
       unknownPhase: "Fase de criação desconhecida",
       nextStepsLead: "Em seguida, você pode dizer: {{steps}}",
       nextStepQuote: "“{{step}}”",
@@ -4524,6 +4554,11 @@ const pt = {
     daysAgo_other: 'há {{count}} dias',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "Os registros aparecem aqui depois da publicação",
+      message: "Você está pré-visualizando um objeto que ainda não foi publicado, por isso ele não tem registros. Publique para começar a adicionar registros ou carregar os dados de exemplo.",
+    },
     empty: {
       loadFailedTitle: 'Falha ao carregar a pré-visualização do rascunho',
       loadFailedDescription: 'Não foi possível ler a camada de rascunho. Tente novamente ou verifique sua conexão.',
