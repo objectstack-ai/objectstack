@@ -313,7 +313,7 @@ describe('[#14079] the two strategies, on a real SQLite engine over a REAL colum
     // [#20025] `instr()` for `contains` on the SQLite engine this suite runs,
     // binding the comparand raw.
     const native = await new NativeSQLStrategy().generateSql(query({ name: { $contains: 'acme' } }), nativeCtx);
-    expect(native.sql).toContain('instr(name, $1) > 0');
+    expect(native.sql).toContain('instr("name", $1) > 0');
     expect(native.params).toEqual(['acme']);
   });
 

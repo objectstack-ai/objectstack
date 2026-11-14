@@ -271,7 +271,7 @@ describe('[#15684] the compiled TEXT, per dialect', () => {
     // correct diff there is no diff at all — asserted verbatim, not by shape.
     for (const dialect of [undefined, 'postgres'] as const) {
       const out = await nativeSql({ name: { $contains: 'acme' } }, dialect);
-      expect(out.sql, String(dialect)).toContain('WHERE name LIKE $1 ESCAPE $2');
+      expect(out.sql, String(dialect)).toContain('WHERE "name" LIKE $1 ESCAPE $2');
       expect(out.params, String(dialect)).toEqual(['%acme%', '\\']);
     }
     const scope = compileScopedFilterToSql({ name: { $contains: 'acme' } } as FilterCondition, 't');
@@ -288,7 +288,7 @@ describe('[#15684] the compiled TEXT, per dialect', () => {
     // test is about is unchanged: `instr()` and the BLOB comparison are
     // byte-wise, and `text-match-sqlite-nul.test.ts` owns the U+0000 rows.
     const out = await nativeSql({ name: { $contains: 'acme' } }, 'sqlite');
-    expect(out.sql).toContain('WHERE instr(name, $1) > 0');
+    expect(out.sql).toContain('WHERE instr("name", $1) > 0');
     expect(out.sql).not.toMatch(/ESCAPE| LIKE /);
     expect(out.params).toEqual(['acme']);
     expect(compileScopedFilterToSql({ name: { $contains: 'acme' } } as FilterCondition, 't', { dialect: 'sqlite' }))
@@ -300,18 +300,18 @@ describe('[#15684] the compiled TEXT, per dialect', () => {
     expect(compileScopedFilterToSql({ name: { $notContains: 'acme' } } as FilterCondition, 't', { dialect: 'sqlite' }))
       .toEqual({ sql: '(("t"."name" IS NULL OR NOT (instr("t"."name", ?) > 0)))', params: ['acme'] });
     const starts = await nativeSql({ name: { $startsWith: 'ACME' } }, 'sqlite');
-    expect(starts.sql).toContain('WHERE name GLOB $1');
+    expect(starts.sql).toContain('WHERE "name" GLOB $1');
     expect(starts.params).toEqual(['ACME*']);
     const ends = await nativeSql({ name: { $endsWith: 'corp' } }, 'sqlite');
     expect(ends.sql).toContain(
-      'WHERE coalesce(substr(CAST(name AS BLOB), -length(CAST($1 AS BLOB))), CAST(name AS BLOB)) = CAST($2 AS BLOB)',
+      'WHERE coalesce(substr(CAST("name" AS BLOB), -length(CAST($1 AS BLOB))), CAST("name" AS BLOB)) = CAST($2 AS BLOB)',
     );
     expect(ends.params).toEqual(['corp', 'corp']);
   });
 
   it('mysql compiles LIKE over CAST(… AS BINARY) — TEXT ONLY, NOT MEASURED on a server', async () => {
     const out = await nativeSql({ name: { $contains: 'acme' } }, 'mysql');
-    expect(out.sql).toContain('WHERE CAST(name AS BINARY) LIKE CAST($1 AS BINARY) ESCAPE $2');
+    expect(out.sql).toContain('WHERE CAST("name" AS BINARY) LIKE CAST($1 AS BINARY) ESCAPE $2');
     expect(out.params).toEqual(['%acme%', '\\']);
     expect(compileScopedFilterToSql({ name: { $contains: 'acme' } } as FilterCondition, 't', { dialect: 'mysql' }))
       .toEqual({ sql: 'CAST("t"."name" AS BINARY) LIKE CAST(? AS BINARY) ESCAPE ?', params: ['%acme%', '\\'] });
@@ -342,11 +342,11 @@ describe('[#15684] the compiled TEXT, per dialect', () => {
       // innermost call and cannot match MySQL's, whose innermost operand is
       // `CAST(name AS BINARY)`.
       const FOLD_PER_DIALECT: Record<string, RegExp> = {
-        undefined: /REPLACE\(name, 'A', 'a'\)/,
-        postgres: /translate\(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'/,
+        undefined: /REPLACE\("name", 'A', 'a'\)/,
+        postgres: /translate\("name", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'/,
         // [#20025] `instr()` since the SQLite arm left `GLOB` for `contains`.
-        sqlite: /instr\(lower\(name\), lower\(\$1\)\) > 0/,
-        mysql: /REPLACE\(CAST\(name AS BINARY\), 'A', 'a'\)/,
+        sqlite: /instr\(lower\("name"\), lower\(\$1\)\) > 0/,
+        mysql: /REPLACE\(CAST\("name" AS BINARY\), 'A', 'a'\)/,
       };
       expect(icontains.sql, String(dialect)).toMatch(FOLD_PER_DIALECT[String(dialect)]);
     }
