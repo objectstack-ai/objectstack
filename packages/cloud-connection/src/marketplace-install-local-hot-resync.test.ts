@@ -32,6 +32,11 @@ import { tmpdir } from 'node:os';
 // clocked `it` (`scripts/check-test-source-alias.mjs`): the plugin reaches the
 // same module through a dynamic `import()` for its handler binder.
 import '@objectstack/runtime';
+import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
+import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { SecurityPlugin } from '@objectstack/plugin-security';
+import { SysMember, SysOrganization, SysUser } from '@objectstack/platform-objects/identity';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
@@ -182,4 +187,143 @@ describe('#21322: a hot install re-runs the boot sweeps through metadata:reloade
         expect(res.payload?.success).toBe(true);
         expect(warnings().filter((w) => w.includes('cannot announce metadata:reloaded') && w.includes(APP_ID))).toHaveLength(1);
     });
+});
+
+/**
+ * [#33238] The announcement's subscriber, end to end through this door: a HOT
+ * UPGRADE whose new version renames a position carries that position's
+ * holders at once, with no restart.
+ *
+ * Real here: an `ObjectKernel` with a SQL driver, `ObjectQLPlugin` (the
+ * `manifest` service over the real `SchemaRegistry`) and `SecurityPlugin` (the
+ * `metadata:reloaded` subscriber whose holder carry is under test), booted to
+ * `kernel:bootstrapped`; the door's `trigger` is a real plugin context's, so
+ * the announcement reaches the kernel's own hook bus. The door's side readers
+ * (binder, translations, seeds) are recorders, as in the bare-name suite.
+ *
+ * The upgrade is over a version the running kernel still serves: the
+ * re-register withdraws the position v2 no longer ships (#33050), so the old
+ * name is no current position and the reload run judges the package's rename.
+ */
+const HOT_ID = 'com.acme.hotrename';
+
+/** v1 ships `hotrename_sales_rep`; v2 renames it, declaring the old name. Both ship the CONTROL `hotrename_auditor`. */
+const hotRenameVersion = (version: '1.0.0' | '2.0.0') => ({
+    manifest: {
+        id: HOT_ID,
+        name: 'Hot rename',
+        namespace: 'hotrename',
+        version,
+        type: 'app',
+        positions: [
+            version === '1.0.0'
+                ? { name: 'hotrename_sales_rep', label: 'Sales rep' }
+                : { name: 'hotrename_crm_sales_rep', label: 'Sales rep', renamedFrom: ['hotrename_sales_rep'] },
+            { name: 'hotrename_auditor', label: 'Auditor' },
+        ],
+    },
+});
+
+const SYSTEM = { context: { isSystem: true } } as const;
+
+async function bootRealKernelDoor() {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false } as never);
+    let kernelCtx: PluginContext | undefined;
+    await kernel.use({
+        name: 'test.hotrename.driver',
+        type: 'standard',
+        version: '1.0.0',
+        async init(ctx: PluginContext) {
+            ctx.registerService('driver.default', new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }));
+        },
+    } as Plugin);
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new SecurityPlugin({ fallbackPermissionSet: null }));
+    await kernel.use({
+        name: 'test.hotrename.identity',
+        type: 'standard',
+        version: '1.0.0',
+        dependencies: ['com.objectstack.engine.objectql'],
+        async init(ctx: PluginContext) {
+            kernelCtx = ctx;
+            // The identity objects the security plugin's store reads.
+            await ctx.getService<{ register(m: unknown): unknown }>('manifest')
+                .register({ id: 'test.hotrename.identity', name: 'Identity', version: '1.0.0', type: 'plugin', objects: [SysUser, SysMember, SysOrganization] });
+        },
+    } as Plugin);
+    await kernel.bootstrap();
+    const ql = kernel.getService<ObjectQL>('objectql');
+    ql.registry.logLevel = 'silent';
+
+    const rawApp = makeRawApp();
+    const hooks = new Map<string, any>();
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const services: Record<string, unknown> = {
+        manifest: kernel.getService('manifest'),
+        auth: installerAuthService(),
+        objectql: withInstallerGrants({
+            convertPackageBodyForward: (body: unknown) => ql.convertPackageBodyForward(body),
+            registry: ql.registry,
+            get manifests() { return (ql as unknown as { manifests: Map<string, unknown> }).manifests; },
+            syncSchemas: async () => undefined,
+        }),
+    };
+    const ctx: any = {
+        hook: (e: string, h: any) => hooks.set(e, h),
+        // The kernel's own hook bus: `SecurityPlugin` hears the announcement.
+        trigger: (event: string, payload: unknown) => kernelCtx!.trigger(event, payload),
+        getService: (name: string) => {
+            if (name === 'http-server') return { getRawApp: () => rawApp };
+            if (!(name in services)) throw new Error(`no ${name}`);
+            return services[name];
+        },
+        logger,
+    };
+    const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
+    const p = plugin as unknown as Record<string, unknown>;
+    p.bindArtifactHandlers = async () => undefined;
+    p.applySideEffects = async () => ({ translationsLoaded: 0, seeded: { mode: 'none' } });
+    await plugin.start(ctx);
+    await hooks.get('kernel:ready')?.();
+
+    const install = async (version: '1.0.0' | '2.0.0') => {
+        const res = await rawApp.routes.get('POST /api/v1/marketplace/install-local')!(makeC(hotRenameVersion(version)));
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.hotLoaded, JSON.stringify(res.payload)).toBe(true);
+        return res;
+    };
+    const holders = async (): Promise<Record<string, unknown>> => {
+        const rows = (await ql.find('sys_user_position', { where: {}, ...SYSTEM })) as Array<Record<string, unknown>>;
+        return Object.fromEntries(rows.map((r) => [String(r.id), r.position]));
+    };
+    const served = (): string[] => ql.registry.listItems<{ name: string }>('position', HOT_ID).map((i) => i.name);
+    return { kernel, ql, install, holders, served };
+}
+
+describe('#33238: a hot upgrade through this door carries the holders of a position its new version renames, with no restart', () => {
+    it('v1 → v2 renaming a position: the holder holds the new name at once; the CONTROL holder is untouched; the same v2 again moves no row', async () => {
+        const k = await bootRealKernelDoor();
+        try {
+            await k.install('1.0.0');
+            expect(k.served().sort()).toEqual(['hotrename_auditor', 'hotrename_sales_rep']);
+            for (const row of [
+                { id: 'h1', user_id: 'u1', position: 'hotrename_sales_rep', organization_id: 'org_a' },
+                { id: 'h2', user_id: 'u2', position: 'hotrename_auditor', organization_id: 'org_a' },
+            ]) await k.ql.insert('sys_user_position', row, SYSTEM);
+
+            await k.install('2.0.0');
+
+            // [#33050] v1's position is withdrawn by the re-register, so the reload run carries its holder.
+            expect(k.served().sort()).toEqual(['hotrename_auditor', 'hotrename_crm_sales_rep']);
+            expect(await k.holders()).toEqual({ h1: 'hotrename_crm_sales_rep', h2: 'hotrename_auditor' });
+
+            // Idempotent: the same upgrade again finds nobody on the old name and writes no holder row.
+            const update = vi.spyOn(k.ql, 'update');
+            await k.install('2.0.0');
+            expect(update.mock.calls.filter(([object]) => object === 'sys_user_position')).toEqual([]);
+            expect(await k.holders()).toEqual({ h1: 'hotrename_crm_sales_rep', h2: 'hotrename_auditor' });
+        } finally {
+            await Promise.race([k.kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+        }
+    }, 60_000);
 });
