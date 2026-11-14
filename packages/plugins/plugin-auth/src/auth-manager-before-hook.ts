@@ -70,6 +70,15 @@ import {
   LAST_LOCAL_CREDENTIAL_MESSAGE,
 } from './last-local-credential.js';
 import { refuseRequestNamingDifferentAccounts } from './one-account-per-request.js';
+import {
+  SSO_ONLY_RESET_UNREADABLE_MESSAGE,
+  judgeSsoOnlyLocalPassword,
+  PHONE_RESET_PASSWORD_PATH,
+  RESET_PASSWORD_PATH,
+  resolveResetDoorUserId,
+  SSO_ONLY_REFUSAL_CODE,
+  SSO_ONLY_REFUSAL_MESSAGES,
+} from './sso-only-local-password.js';
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
 import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
@@ -99,12 +108,14 @@ export interface BeforeHookHost {
   assertSsoSignOutOfIdpSupported: AuthManager['assertSsoSignOutOfIdpSupported'];
   readonly config: AuthManager['config'];
   existingAddressSignUpAnswersSuccess: AuthManager['existingAddressSignUpAnswersSuccess'];
+  getDataEngine: AuthManager['getDataEngine'];
   hasExistingUserFor: AuthManager['hasExistingUserFor'];
   isAuthGateActive: AuthManager['isAuthGateActive'];
   isBootstrapCreation: AuthManager['isBootstrapCreation'];
   isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   isOperatorProvisioning: AuthManager['isOperatorProvisioning'];
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
+  isSsoOnlyMode: AuthManager['isSsoOnlyMode'];
   resolveActor: AuthManager['resolveActor'];
   resolvePasswordChangeUserId: AuthManager['resolvePasswordChangeUserId'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
@@ -180,6 +191,49 @@ export async function globalBeforeHook(
   ) {
     const phone = typeof ctx?.body?.phoneNumber === 'string' ? ctx.body.phoneNumber : '';
     await this.assertPhoneOtpSendAllowed(phone);
+  }
+
+  // ── SSO-only: the reset doors give an IdP-provisioned user no ──
+  // local password. Both doors create the credential account when the
+  // user holds none (better-auth's `resetCredentialPassword`), so under
+  // SSO-only mode the user the presented token or code would reset is
+  // judged here, ahead of the vendor's handler, by the rule every door
+  // shares (`sso-only-local-password.ts`); a platform administrator
+  // resetting their own keeps break-glass. Judged only for a credential
+  // the door itself would accept, read without spending it, so any other
+  // request is answered exactly as before; a reset record that cannot be
+  // read fails closed (503). Ahead of the complexity check,
+  // so the refusal names the real reason.
+  if (
+    (ctx?.path === RESET_PASSWORD_PATH || ctx?.path === PHONE_RESET_PASSWORD_PATH) &&
+    this.isSsoOnlyMode()
+  ) {
+    const subject = await resolveResetDoorUserId(ctx, this.config.phoneOtp?.allowedAttempts ?? 3);
+    // A reset record that cannot be read fails closed, as a source that
+    // cannot be read does.
+    let verdict: 'allow' | 'refuse' | 'unreadable' = subject.ok ? 'allow' : 'unreadable';
+    if (subject.ok && subject.userId) {
+      const userId = subject.userId;
+      verdict = await judgeSsoOnlyLocalPassword({
+        ssoOnly: true,
+        engine: this.getDataEngine(),
+        userId,
+        selfPlatformAdmin: () => this.isPlatformAdminUserId(userId),
+      });
+    }
+    if (verdict !== 'allow') {
+      const { APIError } = await import('better-auth/api');
+      if (verdict === 'refuse') {
+        throw new APIError('CONFLICT', {
+          message: SSO_ONLY_REFUSAL_MESSAGES.resetPassword,
+          code: SSO_ONLY_REFUSAL_CODE,
+        });
+      }
+      throw new APIError('SERVICE_UNAVAILABLE', {
+        message: SSO_ONLY_RESET_UNREADABLE_MESSAGE,
+        code: 'SERVICE_UNAVAILABLE',
+      });
+    }
   }
 
   // ── ADR-0069 D1: password complexity (validator) ────────────
