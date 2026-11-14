@@ -15,6 +15,8 @@
  * organization, the instance, a status and a revision — never a token.
  */
 
+import type { PackageScopedResolution } from '@objectstack/objectql';
+
 import {
     ConnectorCredentialUnavailableError,
     isSecretProtectionFailure,
@@ -43,6 +45,43 @@ export const CONNECTOR_CONNECTION_CLIENT_ID_FIELD = 'client_id';
 /** Whether the installer's client came with a secret (kept only inside the encrypted client). */
 export const CONNECTOR_CONNECTION_CLIENT_HAS_SECRET_FIELD = 'client_has_secret';
 
+/** Its package column: the package of the instance the row connects (ADR-0150 D4, D8 row R11). */
+export const CONNECTOR_CONNECTION_PACKAGE_FIELD = 'connector_package';
+
+/**
+ * [ADR-0150 D4, #31699] Which instance of a connector name a store call is
+ * about: a package id, `null` for an instance the environment authored or a
+ * plugin registers in code, or `undefined` for a caller that knows only the
+ * name (every row of the name in the organization answers it, and two
+ * refuse).
+ */
+export type ConnectorInstancePackage = string | null | undefined;
+
+/**
+ * [#31699] How many holders the connector name has: its durable resolution
+ * for a caller with no package (disabled packages counted), the question the
+ * boot backfill asks before it binds a row naming no package. While it
+ * answers one holder, every row of the name is the one instance's; when it
+ * refuses (two holders), each package's rows are its own. `undefined` when
+ * the composition has no registry to ask.
+ */
+export type ConnectorNullRowHolder = (connectorName: string) => PackageScopedResolution | undefined;
+
+/**
+ * [#31699] Two rows answer one instance in one organization, or a row of a
+ * name two packages hold names none of them: answered `409`, never one of them
+ * picked.
+ */
+export class ConnectorConnectionConflictError extends Error {
+    readonly code = 'RESOURCE_CONFLICT';
+    readonly status = 409;
+    readonly statusCode = 409;
+    constructor(message: string) {
+        super(message);
+        this.name = 'ConnectorConnectionConflictError';
+    }
+}
+
 /** A connection's status (`not connected` is the absence of a row). */
 export type ConnectorConnectionRowStatus = 'connected' | 'reconnect_required';
 
@@ -54,6 +93,8 @@ export interface ConnectorConnectionRecord {
     id: string;
     organizationId: string;
     connectorName: string;
+    /** [#31699] The package the row names, `null` when it names none. */
+    packageId: string | null;
     status: ConnectorConnectionRowStatus;
     statusReason?: string;
     /** The granted scopes, as the authorization server answered them. */
@@ -76,11 +117,18 @@ export interface ConnectorConnectionRecord {
     installerClientHasSecret: boolean;
     connectedAt?: string;
     connectedBy?: string;
+    /**
+     * [#31699] Set only on a {@link ConnectorConnectionStore.listFor} entry:
+     * the refusal a read of this organization's connection answers (two rows
+     * answering the instance, or a row of a name two packages hold that
+     * names none of them). The entry stands for the organization, never as its connection.
+     */
+    conflict?: string;
 }
 
 /** The columns a read asks for — `refresh_token` is never among them; its presence is read from the masked value. */
 const RECORD_FIELDS = [
-    'id', 'organization_id', 'connector_name', 'status', 'status_reason', 'scopes', 'expires_at',
+    'id', 'organization_id', 'connector_name', CONNECTOR_CONNECTION_PACKAGE_FIELD, 'status', 'status_reason', 'scopes', 'expires_at',
     'revision', 'connected_at', 'connected_by', CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD,
     CONNECTOR_CONNECTION_REGISTERED_CLIENT_FIELD, CONNECTOR_CONNECTION_CLIENT_ID_FIELD,
     CONNECTOR_CONNECTION_CLIENT_HAS_SECRET_FIELD,
@@ -98,6 +146,7 @@ function toRecord(row: Record<string, unknown>): ConnectorConnectionRecord | und
         id: String(row.id),
         organizationId: row.organization_id,
         connectorName: row.connector_name,
+        packageId: rowPackage(row),
         status: row.status === 'reconnect_required' ? 'reconnect_required' : 'connected',
         statusReason: optionalText(row.status_reason),
         scopes: optionalText(row.scopes),
@@ -113,6 +162,12 @@ function toRecord(row: Record<string, unknown>): ConnectorConnectionRecord | und
         connectedAt: optionalText(row.connected_at),
         connectedBy: optionalText(row.connected_by),
     };
+}
+
+/** The package a row names, `null` when it names none (NULL, absent or empty). */
+function rowPackage(row: Record<string, unknown>): string | null {
+    const value = row[CONNECTOR_CONNECTION_PACKAGE_FIELD];
+    return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 /** What a connect, or a refresh that rotated or renewed the grant, writes. */
@@ -133,12 +188,95 @@ function affectedRows(result: unknown): number {
     return Number.isFinite(count) ? count : 0;
 }
 
+/** [#31699] The refusal of two rows answering one instance in one organization. */
+function twoConnections(connectorName: string, count: number): ConnectorConnectionConflictError {
+    return new ConnectorConnectionConflictError(
+        `Connector instance '${connectorName}' has ${count} connections in this organization, and one `
+            + 'instance keeps one. Revoke the connection, which removes every one of them, then connect again.',
+    );
+}
+
 /**
  * The `sys_connector_connection` store. One per automation plugin. It never
  * caches a token: {@link resolveRefreshToken} reads the row at the moment of use.
  */
 export class ConnectorConnectionStore {
-    constructor(private readonly resolveEngine: () => ConnectorCredentialEngine | undefined) {}
+    constructor(
+        private readonly resolveEngine: () => ConnectorCredentialEngine | undefined,
+        private readonly nullRowHolderOf: ConnectorNullRowHolder = () => undefined,
+    ) {}
+
+    /**
+     * [ADR-0150 D4, #31699] The rows of one organization's connections of
+     * `connectorName` that answer the instance of `packageId`, by one rule:
+     *
+     * - while the name has one holder (its durable resolution, disabled
+     *   packages included, answers one), or no registry can judge it: every
+     *   row of the name, whatever package it names, as the read by name
+     *   answered before the key carried a package. A connection follows its
+     *   name across a move of the declaration (another package, the
+     *   environment), and a connect adopts the row and stamps it with the
+     *   instance's package in place ({@link connect}), so a one-holder
+     *   answer never moves (ADR-0150 red line 3, epic ruling R2-C);
+     * - while two packages hold the name: the rows naming that package
+     *   (`null`: the rows naming none). A row naming no package, or a package
+     *   that is not one of the holders, is no package's: when it is all a
+     *   package has, the read is refused, naming the bind that settles it,
+     *   never handed to one of them (ADR-0150 red line 2). It is not the R9
+     *   rule (#31696), where such a row beside the package's own row wins and
+     *   is refused: here the package's own row is its connection, and the
+     *   backfill reports the stray row;
+     * - for a caller that knows only the name, every row.
+     */
+    private answering(
+        rows: readonly Record<string, unknown>[],
+        connectorName: string,
+        packageId: ConnectorInstancePackage,
+    ): Record<string, unknown>[] {
+        if (packageId === undefined) return [...rows];
+        const own = rows.filter((r) => rowPackage(r) === packageId);
+        if (own.length === rows.length) return own;
+        const holder = this.nullRowHolderOf(connectorName);
+        if (holder?.status !== 'refused') return [...rows];
+        if (packageId === null || own.length > 0) return own;
+        const holders = new Set(holder.candidates.flatMap((c) => (c.kind === 'package' ? [c.packageId] : [])));
+        const unclaimed = rows.filter((r) => {
+            const named = rowPackage(r);
+            return named === null || !holders.has(named);
+        });
+        if (unclaimed.length === 0) return own;
+        throw new ConnectorConnectionConflictError(
+            `The connection of connector instance '${connectorName}' in this organization names no package that holds `
+                + `that name, and ${holder.candidates.length} packages hold it, so it is no one package's connection. Bind it to `
+                + 'its package with `os migrate stored-references bind --table sys_connector_connection`, or uninstall one of '
+                + 'the packages, then read it again.',
+        );
+    }
+
+    /** The one row answering the instance, refusing two (see {@link answering}). */
+    private chosen(
+        rows: readonly Record<string, unknown>[],
+        connectorName: string,
+        packageId: ConnectorInstancePackage,
+    ): Record<string, unknown> | undefined {
+        const answering = this.answering(rows, connectorName, packageId);
+        if (answering.length > 1) throw twoConnections(connectorName, answering.length);
+        return answering[0];
+    }
+
+    private async rowsOfInstance(
+        engine: ConnectorCredentialEngine,
+        organizationId: string,
+        connectorName: string,
+        fields: readonly string[] = RECORD_FIELDS,
+    ): Promise<Record<string, unknown>[]> {
+        const found = await engine.find(CONNECTOR_CONNECTION_OBJECT, {
+            where: { organization_id: organizationId, connector_name: connectorName },
+            fields: [...fields],
+            context: SYSTEM_CONTEXT,
+        });
+        return rowsOf(found);
+    }
 
     private engineOrThrow(what: string): ConnectorCredentialEngine {
         const engine = this.resolveEngine();
@@ -157,30 +295,37 @@ export class ConnectorConnectionStore {
      * `ConnectorCredentialUnavailableError`, never "not connected". The
      * engine's own message is not carried (it may name the row it was handed).
      */
-    async readOrRefuse(organizationId: string, connectorName: string): Promise<ConnectorConnectionRecord | undefined> {
+    async readOrRefuse(
+        organizationId: string,
+        connectorName: string,
+        packageId?: ConnectorInstancePackage,
+    ): Promise<ConnectorConnectionRecord | undefined> {
         const what = `The connection of connector instance '${connectorName}' cannot be read`;
         this.engineOrThrow(what);
         try {
-            return await this.read(organizationId, connectorName);
-        } catch {
+            return await this.read(organizationId, connectorName, packageId);
+        } catch (err) {
+            if (err instanceof ConnectorConnectionConflictError) throw err;
             throw new ConnectorCredentialUnavailableError(`${what}: the connection store did not answer the read.`);
         }
     }
 
-    /** The row for one instance in one organization, or `undefined` when it is not connected there. */
-    async read(organizationId: string, connectorName: string): Promise<ConnectorConnectionRecord | undefined> {
+    /**
+     * The row for one instance in one organization, or `undefined` when it is
+     * not connected there. `packageId` names the instance (see
+     * {@link ConnectorInstancePackage}); two rows answering it are refused
+     * ({@link ConnectorConnectionConflictError}).
+     */
+    async read(
+        organizationId: string,
+        connectorName: string,
+        packageId?: ConnectorInstancePackage,
+    ): Promise<ConnectorConnectionRecord | undefined> {
         const engine = this.resolveEngine();
         if (!engine) return undefined;
-        const found = await engine.find(CONNECTOR_CONNECTION_OBJECT, {
-            where: { organization_id: organizationId, connector_name: connectorName },
-            fields: RECORD_FIELDS,
-            context: SYSTEM_CONTEXT,
-        });
-        for (const row of rowsOf(found)) {
-            const record = toRecord(row);
-            if (record) return record;
-        }
-        return undefined;
+        const rows = (await this.rowsOfInstance(engine, organizationId, connectorName)).filter((r) => toRecord(r) !== undefined);
+        const row = this.chosen(rows, connectorName, packageId);
+        return row ? toRecord(row) : undefined;
     }
 
     /**
@@ -205,18 +350,35 @@ export class ConnectorConnectionStore {
         return affectedRows(result) > 0;
     }
 
-    /** How many rows one instance has in one organization: one at most, but for a connect that raced the backfill. */
-    private async rowCount(engine: ConnectorCredentialEngine, organizationId: string, connectorName: string): Promise<number> {
-        const found = await engine.find(CONNECTOR_CONNECTION_OBJECT, {
-            where: { organization_id: organizationId, connector_name: connectorName },
-            fields: ['id'],
-            context: SYSTEM_CONTEXT,
-        });
-        return rowsOf(found).length;
+    /**
+     * How many rows answer one instance in one organization: one at most, but
+     * for a connect that raced the backfill. A row of a name two packages
+     * hold that names none of them counts as none.
+     */
+    private async rowCount(
+        engine: ConnectorCredentialEngine,
+        organizationId: string,
+        connectorName: string,
+        packageId: ConnectorInstancePackage,
+    ): Promise<number> {
+        const rows = await this.rowsOfInstance(engine, organizationId, connectorName, ['id', CONNECTOR_CONNECTION_PACKAGE_FIELD]);
+        try {
+            return this.answering(rows, connectorName, packageId).length;
+        } catch (err) {
+            if (err instanceof ConnectorConnectionConflictError) return 0;
+            throw err;
+        }
     }
 
-    /** Every organization's row for one instance. */
-    async listFor(connectorName: string): Promise<ConnectorConnectionRecord[]> {
+    /**
+     * Every organization's connection of one instance, one per organization
+     * (`packageId` names the instance, as {@link read}). An organization whose
+     * read is refused (two rows answering, or a row of a name two packages
+     * hold that names none of them) is still listed, once, carrying that refusal in
+     * `conflict`: the list counts organizations as the read would, and a
+     * caller never takes such an entry for the organization's connection.
+     */
+    async listFor(connectorName: string, packageId: ConnectorInstancePackage): Promise<ConnectorConnectionRecord[]> {
         const engine = this.resolveEngine();
         if (!engine) return [];
         const found = await engine.find(CONNECTOR_CONNECTION_OBJECT, {
@@ -224,7 +386,26 @@ export class ConnectorConnectionStore {
             fields: RECORD_FIELDS,
             context: SYSTEM_CONTEXT,
         });
-        return rowsOf(found).map(toRecord).filter((r): r is ConnectorConnectionRecord => r !== undefined);
+        const byOrganization = new Map<string, Record<string, unknown>[]>();
+        for (const row of rowsOf(found)) {
+            if (toRecord(row) === undefined) continue;
+            const organizationId = String(row.organization_id);
+            byOrganization.set(organizationId, [...(byOrganization.get(organizationId) ?? []), row]);
+        }
+        const out: ConnectorConnectionRecord[] = [];
+        for (const rows of byOrganization.values()) {
+            let answering: Record<string, unknown>[];
+            try {
+                answering = this.answering(rows, connectorName, packageId);
+                if (answering.length > 1) throw twoConnections(connectorName, answering.length);
+            } catch (err) {
+                if (!(err instanceof ConnectorConnectionConflictError)) throw err;
+                out.push({ ...toRecord(rows[0])!, conflict: err.message });
+                continue;
+            }
+            if (answering.length > 0) out.push(toRecord(answering[0])!);
+        }
+        return out;
     }
 
     /**
@@ -283,14 +464,28 @@ export class ConnectorConnectionStore {
         args: {
             organizationId: string;
             connectorName: string;
+            /**
+             * [#31699] The instance's package (`null`: the environment's or
+             * the platform's instance; absent: a caller that knows only the
+             * name, whose row names no package, as before).
+             */
+            packageId?: ConnectorInstancePackage;
             userId?: string;
             registeredClient?: string;
             installerClient?: { clientId: string; hasSecret: boolean };
         } & ConnectorGrantWrite,
     ): Promise<ConnectorConnectionRecord> {
         const engine = this.engineOrThrow(`Connector instance '${args.connectorName}' was not connected`);
-        const existing = await this.readOrRefuse(args.organizationId, args.connectorName);
+        const existing = await this.readOrRefuse(args.organizationId, args.connectorName, args.packageId);
         const context = { ...SYSTEM_CONTEXT, ...(args.userId ? { userId: args.userId } : {}) };
+        // [#31699] The row names the instance's package. A row the instance
+        // adopts (`answering`: one naming no package, or another package, while
+        // the name has one holder) is stamped by this same write, so the
+        // instance's connection is one row (design review M2). `null` (the
+        // environment's or the platform's instance) clears another package's
+        // stamp; an absent package (a caller that knows only the name) leaves
+        // the row as it is.
+        const stamp = args.packageId === undefined ? {} : { [CONNECTOR_CONNECTION_PACKAGE_FIELD]: args.packageId };
         const row = {
             grant: 'authorization_code',
             [CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD]: args.refreshToken ?? null,
@@ -309,11 +504,11 @@ export class ConnectorConnectionStore {
         let insertedId: string | undefined;
         try {
             if (existing) {
-                moved = !(await this.updateAtRevision(engine, existing.id, existing.revision, row, context));
+                moved = !(await this.updateAtRevision(engine, existing.id, existing.revision, { ...row, ...stamp }, context));
             } else {
                 const created = await engine.insert(
                     CONNECTOR_CONNECTION_OBJECT,
-                    { organization_id: args.organizationId, connector_name: args.connectorName, ...row },
+                    { organization_id: args.organizationId, connector_name: args.connectorName, ...stamp, ...row },
                     { context },
                 );
                 const id = (created as { id?: unknown } | null | undefined)?.id;
@@ -338,8 +533,8 @@ export class ConnectorConnectionStore {
         // rows of one instance in one organization would leave `read` answering
         // either and `revoke` deleting one. So the insert that made the second
         // row takes itself back and is refused, as the old key refused it.
-        // (3a-ii counts by package once the store carries it.) A foreign
-        // message is never quoted, as above.
+        // Counted for this instance (`answering`). A foreign message is never
+        // quoted, as above.
         if (!existing && !moved) {
             const twice = new ConnectorCredentialUnavailableError(
                 `Connector instance '${args.connectorName}' was connected twice in this organization: another connect `
@@ -347,7 +542,7 @@ export class ConnectorConnectionStore {
             );
             let rows: number;
             try {
-                rows = await this.rowCount(engine, args.organizationId, args.connectorName);
+                rows = await this.rowCount(engine, args.organizationId, args.connectorName, args.packageId);
             } catch {
                 throw new ConnectorCredentialUnavailableError(
                     `Connector instance '${args.connectorName}' was connected, but the connection store did not answer the `
@@ -371,7 +566,7 @@ export class ConnectorConnectionStore {
                     + 'completing (another connect, a refresh or a revoke landed first). Nothing was kept; begin the connect again.',
             );
         }
-        const stored = await this.readOrRefuse(args.organizationId, args.connectorName);
+        const stored = await this.readOrRefuse(args.organizationId, args.connectorName, args.packageId);
         if (!stored) {
             throw new ConnectorCredentialUnavailableError(
                 `Connector instance '${args.connectorName}' was not connected: the connection did not read back after its write.`,
@@ -428,13 +623,35 @@ export class ConnectorConnectionStore {
         );
     }
 
-    /** Remove the connection of one instance in one organization. `false` when it was not connected there. */
-    async revoke(organizationId: string, connectorName: string, userId?: string): Promise<boolean> {
-        const engine = this.engineOrThrow(`The connection of connector instance '${connectorName}' was not revoked`);
-        const existing = await this.readOrRefuse(organizationId, connectorName);
-        if (!existing) return false;
+    /**
+     * Remove the connection of one instance in one organization: every row
+     * answering it ({@link answering}), so a revoke also clears the second row
+     * a read refuses, and, while the name has one holder, a row its moved
+     * declaration left under another package. Under two holders a row that
+     * names none of them is no package's, so a package's revoke leaves it (the
+     * bind settles it), and where it is all that package has, the revoke is
+     * refused as the read is ({@link ConnectorConnectionConflictError}), never
+     * answered "not connected". `false` when it was not connected there.
+     */
+    async revoke(
+        organizationId: string,
+        connectorName: string,
+        userId: string | undefined,
+        packageId: string | null,
+    ): Promise<boolean> {
+        const what = `The connection of connector instance '${connectorName}' was not revoked`;
+        const engine = this.engineOrThrow(what);
+        let rows: Record<string, unknown>[];
+        try {
+            rows = await this.rowsOfInstance(engine, organizationId, connectorName, ['id', CONNECTOR_CONNECTION_PACKAGE_FIELD]);
+        } catch {
+            throw new ConnectorCredentialUnavailableError(`${what}: the connection store did not answer the read.`);
+        }
+        const answering = this.answering(rows, connectorName, packageId);
+        const ids = answering.flatMap((r) => (typeof r.id === 'string' || typeof r.id === 'number' ? [String(r.id)] : []));
+        if (ids.length === 0) return false;
         const context = { ...SYSTEM_CONTEXT, ...(userId ? { userId } : {}) };
-        await engine.delete(CONNECTOR_CONNECTION_OBJECT, { where: { id: existing.id }, context });
+        for (const id of ids) await engine.delete(CONNECTOR_CONNECTION_OBJECT, { where: { id }, context });
         return true;
     }
 }

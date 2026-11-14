@@ -610,6 +610,10 @@ declarations, not words an app adds. The same door runs the build's
 field-formula pass on each computed field the written entry adds (#33072),
 against the target as served without the package's own stored extension, which
 the write replaces, and refuses with the build's rule id (`expression-invalid`).
+Each validation rule the entry adds is judged the same way (#33154), by the
+object's own rule pass, at the door and in `os build` alike: the registry merges
+an extension's `validations` onto the target, so every save of the target runs
+them (`object 'TARGET' · objectExtensions[0] · validation 'RULE'`).
 
 **Declared enforcement that cannot run** is two rows for the mirror-image
 reason, and #4716 is where it split. That heading covers four rule ids, and

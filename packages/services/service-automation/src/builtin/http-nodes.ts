@@ -26,7 +26,10 @@ import { FLOW_CREDENTIAL_CLEARED, HTTP_SIGNING_SECRET_KEY } from '../flow-creden
  *    retry / idempotency / dead-letter. The flow gets back `{ deliveryId }` and
  *    does NOT block on the response. This closes the "`http_request` is a bare
  *    fetch with no retry" reliability gap (ADR-0018 §4). When no messaging HTTP
- *    outbox is wired the node degrades to the inline call below.
+ *    outbox is wired the node degrades to the inline call below — except on a
+ *    record save's path (an after-record-change run, or a child of one), where
+ *    the call is sent once in the background and the run does not wait for it,
+ *    so no retry around the node holds the save (ruling 6810500711, letter D).
  *
  *  - **Request/response (default)** — a synchronous `fetch()` returning
  *    `{ response, status }` to the flow, preserving the historical `http_request`
@@ -275,6 +278,61 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             // template resolves here, so what was authored is what signs.
             const signingSecret = cfg.signingSecret;
 
+            // One inline send: the default mode, and the durable arm's no-outbox
+            // fallback (awaited, or in the background on the save path).
+            const sendInline = async () => {
+                const method = cfg.method ?? 'GET';
+                // #4354 — unlike a connector action, an HTTP call's effect IS
+                // knowable: the method says it. A GET reads and can never write, so
+                // it reports a real `0`; anything else is a mutating call.
+                const reads = /^(GET|HEAD|OPTIONS)$/i.test(method);
+                const controller = new AbortController();
+                const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+                // The exact bytes this arm sends, and therefore the bytes it signs.
+                // They are this arm's own serialization, not the outbox's
+                // `deliveryBody`; a receiver verifies over what it received, so each
+                // arm signs what it sends. No body is signed as the empty string.
+                const requestBody = body !== undefined && body !== null ? JSON.stringify(body) : undefined;
+                const requestHeaders = signingSecret
+                    ? { ...headers, [HTTP_SIGNATURE_HEADER]: signHttpBody(requestBody ?? '', signingSecret) }
+                    : headers;
+                try {
+                    const response = await fetch(url, {
+                        method,
+                        headers: requestHeaders,
+                        body: requestBody,
+                        signal: controller.signal,
+                    });
+                    const data = await readBody(response);
+                    return {
+                        success: response.ok,
+                        output: { response: data, status: response.status },
+                        error: response.ok ? undefined : `HTTP ${response.status}`,
+                        // A mutating call the upstream ACCEPTED is one effect. One it
+                        // rejected is unknown, not zero: a 500 can arrive after the
+                        // write landed, and claiming `0` there would let a run report
+                        // it changed nothing while it had.
+                        metrics: reads
+                            ? { acted: 0 }
+                            : response.ok
+                                ? { acted: 1 }
+                                : { unmeasuredEffect: true },
+                    };
+                } catch (err) {
+                    const e = err as { name?: string; message?: string };
+                    const msg = e?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : describeFetchFailure(err, url);
+                    // A timed-out or aborted mutating request may well have landed —
+                    // the response is what we lost, not necessarily the write.
+                    return {
+                        success: false,
+                        error: `http: ${msg}`,
+                        metrics: reads ? { acted: 0 } : { unmeasuredEffect: true },
+                    };
+                } finally {
+                    if (timer) clearTimeout(timer);
+                }
+            };
+
             // ── Durable mode: enqueue onto the messaging HTTP outbox ──────────
             if (durable) {
                 const messaging = getMessaging();
@@ -363,66 +421,68 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                 }
                 // No outbox available — degrade to a best-effort inline call,
                 // which signs exactly as the outbox would have.
+                if (onSavePath(context)) {
+                    // Ruling 6810500711, letter D: the record save never waits on
+                    // an external system. A run after a record change holds the
+                    // save until it returns, and a retry around this node would
+                    // hold it through the whole backoff ladder. So, as the outbox
+                    // would, the run does not wait for the request and does not
+                    // see its outcome: it is sent once, in the background, and a
+                    // failure is said loudly here, because it is lost.
+                    ctx.logger.warn(
+                        `[http] node '${node.id}' requested durable delivery but no messaging HTTP outbox is wired; ` +
+                            `on the save path (event '${String(context?.event)}') the request is sent once in the ` +
+                            `background, unretried, and the run does not wait for it`,
+                    );
+                    void sendInline().then(
+                        (outcome) => {
+                            if (outcome.success) return;
+                            ctx.logger.error(
+                                `[http] node '${node.id}': the durable request sent in the background (no messaging ` +
+                                    `HTTP outbox is wired) failed and is lost: ${outcome.error}. Nothing retries it ` +
+                                    `and the flow run already completed as if it had been queued. Wire the messaging ` +
+                                    `service with reliable delivery so a durable request is queued and retried.`,
+                            );
+                        },
+                        (err: unknown) => {
+                            ctx.logger.error(
+                                `[http] node '${node.id}': the durable request sent in the background (no messaging ` +
+                                    `HTTP outbox is wired) failed and is lost: ${(err as Error)?.message ?? String(err)}. ` +
+                                    `Wire the messaging service with reliable delivery so a durable request is queued ` +
+                                    `and retried.`,
+                            );
+                        },
+                    );
+                    return {
+                        success: true,
+                        output: { enqueued: false, background: true },
+                        metrics: { unmeasuredEffect: true },
+                    };
+                }
                 ctx.logger.warn(
                     `[http] node '${node.id}' requested durable delivery but no messaging HTTP outbox is wired; falling back to inline fetch`,
                 );
             }
 
             // ── Request/response mode (default; preserves http_request) ───────
-            const method = cfg.method ?? 'GET';
-            // #4354 — unlike a connector action, an HTTP call's effect IS
-            // knowable: the method says it. A GET reads and can never write, so
-            // it reports a real `0`; anything else is a mutating call.
-            const reads = /^(GET|HEAD|OPTIONS)$/i.test(method);
-            const controller = new AbortController();
-            const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
-            // The exact bytes this arm sends, and therefore the bytes it signs.
-            // They are this arm's own serialization, not the outbox's
-            // `deliveryBody`; a receiver verifies over what it received, so each
-            // arm signs what it sends. No body is signed as the empty string.
-            const requestBody = body !== undefined && body !== null ? JSON.stringify(body) : undefined;
-            const requestHeaders = signingSecret
-                ? { ...headers, [HTTP_SIGNATURE_HEADER]: signHttpBody(requestBody ?? '', signingSecret) }
-                : headers;
-            try {
-                const response = await fetch(url, {
-                    method,
-                    headers: requestHeaders,
-                    body: requestBody,
-                    signal: controller.signal,
-                });
-                const data = await readBody(response);
-                return {
-                    success: response.ok,
-                    output: { response: data, status: response.status },
-                    error: response.ok ? undefined : `HTTP ${response.status}`,
-                    // A mutating call the upstream ACCEPTED is one effect. One it
-                    // rejected is unknown, not zero: a 500 can arrive after the
-                    // write landed, and claiming `0` there would let a run report
-                    // it changed nothing while it had.
-                    metrics: reads
-                        ? { acted: 0 }
-                        : response.ok
-                            ? { acted: 1 }
-                            : { unmeasuredEffect: true },
-                };
-            } catch (err) {
-                const e = err as { name?: string; message?: string };
-                const msg = e?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : describeFetchFailure(err, url);
-                // A timed-out or aborted mutating request may well have landed —
-                // the response is what we lost, not necessarily the write.
-                return {
-                    success: false,
-                    error: `http: ${msg}`,
-                    metrics: reads ? { acted: 0 } : { unmeasuredEffect: true },
-                };
-            } finally {
-                if (timer) clearTimeout(timer);
-            }
+            return sendInline();
         },
     });
 
     ctx.logger.info('[HTTP] http executor registered');
+}
+
+/**
+ * The hook events of a run that holds a record's save until it returns: the
+ * record-change trigger's after-phase (`triggerTypeToHookEvents` in
+ * `@objectstack/trigger-record-change`). A `subflow` / `map` child inherits its
+ * caller's context, so a child of such a run is on the save path too.
+ */
+const SAVE_PATH_EVENTS = /^after(Insert|Update|Delete)$/;
+
+/** Is this run on a record save's path (an after-record-change run, or a child of one)? */
+function onSavePath(context: { event?: unknown } | undefined): boolean {
+    return typeof context?.event === 'string' && SAVE_PATH_EVENTS.test(context.event);
 }
 
 /** Longest cause text a run-record line carries. */

@@ -84,16 +84,16 @@ describe('[#20446] N2 — a stored 「is empty」 rule on an analytics host', ()
   it('the same host WITH sourceFieldMeta answers the declared text row', async () => {
     const { service } = host(true);
     const empty = await service.generateSql(q(['status', 'is_empty', true]));
-    expect(empty.sql).toMatch(/WHERE \(status IS NULL OR status = \$1\)/);
+    expect(empty.sql).toMatch(/WHERE \("status" IS NULL OR "status" = \$1\)/);
     expect(empty.params).toContain('');
     const full = await service.generateSql(q(['status', 'is_not_empty', true]));
-    expect(full.sql).toMatch(/WHERE \(status IS NOT NULL AND status <> \$1\)/);
+    expect(full.sql).toMatch(/WHERE \("status" IS NOT NULL AND "status" <> \$1\)/);
   });
 
   it('is_null is untouched on both hosts', async () => {
     for (const withFieldMeta of [false, true]) {
       const { sql } = await host(withFieldMeta).service.generateSql(q(['status', 'is_null', true]));
-      expect(sql, String(withFieldMeta)).toMatch(/WHERE status IS NULL/);
+      expect(sql, String(withFieldMeta)).toMatch(/WHERE "status" IS NULL/);
     }
   });
 });

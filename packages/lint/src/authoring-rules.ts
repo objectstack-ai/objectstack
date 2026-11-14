@@ -840,6 +840,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // extension draft is refused, because that batch's pending set carries no
     // extension drafts (#33152); publishing the extension first through the
     // per-item door works.
+    //
+    // [#33154] The same walk judges each `validations[]` rule the written
+    // extension adds, by the object walk's own rule pass, so a rule the
+    // registry merges onto the target is refused at this door and in the
+    // build alike (`object 'TARGET' · objectExtensions[0] · validation 'N'`).
+    // MEASURED first: 0 first-party `objectExtensions` entries carry a
+    // validation rule (examples/**, packages/**, HotCRM).
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page', 'object_extension'],
     run: (stack, ctx) =>

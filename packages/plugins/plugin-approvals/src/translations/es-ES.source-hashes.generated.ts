@@ -19,6 +19,8 @@
 
 export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_approval_action.fields.actor_id.label": "b155813f8a7f06e3",
+  "objects.sys_approval_delegation._validations.delegate_not_delegator.message": "e4924bc4008bd3b5",
+  "objects.sys_approval_delegation._validations.validity_window_order.message": "e6a6433d70cb122d",
   "objects.sys_approval_delegation._views.active.emptyState.message": "1095d61c017b6db2",
   "objects.sys_approval_delegation._views.active.emptyState.title": "799d28e51d88963e",
   "objects.sys_approval_delegation._views.active.label": "eee107cf4e466779",

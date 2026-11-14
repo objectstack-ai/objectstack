@@ -117,6 +117,30 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
   // address the D5 allow-list judged, or none. See `client-address-vendor.ts`.
   request = withVendorClientAddress(request, clientAddress);
 
+  // [#33237] A SCIM protocol request (`/scim/v2/*`) that carries a bearer
+  // reaches the vendor WITHOUT its Cookie. `@better-auth/scim` authenticates
+  // that path by the `Authorization: Bearer` credential alone
+  // (`createSCIMConnectionMiddleware`; the platform's verifier reads only the
+  // token), and its writes are attributed to the verified connection, never
+  // to a session (`authSystemWriteContext`), so a Cookie carries no authority
+  // there. It did carry a refusal: the vendor's origin check
+  // (`validateOrigin`) demands an `Origin` whenever the request HAS a cookie,
+  // so an identity provider with a cookie jar, or behind an edge or
+  // sticky-session cookie, was answered 403 `MISSING_OR_NULL_ORIGIN` on every
+  // provision and deprovision. Dropping the Cookie relaxes no check: the
+  // origin check still runs on every request that keeps one — every other
+  // route, and a `/scim/v2/*` request with no bearer, which the SCIM
+  // middleware refuses anyway. Pinned by `scim-bearer-cookie-origin.test.ts`.
+  if (
+    request.headers.has('cookie') &&
+    /^Bearer\s+\S/i.test(request.headers.get('authorization') ?? '') &&
+    isScimProtocolPath(this.betterAuthEndpointPath(request))
+  ) {
+    const headers = new Headers(request.headers);
+    headers.delete('cookie');
+    request = new Request(request, { headers });
+  }
+
   // Dev DX: better-auth's CSRF protection rejects state-changing requests
   // (e.g. `/sign-in/email`) with a 403 when neither `Origin` nor `Referer`
   // is present. Browsers always send one; non-browser API clients (curl,
