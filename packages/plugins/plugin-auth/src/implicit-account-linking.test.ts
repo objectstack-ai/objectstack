@@ -6,6 +6,10 @@
 // Two layers:
 //
 //  1. PURE decision — `decideImplicitLink` over each condition.
+//  1b. Rule 4 (SSO domain verification) on its own inputs; the sign-ins that
+//      reach it through the real vendor are pinned in
+//      `sso-oidc-refusal-cause.test.ts` (OIDC) and
+//      `sso-saml-refusal-landing.test.ts` (SAML).
 //  2. END of the chain — a real better-auth pipeline over the in-memory
 //     engine, driving a real OAuth round trip (`/sign-in/social` →
 //     `/callback/:id`) through generic-OAuth providers whose token and
@@ -19,11 +23,17 @@ import { AuthManager } from './auth-manager';
 import {
   IMPLICIT_LINK_REFUSED,
   PLATFORM_IDP_PROVIDER_ID,
+  SSO_ADDRESS_CHANGE_DOMAIN_REFUSAL_DESCRIPTION,
+  SSO_LINK_DOMAIN_REFUSAL_DESCRIPTION,
   decideImplicitLink,
   linkSourceProviderId,
+  refuseImplicitAccountLink,
+  refuseSsoAddressChangeOutsideProvenDomain,
   unlinkTombstoneIdentifier,
   unlinkTombstoneUserPrefix,
 } from './implicit-account-linking';
+import { EMAIL_DOMAIN_NOT_ALLOWED } from './audience-posture.js';
+import { refuseSsoAccountOutsideProvenDomain, type SsoAccountDomainRuleDeps } from './sso-account-at-proven-domain.js';
 // [#23184] better-auth's first module load is paid HERE, at module load, and
 // not inside the first clocked case: clocked windows measure behaviour, never
 // loading (AGENTS.md, Build & Test). `AuthManager` reaches these vendor modules
@@ -718,5 +728,116 @@ describe('implicit link on external sign-in, end to end', () => {
     for (const key of [...cache.keys()]) if (key.startsWith('verification:')) cache.delete(key);
     const refused = await oauthRoundTrip(manager, EXTERNAL, 'sign-in/social');
     expect(refused.searchParams.get('error')).toBe(IMPLICIT_LINK_REFUSED);
+  });
+});
+
+describe('with SSO domain verification on, an SSO sign-in reaches an existing account only with an address at a domain the provider has proven', () => {
+  const PROVIDER = 'acme-okta';
+  const provenRow = { provider_id: PROVIDER, domain: 'acme.com', domain_verified: 1 };
+  const readerOf = (rows: unknown[]) => ({ find: vi.fn(async () => rows) });
+  const ruleDeps = (over: Partial<SsoAccountDomainRuleDeps> = {}): SsoAccountDomainRuleDeps => ({
+    verificationEnabled: () => true,
+    reader: readerOf([provenRow]),
+    logger: { info: vi.fn(), warn: vi.fn() },
+    ...over,
+  });
+  /** An auth context holding one verified account, not linked and never unlinked. */
+  const ctxHolding = (email: string) => ({
+    context: {
+      adapter: { findOne: vi.fn(async () => null), create: vi.fn(), deleteMany: vi.fn() },
+      internalAdapter: { findUserById: vi.fn(async (id: string) => ({ id, email, emailVerified: true })) },
+    },
+  });
+  const sourceOf = (action: string, method: string) =>
+    method === 'oauth'
+      ? { action, method, oauth: { providerId: PROVIDER } }
+      : { action, method, sso: { providerId: PROVIDER } };
+  const call = (action: string, email: string, method = 'sso-oidc') => ({ user: { id: 'usr_1', email }, source: sourceOf(action, method) });
+  const link = (email: string, method = 'sso-oidc', provenDomain = ruleDeps(), stored = email) =>
+    refuseImplicitAccountLink(call('link-account', email, method), ctxHolding(stored), {
+      requireLocalEmailVerified: true,
+      provenDomain,
+    });
+  const signIn = (asserted: string, stored: string, method = 'sso-oidc', provenDomain = ruleDeps()) =>
+    refuseSsoAddressChangeOutsideProvenDomain(call('sign-in', asserted, method), ctxHolding(stored), { provenDomain });
+  const LINK_REFUSED = { error: EMAIL_DOMAIN_NOT_ALLOWED, errorDescription: SSO_LINK_DOMAIN_REFUSAL_DESCRIPTION };
+  const CHANGE_REFUSED = { error: EMAIL_DOMAIN_NOT_ALLOWED, errorDescription: SSO_ADDRESS_CHANGE_DOMAIN_REFUSAL_DESCRIPTION };
+
+  it('an implicit link at a subdomain the provider has not listed is refused, OIDC and SAML, naming the rule and no domain', async () => {
+    for (const method of ['sso-oidc', 'sso-saml']) {
+      expect(await link('erin@eng.acme.com', method), method).toEqual(LINK_REFUSED);
+    }
+    expect(SSO_LINK_DOMAIN_REFUSAL_DESCRIPTION).not.toMatch(/acme/);
+  });
+
+  it('an implicit link at another domain, or with an asserted email that is not an address, is refused', async () => {
+    for (const email of ['erin@other.example', 'erin@acme.com.other.example', 'erin.acme.com']) {
+      expect(await link(email), email).toEqual(LINK_REFUSED);
+    }
+  });
+
+  it('an implicit link at a proven domain is admitted', async () => {
+    expect(await link('erin@acme.com')).toBeUndefined();
+    expect(await link('Erin@ACME.com', 'sso-saml')).toBeUndefined();
+  });
+
+  it('fails closed: no provider row, an unverified provider, or a read that fails refuses the link, the read failure once at warn', async () => {
+    expect(await link('erin@acme.com', 'sso-oidc', ruleDeps({ reader: readerOf([]) }))).toEqual(LINK_REFUSED);
+    expect(await link('erin@acme.com', 'sso-oidc', ruleDeps({ reader: readerOf([{ ...provenRow, domain_verified: 0 }]) }))).toEqual(LINK_REFUSED);
+    const warn = vi.fn();
+    const failing = { find: vi.fn(async () => { throw new Error('store down'); }) };
+    expect(await link('erin@acme.com', 'sso-oidc', ruleDeps({ reader: failing, logger: { warn } }))).toEqual(LINK_REFUSED);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('a sign-in asserting an address outside the proven domains, other than the account\'s own, is refused', async () => {
+    for (const method of ['sso-oidc', 'sso-saml']) {
+      expect(await signIn('bob@other.example', 'bob@acme.com', method), method).toEqual(CHANGE_REFUSED);
+      expect(await signIn('bob@eng.acme.com', 'bob@acme.com', method), method).toEqual(CHANGE_REFUSED);
+    }
+    expect(SSO_ADDRESS_CHANGE_DOMAIN_REFUSAL_DESCRIPTION).not.toMatch(/acme|other\.example/);
+  });
+
+  it('a sign-in asserting another address at a proven domain is admitted', async () => {
+    expect(await signIn('robert@acme.com', 'bob@acme.com')).toBeUndefined();
+  });
+
+  it("a sign-in asserting the account's own address is not judged, in any case, and reads no provider", async () => {
+    const provenDomain = ruleDeps({ reader: readerOf([]) });
+    expect(await signIn('Bob@Other.Example', 'bob@other.example', 'sso-oidc', provenDomain)).toBeUndefined();
+    expect((provenDomain.reader as { find: ReturnType<typeof vi.fn> }).find).not.toHaveBeenCalled();
+  });
+
+  it('fails closed: a sign-in whose provider row cannot be read is refused when the address changes; one whose account cannot be read throws', async () => {
+    const failing = { find: vi.fn(async () => { throw new Error('store down'); }) };
+    expect(await signIn('bob@acme.com', 'old@acme.com', 'sso-oidc', ruleDeps({ reader: failing }))).toEqual(CHANGE_REFUSED);
+    const noAccount = { context: { adapter: {}, internalAdapter: { findUserById: vi.fn(async () => null) } } };
+    await expect(
+      refuseSsoAddressChangeOutsideProvenDomain(call('sign-in', 'bob@acme.com'), noAccount, { provenDomain: ruleDeps() }),
+    ).rejects.toThrow();
+  });
+
+  it('CONTROL: with verification off, neither the link nor the address change is judged, and no provider is read', async () => {
+    const provenDomain = ruleDeps({ verificationEnabled: () => false, reader: readerOf([]) });
+    expect(await link('erin@eng.acme.com', 'sso-oidc', provenDomain)).toBeUndefined();
+    expect(await signIn('bob@other.example', 'bob@acme.com', 'sso-oidc', provenDomain)).toBeUndefined();
+    expect((provenDomain.reader as { find: ReturnType<typeof vi.fn> }).find).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a non-SSO source, and an explicit link (the vendor sends it as an OAuth source), are not judged by this rule', async () => {
+    const provenDomain = ruleDeps({ reader: readerOf([]) });
+    expect(await link('erin@other.example', 'oauth', provenDomain)).toBeUndefined();
+    expect(await signIn('bob@other.example', 'bob@acme.com', 'oauth', provenDomain)).toBeUndefined();
+    expect((provenDomain.reader as { find: ReturnType<typeof vi.fn> }).find).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: the creation rule is unchanged, and these gates do not judge a creation', async () => {
+    const creation = call('create-user', 'bob@other.example');
+    expect(await refuseSsoAccountOutsideProvenDomain(creation, ruleDeps())).toMatchObject({ error: EMAIL_DOMAIN_NOT_ALLOWED });
+    expect(await refuseSsoAccountOutsideProvenDomain(call('create-user', 'bob@acme.com'), ruleDeps())).toBeUndefined();
+    const provenDomain = ruleDeps({ reader: readerOf([]) });
+    expect(await refuseImplicitAccountLink(creation, ctxHolding('x@acme.com'), { requireLocalEmailVerified: true, provenDomain })).toBeUndefined();
+    expect(await refuseSsoAddressChangeOutsideProvenDomain(creation, ctxHolding('x@acme.com'), { provenDomain })).toBeUndefined();
+    expect((provenDomain.reader as { find: ReturnType<typeof vi.fn> }).find).not.toHaveBeenCalled();
   });
 });
