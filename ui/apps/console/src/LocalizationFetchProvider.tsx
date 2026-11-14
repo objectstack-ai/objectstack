@@ -59,12 +59,23 @@
  * So when the device holds an explicit language choice, this read states that
  * language. The server's rungs are unchanged: a stored `sys_user.locale` still
  * answers first, and the header only decides the rung below it. Without a
- * choice the browser's header stays: that is exactly the boot on which
+ * choice, see the next section: that is exactly the boot on which
  * `seedTenantLanguage()` asks this endpoint too, and the two share one request
  * only while their headers match (objectui#5544). The stated language is part
  * of the request, so a change of it reads again, and the new read cannot join
  * one still in flight under the old language: the in-flight key includes the
  * headers.
+ *
+ * ## With no choice, state the app's declared default (objectstack#33231)
+ *
+ * The browser's header answered the `Accept-Language` rung for a user with no
+ * `sys_user.locale`, so both the dates here and the language seed this read
+ * refreshes followed the browser, never the app's declared default (discovery
+ * `locale.default`). With no explicit choice on the device, this read states
+ * that default instead, the same value `seedTenantLanguage()` states, so the
+ * two still share one request on a first visit. Only when no default is
+ * served (discovery failed, or never asked, as outside the console's boot)
+ * does the browser's own header go out.
  */
 import { useEffect, useState } from 'react';
 import {
@@ -75,6 +86,7 @@ import {
   type LocalizationValue,
 } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount, useAuth } from '@object-ui/auth';
+import { startedAppDefaultLocale } from './languageSeed';
 import { useDataInvalidation } from '@object-ui/react';
 import {
   HttpFetchError,
@@ -113,8 +125,9 @@ export function LocalizationFetchProvider({
   const userId = user?.id ? String(user.id) : undefined;
   // Bumps on every write to the signed-in user's own row (objectstack#27498).
   const userRowWrites = useDataInvalidation(userId ? 'sys_user' : undefined, userId);
-  // The device's chosen UI language, stated as this read's `Accept-Language`;
-  // none chosen, the browser's own header goes out (objectstack#27625).
+  // The device's chosen UI language, stated as this read's `Accept-Language`
+  // (objectstack#27625); none chosen, the app's declared default is stated
+  // inside the effect (objectstack#33231).
   const { language } = useObjectTranslation();
   const statedLanguage = readStoredLanguage() ? language : undefined;
 
@@ -125,7 +138,15 @@ export function LocalizationFetchProvider({
     // boot read keeps sharing with `seedTenantLanguage()` (objectui#5544).
     const reread = userRowWrites > 0 ? new AbortController() : undefined;
 
+    // Read when the effect runs, not at render: `seedTenantLanguage()` starts it
+    // before the app mounts, and nothing in it is React state.
+    const appDefaultRead = statedLanguage ? null : startedAppDefaultLocale();
+
     void (async () => {
+      // No explicit choice ⇒ the app's declared default decides the rung below
+      // the user's own locale; none served, the browser's own header goes out.
+      const preference = statedLanguage ?? (appDefaultRead ? await appDefaultRead : undefined);
+      if (cancelled) return;
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         // Whose answer this attempt will be (objectui#10193). The request
         // carries whatever session this browser holds right now; if
@@ -145,7 +166,7 @@ export function LocalizationFetchProvider({
             credentials: 'include',
             headers: {
               Accept: 'application/json',
-              ...(statedLanguage ? { 'Accept-Language': statedLanguage } : {}),
+              ...(preference ? { 'Accept-Language': preference } : {}),
             },
             signal: reread?.signal,
           });

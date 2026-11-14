@@ -16,11 +16,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { useLocalization, readCachedLanguageSeed } from '@object-ui/i18n';
+import { clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
 import { resetInflightGetsForTesting } from '../../../../packages/types/src/http-inflight';
-import { seedTenantLanguage } from '../languageSeed';
+import { __resetAppDefaultLocaleForTests, seedTenantLanguage } from '../languageSeed';
 import { LocalizationFetchProvider } from '../LocalizationFetchProvider';
 
 const ENDPOINT = '/api/v1/auth/me/localization';
+const DISCOVERY = '/api/v1/discovery';
+
+/**
+ * The boot's discovery read (objectstack#33231) is the data adapter's request,
+ * not this endpoint's: these answer it as a server serving no default, unless a
+ * test says otherwise, and count only the localization requests.
+ */
+const isDiscovery = (url: unknown) => String(url).endsWith(DISCOVERY);
+const meCalls = (fetchStub: ReturnType<typeof vi.fn>) =>
+  fetchStub.mock.calls.filter(([url]) => !isDiscovery(url)).length;
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -48,6 +59,8 @@ function Consumer() {
 beforeEach(() => {
   resetInflightGetsForTesting();
   localStorage.clear();
+  __resetAppDefaultLocaleForTests();
+  clearSharedDiscoveryCache();
 });
 
 afterEach(() => {
@@ -59,14 +72,16 @@ afterEach(() => {
 describe('first-visit localization request budget', () => {
   it('serves the seed and the provider from ONE request', async () => {
     const gate = deferred<Response>();
-    const fetchStub = vi.fn(() => gate.promise);
+    const fetchStub = vi.fn((url: string) =>
+      isDiscovery(url) ? Promise.resolve(jsonResponse({}, 404)) : gate.promise,
+    );
     vi.stubGlobal('fetch', fetchStub);
 
     // True first visit: no stored choice, no cached seed ⇒ the seed fetches and
     // races a timeout. A tiny timeout keeps the test fast; the shape is the same
     // one production has at 500 ms — the race resolves while the fetch runs on.
     await seedTenantLanguage('', 1);
-    expect(fetchStub).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(meCalls(fetchStub)).toBe(1));
 
     // The provider mounts right after the boot's `Promise.all` resolves — while
     // the seed's request is still in flight.
@@ -83,17 +98,49 @@ describe('first-visit localization request budget', () => {
     // ── and the seed got the same answer ──
     await waitFor(() => expect(readCachedLanguageSeed()).toBe('zh-CN'));
     // ── from one network call ──
-    expect(fetchStub).toHaveBeenCalledTimes(1);
+    expect(meCalls(fetchStub)).toBe(1);
+  });
+
+  it("still ONE request when both state the app's declared default (objectstack#33231)", async () => {
+    const gate = deferred<Response>();
+    const fetchStub = vi.fn((url: string, _init?: RequestInit) =>
+      isDiscovery(url)
+        ? Promise.resolve(jsonResponse({ locale: { default: 'zh-CN', supported: ['zh-CN'], timezone: 'UTC' } }))
+        : gate.promise,
+    );
+    vi.stubGlobal('fetch', fetchStub);
+
+    await seedTenantLanguage('', 1);
+    await waitFor(() => expect(meCalls(fetchStub)).toBe(1));
+    render(
+      <LocalizationFetchProvider endpoint={ENDPOINT}>
+        <Consumer />
+      </LocalizationFetchProvider>,
+    );
+
+    gate.resolve(jsonResponse({ authenticated: true, locale: 'zh-CN', currency: 'CNY' }));
+
+    await waitFor(() => expect(screen.getByTestId('value').textContent).toBe('zh-CN/CNY'));
+    await waitFor(() => expect(readCachedLanguageSeed()).toBe('zh-CN'));
+    // The two state the same `Accept-Language`, so they share the request.
+    expect(meCalls(fetchStub)).toBe(1);
+    const stated = fetchStub.mock.calls
+      .filter(([url]) => !isDiscovery(url))
+      .map(([, init]) => init?.headers as Record<string, string>);
+    expect(stated.map((h) => h['Accept-Language'])).toEqual(['zh-CN']);
   });
 
   it('passes a shared 503 through to the retry policy rather than resolving it empty', async () => {
     const gate = deferred<Response>();
-    const fetchStub = vi
-      .fn()
-      .mockImplementationOnce(() => gate.promise)
-      .mockImplementation(async () =>
-        jsonResponse({ authenticated: true, locale: 'ja-JP', currency: 'JPY' }),
-      );
+    let first = true;
+    const fetchStub = vi.fn(async (url: string) => {
+      if (isDiscovery(url)) return jsonResponse({}, 404);
+      if (first) {
+        first = false;
+        return gate.promise;
+      }
+      return jsonResponse({ authenticated: true, locale: 'ja-JP', currency: 'JPY' });
+    });
     vi.stubGlobal('fetch', fetchStub);
 
     await seedTenantLanguage('', 1);
@@ -112,19 +159,21 @@ describe('first-visit localization request budget', () => {
     await waitFor(() => expect(screen.getByTestId('value').textContent).toBe('ja-JP/JPY'), {
       timeout: 5000,
     });
-    expect(fetchStub.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(meCalls(fetchStub)).toBeGreaterThanOrEqual(2);
   });
 
   it('does not share once the request has settled', async () => {
-    const fetchStub = vi.fn(async () =>
-      jsonResponse({ authenticated: true, locale: 'en-US', currency: 'USD' }),
+    const fetchStub = vi.fn(async (url: string) =>
+      isDiscovery(url)
+        ? jsonResponse({}, 404)
+        : jsonResponse({ authenticated: true, locale: 'en-US', currency: 'USD' }),
     );
     vi.stubGlobal('fetch', fetchStub);
 
     // Let the seed's request settle completely before the provider mounts.
     await seedTenantLanguage('', 1);
     await waitFor(() => expect(readCachedLanguageSeed()).toBe('en-US'));
-    expect(fetchStub).toHaveBeenCalledTimes(1);
+    expect(meCalls(fetchStub)).toBe(1);
 
     render(
       <LocalizationFetchProvider endpoint={ENDPOINT}>
@@ -134,6 +183,6 @@ describe('first-visit localization request budget', () => {
 
     await waitFor(() => expect(screen.getByTestId('value').textContent).toBe('en-US/USD'));
     // Two waves, two requests: this is in-flight sharing, not a cache.
-    expect(fetchStub).toHaveBeenCalledTimes(2);
+    expect(meCalls(fetchStub)).toBe(2);
   });
 });
