@@ -2168,6 +2168,18 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             label: "URL de descoberta",
             helpText: "Opcional. URL do documento de descoberta OIDC (https). Deixe em branco para derivar `<issuer>/.well-known/openid-configuration`. Um endpoint informado aqui é considerado confiável para este provedor."
           },
+          authorizationEndpoint: {
+            label: "Authorization URL",
+            helpText: "Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust."
+          },
+          tokenEndpoint: {
+            label: "Token URL",
+            helpText: "Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token"
+          },
+          jwksEndpoint: {
+            label: "JWKS URL",
+            helpText: "Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs"
+          },
           userInfoEndpoint: {
             label: "URL de userinfo",
             helpText: "Opcional. URL do endpoint userinfo do OIDC (https), usada no lugar da indicada pelo documento de descoberta. Um endpoint informado aqui é considerado confiável para este provedor: informe-o quando o registro for recusado porque o documento de descoberta indica um host de userinfo em que o servidor não confia."

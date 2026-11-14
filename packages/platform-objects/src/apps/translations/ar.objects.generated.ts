@@ -2168,6 +2168,18 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             label: "رابط الاكتشاف",
             helpText: "اختياري. رابط مستند اكتشاف OIDC (https). اتركه فارغًا لاشتقاق `<issuer>/.well-known/openid-configuration`. تُعدّ نقطة النهاية المحددة هنا موثوقة لهذا المزوّد."
           },
+          authorizationEndpoint: {
+            label: "Authorization URL",
+            helpText: "Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust."
+          },
+          tokenEndpoint: {
+            label: "Token URL",
+            helpText: "Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token"
+          },
+          jwksEndpoint: {
+            label: "JWKS URL",
+            helpText: "Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs"
+          },
           userInfoEndpoint: {
             label: "رابط userinfo",
             helpText: "اختياري. رابط نقطة نهاية userinfo في OIDC (https)، يُستخدم بدلًا من الرابط الذي يذكره مستند الاكتشاف. تُعدّ نقطة النهاية المحددة هنا موثوقة لهذا المزوّد: حدّدها عندما يُرفض التسجيل لأن مستند الاكتشاف يذكر مضيف userinfo لا يثق به الخادم."

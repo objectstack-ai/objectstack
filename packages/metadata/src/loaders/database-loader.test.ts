@@ -1995,14 +1995,53 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
     });
   const agentRow = async () => (await driver.findOne('sys_metadata', { where: { type: 'agent' } } as never)) as Record<string, any>;
 
-  it('[R7-A] an agent legacy row (empty column, stamped body): the column is bound, body, version and history unchanged', async () => {
-    await seedAgent({ _packageId: ALPHA });
+  it('[R7-A] an agent legacy row (empty column, body naming its package by its own `packageId`): the column is bound, body, version and history unchanged', async () => {
+    await seedAgent({ packageId: ALPHA });
     const before = await agentRow();
-    const manager = await bootPass([new DatabaseLoader({ driver })], { packageId: 'com.host.app' });
+    await bootPass([new DatabaseLoader({ driver })], { packageId: 'com.host.app' });
     expect(await agentRow()).toEqual({ ...before, package_id: ALPHA });
     expect(vi.mocked(driver.update).mock.calls).toEqual([['sys_metadata', 'legacy', { package_id: ALPHA }]]);
     expect(driver.create).toHaveBeenCalledTimes(1);
-    expect(registered(manager, 'agent')).toEqual([{ name: 'helper', label: 'Helper', _packageId: ALPHA, _provenance: 'package' }]);
+  });
+
+  /**
+   * [#32985; maintainer decision 2026-11-14] A body that names its package by
+   * the `_packageId` stamp alone may be the environment's row a 17.0.0–18.3.0
+   * boot stamped with the host; binding the column would make it the host's
+   * for every reader of `package_id`. FROM bound (R7-A) TO left, for the host's
+   * stamp and any other package's alike: the row alone cannot tell them apart.
+   */
+  it.each([['the host\'s', 'com.host.app'], ['another package\'s', ALPHA]] as const)('[#32985] an agent legacy row (empty column, body naming %s package by the `_packageId` stamp alone): not bound, no update, read as before (BEFORE: the column bound to the stamp\'s package)', async (_whose, stamp) => {
+    await seedAgent({ _packageId: stamp, _provenance: 'package' });
+    const before = await agentRow();
+    const manager = await bootPass([new DatabaseLoader({ driver })], { packageId: 'com.host.app' });
+    expect(await agentRow()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+    expect(registered(manager, 'agent')).toEqual([{ name: 'helper', label: 'Helper', _packageId: stamp, _provenance: 'package' }]);
+  });
+
+  /**
+   * [#32985] What skipping the stamp-only bind costs a genuine legacy row: a
+   * row of a package's item whose code still ships is bound by that item's own
+   * save, the column only, on the boot that reads both.
+   */
+  it('[#32985] CONTROL a legacy row the host\'s file item seeded (empty column, the host\'s stamp alone): the file item\'s own save binds its column on the next boot, body and version unchanged', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'e2-32985-'));
+    try {
+      mkdirSync(join(rootDir, 'email_template'));
+      const body = { name: 'welcome', locale: 'en-US', subject: 'from file', bodyHtml: '<p/>' };
+      writeFileSync(join(rootDir, 'email_template', 'welcome.email-template.json'), JSON.stringify(body));
+      await driver.create('sys_metadata', {
+        id: 'seeded', type: 'email_template', name: 'welcome', state: 'active', version: 1, checksum: 'seeded', source: 'database',
+        package_id: null, metadata: JSON.stringify({ ...body, _packageId: ALPHA, _provenance: 'package' }),
+      });
+      await bootPass([new DatabaseLoader({ driver })], { rootDir, packageId: ALPHA });
+      const row = (await driver.findOne('sys_metadata', { where: { type: 'email_template' } } as never)) as Record<string, any>;
+      expect([row.id, row.package_id, row.version, JSON.parse(row.metadata).subject]).toEqual(['seeded', ALPHA, 1, 'from file']);
+      expect(vi.mocked(driver.update).mock.calls.map(([, id, data]) => [id, data])).toEqual([['seeded', { package_id: ALPHA }]]);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
   });
 
   it('[R7-A, R7-B] a package-less row on a host with a packageId stays package-less, no update; the loader\'s cache keeps it unstamped', async () => {
@@ -3191,7 +3230,7 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     }
   });
 
-  it('agent, two holders of a name and another row\'s body that says the same name: no body of the name is stamped, so none takes a package its row is not bound to (contract review F3 of #32458)', async () => {
+  it('agent, two holders of a name and another row\'s body that says the same name: each holder is stamped with its own row\'s package and the other row\'s body with none, so none takes a package its row is not bound to (contract review F3 of #32458; #32680, FROM no body of the name stamped)', async () => {
     await seed('agent', ALPHA, 1);
     await seed('agent', BETA, 2);
     // Row keyed `stray` whose body says `name: 'helper'`, byte for byte ALPHA's row's body.
@@ -3201,7 +3240,7 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     });
     const m = cold();
     expect((await m.loadMany('agent') as Array<Record<string, unknown>>).map((item) => [item._packageId ?? null, item.label]))
-      .toEqual([[null, ALPHA]]);
+      .toEqual([[ALPHA, ALPHA], [BETA, BETA], [null, ALPHA]]);
   });
 
   it('CONTROL email_template (bundled): every row was already primed — a bare read is refused naming both, list keeps both', async () => {
@@ -3217,6 +3256,162 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     expect(labels(await m.list('email_template'))).toEqual([ALPHA, BETA]);
     expect((await new DatabaseLoader({ driver }).loadManyKeyed('email_template')).map((entry) => entry.packageId)).toEqual([ALPHA, BETA]);
   });
+});
+
+/**
+ * [#32681; seat ruling A on #32681, ADR-0150 D4] A package-less action row
+ * bound to an object is keyed per `(object, name)` on the stored side, as the
+ * in-memory store keys it (`storeWriteKey`): `DatabaseLoader`'s save counts
+ * the holders of the written body's `(object, name)` (`storeRowWriteKey` over
+ * `storeRowSlotKey`), and its slot read hands a stored package-less row bound
+ * to an object one package binds the name to, under a name two packages
+ * hold, on as that package's customization (`loadManySlots`), where the boot
+ * priming pass files it.
+ *
+ * BEFORE (measured on main `9f736f2e`, same fixtures): every save cell not
+ * marked CONTROL wrote the row the FROM column of the PR names (a package-less
+ * row beside ALPHA's; BETA's row bound to `account`; ALPHA's object-less
+ * row; a third row beside the package-less one); every cold read naming
+ * ALPHA answered ALPHA's own row where the read after the pass answered the
+ * package-less one. The CONTROLs answered as here.
+ */
+describe('[#32681] a package-less object-bound action row is keyed per (object, name) on the stored side', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  const GAMMA = 'com.gamma.app';
+  let driver: IDataDriver;
+
+  /** A binding of `approve`: its package (`null`: none) and its object (`null`: object-less). */
+  type Binding = readonly [packageId: string | null, objectName: string | null];
+  const labelOf = ([packageId, objectName]: Binding) => `${packageId ?? 'env'}@${objectName ?? 'global'}`;
+  const bodyOf = (binding: Binding, label = labelOf(binding)) => ({ name: 'approve', label, ...(binding[1] ? { objectName: binding[1] } : {}) });
+  /** A stored row of `approve`, bound by its columns, at `version`. */
+  const seed = (binding: Binding, version: number) =>
+    driver.create('sys_metadata', {
+      id: `approve_${labelOf(binding)}`, type: 'action', name: 'approve', state: 'active', version, checksum: `approve_${version}`,
+      source: 'database', package_id: binding[0], bundle_member: binding[1], metadata: JSON.stringify(bodyOf(binding)),
+    });
+  /** A save through the loader: a package's body carries its stamp, a package-less one none. */
+  const save = (binding: Binding, label?: string) =>
+    new DatabaseLoader({ driver }).save('action', 'approve', { ...bodyOf(binding, label), ...(binding[0] ? { _packageId: binding[0] } : {}) });
+  /** Every stored row of `approve`: `[package_id, bundle_member, label]`, sorted. */
+  const stored = async () => ((await driver.find('sys_metadata', { where: { type: 'action' } } as never)) as Array<Record<string, any>>)
+    .map((row) => [row.package_id ?? null, row.bundle_member ?? null, JSON.parse(row.metadata).label])
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  const cold = () => {
+    const m = new MetadataManager({ formats: ['json'], loaders: [] });
+    m.registerLoader(new DatabaseLoader({ driver }));
+    return m;
+  };
+  const bootPass = async () => {
+    const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /** What a read answers: the body's label, or the refusal's code, status, reason and holders. */
+  const answer = async (m: MetadataManager, packageId?: string) => {
+    try {
+      return ((await m.get('action', 'approve', packageId)) as { label?: string } | undefined)?.label;
+    } catch (e: any) {
+      return [e?.code, e?.status, e?.refusal?.reason, ...(e?.refusal?.candidates ?? []).map((c: any) => c.packageId ?? c.kind).sort()];
+    }
+  };
+  /** Every read: bare, naming ALPHA, BETA and a package that holds nothing; and the listed labels. */
+  const reads = async (m: MetadataManager) => [
+    ...(await Promise.all([undefined, ALPHA, BETA, GAMMA].map((packageId) => answer(m, packageId)))),
+    ((await m.list('action')) as Array<{ label?: string }>).map((item) => item.label).sort(),
+  ];
+  const REFUSED = ['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ALPHA, BETA];
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('ALPHA binds `approve` to account, BETA to contact: a package-less save on account goes into ALPHA\'s row, its customization (BEFORE: a package-less row beside it)', async () => {
+    await save([ALPHA, 'account']);
+    await save([BETA, 'contact']);
+    await save([null, 'account'], 'custom');
+    expect(await stored()).toEqual([[ALPHA, 'account', 'custom'], [BETA, 'contact', `${BETA}@contact`]]);
+  });
+
+  it('the same saves in the other registration order: ALPHA\'s first account binding takes the package-less row over, and BETA keeps only its contact binding (BEFORE: the package-less save went into BETA\'s row, bound to account)', async () => {
+    await save([BETA, 'contact']);
+    await save([null, 'account'], 'custom');
+    expect(await stored()).toEqual([[BETA, 'contact', `${BETA}@contact`], [null, 'account', 'custom']]);
+    await save([ALPHA, 'account']);
+    expect(await stored()).toEqual([[ALPHA, 'account', `${ALPHA}@account`], [BETA, 'contact', `${BETA}@contact`]]);
+  });
+
+  it('a stored package-less account row beside BETA\'s contact binding: ALPHA\'s first account save takes it over (BEFORE: a third row beside it)', async () => {
+    await seed([BETA, 'contact'], 1);
+    await seed([null, 'account'], 2);
+    await save([ALPHA, 'account']);
+    expect(await stored()).toEqual([[ALPHA, 'account', `${ALPHA}@account`], [BETA, 'contact', `${BETA}@contact`]]);
+  });
+
+  it('single holder on another object: beside BETA\'s contact binding alone, a package-less save on account is the environment\'s own row (BEFORE: BETA\'s row bound to account)', async () => {
+    await save([BETA, 'contact']);
+    await save([null, 'account'], 'custom');
+    expect(await stored()).toEqual([[BETA, 'contact', `${BETA}@contact`], [null, 'account', 'custom']]);
+    expect((await new DatabaseLoader({ driver }).loadManySlots('action')).map((slot) => [slot.packageId ?? null, (slot.data as { label?: string }).label]))
+      .toEqual([[BETA, `${BETA}@contact`], [null, 'custom']]);
+  });
+
+  it('beside ALPHA\'s account binding alone, a package-less object-less save is the environment\'s own row (BEFORE: ALPHA\'s object-less row)', async () => {
+    await save([ALPHA, 'account']);
+    await save([null, null], 'custom');
+    expect(await stored()).toEqual([[ALPHA, 'account', `${ALPHA}@account`], [null, null, 'custom']]);
+  });
+
+  it('CONTROL: beside ALPHA\'s account binding alone a package-less account save goes into ALPHA\'s row; beside ALPHA\'s and BETA\'s account bindings into a package-less row, as before', async () => {
+    await save([ALPHA, 'account']);
+    await save([null, 'account'], 'custom');
+    expect(await stored()).toEqual([[ALPHA, 'account', 'custom']]);
+    driver = createMockDriver();
+    await save([ALPHA, 'account']);
+    await save([BETA, 'account']);
+    await save([null, 'account'], 'custom');
+    expect(await stored()).toEqual([[ALPHA, 'account', `${ALPHA}@account`], [BETA, 'account', `${BETA}@account`], [null, 'account', 'custom']]);
+  });
+
+  for (const [order, rows] of [
+    ['holders first, the package-less row saved last', [[[ALPHA, 'account'], 1], [[BETA, 'contact'], 2], [[null, 'account'], 3]]],
+    ['the package-less row stored first, saved last', [[[null, 'account'], 3], [[BETA, 'contact'], 2], [[ALPHA, 'account'], 1]]],
+    ['the package-less row saved first', [[[null, 'account'], 1], [[BETA, 'contact'], 2], [[ALPHA, 'account'], 3]]],
+  ] as Array<[string, Array<[Binding, number]>]>) {
+    it(`stored rows, ALPHA on account, BETA on contact, a package-less row on account (${order}): every read without the pass answers what it answers after it — a read naming ALPHA its customization (BEFORE: ALPHA's own row without the pass)`, async () => {
+      for (const [binding, version] of rows) await seed(binding, version);
+      const without = await reads(cold());
+      expect(without).toEqual([REFUSED, 'env@account', `${BETA}@contact`, undefined, [`${BETA}@contact`, 'env@account']]);
+      expect(await reads(await bootPass())).toEqual(without);
+      expect(driver.update).not.toHaveBeenCalled();
+    });
+  }
+
+  for (const order of ['ALPHA first', 'the package-less item first'] as const) {
+    it(`registered through the manager (${order}), BETA on contact: the item in memory, the stored row and every read after a reboot agree (BEFORE, package-less first: the stored row went to BETA, so after a reboot a read naming BETA answered it)`, async () => {
+      const m = cold();
+      const register = (binding: Binding, label?: string) =>
+        m.register('action', 'approve', { ...bodyOf(binding, label), ...(binding[0] ? { _packageId: binding[0] } : {}) });
+      await register([BETA, 'contact']);
+      if (order === 'ALPHA first') {
+        await register([ALPHA, 'account']);
+        await register([null, 'account'], 'custom');
+      } else {
+        await register([null, 'account'], 'custom');
+        await register([ALPHA, 'account']);
+      }
+      const inProcess = await reads(m);
+      const winner = order === 'ALPHA first' ? 'custom' : `${ALPHA}@account`;
+      expect(inProcess).toEqual([REFUSED, winner, `${BETA}@contact`, undefined, [winner, `${BETA}@contact`].sort()]);
+      expect(await stored()).toEqual([[ALPHA, 'account', winner], [BETA, 'contact', `${BETA}@contact`]]);
+      expect(await reads(cold())).toEqual(inProcess);
+      expect(await reads(await bootPass())).toEqual(inProcess);
+    });
+  }
 });
 
 /**
@@ -3284,11 +3479,23 @@ describe('[#32986] unregisterPackage of the host package keeps the environment\'
     expect(await state(m)).toEqual(primed);
   });
 
-  it('CONTROL the host\'s own rows (their bodies carry the host\'s stamp, as a host item the pass seeded is stored): unregisterPackage(host) still removes each, from the registry and storage', async () => {
+  /**
+   * [#32985; maintainer decision 2026-11-14] FROM removed TO kept and reported
+   * unless forced: a row whose body names the host by the `_packageId` stamp
+   * alone, its column empty, cannot be told from the environment's row a
+   * 17.0.0–18.3.0 boot stamped with the host, so the removal is fail-closed.
+   */
+  it('[#32985] the host\'s own rows stored with its stamp alone (as a host item the pass seeded is stored): unregisterPackage(host) keeps and reports each (BEFORE: each removed); with `force` it removes each, from the registry and storage', async () => {
     for (const [type, name] of ITEMS) await seed(type, name, null, { _packageId: HOST });
     const m = await bootPass(HOST);
     expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
-    await m.unregisterPackage(HOST);
+    const kept = await m.unregisterPackageWithReport(HOST);
+    const sorted = (pairs: unknown[][]) => [...pairs].sort((a, b) => String(a).localeCompare(String(b)));
+    expect(sorted(kept.kept.map(({ type, name, reason }) => [type, name, reason]))).toEqual(sorted(ITEMS.map(([type, name]) => [type, name, 'stamp-only-row'])));
+    expect(kept.removed).toEqual([]);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, HOST, 'env', 1]));
+    const forced = await m.unregisterPackageWithReport(HOST, { force: true });
+    expect([forced.kept, forced.removed.map(({ type }) => type).sort()]).toEqual([[], ITEMS.map(([type]) => type).sort()]);
     expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, null, 0]));
   });
 
@@ -3326,6 +3533,125 @@ describe('[#32986] unregisterPackage of the host package keeps the environment\'
 });
 
 /**
+ * [#32985; maintainer decision 2026-11-14 on #32985] `@objectstack/metadata`
+ * 17.0.0–18.3.0, on a host declaring its package (eager, no `artifactSource`,
+ * a `DatabaseLoader`), saved each package-less row its boot pass read back
+ * stamped with the host (`_packageId`, `_provenance`, a new version). Such a
+ * row names the host by the stamp alone, its `package_id` column empty, and
+ * the #32986 mark does not reach it (its stored body already names the host).
+ * Rows seeded here as 18.3.0 left them, for types stored per `(package,
+ * name)` and types that are not, and for a row another writer stored.
+ *
+ * BEFORE (`main` at this branch's base, same fixtures; measured over a real
+ * 18.3.0-built SQLite database: 34 of 37 rows deleted, a never-stamped control
+ * 0): the boot bound each by-package row's column to the host, and
+ * `unregisterPackage(host)` deleted every row and registry entry.
+ */
+describe('[#32985] unregisterPackage keeps the rows that name the package by the `_packageId` stamp alone, and the boot binds no column from them', () => {
+  const HOST = 'com.host.app';
+  const OTHER = 'com.other.app';
+  const ITEMS: ReadonlyArray<readonly [type: string, name: string]> = [
+    ['object', 'env_account'], ['view', 'env_account.all'], ['app', 'env_app'], ['agent', 'env_agent'], ['flow', 'env_flow'], ['tool', 'env_tool'],
+  ];
+  let driver: IDataDriver;
+
+  /** A row as an 18.3.0 boot left it: its body stamped by the boot, version 2, column empty. */
+  const seed = (type: string, name: string, body: Record<string, unknown>, source = 'database') =>
+    driver.create('sys_metadata', {
+      id: `${type}_${name}`, type, name, state: 'active', version: 2, checksum: `${type}_${name}`,
+      source, package_id: null, metadata: JSON.stringify({ name, label: 'env', ...body }),
+    });
+  const stamped = { _packageId: HOST, _provenance: 'package' };
+  const bootPass = async () => {
+    const plugin = new MetadataPlugin({ packageId: HOST, watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /** Per item: what a read answers, and its stored rows' columns. */
+  const state = async (m: MetadataManager) => {
+    const out: unknown[] = [];
+    for (const [type, name] of ITEMS) {
+      const read = (await m.get(type, name)) as { label?: string } | undefined;
+      const rows = (await driver.find('sys_metadata', { where: { type, name } } as never)) as Array<Record<string, unknown>>;
+      out.push([type, read?.label ?? null, rows.map((row) => row.package_id ?? null)]);
+    }
+    return out;
+  };
+  const asLeft = ITEMS.map(([type]) => [type, 'env', [null]]);
+  /** The registry's order of types is not the fixture's: compare by item. */
+  const sortedByItem = <T extends { type: string; name: string }>(items: T[]) => [...items].sort((a, b) => `${a.type}/${a.name}`.localeCompare(`${b.type}/${b.name}`));
+
+  beforeEach(() => {
+    driver = createMockDriver();
+    logger.warn.mockClear();
+  });
+
+  it('rows as an 18.3.0 boot left them: the boot binds no column (BEFORE: each by-package row bound to the host), and unregisterPackage(host) keeps every item and row, reporting each (BEFORE: every one deleted)', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, stamped);
+    const m = await bootPass();
+    expect(await state(m), 'no column bound by the boot').toEqual(asLeft);
+    expect(driver.update).not.toHaveBeenCalled();
+    const result = await m.unregisterPackageWithReport(HOST);
+    expect(result.removed).toEqual([]);
+    expect(sortedByItem(result.kept)).toEqual(sortedByItem(ITEMS.map(([type, name]) => ({ type, name, reason: 'stamp-only-row', rows: [{ loader: 'database', id: `${type}_${name}`, source: 'database' }] }))));
+    expect(await state(m)).toEqual(asLeft);
+    expect(driver.delete).not.toHaveBeenCalled();
+    const warned = logger.warn.mock.calls.filter(([message]) => String(message).includes(`unregisterPackage(${HOST}) kept`));
+    expect(warned.map(([, meta]) => ({ ...meta, kept: [...meta.kept].sort() }))).toEqual([{ packageId: HOST, kept: ITEMS.map(([type, name]) => `${type}/${name}`).sort() }]);
+  });
+
+  it('a stamped row another writer stored (`source` other than database): kept the same (BEFORE: deleted)', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, stamped, 'api');
+    const m = await bootPass();
+    const result = await m.unregisterPackageWithReport(HOST);
+    expect(result.kept.map(({ rows }) => rows.map(({ source }) => source))).toEqual(ITEMS.map(() => ['api']));
+    expect(await state(m)).toEqual(asLeft);
+  });
+
+  it('the contract\'s door (`unregisterPackage`, answering nothing) keeps them the same; with `force` it removes each item and row, as before', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, stamped);
+    const m = await bootPass();
+    expect(await m.unregisterPackage(HOST)).toBeUndefined();
+    expect(await state(m)).toEqual(asLeft);
+    await m.unregisterPackage(HOST, { force: true });
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, []]));
+  });
+
+  it('CONTROL rows naming the host by their own `packageId`: removed without `force`, from the registry and storage', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, { packageId: HOST });
+    const m = await bootPass();
+    const result = await m.unregisterPackageWithReport(HOST);
+    expect([result.kept, result.removed.length]).toEqual([[], ITEMS.length]);
+    expect(await state(m)).toEqual(ITEMS.map(([type]) => [type, null, []]));
+  });
+
+  it('CONTROL unregisterPackage of another package: nothing kept, nothing removed, every row as it was', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, stamped);
+    const m = await bootPass();
+    expect(await m.unregisterPackageWithReport(OTHER)).toEqual({ removed: [], kept: [] });
+    expect(await state(m)).toEqual(asLeft);
+  });
+
+  it('a check that fails removes nothing: the read error is thrown before the first removal', async () => {
+    for (const [type, name] of ITEMS) await seed(type, name, { packageId: HOST });
+    await seed('page', 'env_page', stamped);
+    const m = await bootPass();
+    const loader = [...(m as any).loaders.values()][0] as DatabaseLoader;
+    vi.spyOn(loader, 'stampOnlyRows').mockImplementation(async (type) => {
+      if (type === 'page') throw new Error('connection reset');
+      return [];
+    });
+    const before = await state(m);
+    await expect(m.unregisterPackageWithReport(HOST)).rejects.toThrow('connection reset');
+    expect(driver.delete).not.toHaveBeenCalled();
+    expect(await state(m)).toEqual(before);
+  });
+});
+
+/**
  * [#33003; follow-up of #32986, review S1 of PR #32999] The boot pass's mark
  * on an environment row it stamped with the host rode the registry object, so
  * a later write that registered a COPY still stamped with the host dropped it
@@ -3356,6 +3682,11 @@ describe('[#32986] unregisterPackage of the host package keeps the environment\'
  * `(package, name)` and is not under this rule).
  *
  * BEFORE (#32999's head): every case below not marked CONTROL lost the row.
+ *
+ * [#32985] A CONTROL whose host row is stored with the host's stamp alone
+ * passes `force`: without it `unregisterPackage` keeps every such row
+ * (`MetadataLoader.stampOnlyRows`), and these CONTROLs pin what the mark
+ * alone keeps, which `force` does not lift.
  */
 describe('[#33003] a write that rewrites an environment row the boot pass stamped keeps it the environment\'s: unregisterPackage(host) keeps it in process and after a reboot', () => {
   const HOST = 'com.host.app';
@@ -3466,16 +3797,16 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
       expect(await state(rebooted)).toEqual(kept());
     });
 
-    it(`CONTROL ${writer}: the host's own rows (stored bodies carrying its stamp) are still removed, in the same process and after a reboot`, async () => {
+    it(`CONTROL ${writer}: the host's own rows (stored bodies carrying its stamp) are still removed with \`force\`, in the same process and after a reboot`, async () => {
       for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, { _packageId: HOST });
       const m = await bootPass();
       await write(m);
       const rebooted = await bootPass();
       expect(await state(rebooted)).toEqual(kept());
-      await rebooted.unregisterPackage(HOST);
+      await rebooted.unregisterPackage(HOST, { force: true });
       expect(await state(rebooted)).toEqual(gone());
       // The same rows, removed by the first process too (already gone from storage).
-      await m.unregisterPackage(HOST);
+      await m.unregisterPackage(HOST, { force: true });
       expect(await state(m)).toEqual(gone());
     });
   }
@@ -3488,7 +3819,7 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
     expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
   });
 
-  it('CONTROL a stored row that now names the host in its own body, read again by the pass over the marked entry, is the host\'s: unregisterPackage(host) removes it', async () => {
+  it('CONTROL a stored row that now names the host in its own body, read again by the pass over the marked entry, is the host\'s: unregisterPackage(host) with `force` removes it', async () => {
     for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
     const plugin = new MetadataPlugin({ packageId: HOST, watch: false, config: { bootstrap: 'eager' } });
     const m = (plugin as any).manager as MetadataManager;
@@ -3503,15 +3834,15 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
     m.registerLoader(new DatabaseLoader({ driver }));
     await (plugin as any)._loadFromFileSystem({ logger });
     expect((m as any).registry.get('object').get('env_account')).toMatchObject({ label: 'host', _packageId: HOST });
-    await m.unregisterPackage(HOST);
+    await m.unregisterPackage(HOST, { force: true });
     expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
   });
 
-  it('CONTROL a copy stamped with another package is that package\'s item: unregisterPackage of that package removes it', async () => {
+  it('CONTROL a copy stamped with another package is that package\'s item: unregisterPackage of that package with `force` removes it', async () => {
     for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, {});
     const m = await bootPass();
     await m.register('object', 'env_account', { name: 'env_account', label: 'env', _packageId: EXT }, { notify: false });
-    await m.unregisterPackage(EXT);
+    await m.unregisterPackage(EXT, { force: true });
     expect(await state(m)).toEqual(ITEMS.map(([type, name]) => name === 'env_account' ? [type, name, null, false, 0] : [type, name, HOST, true, 1]));
   });
 
@@ -3554,14 +3885,14 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
     expect(await state(m)).toEqual(kept());
   });
 
-  it('CONTROL rollback of the host\'s own row to a stamped version: removed after a reboot', async () => {
+  it('CONTROL rollback of the host\'s own row to a stamped version: removed with `force` after a reboot', async () => {
     for (const [type, name, rowState] of ITEMS) await seed(type, name, rowState, { _packageId: HOST });
     const m = await bootPass();
     await (m as any).getDatabaseLoader().save('object', 'env_account', { name: 'env_account', label: 'stamped', _packageId: HOST });
     await m.register('object', 'env_account', { name: 'env_account', label: 'later', _packageId: HOST });
     await m.rollback('object', 'env_account', 2);
     const rebooted = await bootPass();
-    await rebooted.unregisterPackage(HOST);
+    await rebooted.unregisterPackage(HOST, { force: true });
     expect(await state(rebooted)).toEqual(gone());
   });
 
@@ -3572,4 +3903,159 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
     await m.unregisterPackage(EXT);
     expect(await state(m)).toEqual(kept());
   });
+});
+
+/**
+ * [#32680; follow-up of #32521, contract review F2/F3/F4, epic #31527 red line
+ * 2, ADR-0150 D3/D4] `MetadataManager.loadMany` reads a by-package type's
+ * bodies and packages off the loader's keyed entries (each body its own row's,
+ * stamped with that row's package), FROM pairing `loadMany`'s bodies to the
+ * keyed entries by content. So no body of a name is left unstamped because
+ * another row's body says the same name (F2) or because the loader serialises
+ * its two reads differently (F3), and `MetadataManager.loadManyKeyed` carries
+ * each entry's package (F4).
+ *
+ * BEFORE (measured on main d4fbb4db, same fixtures, every type below): in the
+ * F2 shape `loadMany` handed on one unstamped body of the name, the pass filed
+ * it in the bare slot (registry keys `['helper']`) and a bare read after the
+ * pass answered it (`com.alpha.app`); with F3's loader both holders were
+ * handed on unstamped; `loadManyKeyed` entries carried no package; one holder
+ * beside another row's body of its name was handed on unstamped. The CONTROLs
+ * answered as here.
+ */
+describe('[#32680] the plural read takes a by-package name\'s bodies and packages off the keyed entries', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  const GAMMA = 'com.gamma.app';
+  const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  const BOOT_PASS_READS = UNBUNDLED.filter((type) => DEFAULT_METADATA_TYPE_REGISTRY.some((entry) => entry.type === type));
+  let driver: IDataDriver;
+
+  const seed = (type: string, packageId: string | null, version: number, name = 'helper', body: Record<string, unknown> = {}) =>
+    driver.create('sys_metadata', {
+      id: `${type}_${name}_${packageId ?? 'env'}_${version}`, type, name, state: 'active', version, checksum: `${type}_${name}_${version}`,
+      source: 'database', package_id: packageId, metadata: JSON.stringify({ name: 'helper', label: packageId ?? 'env', ...body }),
+    });
+  /** The F2 shape: two holders of `helper`, and a package-less row keyed `stray` whose body says `helper`, byte for byte ALPHA's. */
+  const seedF2 = async (type: string, strayFirst = false) => {
+    if (strayFirst) await seed(type, null, 3, 'stray', { label: ALPHA });
+    await seed(type, ALPHA, 1);
+    await seed(type, BETA, 2);
+    if (!strayFirst) await seed(type, null, 3, 'stray', { label: ALPHA });
+  };
+  const cold = (loader: MetadataLoader = new DatabaseLoader({ driver })) => {
+    const m = new MetadataManager({ formats: ['json'], loaders: [] });
+    m.registerLoader(loader);
+    return m;
+  };
+  const bootPass = async (loader: MetadataLoader = new DatabaseLoader({ driver })) => {
+    const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(loader);
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  const answer = async (m: MetadataManager, type: string, name: string, packageId?: string) => {
+    try {
+      const item = (await m.get(type, name, packageId)) as { label?: string } | undefined;
+      return item?.label;
+    } catch (e: any) {
+      return [e?.code, e?.status, e?.refusal?.reason, ...(e?.refusal?.candidates ?? []).map((c: any) => c.packageId ?? c.kind).sort()];
+    }
+  };
+  const REFUSED = ['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ALPHA, BETA];
+  const stamps = async (m: MetadataManager, type: string) =>
+    ((await m.loadMany(type)) as Array<Record<string, unknown>>).map((item) => [item._packageId ?? null, item.label]);
+  const keyedPackages = async (m: MetadataManager, type: string) =>
+    (await m.loadManyKeyed(type)).map((entry) => [entry.name, entry.packageId ?? null, (entry.data as { label?: string }).label]);
+  const registryKeys = (m: MetadataManager, type: string) => [...(((m as any).registry.get(type) as Map<string, unknown> | undefined)?.keys() ?? [])];
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  for (const type of BOOT_PASS_READS) {
+    for (const strayFirst of [false, true]) {
+      it(`${type}, F2 shape (another row's body says the name, ${strayFirst ? 'stored first' : 'stored last'}): both holders are handed on stamped, and after the pass a bare read is refused 409 naming both, as without it`, async () => {
+        await seedF2(type, strayFirst);
+        expect(await answer(cold(), type, 'helper')).toEqual(REFUSED);
+        expect((await stamps(cold(), type)).filter(([packageId]) => packageId !== null)).toEqual([[ALPHA, ALPHA], [BETA, BETA]]);
+        const m = await bootPass();
+        // The other row's body is filed in the name's bare slot, as the pass files any
+        // package-less body beside two holders (by its body's name, as before).
+        expect(registryKeys(m, type)).toEqual([`${ALPHA}\u0000helper`, `${BETA}\u0000helper`, 'helper']);
+        // An action name's package-less registry slot no loader stores under the name is
+        // counted as the platform's (#32560), so its refusal names it too.
+        expect(await answer(m, type, 'helper')).toEqual(type === 'action' ? [...REFUSED, 'platform'] : REFUSED);
+        for (const packageId of [ALPHA, BETA, GAMMA]) {
+          expect([packageId, await answer(m, type, 'helper', packageId)]).toEqual([packageId, await answer(cold(), type, 'helper', packageId)]);
+        }
+        expect(driver.update).not.toHaveBeenCalled();
+      });
+    }
+  }
+
+  it('agent, F3: a loader whose two reads serialise a body differently still hands both holders on stamped', async () => {
+    await seed('agent', ALPHA, 1);
+    await seed('agent', BETA, 2);
+    class ReorderingLoader extends DatabaseLoader {
+      override async loadMany<T = any>(type: string, options?: any): Promise<T[]> {
+        // The same bodies, keys in another order: their serialisations no longer agree.
+        return (await super.loadMany<Record<string, unknown>>(type, options))
+          .map((body) => Object.fromEntries(Object.entries(body).reverse())) as T[];
+      }
+    }
+    expect(await stamps(cold(new ReorderingLoader({ driver })), 'agent')).toEqual([[ALPHA, ALPHA], [BETA, BETA]]);
+    const m = await bootPass(new ReorderingLoader({ driver }));
+    expect(await answer(m, 'agent', 'helper')).toEqual(REFUSED);
+    // A row the keyed read cannot name (its `name` column empty) is still handed on, once, unstamped.
+    await driver.create('sys_metadata', {
+      id: 'agent_unnamed', type: 'agent', name: null, state: 'active', version: 3, checksum: 'agent_unnamed',
+      source: 'database', package_id: null, metadata: JSON.stringify({ label: 'empty name column' }),
+    });
+    expect(await stamps(cold(new ReorderingLoader({ driver })), 'agent')).toEqual([[ALPHA, ALPHA], [BETA, BETA], [null, 'empty name column']]);
+  });
+
+  for (const type of UNBUNDLED) {
+    it(`${type}, F4: MetadataManager.loadManyKeyed carries each entry's package`, async () => {
+      await seed(type, ALPHA, 1);
+      await seed(type, BETA, 2);
+      await seed(type, null, 3, 'solo', { name: 'solo' });
+      expect(await keyedPackages(cold(), type)).toEqual([['helper', ALPHA, ALPHA], ['helper', BETA, BETA], ['solo', null, 'env']]);
+    });
+  }
+
+  it('email_template, F4: MetadataManager.loadManyKeyed carries each entry\'s package', async () => {
+    for (const [packageId, version] of [[ALPHA, 1], [BETA, 2]] as const) {
+      await driver.create('sys_metadata', {
+        id: `et_${packageId}`, type: 'email_template', name: 'welcome', state: 'active', version, checksum: `et_${packageId}`,
+        source: 'database', package_id: packageId, metadata: JSON.stringify({ name: 'welcome', locale: 'en-US', subject: packageId, bodyHtml: '<p/>', label: packageId }),
+      });
+    }
+    expect(await keyedPackages(cold(), 'email_template')).toEqual([['welcome', ALPHA, ALPHA], ['welcome', BETA, BETA]]);
+  });
+
+  for (const type of BOOT_PASS_READS) {
+    it(`${type}, one holder beside another row's body that says its name: handed on stamped, and after the pass every read answers as without it`, async () => {
+      await seed(type, ALPHA, 1);
+      await seed(type, null, 2, 'stray', { label: 'stray' });
+      expect(await stamps(cold(), type)).toEqual([[ALPHA, ALPHA]]);
+      const m = await bootPass();
+      expect(registryKeys(m, type)).toEqual([`${ALPHA}\u0000helper`]);
+      for (const packageId of [undefined, ALPHA, GAMMA]) {
+        expect([packageId ?? null, await answer(m, type, 'helper', packageId)]).toEqual([packageId ?? null, await answer(cold(), type, 'helper', packageId)]);
+      }
+    });
+
+    it(`CONTROL ${type}, one holder: handed on stamped with its row's package, and after the pass a bare read answers it, as before`, async () => {
+      await seed(type, ALPHA, 1);
+      expect(await stamps(cold(), type)).toEqual([[ALPHA, ALPHA]]);
+      const m = await bootPass();
+      expect(registryKeys(m, type)).toEqual([`${ALPHA}\u0000helper`]);
+      expect(await answer(m, type, 'helper')).toBe(ALPHA);
+      expect(await answer(m, type, 'helper', ALPHA)).toBe(ALPHA);
+      expect(await answer(m, type, 'helper', GAMMA)).toBeUndefined();
+    });
+  }
 });

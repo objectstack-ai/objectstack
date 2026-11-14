@@ -2168,6 +2168,18 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
             label: "URL обнаружения",
             helpText: "Необязательно. URL документа обнаружения OIDC (https). Оставьте пустым, чтобы вывести `<issuer>/.well-known/openid-configuration`. Указанной здесь конечной точке доверяют для этого поставщика."
           },
+          authorizationEndpoint: {
+            label: "Authorization URL",
+            helpText: "Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust."
+          },
+          tokenEndpoint: {
+            label: "Token URL",
+            helpText: "Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token"
+          },
+          jwksEndpoint: {
+            label: "JWKS URL",
+            helpText: "Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs"
+          },
           userInfoEndpoint: {
             label: "URL userinfo",
             helpText: "Необязательно. URL конечной точки userinfo OIDC (https), используемый вместо указанного в документе обнаружения. Указанной здесь конечной точке доверяют для этого поставщика: укажите её, если регистрация отклонена, потому что документ обнаружения называет хост userinfo, которому сервер не доверяет."

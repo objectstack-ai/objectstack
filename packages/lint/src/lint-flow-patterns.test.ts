@@ -37,6 +37,7 @@ import {
   FLOW_START_NODE_MISSING,
   FLOW_AFTER_SAVE_INLINE_RETRY,
   FLOW_MULTI_WRITE_UNFILTERED,
+  FLOW_MULTI_UPDATE_MOVES_STORED_INPUT,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,
   FLOW_DECISION_MODE_INVALID,
@@ -2066,6 +2067,134 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
         // the #14394 warning is present and is not this rule's business.
       })).filter((f) => f.rule === FLOW_MULTI_WRITE_UNFILTERED)).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * A `multi: true` update that moves an input of a STORED computed field. The
+ * engine keeps its refusal (ADR-0058 Addendum II D3: a predicate write is one
+ * `updateMany`, never split): one patch reaches every matched row, so the
+ * computed value is stored only when it is the same on every row, and the whole
+ * update is refused `VALIDATION_FAILED` otherwise. The rule names that at
+ * authoring and prescribes read → loop → update by id.
+ */
+describe('lintFlowPatterns — a multi update moving a stored expression input (flow-multi-update-moves-stored-input)', () => {
+  /** `amount` is stored (a `currency`, not a `formula`), computed from quantity * unit_price. */
+  const invoiceLine = {
+    name: 'invoice_line',
+    fields: {
+      description: { type: 'text' },
+      quantity: { type: 'number' },
+      unit_price: { type: 'currency' },
+      invoice: { type: 'lookup', reference: 'invoice' },
+      amount: { type: 'currency', expression: { dialect: 'cel', source: 'record.quantity * record.unit_price' } },
+      // Stored, reading another stored field: moving `quantity` moves it too.
+      amount_with_tax: { type: 'currency', expression: 'record.amount * 1.2' },
+      // Stored, reading through a reference: moving the FK moves it.
+      invoice_ref: { type: 'text', expression: { dialect: 'cel', source: 'record.invoice.number' } },
+      // A `formula` is computed on read: not stored, never an input source here.
+      label: { type: 'formula', expression: { dialect: 'cel', source: 'record.description' } },
+    },
+  };
+  const stackOf = (node: Record<string, unknown>, objects: unknown[] = [invoiceLine]) => ({
+    objects,
+    flows: [{
+      name: 'reprice',
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 3 * * *' } },
+        { id: 'bulk', type: 'update_record', config: node },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'bulk' }],
+    }],
+  });
+  const moving = (stack: unknown) =>
+    lintFlowPatterns(stack as never).filter((f) => f.rule === FLOW_MULTI_UPDATE_MOVES_STORED_INPUT);
+  const BULK = { objectName: 'invoice_line', filter: { invoice: 'INV-1' }, multi: true } as const;
+
+  it('warns on a multi update that sets an input, naming the input, the stored fields it moves and the refusal', () => {
+    const fnds = moving(stackOf({ ...BULK, fields: { quantity: 10 } }));
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].where).toBe("flow 'reprice' · node 'bulk' (update_record)");
+    // A warning: a patch computing the same value on every row is stored.
+    expect(fnds[0].severity).toBeUndefined();
+    expect(fnds[0].message).toContain('sets `quantity`');
+    // Direct reader and the stored field reading it, both named.
+    expect(fnds[0].message).toContain("`amount`, `amount_with_tax` on 'invoice_line'");
+    expect(fnds[0].message).toContain('VALIDATION_FAILED');
+    expect(fnds[0].hint).toContain('get_record');
+    expect(fnds[0].hint).toContain('`loop`');
+    expect(fnds[0].hint).toContain('filter: { id: item.id }');
+    expect(fnds[0].hint).not.toContain('\n');
+    expect(fnds[0].hint.length).toBeLessThanOrEqual(200);
+  });
+
+  it('is silent on a multi update that touches no input of a stored field', () => {
+    // `description` feeds only a `formula`; `amount` itself is computed, never taken from the patch.
+    expect(moving(stackOf({ ...BULK, fields: { description: 'bulk', amount: 1 } }))).toEqual([]);
+  });
+
+  it('is silent on a single-record update that sets the same input', () => {
+    expect(moving(stackOf({ objectName: 'invoice_line', filter: { id: 'line_1' }, fields: { quantity: 10 } }))).toEqual([]);
+    expect(moving(stackOf({ objectName: 'invoice_line', filter: { id: 'line_1' }, fields: { quantity: 10 }, multi: false }))).toEqual([]);
+  });
+
+  it('counts a reference field read through as an input, and names only the stored field it moves', () => {
+    const fnds = moving(stackOf({ ...BULK, fields: { invoice: 'INV-2', description: 'x' } }));
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].message).toContain('sets `invoice`');
+    expect(fnds[0].message).toContain("`invoice_ref` on 'invoice_line'");
+  });
+
+  it('judges only an object the stack carries, and a field an object extension adds counts', () => {
+    expect(moving(stackOf({ ...BULK, objectName: 'elsewhere', fields: { quantity: 10 } }))).toEqual([]);
+    expect(moving({ ...stackOf({ ...BULK, fields: { quantity: 10 } }), objects: [] })).toEqual([]);
+    const base = { name: 'invoice_line', fields: { quantity: { type: 'number' } } };
+    const extended = {
+      ...stackOf({ ...BULK, fields: { quantity: 10 } }, [base]),
+      objectExtensions: [{ extend: 'invoice_line', fields: { doubled: { type: 'number', expression: 'record.quantity * 2' } } }],
+    };
+    expect(moving(extended).map((f) => f.message)).toEqual([expect.stringContaining("`doubled` on 'invoice_line'")]);
+  });
+
+  it('is judged inside a loop body, where a scheduled sweep puts it', () => {
+    const stack = {
+      objects: [invoiceLine],
+      flows: [{
+        name: 'sweep',
+        runAs: 'system',
+        nodes: [
+          { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 3 * * *' } },
+          {
+            id: 'each',
+            type: 'loop',
+            config: {
+              collection: { dialect: 'cel', source: 'invoices' },
+              body: { nodes: [{ id: 'bulk', type: 'update_record', config: { ...BULK, fields: { unit_price: 2 } } }], edges: [] },
+            },
+          },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'each' }],
+      }],
+    };
+    const fnds = moving(stack);
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].where).toContain("node 'bulk' (update_record)");
+    expect(fnds[0].where).toContain("loop 'each' body");
+  });
+
+  it('reaches authors through the lintFlowPatterns authoring rule as a warning, never an error', () => {
+    const rule = AUTHORING_RULES.find((r) => r.name === 'lintFlowPatterns');
+    expect(rule!.runtimeTypes).toContain('flow');
+    const served = rule!.run(stackOf({ ...BULK, fields: { quantity: 10 } }) as never, {});
+    expect(served).toContainEqual(expect.objectContaining({ rule: FLOW_MULTI_UPDATE_MOVES_STORED_INPUT, severity: 'warning' }));
+  });
+
+  it('`os explain` carries the reasons and the by-id shape the one-line fix points at', () => {
+    const text = explained(FLOW_MULTI_UPDATE_MOVES_STORED_INPUT);
+    expect(text).toContain('never split into single-row writes');
+    expect(text).toContain('`filter: { id: item.id }`');
+    expect(text).toContain('warning, not a gate');
   });
 });
 

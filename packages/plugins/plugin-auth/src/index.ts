@@ -28,6 +28,8 @@ export {
   type InvitationPlacementServiceLike,
   readInvitationPlacementIntent,
   type AuthManagerOptions,
+  type OrganizationDeleteGateRequest,
+  type OrganizationDeleteGateRefusal,
   ipMatchesRange,
   normalizeAuthEmailLocale,
   authEmailLocaleFromRequest,
@@ -98,6 +100,9 @@ export * from './cloud-managed.js';
 export * from './pending-sso-marker.js';
 export * from './environment-user-host.js';
 export * from './pending-sso-users.js';
+
+// Direct sign-in: the `directSignIn` option's shape, for a host that sets it.
+export type { DirectSignInOptions, DirectSignInLocalPath } from './direct-sign-in.js';
 export * from './last-local-credential.js';
 export * from './placeholder-email.js';
 export * from './admin-import-users.js';

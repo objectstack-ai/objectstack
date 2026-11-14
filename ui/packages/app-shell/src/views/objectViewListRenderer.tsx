@@ -8,7 +8,7 @@
  * passed in; the component reads the returned callback.
  */
 
-import { useCallback, useRef, lazy, Suspense, type ReactNode } from 'react';
+import { useCallback, useRef, useState, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
 import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePatch } from '../context/ListPreferencesProvider.js';
@@ -22,6 +22,9 @@ import type { useAuth } from '@object-ui/auth';
 import type { useActionTextLocalizer } from '@object-ui/react';
 import { useLocalization, type useObjectLabel, type useObjectTranslation } from '@object-ui/i18n';
 import { resolveManagedByEmptyState } from '../utils/managedByEmptyState.js';
+import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
+import { withUnpublishedObjectReads } from '../preview/unpublishedObjectReads.js';
+import type { DataSource } from '@object-ui/types';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import { warnSuppressedListNav } from '../utils/warnSuppressedListNav.js';
 import type { isSetupAppSegment } from '../console/setupApp.js';
@@ -208,7 +211,26 @@ export function useObjectViewListRenderer({
     // view's filter is resolved again and a changed day reaches the list.
     const { timezone: workspaceTimeZone } = useLocalization();
 
-    const renderListView = useCallback(({ schema: listSchema, dataSource: ds, onEdit: editHandler, className, refreshKey: pluginRefreshKey }: any) => {
+    // objectstack#32984 — in the draft preview, a list of an object the build
+    // only drafted reads `OBJECT_NOT_FOUND` (not registered until its first
+    // publish). That is an empty list, not a fault: the wrapper answers it
+    // empty and names the object, and the list says why it is empty. One
+    // wrapper per source, so the list's fetch never sees a new data source.
+    const previewDrafts = usePreviewDrafts();
+    const [unpublishedObjects, setUnpublishedObjects] = useState<ReadonlySet<string>>(() => new Set());
+    const unpublishedReadsRef = useRef(new WeakMap<object, DataSource>());
+    const previewDataSource = useCallback((ds: DataSource): DataSource => {
+        const cached = unpublishedReadsRef.current.get(ds);
+        if (cached) return cached;
+        const wrapped = withUnpublishedObjectReads(ds, (name) =>
+            setUnpublishedObjects((prev) => (prev.has(name) ? prev : new Set(prev).add(name))),
+        );
+        unpublishedReadsRef.current.set(ds, wrapped);
+        return wrapped;
+    }, []);
+
+    const renderListView = useCallback(({ schema: listSchema, dataSource: rawDs, onEdit: editHandler, className, refreshKey: pluginRefreshKey }: any) => {
+        const ds = previewDrafts && rawDs ? previewDataSource(rawDs) : rawDs;
         // Combine local refreshKey with the plugin ObjectView's refreshKey for full propagation
         const combinedRefreshKey = refreshKey + (pluginRefreshKey || 0);
         // objectui#10035 — AGENTS.md #8's corollary: refresh data, don't
@@ -816,8 +838,16 @@ export function useObjectViewListRenderer({
             })(),
             showRecordCount: viewDef.showRecordCount ?? listSchema.showRecordCount,
             allowPrinting: viewDef.allowPrinting ?? listSchema.allowPrinting,
-            emptyState:
-                viewEmptyState(
+            emptyState: previewDrafts && objectDef?.name && unpublishedObjects.has(objectDef.name)
+                ? {
+                    title: t('preview.unpublishedList.title', {
+                        defaultValue: 'Records appear here once you publish',
+                    }),
+                    message: t('preview.unpublishedList.message', {
+                        defaultValue: 'You are previewing an object that is not published yet, so it has no records. Publish to start adding records, or to load its sample data.',
+                    }),
+                }
+                : viewEmptyState(
                     objectDef.name,
                     viewDef.name || viewDef.id || '',
                     viewDef.emptyState
@@ -1053,7 +1083,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }

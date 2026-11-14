@@ -3212,6 +3212,8 @@ describe('AuthManager', () => {
         oidcProvider: false,
         sso: false,
         ssoEnforced: false,
+        // Direct sign-in is off unless the host or the environment turns it on.
+        directSignIn: false,
         deviceAuthorization: false,
         admin: false,
         phoneNumber: false,

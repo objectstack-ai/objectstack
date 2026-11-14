@@ -1092,6 +1092,59 @@ That leaves this route. An administrator who does not know it exists reasonably
 concludes the platform cannot attach an existing user to an organization at all.
 </Callout>
 
+#### Deleting an organization
+
+`POST /api/v1/auth/organization/delete` with `{ "organizationId": "org_beta" }`
+is better-auth's endpoint. Before better-auth writes anything, the platform
+refuses a delete it must not run:
+
+| Status | `code` | When |
+|---|---|---|
+| `403` | `PERMISSION_DENIED` | The target is the Default Organization and the caller is its last administrator. |
+| `409` | `DELETE_RESTRICTED` | The organization still owns records. `dependents` lists each table and its row count. |
+| `503` | `SERVICE_UNAVAILABLE` | A read the decision depends on failed. Nothing was deleted, so retry. |
+
+A caller better-auth refuses itself (no session, not a member, a membership
+tier without the `organization: ['delete']` permission) gets better-auth's
+answer and no count.
+
+**A host check of its own.** A host that must refuse a delete for its own
+reasons, such as a subscription that will charge again, sets
+`organizationDeleteGate` on the `AuthPlugin` (or `AuthManager`) options:
+
+```typescript
+new AuthPlugin({
+  organizationDeleteGate: async ({ organizationId, session, acceptLanguage }) => {
+    if (!(await billing.hasActiveSubscription(organizationId))) return undefined; // go ahead
+    return {
+      status: 409,
+      body: {
+        code: 'DELETE_RESTRICTED',
+        message: 'The organization has a subscription that will charge again.',
+        userMessage: 'Cancel the subscription first.', // in the request's language
+      },
+    };
+  },
+});
+```
+
+- **When it is asked.** Once per delete, last, only for a delete that the
+  checks above would let through. A request the auth mount refuses first (the
+  IP allow-list, two credentials naming different accounts) never reaches it.
+- **What it receives.** `organizationId` is the id better-auth parsed from the
+  JSON body (a body it does not parse, it answers `415` without asking), so the
+  host reads no request body itself.
+  `session` is the caller: `userId`, plus `activeOrganizationId` and
+  `impersonatedBy` when the session has them. `acceptLanguage` is the
+  request's `Accept-Language` header.
+- **What it answers.** `undefined` or `null` lets the delete go ahead. A
+  refusal is answered exactly as given: its `status` (`400` to `499`) and its
+  `body`, which needs `code` and `message`; `userMessage` and any other field
+  pass through as given. Nothing is deleted.
+- **Fail-closed.** A check that throws, or answers anything else, is answered
+  `503 SERVICE_UNAVAILABLE` naming `organizationDeleteGate`, and nothing is
+  deleted. The host's error text is not sent to the client.
+
 ### Admin User Management
 
 With `plugins: { admin: true }` (forced on when SCIM is enabled), platform

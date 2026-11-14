@@ -43,7 +43,7 @@ import {
   isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
-import { isPostgresInstantColumnType } from './date-on-instant-column.js';
+import { isInstantColumnType } from './date-on-instant-column.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link RotationFacet} read — every one of
@@ -139,7 +139,7 @@ export class RotationFacet {
       throw new Error(`[sql-driver] rotateShards: rotation is not supported on dialect '${this.dialectName}'`);
     }
     const tableName = StorageNameMapping.resolveTableName(objectDef as any);
-    return this.ensureRotation(tableName, objectDef, policy, nowMs);
+    return this.ensureRotation(tableName, objectDef, policy, nowMs, true);
   }
 
   /** The body of `SqlDriver#ensureShardTable`; the method's docblock there is its contract. */
@@ -462,10 +462,12 @@ export class RotationFacet {
       // ADR-0057 P2: rotation-declared telemetry is physically time-sharded —
       // the Rotator owns its DDL (shard tables + a read view under the base
       // name); the plain create/alter path below would collide with the view.
+      // Sync creates the current shard and drops none: a boot syncs before it
+      // is judged, and expiry is the lifecycle sweep's (`rotateShards`).
       const rotationPolicy = obj.lifecycle?.storage;
       if (rotationPolicy?.strategy === 'rotation' && this.supportsRotation) {
         this.tablesWithTimestamps.add(tableName);
-        await this.ensureRotation(tableName, obj, rotationPolicy);
+        await this.ensureRotation(tableName, obj, rotationPolicy, undefined, false);
         continue;
       }
 
@@ -563,11 +565,11 @@ export class RotationFacet {
 
         // [#32851] Read from the catalog just fetched, before any column below
         // is added: an added `date` column is built `date`, never an instant.
-        if (this.dialectName === 'postgres') {
-          for (const field of this.dateFields[tableName] ?? []) {
-            if (isPostgresInstantColumnType((columnInfo as Record<string, { type?: unknown }>)[field]?.type)) {
-              this.dateFieldsOnInstantColumn[tableName].add(field);
-            }
+        // [#33002] On every dialect that builds an instant column for a
+        // `datetime` field, not only Postgres.
+        for (const field of this.dateFields[tableName] ?? []) {
+          if (isInstantColumnType(this.dialectName, (columnInfo as Record<string, { type?: unknown }>)[field]?.type)) {
+            this.dateFieldsOnInstantColumn[tableName].add(field);
           }
         }
 

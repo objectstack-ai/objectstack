@@ -47,6 +47,17 @@ const START_FROM_LOGIN_PAGE: RefusalCopy = {
     "Sign-in has to start from this system's login page. Enter your work email here and choose Sign in with SSO.",
 };
 
+const DIRECT_SIGN_IN_UNAVAILABLE: RefusalCopy = {
+  key: 'auth.login.errors.directSignInUnavailable',
+  defaultValue:
+    "Single sign-on could not be started for this system. Ask your administrator to check which sign-in service it uses.",
+};
+
+const DIRECT_SIGN_IN_RATE_LIMITED: RefusalCopy = {
+  key: 'auth.login.errors.directSignInRateLimited',
+  defaultValue: 'Too many sign-ins were started from this network just now. Wait a few seconds, then try again.',
+};
+
 const GENERIC: RefusalCopy = {
   key: 'auth.login.errors.oauthCallbackFailed',
   defaultValue:
@@ -68,7 +79,10 @@ const GENERIC: RefusalCopy = {
  *    callback URL opened again later;
  *  - `unsolicited_response`: the SAML ACS refused an identity-provider-
  *    initiated response (a sign-in started from the provider's app tile)
- *    because the provider does not allow IdP-initiated sign-in.
+ *    because the provider does not allow IdP-initiated sign-in;
+ *  - `direct_sign_in_unavailable`: the direct sign-in door found no single
+ *    identity provider to start, or the provider's start was refused
+ *    (`./directSignIn`).
  *
  * A code missing here keeps the generic sentence.
  */
@@ -79,6 +93,8 @@ const SSO_CALLBACK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
   invalid_saml_response: RESPONSE_REJECTED,
   unsolicited_response: START_FROM_LOGIN_PAGE,
   state_not_found: START_FROM_LOGIN_PAGE,
+  direct_sign_in_unavailable: DIRECT_SIGN_IN_UNAVAILABLE,
+  direct_sign_in_rate_limited: DIRECT_SIGN_IN_RATE_LIMITED,
 };
 
 /**

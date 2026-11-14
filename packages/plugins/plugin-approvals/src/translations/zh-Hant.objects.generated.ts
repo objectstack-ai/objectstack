@@ -395,6 +395,14 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           message: "設定一則外出委派，你不在時核准就會轉給代理人。"
         }
       }
+    },
+    _validations: {
+      validity_window_order: {
+        message: "Valid Until must be later than Valid From. The delegation applies from Valid From up to, but not including, Valid Until, so a window that ends at or before it starts never reroutes an approval. Leave either one empty for an open-ended window."
+      },
+      delegate_not_delegator: {
+        message: "Delegate must be someone other than the Delegator. A delegation hands your approvals to another user while you are away, so naming yourself as the delegate never reroutes an approval."
+      }
     }
   }
 };

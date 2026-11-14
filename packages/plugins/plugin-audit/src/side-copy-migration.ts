@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#32442, GHSA-2985-5f64-8wgh] One-off rewrite of the columns
+ * [#32442; rule: a ledger copy holds no value its owner narrows per reader]
+ * One-off rewrite of the columns
  * `side-copy-columns.ts` lists out of the ledger copies written before the
  * writer omitted them (`ledgerView`), so a repaired copy and a new one read
  * the same. It is the key-material rewrite with a different list

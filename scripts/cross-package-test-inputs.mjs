@@ -1330,6 +1330,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/plugins/plugin-auth/src/personal-view-route-ledger.ts',
       // [#30209] The shareable-objects door's ledger, imported the same way.
       'packages/plugins/plugin-sharing/src/sharing-route-ledger.ts',
+      // [#33010] The attachment removal door's ledger, imported the same way.
+      'packages/services/service-storage/src/attachment-removal-route-ledger.ts',
       // flow-trigger / validation conformance pin spec's zod schemas.
       'packages/spec/src/automation/**',
       'packages/spec/src/data/**',

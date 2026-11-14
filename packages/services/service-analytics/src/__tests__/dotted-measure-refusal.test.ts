@@ -383,7 +383,7 @@ describe('[#5918] the surfaces the ruling leaves alone', () => {
     expect(error).toBeUndefined();
     expect(measures).toContain('region_count_distinct');
     expect(sqls[0]).toBe(
-      'SELECT COUNT(DISTINCT region) AS "crm_account.region_count_distinct" FROM "crm_account"',
+      'SELECT COUNT(DISTINCT "region") AS "crm_account.region_count_distinct" FROM "crm_account"',
     );
   });
 
@@ -398,7 +398,7 @@ describe('[#5918] the surfaces the ruling leaves alone', () => {
 
     expect(sqls).toEqual([
       'SELECT COUNT(*) AS "count" FROM "crm_account"',
-      'SELECT COUNT(DISTINCT region) AS "region_count_distinct", MAX(created_at) AS "created_at_max" ' +
+      'SELECT COUNT(DISTINCT "region") AS "region_count_distinct", MAX("created_at") AS "created_at_max" ' +
         'FROM "crm_account"',
     ]);
   });

@@ -4095,6 +4095,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     //   2) auto-grouping (primary + collapsible "More details").
     const sections = deriveRecordDetailSections(objectDef, {
       moreDetails: sectionLabel(objectDef.name, 'details', t('detail.sectionMoreDetails', 'More details')),
+      ungrouped: t('common.ungroupedSection', 'Other'),
     });
 
     // Audit fields (created_at/created_by/updated_at/updated_by) are NOT

@@ -63,10 +63,19 @@ type SectionDividerRow = FormField & {
  *
  * Section `fields` are field *names* (strings) so the result plugs straight
  * into ObjectForm's existing section-render path.
+ *
+ * `ungroupedLabel` is the heading of the trailing keyless bucket — the fields
+ * no declared group claims. The bucket only exists after at least one declared
+ * group (no group applies ⇒ `null`, a flat form), so a caller that DRAWS the
+ * sections passes the translated `common.ungroupedSection` text: drawn
+ * headerless, the bucket's fields read as members of the group above it, and
+ * as hidden ones when that group is collapsed. A caller that only resolves
+ * `{ group }` references by key never reads the bucket and passes nothing.
  */
 export function deriveFieldGroupSections(
   fields: FormField[],
   fieldGroups: unknown,
+  ungroupedLabel?: string,
 ): ObjectFormSection[] | null {
   const derived = deriveFieldGroupLayout({
     fieldGroups,
@@ -83,7 +92,9 @@ export function deriveFieldGroupSections(
 
   const sections: ObjectFormSection[] = derived.map((s) => ({
     ...(s.key !== undefined ? { name: s.key } : {}),
-    ...(s.key !== undefined ? { label: s.label ?? s.key } : {}),
+    ...(s.key !== undefined
+      ? { label: s.label ?? s.key }
+      : ungroupedLabel !== undefined ? { label: ungroupedLabel } : {}),
     // The other two presentation keys the shared derivation emits and
     // `ObjectFormSection` declares (objectui#7051). This map is a key-by-key
     // rebuild, so a key it does not copy is dropped before any renderer can
@@ -116,7 +127,7 @@ export function deriveFieldGroupSections(
     if (trailing && trailing.name === undefined) {
       trailing.fields = [...(trailing.fields ?? []), ...leftover];
     } else {
-      sections.push({ fields: leftover });
+      sections.push({ ...(ungroupedLabel !== undefined ? { label: ungroupedLabel } : {}), fields: leftover });
     }
   }
 
@@ -328,9 +339,11 @@ const DIVIDER_COL_SPAN = 4;
  *    the predicate gates the whole group and not just the heading. The form
  *    renderer also ends the group's field grid where the claim ends
  *    (`splitAtUntitledRuns`, `@object-ui/components`, objectui#11777), which is
- *    how an untitled section after it — the trailing ungrouped bucket, which
- *    gets no row here — is drawn as its own block instead of under this
- *    heading. A row that dropped the claim would put those fields back under it.
+ *    how an untitled section after it — an authored section with neither a
+ *    label nor a description, which gets no row here — is drawn as its own
+ *    block instead of under this heading. A row that dropped the claim would
+ *    put those fields back under it. (The derived trailing bucket is not such a
+ *    section: `deriveFieldGroupSections` heads it with `ungroupedLabel`.)
  *  - `colSpan` — see `DIVIDER_COL_SPAN`.
  *  - `collapsible` / `collapsed` / `onToggle` — on the visible row only (the
  *    control lives on the row), and only when the arm hands over a resolved
