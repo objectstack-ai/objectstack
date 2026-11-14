@@ -185,6 +185,7 @@ const ADMIN = (): HttpProtocolContext => ({
 const statusOf = (r: any): unknown => r?.response?.status;
 const codeOf = (r: any): unknown => r?.response?.body?.error?.code;
 const bodyOf = (r: any): string => JSON.stringify(r?.response?.body);
+const candidatesOf = (r: any): unknown => r?.response?.body?.error?.details?.candidates;
 
 const flip = (h: Harness, objectName: string, actionName: string, enabled: boolean) =>
     h.dispatcher.handleActions(`/_activation/${objectName}/${actionName}`, 'POST', { enabled }, ADMIN());
@@ -314,8 +315,9 @@ describe('#22817 — a refused ledger write keeps ADR-0112\'s code and status to
  *
  * A stack whose `protocol` serves the merged listing (the composed artifact
  * on `MetadataPlugin` + `ObjectQLPlugin` + `AppPlugin`) already saw both and
- * answers the same before and after: 409 for the pair on two objects, 404 for
- * the object-less pair. This host now answers what that stack answers.
+ * answers the same before and after: 409 for the pair on two objects, and
+ * (since #32689) 409 naming both packages for the object-less pair. This host
+ * now answers what that stack answers.
  *
  * BASE (main `874166b60`'s `@objectstack/metadata` built): 200 and one row
  * (`package_id` = the package saved last) in both cases.
@@ -357,11 +359,36 @@ describe('[#32517] two packages\' same-named actions: the metadata-service-only 
         expect(h.rows).toEqual([]);
     });
 
-    it('NARROWING — both object-less: 404, no row, as the merged-listing stack answers (BASE: 200 and one row)', async () => {
+    /**
+     * [#32689] The declaration reading refuses the name, and the activation
+     * door answers that refusal as the execution door does — 409 naming both
+     * packages, in both directions — never "has no declaration" (BASE of
+     * #32689: 404 RESOURCE_NOT_FOUND; BASE of #32517: 200 and one row).
+     */
+    it('NARROWING — both object-less: 409 RESOURCE_CONFLICT naming both packages, on and off, and no row', async () => {
         const h = await bootWithDoor([undefined, undefined]);
-        const res = await flip(h, 'global', 'shared_ping', false);
-        expect(statusOf(res), bodyOf(res)).toBe(404);
-        expect(codeOf(res)).toBe('RESOURCE_NOT_FOUND');
+        for (const enabled of [false, true]) {
+            const res = await flip(h, 'global', 'shared_ping', enabled);
+            expect(statusOf(res), bodyOf(res)).toBe(409);
+            expect(codeOf(res)).toBe('RESOURCE_CONFLICT');
+            expect(candidatesOf(res)).toEqual(expect.arrayContaining([
+                expect.objectContaining({ packageId: 'com.acme.alpha' }),
+                expect.objectContaining({ packageId: 'com.acme.beta' }),
+            ]));
+            expect(bodyOf(res)).toContain('com.acme.alpha');
+            expect(bodyOf(res)).toContain('com.acme.beta');
+        }
+        expect(h.rows).toEqual([]);
+    });
+
+    it('CONTROL — a name nothing declares: 404 RESOURCE_NOT_FOUND "has no declaration", and no row (unchanged)', async () => {
+        const h = await bootWithDoor([undefined, undefined]);
+        for (const enabled of [false, true]) {
+            const res = await flip(h, 'global', 'nobody_ping', enabled);
+            expect(statusOf(res), bodyOf(res)).toBe(404);
+            expect(codeOf(res)).toBe('RESOURCE_NOT_FOUND');
+            expect(bodyOf(res)).toContain('has no declaration');
+        }
         expect(h.rows).toEqual([]);
     });
 
@@ -438,18 +465,21 @@ describe('[#32714] the metadata-service-only host: two packages on one object, a
 
     /**
      * Refused, and no row: the flip of a name two packages hold on this object
-     * switches neither. It answers 404 "has no declaration", the answer the
-     * object-less pair gets above: the declaration read refuses the name
-     * (the execution door's 409 below) and the activation door drops that
-     * refusal for its "no declaration" branch. That door's 404 → 409 is
-     * #32689's, for every key; this pin moves with it.
+     * switches neither. The declaration read refuses the name, and the
+     * activation door answers that refusal as the execution door below does
+     * — 409 naming both packages — for every key (#32689; BASE: 404
+     * RESOURCE_NOT_FOUND "has no declaration", the refusal dropped).
      */
-    it('two packages bound to ONE object — the activation door: refused, 404 RESOURCE_NOT_FOUND, and no row', async () => {
+    it('two packages bound to ONE object — the activation door: refused, 409 RESOURCE_CONFLICT naming both packages, and no row', async () => {
         const h = await host([[ALPHA, OTHER], [BETA, OTHER]]);
         for (const enabled of [false, true]) {
             const res = await flip(h, OTHER, 'shared_ping', enabled);
-            expect(statusOf(res), bodyOf(res)).toBe(404);
-            expect(codeOf(res)).toBe('RESOURCE_NOT_FOUND');
+            expect(statusOf(res), bodyOf(res)).toBe(409);
+            expect(codeOf(res)).toBe('RESOURCE_CONFLICT');
+            expect(candidatesOf(res)).toEqual(expect.arrayContaining([
+                expect.objectContaining({ packageId: ALPHA }),
+                expect.objectContaining({ packageId: BETA }),
+            ]));
         }
         expect(h.rows).toEqual([]);
     });
