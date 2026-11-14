@@ -73,10 +73,22 @@
  * non-GET/HEAD request a stream, an empty one included. An in-process
  * `Request` built without those headers is therefore read as having no body.
  *
+ * ## A body over the limit (`./body-limit.ts`)
+ *
+ * The transport's request-body limit is checked first: a declared length over
+ * it is never read, and reading `req.body` refuses with `413
+ * PAYLOAD_TOO_LARGE`, on the same read-time path as the refusals above, so a
+ * byte door that reads `rawBody()` instead is untouched. A JSON or form body
+ * with no declared length is read up to the limit and kept; past it, reading
+ * `req.body` refuses with 413, and `rawBody()` still hands a byte door every
+ * byte.
+ *
  * The message names the failure and never echoes the body.
  */
 
 import type { Context } from 'hono';
+import { parseBody } from 'hono/utils/body';
+import { RequestBodyTooLarge, requestBodyGuardOf } from './body-limit';
 
 /**
  * The refusal, as a DECLARED ADR-0112 throw: `status` and a registered `code`
@@ -95,7 +107,7 @@ export class RequestBodyRefusal extends Error {
 
 export type RequestBodyReading =
     | { readonly body: unknown; readonly refusal?: undefined }
-    | { readonly refusal: RequestBodyRefusal };
+    | { readonly refusal: RequestBodyRefusal | RequestBodyTooLarge };
 
 /** The refusal tail every message ends with: what the transport did NOT do. */
 const NOT_EMPTY = 'It was refused rather than read as an empty body';
@@ -130,17 +142,59 @@ function declaresBody(c: Context): boolean {
     return c.req.header('transfer-encoding') !== undefined;
 }
 
+/**
+ * A JSON or form body with no declared length, read up to the limit from the
+ * ORIGINAL body and kept (`./body-limit.ts`, `RequestBodyGuard.hold`), so a
+ * byte door that reads `rawBody()` afterwards still receives every byte. `null`
+ * when the reading is the plain `c.req` one: a declared length within the
+ * limit (the guard counts it, and it cannot pass the limit), a body something
+ * upstream already read, or an app with no guard.
+ */
+async function heldBody(c: Context): Promise<{ bytes: Uint8Array } | { tooLarge: RequestBodyTooLarge } | null> {
+    const guard = requestBodyGuardOf(c);
+    if (!guard || guard.declaresLength || guard.pulled() || c.req.raw.bodyUsed || !guard.original.body) return null;
+    const held = await guard.hold();
+    return held.bytes ? { bytes: held.bytes } : { tooLarge: new RequestBodyTooLarge(guard.limit) };
+}
+
+/** The 413 refusal when the read that just failed was the guard refusing a body past the limit. */
+function tooLargeIfTripped(c: Context): RequestBodyTooLarge | undefined {
+    const guard = requestBodyGuardOf(c);
+    return guard?.tripped() ? new RequestBodyTooLarge(guard.limit) : undefined;
+}
+
 export async function readRequestBody(c: Context): Promise<RequestBodyReading> {
     const lowered = (c.req.header('content-type') ?? '').toLowerCase();
 
-    if (lowered.includes('application/json')) {
-        // `text()` fills the same Hono body cache `json()` did (`json()` is
-        // `text()` then `JSON.parse`), so `rawBody()` still reads the bytes.
-        let text: string;
+    // A declared length over the limit is never read: reading `req.body`
+    // refuses with 413, and `rawBody()` still serves a byte door, which bounds
+    // the body by its own limit (`./body-limit.ts`).
+    const guard = requestBodyGuardOf(c);
+    if (guard?.declaredOverLimit) return { refusal: new RequestBodyTooLarge(guard.limit) };
+
+    const mediaType = lowered.split(';')[0]!.trim();
+    const isForm = mediaType === 'multipart/form-data' || mediaType === 'application/x-www-form-urlencoded';
+    let heldBytes: Uint8Array | undefined;
+    if (lowered.includes('application/json') || isForm) {
+        let held: Awaited<ReturnType<typeof heldBody>>;
         try {
-            text = await c.req.text();
+            held = await heldBody(c);
         } catch {
             return { refusal: new RequestBodyRefusal(UNREADABLE_BODY_MESSAGE) };
+        }
+        if (held && 'tooLarge' in held) return { refusal: held.tooLarge };
+        heldBytes = held?.bytes;
+    }
+
+    if (lowered.includes('application/json')) {
+        // `text()` fills the same Hono body cache `json()` did (`json()` is
+        // `text()` then `JSON.parse`), so `rawBody()` still reads the bytes; a
+        // held body is decoded the way `text()` decodes (UTF-8, a BOM dropped).
+        let text: string;
+        try {
+            text = heldBytes ? new TextDecoder().decode(heldBytes) : await c.req.text();
+        } catch {
+            return { refusal: tooLargeIfTripped(c) ?? new RequestBodyRefusal(UNREADABLE_BODY_MESSAGE) };
         }
         if (text.trim() === '') return { body: {} };
         try {
@@ -150,12 +204,17 @@ export async function readRequestBody(c: Context): Promise<RequestBodyReading> {
         }
     }
 
-    const mediaType = lowered.split(';')[0]!.trim();
-    if (mediaType === 'multipart/form-data' || mediaType === 'application/x-www-form-urlencoded') {
+    if (isForm) {
         try {
-            return { body: await c.req.parseBody() };
+            if (!heldBytes) return { body: await c.req.parseBody() };
+            const request = new Request(c.req.url, {
+                method: 'POST',
+                headers: { 'content-type': c.req.header('content-type') ?? mediaType },
+                body: heldBytes as BodyInit,
+            });
+            return { body: await parseBody(request) };
         } catch {
-            return { refusal: new RequestBodyRefusal(malformedFormMessage(mediaType)) };
+            return { refusal: tooLargeIfTripped(c) ?? new RequestBodyRefusal(malformedFormMessage(mediaType)) };
         }
     }
 

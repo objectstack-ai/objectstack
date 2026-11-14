@@ -1047,6 +1047,25 @@ function MarketplacePackagePageBody() {
     ? localInstalls.find((i) => !!data && i.manifestId === data.package.manifest_id)
     : localInstalls.find((i) => i.packageId === packageId)) ?? null;
 
+  // ADR-0090 D5 — an installed package's suggested audience bindings, on every
+  // visit and not only in an install's own result: a package installed earlier,
+  // or from the cloud console, has no install result here, and this page is
+  // where its pending suggestion is accepted. "Installed here" is a local
+  // install this runtime loaded, or a cloud install into the environment this
+  // console renders (`cloudInstall` is read for that environment only). The
+  // panel reads the list itself and renders nothing when the package has no
+  // suggestion or the caller lacks `manage_metadata` (the list answers 403).
+  // Not drawn while the install dialog is open, or while a local install's
+  // result banner carries its own panel: one panel per package on screen.
+  // Mounted again when either closes, so it reads what the install left.
+  const installedSuggestions = (manifestId: string | null, resultCarriesPanel: boolean) =>
+    manifestId
+    && ((localInstall !== null && !localInstall.notLoaded) || cloudInstall !== null)
+    && !installOpen
+    && !resultCarriesPanel ? (
+      <SuggestedBindingsPanel packageId={manifestId} strings={suggestionStrings} />
+    ) : null;
+
   // objectstack#30616 — the runtime's count of the sample rows a purge of this
   // install would delete now, read on every visit and again each time the
   // listing is read (after an install, a reseed or a clear, which hand the
@@ -1382,6 +1401,7 @@ function MarketplacePackagePageBody() {
           </div>
         )}
         {sampleDataNote}
+        {installedSuggestions(localInstall?.manifestId ?? null, false)}
         {localResultNote(null)}
         {purgeConfirmDialog}
         {leaveBanner}
@@ -1757,6 +1777,8 @@ function MarketplacePackagePageBody() {
       {sampleDataNote}
 
       {!installOpen && deployNote}
+
+      {installedSuggestions(pkg.manifest_id, !!localResult?.ok && !localResult.unmanaged)}
 
       {localResultNote(pkg.manifest_id)}
       {purgeConfirmDialog}

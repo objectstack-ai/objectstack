@@ -119,6 +119,19 @@ export interface HonoPluginOptions {
     serverTiming?: boolean;
 
     /**
+     * The request-body limit, in bytes. A body over it is not read past the
+     * limit and is answered `413 PAYLOAD_TOO_LARGE`; a declared length over it
+     * is not read at all. Upload doors that read the raw bytes
+     * (`IHttpRequest.rawBody()`) keep their own bound, the storage
+     * `max_upload_mb`.
+     *
+     * Unset, the limit is `OS_HTTP_MAX_BODY_BYTES`, else 10 MiB. A value that
+     * is not a positive whole number of bytes fails the plugin's construction.
+     * @default 10485760
+     */
+    maxRequestBodyBytes?: number;
+
+    /**
      * Observability backends for the transport's own signals.
      *
      * `metrics` receives `http_requests_total{method,route,status}` for every
@@ -288,6 +301,9 @@ export class HonoServerPlugin implements Plugin {
         // adapter's own defaults — named positionally only because `tls`
         // follows them (#16804).
         this.server = new HonoHttpServer(this.options.port, undefined, undefined, this.options.tls);
+        if (this.options.maxRequestBodyBytes !== undefined) {
+            this.server.setMaxRequestBodyBytes(this.options.maxRequestBodyBytes);
+        }
     }
 
     /**

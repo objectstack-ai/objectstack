@@ -292,3 +292,175 @@ describe('[#23914, #24042] both Hono doors answer one body alike, media type by 
     }
   });
 });
+
+/**
+ * The request-body limit (`@objectstack/plugin-hono-server`'s
+ * `src/body-limit.ts`), on both doors. The client's body is a stream that
+ * counts what the server pulled from it, so "not read" and "not read past the
+ * limit" are measured, not inferred from the status.
+ */
+describe('a request body over the transport limit is answered 413 and not read past the limit, on both doors', () => {
+  const LIMIT = 64;
+  const CHUNK = 16;
+
+  /** A client body that yields `text` in `CHUNK`-byte pieces and counts the bytes the server pulled. */
+  function countedBody(text: string) {
+    const bytes = new TextEncoder().encode(text);
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= bytes.byteLength) {
+          controller.close();
+          return;
+        }
+        const piece = bytes.slice(sent, sent + CHUNK);
+        sent += piece.byteLength;
+        controller.enqueue(piece);
+      },
+    }, { highWaterMark: 0 });
+    return { stream, sent: () => sent, total: bytes.byteLength };
+  }
+
+  /** A JSON document of exactly `size` bytes. */
+  const jsonOfSize = (size: number) => `{"a":"${'x'.repeat(size - 8)}"}`;
+
+  /** `declared` sends `Content-Length: size`; `chunked` sends `Transfer-Encoding` and no length. */
+  function init(method: string, contentType: string, stream: ReadableStream<Uint8Array>, framing: { declared?: number; chunked?: boolean }): RequestInit {
+    const headers: Record<string, string> = { 'content-type': contentType };
+    if (framing.declared !== undefined) headers['content-length'] = String(framing.declared);
+    if (framing.chunked) headers['transfer-encoding'] = 'chunked';
+    return { method, headers, body: stream, duplex: 'half' } as RequestInit;
+  }
+
+  const hostedApp = (limit = LIMIT) => createHonoApp({ kernel, prefix: PREFIX, cors: false, maxRequestBodyBytes: limit });
+
+  /** The self-hosted door: a reading route, a byte door that reads `rawBody()`, a raw-app reader, and a route that refuses before it reads. */
+  function directServer(limit = LIMIT) {
+    const server = new HonoHttpServer(0);
+    server.setMaxRequestBodyBytes(limit);
+    server.post(`${PREFIX}/data/:object/query`, (req, res) => { res.json({ success: true, data: req.body }); });
+    server.put(`${PREFIX}/bytes/:id`, async (req, res) => {
+      const bytes = await req.rawBody!();
+      res.json({ success: true, data: { size: bytes.byteLength, text: bytes.toString('utf8') } });
+    });
+    server.post(`${PREFIX}/signed-in-only`, (_req, res) => {
+      res.status(401).json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first.' } });
+    });
+    // A raw-app route that reads the request itself, as the auth service's mount does.
+    server.getRawApp().post(`${PREFIX}/auth/sign-in/email`, async (c) => {
+      try {
+        return c.json({ success: true, data: await c.req.raw.json() });
+      } catch {
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'reader fault' } }, 500);
+      }
+    });
+    return server;
+  }
+
+  const hosted = (path: string, method: string, contentType: string, stream: ReadableStream<Uint8Array>, framing: { declared?: number; chunked?: boolean }, limit?: number) =>
+    hostedApp(limit).request(`http://hosted.test${PREFIX}${path}`, init(method, contentType, stream, framing));
+  const direct = (path: string, method: string, contentType: string, stream: ReadableStream<Uint8Array>, framing: { declared?: number; chunked?: boolean }, limit?: number) =>
+    directServer(limit).getRawApp().fetch(new Request(`http://direct.test${PREFIX}${path}`, init(method, contentType, stream, framing)));
+
+  async function expectTooLarge(res: Response) {
+    const json = await res.json() as any;
+    expect(res.status, JSON.stringify(json)).toBe(413);
+    expect(json).toEqual({ success: false, error: { code: 'PAYLOAD_TOO_LARGE', message: expect.stringContaining(`(${LIMIT} bytes)`) } });
+    return json;
+  }
+
+  /** [label, the door, the path, the method] — every reader of a body on each door. */
+  const READERS: Array<[string, typeof hosted, string, string]> = [
+    ['the hosted door, a domain that reads the parsed body', hosted, QUERY, 'POST'],
+    ['the hosted door, a domain that reads the forwarded request', hosted, '/webhooks/redeliver', 'POST'],
+    ['the hosted door, the auth fallback that reads the parsed body', hosted, '/auth/sign-in/email', 'POST'],
+    ['the self-hosted door, a route that reads req.body', direct, QUERY, 'POST'],
+    ['the self-hosted door, a raw-app route that reads the request itself', direct, '/auth/sign-in/email', 'POST'],
+  ];
+
+  it.each(READERS)('%s: a declared length over the limit is answered 413 and no byte of it is read', async (_label, door, path, method) => {
+    const body = countedBody(jsonOfSize(LIMIT + 1));
+    await expectTooLarge(await door(path, method, 'application/json', body.stream, { declared: body.total }));
+    expect(body.sent()).toBe(0);
+    expect(seen).toEqual([]);
+  });
+
+  it.each(READERS)('%s: a body with no declared length is answered 413 once it passes the limit, and is not read further', async (_label, door, path, method) => {
+    const body = countedBody(jsonOfSize(LIMIT * 10));
+    await expectTooLarge(await door(path, method, 'application/json', body.stream, { chunked: true }));
+    expect(body.sent()).toBeLessThanOrEqual(LIMIT + 2 * CHUNK);
+    expect(body.sent()).toBeLessThan(body.total);
+    expect(seen).toEqual([]);
+  });
+
+  it.each([
+    ['declared', { declared: LIMIT }],
+    ['with no declared length', { chunked: true }],
+  ] as const)('a body of exactly the limit, %s, is read as before on both doors', async (_label, framing) => {
+    const text = jsonOfSize(LIMIT);
+    const hostedRes = await hosted(QUERY, 'POST', 'application/json', countedBody(text).stream, framing);
+    const directRes = await direct(QUERY, 'POST', 'application/json', countedBody(text).stream, framing);
+    expect(hostedRes.status).toBe(200);
+    expect(directRes.status).toBe(200);
+    expect(await hostedRes.json()).toEqual({ success: true, data: JSON.parse(text) });
+    expect(await directRes.json()).toEqual({ success: true, data: JSON.parse(text) });
+  });
+
+  it('an operator-raised limit admits the larger body, on both doors', async () => {
+    const text = jsonOfSize(LIMIT * 3);
+    const hostedRes = await hosted(QUERY, 'POST', 'application/json', countedBody(text).stream, { declared: LIMIT * 3 }, LIMIT * 4);
+    const directRes = await direct(QUERY, 'POST', 'application/json', countedBody(text).stream, { chunked: true }, LIMIT * 4);
+    expect(hostedRes.status).toBe(200);
+    expect(directRes.status).toBe(200);
+    expect((await directRes.json() as any).data).toEqual(JSON.parse(text));
+  });
+
+  it.each([
+    ['declared, sent as bytes', 'application/octet-stream', { declared: LIMIT * 4 }],
+    ['declared, sent as the JSON file it is', 'application/json', { declared: LIMIT * 4 }],
+    ['with no declared length, sent as bytes', 'application/octet-stream', { chunked: true }],
+    ['with no declared length, sent as the JSON file it is', 'application/json', { chunked: true }],
+  ] as const)('a byte door that reads rawBody() keeps its own bound: a body over the transport limit, %s, arrives whole', async (_label, contentType, framing) => {
+    const text = jsonOfSize(LIMIT * 4);
+    const res = await direct('/bytes/f_1', 'PUT', contentType, countedBody(text).stream, framing);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await res.json()).toEqual({ success: true, data: { size: LIMIT * 4, text } });
+  });
+
+  it('a route that refuses an anonymous caller before reading keeps its answer, and reads nothing', async () => {
+    const body = countedBody(jsonOfSize(LIMIT * 10));
+    const res = await direct('/signed-in-only', 'POST', 'application/json', body.stream, { declared: body.total });
+    expect(res.status).toBe(401);
+    expect(body.sent()).toBe(0);
+  });
+
+  it('CONTROL: a JSON and a form body within the limit are read as before, on both doors', async () => {
+    for (const [contentType, text, expected] of [
+      ['application/json', '{"where":{"status":"churned"}}', { where: { status: 'churned' } }],
+      ['application/x-www-form-urlencoded', 'token=abc&x=1', { token: 'abc', x: '1' }],
+    ] as const) {
+      for (const framing of [{ declared: Buffer.byteLength(text) }, { chunked: true }]) {
+        seen.length = 0;
+        const hostedRes = await hosted(QUERY, 'POST', contentType, countedBody(text).stream, framing);
+        expect(hostedRes.status).toBe(200);
+        expect(seen).toEqual([{ path: QUERY, read: expected }]);
+        const directRes = await direct(QUERY, 'POST', contentType, countedBody(text).stream, framing);
+        expect(directRes.status).toBe(200);
+        expect(await directRes.json()).toEqual({ success: true, data: expected });
+      }
+    }
+  });
+
+  it('the default limit is 10 MiB on both doors, and a declared length over it is not read', async () => {
+    const TEN_MIB = 10 * 1024 * 1024;
+    expect(new HonoHttpServer(0).getMaxRequestBodyBytes()).toBe(TEN_MIB);
+    const server = new HonoHttpServer(0);
+    server.post(`${PREFIX}/data/:object/query`, (req, res) => { res.json({ success: true, data: req.body }); });
+    for (const app of [createHonoApp({ kernel, prefix: PREFIX, cors: false }), server.getRawApp()]) {
+      const body = countedBody(jsonOfSize(LIMIT));
+      const res = await app.request(`http://default.test${PREFIX}${QUERY}`, init('POST', 'application/json', body.stream, { declared: TEN_MIB + 1 }));
+      expect(res.status).toBe(413);
+      expect(body.sent()).toBe(0);
+    }
+  });
+});
