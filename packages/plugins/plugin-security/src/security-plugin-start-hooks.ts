@@ -375,12 +375,15 @@ export function registerStartHooks(
   // would judge a catalog that is still being filled. See `catalog-reference-report.ts`.
   //
   // [#32983, #33238] The position-rename holder carry runs at `kernel:bootstrapped`
-  // (below, ahead of the report) and again on each `metadata:reloaded` after it —
-  // the re-sync a hot marketplace install or upgrade announces once its package
-  // is registered — so a package installed into a running kernel moves its
-  // holders without a restart. One runner, so the runs never overlap and a
-  // reload heard before the boot run is ignored. The catalog read is built at
-  // each run. See `position-renamed-holder-carry.ts`, "When it runs".
+  // over every claim (below, ahead of the report), and on each `metadata:reloaded`
+  // after it over the claims of what the announcement names as registered then:
+  // `app/ID` of a package the registry holds (the marketplace install-local
+  // door's hot install or upgrade; its uninstall names a withdrawn package and
+  // carries nothing) and `position/NAME` (the per-item publish, the package
+  // publish-drafts route). An artifact reload names a file path, so it carries
+  // nothing. One runner, so the runs never overlap and a reload heard before
+  // the boot run is ignored. The catalog read is built at each run. See
+  // `position-renamed-holder-carry.ts`, "When it runs".
   const positionRenameCarry = createPositionRenameCarryRuns(ql as any, () => ({
     catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
   }), ctx.logger);
@@ -475,12 +478,13 @@ export function registerStartHooks(
       }
     });
     // [#33238] A hot install or upgrade announces `metadata:reloaded` once its
-    // package is registered: carry the holders of the positions it renamed now,
-    // not at the next restart. Ignored until the boot run above has started;
-    // never fails the announcing door.
-    (ctx as any).hook('metadata:reloaded', async (): Promise<void> => {
+    // package is registered: carry the holders of the positions THAT package or
+    // position renamed now, not at the next restart. Only what the announcement
+    // names is judged (ruling A1 condition 2 on the reload path); ignored until
+    // the boot run above has started; never fails the announcing door.
+    (ctx as any).hook('metadata:reloaded', async (payload?: unknown): Promise<void> => {
       try {
-        await positionRenameCarry.afterReload();
+        await positionRenameCarry.afterReload(payload);
       } catch (e) {
         ctx.logger.warn('[security] position renames: the holder carry did not run after a reload — it is tried again at the next install, publish or boot', {
           error: (e as Error)?.message,

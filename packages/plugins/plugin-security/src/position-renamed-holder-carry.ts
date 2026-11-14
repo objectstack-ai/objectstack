@@ -22,7 +22,8 @@
  *
  * At `kernel:bootstrapped` — every code, package and environment position
  * this boot registers is in the catalog — it reads every position's
- * `renamedFrom` from the security catalog and judges each old name. An old
+ * `renamedFrom` from the security catalog and judges each old name (after the
+ * boot, a reload judges a narrower set: "When it runs" below). An old
  * name it may carry has each holder row moved to the new name: only the
  * `position` column is written, so the user, organization, business unit,
  * validity window, reason and delegation columns stay as they were. A holder
@@ -94,21 +95,43 @@
  *
  * ## When it runs
  *
- * [#33238] At `kernel:bootstrapped`, and again on every `metadata:reloaded`
- * after that — the platform's one post-boot re-sync signal, which a hot
- * marketplace install or upgrade announces once the package is registered
- * (and a package publish, a per-item publish and an artifact reload too). So
- * a package installed or upgraded into a running kernel carries its holders
- * then, not at the next restart. The same judgement runs both times, over
- * the catalog as it stands; being idempotent, a run with nothing new moves
- * nothing and writes nothing (`createPositionRenameCarryRuns`).
+ * [#33238] Once at `kernel:bootstrapped`, over every claim in the catalog.
+ * After that, again on each `metadata:reloaded` (the platform's post-boot
+ * re-sync signal), but a reload run judges ONLY the renames declared by what
+ * the announcement names as registered at that moment
+ * (`positionRenameReloadScope`), so condition 2 holds on the reload path
+ * exactly as on the boot path: a reload never re-judges another package's
+ * standing claim. Read from the payload's `changed` list:
+ *
+ *  - `app/ID` where `ID` is a package the registry holds now: the positions
+ *    of that package. The marketplace install-local door announces this after
+ *    a hot install or upgrade has registered the package. Its uninstall
+ *    announces the same spelling after the package is withdrawn, so the
+ *    registry no longer holds it and nothing is judged: a withdrawal carries
+ *    nothing;
+ *  - `position/NAME` where `NAME` is a position the catalog serves now: that
+ *    position. The per-item publish (`ObjectQLPlugin`) and the package
+ *    publish-drafts route (one entry per published item) announce this;
+ *  - anything else is not a scope: another item type, an `app/NAME` that is
+ *    no package the registry holds (publish-drafts names the apps it unhid by
+ *    app name), and the file path an artifact reload announces. A reload that
+ *    names no scope reads nothing and carries nothing; its renames wait for
+ *    the boot run.
+ *
+ * Within that scope the judgement is the boot's own, over the whole catalog:
+ * every refusal below reads every position the environment holds, not only
+ * the scope's. Being idempotent, a run with nothing new moves nothing and
+ * writes nothing; a reload run that moves nothing also skips the read of the
+ * references it would leave behind (`createPositionRenameCarryRuns`).
  *
  * A reload heard before the boot run is ignored: during the boot the catalog
  * is still being filled, and an old name whose holding package has not
  * registered yet would read as no position at all (condition 2). The boot run
  * judges it once the catalog is complete. A door that registers positions
  * without announcing `metadata:reloaded` (the runtime's package install and
- * enable routes) is still carried at the next boot.
+ * enable routes), a hot upgrade over a version the running kernel still
+ * serves (its old position reads as still declared), and a package the
+ * announcement does not name are carried at the next boot.
  *
  * ## Its one limit
  *
@@ -117,7 +140,9 @@
  * refused, or whose protocol range this runtime does not meet) holds no name
  * the registry or the ledger can show, so a standing claim on one of its
  * position names is carried. A package that loaded and then failed a later
- * step is loaded, and is judged.
+ * step is loaded, and is judged. A reload run reads the catalog, the disabled
+ * packages' positions and the activation ledger as they stand at that reload,
+ * and judges only its scope's claims against them.
  */
 
 import { catalogEntryAddress, readDisabledCatalogNames, type SecurityCatalogEntry, type SecurityCatalogReader } from '@objectstack/core';
@@ -201,7 +226,7 @@ export interface FailedPositionRename extends PositionRenameClaim {
 export interface PositionRenameCarryReport {
   readonly carried: readonly CarriedPositionRename[];
   readonly refused: readonly RefusedPositionRename[];
-  /** Claims whose carry failed; the next boot reads what is left on the old name. */
+  /** Claims whose carry failed; the next run that judges the claim (the next boot, or a reload naming it) reads what is left on the old name. */
   readonly failed: readonly FailedPositionRename[];
   readonly leftBehind: readonly LeftBehindReferences[];
   /** Tables that exist here and could not be read: no answer, never "none". */
@@ -221,6 +246,8 @@ export interface PositionRenameCarryEngine {
     getObject?(name: string): unknown;
     listItems?(type: string, packageId?: string, options?: { includeDisabledPackages?: boolean }): readonly unknown[];
     isPackageDisabled?(packageId?: string): boolean;
+    /** The installed package record for `id`, if the registry holds that package now (a reload's scope). */
+    getPackage?(id: string): unknown;
   };
 }
 
@@ -477,6 +504,51 @@ async function readLeftBehind(
   return out;
 }
 
+/** What a reload run may judge (module doc, "When it runs"): positions of these packages, and these positions. */
+export interface PositionRenameScope {
+  readonly packages: ReadonlySet<string>;
+  readonly positions: ReadonlySet<string>;
+}
+
+export interface PositionRenameCarryOptions {
+  /** Judge only the old names a position in this scope claims; absent, every claim (the boot run). */
+  readonly only?: PositionRenameScope;
+  /** Read the references left behind only for old names this run moved rows of (a reload run). */
+  readonly leftBehindOnlyWhenMoved?: boolean;
+}
+
+/**
+ * The scope a `metadata:reloaded` announcement names (module doc, "When it
+ * runs"): `app/ID` for a package the registry holds NOW, and `position/NAME`.
+ * A withdrawn package is no longer held, so its announcement names nothing.
+ * Every other entry, and a payload with no `changed` list, names nothing.
+ */
+export function positionRenameReloadScope(payload: unknown, engine: Partial<PositionRenameCarryEngine> | undefined): PositionRenameScope {
+  const packages = new Set<string>();
+  const positions = new Set<string>();
+  const changed = (payload as { changed?: unknown } | null | undefined)?.changed;
+  if (!Array.isArray(changed)) return { packages, positions };
+  for (const entry of changed) {
+    if (typeof entry !== 'string') continue;
+    const slash = entry.indexOf('/');
+    if (slash <= 0) continue;
+    const type = entry.slice(0, slash);
+    const name = entry.slice(slash + 1);
+    if (name === '') continue;
+    if (type === 'position' && POSITION_NAME_GRAMMAR.test(name)) positions.add(name);
+    else if (type === 'app') {
+      let held = false;
+      try {
+        held = engine?.registry?.getPackage?.(name) != null;
+      } catch {
+        held = false;
+      }
+      if (held) packages.add(name);
+    }
+  }
+  return { packages, positions };
+}
+
 /**
  * Judge every declared position rename and carry the holders of each old
  * name the rules allow (module doc). Reads nothing when no position declares
@@ -485,6 +557,7 @@ async function readLeftBehind(
 export async function carryRenamedPositionHolders(
   engine: PositionRenameCarryEngine,
   deps: PositionRenameCarryDeps,
+  options: PositionRenameCarryOptions = {},
 ): Promise<PositionRenameCarryReport> {
   const served = await deps.catalog.list('position');
   // [condition 2] A disabled package still holds its names: judge them too.
@@ -500,6 +573,14 @@ export async function carryRenamedPositionHolders(
       list.push({ from, to: e.name, packageId: holderOf(e), ...(off ? { disabled: true } : {}) });
       claimsByOld.set(from, list);
     }
+  }
+  // [#33238, condition 2] A reload judges only the old names its scope's
+  // positions claim; every other standing claim waits for a run that names it.
+  const { only } = options;
+  if (only) {
+    const inScope = (c: PositionRenameClaim): boolean =>
+      (c.packageId !== null && only.packages.has(c.packageId)) || only.positions.has(c.to);
+    for (const [from, claims] of [...claimsByOld]) if (!claims.some(inScope)) claimsByOld.delete(from);
   }
   const carried: CarriedPositionRename[] = [];
   const refused: RefusedPositionRename[] = [];
@@ -582,6 +663,11 @@ export async function carryRenamedPositionHolders(
     } else {
       carried.push({ ...claim, byOrganization: progress.byOrganization, rows: progress.rows, alreadyHolds: progress.alreadyHolds });
     }
+  }
+  // [#33238] A run told to (a reload) reads what it leaves behind only for the old names it moved rows of.
+  if (options.leftBehindOnlyWhenMoved) {
+    const moved = new Set([...carried, ...failed].filter((c) => c.rows > 0).map((c) => c.from));
+    for (const from of [...carriedOlds]) if (!moved.has(from)) carriedOlds.delete(from);
   }
   const leftBehind = carriedOlds.size > 0 ? await readLeftBehind(engine, carriedOlds, notRead) : [];
   return { carried, refused, failed, leftBehind, notRead };
@@ -671,10 +757,11 @@ async function runCarry(
   logger: PositionRenameCarryLogger,
   retry: string,
   standing?: { readonly previous: ReadonlySet<string>; readonly said: Set<string> },
+  options?: PositionRenameCarryOptions,
 ): Promise<PositionRenameCarryReport | undefined> {
   if (!engine || typeof engine.find !== 'function' || typeof engine.update !== 'function') return undefined;
   try {
-    const report = await carryRenamedPositionHolders(engine as PositionRenameCarryEngine, typeof deps === 'function' ? deps() : deps);
+    const report = await carryRenamedPositionHolders(engine as PositionRenameCarryEngine, typeof deps === 'function' ? deps() : deps, options);
     logPositionRenameCarry(report, logger, standing);
     return report;
   } catch (e: unknown) {
@@ -686,8 +773,10 @@ async function runCarry(
 }
 
 /**
- * The boot wiring: run, log, never throw past here — a failure is said once
- * and the next boot tries again.
+ * The boot run on its own: run, log, never throw past here — a failure is
+ * said once and the next boot tries again. The plugin wires
+ * {@link createPositionRenameCarryRuns} instead; this stays an export for a
+ * caller that runs the boot judgement alone, and for the tests.
  */
 export async function carryRenamedPositionHoldersAtBoot(
   engine: Partial<PositionRenameCarryEngine> | undefined,
@@ -702,11 +791,13 @@ export interface PositionRenameCarryRuns {
   /** `kernel:bootstrapped`: the first run, over the complete catalog. Opens {@link afterReload}. */
   atBoot(): Promise<PositionRenameCarryReport | undefined>;
   /**
-   * `metadata:reloaded`: the same run again, once {@link atBoot} has started
-   * (`undefined`, reading nothing, before that). A warning the run before
-   * already said is not said again.
+   * `metadata:reloaded`: a run over the claims of what `payload` names as
+   * registered now ({@link positionRenameReloadScope}), once {@link atBoot}
+   * has started. `undefined`, reading nothing, before that or when the
+   * payload names no scope. A warning the run before already said is not
+   * said again.
    */
-  afterReload(): Promise<PositionRenameCarryReport | undefined>;
+  afterReload(payload?: unknown): Promise<PositionRenameCarryReport | undefined>;
 }
 
 /**
@@ -723,11 +814,11 @@ export function createPositionRenameCarryRuns(
   let booted = false;
   let previous: ReadonlySet<string> = new Set();
   let queue: Promise<unknown> = Promise.resolve();
-  const run = (retry: string): Promise<PositionRenameCarryReport | undefined> => {
+  const run = (retry: string, options?: PositionRenameCarryOptions): Promise<PositionRenameCarryReport | undefined> => {
     const next = queue.then(async () => {
       const said = new Set<string>();
       try {
-        return await runCarry(engine, deps, logger, retry, { previous, said });
+        return await runCarry(engine, deps, logger, retry, { previous, said }, options);
       } finally {
         previous = said;
       }
@@ -740,6 +831,12 @@ export function createPositionRenameCarryRuns(
       booted = true;
       return run('the next boot');
     },
-    afterReload: () => (booted ? run('the next install, publish or boot') : Promise.resolve(undefined)),
+    afterReload: (payload?: unknown) => {
+      if (!booted) return Promise.resolve(undefined);
+      // The scope is read when the announcement arrives: what it names as registered at that moment.
+      const only = positionRenameReloadScope(payload, engine);
+      if (only.packages.size === 0 && only.positions.size === 0) return Promise.resolve(undefined);
+      return run('the next run that names it', { only, leftBehindOnlyWhenMoved: true });
+    },
   };
 }
