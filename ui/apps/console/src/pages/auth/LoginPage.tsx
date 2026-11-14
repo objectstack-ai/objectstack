@@ -508,8 +508,11 @@ export function LoginPage() {
               <InvitationLinkHint offer={signUpOffer} />
               {/* The row signs in with email and password: with that sign-in
                   off (the same answer `LoginForm` reads) the server refuses
-                  it, so the row is not drawn. */}
-              {devSeedAdmin && authConfig?.emailPassword?.enabled !== false ? (
+                  it, and with the local sign-in path `off` the page draws no
+                  local way in, so the row is not drawn. */}
+              {devSeedAdmin
+                && authConfig?.emailPassword?.enabled !== false
+                && authConfig?.features?.localSignIn !== 'off' ? (
                 <DevAdminRow seed={devSeedAdmin} emailDelivery={emailDelivery} />
               ) : null}
             </>

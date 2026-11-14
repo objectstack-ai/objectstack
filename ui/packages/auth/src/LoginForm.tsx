@@ -342,11 +342,16 @@ export function LoginForm({
       .then(() => getAuthConfig())
       .then((config) => {
         if (cancelled) return;
+        // Direct sign-in with the local sign-in path `off`: this page draws
+        // no local way in at all (email or phone, password or code, sign-up
+        // or the break-glass link), whichever state brought the visitor here.
+        // The server's own doors are not changed by it.
+        const localSignInOff = config?.features?.localSignIn === 'off';
         setSsoEnabled(config?.features?.sso === true);
-        setPhoneOtpEnabled(config?.features?.phoneNumberOtp === true);
-        setPhonePasswordEnabled(config?.features?.phoneNumber === true);
+        setPhoneOtpEnabled(config?.features?.phoneNumberOtp === true && !localSignInOff);
+        setPhonePasswordEnabled(config?.features?.phoneNumber === true && !localSignInOff);
         setSsoEnforced(config?.features?.ssoEnforced === true);
-        setPasswordSignInOff(config?.emailPassword?.enabled === false);
+        setPasswordSignInOff(config?.emailPassword?.enabled === false || localSignInOff);
         // Read here as well as from `SocialSignInButtons`' callback, so the
         // no-method state below is decided with the config, never painted
         // before the provider list lands.

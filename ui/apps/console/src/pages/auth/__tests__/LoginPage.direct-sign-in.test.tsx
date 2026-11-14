@@ -14,7 +14,9 @@
  * same page marked `direct=returned`. The loop guard keeps the page drawn on an
  * `error`, on a return without a session, and for an OAuth client's hand-off;
  * `?local=1` draws today's page while the local path is `hidden`, and is
- * ignored while it is `off`. With the flag off the page is today's.
+ * ignored while it is `off`; with it `off` the page draws no local way in,
+ * whatever state brought the visitor to it. With the flag off the page is
+ * today's.
  */
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
@@ -139,6 +141,29 @@ describe('LoginPage — direct sign-in', () => {
     renderLogin('?client_id=c&redirect_uri=https%3A%2F%2Fapp.example%2Fcb', ON);
     await screen.findByLabelText('Email');
     expect(window.location.replace).not.toHaveBeenCalled();
+  });
+
+  it('draws no local way in on an OAuth client hand-off while the local path is off', async () => {
+    renderLogin('?client_id=c&redirect_uri=https%3A%2F%2Fapp.example%2Fcb', ON_LOCAL_OFF);
+    await screen.findByTestId('login-no-sign-in-method');
+    expect(screen.queryByLabelText('Email')).toBeNull();
+    expect(screen.queryByTestId('login-password-toggle')).toBeNull();
+    expect(window.location.replace).not.toHaveBeenCalled();
+  });
+
+  it('draws no local way in when no provider can start while the local path is off', async () => {
+    renderLogin('', { features: { directSignIn: false, localSignIn: 'off', ssoEnforced: true, sso: true } });
+    await screen.findByTestId('login-sso-email-form');
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    expect(screen.queryByRole('button', { name: /password/i })).toBeNull();
+    expect(screen.queryByRole('link', { name: /sign up|create/i })).toBeNull();
+    expect(window.location.replace).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: the same refused start with the local path hidden keeps the break-glass link', async () => {
+    renderLogin('', { features: { directSignIn: false, localSignIn: 'hidden', ssoEnforced: true, sso: true } });
+    await screen.findByTestId('login-sso-email-form');
+    expect(screen.getByRole('button', { name: /password/i })).toBeTruthy();
   });
 
   it('names a door that could not start, on today\'s page, when the server no longer offers direct sign-in', async () => {
