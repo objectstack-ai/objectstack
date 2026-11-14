@@ -53,6 +53,24 @@ The set reaches no one else:
   auth service is composed for the download check; then it contributes no set
   either, and the boot log names the missing gate and what to add.
 
+A host can also narrow the set for its own deployment, through the
+`SecurityPlugin` option `platformBaselineOverrides`. It names a contributed set
+and one of its objects, and either keeps that object at read (`'read'`) or
+withholds it (`'decline'`). A host on which members must see attachments but
+never create them declares:
+
+```ts
+new SecurityPlugin({
+  platformBaselineOverrides: { storage_attachment_member: { sys_attachment: 'read' } },
+});
+```
+
+Members then keep the read, and a create is refused `PERMISSION_DENIED` (403);
+`security/explain` and the effective-access read show the narrowed set. An
+override only takes bits away. A set left granting nothing joins no baseline,
+and an override that matched no contributed set by the end of boot is logged
+at `warn` naming it, so a renamed set or object does not pass unnoticed.
+
 The set carries **no edit and no delete** (ADR-0090 D5: a set every member holds
 carries no delete bit). Editing or deleting attachments still needs an explicit
 grant on `sys_attachment` (see Delete below). An app can also grant read and

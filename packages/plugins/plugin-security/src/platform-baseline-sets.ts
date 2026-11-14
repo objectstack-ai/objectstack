@@ -60,6 +60,27 @@
  * contribution, and every refusal, is logged by the seam that calls
  * {@link PlatformBaselineSets.contribute}.
  *
+ * ## What a host may change (`platformBaselineOverrides`)
+ *
+ * A host that composes a platform service may still not want every member to
+ * hold what that service contributes (#33132: a cross-tenant control plane
+ * that must not let an organization administrator create `sys_attachment`
+ * rows). It declares that on `SecurityPlugin`
+ * (`SecurityPluginOptions.platformBaselineOverrides`), by contributed set name
+ * and object, and the declaration is applied HERE, where the contribution is
+ * admitted, so every reader of the set reads the narrowed body:
+ *
+ *  - `'read'` keeps the object's read and withholds its create;
+ *  - `'decline'` withholds the object's grant entirely.
+ *
+ * An override only ever narrows: the contribution is first held to every rule
+ * above as the contributor wrote it, and the host can then take bits away,
+ * never add one. A set left granting nothing is not registered and joins no
+ * baseline (`joined: false`, as for a deployment with no baseline). An
+ * override that matched no admitted contribution by the time the boot window
+ * closes is reported at `warn` ({@link PlatformBaselineSets.unmatchedOverrides}),
+ * so a renamed set or object is said rather than silently left in force.
+ *
  * This seam is for always-on platform services. A tenant-installed package
  * suggests a default set and a `manage_metadata` holder accepts it
  * (`suggested-audience-bindings.ts`, ADR-0090 D5); it does not contribute here.
@@ -73,6 +94,49 @@ const SET_KEYS: ReadonlySet<string> = new Set(['name', 'label', 'description', '
 
 /** The object-permission bits a contributed set may carry. */
 const OBJECT_BITS: ReadonlySet<string> = new Set(['allowRead', 'allowCreate']);
+
+/**
+ * What a host does to one object of a contributed set: keep it at read
+ * (`'read'`), or withhold it (`'decline'`). See the module doc.
+ */
+export type PlatformBaselineOverride = 'read' | 'decline';
+
+/** The host's overrides: contributed set name → object → {@link PlatformBaselineOverride}. */
+export type PlatformBaselineOverrides = Readonly<Record<string, Readonly<Record<string, PlatformBaselineOverride>>>>;
+
+const OVERRIDES: ReadonlySet<string> = new Set<PlatformBaselineOverride>(['read', 'decline']);
+
+function refuseOption(detail: string): never {
+  throw new Error(`[security] SecurityPlugin option platformBaselineOverrides refused: ${detail}`);
+}
+
+/**
+ * Read `SecurityPluginOptions.platformBaselineOverrides`, frozen, or throw the
+ * refusal naming the malformed entry. `undefined` reads as no override.
+ */
+export function readPlatformBaselineOverridesOption(raw: unknown): PlatformBaselineOverrides {
+  if (raw === undefined) return Object.freeze({});
+  if (!isPlainRecord(raw)) refuseOption('it is not an object keyed by contributed permission set name.');
+  const out: Record<string, Readonly<Record<string, PlatformBaselineOverride>>> = {};
+  for (const [setName, objects] of Object.entries(raw)) {
+    if (setName.length === 0) refuseOption('a set name is empty.');
+    if (!isPlainRecord(objects) || Object.keys(objects).length === 0) {
+      refuseOption(`the entry for '${setName}' names no object.`);
+    }
+    const perObject: Record<string, PlatformBaselineOverride> = {};
+    for (const [object, verdict] of Object.entries(objects)) {
+      if (object.length === 0 || object === '*') {
+        refuseOption(`the entry for '${setName}' names object '${object}'; an override names one object of the set.`);
+      }
+      if (typeof verdict !== 'string' || !OVERRIDES.has(verdict)) {
+        refuseOption(`'${setName}.${object}' is ${JSON.stringify(verdict)}; it is 'read' (keep read, withhold create) or 'decline' (withhold the object).`);
+      }
+      perObject[object] = verdict as PlatformBaselineOverride;
+    }
+    out[setName] = Object.freeze(perObject);
+  }
+  return Object.freeze(out);
+}
 
 /** The registry members the seam uses: the object's owner, and the set's registration. */
 export interface PlatformBaselineRegistry {
@@ -100,6 +164,11 @@ export interface PlatformBaselineContribution {
   readonly set: PermissionSet;
   /** Whether the name joined the composed baseline. */
   readonly joined: boolean;
+  /**
+   * What the host's overrides changed, one line per object (`'sys_attachment: kept at read'`);
+   * empty when none applied.
+   */
+  readonly overridden: readonly string[];
 }
 
 function refuse(contributor: string, detail: string): never {
@@ -119,6 +188,11 @@ export class PlatformBaselineSets {
   private anchorDerived = false;
   private joinedAfterDerivation = false;
   private readonly byContributor = new Map<string, PermissionSet>();
+  /** `set.object` keys of the host's overrides that an admitted contribution matched. */
+  private readonly matched = new Set<string>();
+
+  /** @param overrides the host's declaration, as {@link readPlatformBaselineOverridesOption} reads it. */
+  constructor(private readonly overrides: PlatformBaselineOverrides = Object.freeze({})) {}
 
   /**
    * Admit one contribution, or throw the refusal. See the module doc for the
@@ -202,25 +276,71 @@ export class PlatformBaselineSets {
     if (!parsed.success) {
       refuse(contributor, `it is not a well-formed permission set (${parsed.error.issues.map((i) => i.message).join('; ')}).`);
     }
-    const set = parsed.data as PermissionSet;
-    const offending = describeHighPrivilegeBits(set);
+    const offending = describeHighPrivilegeBits(parsed.data as PermissionSet);
     if (offending) refuse(contributor, `it carries ${offending}, which the everyone anchor forbids.`);
 
+    // The host's overrides narrow the admitted set; they never add a bit.
+    const { set, overridden, matched } = this.applyOverrides(parsed.data as PermissionSet);
+    const grantsSomething = Object.keys(set.objects ?? {}).length > 0;
+
     // The registry's own one-holder rule answers a name another package holds.
-    try {
-      registry.registerItem('permission', { ...set }, 'name', contributor);
-    } catch (e) {
-      refuse(contributor, `the registry refused the set: ${(e as Error)?.message ?? e}`);
+    if (grantsSomething) {
+      try {
+        registry.registerItem('permission', { ...set }, 'name', contributor);
+      } catch (e) {
+        refuse(contributor, `the registry refused the set: ${(e as Error)?.message ?? e}`);
+      }
     }
     this.byContributor.set(contributor, set);
+    for (const key of matched) this.matched.add(key);
 
-    // A deployment that declares no baseline hands out none.
-    const joined = host.baseline.length > 0;
+    // A deployment that declares no baseline hands out none, and a set the
+    // host's overrides left granting nothing joins none.
+    const joined = grantsSomething && host.baseline.length > 0;
     if (joined && !host.baseline.includes(set.name)) {
       host.baseline.push(set.name);
       if (this.anchorDerived) this.joinedAfterDerivation = true;
     }
-    return { contributor, set, joined };
+    return { contributor, set, joined, overridden };
+  }
+
+  /** Apply the host's overrides for `set.name` to its objects; see the module doc. */
+  private applyOverrides(set: PermissionSet): { set: PermissionSet; overridden: string[]; matched: string[] } {
+    const forSet = this.overrides[set.name];
+    if (!forSet) return { set, overridden: [], matched: [] };
+    const overridden: string[] = [];
+    const matched: string[] = [];
+    const objects: Record<string, NonNullable<PermissionSet['objects']>[string]> = {};
+    for (const [object, entry] of Object.entries(set.objects ?? {})) {
+      const verdict = forSet[object];
+      if (verdict === undefined) {
+        objects[object] = entry;
+        continue;
+      }
+      matched.push(`${set.name}.${object}`);
+      if (verdict === 'read' && entry.allowRead === true) {
+        objects[object] = { ...entry, allowCreate: false };
+        overridden.push(`${object}: kept at read`);
+      } else {
+        overridden.push(verdict === 'read' ? `${object}: declined (the set grants it no read to keep)` : `${object}: declined`);
+      }
+    }
+    return { set: { ...set, objects }, overridden, matched };
+  }
+
+  /**
+   * The host's overrides no admitted contribution matched, as `set.object`.
+   * Read when the boot window closes: each one is a declaration that withheld
+   * nothing, a set or object name that is wrong or was renamed.
+   */
+  unmatchedOverrides(): string[] {
+    const out: string[] = [];
+    for (const [setName, objects] of Object.entries(this.overrides)) {
+      for (const object of Object.keys(objects)) {
+        if (!this.matched.has(`${setName}.${object}`)) out.push(`${setName}.${object}`);
+      }
+    }
+    return out;
   }
 
   /** The body of the contributed set `name`, if one was admitted. */
