@@ -270,6 +270,10 @@ describe('[#22578] handleActionPage — the ADR-0043 action page from a Request'
     const movedOn = await openRequest();
     const moved = await svc.issueActionTokens(movedOn, APPROVER);
     await svc.reassign(movedOn, { actorId: APPROVER, from: APPROVER, to: 'u_delegate' }, SYSTEM);
+    // The mint is approver-bound too: an approver whose slot moved on is no
+    // longer pending, so no fresh link is minted for them; the new holder gets one.
+    await expect(svc.issueActionTokens(movedOn, APPROVER)).rejects.toThrow(/^FORBIDDEN: 'u_approver' is not a pending approver/);
+    await expect(svc.issueActionTokens(movedOn, 'u_delegate')).resolves.toMatchObject({ approve: expect.any(String) });
 
     const cases: Array<[string, string, 'not_pending' | 'not_approver', string]> = [
       ['not_pending', decided.reject, 'not_pending', decidedOn],
