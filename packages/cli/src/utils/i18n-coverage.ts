@@ -94,7 +94,14 @@ export interface CoverageStats {
 export interface CoverageReport {
   /** Locales discovered across all bundles attached to the stack. */
   locales: string[];
-  /** Default / source-of-truth locale (errors are raised against this one). */
+  /**
+   * The source locale — the language the inline text is written in, which the
+   * inline text satisfies and errors are raised against: the caller's
+   * override, else the config's `i18n.sourceLocale`, else `i18n.defaultLocale`,
+   * else `'en'`. Named `defaultLocale` because that is the field `os i18n check
+   * --json` has always carried; on a stack declaring `sourceLocale` it is that
+   * value, not the users' `defaultLocale`.
+   */
   defaultLocale: string;
   /** Per-locale coverage statistics. */
   stats: CoverageStats[];
@@ -150,9 +157,11 @@ export type PlatformMetadataFormsOption = 'include' | 'exclude' | 'auto';
 
 export interface CoverageOptions {
   /**
-   * The locale that *must* be translated. Missing keys here surface as
-   * errors; missing keys in other locales surface as warnings. Defaults to
-   * `'en'`.
+   * Override of the SOURCE locale — the language the inline text is written
+   * in (the `--default-locale` flag). The inline text satisfies it, missing
+   * keys here surface as errors, and missing keys in other locales surface as
+   * warnings. Defaults to the config's `i18n.sourceLocale`, else its
+   * `i18n.defaultLocale`, else `'en'`.
    */
   defaultLocale?: string;
   /**
@@ -595,22 +604,44 @@ function lookupKey(data: TranslationData | undefined, path: string[]): string | 
 // ─── Public API ────────────────────────────────────────────────────────
 
 /**
+ * The stack's declared SOURCE locale — the language its inline metadata text
+ * is written in: `i18n.sourceLocale`, else `i18n.defaultLocale`, else `'en'`.
+ *
+ * `defaultLocale` is the users' default language, and it stands in for the
+ * source language only because most stacks author in the language their
+ * users get. The one reading shared by `os lint`, `os i18n check` (through
+ * {@link computeI18nCoverage}) and `os i18n extract`, so the three never
+ * disagree about which locale the inline text satisfies; each command's
+ * `--default-locale` flag still overrides it.
+ */
+export function resolveSourceLocale(i18n: unknown): string {
+  const block = i18n !== null && typeof i18n === 'object'
+    ? (i18n as { sourceLocale?: unknown; defaultLocale?: unknown })
+    : undefined;
+  for (const candidate of [block?.sourceLocale, block?.defaultLocale]) {
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return 'en';
+}
+
+/**
  * Compute a coverage report for a normalized stack config.
  */
 export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): CoverageReport {
-  // Locale selection, most specific first: an explicit caller override, then
-  // the project's own `i18n` block, then 'en'. Reading the config matters for a
-  // monolingual non-English project — forcing 'en' on a stack whose source
-  // strings are Chinese would report a language it never claimed to speak.
+  // Source-locale selection, most specific first: an explicit caller override,
+  // then the project's own `i18n` block, then 'en'. Reading the config matters
+  // for a monolingual non-English project — forcing 'en' on a stack whose
+  // source strings are Chinese would report a language it never claimed to
+  // speak. Within the block `sourceLocale` (the language the inline text is
+  // written in) outranks `defaultLocale` (the users' default): an
+  // English-authored app defaulting its users to zh-CN must not have its
+  // English inline text read as Chinese — that reported every key "missing"
+  // in `en` and hid every real zh-CN gap. See `resolveSourceLocale`.
   const declared = config?.i18n;
   const declaredLocales: string[] = Array.isArray(declared?.supportedLocales)
     ? declared.supportedLocales.filter((l: unknown): l is string => typeof l === 'string' && l.length > 0)
     : [];
-  const defaultLocale =
-    opts.defaultLocale ??
-    (typeof declared?.defaultLocale === 'string' && declared.defaultLocale.length > 0
-      ? declared.defaultLocale
-      : 'en');
+  const defaultLocale = opts.defaultLocale ?? resolveSourceLocale(declared);
   const bundles: TranslationBundle[] = Array.isArray(config?.translations) ? config.translations : [];
   const { merged, locales: discovered } = mergeTranslationBundles(bundles);
 

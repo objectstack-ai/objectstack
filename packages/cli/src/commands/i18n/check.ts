@@ -104,7 +104,7 @@ export default class I18nCheck extends Command {
     json: Flags.boolean({ description: 'Output as JSON' }),
     'default-locale': Flags.string({
       description:
-        "Locale that must be 100% translated (errors raised against it). Defaults to the config's i18n.defaultLocale, else 'en'.",
+        "Source locale: the language inline labels are written in, which they satisfy and errors are raised against. Overrides the config's i18n.sourceLocale, else its i18n.defaultLocale, else 'en'.",
     }),
     locales: Flags.string({
       description:

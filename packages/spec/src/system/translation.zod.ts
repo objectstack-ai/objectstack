@@ -2626,7 +2626,7 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
   history:
     'Until this shape was closed an unknown key was dropped silently — the stack still '
     + 'built, with the setting the author wrote never reaching any runtime.',
-  aliases: { locale: 'defaultLocale', defaultLanguage: 'defaultLocale', locales: 'supportedLocales', languages: 'supportedLocales', fallback: 'fallbackLocale', fallbackLanguage: 'fallbackLocale' },
+  aliases: { locale: 'defaultLocale', defaultLanguage: 'defaultLocale', locales: 'supportedLocales', languages: 'supportedLocales', fallback: 'fallbackLocale', fallbackLanguage: 'fallbackLocale', sourceLanguage: 'sourceLocale', authoringLocale: 'sourceLocale', authoringLanguage: 'sourceLocale' },
   // #3494 removed these four. They were the exemplar the liveness audit
   // (#1878/#1893) was built to find — declared, authored, and read by nothing —
   // and removing them made a config that was *already* a no-op into a config
@@ -2645,6 +2645,33 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
   supportedLocales: z.array(LocaleSchema).describe('Supported BCP-47 locale codes'),
   /** Fallback locale when translation is not found */
   fallbackLocale: LocaleSchema.optional().describe('Fallback locale code'),
+  /**
+   * The language the stack's inline metadata text is written in — the locale
+   * a plain-string `label:` IS the text of.
+   *
+   * `defaultLocale` answers a different question: which language a user who
+   * has not chosen one gets. The two coincide for most stacks, so this key is
+   * optional and, absent, reads as `defaultLocale` — a stack that declares
+   * nothing here reads exactly as before. They differ for an app authored in
+   * one language and sold into another market: English inline labels with
+   * `defaultLocale: 'zh-CN'` declare `sourceLocale: 'en'`.
+   *
+   * Read by the authoring tools: `os lint` and `os i18n check` count the
+   * inline text as this locale's translation (so they never ask for a bundle
+   * row that restates it, and they do gate every other declared locale,
+   * `defaultLocale` included), and `os i18n extract` fills this locale's
+   * bundle from the inline text. Their `--default-locale` flag overrides it.
+   * Like `defaultLocale`, it need not appear in `supportedLocales`.
+   *
+   * ⚠️ Not yet read by the serving layer: the runtime label resolvers still
+   * treat `defaultLocale` as the authored label's language when they decide
+   * whether a request walks the fallback chain.
+   */
+  sourceLocale: LocaleSchema.optional().describe(
+    'Language the inline metadata text (a plain-string label) is written in, when it differs from defaultLocale '
+    + '(e.g. "en" for an English-authored app whose users default to "zh-CN"). Absent, it is defaultLocale. '
+    + 'Read by os lint, os i18n check and os i18n extract as the source language; their --default-locale flag overrides it.',
+  ),
 }).describe('Internationalization configuration'));
 
 export type TranslationConfig = z.input<typeof TranslationConfigSchema>;

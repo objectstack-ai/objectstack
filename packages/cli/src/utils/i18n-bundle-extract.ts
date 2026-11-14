@@ -27,7 +27,11 @@ export type { ExpectedEntry, ExpectedEntryOptions } from '@objectstack/lint';
 export type FillStrategy = 'empty' | 'default' | 'todo';
 
 export interface ExtractOptions extends ExpectedEntryOptions {
-  /** Default locale (filled with source values). Defaults to `'en'`. */
+  /**
+   * The source locale (filled with source values) — the language the inline
+   * text is written in. `os i18n extract` passes its `--default-locale` flag,
+   * else `resolveSourceLocale` (`i18n-coverage.ts`) of the config. Defaults to `'en'`.
+   */
   defaultLocale?: string;
   /** Locales to emit. Defaults to `[defaultLocale]`. */
   locales?: string[];
