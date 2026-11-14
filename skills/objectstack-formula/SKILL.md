@@ -176,6 +176,7 @@ tests: every entry resolves at runtime, and this table documents them all.
 | Inclusive span | `daysBetween(record.start_date, record.end_date) + 1` |
 | Shift a date | `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` |
 | Tenure in years | `daysBetween(record.hire_date, today()) / 365` |
+| Hours between date-times | `double((datetime(record.end_at) - datetime(record.start_at)).getMinutes()) / 60.0` |
 | Sub-day offset | `now() + duration("3h")` — the calendar helpers land on UTC midnight |
 
 **Numbers**
