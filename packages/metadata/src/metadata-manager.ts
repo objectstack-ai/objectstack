@@ -4599,7 +4599,9 @@ export class MetadataManager implements IMetadataService {
    *
    * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
    * `options.packageId` names whose row is restored, and the version must be
-   * that package's ("not found" otherwise). Naming none, the name's one row is
+   * that package's ("not found" otherwise — [#32717] one attributed to none,
+   * or the environment's, included, in the words `DatabaseLoader.registerRollback`
+   * answers when called directly). Naming none, the name's one row is
    * restored; several are refused 409 naming every holder, and so is a version
    * of a package that holds no row of the name (`not-held-by-qualifier`) —
    * ⛔ never written into another package's row.

@@ -1974,7 +1974,8 @@ export class DatabaseLoader implements MetadataLoader {
    * history row is attributed to none. An addressed read leaves such a
    * version out, so `MetadataManager.rollback` asks here before answering its
    * miss "not found": the version exists, and nothing says whose it is. A
-   * name one row slot holds, an absent row and every other type pass.
+   * name one row slot holds, an absent row and every other type pass: the
+   * miss is "not found", as {@link registerRollback} answers it (#32717).
    */
   async refuseUnattributedVersion(type: string, name: string, version: number): Promise<void> {
     if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !this.trackHistory) return;
