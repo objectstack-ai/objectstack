@@ -7,7 +7,9 @@
  * routed page sends the item page's `?package=` to `history()` and
  * `rollback()`, as the item page's own layered read does. `all` and the empty
  * spelling name no package, as on the server's doors; no `?package=`, no
- * `packageId` (CONTROL — a name one holder holds reads as before).
+ * `packageId` (CONTROL — a name one holder holds reads as before). A type
+ * not stored per package (an object, a view, a page) is read and restored
+ * bare even under `?package=`: the doors refuse the selector `400` there.
  *
  * Real: the page, `HistoryPanel` and React Router. Stubbed: the metadata client and types.
  */
@@ -72,6 +74,22 @@ describe('History item tool — the item page\'s `?package=` names the holder (o
     fireEvent.click(button!);
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByTestId('history-rollback-confirm-action'));
     await waitFor(() => expect(client.rollback).toHaveBeenCalledWith('flow', 'solo_flow', 1));
+  });
+
+  it('a type not stored per package reads and restores bare under `?package=` (the doors refuse it 400 there)', async () => {
+    renderAt('/metadata/object/showcase_account/history?package=com.acme.alpha');
+    await waitFor(() => expect(client.history).toHaveBeenCalledWith('object', 'showcase_account', { limit: 100 }));
+    const [button] = await screen.findAllByTitle('Rollback to this version');
+    fireEvent.click(button!);
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByTestId('history-rollback-confirm-action'));
+    await waitFor(() => expect(client.rollback).toHaveBeenCalledWith('object', 'showcase_account', 1));
+  });
+
+  it('a plural spelling of a by-package type still names the package', async () => {
+    renderAt('/metadata/flows/shared_flow/history?package=com.acme.alpha.custom');
+    await waitFor(() =>
+      expect(client.history).toHaveBeenCalledWith('flows', 'shared_flow', { limit: 100, packageId: 'com.acme.alpha.custom' }),
+    );
   });
 
   it('`all` and the empty spelling name no package, as on the server\'s doors', () => {

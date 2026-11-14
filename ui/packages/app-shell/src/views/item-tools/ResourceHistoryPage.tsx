@@ -37,6 +37,7 @@ import {
 import { t, tFormat, translateConsoleValue, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { useHistoryActorNames, type HistoryActorName } from './historyActors.js';
 import { PageShell } from '../metadata-admin/PageShell.js';
+import { isPackageSlottedMetaType } from '@objectstack/spec/api';
 import { useMetadataAreaHost } from '../metadata-admin/metadataAreaHost.js';
 import {
   useMetadataClient,
@@ -193,6 +194,10 @@ export function HistoryPanel({
    * versions to list and restore into, sent as `?package=` on both doors.
    * Omitted, a name two holders hold is refused 409 naming both, and the
    * refusal shows as the timeline's error; one holder reads as before.
+   * Sent only for a type stored per `(package, name)`
+   * (`isPackageSlottedMetaType`): the doors refuse `?package=` `400` on every
+   * other type, whose log is the name's alone, so an object, view or page
+   * opened under a package reads and restores bare, as before.
    */
   packageId?: string;
   refreshKey?: number;
@@ -219,6 +224,8 @@ export function HistoryPanel({
   // the in-app AlertDialog below rather than the browser's native `confirm()`.
   const [confirmVersion, setConfirmVersion] = React.useState<number | null>(null);
   const [localRefresh, setLocalRefresh] = React.useState(0);
+  // objectstack#32905 — the package the doors address, for a by-package type only.
+  const addressedPackage = packageId && isPackageSlottedMetaType(type) ? packageId : undefined;
   // ADR-0146 D1 — the timeline names people, not ids.
   const actorNames = useHistoryActorNames(
     React.useMemo(
@@ -235,7 +242,7 @@ export function HistoryPanel({
       try {
         const result = await client.history<any>(type, name, {
           limit: 100,
-          ...(packageId ? { packageId } : {}),
+          ...(addressedPackage ? { packageId: addressedPackage } : {}),
         });
         if (cancelled) return;
         const list = Array.isArray(result)
@@ -258,7 +265,7 @@ export function HistoryPanel({
     return () => {
       cancelled = true;
     };
-  }, [client, type, name, packageId, refreshKey, localRefresh]);
+  }, [client, type, name, addressedPackage, refreshKey, localRefresh]);
 
   function rollbackMessage(version: number): string {
     return rollbackConfirm
@@ -270,8 +277,8 @@ export function HistoryPanel({
     setRollingBack(version);
     setError(null);
     try {
-      await (packageId
-        ? (client as any).rollback(type, name, version, { packageId })
+      await (addressedPackage
+        ? (client as any).rollback(type, name, version, { packageId: addressedPackage })
         : (client as any).rollback(type, name, version));
       onRollback?.(version);
       // Refetch so the new revert event shows up at the top.

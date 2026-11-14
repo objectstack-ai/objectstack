@@ -13,7 +13,8 @@ import { describe, expect, it } from 'vitest';
 // The source reaches `@objectstack/lint` lazily; pay that load at collection, never in a clocked case.
 import '@objectstack/lint';
 import { PackageScopedNameRefusedError, packageScopedRefusalMessage } from '@objectstack/core';
-import { historySlotOf } from './protocol-history-slots.js';
+import { PACKAGE_SLOTTED_METADATA_TYPES, isPackageSlottedMetaType } from '@objectstack/spec/api';
+import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
 
 interface FakeOptions {
     candidates?: string[];
@@ -159,5 +160,27 @@ describe('historySlotOf: a type not stored per package', () => {
 
     it('CONTROL: named bare it answers nothing', async () => {
         expect(await historySlotOf(fakeHost({}), { type: 'view', name: 'n' })).toBeUndefined();
+    });
+});
+
+describe('the doors and the console read one list of by-package types', () => {
+    // The console names a package on the history and rollback doors only where
+    // `isPackageSlottedMetaType` answers true; the doors refuse `?package=`
+    // everywhere else. Pinned together so the two cannot disagree: a type the
+    // console would name a package for is never refused here, and a type it
+    // would not is.
+    it('every type the console names a package for is accepted by the doors', () => {
+        expect(PACKAGE_SLOTTED_METADATA_TYPES.length).toBeGreaterThan(0);
+        for (const type of PACKAGE_SLOTTED_METADATA_TYPES) {
+            expect(isPackageSlottedMetaType(type), type).toBe(true);
+            expect(() => refusePackageSelectorOutsideSlottedTypes(type, 'com.a'), type).not.toThrow();
+        }
+    });
+
+    it('every type the console reads bare is refused the selector by the doors', () => {
+        for (const type of ['object', 'view', 'page', 'dashboard', 'report', 'app']) {
+            expect(isPackageSlottedMetaType(type), type).toBe(false);
+            expect(() => refusePackageSelectorOutsideSlottedTypes(type, 'com.a'), type).toThrow(/not stored per package/);
+        }
     });
 });

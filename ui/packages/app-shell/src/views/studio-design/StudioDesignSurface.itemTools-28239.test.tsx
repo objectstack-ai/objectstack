@@ -216,8 +216,9 @@ describe('Studio item toolbar — every pillar opens the five tools (objectstack
 
     const history = await openTool('history');
     expect(await within(history).findAllByTitle(ROLLBACK)).toHaveLength(2);
-    // The holder the layers read names (objectstack#32905).
-    expect(mockClient.history).toHaveBeenCalledWith(type, name, { limit: 100, packageId: PKG });
+    // The holder the layers read names, for a type stored per package only
+    // (objectstack#32905): the doors refuse `?package=` on an object or a page.
+    expect(mockClient.history).toHaveBeenCalledWith(type, name, type === 'flow' ? { limit: 100, packageId: PKG } : { limit: 100 });
 
     await openTool('audit');
     await waitFor(() => expect(mockClient.audit).toHaveBeenCalledWith(type, name, { limit: 100 }));
@@ -243,7 +244,8 @@ describe('Studio item toolbar — rollback (objectstack#28239)', () => {
     expect(mockClient.rollback).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByTestId('history-rollback-confirm-action'));
 
-    await waitFor(() => expect(mockClient.rollback).toHaveBeenCalledWith('object', 'showcase_account', 1, { packageId: PKG }));
+    // An object is not stored per package: the rollback names none (objectstack#32905).
+    await waitFor(() => expect(mockClient.rollback).toHaveBeenCalledWith('object', 'showcase_account', 1));
     expect(mockClient.rollback).toHaveBeenCalledTimes(1);
     await waitFor(() =>
       expect(mockClient.layered.mock.calls.filter(([type]) => type === 'object').length).toBeGreaterThan(reads),

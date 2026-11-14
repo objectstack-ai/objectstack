@@ -812,7 +812,9 @@ export interface MetadataHistoryOptions {
    * spelling). For a type stored per `(package, name)` the server numbers a
    * name's versions across every holder; naming the package reads only that
    * holder's, and a bare read of a name two holders hold is refused `409`
-   * naming every holder. Every other type reads the name's log either way.
+   * naming every holder. On every other type both doors refuse it `400`:
+   * send it only for a type `isPackageSlottedMetaType` (`@objectstack/spec/api`)
+   * answers true for.
    */
   packageId?: string;
 }
@@ -2027,7 +2029,9 @@ export class MetadataClient {
    * `packageId` (`?package=`) names whose row a by-package name's version is
    * restored into, as `history()`'s does: the version must be that holder's
    * (`404` otherwise), and a bare rollback of a name two holders hold is
-   * refused `409` naming every holder, with no row written.
+   * refused `409` naming every holder, with no row written. As with
+   * `history()`, only for a type `isPackageSlottedMetaType` answers true for:
+   * every other type refuses it `400`.
    */
   async rollback<T = unknown>(
     type: string,

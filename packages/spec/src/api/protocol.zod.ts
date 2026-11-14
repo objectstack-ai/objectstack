@@ -79,6 +79,7 @@ import type {
 } from '../kernel/package-registry.zod';
 
 import { lazySchema } from '../shared/lazy-schema';
+import { canonicalMetaUrlType } from '../meta-spelling/metadata-url-spelling';
 export const AutomationTriggerRequestSchema = lazySchema(() => z.object({
   trigger: z.string(),
   payload: z.record(z.string(), z.unknown())
@@ -2306,6 +2307,29 @@ const HISTORY_PACKAGE_SELECTOR_DESCRIPTION =
   + 'on a type not stored per (package, name).';
 
 /**
+ * [ADR-0150 D3/D4, #32905] The metadata types stored per `(package, name)`:
+ * one row per package for a name, so a name can have several holders. These
+ * are the types whose history and rollback doors take `?package=` (see
+ * {@link HistoryMetaItemRequestSchema}`.packageId`); on every other type the
+ * doors refuse it `400`. The one list: `@objectstack/metadata`'s
+ * `PACKAGE_SLOTTED_STORE_TYPES` is built from it, and a client names a
+ * package on those doors only for a type it holds
+ * ({@link isPackageSlottedMetaType}).
+ */
+export const PACKAGE_SLOTTED_METADATA_TYPES: readonly string[] = Object.freeze([
+  'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
+  'webhook', 'tool',
+]);
+
+/**
+ * Whether `type`, in any `/meta/:type` spelling (`flows` folds to `flow`), is
+ * stored per `(package, name)` ({@link PACKAGE_SLOTTED_METADATA_TYPES}).
+ */
+export function isPackageSlottedMetaType(type: string): boolean {
+  return PACKAGE_SLOTTED_METADATA_TYPES.includes(canonicalMetaUrlType(type));
+}
+
+/**
  * History Metadata Item Request
  *
  * Request shape for `GET /api/v1/meta/:type/:name/history` (the
@@ -2599,8 +2623,9 @@ export const FindReferencesToMetaResponseSchema = lazySchema(() => z.object({
  * Rollback Metadata Item Request
  *
  * Request shape for `POST /api/v1/meta/:type/:name/rollback` (the
- * `rollbackMetaItem` protocol method): `toVersion` from the body or the
- * query, `member` and `package` from the query, `message` from the body.
+ * `rollbackMetaItem` protocol method): `toVersion` from the body (or its
+ * `version` alias) or the query, all three read through this declaration,
+ * `member` and `package` from the query, `message` from the body.
  * Mirrors the implementation's parameter type in
  * `@objectstack/metadata-protocol` (`RollbackMetaItemRequest`) member for
  * member, less the actor the door fills from the session — a
