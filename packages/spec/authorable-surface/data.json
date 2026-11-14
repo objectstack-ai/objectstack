@@ -491,7 +491,6 @@
     "data/HookRefusal:params",
     "data/HookRefusal:reasons",
     "data/HookRefusal:status",
-    "data/HookRefusalReason:message",
     "data/ImportFieldMapping:params",
     "data/ImportFieldMapping:source",
     "data/ImportFieldMapping:target",
