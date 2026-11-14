@@ -1,6 +1,7 @@
 ---
 '@object-ui/i18n': patch
 '@object-ui/plugin-form': patch
+'@object-ui/app-shell': patch
 ---
 
 fix(console): the fields no declared field group claims render under their own "Other" heading after the declared groups, on the record page, the record drawer and the form arms (#33229)
