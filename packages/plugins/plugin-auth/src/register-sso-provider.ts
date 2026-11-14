@@ -535,14 +535,21 @@ function forwardAuthHeaders(request: Request, origin: string): Headers {
  * its host name and lower-cased, duplicates dropped (`parseProviderDomains` in
  * `@better-auth/sso`, which reads each entry with `tldts`; {@link bareHostname}
  * reads the bare host and the URL forms the same way).
+ *
+ * `null` when the list names no host, or when ANY non-empty entry yields no
+ * host: the vendor's parse answers `null` for such a list and verify-domain
+ * then refuses the whole provider (`INVALID_DOMAIN`), so no record shown for
+ * the other entries could ever verify it.
  */
-function providerDomainHosts(domain: string): string[] {
+function providerDomainHosts(domain: string): string[] | null {
   const hosts: string[] = [];
   for (const entry of domain.split(',')) {
+    if (!entry.trim()) continue;
     const host = bareHostname(entry).toLowerCase();
-    if (host && !hosts.includes(host)) hosts.push(host);
+    if (!host) return null;
+    if (!hosts.includes(host)) hosts.push(host);
   }
-  return hosts;
+  return hosts.length > 0 ? hosts : null;
 }
 
 /**
@@ -639,7 +646,7 @@ export async function runRequestDomainVerification(
     };
   }
   const hosts = providerDomainHosts(registered.domain);
-  if (hosts.length === 0) {
+  if (hosts === null) {
     // The vendor's verify-domain refuses such a provider too (`INVALID_DOMAIN`).
     return {
       status: 400,
@@ -647,7 +654,7 @@ export async function runRequestDomainVerification(
         success: false,
         error: {
           code: 'DOMAIN_VERIFICATION_FAILED',
-          message: `SSO provider "${providerId}" has no domain to verify: its registered domain names no host name. Set the provider's domain to a bare host name, such as acme.com.`,
+          message: `SSO provider "${providerId}" has no domain to verify: its registered domain, or an entry of it, names no host name. Set the provider's domain to bare host names, such as acme.com.`,
         },
       },
     };

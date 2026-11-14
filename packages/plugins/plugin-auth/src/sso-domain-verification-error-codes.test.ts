@@ -340,6 +340,16 @@ describe('request-domain-verification: the record goes under the domain the prov
     expect(read?.headers.get('authorization')).toBe('Bearer caller');
   });
 
+  it('CONTROL: a list whose every entry names a host answers one record per host; a blank entry is skipped', async () => {
+    const res = await runRequestDomainVerification(
+      challengeThenProvider({ status: 200, body: { domain: 'acme.com, , https://acme.org/x' } }),
+      post(REQUEST_URL),
+      ON,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data?.dnsRecordName).toBe('_better-auth-token-p1.acme.com, _better-auth-token-p1.acme.org');
+  });
+
   it('a refused provider read answers DOMAIN_VERIFICATION_FAILED with the read\'s status, and no record', async () => {
     const res = await runRequestDomainVerification(challengeThenProvider({ status: 403, body: { message: 'denied' } }), post(REQUEST_URL), ON);
 
@@ -350,7 +360,10 @@ describe('request-domain-verification: the record goes under the domain the prov
   });
 
   it('a registered domain naming no host name answers 400 DOMAIN_VERIFICATION_FAILED, and no record', async () => {
-    for (const body of [{ domain: '' }, { domain: ' , ' }, {}]) {
+    // `acme.com, /path`: one entry yields no host, so the vendor's parse
+    // refuses the whole list and verify-domain answers INVALID_DOMAIN; no
+    // record for `acme.com` alone is shown (review S1, record 6880717828).
+    for (const body of [{ domain: '' }, { domain: ' , ' }, {}, { domain: 'acme.com, /path' }]) {
       const res = await runRequestDomainVerification(challengeThenProvider({ status: 200, body }), post(REQUEST_URL), ON);
       expect(res.status, JSON.stringify(body)).toBe(400);
       expect(res.body.error?.code, JSON.stringify(body)).toBe(OUR_DEFAULT);
