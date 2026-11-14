@@ -192,6 +192,11 @@ loader guessing:
   constraint unreachable, and nagging every legacy required field would bury
   real drift. A declaration stricter than the column stays the destructive
   ceremony it always was.
+  The silence is for a field with no `storage` declaration: a `required: true`
+  field that writes `storage: { notNull: false }` out has its stricter column
+  reported (`relax_not_null`, still `needs_confirm`, never auto-applied), and
+  the publish of that declaration applies the relax, being the deliberate relax
+  named above.
 
 ### D6 — `criteria_json` is the first consumer
 
