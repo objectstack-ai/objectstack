@@ -6,11 +6,12 @@
 // The organisation that hosts the environment invites its people in the cloud,
 // so on a managed environment: the audience posture is `invite_only` only,
 // local sign-up is forced off, invitation creation and the admin create and
-// import doors answer 409 RESOURCE_CONFLICT, and the two password doors split
-// by population — `set-user-password` refuses an `idp_provisioned` target and
-// still answers on an `env_native` one, `set-initial-password` admits only a
-// caller with platform-admin standing. The break-glass administrator therefore
-// stays reachable (ADR-0135 D5.2: narrowed by population, never wholesale).
+// import doors answer 409 RESOURCE_CONFLICT, and the two password doors are
+// closed to everyone — `set-user-password` refuses every target, an
+// `env_native` one included, and `set-initial-password` refuses every
+// signed-in caller, a platform administrator included (#33203: a hosted
+// environment keeps no local password for anyone and no local break-glass
+// administrator, ruling 10 of objectstack-ai/cloud#4465).
 //
 // Every door is driven through the REAL seam: a real `AuthManager` on the
 // installed better-auth, behind `AuthPlugin.registerAuthRoutes` mounted on a
@@ -510,9 +511,32 @@ describe('[#25083] the password doors on a cloud-managed environment', () => {
     expect(s.credentialOf(s.ids.idp)).toBeUndefined();
   }, 120_000);
 
-  it('admin set-user-password still answers 200 on an env_native target (break-glass stays editable)', async () => {
+  it('[#33203] admin set-user-password refuses an env_native target too, and its password does not move', async () => {
     const s = await stage();
     setManaged(true);
+    const before = s.credentialOf(s.ids.member)?.password;
+    expect(before).toBeDefined();
+    const v = await verdict(
+      await s.fire('/admin/set-user-password', { userId: s.ids.member, newPassword: NEW_PASSWORD }, s.bearers.admin),
+    );
+    expectManagedRefusal(v, 'setUserPassword');
+    expect(s.credentialOf(s.ids.member)?.password).toBe(before);
+  }, 120_000);
+
+  it('[#33203] admin set-user-password refuses a platform administrator setting their own password', async () => {
+    const s = await stage();
+    setManaged(true);
+    const before = s.credentialOf(s.ids.admin)?.password;
+    expect(before).toBeDefined();
+    const v = await verdict(
+      await s.fire('/admin/set-user-password', { userId: s.ids.admin, newPassword: NEW_PASSWORD }, s.bearers.admin),
+    );
+    expectManagedRefusal(v, 'setUserPassword');
+    expect(s.credentialOf(s.ids.admin)?.password).toBe(before);
+  }, 120_000);
+
+  it('CONTROL: unmanaged, admin set-user-password answers 200 on an env_native target as before', async () => {
+    const s = await stage();
     const before = s.credentialOf(s.ids.member)?.password;
     const v = await verdict(
       await s.fire('/admin/set-user-password', { userId: s.ids.member, newPassword: NEW_PASSWORD }, s.bearers.admin),
@@ -529,20 +553,39 @@ describe('[#25083] the password doors on a cloud-managed environment', () => {
     expect(s.credentialOf(s.ids.idp)).toBeUndefined();
   }, 120_000);
 
-  it('set-initial-password still admits a platform admin, who can give themselves the break-glass password', async () => {
-    const s = await stage();
-    // The admin as a cloud-onboarded administrator first arrives: no local credential yet.
+  /** The admin as a cloud-onboarded administrator first arrives: no local credential yet. */
+  const dropAdminCredential = (s: Awaited<ReturnType<typeof stage>>) =>
     s.engine.tables.set(
       'sys_account',
       ((s.engine.tables.get('sys_account') ?? []) as any[]).filter(
         (r) => !(r.provider_id === 'credential' && String(r.user_id) === s.ids.admin),
       ),
     );
+
+  it('[#33203] set-initial-password refuses a platform admin too: no local break-glass password', async () => {
+    const s = await stage();
+    dropAdminCredential(s);
     setManaged(true);
+    const v = await verdict(await s.fire('/set-initial-password', { newPassword: NEW_PASSWORD }, s.bearers.admin));
+    expectManagedRefusal(v, 'setInitialPassword');
+    expect(s.credentialOf(s.ids.admin)).toBeUndefined();
+  }, 120_000);
+
+  it('CONTROL: unmanaged, a platform admin with no credential sets their own initial password as before', async () => {
+    const s = await stage();
+    dropAdminCredential(s);
     const v = await verdict(await s.fire('/set-initial-password', { newPassword: NEW_PASSWORD }, s.bearers.admin));
     expect(v.status, v.text).toBe(200);
     expect(s.credentialOf(s.ids.admin)).toBeDefined();
   }, 120_000);
+
+  it('[#33203] no managed refusal sentence promises a local or break-glass password', () => {
+    for (const door of ['setUserPassword', 'setInitialPassword'] as const) {
+      const message = CLOUD_MANAGED_REFUSAL_MESSAGES[door];
+      expect(message).not.toMatch(/break-glass/i);
+      expect(message).not.toMatch(/env_native/);
+    }
+  });
 
   it('an anonymous set-initial-password caller is answered as before, not with the managed refusal', async () => {
     const s = await stage();

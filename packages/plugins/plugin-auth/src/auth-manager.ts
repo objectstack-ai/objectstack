@@ -5455,8 +5455,11 @@ export class AuthManager {
    * Under SSO-only ({@link resolveSsoOnly}), and [#25083] on a cloud-managed
    * environment, whose people the hosting organisation invites in the cloud.
    * Read by the wiring and by `getPublicConfig()` alike, so the advertised
-   * flag cannot disagree with the wired one. Break-glass is untouched: neither
-   * case disables `emailAndPassword.enabled`.
+   * flag cannot disagree with the wired one. Neither case disables
+   * `emailAndPassword.enabled`: a password held before still signs in. Under
+   * SSO-only that keeps ADR-0135 D5.2's break-glass; a cloud-managed
+   * environment keeps none, and its password doors refuse everyone
+   * (`cloud-managed.ts`, #33203).
    */
   private signUpForcedOff(): boolean {
     return this.resolveSsoOnly() || isCloudManaged();
