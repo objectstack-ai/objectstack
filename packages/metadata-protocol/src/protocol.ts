@@ -10037,7 +10037,7 @@ export class ObjectStackProtocolImplementation implements
         message?: string;
         /** ADR-0067 — AI model that authored the turn (absent for human/CLI). */
         aiModel?: string;
-        /** [#32656] The locales the door states for the findings' user sentences (`PublishPackageDraftsRequestSchema.userTextLocales`). */
+        /** [#32656] The locales the door states for the findings' user sentences (stated by the door, never read from the body; see `SaveMetaItemRequestSchema.userTextLocales`). */
         userTextLocales?: readonly (string | undefined)[];
         /**
          * [#24253] Opt-in: fields THIS publish adds whose literal

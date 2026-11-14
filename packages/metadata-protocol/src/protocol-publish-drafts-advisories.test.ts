@@ -37,6 +37,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a clocked case (check-test-source-alias).
+import '@objectstack/lint';
 
 interface Row {
     id: string;

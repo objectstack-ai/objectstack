@@ -1473,7 +1473,7 @@ export class ProtocolHistoryAndPublishFacet {
          * the package.
          */
         message?: string;
-        /** [#32656] The locales the door states for the findings' user sentences (`PublishPackageDraftsRequestSchema.userTextLocales`). */
+        /** [#32656] The locales the door states for the findings' user sentences (stated by the door, never read from the body; see `SaveMetaItemRequestSchema.userTextLocales`). */
         userTextLocales?: readonly (string | undefined)[];
         /** ADR-0067 — AI model that authored the turn (absent for human/CLI). */
         aiModel?: string;

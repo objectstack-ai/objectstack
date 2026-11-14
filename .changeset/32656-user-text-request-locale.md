@@ -8,8 +8,9 @@
 
 feat(metadata-protocol): a metadata write's advisories and refusals come back in the caller's language
 
-Clause-②: yes (widening) — `SaveMetaItemRequestSchema`, `PublishMetaItemRequestSchema` and `PublishPackageDraftsRequestSchema` gain an optional `userTextLocales` member (at most two locale codes), and `ExecutionContextSchema` gains an optional `workspaceLocale`. Nothing that was accepted before is refused now; a request that states no locales composes in `en`, and a finding whose rule has no user sentence carries no `userMessage`, exactly as before.
+Clause-②: yes (widening) — `SaveMetaItemRequestSchema` and `PublishMetaItemRequestSchema` gain an optional, server-stated `userTextLocales` member (at most two locale codes; the doors build these requests member by member, so a wire body never sets it, like `client`), and `ExecutionContextSchema` gains an optional `workspaceLocale`. The batch publish body (`PublishPackageDraftsRequestSchema`) is unchanged; its door states the locales to the protocol call directly. Nothing that was accepted before is refused now; a request that states no locales composes in `en`, and a finding whose rule has no user sentence carries no `userMessage`, exactly as before.
 Metadata-protocol: added
+Skills-docs: none — `skills/**` and `content/docs/**` teach what a metadata author writes; `userTextLocales` and `workspaceLocale` are stated by the server from the caller's request and workspace, never authored or sent by a client, so no taught sentence moves. The generated reference pages (`content/docs/references/**`) are regenerated.
 
 Ruling C on #32440: the producer of a finding writes its user-facing sentence in the request's language, else the workspace's default language, else English, and every client shows it as received. The authoring rules already carry a sentence in twelve languages for most findings (#32790); this change composes it on the server:
 
