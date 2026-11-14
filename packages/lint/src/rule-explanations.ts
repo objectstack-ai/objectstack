@@ -4982,6 +4982,27 @@ const FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FLOW_MULTI_UPDATE_MOVES_STORED_INPUT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-multi-update-moves-stored-input',
+  covers: 'a multi update that moves a stored expression input',
+  paragraphs: [
+    'A stored computed field is any field but a `formula` that declares an `expression`: the engine computes it ' +
+      'from the row each write stores. A predicate update (`multi: true`) is one statement that writes one patch ' +
+      'to every matched row, and it is never split into single-row writes, so the computed value can be stored ' +
+      'only when it is the same on every matched row. When the patch moves an input to values that compute ' +
+      'differently on different rows, the whole update is refused with `VALIDATION_FAILED` and nothing is written.',
+    'The shape that always works reads the rows, loops and updates each by id: a `get_record` with the same ' +
+      'filter and a `limit` above 1 bound to an `outputVariable`, a `loop` over that list, and inside the loop ' +
+      'an `update_record` with `filter: { id: item.id }` (the loop\'s `iteratorVariable`) and no `multi`. Each row ' +
+      'is then computed from its own stored row. Wrap the loop body in a `try_catch` if one refused row should ' +
+      'not end the sweep.',
+    'An input is a field the `expression` reads as `record.FIELD`, or through a reference field, or through ' +
+      'another stored field that reads it. Setting a stored field itself is not reported: its value is computed, ' +
+      'never taken from the patch. This is a warning, not a gate: a patch that sets the inputs to values that ' +
+      'compute the same result on every matched row is stored, and which case a run meets depends on its rows.',
+  ],
+};
+
 const FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION: RuleExplanation = {
   rule: 'flow-decision-inclusive-overlap',
   covers: 'when an inclusive decision runs more than one branch',
@@ -6288,6 +6309,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION.rule]: FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION,
   [FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION.rule]: FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION,
   [FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION.rule]: FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION,
+  [FLOW_MULTI_UPDATE_MOVES_STORED_INPUT_EXPLANATION.rule]: FLOW_MULTI_UPDATE_MOVES_STORED_INPUT_EXPLANATION,
   [FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION.rule]: FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION,
   [FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION.rule]: FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION,
   [FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION.rule]: FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION,
