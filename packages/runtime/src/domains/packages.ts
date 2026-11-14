@@ -76,7 +76,7 @@ import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES, refuseNamespaceObjectNameC
 import { customizationPairManifestRefusal, runtimeNavigationContributionsRefusal } from '@objectstack/metadata-protocol';
 // [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
 // shared with the registry's co-owner gate.
-import { declaredDependencyIds } from '@objectstack/core';
+import { declaredDependencyIds, userTextLocalesOf } from '@objectstack/core';
 // [#28914, ADR-0141 D5] The one sorter of installed packages by their declared
 // dependencies: the order a boot hydrates them in is the order the
 // whole-deployment export lists them in.
@@ -2997,6 +2997,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         // its shape and what it names, and refuses the whole
                         // request before anything is published.
                         ...(body?.backfill !== undefined ? { backfill: body.backfill } : {}),
+                        // [#32656] The languages the findings' `userMessage` is
+                        // composed in: the request's locale, then the workspace
+                        // default, off THIS caller's execution context.
+                        userTextLocales: userTextLocalesOf(_context?.executionContext),
                         // THIS caller's execution context, never a system one:
                         // the backfill writes run as it, and [#25484] so do the
                         // build probes' dashboard-widget reads — the renderer's

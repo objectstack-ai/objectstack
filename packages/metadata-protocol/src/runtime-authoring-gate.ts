@@ -47,6 +47,7 @@
  */
 
 import {
+    findingUserMessage,
     runRuntimeAuthoringRules,
     type AuthoringFinding,
     type RuntimePackageScope,
@@ -1104,14 +1105,27 @@ export function stampHtmlPageRequires(type: string, body: unknown, sduiManifest:
     return { ...(body as AnyRec), requires: [...compiled.result.requires] };
 }
 
-const toIssue = (f: AuthoringFinding): RuntimeAuthoringIssue => ({
-    rule: f.rule,
-    path: f.path,
-    where: f.where,
-    message: f.message,
-    hint: f.hint,
-    severity: f.severity,
-});
+/**
+ * One finding as the wire element. [#32656] `userMessage` is the finding's
+ * user-facing sentence, composed here because this is where the finding and
+ * the request's locales meet: a rule never sees the request, so it emits the
+ * names its sentence interpolates (`userTextParams`), and the door that holds
+ * the request states the locales (`SaveMetaItemRequestSchema.userTextLocales`).
+ * Present only when the rule authors a sentence for this finding; the six
+ * other keys are copied as before.
+ */
+const issueOf = (locales: readonly (string | undefined)[]) => (f: AuthoringFinding): RuntimeAuthoringIssue => {
+    const userMessage = findingUserMessage(f, locales);
+    return {
+        rule: f.rule,
+        path: f.path,
+        where: f.where,
+        message: f.message,
+        hint: f.hint,
+        severity: f.severity,
+        ...(userMessage !== undefined ? { userMessage } : {}),
+    };
+};
 
 /**
  * The gate's whole verdict on one write — both severities, in one value.
@@ -1325,7 +1339,15 @@ export function evaluateRuntimeAuthoringGate(args: {
      * predicate), nothing is judged.
      */
     packagedRuleCopyRefusal?: PackagedRuleCopyRefusal | null;
+    /**
+     * [#32656] The locales the findings' user-facing sentences are composed
+     * in, in ladder order: the request's locale, then the workspace default
+     * (`SaveMetaItemRequestSchema.userTextLocales`). Absent ⇒ `en`. It picks a
+     * language and nothing else: no verdict depends on it.
+     */
+    userTextLocales?: readonly (string | undefined)[];
 }): RuntimeAuthoringVerdict {
+    const toIssue = issueOf(args.userTextLocales ?? []);
     // [#26188] The one finding a draft hears: a hierarchy scope this runtime
     // cannot enforce. Same rule as the publish refusal below, `warning` here.
     const hierarchyScopeGaps = findHierarchyScopeCapabilityGaps({

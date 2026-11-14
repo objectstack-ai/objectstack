@@ -692,6 +692,8 @@ export class ProtocolHistoryAndPublishFacet {
              * all address it, so the body judged is the body that goes live.
              */
             member?: string;
+            /** [#32656] The write request's `userTextLocales`, for the findings' `userMessage`. */
+            userTextLocales?: readonly (string | undefined)[];
             /**
              * [ADR-0144 D2 and D6, amended] The registry question this
              * promotion asks before the row goes live, stated by every producer
@@ -1194,6 +1196,9 @@ export class ProtocolHistoryAndPublishFacet {
                 // different narrowings, both needed for a package to be
                 // judged as a self-consistent unit.
                 ...(request.pending !== undefined ? { pending: request.pending } : {}),
+                // [#32656] The locales the publish door stated for the
+                // findings' user sentences (`advisories[].userMessage`).
+                ...(request.userTextLocales !== undefined ? { userTextLocales: request.userTextLocales } : {}),
                 // [#20790] The publish gate's restored-credential read. The
                 // stored draft holds no credential the write-only channel
                 // holds — the draft's own save moved it there — so the gate is
@@ -1468,6 +1473,8 @@ export class ProtocolHistoryAndPublishFacet {
          * the package.
          */
         message?: string;
+        /** [#32656] The locales the door states for the findings' user sentences (`PublishPackageDraftsRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly (string | undefined)[];
         /** ADR-0067 — AI model that authored the turn (absent for human/CLI). */
         aiModel?: string;
         /**
@@ -2070,6 +2077,9 @@ export class ProtocolHistoryAndPublishFacet {
             // universe as it stood before the publish started.
             ...(pendingDeclarations !== undefined
                 ? { pending: pendingDeclarations } : {}),
+            // [#32656] The door's locales for the findings' user sentences.
+            ...(request.userTextLocales !== undefined
+                ? { userTextLocales: request.userTextLocales } : {}),
             // [#26724] …and the datasources it drafts, which
             // an object draft beside them may name.
             batchDatasources,
