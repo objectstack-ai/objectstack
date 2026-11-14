@@ -2232,7 +2232,7 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
     const enter = async (type: string, state: (typeof STATES)[number]) => {
       storeRow(type, 'active', 'stored');
       if (state === 'after the read-side hydrator') await protocol.getMetaItems({ type } as never);
-      if (state === 'after the boot load') expect(await protocol.loadMetaFromDb(), 'the boot load read the row').toMatchObject({ errors: 0, invalid: 0 });
+      if (state === 'after the boot load') expect(await protocol.loadMetaFromDb(), 'the boot load read the row').toMatchObject({ loaded: 1, errors: 0 });
       if (state.startsWith('bare-slot')) {
         registry.registerItem(type, { ...sealedBody(type, 'stored'), _provenance: 'org', _packageId: state.endsWith("''") ? '' : 'sys_metadata' }, 'name' as never);
       }
