@@ -837,3 +837,81 @@ describe('#8034 plugin composition: os serve stdio wiring', () => {
     }
   });
 });
+
+// [#33176] `validate_expression` takes the flow's declared `variables` at a
+// flow condition. One tool definition serves both transports
+// (`wireBridgeTools`); this pins that the input is advertised and answered
+// alike on the stdio wire and over HTTP, with the warning it exists for.
+describe('#33176 validate_expression: the flow variables input answers alike on stdio and over HTTP', () => {
+  const TASK = { name: 'task', fields: { title: { type: 'text', label: 'Title', required: true } } };
+  function flowBridge(): McpDataBridge {
+    return {
+      ...makeBridge(),
+      async describeObject(name: string) {
+        return name === 'task' ? { name: 'task', fields: [{ name: 'title', type: 'text', label: 'Title', required: true }] } : null;
+      },
+      async servedObjectDefinitionOf(name: string) {
+        return name === 'task' ? TASK : null;
+      },
+    };
+  }
+
+  async function overStdio(method: string, params?: unknown): Promise<JsonRpcFrame> {
+    const runtime = new MCPServerRuntime({ name: 'parity', version: '1.0.0' });
+    runtime.bridgeDataTools(flowBridge());
+    const session = await openStdio(runtime.server);
+    try {
+      await handshake(session);
+      return await session.rpc(method, params);
+    } finally {
+      await session.close();
+    }
+  }
+
+  async function overHttp(method: string, params?: unknown): Promise<JsonRpcFrame> {
+    const runtime = new MCPServerRuntime({ name: 'parity', version: '1.0.0' });
+    const body = { jsonrpc: '2.0', id: 1, method, ...(params ? { params } : {}) };
+    const res = await runtime.handleHttpRequest(
+      new Request('http://localhost/api/v1/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify(body),
+      }),
+      { bridge: flowBridge(), parsedBody: body },
+    );
+    return (await res.json()) as JsonRpcFrame;
+  }
+
+  it('advertises the same `variables` input on both transports', async () => {
+    const schemaOf = (frame: JsonRpcFrame) =>
+      (frame.result.tools as Array<{ name: string; inputSchema: any }>).find((t) => t.name === 'validate_expression')!.inputSchema;
+    const stdio = schemaOf(await overStdio('tools/list'));
+    expect(stdio.properties.variables.type).toBe('array');
+    expect(stdio.properties.variables.items.required).toEqual(expect.arrayContaining(['name', 'type']));
+    expect(stdio).toEqual(schemaOf(await overHttp('tools/list')));
+  });
+
+  it('gives the shadowed-read warning, and refuses the input off a flow condition, alike', async () => {
+    const variables = [{ name: 'title', type: 'text' }];
+    const shadowed = { objectName: 'task', expression: "title == 'x'", site: 'flow_condition', variables };
+    const control = { objectName: 'task', expression: "title == 'x'", site: 'flow_condition' };
+    const offSite = { objectName: 'task', expression: "record.title == 'x'", site: 'validation', variables };
+    for (const args of [shadowed, control, offSite]) {
+      const stdio = await overStdio('tools/call', { name: 'validate_expression', arguments: args });
+      expect(stdio.error, JSON.stringify(args)).toBeUndefined();
+      const http = await overHttp('tools/call', { name: 'validate_expression', arguments: args });
+      expect(stdio.result, JSON.stringify(args)).toEqual(http.result);
+    }
+    // Non-vacuous: the three answers differ in the way the input says.
+    const read = async (args: Record<string, unknown>) =>
+      (await overStdio('tools/call', { name: 'validate_expression', arguments: args })).result;
+    const withVariables = JSON.parse((await read(shadowed)).content[0].text);
+    expect(withVariables.warnings.map((w: { message: string }) => w.message)).toEqual([
+      expect.stringContaining('`title`'),
+    ]);
+    expect(JSON.parse((await read(control)).content[0].text).warnings).toEqual([]);
+    const refused = await read(offSite);
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toContain('`variables`');
+  });
+});

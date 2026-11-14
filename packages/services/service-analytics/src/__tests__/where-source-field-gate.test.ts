@@ -484,7 +484,7 @@ describe('#5669 — what the gate must NOT do', () => {
         } as any);
 
         expect(sqls).toEqual([
-            'SELECT COUNT(*) AS "account_count" FROM "crm_account" WHERE industry = $1',
+            'SELECT COUNT(*) AS "account_count" FROM "crm_account" WHERE "industry" = $1',
         ]);
     });
 
