@@ -54,7 +54,6 @@ import {
     type PackageScopedHolder,
     type PackageScopedRefusalReason,
     type PackageScopedResolvableType,
-    type PackageScopedType,
 } from '@objectstack/core';
 import { ENVIRONMENT_ADDRESS_SEGMENT, readNamespacePositionSegment } from '@objectstack/spec/kernel';
 import { installedManifestsOfEngine } from './installed-manifests.js';
@@ -612,8 +611,13 @@ export function resolveCallerPackageAddress(
  * narrowed type lets two namespaces hold one name whether or not its readers
  * are wired, so the refusal is in place from the change that narrows it
  * (`action` since #31697, read through `getItem`), never one reader card later.
+ *
+ * A plain `boolean`, never the type predicate `type is PackageScopedType`:
+ * the `false` answer depends on the registry (`readsByPackage`), not on the
+ * type alone, so a predicate would narrow a package-scoped type to `never` in
+ * a caller's `false` branch (#32716 N1).
  */
-export function judgesPackageLessRows(registry: { readsByPackage?(type: string): boolean }, type: string): type is PackageScopedType {
+export function judgesPackageLessRows(registry: { readsByPackage?(type: string): boolean }, type: string): boolean {
     if (!isPackageScopedType(type)) return false;
     return registry.readsByPackage?.(type) === true || isNamespaceScopedBareNameType(type);
 }
