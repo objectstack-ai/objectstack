@@ -11,7 +11,9 @@ import {
   PACKAGE_TABLE_COLUMNS,
   PACKAGE_ROW_CREATED_AT_SQL,
   PACKAGE_TABLE_STATEMENTS,
+  nextPackageWriteInstant,
   packageRowStamp,
+  packageWriteStamp,
   probePackageTable,
   resolvePackageTableDialect,
 } from './package-table.js';
@@ -32,7 +34,9 @@ export interface PackageRecord {
   manifest: ObjectStackManifest;
   metadata: PackageMetadata;
   hash: string;
+  /** When this `(id, version)` row was first written (`YYYY-MM-DD HH:MM:SS` UTC); an overwrite keeps it. */
   created_at: string;
+  /** When this row was last written (`YYYY-MM-DD HH:MM:SS.mmm` UTC from this release on); `latest` orders by it. */
   updated_at: string;
 }
 
@@ -530,7 +534,12 @@ export class PackageServicePlugin implements Plugin {
             .digest('hex');
           // [#31530] The row's stamps, bound by this write, so the answer can
           // name the `created_at` it inserted without reading the row back.
-          const stamp = packageRowStamp(new Date());
+          // `updated_at` is this instant to the millisecond, moved on past this
+          // process's previous write when the clock has not: it is what
+          // `latest` orders by. `created_at` stays the wall clock's second.
+          const now = new Date();
+          const stamp = packageRowStamp(now);
+          const writeStamp = packageWriteStamp(nextPackageWriteInstant(now));
           // [#31530] The row's own `created_at` when `(id, version)` is already
           // stored: the upsert's update arm keeps it, so that is the value to
           // answer. `null` — no row, so the insert arm runs and binds `stamp`.
@@ -550,7 +559,7 @@ export class PackageServicePlugin implements Plugin {
               JSON.stringify(data.metadata),
               hash,
               stamp,
-              stamp,
+              writeStamp,
             ],
           });
 
@@ -602,8 +611,10 @@ export class PackageServicePlugin implements Plugin {
 
       async get(packageId: string, version: string = 'latest') {
         try {
+          // "latest" is the row written last, by `updated_at` — never by
+          // `created_at`, which an overwrite keeps (`PACKAGE_TABLE_STATEMENTS`).
           const sql = version === 'latest'
-            ? `SELECT * FROM sys_packages WHERE id = ? ORDER BY created_at DESC LIMIT 1`
+            ? `SELECT * FROM sys_packages WHERE id = ? ORDER BY updated_at DESC LIMIT 1`
             : `SELECT * FROM sys_packages WHERE id = ? AND version = ?`;
 
           const args = version === 'latest' ? [packageId] : [packageId, version];
@@ -650,13 +661,15 @@ export class PackageServicePlugin implements Plugin {
 
       async list() {
         try {
+          // Each package's row written last, by `updated_at`, as in `get()`.
+          // The boot hydrates from this, so it is what a restart serves.
           const result = await objectql.execute!({
             sql: `
               SELECT * FROM sys_packages
-              WHERE (id, created_at) IN (
-                SELECT id, MAX(created_at) FROM sys_packages GROUP BY id
+              WHERE (id, updated_at) IN (
+                SELECT id, MAX(updated_at) FROM sys_packages GROUP BY id
               )
-              ORDER BY created_at DESC
+              ORDER BY updated_at DESC
             `,
           });
 
