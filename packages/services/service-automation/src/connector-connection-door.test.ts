@@ -1111,6 +1111,17 @@ describe('ADR-0150 D4 [#31699] — the connection door connects one instance, by
         expect(await rowPackages(ql)).toEqual([OTHER]);
     });
 
+    it('[contract review F1(b)] there, a row from before the package column (naming none) is the served instance\'s: one holder, read by its name', async () => {
+        const { engine, connect, ql } = await boot([crm({ _packageId: OTHER })], { registry: registryHolding('com.example.crm') });
+        await (await connect()).done();
+        const [row] = await rowsOf(ql);
+        await ql.update(CONNECTOR_CONNECTION_OBJECT, { id: row.id, connector_package: null } as never, { context: SYSTEM } as never);
+        expect(await engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
+            .toMatchObject({ status: 'connected' });
+        await (await connect()).done();
+        expect((await rowsOf(ql)).map((r) => [r.id, r.connector_package])).toEqual([[row.id, OTHER]]);
+    });
+
     it('a row naming no package is adopted by the resolved package’s connect (M2): one row, stamped in place', async () => {
         const { connect, ql } = await boot([crm()], { registry: registryHolding('com.example.crm') });
         await (await connect()).done();
