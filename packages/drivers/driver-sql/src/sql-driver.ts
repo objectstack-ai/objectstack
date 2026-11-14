@@ -4239,11 +4239,18 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Public Rotator entry point (called by the LifecycleService each sweep and
-   * by {@link initObjects} at boot). Idempotent: ensures the current shard +
-   * read view exist, adopts a legacy pre-rotation base table as the current
-   * shard, column-syncs every retained shard so the UNION stays uniform, and
-   * drops shards past the `shards × unit` window.
+   * Public Rotator entry point, called by the LifecycleService each sweep.
+   * Idempotent: ensures the current shard + read view exist, adopts a legacy
+   * pre-rotation base table as the current shard, column-syncs every retained
+   * shard so the UNION stays uniform, and drops shards past the
+   * `shards × unit` window.
+   *
+   * The only caller that drops. {@link initObjects} runs the same
+   * {@link ensureRotation} at boot with `dropExpired` false: a boot syncs its
+   * schema before it is judged (the organization-ownership guard refuses after
+   * the engine's sync), so a sync that dropped took a restored shard with the
+   * boot that refused to serve it. An expired shard stays in the read view
+   * until the first sweep of a served boot drops it here.
    */
   rotateShards(
     objectDef: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any },
@@ -4253,11 +4260,19 @@ export class SqlDriver implements IDataDriver {
     return RotationFacet.rotateShards.call(rotationHost.of(this), objectDef, nowMs);
   }
 
+  /**
+   * Inventory a rotation-managed table's shards, adopt a legacy base table,
+   * create the current shard, column-sync the live shards and rebuild the read
+   * view. With `dropExpired` (the Rotator's {@link rotateShards} only) shards
+   * past the `shards × unit` window are DROPPED and leave the view; without it
+   * (schema sync, {@link initObjects}) every shard stays, in the view.
+   */
   protected ensureRotation(
     tableName: string,
     obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
     policy: { shards: number; unit: 'day' | 'week' | 'month' },
     nowMs?: number,
+    dropExpired: boolean = false,
   ): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }> {
     // [#25521 cut 17] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
     const readKnex = () => this.knex;
@@ -4272,7 +4287,7 @@ export class SqlDriver implements IDataDriver {
       rotationShardKey: (...a) => this.rotationShardKey(...a),
       get rotationStateByTable() { return readRotationStateByTable(); },
     };
-    return ensureRotation.call(host, tableName, obj, policy, nowMs);
+    return ensureRotation.call(host, tableName, obj, policy, nowMs, dropExpired);
   }
 
   /**

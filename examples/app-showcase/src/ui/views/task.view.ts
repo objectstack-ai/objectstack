@@ -340,6 +340,13 @@ export const TaskViews = defineView({
         endDateField: 'end_date',
         titleField: 'title',
         progressField: 'progress',
+        // A finished task is locked: its bar takes no drag, resize or
+        // progress edit, and auto-schedule skips it. `done` is the task's
+        // boolean, and two seeded tasks are done, so a locked bar sits beside
+        // draggable ones on every stock boot. Declared on this named view
+        // only, the one the gantt checklist item drives; the default list's
+        // switcher binding above stays unlocked.
+        lockField: 'done',
       },
     },
 

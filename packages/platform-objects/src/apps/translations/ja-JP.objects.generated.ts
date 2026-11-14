@@ -2167,6 +2167,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             label: "ディスカバリ URL",
             helpText: "任意。OIDC ディスカバリドキュメントの URL（https）。空欄の場合は `<issuer>/.well-known/openid-configuration` を導出します。ここで指定したエンドポイントはこのプロバイダーで信頼されます。"
           },
+          authorizationEndpoint: {
+            label: "Authorization URL",
+            helpText: "Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust."
+          },
+          tokenEndpoint: {
+            label: "Token URL",
+            helpText: "Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token"
+          },
+          jwksEndpoint: {
+            label: "JWKS URL",
+            helpText: "Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs"
+          },
           userInfoEndpoint: {
             label: "Userinfo エンドポイント URL",
             helpText: "任意。OIDC userinfo エンドポイントの URL（https）。ディスカバリドキュメントが示すものの代わりに使われます。ここで指定したエンドポイントはこのプロバイダーで信頼されます。ディスカバリドキュメントが示す userinfo ホストをサーバーが信頼せず登録が拒否された場合に指定してください。"
