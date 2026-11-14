@@ -14,7 +14,7 @@ To find candidates, run against the object's table, with ZONE the server's zone 
 ```sql
 SELECT id, FIELD FROM TABLE
 WHERE (FIELD AT TIME ZONE 'ZONE')::time = '00:00'
-  AND (FIELD AT TIME ZONE 'UTC')::time <> '00:00';
+  AND (FIELD AT TIME ZONE 'UTC')::time != '00:00';
 ```
 
 Check each row against what was entered (a value that really was entered as a date-time at local midnight is also listed), then correct the ones that are early days:
