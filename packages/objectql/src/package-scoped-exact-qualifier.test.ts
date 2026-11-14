@@ -1140,6 +1140,31 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
 
   });
 
+  // [#33131 item 4, ruling 6868829990 = A] A pair row declaring a module X of
+  // the App that ships nothing of the name, while another module W of the App
+  // ships the member, is read as a tenant's edit of an item that moved from X
+  // to W (#31593, `isMovedOverrideRowOf`): W's address and lists serve it.
+  // Measured, by design: nothing in the stored state tells it apart from a
+  // genuine module-to-module move. X's own address refuses naming W.
+  it.each([['row stored first', true], ['W registered first', false]] as const)('[#33131 item 4, by design #31593] a pair row declaring a module that ships nothing of the name is the moved edit of the module that ships it (%s): W\'s address and lists serve it, X\'s address refuses naming W', async (_order, rowFirst) => {
+    const W = 'com.other.wolf';
+    registry.installPackage({ id: W, name: W, version: '1.0.0', type: 'module', namespace: 'wolf', dependencies: { [APP]: '^1.0.0', [X]: '^1.0.0' } } as never, 'code');
+    const deRow = { name: 'welcome', label: 'pair de-DE for X', locale: 'de-DE', subject: 's', bodyHtml: '<p>p</p>', overrides: { package: X } };
+    const store = () => {
+      rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(deRow) });
+      registry.registerItem('email_template', { ...deRow, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+    };
+    if (rowFirst) { store(); tpl('de-DE', W); } else { tpl('de-DE', W); store(); }
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([W]);
+    expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', W, 'de-DE')?.label, 'the registry item at W is W\'s own').toBe('wolf de-DE');
+    const atW = await read(W, 'de-DE') as { item?: { label?: string; _packageId?: string } };
+    expect([atW?.item?.label, atW?.item?._packageId]).toEqual(['pair de-DE for X', W]);
+    expect(await listed(W)).toEqual(['pair de-DE for X']);
+    expect(await forSend(W)).toEqual(['pair de-DE for X']);
+    const err = await refusalOf(() => read(X, 'de-DE'));
+    expect([err.status, err.refusal.candidates]).toEqual([409, [{ kind: 'package', packageId: W }]]);
+  });
+
   it('a sole owner keeps its member: another package of the pair does not serve it (delta review S2; through the doors the qualifier refuses the non-holder first)', async () => {
     tpl('en-US', X);
     pairRow();
