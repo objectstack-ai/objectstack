@@ -308,7 +308,13 @@ const MODULES = {
   // shared own-row delete door below and answers nothing itself, so it builds no body.
   'packages/plugins/plugin-auth/src/personal-view-routes.ts': { responses: 0, ok: 0, err: 0 },
 
-  // The shared own-row delete door both of the above are served by
+  // The uploader's removal door for an attachment (`DELETE /api/v1/attachments/:id`),
+  // mounted by `StorageServicePlugin` straight on `IHttpServer`. It supplies its part
+  // of the shared own-row delete door below and answers nothing itself, so it builds
+  // no body.
+  'packages/services/service-storage/src/attachment-removal-routes.ts': { responses: 0, ok: 0, err: 0 },
+
+  // The shared own-row delete door every door above is served by
   // (`registerOwnRowDeleteRoute`). Every body it answers is written by the shared
   // pair (`sendOk` / `sendError` / `sendServerFault`), so it builds none itself.
   // Declared in the same PR that created the module.
