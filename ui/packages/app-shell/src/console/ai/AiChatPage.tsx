@@ -1007,7 +1007,18 @@ export function useDeferredFirstSend(opts: {
     ensureConversationRef.current = ensureConversation;
     onHeldChangeRef.current = onHeldChange;
   }, [ensureConversation, onHeldChange]);
+  // Only a committed pane is told: a send can reach a render React has not
+  // committed (or has thrown away), and a state update there loses the render
+  // the stash belongs to. The mount report below covers that pane once it commits.
+  const committedRef = useRef(false);
+  useLayoutEffect(() => {
+    committedRef.current = true;
+    return () => {
+      committedRef.current = false;
+    };
+  }, []);
   const reportHeld = useCallback(() => {
+    if (!committedRef.current) return;
     const held = pendingRef.current;
     onHeldChangeRef.current?.(held && !held.targetAgentRoute ? held : null);
   }, [pendingRef]);
@@ -1015,8 +1026,8 @@ export function useDeferredFirstSend(opts: {
   // A message held over from the pane this one replaced is drawn before the
   // first paint, so the id-keyed remount never shows an empty thread.
   useLayoutEffect(() => {
-    if (apiMode) reportHeld();
-  }, [apiMode, reportHeld]);
+    if (apiMode && pendingRef.current) reportHeld();
+  }, [apiMode, pendingRef, reportHeld]);
 
   // The create failed: the user's held message goes (its text is restored to
   // the composer by the host's not-sent rollback). A handoff seed is kept.
