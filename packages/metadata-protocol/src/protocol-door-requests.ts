@@ -28,6 +28,12 @@ type SaveMetaItemRequest = {
      * already holds. Set by server code only; no HTTP door forwards it.
      */
     inheritedGrantObjects?: readonly string[],
+    /**
+     * [#32656] The locales the findings' user sentences are composed in, in
+     * ladder order: the request's locale, then the workspace default
+     * (`SaveMetaItemRequestSchema.userTextLocales`). Stated by the door.
+     */
+    userTextLocales?: readonly (string | undefined)[],
 };
 
 /** The request of {@link ObjectStackProtocolImplementation.publishMetaItem}. */
@@ -86,6 +92,8 @@ type PublishMetaItemRequest = {
     _skipSeedApply?: boolean;
     /** [#22877] The bundle member whose draft to publish — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
     member?: string;
+    /** [#32656] The locales the findings' user sentences are composed in (`PublishMetaItemRequestSchema.userTextLocales`). */
+    userTextLocales?: readonly (string | undefined)[];
 };
 
 /** The request of {@link ObjectStackProtocolImplementation.rollbackMetaItem}. */
