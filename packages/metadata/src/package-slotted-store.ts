@@ -127,6 +127,7 @@ import {
 } from '@objectstack/core';
 import { ITEM_KEY_DISCRIMINATORS, SysMetadataObject, itemDiscriminator } from '@objectstack/metadata-core';
 import { peelStoredEnvelope } from './stored-envelope.js';
+import { PACKAGE_SLOTTED_METADATA_TYPES } from '@objectstack/spec/api';
 
 /**
  * The types whose in-memory items are stored per `(package, name)`: `api`,
@@ -138,12 +139,11 @@ import { peelStoredEnvelope } from './stored-envelope.js';
  * picklist family's `picklist`, `mapping` and `dataset` (#31700); then
  * `webhook` (#31699 PR 2), so a host with no registry lists each package's
  * declaration of one name; then `tool` (#31985, ADR-0150 child B), likewise
- * in the change that narrows it.
+ * in the change that narrows it. The list itself is `@objectstack/spec`'s
+ * `PACKAGE_SLOTTED_METADATA_TYPES` (#32905), so a client that names a package
+ * on the history and rollback doors reads the same one; a type joins there.
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set([
-  'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
-  'webhook', 'tool',
-]);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(PACKAGE_SLOTTED_METADATA_TYPES);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';

@@ -761,6 +761,8 @@
     "RetryStrategy": "api/RetryStrategy",
     "RevertPackageCommitResponse": "api/RevertPackageCommitResponse",
     "RevertPackageCommitResponseSchema": "api/RevertPackageCommitResponse",
+    "RollbackMetaItemRequest": "api/RollbackMetaItemRequest",
+    "RollbackMetaItemRequestSchema": "api/RollbackMetaItemRequest",
     "RollbackMetaItemResponse": "api/RollbackMetaItemResponse",
     "RollbackMetaItemResponseSchema": "api/RollbackMetaItemResponse",
     "RollbackToPackageCommitResponse": "api/RollbackToPackageCommitResponse",

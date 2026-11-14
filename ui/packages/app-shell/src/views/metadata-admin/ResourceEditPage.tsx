@@ -3858,6 +3858,7 @@ function MetadataResourceEditPageImpl({
                 name={name}
                 client={client}
                 locale={locale}
+                packageId={ownerPackageId}
                 // The rollback door asks the capability and wall verdicts the
                 // save door asks, so it is offered on Save's gate
                 // (objectui#12183: a walled tenant was offered it, refused).
