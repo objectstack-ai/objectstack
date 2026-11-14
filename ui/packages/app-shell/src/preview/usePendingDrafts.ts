@@ -29,11 +29,32 @@
  * toasts differ on purpose); the contract is that every successful publish
  * path calls `emitMetadataRefresh()` — that pulse, plus this hook, is the
  * whole unification mechanism.
+ *
+ * ## A change made outside this tab (objectstack#32592, phase 1)
+ *
+ * The pulse is per tab: it reaches nothing written by an agent over MCP, a
+ * REST caller or another tab. So while any hook here is mounted, the ledger
+ * of each scope it reads is also asked again when the tab becomes visible or
+ * the window gains focus, and every {@link PENDING_DRAFTS_POLL_MS} while the
+ * tab stays visible. When that answer differs from the one this tab last
+ * read, the check sends the tab's own `emitMetadataRefresh()`: every hook
+ * re-reads, and so does everything else on that pulse (Studio's item header
+ * line and its pillars' re-reads with their draft marks, the package app
+ * resolver, `MetadataProvider`), so the badge and the marks move together. An
+ * unchanged answer sends nothing more. One read per scope, however many hooks
+ * read it.
+ *
+ * The poll obeys `hooks/hiddenTabPollStop.ts`, and is stricter than it: a
+ * hidden tab arms no timer and sends nothing at all, since a poll keeps a
+ * scale-to-zero backend awake; coming back to the tab is the one read.
+ * Phase 2, the same events pushed by the server, is its own card
+ * (objectstack#33023); this check stays its fallback.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { I18nLabel } from '@objectstack/spec/ui';
-import { subscribeMetadataRefresh } from '../assistant/assistantBus.js';
+import { emitMetadataRefresh, subscribeMetadataRefresh } from '../assistant/assistantBus.js';
+import { isPollingSuspended } from '../hooks/hiddenTabPollStop.js';
 
 export interface PendingDraftEntry {
   /** Raw stored type — callers that build `/meta` URLs must fold it themselves. */
@@ -100,14 +121,40 @@ function servedLabel(raw: unknown): I18nLabel | undefined {
  * callers of the same transport. Each caller parses the shared payload itself,
  * so every caller still gets its own entry list.
  */
-const pendingDraftReads = new WeakMap<typeof fetch, Map<string, Promise<unknown>>>();
+const pendingDraftReads = new WeakMap<typeof fetch, Map<string, Promise<DraftsAnswer>>>();
 let publishPulseObserved = false;
+
+/**
+ * A settled `_drafts` read: the payload, and whether it differs from the
+ * answer this tab read last for the same URL through the same transport.
+ */
+interface DraftsAnswer {
+  payload: unknown;
+  /** False for the first answer of a URL: there was nothing to differ from. */
+  moved: boolean;
+}
+
+/**
+ * The last answer read per transport and URL, as a fingerprint, so a check
+ * can tell an answer that moved from one that did not. ⛔ Never read back as
+ * an answer: it only compares, so it is no response cache (see above).
+ */
+const lastDraftAnswers = new WeakMap<typeof fetch, Map<string, string>>();
+
+function answerFingerprint(payload: unknown): string {
+  try {
+    return JSON.stringify(payload) ?? '';
+  } catch {
+    // An answer that cannot be compared counts as changed every time.
+    return `unserializable:${Math.random()}`;
+  }
+}
 
 function draftsUrl(packageId?: string | null): string {
   return `/api/v1/meta/_drafts${packageId ? `?package=${encodeURIComponent(packageId)}` : ''}`;
 }
 
-function readDraftsPayload(url: string): Promise<unknown> {
+function readDraftsAnswer(url: string): Promise<DraftsAnswer> {
   // Registered on first use rather than at import, and so before the hook's
   // own pulse subscription (the hook reads first, then subscribes): the drop
   // runs before the refresh that pulse triggers.
@@ -123,14 +170,23 @@ function readDraftsPayload(url: string): Promise<unknown> {
   }
   const pending = reads.get(url);
   if (pending) return pending;
-  const read = (async () => {
+  const read = (async (): Promise<DraftsAnswer> => {
     const res = await fetch(url, {
       credentials: 'include',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     });
     if (!res.ok) throw new Error(`_drafts HTTP ${res.status}`);
-    return res.json() as Promise<unknown>;
+    const payload = (await res.json()) as unknown;
+    let seen = lastDraftAnswers.get(transport);
+    if (!seen) {
+      seen = new Map();
+      lastDraftAnswers.set(transport, seen);
+    }
+    const before = seen.get(url);
+    const after = answerFingerprint(payload);
+    seen.set(url, after);
+    return { payload, moved: before !== undefined && before !== after };
   })();
   reads.set(url, read);
   const owner = reads;
@@ -141,10 +197,116 @@ function readDraftsPayload(url: string): Promise<unknown> {
   return read;
 }
 
+/**
+ * Foreground cadence of the outside-change check (objectstack#32592): the top
+ * of the 15–30 s range the ruling set. The read that matters most, coming back
+ * to the tab from the agent or the other tab, is sent at once on
+ * `visibilitychange` / `focus`; the timer only covers a Studio left visible
+ * beside the client making the change, where half a minute is soon enough and
+ * half the requests of 15 s.
+ */
+export const PENDING_DRAFTS_POLL_MS = 30_000;
+
+/** The scopes (as `_drafts` URLs) the mounted hooks read, with how many read each. */
+const watchedDraftScopes = new Map<string, number>();
+let watchTimer: ReturnType<typeof setTimeout> | null = null;
+let watchListening = false;
+let watchCheck: Promise<void> | null = null;
+
+function documentHidden(): boolean {
+  return typeof document !== 'undefined' && document.hidden;
+}
+
+/**
+ * Read every watched scope once and, when any answer moved since this tab
+ * last read it, send the tab's metadata-refresh pulse. A check asked for while
+ * one is running joins it (a tab switch fires `visibilitychange` and `focus`
+ * together).
+ */
+function checkWatchedLedgers(): Promise<void> {
+  if (watchCheck) return watchCheck;
+  const check = (async () => {
+    const answers = await Promise.all(
+      [...watchedDraftScopes.keys()].map((url) => readDraftsAnswer(url).then((a) => a.moved, () => false)),
+    );
+    if (answers.some(Boolean)) emitMetadataRefresh();
+  })();
+  watchCheck = check;
+  const settle = () => {
+    if (watchCheck === check) watchCheck = null;
+  };
+  check.then(settle, settle);
+  return check;
+}
+
+function clearWatchTimer(): void {
+  if (watchTimer !== null) clearTimeout(watchTimer);
+  watchTimer = null;
+}
+
+/**
+ * Arm the next poll tick — only while a scope is watched and the tab is
+ * visible, and never once `hiddenTabPollStop` reports a suspension. The tick
+ * asks both again when it fires, so a tick that comes due behind a hide sends
+ * nothing and arms nothing.
+ */
+function armWatchTimer(): void {
+  if (watchTimer !== null || watchedDraftScopes.size === 0) return;
+  if (documentHidden() || isPollingSuspended()) return;
+  watchTimer = setTimeout(() => {
+    watchTimer = null;
+    if (watchedDraftScopes.size === 0 || documentHidden() || isPollingSuspended()) return;
+    void checkWatchedLedgers().finally(armWatchTimer);
+  }, PENDING_DRAFTS_POLL_MS);
+}
+
+/** Hidden: drop the timer. Visible again (or focused): read now, then re-arm. */
+function onWatchVisibility(): void {
+  if (documentHidden()) {
+    clearWatchTimer();
+    return;
+  }
+  if (watchedDraftScopes.size === 0) return;
+  clearWatchTimer();
+  void checkWatchedLedgers().finally(armWatchTimer);
+}
+
+function startWatching(): void {
+  if (!watchListening && typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onWatchVisibility);
+    if (typeof window !== 'undefined') window.addEventListener('focus', onWatchVisibility);
+    watchListening = true;
+  }
+  armWatchTimer();
+}
+
+function stopWatching(): void {
+  clearWatchTimer();
+  if (!watchListening) return;
+  document.removeEventListener('visibilitychange', onWatchVisibility);
+  if (typeof window !== 'undefined') window.removeEventListener('focus', onWatchVisibility);
+  watchListening = false;
+}
+
+/** Count one more reader of `url`'s scope; the returned function un-counts it. */
+function watchDraftScope(url: string): () => void {
+  watchedDraftScopes.set(url, (watchedDraftScopes.get(url) ?? 0) + 1);
+  startWatching();
+  let counted = true;
+  return () => {
+    if (!counted) return;
+    counted = false;
+    const left = (watchedDraftScopes.get(url) ?? 1) - 1;
+    if (left > 0) watchedDraftScopes.set(url, left);
+    else watchedDraftScopes.delete(url);
+    if (watchedDraftScopes.size === 0) stopWatching();
+  };
+}
+
 export async function fetchPendingDrafts(
   packageId?: string | null,
 ): Promise<PendingDraftEntry[]> {
-  const data = (await readDraftsPayload(draftsUrl(packageId))) as
+  const data = (await readDraftsAnswer(draftsUrl(packageId))).payload as
     | Array<Record<string, unknown>>
     | { drafts?: Array<Record<string, unknown>>; data?: { drafts?: Array<Record<string, unknown>> } };
   const list = Array.isArray(data) ? data : (data?.drafts ?? data?.data?.drafts ?? []);
@@ -245,10 +407,15 @@ export function usePendingDrafts(opts: UsePendingDraftsOptions = {}): UsePending
       return;
     }
     void refresh();
-    return subscribeMetadataRefresh(() => {
+    const unwatch = watchDraftScope(draftsUrl(packageId));
+    const unsubscribe = subscribeMetadataRefresh(() => {
       void refresh();
     });
-  }, [refresh, enabled]);
+    return () => {
+      unsubscribe();
+      unwatch();
+    };
+  }, [refresh, enabled, packageId]);
 
   return { count, entries, refresh, behindSave: counted < saves };
 }
