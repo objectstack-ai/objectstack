@@ -19,7 +19,10 @@
  *    the Console's own post-sign-in `fetch` (`Accept: application/json`), a
  *    bearer API client, and a bare `curl`. Whether a request is a navigation is
  *    {@link isPageNavigation}'s answer, the one this package already gives the
- *    mobile sign-in hand-off, so the two doors cannot disagree about it.
+ *    mobile sign-in hand-off, so the two doors cannot disagree about it. By
+ *    that rule a script that sends `Accept: text/html` (and no Fetch Metadata
+ *    saying otherwise) is read as a navigation, and gets the redirect or the
+ *    page below, not the envelope.
  *  - **A page navigation whose `redirect_uri` is registered for the client**
  *    is sent back to that client, RFC 6749 §4.1.2.1: `302` to the
  *    `redirect_uri` with `error=access_denied`, an `error_description`, the
@@ -28,7 +31,8 @@
  *  - **A page navigation with no such `redirect_uri`** gets a readable `403`
  *    HTML page: the sentence, the account it is signed in as, and two
  *    actions: switch account (the provider's own RP-initiated logout,
- *    `/oauth2/end-session`) and back to the console.
+ *    `/oauth2/end-session`) and back to the console. The page is in English
+ *    only; it does not read `Accept-Language`.
  *
  * ## Which `redirect_uri` is followed
  *
