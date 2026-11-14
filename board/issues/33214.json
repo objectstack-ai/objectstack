@@ -1,0 +1,30 @@
+{
+  "number": 33214,
+  "kind": "issue",
+  "title": "hooks: the refusal catalogue (`refusals`) cannot translate a handler-authored hook's refusals, and holds one sentence per code — a TS hook has no way to refuse in the user's language",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T03:52:25Z",
+  "updated_at": "2026-11-14T04:49:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33214",
+  "body": "Found by a downstream app on the published 18.4.0 packages (downstream card: steedos-labs/os-project-blackcat-crm#51, held on this one). Present on `main` at `64551047`.\n\n## Symptom\n\nAn app's business hooks refuse writes with `VALIDATION_FAILED` / 400 and an English sentence (plan submit gate, locked order fields, locked rating facts, second primary plant). Under `Accept-Language: zh-CN` the user reads English. The platform's declared mechanism — `HookSchema.refusals` plus `hooks.HOOK.refusals.CODE.message` in the language packs — does serve the translated sentence with the envelope unchanged (measured downstream with a `body` hook: 400, `VALIDATION_FAILED`, zh-CN `error` / `userMessage`), but it is out of reach for the ordinary authoring form:\n\n1. `os validate` refuses `refusals` on a hook authored as a `handler` (`packages/spec/src/data/hook-refusal-codes.ts:204`: \"`refusals` is answered only for a sandboxed `body` (`language: 'js'`) …\"), although `os build` itself lowers an inline TS handler to a `js` body. The remedy it gives — hand-write the hook as an untyped JS string with hand-maintained capabilities — trades away type checking for a translation.\n2. The catalogue holds one sentence per code per hook. A gate with several distinct refusals of the same class (five in one plan-compute hook) must invent codes, and an invented code goes on the wire as `VALIDATION_ERROR` with `declaredCode`, changing the public envelope; sentences take no parameters, so one naming the current state cannot be catalogued.\n\n## Suggested fix shape (for the lane to judge)\n\nAccept `refusals` on a handler-authored hook the build lowers (judge it on the lowered body), and let a refusal be keyed below the code (a per-throw message key under one wire code), with optional parameters — so a TS hook can refuse in the user's language without changing its authoring form or its wire code.\n\nDedupe: `is:issue hook refusals handler` (181 hits, none on handler-form or per-code multiplicity; nearest open #30806 is unrelated naming work). **New.** Dedupe words: hook refusals handler lowered · refusals catalogue in-process handler · per-throw refusal message key · hook refusal translation."
+}

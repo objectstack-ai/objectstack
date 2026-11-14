@@ -13,20 +13,18 @@
   "labels": [
     "area:devpath",
     "domain:server",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T16:14:52Z",
-  "updated_at": "2026-11-14T00:51:33Z",
+  "updated_at": "2026-11-14T05:49:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 8,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33131",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ① product defects with named locations, filed as one checklist card per #32997's follow-up rule (one closing card per landed PR, not one per item). Carried from #32613 / PR #33126 (review 6858448985, M1/S1/S2) by `epic:#31527#2` (6858471472). PR #33126 is scoped to the two types its card names (flow, action); this card holds the rest of the same ADR-0150 D4 step: **a second holder's declared override is served, judged against every shipper.**\n\n## Checklist\n\n- [ ] **1. The six sealed served-override types** (`servesSealedOverrideRow`: page, app, dataset, doc, book, mapping) still judge a declared override against `packagedArtifactOwner` alone, so the **second** holder's `.custom` override is declined. `dataset` and `mapping` are reachable today, since they have been per-namespace since #31700; `mapping`'s by-name read is the import door's. Judge them against every shipper (`someShipperOf`, as PR #33126 and PR #33129 do).\n- [ ] **2. The env-wide list filter for the other overlay types** (dashboard, report, email template, …), where two packages ship a name and one serves a declared override. **Not measured on `main`.** Measure first, and fix only if it drops the second holder's override.\n- [ ] **3. The action registry-reader face:** the hydrator registers an action override row under the bare name with the envelope `lookupArtifactItem` answers for the pair's id, while `getArtifactItem` falls to the first shipper's composite. `main` behaves the same (no regression), but nothing pins it. Add the pin, and the fix if the pin shows a wrong reader.\n\n- [ ] **4. A declared App-pair row served at another package's address** (added by triage 2026-11-13 evening, measured by `epic:#31527#2` on #32561, comment 6863197549, on `main` and on PR #33148's head `72c8a9c8` alike). Module W depends on App A and on X and holds `de-DE`. `A.custom` stores a `de-DE` row declaring X, and X is refused at both the item door and the package door. Then `?package=W&member=de-DE` serves the row declared for X (stamped W), and W's list and execution list carry it, while the registry item at W is W's own and `overlayRowBinding` answers no package. `?package=X` refuses 409 naming W. The row is declared, so #33148 (undeclared pair rows) does not cover it. The save door and a cold boot were not probed. Same red-line-2 family as item 3: one package's address serves a row declared for another. Weight p3 (the wrong translation row is shown; rare configuration), so do it **last**.\n\n- [ ] **5. A sole owner's exact address serves an undeclared App-pair row that its lists leave out** (added by triage 2026-11-13 evening; red-line read 6865563363 on PR #33148 / #32561 measured it on `main` and on head `dd283faf` alike, in both registration orders). Package X holds a name only through its own stored row in the bare slot, with no composite slot. Then `?package=X&member=de-DE` serves the App's undeclared pair row (bound to X as the sole owner), while X's list and execution list leave it out. This is a list-versus-exact-read disagreement, the class this card closes elsewhere. Weight p3 (rare shape; a translation row), done after item 4.\n\n## Why it matters\n\nAn admin who customises the second-registered package's dataset or import mapping finds the customization declined, while the same act on the first package works. This needs two namespaces shipping one name.\n\n## Reader\n\n`domain:server`. ADR-0150's red lines apply. Pins should cover both registration orders, each holder disabled in turn, and one-holder controls, as PR #33126 does.\n\n## Dedupe\n\n`servesSealedOverrideRow`: 0 open. `second holder override declined`: #32613 / #32552 only (their own types). `packagedArtifactOwner`: 0 open.\n\n"

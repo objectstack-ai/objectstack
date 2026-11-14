@@ -13,20 +13,18 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T00:31:17Z",
-  "updated_at": "2026-11-14T01:53:24Z",
+  "updated_at": "2026-11-14T06:10:26Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33181",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ④ a child of the topic card objectstack-ai/cloud#4465 (the maintainer's rulings 1-10 of 2026-11-13/14 are recorded there; read it first). \n\n## 维护者速读\n\n托管环境的「设置 → 用户」可以直接加人或导入 CSV，同时填好岗位、权限集和上级。这些人先以「待激活」状态存在，没有密码，只能通过云端登录，种子数据和审批流马上就能指向他们。加人、停用、恢复时，框架会通知宿主（托管时就是云端）。\n\n## Work (objectstack-ai/cloud#4465, child 1a; execution terms \"Environment\")\n- Add a dedicated door that does not depend on the better-auth admin plugin. On Free and Team hosted kernels that plugin mounts only with SCIM (`auth-manager-plugin-list.ts:211`), and `admin/import-users` answers 501 there (`auth-plugin.ts:4604`).\n- The door accepts email, name, position, permission sets and manager; CSV import reports per-row results.\n- Give the pending marker its own value, never `env_native`: `set-user-password` admits `env_native` rows (`admin-user-endpoints.ts:1120-1136`). Every password door refuses the pending marker.\n- First platform-SSO sign-in binds to the pending row (`implicit-account-linking.ts`). Confirm by a run whether `email_verified` is needed; `requireLocalEmailVerified` is deprecated.\n- Add a host seam on create, deactivate and reactivate, so a host can forward an invitation or a removal. The cloud implements it (cloud card C4).\n- Reword the managed-mode 409 messages from objectstack#25083 (\"Invite them from the organisation in the cloud console\").\n- The pending marker coexists with `idp_provisioned` and SCIM adoption (#32148). There is no fan-out.\n- Measure first: does today's deactivation (`admin/ban-user`) answer on a Free hosted kernel? If not, add a deactivation door here.\n\nSuggested `priority:p1` (the maintainer: core onboarding flow). Routing: triage (`domain:server`).\n\n`priority:p1` on the maintainer's word, verbatim (seat session `session_01Q4EjjPP1zuWBNq3nBXVei9`, 2026-11-14): 「都是p1，车道自己认领就可以」. Triage routes it to its lane; the lane claims it."

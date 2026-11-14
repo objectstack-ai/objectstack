@@ -2,8 +2,8 @@
   "number": 32607,
   "kind": "issue",
   "title": "metadata-protocol: a name held only by stored rows of two enabled packages answers the bare read by save order while /layers refuses 409 (ADR-0150 D3)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T07:40:26Z",
-  "updated_at": "2026-11-14T00:33:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T05:38:13Z",
+  "closed_at": "2026-11-14T05:38:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 14,
   "locked": false,

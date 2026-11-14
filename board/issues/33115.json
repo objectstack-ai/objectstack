@@ -1,7 +1,7 @@
 {
   "number": 33115,
   "kind": "issue",
-  "title": "[PM seat] review — 🟢 os-tesla · 由 os-tesla 账户的项目负责",
+  "title": "[PM seat] review — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T14:23:05Z",
-  "updated_at": "2026-11-13T14:25:49Z",
+  "updated_at": "2026-11-14T04:42:47Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
   "comments": 0,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33115",
-  "body": "review#1 · os-tesla · session_01L9qibzosF5fZk98UHos9cv\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 1**, the first review seat post: no predecessor brief, no inherited ledger. Posture and round ledger live in the project.\n\n## Current PM — 🟢 os-tesla\n\n- **Holder:** `os-tesla` (`GET /user`) · `session_01L9qibzosF5fZk98UHos9cv` · seated 2026-11-13T14:25Z on the maintainer's summons 「开一个 review 车道，负责契约复审」.\n- **Patrol:** `trig_01A7MpSRD4xhxmN5Nza2PT9h` · `24 * * * *` (hourly: the owed list's trigger (b) is a 60-minute reading; a fire with no TAKE row ends at once).\n- **Mailbox:** PR #33116 (head `claude/project-thread-tedolz`), subscribed by this session.\n- **Takeover:** `/pm-dispatch review`, then read this post first.\n\n## What this seat takes\n\n- The owed list is `node scripts/pm/check-owed-reviews.mjs`: a TAKE row with no record and no live claim on its current head, and a `Request: contract-review` knock on the mailbox.\n- Independence (`lanes/review.md`): this seat is on `os-tesla`, so it takes no PR that account dispatched or implemented; those stay with their lane seats. Every other account's owed head is in scope.\n- ⛔ Never the Version Packages PR. ⛔ No merge, no ready, no dispatch, no grading: review records, claim lines and doorbells only.\n\n## Hot-file serial queue\n\n- None: this seat writes no code and opens no PR other than its mailbox.\n\n## Notes\n\n- Write path: the relay (`issue-create.mjs`, `post-stamped.mjs`, `label-write.mjs`, `mailbox-open.mjs`). ⛔ No GitHub MCP writes.\n"
+  "body": "review#1 · os-tesla · session_01L9qibzosF5fZk98UHos9cv\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 1**. Posture and round ledger live in the project.\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-tesla` · `session_01L9qibzosF5fZk98UHos9cv` · seated 2026-11-13T14:25Z, signed off 2026-11-14T04:41Z.\n- **Why:** the maintainer's words, 2026-11-14T04:35Z 「所有座位当前任务处理完，合并后就下班」 and 04:36Z 「契约复审暂停」. Contract review on this seat is paused by the maintainer; a successor sits only on the maintainer's summons.\n- **Patrol:** none. `trig_01A7MpSRD4xhxmN5Nza2PT9h` was stopped at sign-off.\n- **Mailbox:** PR #33116, closed at sign-off. A successor opens its own.\n- **Takeover:** `/pm-dispatch review`, then read this post first.\n\n## Hand-over ledger\n\n- `check-handover.mjs --session=session_01L9qibzosF5fZk98UHos9cv --account=os-tesla` answered clear at sign-off: no unreleased claim, no decision outside the inbox. This seat dispatched nothing and holds no card.\n- **Owed, one item: PR #33182** (card #32607, seat `epic:#31527#2`, mailbox PR #32972). Records: FAIL 6868755969 on `5d3a6c75`, delta PASS 6870642184 on `2eb2f7c258509846fc2659aaa96e2ba586d3c0e8`. The head then moved to `f20d249baf18db795aaaf2edb6bb601da64539f9`, a merge of `main` at `67274aca`. This seat posted claim 6871671735 on that head and **no record**. The claim is withdrawn by this line and lapses by its own clock as well. The delta on that head goes to the next reviewer (`lanes/review.md`: the next review seat takes the delta of a signed-off seat's record and its hand-over line names record 6870642184).\n- Reading notes for that reviewer, information and not a record: the merge commit's tree equals what `git merge-tree` writes for its two parents, and the PR's diff against the new merge base has the patch id of the diff record 6870642184 read. The check-runs on `f20d249b` had not all concluded at 04:26Z, none failed then. Nothing was run by this seat.\n- Flags record 6870642184 left with `epic:#31527#2` stand as written there (`Fixes #32607` with sub-issue #32663 open, two residuals owing cards).\n- Every other PR this seat PASSed is merged: #33108, #33121, #33124, #33126, #33129, #33130, #33148, #33149. The owed list at 04:24Z showed no other stale record of this seat.\n- Scope notes for a successor on `os-tesla`: the maintainer ruled 2026-11-13T22:18Z that this seat reviews other accounts' PRs only, so rows the owed list prints as barred are not taken. ⛔ Never the Version Packages PR #33097.\n\n## Hot-file serial queue\n\n- None: this seat writes no code and opens no PR other than its mailbox.\n\n## Notes\n\n- Write path: the relay (`issue-create.mjs`, `post-stamped.mjs`, `label-write.mjs`, `mailbox-open.mjs`). ⛔ No GitHub MCP writes.\n"
 }

@@ -11,18 +11,20 @@
     "type": "Bot"
   },
   "labels": [
+    "domain:server",
     "enhancement",
+    "pm:queue",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T02:06:09Z",
-  "updated_at": "2026-11-14T02:06:09Z",
+  "updated_at": "2026-11-14T02:47:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33203",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ④ a child of the topic card objectstack-ai/cloud#4465, ruling 10 (hosted has no local break-glass admin; no local password for anyone), from the dev of objectstack-ai/cloud#4468 (PR objectstack-ai/cloud#4477).\n\n## 维护者速读\n\n托管上已经不允许任何人用本地密码登录。但框架里还有几处入口和提示仍在暗示可以设本地密码：\n- 「给环境用户设密码」这个接口；\n- 关于平台管理员应急密码的说明文字；\n- 环境首页那条「设置备用密码」的横幅。\n\n这些在托管上都应该关掉或不再显示。\n\n## Work\n\nOn a managed (cloud-managed) environment:\n- `plugin-auth` `cloud-managed.ts`: `CLOUD_MANAGED_REFUSAL_MESSAGES.setInitialPassword` / `setUserPassword` keep a platform-admin break-glass and `env_native` passwords. Refuse `set-user-password` on `env_native` rows too, and reword the messages so they promise no break-glass.\n- The environment home's \"set a backup password\" banner (cloud#2430) is not shown.\n- Self-hosted deployments are unchanged: they keep local admins.\n\nThe cloud already refuses password sign-in and its own `set-initial-password` twin on hosted (PR objectstack-ai/cloud#4477). This card aligns the framework's doors and copy, so nothing promises a password that hosted refuses.\n\n`priority:p1` on the maintainer's word, verbatim: 「都是p1，车道自己认领就可以」. Triage routes it; the lane claims it."

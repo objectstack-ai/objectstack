@@ -1,0 +1,31 @@
+{
+  "number": 33219,
+  "kind": "issue",
+  "title": "SCIM connection credentials: clicking a row opens a record page that always fails (OBJECT_API_METHOD_NOT_ALLOWED, apiMethods list-only), and record_header Revoke is unreachable",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T04:55:03Z",
+  "updated_at": "2026-11-14T05:45:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33219",
+  "body": "director#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\n\nFiling gate: ① a defect with a named producer. The account owner found it on staging during cloud#4384 row 15 (SCIM with Okta), and the seat reproduced it.\nReader: the `domain:ui` lane (console list → record navigation for objects whose data API is list-only), together with the `sys_scim_connection_credential` author in `platform-objects`. `priority:p2`. Triage decides.\nDedupe (open and closed, objectstack): `sys_scim_connection_credential get not allowed` 3 hits (#30958 mint door, #30959 group push, #3653 rc migration), none about the record page. `OBJECT_API_METHOD_NOT_ALLOWED record` 30 hits; the nearest is #32444 (inbox New form, a different object and surface).\n\n## 维护者速读\n\n在 Setup →「SCIM 连接凭据」里签发凭据后，点开列表里这一行，详情页报错「无法加载此记录」。这个对象被设计成只能列表（不能单条读取，出于安全考虑），但控制台照样让人点进详情页。另外，「撤销凭据」按钮也放在详情页顶部；详情页打不开，那个入口就是死的。列表行菜单里的撤销还能用。\n\n## Measured (staging test1016 `os-4e4qa4`, Enterprise, cloud PR #4415 head `153d10ca`, objectstack 18.4.0, 2026-11-14)\n\n1. Setup → SCIM 连接凭据 → 签发凭据 (connection `okta-staging`, organization test1016) → the token dialog appears, and the row lists.\n2. Clicking the row opens the record drawer `…/sys_scim_connection_credential?recordId=<id>`, which shows **无法加载此记录** — \"API operation 'get' is not allowed on object 'sys_scim_connection_credential'\" — `OBJECT_API_METHOD_NOT_ALLOWED`, with a 重试 button that can never succeed.\n\n## Why\n\n`packages/platform-objects/src/identity/sys-scim-connection-credential.object.ts` declares `enable.apiMethods: ['list']` (~L320) on purpose: \"the data API stays list-only\" (~L61). Yet:\n- the console's list view links each row to the record page, which reads with `get`;\n- `revoke_scim_credential` declares `locations: ['list_item', 'record_header']` (~L158), and the `record_header` placement is unreachable.\n\n## Fix direction\n\n- Have the console honour `apiMethods`: when `get` is not served, a list row does not navigate, or it opens a read-only drawer built from the list row's own fields.\n- Have the object's `record_header` placement either dropped, or served by a list-row-backed drawer.\n- A lint or spec check: an object whose `apiMethods` exclude `get` does not declare `record_header` actions or record pages.\n\n## Acceptance\n\n1. Clicking a SCIM credential row no longer lands on an error. It either does nothing or shows the row's listed fields.\n2. Revoke stays reachable from the row menu.\n3. A test pins that list-only objects are not navigated to a `get` page."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 33206,
+  "kind": "issue",
+  "title": "seed: a seed write carries no organization in its execution context, so a system hook that pins the writer's organization computes nothing for seeded rows",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T02:31:27Z",
+  "updated_at": "2026-11-14T06:12:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33206",
+  "body": "Found while converting a downstream app's demo book to standard seeds on the published 18.4.0 packages (downstream card: steedos-labs/os-project-blackcat-crm#55, its order half is held on this). Present on `main` at `64551047`.\n\n## Symptom\n\nA seeded order row lands, organization-stamped, but the app's system hooks that derive data from it compute nothing: the plan-recommendation hook creates an empty \"recommended\" plan, and every plan's margin and verdict stay `null`. The same order created through the API by a user computes correctly (control).\n\n## Producer\n\n- `packages/spec/src/kernel/execution-context.zod.ts:735` — `SEED_WRITE_EXECUTION_CONTEXT = { isSystem: true, skipTriggers: true, seedReplay: true }`: no `organizationId`, although the loader knows the organization it loads for (`SeedLoaderConfig.organizationId`) and stamps it on every row it writes.\n- A hook that runs `runAs: 'system'` and pins its reads/writes to the caller's organization (the multi-tenant rule apps are taught: a system hook scopes to `ctx`'s organization, never across orgs) therefore reads nothing in the seed context: no plants, costs or freight rows are visible to it, so it derives nothing.\n\n## Why it matters\n\nAny app whose sample data includes rows that system hooks enrich (recommendations, roll-ups, derived verdicts) cannot ship that data as a standard seed. It has to stay in an app-side script that writes through the API, which is exactly what a seed is meant to replace, and such a script does not run on a hosted install with sample data.\n\n## Suggested fix shape (for the lane to judge)\n\nThe seed loader passes the organization it is loading for into the write context (`{ ...SEED_WRITE_EXECUTION_CONTEXT, organizationId }`) on every org-scoped load (boot under `single`, per-organization replay, install, reseed), so a system hook sees the same organization the row is stamped with. A load with no organization keeps today's context.\n\nDownstream evidence (steedos-labs/os-project-blackcat-crm PR #59 report): seeded `crm_cb_order` rows → recommended plan `plan_kind: manual` with no lines, every plan `margin: null`, `verdict: null`; the same orders placed through the API → 11/11 plans match the workbook.\n\nDedupe: `is:issue SEED_WRITE_EXECUTION_CONTEXT` (10 hits, none on the organization; nearest #21646, `created_at` overwritten in the seed context). **New.** Dedupe words: seed execution context organization · seedReplay organizationId hook · system hook org pin seed."
+}

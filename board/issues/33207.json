@@ -1,0 +1,30 @@
+{
+  "number": 33207,
+  "kind": "issue",
+  "title": "seed: on an organization-scoped load a reference to sys_user (owner_id: NAME) never resolves — the reference probe adds organization_id to a tenant-less object and swallows the refusal",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T02:31:37Z",
+  "updated_at": "2026-11-14T06:11:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33207",
+  "body": "Found while converting a downstream app's demo book to standard seeds on the published 18.4.0 packages (downstream card: steedos-labs/os-project-blackcat-crm#55). Present on `main` at `64551047`.\n\n## Symptom\n\nOn a per-organization replay or a sample-data reseed, a seed record that names a person (`owner_id: 'Zhang Wei (Rep)'`) never resolves, **even when that user exists** with exactly that name. The load reports `Deferred reference unresolved after pass 2` for every such reference, and the rows land owned by the installer / platform owner instead of the named person. On the single-tenant boot seed (no organization on the load) the same reference resolves (control).\n\n## Producer\n\n`packages/metadata-protocol/src/seed-loader.ts`, `resolveFromDatabase` (the external-key probe loop, ~line 1805 onward):\n\n```ts\nconst where: Record<string, unknown> = { [probeField]: value };\nif (organizationId) where.organization_id = organizationId;   // applied to EVERY target object\nconst records = await this.engine.find(targetObject, { where, … });\n…\n} catch {\n  // Target object (or this probe's column) may not exist — try the next probe\n}\n```\n\n`sys_user` is tenant-less (no `organization_id` column; identity lives above the organization, membership in `sys_member`). The SQL driver refuses the unknown column (`Find operation failed object sys_user … names a column the database could not resolve`), the bare `catch` swallows it as \"try the next probe\", every probe fails the same way, and the reference stays unresolved.\n\n## Why it matters\n\nHosted sample data can never be dealt to named people: even if the people are provisioned first (by an admin import, or once objectstack-ai/objectstack#33113 is ruled), every owner reference in an org-scoped load resolves to nobody. It also hides the cause — the warning says \"unresolved\", not \"the probe was refused\".\n\n## Suggested fix shape (for the lane to judge)\n\nApply the organization filter only to targets that carry tenancy (the platform's tenancy table already adjudicates each platform object, cf. #14570); for a tenant-less identity target such as `sys_user`, scope instead through membership in the load's organization (`sys_member`), so a cross-org person is still never borrowed. And narrow the `catch` so a refused probe is reported as a refusal, not silently treated as \"no match\" (same family as #9071, closed, where the probe queried a column the target did not have).\n\nDownstream evidence (steedos-labs/os-project-blackcat-crm PR #59, `test/carbon-demo-data.test.ts`): after signing up the demo people under the seeded names, `seed-replayer(org, { reseed: true })` reports 14 `Deferred reference unresolved after pass 2` for the owner references; the boot seed resolves the same names.\n\nDedupe: `is:issue resolveFromDatabase organization` (4 hits: #14570, #9071, #12753, #9165 — none on a tenant-less target under an org-scoped load). **New.** Dedupe words: seed reference sys_user organization_id · resolveFromDatabase owner_id · deferred reference unresolved replay."
+}

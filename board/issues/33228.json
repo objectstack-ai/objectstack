@@ -1,0 +1,30 @@
+{
+  "number": 33228,
+  "kind": "issue",
+  "title": "plugin-auth: the environment-user host seam cannot cancel a pending person's invitation, and has no durable retry or per-row invitation status",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T06:08:02Z",
+  "updated_at": "2026-11-14T06:45:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33228",
+  "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\nFiling gate: a maintainer-ruled execution term not yet built (objectstack-ai/cloud#4465, quoted on #33181 comment 6870710213); follow-up of #33181 / draft PR #33227. ⛔ Not a claim; triage sets the lane and grade.\n\n## What is missing\n\n#33181 adds pending, SSO-only people on a cloud-managed environment (`POST /admin/add-sso-user`, `POST /admin/import-sso-users`) and a host seam, the auth plugin's `environmentUserHost` option (`environment-user-host.ts`). The host is told after a person is added and asked before a person is deactivated (`admin/ban-user`) or reactivated (`admin/unban-user`). It can refuse with a typed `409` / `403`. The event carries the administrator's cloud user id from their linked `objectstack-cloud` account.\n\nTwo execution terms from the rulings that #33181 does not cover:\n\n1. **Cancel on delete.** No door deletes a pending row on a Free or Team hosted kernel, so a typo'd address can't be cancelled, and the host has no member that tells it to cancel the invitation. Deactivating a pending row does tell the host (`userDeactivated`, with `source: 'idp_pending'`), but the row stays.\n2. **Durable outbox with retry, and per-row invitation status.** Today the seam is one call per operation. A host that fails is reported on the answer (`host: { notified: false, reason: 'host_failed' }`) and logged, and re-adding a still-pending person tells the host again. Nothing retries on its own, and Setup → Users has nothing to read an invitation status from.\n\n## The rulings this follows\n\nRulings relayed on #33181, comment 6870710213 (objectstack-ai/cloud#4465). Execution terms for the environment, verbatim:\n\n> - A durable outbox with retry (mirror `sys_environment_revocation`), with per-row invitation status in Setup → Users.\n> - Deleting or deactivating a pending row cancels its cloud invitation (the email-typo case).\n> - No database transaction is held across the invite call. The cap calls back into the environment (`GET /_admin/environments/:id/ai-seats`, which fails closed with 503).\n\nEdge path, verbatim:\n\n> - **A pending row that never accepts:** it stays pending, can be re-sent, and can be deleted, which cancels the invitation.\n\n## What this card would decide and build\n\n- A pending-only remove door (for example `POST /admin/remove-sso-user`): platform-admin gated, cloud-managed only, refused for any row that is not `idp_pending`, removing the row with its grants and membership. Plus a host member (for example `userRemoved`) that cancels the invitation, with the same typed-refusal and fail-open rules as the other members.\n- Where the outbox lives. Either it's **host-owned**: the cloud enqueues into its own outbox when the seam calls it, and keeps the invitation status. Or it's a **framework object**: an environment-side outbox platform object mirroring `sys_environment_revocation`, with retry and a status Setup → Users reads. That choice is the maintainer's. The second option adds a platform object and a worker.\n- The Setup → Users status column and console entries stay with #33186 / #33187.\n\n## Seam\n\n`Seam: plugin-auth:environment-user-host.ts (EnvironmentUserHost) → cloud host (invitation create / cancel)`.\n\nDedupe words: `remove-sso-user`, `cancel pending invitation`, `environment user outbox`, `invitation status Setup Users`, `environmentUserHost retry`."
+}

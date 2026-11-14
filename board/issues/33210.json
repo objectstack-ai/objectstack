@@ -1,0 +1,31 @@
+{
+  "number": 33210,
+  "kind": "issue",
+  "title": "metadata-protocol: a package-less row beside two packages' rows of one name (no shipper) is served by store order on the plain read while /layers refuses — follow-ups of PR #33182 (#32607)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T03:04:23Z",
+  "updated_at": "2026-11-14T05:14:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33210",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ① a product defect with a named location, measured. These are the follow-ups of PR #33182 (#32607), named by review#1's PASS record 6870642184 (red-line-2 read). The PR does not move them; all are `main`'s. Carried by `epic:#31527#2` (6870658359). This is the one follow-up card for that PR (#32997 rule).\n\n## Checklist\n\n- [ ] **(a) A package-less row beside two packages' rows, with no shipper.** That is three rows and no single holder. The plain read that names no package serves one of them **by store order** (`rows.unbound`), while `/layers` refuses 409 naming both packages. The registry already binds such a row to no package (\"a customization of a name it cannot say whose\").\n  - **Not a decision card:** ADR-0150's red line 2, which the maintainer ruled on this epic, says ambiguity is reported, never guessed. Reading past the package-less row still leaves two holders, so both shapes end in the same answer.\n  - **The answer:** the plain read refuses 409 `RESOURCE_CONFLICT` naming both packages, exactly as `/layers` does, and never serves the package-less row in their place. A row with a single holder stays readable bare.\n- [ ] **(c) A question, measure first.** For a **row-held** base, the read naming no package at a dependent's added member serves the dependent's row (PR #33182's M2 pin). For a **shipped** base the same read answers 404 (#28802). One operation should not answer two ways (SKILL.md: two implementations that disagree resolve to one), so align the row-held base with the shipped base's 404 unless the measurement shows a reason they differ. If it does, write the reason on this card instead of changing it.\n\n- [ ] **(d) Text fix in the ADR-0087 entry PR #33182 added** (n3 of the merge-only delta record 6872223535, carried by `epic:#31527#2`, 6872234201). In `packages/spec/src/migrations/entries/semantic/18.two-row-holders-bare-read-refused.ts`, `reason` still says the read counts \"the registry's holders and the packages its active stored rows are bound to\". Since round 2, the registry's holders only help recognise a pair, as the changeset says. Make it say that. What the entry promises (409 naming each holder, and the `?package=` remedy) is right and stays. This is a one-line text fix, and it rides whichever PR takes (a).\n\n(b), one holder's layer chosen by save order, is folded into #32662 (the pair address after a reboot), as review#1 placed it. It is not tracked here.\n\n## Pins\n\nBoth save orders; a CONTROL with one holder plus a package-less row (unchanged); `/layers` and the plain read agree.\n\n## Reader\n\n`domain:server`, under ADR-0150's red lines. The free epic seat `epic:#31527#3` or the server lane may take it.\n"
+}

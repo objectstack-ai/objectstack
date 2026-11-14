@@ -1,0 +1,32 @@
+{
+  "number": 33212,
+  "kind": "issue",
+  "title": "Managed (cloud-hosted) environments: retire the framework's remaining local-password doors and the 'set a backup password' banner",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T03:48:20Z",
+  "updated_at": "2026-11-14T04:53:22Z",
+  "closed_at": "2026-11-14T04:53:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33212",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFound by the os-dev agent on objectstack-ai/cloud PR #4477 (the cloud card carrying the maintainer's ruling 10 on objectstack-ai/cloud#4465). Ruling 10, verbatim from that card: 「No hosted environment sets a local password for anyone, and existing owner break-glass passwords are invalidated.」 The cloud runtime now refuses password sign-in and its own `set-initial-password` twin on hosted environments. Two framework surfaces still promise a local password there.\n\n## Measured (by reading; reach not run)\n\n1. `packages/plugins/plugin-auth` `cloud-managed.ts`: `CLOUD_MANAGED_REFUSAL_MESSAGES.setInitialPassword` and `setUserPassword` keep a platform-admin break-glass and admit passwords on `env_native` rows on a managed environment. The full AuthPlugin's own set-initial-password door and `set-user-password` on `env_native` rows still accept a password. With hosted sign-in refusing passwords, these confer nothing, but the doors and their wording still promise a break-glass that ruling 10 removed.\n2. The environment home banner \"set a backup password\" (cited in the cloud repo's `objectos-runtime` `backup-password-sign-in.e2e.test.ts` header, cloud#2430) now promises a password that hosted refuses.\n\n## Change\n\n- On a cloud-managed environment, every local-password door refuses (one stable code, one message), and the break-glass wording goes. Self-hosted keeps local passwords and local admins (ruling 10).\n- The backup-password banner is not shown on a cloud-managed environment.\n- The maintainer ruled stored hashes are refused, not deleted (cloud#4465 D-3): delete nothing.\n\nNot in scope: the cloud runtime's own refusals (done in cloud PR #4477).\n\nCarrier: objectstack. Triage sets the lane and the level.\n\n<!-- signed: repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9 -->"
+}

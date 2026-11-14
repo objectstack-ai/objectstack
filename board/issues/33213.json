@@ -1,0 +1,30 @@
+{
+  "number": 33213,
+  "kind": "issue",
+  "title": "data: the duplicate refusal (\"A record with this value already exists\") ignores the request locale and never names the fields of a multi-column unique index",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T03:52:17Z",
+  "updated_at": "2026-11-14T04:48:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33213",
+  "body": "Found by a downstream app on the published 18.4.0 packages (downstream card: steedos-labs/os-project-blackcat-crm#51, held on this one). Present on `main` at `64551047`.\n\n## Symptom\n\n`POST /api/v1/data/crm_weekly_cost` with `Accept-Language: zh-CN`, duplicating a row of a unique index over `plant + carbon_grade + cost_week` → `409 UNIQUE_VIOLATION`, `error: \"A record with this value already exists\"` in English; the `developerMessage` already names the object by its zh-CN label (「周成本」), and a `VALIDATION_FAILED` required-field refusal on the same request locale comes back in Chinese — so the locale reaches platform text, but not this sentence. No field of the index is named, so the user cannot tell which combination collided.\n\n## Producer\n\n- `packages/types/src/data-error-classification.ts:1114` and `:1765` — the fixed English sentence; the field-naming form (\"A record with this LABEL already exists\", #26867) is reached only for a single-field unique with a `fieldLabel`.\n- `IndexSchema` (`packages/spec/src/data/object.zod.ts`) has `name`, `fields`, `unique` only: no message or label, so an app has no declared way to supply the sentence either.\n- Contract it misses: the objectstack-i18n skill's \"Server-Composed User Text\" — text the server addresses to the end user comes back in the request's locale.\n\n## Suggested fix shape (for the lane to judge)\n\nCompose the duplicate sentence in the request locale from the platform bundle, naming the index's fields by their translated labels (\"同一工厂、牌号、成本周次的周成本已存在\" shape), for single- and multi-field unique indexes alike.\n\nDedupe: `is:issue UNIQUE_VIOLATION locale` (35 hits; nearest #26867 single-field naming, #24951 object API name — both closed, neither on locale or multi-field). **New.** Dedupe words: UNIQUE_VIOLATION locale · duplicate record message translation · composite unique index field names."
+}

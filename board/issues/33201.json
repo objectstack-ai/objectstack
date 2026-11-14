@@ -10,16 +10,20 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T01:57:04Z",
-  "updated_at": "2026-11-14T01:57:04Z",
+  "updated_at": "2026-11-14T02:46:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33201",
   "body": "domain:server#7 · os-tesla · session_01L9qibzKCovWpJoMZD6U3NT\n\nFiling gate: ① product defect, located by reading the code with its mechanism written down (reach: a named real producer, `driver-sql`'s widening arm, on every MySQL 8 database upgraded from a release that had the narrower key). Found by the red-line read of #33199 (round-1 design finding M4), declared there as a limit.\n\n## Business rationale\n\nWho: an operator running on MySQL 8.0.13+ who upgraded a database created before ADR-0150 widened three platform keys to carry the package. What breaks: the old, narrower unique key is never retired, so the database keeps refusing exactly what the widening exists to admit:\n\n- `sys_user_permission_set` (#32164): one user cannot hold two packages' permission sets of one name in one organization.\n- `sys_connector_connection` (#33199, #31699): one organization cannot connect two packages' connector instances of one name.\n- `sys_metadata_activation` (#31682): read from the same code; the activation ledger's MySQL guard takes the same functional form, so the ledger's old `(metadata_type, name)` key is kept too. Not measured.\n\nEach is unreachable while the phase-1 one-holder backstop keeps a name to one package, and becomes a refusal the user cannot get past (no prescription names it) once ADR-0150's narrowing lands for that type. SQLite, PostgreSQL, MariaDB 10.3+ and MongoDB retire the old key; a database created fresh on MySQL never has it. If not fixed: MySQL deployments silently keep phase-1 behaviour for these tables after the platform moves on.\n\n## Mechanism\n\n- The guard on MySQL is a UNIQUE key over a functional key part, the driver's hash-shadow digest, NULL for a packaged row (`packages/metadata-protocol/src/migrations/*-packageless-index.ts`, MySQL branch).\n- Introspection records that key part as an expression (`packages/drivers/driver-sql/src/sql-driver-introspection.ts`, the `EXPRESSION` branch of the MySQL statistics read).\n- `hasPartialUniqueGuard` (`packages/drivers/driver-sql/src/schema-drift.ts`) accepts only `partial === true` with no expressions, so the guard never counts, and `widenedUniqueReplacements` keeps the old key (`kept`), with no plan op ever offered.\n- Pinned as the declared limit in `packages/drivers/driver-sql/src/sql-driver-widened-connection-key.test.ts` (MySQL cell: no index op, a second package's row refused).\n\n## Acceptance\n\n- `driver-sql` recognises the platform's MySQL functional-digest guard (the digest expression over exactly the narrower columns, NULL when the gained column is non-null) as a partial unique on those columns, so the arm plans the same safe `replace_unique_index` as on PostgreSQL.\n- The MySQL cells of the three widened-key suites flip from the declared limit to the replace; MariaDB unchanged.\n- The declared-limit sentences go (changesets of #32164 and #33199 are released text; the new changeset says FROM kept TO retired, plus `content/docs/deployment/cli.mdx` \"Runtime-owned indexes apply builds\").\n\n## Who acts\n\nThe server lane's `driver-sql` owner, as one PR after #33199 lands (it adds the connection table's MySQL cell this card flips). Not folded into #31699: it is a driver change across three tables.\n\n## Duplicate search\n\n`gh api search/issues` over this repo, issues: `hasPartialUniqueGuard` 2 hits (#31699, #32164, neither tracks it); `MySQL functional key part guard` 26 (#31732 is the MongoDB analogue, closed; none for MySQL); `widening arm MySQL` 228, first page none; `packageless MySQL expression` 4, none."

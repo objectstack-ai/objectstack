@@ -1,0 +1,30 @@
+{
+  "number": 33211,
+  "kind": "issue",
+  "title": "fix(deps): hono 4.13.12 → 4.13.16 and @hono/node-server 2.1.5 → 2.1.6 — seven public advisories fail the scheduled OSV audit on main",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T03:45:37Z",
+  "updated_at": "2026-11-14T06:12:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33211",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ① a defect with a named producer, measured: the scheduled `Validate Dependencies` run 43549452164 (job 132308268047, step \"Audit dependencies for known vulnerabilities (OSV-Scanner)\") failed on `main` at 2026-11-14 03:01Z.\n\n## What the scanner reports (public advisories, `pnpm-lock.yaml`)\n\n| Package | Locked | Fixed in | Advisories |\n|---|---|---|---|\n| `@hono/node-server` | 2.1.5 | 2.1.6 | GHSA-jpvv-r467-5p4w, GHSA-qv5m-9pm6-hqp3 (CVSS 5.3 each) |\n| `hono` | 4.13.12 | 4.13.16 | GHSA-3gg2-335m-rxc6 (3.4), GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-4m76-xfj5-7975, GHSA-h7mg-cq63-vhpq (5.3 each) |\n\nThat is 0 critical, 0 high, 6 medium and 1 low; all seven have a fixed version. The one existing exemption in `osv-scanner.toml` is unrelated and still valid.\n\n## Why it matters\n\n`hono` and `@hono/node-server` are the HTTP stack every deployment runs (`plugin-hono-server`, `adapters/hono`), and 18.4.0 ships these versions. The scheduled audit stays red until the lock moves.\n\n## Do\n\n- Bump both to their fixed releases (patch-level), regenerate `pnpm-lock.yaml`, run the server and REST suites, and run a dogfood boot once.\n- **Do not add exemptions** to make the audit green. The fixes exist. Exempt only an advisory with no fix, with an `ignoreUntil` and an advisory link, as the ledger requires.\n- Add a patch changeset for the packages that pin them.\n\n## Reader\n\n`domain:server` (the HTTP stack). Precedent: PR #33066 (fast-xml-parser onto its fixed release, with the OSV ledger kept clean)."
+}

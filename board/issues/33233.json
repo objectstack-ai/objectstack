@@ -1,0 +1,26 @@
+{
+  "number": 33233,
+  "kind": "issue",
+  "title": "runtime: seed settlement is not observable over HTTP — /health and /ready answer \"ready\" while the boot seed is still writing, and the banner's promised seed result is logged only at info level",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T07:51:52Z",
+  "updated_at": "2026-11-14T07:51:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33233",
+  "body": "Found by a downstream app on the published 18.4.0 packages (steedos-labs/os-project-blackcat-crm#78, PR #82: a demo loader run from a second terminal placed orders before the seed had landed and costed 8 of 11 plans wrongly).\n\n## Symptom\n\nOn `os dev` with an empty DB:\n- `GET /api/v1/health` and `GET /api/v1/ready` answer `200 { status: ready, state: running }` from ~31 s, every second, while the inline boot seed is still writing in the background (measured: seeded customers land ~42–47 s, certifications and ratings ~99–120 s) and after it finishes — nothing distinguishes the two.\n- Seed settlement is announced only over the `os dev` IPC channel (`serve.js` `announceSettled` → `process.send('objectstack:seed-settled')`), so a script or test in another process has no HTTP way to know when seeding is done.\n- The CLI banner says seeding \"continues in the background; its result prints after this banner\" (`cli` `utils/format.js` ~1169), but the result is logged only at info level (`[Seeder] Data seeding complete.`, runtime `dist/index.js` ~21186); at the default log level nothing appeared in the 150 s after the seed landed.\n\n## Why it matters\n\nEvery app that ships a demo/setup script, an e2e suite or a cloud health check against a fresh environment has to poll its own seeded row counts to know the data is there — a per-app reimplementation of a fact the runtime already knows.\n\n## Suggested fix shape (for the lane to judge)\n\nExpose seed settlement over HTTP (e.g. `/ready` reports `seed: pending | settled | failed`, or a dedicated readiness probe that waits for it), and print the seed result the banner promises at the level the banner implies.\n\nDedupe words: seed settlement http · ready seeding in flight · seed-settled ipc only · seed result banner info level."
+}

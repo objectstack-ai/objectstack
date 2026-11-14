@@ -2,8 +2,8 @@
   "number": 33158,
   "kind": "issue",
   "title": "Studio Access hides SuggestedBindingsPanel on read-only packages, so a marketplace app's pending default permission set (HotCRM crm_user) has no UI door to accept or dismiss",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T22:42:29Z",
-  "updated_at": "2026-11-14T01:41:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-14T03:13:58Z",
+  "closed_at": "2026-11-14T02:32:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

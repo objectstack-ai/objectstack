@@ -1,0 +1,30 @@
+{
+  "number": 33215,
+  "kind": "issue",
+  "title": "console: an action's `disabled` predicate is honoured in the record header but ignored on the same action's row button in a parent's related list (`record_related`)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T04:00:20Z",
+  "updated_at": "2026-11-14T04:50:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33215",
+  "body": "Found by a downstream app on the published 18.4.0 packages (steedos-labs/os-project-blackcat-crm PR #61, #46). Nothing downstream waits on this: the app dropped `disabled` and uses `visible` only.\n\n## Symptom\n\nAn action declared with `locations: ['record_header', 'record_related']` and a `disabled` predicate (with `disabledReason`) that evaluates **true** for a record:\n- in that record's **header**, the button renders disabled with its reason attached (`aria-describedby`) — correct;\n- on that record's **row in the parent's related list**, the same action's button renders **enabled** (`disabled=false`) and is clickable.\n\n`ActionSchema.disabled` is documented as \"shown but refused when it evaluates TRUE\", so the related-list row breaks the declared contract (the server-side gate still refuses the click, so this is a presentation defect, not a bypass).\n\n## Evidence (downstream, 18.4.0)\n\nPlaywright DOM probe on an earlier revision of PR #61: the order SO-2026-0001's Allocation Plans list rows had the action's button enabled for a plan whose `disabled` predicate was true; that plan's own record header showed the button disabled with its reason. Producer not pinned by the PM seat: the related-list row action path is under `ui/packages/plugin-detail/src/RelatedList.tsx` / `renderers/record-related-list.tsx` and `app-shell/src/views/RelatedRecordActionsBridge.tsx` (candidates, unverified); the header path evaluates `disabled` in `ui/packages/components/src/renderers/layout/containers.tsx` (~line 2034).\n\n## Suggested fix shape (for the lane to judge)\n\nEvaluate `disabled` (and attach `disabledReason`) for `record_related` row actions with the same evaluator the header uses, fail-closed on a faulting predicate as the header does.\n\nDedupe words: record_related disabled · related list row action disabledReason · row button not greyed."
+}

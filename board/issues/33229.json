@@ -1,0 +1,30 @@
+{
+  "number": 33229,
+  "kind": "issue",
+  "title": "ui: the derived record layout's ungrouped bucket has no header, so its fields read as part of the group above it — under a collapsed group they look hidden in that group",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T06:10:40Z",
+  "updated_at": "2026-11-14T06:46:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33229",
+  "body": "Found by a downstream app on the published 18.4.0 packages (steedos-labs/os-project-blackcat-crm#66; the app has since given its fields declared groups in PR #68, so nothing downstream waits on this).\n\n## Symptom\n\nOn a record page / drawer whose object declares field groups, fields with no `group` render in a section **with no header** after the last declared group. When that last group is collapsed (e.g. `crm_account`'s 「系统 / System」), the ungrouped fields sit directly under its collapsed header and read as its contents; users take them for system fields or miss them. Measured on `crm_account` in zh-CN: 基本信息 · 联系信息 · 归属与状态 · 财务信息 · 系统 (collapsed) · *(no header)* 业务线 | 国内/出口 | ….\n\n## Producer\n\n`packages/spec/src/data/field-group-layout.ts` `deriveFieldGroupLayout` pushes the trailing bucket `{ collapse: 'none', fields: ungrouped }` with no `key` / label (lines ~65–77 document \"Absent = ungrouped bucket\"), and the console renders it without a heading. The contract only says \"a default bucket after the declared groups\".\n\n## Why fix at the default\n\nEvery app that extends an object it does not own (an extension cannot declare `fieldGroups`) or leaves a field ungrouped hits it; asking each app to group every field to dodge a render default is the per-tile tax AGENTS.md-style rules ask to fix upstream.\n\n## Suggested fix shape (for the lane to judge)\n\nGive the ungrouped bucket a translatable default heading (e.g. \"Other\" / 「其他」, with a translation slot like the groups' `_sections` labels), or render it before the collapsed trailing groups; either way, never directly under a collapsed group without its own header.\n\nDedupe words: ungrouped bucket header · deriveFieldGroupLayout trailing section · collapsed field group headerless section."
+}
