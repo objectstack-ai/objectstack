@@ -1349,7 +1349,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // joins something, and what it joins is known only once every member has
     // been resolved: joins are registered lazily, by whichever member walks a
     // relationship path first, and an absorbed `$or` takes back the joins its
-    // branches registered. So the query is compiled once with bare base
+    // branches registered. So the query is compiled once with unqualified base
     // columns, and, when that compile registered any join, once more with
     // every base column qualified. The predicate is the hop resolver's own
     // answer for this query, never `cube.joins`: a cube that declares no join
@@ -1358,7 +1358,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // also declares `note` — "ambiguous column" on SQLite and PostgreSQL. Both
     // compiles walk the same members through the same resolver, so the second
     // registers the same joins; a statement that joins nothing is compiled
-    // once and keeps its bare columns.
+    // once and keeps its columns unqualified (quoted, #33138).
     let clauses = this.compileClauses(query, ctx, cube, false);
     if (clauses.joins.size > 0) clauses = this.compileClauses(query, ctx, cube, true);
     return this.assembleStatement(query, ctx, cube, clauses);
@@ -1756,8 +1756,8 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       // column that also exists on a joined table (e.g. base `status` vs joined
       // `account.status`) makes the SQL engine raise "ambiguous column name".
       // Qualify plain identifiers with the base table; leave SQL expressions
-      // and `*` untouched. A statement that joins nothing keeps bare columns,
-      // so its generated SQL is byte-for-byte unchanged.
+      // and `*` untouched. A statement that joins nothing writes the column
+      // unqualified, `"<column>"`.
       //
       // [#21249] "Joins something" is THIS statement's joins, as the hop
       // resolver registered them — `joins.qualifyBaseColumns`, set by
@@ -1765,8 +1765,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       // answers for the cube, not the statement: a cube declaring no join still
       // joins a lookup's declared `reference`, and its base columns were left
       // bare beside it.
-      if (joins.qualifyBaseColumns && /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawSql)) {
-        return `"${parentTable}"."${rawSql}"`;
+      //
+      // [#33138] A plain identifier is a column and is always QUOTED, joined
+      // or not. Left bare, a field whose name is a SQL keyword reached the
+      // statement as that keyword: a relationship field named `order`,
+      // `group` or `select` answered `500 DATABASE_ERROR` (`near "order":
+      // syntax error`), and on Postgres a bare `user` is `CURRENT_USER`, so a
+      // field named `user` would group every row under the database role.
+      // Quoting is what the joined form above already does, so a bare name
+      // means the same column in both statements.
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(rawSql)) {
+        return joins.qualifyBaseColumns ? `"${parentTable}"."${rawSql}"` : `"${rawSql}"`;
       }
       return rawSql;
     }

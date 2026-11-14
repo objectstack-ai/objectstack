@@ -3214,6 +3214,12 @@ export interface DeclaredWebhooksPort {
   list(): Promise<ReadonlyArray<{ name: string; packageId: string | null }>>;
 }
 
+/** The package a `sys_webhook` row's own definition names (`_packageId`), or `null`. */
+function ownPackageOf(row: Record<string, unknown>): string | null {
+  const def = webhookDefinition(row);
+  return typeof def?._packageId === 'string' && def._packageId ? def._packageId : null;
+}
+
 /** A `sys_webhook` row's `definition_json`, parsed, or `null`. */
 function webhookDefinition(row: Record<string, unknown>): Record<string, unknown> | null {
   const raw = row.definition_json;
@@ -3317,7 +3323,13 @@ async function runDeclaredWebhooks(run: Run): Promise<StepReport> {
         "deployment's own composition, then re-run.",
     ]);
   }
-  const declared = new Map((await run.opts.declaredWebhooks.list()).map((d) => [d.name, d.packageId] as const));
+  // [ADR-0150 D4/D8] Every holder of each declared name, never the one listed last.
+  const declared = new Map<string, Array<string | null>>();
+  for (const d of await run.opts.declaredWebhooks.list()) {
+    const holders = declared.get(d.name) ?? [];
+    if (!holders.includes(d.packageId)) holders.push(d.packageId);
+    declared.set(d.name, holders);
+  }
   const held = rows.filter((r) => declared.has(String(r.name)));
   summary.undeclaredKept = rows.length - held.length;
   if (summary.undeclaredKept > 0) {
@@ -3373,9 +3385,41 @@ async function runDeclaredWebhooks(run: Run): Promise<StepReport> {
     const name = String(row.name);
     const id = String(row.id);
     const def = webhookDefinition(row);
-    const packageId = (typeof def?._packageId === 'string' && def._packageId ? def._packageId : null) ?? declared.get(name) ?? null;
+    // [ADR-0150 D8] The activation row a customized copy writes names the
+    // copy's own package, else the name's one holder. Of a name two or more
+    // package holders declare, a copy that names no package names none of
+    // them: its row names no package, as the name-keyed switch it was — off,
+    // it keeps every holder with no row of its own off; on, it turns none on —
+    // and the run says so, naming each holder. When the environment is one of
+    // those holders, a row naming no package IS the environment slot's own
+    // switch, so writing it would pick the environment: nothing is written and
+    // the run reports the copy's switch, naming each holder. Never the first or
+    // last one listed.
+    const holders = declared.get(name) ?? [];
+    const ownPackage = ownPackageOf(row);
+    const packageId = ownPackage ?? (holders.length === 1 ? holders[0] : null);
+    const unnamed = truthy(row.customized) && ownPackage === null && holders.length > 1;
+    const ambiguous = unnamed && holders.includes(null);
+    const holderList = holders.map((p) => (p === null ? 'the environment' : `'${p}'`)).join(', ');
+    if (ambiguous) {
+      notes.push(
+        `${table} ${id}: a customized copy of the declared webhook ${name}, which ${holders.length} holders declare ` +
+          `(${holderList}), and its definition names no package. A switch row naming no package would be the ` +
+          `environment's own, so which holder the copy's switch (${truthy(row.active) ? 'on' : 'off'}) belonged to is ` +
+          'not decided here and no switch row was written. Switch each holder at its own address ' +
+          `(POST /api/v1/security/_activation/webhook/${name}?package=PACKAGE, no package for the environment).`,
+      );
+    } else if (unnamed) {
+      notes.push(
+        `${table} ${id}: a customized copy of the declared webhook ${name}, which ${holders.length} holders declare ` +
+          `(${holderList}), and its definition names no ` +
+          'package, so its switch is written as a row naming no package: switched off it keeps each holder with no row of ' +
+          'its own off, switched on it turns none on. Switch each holder at its own address ' +
+          `(POST /api/v1/security/_activation/webhook/${name}?package=PACKAGE).`,
+      );
+    }
     if (!truthy(row.customized) || isSwitchOnlyEdit(row)) {
-      if (truthy(row.customized) && (await setActivation(run, 'webhook', name, packageId, truthy(row.active)))) summary.activationRows++;
+      if (truthy(row.customized) && !ambiguous && (await setActivation(run, 'webhook', name, packageId, truthy(row.active)))) summary.activationRows++;
       summary.deliveriesResourced += await resource(id, `${DECLARED_WEBHOOK_REF_PREFIX}${name}`);
       await deleteCopy(row);
       orphaned.push(...secretIdsOf(row));
@@ -3398,11 +3442,12 @@ async function runDeclaredWebhooks(run: Run): Promise<StepReport> {
     );
     const [landed] = await sql.read(table, `SELECT ${q('name')} AS ${q('name')} FROM ${q(table)} WHERE ${q('id')} = ?`, [row.id]);
     if (text(landed?.name) !== clone) throw new Error(`The clone of the declared webhook ${name} (${id}) did not read back as ${clone}.`);
-    if (await setActivation(run, 'webhook', name, packageId, false)) summary.activationRows++;
+    if (!ambiguous && (await setActivation(run, 'webhook', name, packageId, false))) summary.activationRows++;
     summary.clones++;
     notes.push(
       `${table} ${id}: customized beyond its switch, so it is now the administrator's own webhook ${clone} (its ` +
-        `credentials and deliveries with it), and the declared ${name} is switched off.`,
+        `credentials and deliveries with it), and the declared ${name} is ` +
+        `${ambiguous ? 'not switched (see the note naming its holders)' : 'switched off'}.`,
     );
   }
 

@@ -231,10 +231,10 @@ describe('[#10413] the three doors on one dataset', () => {
     const svc = sqlService([OPPORTUNITY_METRICS]);
     const { sql } = await svc.generateSql({ cube: 'opportunity_metrics', measures: MEASURES });
     // Its own scope, as a whole-statement conjunct...
-    expect(sql).toContain('is_deleted = $');
+    expect(sql).toContain('"is_deleted" = $');
     // ...and one conditional aggregate per measure-scoped filter.
     expect(sql).toContain('THEN 1 END) AS "won_count"');
-    expect(sql).toContain('THEN amount END), 0) AS "won_amount"');
+    expect(sql).toContain('THEN "amount" END), 0) AS "won_amount"');
   });
 
   it('the DASHBOARD door answers the fully-declared numbers (it always did)', async () => {
@@ -326,7 +326,7 @@ describe('[#10413 phase 2] per-measure filters lower into the aggregation they b
     const svc = sqlService([OPPORTUNITY_METRICS]);
     const { sql } = await svc.generateSql({ cube: 'opportunity_metrics', measures: MEASURES });
     expect(sql).toContain('THEN 1 END) AS "won_count"');
-    expect(sql).toContain('THEN amount END), 0) AS "won_amount"');
+    expect(sql).toContain('THEN "amount" END), 0) AS "won_amount"');
   });
 });
 
