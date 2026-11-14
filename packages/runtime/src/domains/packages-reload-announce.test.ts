@@ -130,9 +130,9 @@ beforeAll(async () => {
             await manifest.register({ id: 'test.reload.identity', name: 'Identity', version: '1.0.0', type: 'plugin', objects: [SysUser, SysMember, SysOrganization] });
             await manifest.register(crmPackage);
             // The recorder: it only listens, and reads the registry as the announcement arrives.
-            (ctx as any).hook('metadata:reloaded', async (payload?: unknown) => {
+            ctx.hook('metadata:reloaded', async (payload?: unknown) => {
                 const changed = (payload as { changed?: unknown } | undefined)?.changed;
-                const registry = ctx.getService<ObjectQL>('objectql').registry as any;
+                const registry = ctx.getService<ObjectQL>('objectql').registry;
                 const held: Record<string, boolean> = {};
                 if (Array.isArray(changed)) {
                     for (const entry of changed) {
