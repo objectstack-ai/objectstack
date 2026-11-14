@@ -534,11 +534,12 @@ export class PackageServicePlugin implements Plugin {
             .digest('hex');
           // [#31530] The row's stamps, bound by this write, so the answer can
           // name the `created_at` it inserted without reading the row back.
-          // `updated_at` is the same instant to the millisecond, strictly after
-          // this process's previous write: it is what `latest` orders by.
-          const instant = nextPackageWriteInstant();
-          const stamp = packageRowStamp(instant);
-          const writeStamp = packageWriteStamp(instant);
+          // `updated_at` is this instant to the millisecond, moved on past this
+          // process's previous write when the clock has not: it is what
+          // `latest` orders by. `created_at` stays the wall clock's second.
+          const now = new Date();
+          const stamp = packageRowStamp(now);
+          const writeStamp = packageWriteStamp(nextPackageWriteInstant(now));
           // [#31530] The row's own `created_at` when `(id, version)` is already
           // stored: the upsert's update arm keeps it, so that is the value to
           // answer. `null` — no row, so the insert arm runs and binds `stamp`.

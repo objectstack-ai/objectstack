@@ -290,11 +290,11 @@ describe('[#31530] publish answers the row\'s version and created_at, from the w
     const byVersion = await svc.get('com.acme.crm-copy', '1.0.0');
     expect(byVersion?.created_at).toBe(first.createdAt);
     // The stored created_at holds the bound text, in the form the database used to write;
-    // updated_at holds the same instant to the millisecond (what `latest` orders by).
+    // updated_at holds the write's instant to the millisecond (what `latest` orders by).
     const [inserted] = db.prepare('SELECT created_at, updated_at FROM sys_packages').all() as Array<{ created_at: string; updated_at: string }>;
     expect(inserted!.created_at).toBe(first.createdAt);
     expect(inserted!.updated_at).toMatch(WRITE_STAMP);
-    expect(inserted!.updated_at.slice(0, 19)).toBe(first.createdAt);
+    expect(inserted!.updated_at >= first.createdAt!, 'the write stamp is not before the row\'s created_at').toBe(true);
 
     // An update of the same (id, version) keeps the row's created_at, takes the new updated_at,
     // and ANSWERS the created_at the row keeps — never the stamp it bound for the update.
@@ -333,7 +333,7 @@ describe('[#31530] publish answers the row\'s version and created_at, from the w
     }
   });
 
-  it.each(['mysql', 'sqlite'] as const)('%s: the created_at binding is the stamp the answer names; updated_at is that instant to the millisecond', async (dialectName) => {
+  it.each(['mysql', 'sqlite'] as const)('%s: the created_at binding is the stamp the answer names; updated_at is the write stamp, to the millisecond', async (dialectName) => {
     const calls: Array<{ sql: string; args?: unknown[] }> = [];
     const engine: any = {
       getDefaultDriverName: () => 'default',
@@ -355,7 +355,7 @@ describe('[#31530] publish answers the row\'s version and created_at, from the w
     const [createdAt, updatedAt] = upsert.args!.slice(5) as [string, string];
     expect(createdAt).toBe(out.createdAt);
     expect(updatedAt).toMatch(WRITE_STAMP);
-    expect(updatedAt.slice(0, 19)).toBe(out.createdAt);
+    expect(updatedAt >= out.createdAt!, 'the write stamp is not before the row\'s created_at').toBe(true);
     expect(out).toEqual({ success: true, version: '2.0.0', createdAt: expect.stringMatching(STAMP) });
   });
 

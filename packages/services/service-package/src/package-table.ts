@@ -66,7 +66,7 @@ export interface PackageTableStatements {
    * Insert-or-update of one `(id, version)` row; bindings: id, version,
    * manifest, metadata, hash, created_at, updated_at. [#31530] Both stamps are
    * bound — `created_at` as {@link packageRowStamp}, `updated_at` as
-   * {@link packageWriteStamp} of the same instant — so the writer knows the
+   * {@link packageWriteStamp} of {@link nextPackageWriteInstant} — so the writer knows the
    * `created_at` it inserted. An update keeps the row's `created_at` and takes
    * the bound `updated_at`, the stamp the `latest` reads order by.
    */
@@ -146,8 +146,9 @@ export interface PackageTableStatements {
  * Its stamp is {@link packageWriteStamp}: the same UTC text with milliseconds,
  * strictly increasing within a process ({@link nextPackageWriteInstant}), so
  * several writes within one second — or one millisecond — still order.
- * `created_at` keeps its whole-second form: the unmanaged-copy record ties to
- * it by string equality, and it says nothing about order any more.
+ * `created_at` keeps its whole-second, wall-clock form: the unmanaged-copy
+ * record ties to it by string equality, and it says nothing about order any
+ * more.
  *
  * Rows written before this kept the whole-second `updated_at` the database or
  * an earlier publish wrote, which an update has always refreshed, so a stored
