@@ -535,21 +535,29 @@ describe('after the boot: a hot install carries its holders without a restart (#
     }
   }, 60_000);
 
-  it('a hot upgrade over v1, which the running kernel still serves: no holder is left on a position the catalog does not serve', async () => {
+  it('a hot upgrade over v1, which the running kernel still serves: v1\'s position is withdrawn and its holder holds the new name at once; the CONTROL is untouched; a second identical upgrade moves no row', async () => {
     const k = await runningKernel();
     try {
       await seed(k.ql, 'sys_user_position', [holder('h1', 'u1', 'hot_sales_rep', 'org_a'), holder('h2', 'u2', 'hot_auditor', 'org_a')]);
+      expect(await k.served()).toEqual(expect.arrayContaining(['hot_sales_rep', 'hot_auditor']));
 
       await k.hotInstall('2.0.0');
 
-      // Measured: a re-register of an installed id withdraws nothing of the
-      // version before it, so `hot_sales_rep` still serves until the restart
-      // and the old name reads as still declared (no move); the boot after
-      // the restart carries it. Either way, no holder names nothing.
-      const served = new Set(await k.served());
-      const positions = await positionsById(k.ql);
-      expect(Object.values(positions).filter((p) => !served.has(String(p)))).toEqual([]);
-      expect(positions.h2).toBe('hot_auditor');
+      // [#33050] The re-register withdraws the position v2 no longer ships, so
+      // the old name is no current position and the reload run carries it.
+      const served = await k.served();
+      expect(served).not.toContain('hot_sales_rep');
+      expect(served).toEqual(expect.arrayContaining(['hot_crm_sales_rep', 'hot_auditor']));
+      expect(await positionsById(k.ql)).toEqual({ h1: 'hot_crm_sales_rep', h2: 'hot_auditor' });
+      expect(renameWarnings(k.warnings)).toEqual([]);
+
+      // Idempotent: the same upgrade again finds nobody on the old name, writes nothing and says nothing.
+      const update = vi.spyOn(k.ql, 'update');
+      const before = k.warnings.length;
+      await k.hotInstall('2.0.0');
+      expect(update.mock.calls.filter(([object]) => object === 'sys_user_position')).toEqual([]);
+      expect(renameWarnings(k.warnings.slice(before))).toEqual([]);
+      expect(await positionsById(k.ql)).toEqual({ h1: 'hot_crm_sales_rep', h2: 'hot_auditor' });
     } finally {
       await Promise.race([k.kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
     }
