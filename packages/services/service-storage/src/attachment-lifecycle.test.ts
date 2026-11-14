@@ -625,6 +625,98 @@ describe('createSysFileReapGuard', () => {
   });
 });
 
+describe('[#33125] createSysFileReapGuard — an upload-link file no record took', () => {
+  const storage = () => ({ delete: vi.fn(async () => {}) }) as any;
+  const PAST = new Date(Date.now() - 60_000).toISOString();
+  const FUTURE = new Date(Date.now() + 60 * 60_000).toISOString();
+  /** A file uploaded through a link that named no record: committed, stamped, bound. */
+  const stamped = (over: Record<string, unknown> = {}, claimUntil = PAST): Record<string, unknown> => ({
+    id: 'u1',
+    key: 'user/u1.pdf',
+    scope: 'user',
+    status: 'committed',
+    deleted_at: '2026-01-01T00:00:00.000Z',
+    ref_object: null,
+    ref_id: null,
+    ref_field: null,
+    owner_id: 'u_owner',
+    metadata: JSON.stringify({
+      kind: 'pre_record_upload', object: 'expense_line', field: 'invoice', user_id: 'u_owner', claim_until: claimUntil,
+    }),
+    ...over,
+  });
+  const run = async (row: Record<string, unknown>, opts: { attachments?: Array<Record<string, unknown>>; open?: boolean } = {}) => {
+    const engine = fakeEngine({ attachments: opts.attachments ?? [], files: [{ ...row }] });
+    const s = storage();
+    const logger = silentLogger();
+    const guard = createSysFileReapGuard(engine, () => s, logger, async () => opts.open ?? true);
+    const confirmed = await guard('sys_file', [row]);
+    return { confirmed, s, engine, logger };
+  };
+
+  it('never held, past its claim window, gate open: the bytes go and the row is confirmed', async () => {
+    const { confirmed, s, engine } = await run(stamped());
+    expect(s.delete).toHaveBeenCalledTimes(1);
+    expect(s.delete).toHaveBeenCalledWith('user/u1.pdf');
+    expect(confirmed).toEqual(['u1']);
+    expect(engine.updates).toEqual([]);
+  });
+
+  it('held by a record (ref_*): kept, and the stamp is cleared', async () => {
+    const { confirmed, s, engine } = await run(stamped({ ref_object: 'expense_line', ref_id: 'r1', ref_field: 'invoice' }));
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(engine.updates).toEqual([{ object: 'sys_file', data: { id: 'u1', deleted_at: null } }]);
+  });
+
+  it('held by an attachment row: kept, and the stamp is cleared', async () => {
+    const { confirmed, s, engine } = await run(stamped(), { attachments: [{ id: 'a1', file_id: 'u1' }] });
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(engine.updates).toEqual([{ object: 'sys_file', data: { id: 'u1', deleted_at: null } }]);
+  });
+
+  it('let go by a record (released_ref_*): kept as any released file, the stamp cleared', async () => {
+    const { confirmed, s, engine } = await run(stamped({ released_ref_object: 'expense_line', released_ref_id: 'r1' }));
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(engine.updates).toEqual([{ object: 'sys_file', data: { id: 'u1', deleted_at: null } }]);
+  });
+
+  it('no binding, or a damaged one: kept as an ordinary committed file, the stamp cleared', async () => {
+    for (const metadata of [null, JSON.stringify({ kind: 'pre_record_upload', object: 'expense_line' })]) {
+      const { confirmed, s, engine } = await run(stamped({ metadata }));
+      expect(confirmed).toEqual([]);
+      expect(s.delete).not.toHaveBeenCalled();
+      expect(engine.updates).toEqual([{ object: 'sys_file', data: { id: 'u1', deleted_at: null } }]);
+    }
+  });
+
+  it('its claim window still open (a ttl shortened below it): kept, still stamped', async () => {
+    const { confirmed, s, engine } = await run(stamped({}, FUTURE));
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(engine.updates).toEqual([]);
+  });
+
+  it('the file-as-reference gate closed: kept, still stamped, and said once', async () => {
+    const { confirmed, s, engine, logger } = await run(stamped(), { open: false });
+    expect(confirmed).toEqual([]);
+    expect(s.delete).not.toHaveBeenCalled();
+    expect(engine.updates).toEqual([]);
+    expect(logger.info).toHaveBeenCalledTimes(1);
+  });
+
+  it('a byte-delete failure vetoes the row, retried next sweep', async () => {
+    const engine = fakeEngine({ attachments: [], files: [stamped()] });
+    const s = { delete: vi.fn(async () => { throw new Error('S3 down'); }) } as any;
+    const logger = silentLogger();
+    const guard = createSysFileReapGuard(engine, () => s, logger, async () => true);
+    expect(await guard('sys_file', [stamped()])).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('createUploadSessionReapGuard', () => {
   /** Swappable-style storage fake: `getInner()` exposes an S3-like inner with
    * `setUploadKey`; `abortChunkedUpload` is forwarded. */

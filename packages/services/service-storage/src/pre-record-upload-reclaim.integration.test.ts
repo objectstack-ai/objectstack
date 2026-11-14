@@ -250,6 +250,19 @@ describe('#33125 — an upload for a record that was never created is reclaimed 
       sweepAhead = 0;
     }
   };
+  /**
+   * Move the file's claim window into the past. The sweep's clock is moved by
+   * the lifecycle alone; the reap guard reads the wall clock, as the write
+   * that would claim the file does, so the deadline is moved instead.
+   */
+  const expireClaimWindow = async (id: string) => {
+    const binding = JSON.parse((await fileRow(id)).metadata);
+    await engine.update(
+      'sys_file',
+      { metadata: JSON.stringify({ ...binding, claim_until: new Date(Date.now() - 1_000).toISOString() }) },
+      { where: { id }, context: SYS } as never,
+    );
+  };
   const bytesOf = async (id: string) => {
     const row = await fileRow(id);
     return row?.key ? storage.exists(row.key as string) : false;
@@ -263,6 +276,7 @@ describe('#33125 — an upload for a record that was never created is reclaimed 
     expect(landed.deleted_at, 'the upload stamps deleted_at').toBeTruthy();
     const key = landed.key as string;
     expect(await storage.exists(key)).toBe(true);
+    await expireClaimWindow(fileId);
 
     await sweepAt(TTL_MS + DAY_MS);
 
@@ -272,7 +286,17 @@ describe('#33125 — an upload for a record that was never created is reclaimed 
 
   it('inside the window it is untouched: committed, stamped, bytes kept', async () => {
     const [fileId] = await uploadForNewRecord();
+    await expireClaimWindow(fileId);
     await sweepAt(TTL_MS - DAY_MS);
+    const row = await fileRow(fileId);
+    expect(row).toMatchObject({ status: 'committed', ref_id: null });
+    expect(row.deleted_at).toBeTruthy();
+    expect(await bytesOf(fileId)).toBe(true);
+  });
+
+  it('a candidate whose claim window is still open (a ttl shortened below it) is kept, still stamped', async () => {
+    const [fileId] = await uploadForNewRecord();
+    await sweepAt(TTL_MS + DAY_MS);
     const row = await fileRow(fileId);
     expect(row).toMatchObject({ status: 'committed', ref_id: null });
     expect(row.deleted_at).toBeTruthy();
@@ -321,6 +345,8 @@ describe('#33125 — an upload for a record that was never created is reclaimed 
     await engine.getDriverForObject('sys_attachment')!.create('sys_attachment', {
       id: `att_${fileId}`, file_id: fileId, parent_object: 'expense_line', parent_id: String(line.id), organization_id: ORG,
     });
+    // Past its claim window, so only the hold question stands between it and the reclaim.
+    await expireClaimWindow(fileId);
 
     await sweepAt(TTL_MS + DAY_MS);
 
@@ -360,6 +386,7 @@ describe('#33125 — an upload for a record that was never created is reclaimed 
 
   it('the file-as-reference gate closed: past the window the row and bytes stay, and go once it opens', async () => {
     const [fileId] = await uploadForNewRecord();
+    await expireClaimWindow(fileId);
     migrationVerified = false;
     try {
       await sweepAt(TTL_MS + DAY_MS);
