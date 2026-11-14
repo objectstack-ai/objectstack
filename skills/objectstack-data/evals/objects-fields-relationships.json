@@ -291,6 +291,25 @@
           "class: 'telemetry'"
         ]
       }
+    },
+    {
+      "id": 17,
+      "prompt": "Each `invoice_line` belongs to an `invoice` (deleting the invoice deletes its lines), and the invoice carries `currency_code`. The line's `amount` must always be in its invoice's currency without storing a code on the line, and the invoice shows a subtotal of its lines. A teammate suggests making `invoice` a plain `lookup` instead. How do I declare the amounts?",
+      "expected_output": "Keep `invoice` a `master_detail` and declare `amount` with `currencyMode: 'record'` and `currencyField: 'invoice.currency_code'`: on a `master_detail` child the code may be one hop to the parent's `iso_4217_currency` field, so the line stores no code. A `lookup` path is refused, so the teammate's change would refuse the amount. The invoice's `subtotal` is a `summary` with `function: 'sum'` over the lines' `amount`, and it must declare its own `currencyMode: 'record'` with `currencyField: 'currency_code'`. A blank invoice code refuses the line's amount (`ERR_CURRENCY_CODE_REQUIRED`), and once a line follows it the invoice's `currency_code` cannot change until none does.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "master_detail",
+          "currencyField: 'invoice.currency_code'",
+          "iso_4217_currency",
+          "summary",
+          "ERR_CURRENCY_CODE_REQUIRED"
+        ],
+        "must_not_contain": [
+          "currencyMode: 'fixed'",
+          "Field.lookup('invoice')"
+        ]
+      }
     }
   ]
 }
