@@ -64,6 +64,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 // never from `@objectstack/objectql` — that import would close a cycle.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { evaluateRuntimeAuthoringGate, foldPendingObjectExtensions } from './runtime-authoring-gate.js';
 
 interface Row {
     id: string;
@@ -870,5 +871,58 @@ describe('[#32666] an object write that makes a field readonly is judged against
 
         expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
         expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 1 });
+    });
+});
+
+// [#33152] The batch's `object_extension` drafts join the closure by FOLDING
+// onto their targets, never by replacing them: the live objects are served
+// (every published extension already folded on), and an extension draft
+// carries only `extend` and the fields it adds. The door-level pins — a batch
+// whose formula hops into a sibling extension draft's field publishes, and a
+// hop into a field no sibling adds still rolls the batch back — run on the
+// real store in `packages/runtime` (`meta-object-extension-item.test.ts`);
+// these pin the fold and the gate's use of it.
+describe('[#33152] a batch\'s extension drafts fold onto their targets', () => {
+    const regionLive = { name: 'crm_region', label: 'Region', fields: { code: { type: 'text', label: 'Code' } } };
+    const account = { name: 'crm_account', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } };
+    const tierDraft = { extend: 'crm_region', fields: { tier__c: { type: 'text', label: 'Tier' } } };
+
+    it('adds the draft\'s fields to its target and keeps every field the target already serves', () => {
+        const folded = foldPendingObjectExtensions([regionLive, account], [tierDraft]) as any[];
+        expect(Object.keys(folded[0].fields).sort()).toEqual(['code', 'tier__c']);
+        expect(folded[0].label).toBe('Region');
+        // An entry nothing extends is the same reference, and the live entry is not mutated.
+        expect(folded[1]).toBe(account);
+        expect(Object.keys(regionLive.fields)).toEqual(['code']);
+    });
+
+    it('a draft whose target is in no universe folds onto nothing', () => {
+        expect(foldPendingObjectExtensions([account], [tierDraft])).toEqual([account]);
+    });
+
+    it('`withoutTarget` leaves an extension write\'s own draft to the rules that fold the written entry', () => {
+        const folded = foldPendingObjectExtensions([regionLive], [tierDraft], 'crm_region') as any[];
+        expect(Object.keys(folded[0].fields)).toEqual(['code']);
+    });
+
+    it('the gate judges a batch member against the target with the sibling extension draft folded on', () => {
+        const deal = {
+            name: 'shyx_deal', label: 'Deal', sharingModel: 'private',
+            fields: {
+                region: { type: 'lookup', label: 'Region', reference: 'crm_region' },
+                tier_label: { type: 'formula', label: 'Tier label', expression: "record.region.tier__c + '!'" },
+            },
+        };
+        const judge = (objectExtensions?: unknown[]) => evaluateRuntimeAuthoringGate({
+            type: 'object', name: deal.name, state: 'active', body: deal,
+            objects: [regionLive],
+            pending: { objects: [deal], ...(objectExtensions ? { objectExtensions } : {}) },
+        });
+        // Without the sibling extension draft the hop is refused…
+        const refused = judge().error as any;
+        expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(JSON.stringify(refused.issues)).toContain('tier__c');
+        // …and with it, it resolves.
+        expect(judge([tierDraft]).error).toBeNull();
     });
 });
