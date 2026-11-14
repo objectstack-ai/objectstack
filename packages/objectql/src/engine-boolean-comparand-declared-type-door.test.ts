@@ -713,7 +713,7 @@ describe('[#29486] the string-stored arm at the engine collection point', () => 
   const driverWhere = async (where: unknown): Promise<unknown> => {
     reads.length = 0;
     await engine.find(STRING_OBJECT, { where } as EngineQueryOptions);
-    expect(reads, JSON.stringify(where)).toHaveLength(1);
+    expect(reads, JSON.stringify(where, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v))).toHaveLength(1);
     return reads[0]?.ast?.where;
   };
 

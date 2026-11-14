@@ -310,19 +310,23 @@ export const FILTER_COMPARAND_TYPE_CASES: readonly ComparandTypeCase[] = [
 /**
  * The fixture's declared fields: a text-family field and an option-family
  * field, each holding the string the write door stores for a number or a
- * boolean (`42` → `"42"`, `3` → `"3"`, `true` → `"true"`; #29241, #29562).
- * Legal `FieldSchema` inputs, in the `{ type }` slice a driver's `syncSchema`
- * and the engine's registry both take.
+ * boolean (`42` → `"42"`, `3` → `"3"`, `true` → `"true"`; #29241, #29562), in
+ * the `{ name, type }` slice a driver's `syncSchema` and the engine's registry
+ * both take.
+ *
+ * `stage` declares no `options`, the shape the write door's own option pins
+ * register: a declared option code is a system identifier (a lower-case
+ * letter first), so `"3"` is never one, and the write door refuses `3` on a
+ * select that declares its codes. A number reaches an option field's storage
+ * only where the field declares none (an object registered in code, with no
+ * authoring parse) or from a row written before the rule; `"true"` /
+ * `"false"` are legal codes anywhere. `FieldSchema` refuses this `stage` at
+ * authoring for that reason; `code` is a legal `FieldSchema` input.
  */
 export const FILTER_STRING_STORED_COMPARAND_FIELDS = {
   id: { name: 'id', type: 'text' },
   code: { name: 'code', type: 'text' },
-  stage: { name: 'stage', type: 'select', options: [
-    { label: 'Three', value: '3' },
-    { label: 'True', value: 'true' },
-    { label: 'False', value: 'false' },
-    { label: 'Open', value: 'open' },
-  ] },
+  stage: { name: 'stage', type: 'select' },
 } as const;
 
 /** A row in the string-stored fixture — every value is the STORED string. */

@@ -94,10 +94,13 @@ describe('the verdict', () => {
 });
 
 describe('FILTER_STRING_STORED_COMPARAND_CASES — the cross-driver table', () => {
-  it('declares legal fields from both families', () => {
-    for (const def of Object.values(FILTER_STRING_STORED_COMPARAND_FIELDS)) {
-      expect(FieldSchema.safeParse(def).success, def.name).toBe(true);
-    }
+  it('declares fields from both families — the text field a legal FieldSchema input, the select the code-registered shape', () => {
+    expect(FieldSchema.safeParse(FILTER_STRING_STORED_COMPARAND_FIELDS.id).success).toBe(true);
+    expect(FieldSchema.safeParse(FILTER_STRING_STORED_COMPARAND_FIELDS.code).success).toBe(true);
+    // A select that declares no options is refused at authoring (its codes would be
+    // system identifiers, never "3"); the fixture is the shape the write door's
+    // option pins register in code, the one place a number code is stored today.
+    expect(FieldSchema.safeParse(FILTER_STRING_STORED_COMPARAND_FIELDS.stage).success).toBe(false);
     expect(stringStoredComparandFieldVerdict(FILTER_STRING_STORED_COMPARAND_FIELDS.code)).toBe('judged');
     expect(stringStoredComparandFieldVerdict(FILTER_STRING_STORED_COMPARAND_FIELDS.stage)).toBe('judged');
     expect(BOUNDED_STRING_FIELD_TYPES.has(FILTER_STRING_STORED_COMPARAND_FIELDS.code.type)).toBe(true);
