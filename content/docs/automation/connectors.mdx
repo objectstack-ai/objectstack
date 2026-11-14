@@ -754,7 +754,9 @@ a rotating refresh token is never spent twice.
   (`OS_BASE_URL` or `OS_AUTH_URL` plus `/api/v1/automation/connectors/oauth/callback`,
   or the automation plugin's `connectorOAuthRedirectUri`), never the
   request's; register that URI with the vendor. The refresh token is kept
-  encrypted in `sys_connector_connection`, one row per organization; it is
+  encrypted in `sys_connector_connection`, one row per organization and
+  instance, an instance being its package and name (one per organization for
+  an instance the environment authored or a plugin registers); it is
   not a sign-in account, and signing in never touches it. A run dispatches
   with its own organization's connection; a run with no organization uses the
   instance's only connection, and is refused when there are several. When the

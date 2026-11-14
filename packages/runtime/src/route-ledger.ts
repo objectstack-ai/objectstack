@@ -450,7 +450,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
       + 'declare a webhook of one name, and the bare `webhook/:name` refuses that name 409 naming both. `:ns` names the holder '
       + 'among the packages of that namespace (the registry\'s `getNamespaceOwners`); two co-owners holding the name are 409 '
       + '`ambiguous-in-namespace`, none is 409 `not-held-by-qualifier` naming the holders, or 404 when nothing declares it. '
-      + 'Writes that holder\'s own `(webhook, package_id, name)` row and no other. Same body, gates and caller as the row above, '
+      + 'Writes that holder\'s own `(webhook, package_id, name)` row and no other. Two holders `:ns` cannot tell apart (two '
+      + 'co-owners of one namespace, or a package that declares no namespace beside another holder) are each switched by the row '
+      + 'above with `?package=PKG`, the exact qualifier and the one query parameter of the webhook\'s bare address (a PKG that '
+      + 'does not hold the name is 409 naming the holders); this address takes none. Same body, gates and caller as the row above, '
       + 'whose arm it is (`domains/catalog-activation.ts`). Pinned in `domains/catalog-activation-door.test.ts` and '
       + '`qa/dogfood/test/bare-name-one-holder-flow-family.dogfood.test.ts`' },
   { route: 'POST /security/permission-sets/:name/clone', domain: '/security', disposition: 'server-only',

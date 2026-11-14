@@ -590,9 +590,26 @@ function metaItemReadGateSources(
             const registry = (await deps.getObjectQL(context))?.registry;
             if (typeof (registry as { isPackageDisabled?: unknown } | undefined)?.isPackageDisabled !== 'function') return false;
             // [#32076] At the member the layers were read at (`MetaItemReadGateSources.isItemOfDisabledPackage`).
-            const envelope = await protocol.getMetaItem({
-                type, name, ...(packageId ? { packageId } : {}), ...(member !== undefined ? { member } : {}),
-            });
+            let envelope: Awaited<ReturnType<NonNullable<typeof protocol.getMetaItem>>>;
+            try {
+                envelope = await protocol.getMetaItem({
+                    type, name, ...(packageId ? { packageId } : {}), ...(member !== undefined ? { member } : {}),
+                });
+            } catch (error) {
+                // [#32607] The plain read's refusal of a name several packages
+                // hold only as stored rows is step 1c's to answer: the
+                // package-less writes' own refusal (#28337), as `RestServer`'s
+                // owner step leaves it. Only that refusal, which the protocol
+                // marks under the registered key below
+                // (`protocol-meta-item-face.ts`); every other error is
+                // rethrown (contract review S1).
+                if (!packageId && (error as Record<symbol, unknown> | null)?.[Symbol.for('objectstack.metadata-protocol.storedRowHoldersRefusal')] === true
+                    && typeof protocol.packagelessLayeredReadRefusal === 'function'
+                    && await protocol.packagelessLayeredReadRefusal({ type, name, ...(member !== undefined ? { member } : {}) }) !== undefined) {
+                    return false;
+                }
+                throw error;
+            }
             return envelope?.item == null && isServiceItemOfDisabledPackage(registry, { _packageId: envelope?.packageId });
         },
         ...(typeof protocol?.packagelessLayeredReadRefusal === 'function'

@@ -1170,7 +1170,9 @@ export function buildMcpBridge(
         // and the open distribution is MCP-only (BYO-AI): without this read the
         // type is authorable, lint-validated and consumed by nothing here. The
         // MCP runtime projects each skill's `instructions` onto the `prompts`
-        // primitive; the tool-binding half stays cloud-runtime-only.
+        // primitive. The tool-binding half binds nothing here, but it is read:
+        // `registerSkillPrompts` offers a skill only when this request's
+        // server lists every tool the skill binds.
         //
         // Resolved through THIS request's per-environment services — the same
         // seam `listObjects` / `describeObject` use — so a multi-tenant host

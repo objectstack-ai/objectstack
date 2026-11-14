@@ -225,16 +225,23 @@ export type SkillTriggerCondition = z.input<typeof SkillTriggerConditionSchema>;
  * different runtimes, and the schema says which is which rather than implying
  * both work everywhere:
  *
- * - **`instructions`** — served **everywhere**. `@objectstack/mcp` projects it
- *   onto the MCP `prompts` primitive, so any connected MCP client can
+ * - **`instructions`** — runs in **both** distributions. `@objectstack/mcp`
+ *   projects it onto the MCP `prompts` primitive, so a connected MCP client can
  *   `prompts/list` / `prompts/get` a skill authored in the open framework.
- * - **`tools` / `surface` / `triggerConditions`** — **cloud-runtime-only**.
- *   Tool binding and skill↔agent affinity are read by the in-product `ask` /
- *   `build` agent runtime, which ships in the cloud / Enterprise distribution.
- *   In the open framework there is no agent loop to bind tools to (the client's
- *   own model drives a flat MCP tool list), so these keys are authored for
- *   cloud and inert here. They are still validated — a skill naming a tool that
- *   does not exist is an authoring error in both distributions.
+ *   Where `registerSkillPrompts` installs that prompt surface, the skill is
+ *   offered only on a server that serves every tool it binds (see `tools`).
+ * - **`tools`** — **bound** by the cloud runtime, **read** by MCP. The
+ *   in-product `ask` / `build` agent runtime, which ships in the cloud /
+ *   Enterprise distribution, composes an agent's tool set from it. In the open
+ *   framework there is no agent loop to bind tools to (the client's own model
+ *   drives a flat MCP tool list), so nothing is bound there; the binding
+ *   decides instead whether the skill's prompt is offered at all.
+ * - **`surface` / `triggerConditions`** — **cloud-runtime-only**. Skill↔agent
+ *   affinity and activation are read by that same in-product agent runtime, so
+ *   these keys are authored for cloud and inert here.
+ *
+ * All three are still validated — a skill naming a tool that does not exist is
+ * an authoring error in both distributions.
  *
  * NOTE — there is deliberately NO per-skill `permissions` field. Access to AI
  * capability is gated at the AGENT level (`agent.access` / `agent.permissions`,
@@ -337,8 +344,9 @@ export const SkillSchema = lazySchema(() => strictObject({
    * cloud agent runtime it is injected into the active agent's system prompt;
    * in the open framework `@objectstack/mcp` projects it onto the MCP `prompts`
    * primitive, so a connected client can list this skill by name and fetch this
-   * text. A skill with no `instructions` has nothing to project and is not
-   * listed as a prompt at all.
+   * text, on a server that serves the tools the skill binds (see `tools`). A
+   * skill with no `instructions` has nothing to project and is not listed as a
+   * prompt at all.
    */
   instructions: z.string().optional().describe('LLM instructions when skill is active — also served as an MCP prompt'),
 
@@ -364,15 +372,35 @@ export const SkillSchema = lazySchema(() => strictObject({
    * path the executable, its authz and its audit stay on the action/flow the
    * app already ships.
    *
-   * **CLOUD-RUNTIME-ONLY** (#3905). Tool binding is consumed by the in-product
-   * agent runtime, which composes an agent's tool set from its
+   * **Bound by the cloud runtime, read by MCP** (#3905). The in-product agent
+   * runtime consumes the binding: it composes an agent's tool set from its
    * surface-compatible skills. Over MCP the model lives client-side and the
-   * server exposes one flat tool list, so there is nothing here to bind: an
-   * AI-exposed Action is already reachable as `action_<name>` through
-   * `list_actions` / `run_action`. The references are still checked at
-   * authoring time in both distributions (`ai-skill-tool-unresolved`).
+   * server exposes one flat tool list, so nothing is bound there. The binding
+   * decides instead whether the skill is offered: the prompt surface
+   * `registerSkillPrompts` (`@objectstack/mcp`) installs answers
+   * `prompts/list` and `prompts/get` with a skill only when the server it is
+   * installed on lists every tool named here, read from that server's own
+   * tool registry when the prompt request is answered.
+   *
+   * - A plain name is served when the server lists a tool of that name; a
+   *   trailing wildcard when any listed tool matches it.
+   * - An `action_<name>` entry (and `action_*`) is also served when
+   *   `run_action` is listed: the native MCP families serve AI-exposed Actions
+   *   through `list_actions` / `run_action`, never as `action_<name>` tools.
+   * - A skill that binds no tool is offered as before, and `prompts/get`
+   *   answers a withheld skill as it answers a prompt name no skill derives.
+   *
+   * That is the reach of `registerSkillPrompts`: `MCPServerRuntime`'s HTTP
+   * door, and any host that drives its own `McpServer` and calls it, stdio
+   * included, each narrowed by that server's own tool list.
+   * `MCPServerRuntime.bridgePrompts`, which projects skills onto the
+   * long-lived server without `registerSkillPrompts`, applies no such filter.
+   * So a skill binding a tool no MCP family serves (a `stack.tools` name
+   * nothing registers, say) is offered on no such server unless a host
+   * registers that tool. The references are still checked at authoring time in
+   * both distributions (`ai-skill-tool-unresolved`).
    */
-  tools: z.array(z.string().regex(/^[a-z_][a-z0-9_]*\*?$/)).describe('Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) — bound by the cloud agent runtime only'),
+  tools: z.array(z.string().regex(/^[a-z_][a-z0-9_]*\*?$/)).describe('Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) — bound by the cloud agent runtime; an MCP server whose prompts `registerSkillPrompts` installs offers the skill only when it serves every tool named here (an `action_` entry also through `run_action`)'),
 
   /**
    * Programmatic conditions for skill activation.

@@ -486,15 +486,13 @@ describe('[#32613] two packages ship one name, each with its declared override: 
         });
 
         // Mixed (review n1): two holders, only one with a declared override.
-        // Flow: the overridden holder's override and the other holder's
-        // shipped body, each once, in its own slot, whichever holder is
-        // overridden. Action: the overridden holder's override is listed in
-        // its own slot and served at its own address. The other holder's list
-        // slot is NOT pinned here: when the second holder to register is the
-        // overridden one, the first holder's slot lists that override too, on
-        // `main` as on this change (the registry face: the hydrator registers
-        // the override row under the bare name wearing the first shipper's
-        // envelope), carried to #33131.
+        // The overridden holder's override and the other holder's shipped
+        // body, each once, in its own slot, whichever holder is overridden.
+        // [#33131] The action's other slot too: before, when the second
+        // holder to register was the overridden one, the first holder's slot
+        // listed that override as well (the hydrator registered the override
+        // row under the bare name wearing the first shipper's envelope). The
+        // registry face is pinned in this file's [#33131] describe.
         it(`flow and action, ${first} registered first, one holder overridden: its override in its own slot`, async () => {
             for (const [overridden, other] of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
                 const protocol = await bootHolders(order);
@@ -505,17 +503,10 @@ describe('[#32613] two packages ship one name, each with its declared override: 
                     await overrideEach(protocol, type, [overridden]);
                     const name = type === 'flow' ? FLOW : SHARED_ACTION;
                     for (const face of ['served', 'execution'] as const) {
-                        const listed = await entries(protocol, type, face);
-                        if (type === 'flow') {
-                            expect(listed, `${type} ${face}, ${overridden} overridden`).toEqual([`${overridden}:${label}`, `${other}:${shipped}`].sort());
-                        } else {
-                            expect(listed.filter((e) => e.startsWith(`${overridden}:`)), `${type} ${face}, ${overridden} overridden`).toEqual([`${overridden}:${label}`]);
-                        }
+                        expect(await entries(protocol, type, face), `${type} ${face}, ${overridden} overridden`).toEqual([`${overridden}:${label}`, `${other}:${shipped}`].sort());
                     }
                     expect((await p.getMetaItem({ type, name, packageId: overridden })).item.label, `${type} at ${overridden}`).toBe(label);
-                    if (type === 'flow') {
-                        expect((await p.getMetaItem({ type, name, packageId: other })).item.label, `${type} at ${other}`).toBe(shipped);
-                    }
+                    expect((await p.getMetaItem({ type, name, packageId: other })).item.label, `${type} at ${other}`).toBe(shipped);
                 }
             }
         });
@@ -783,7 +774,7 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
     const sharedAction = (label: string, extra: Record<string, unknown> = {}) => ({
         name: SHARED, label, type: 'script', body: { language: 'js', source: `return { ran: '${label}' };` }, ...extra,
     });
-    /** An import mapping of one name, a sealed type that keeps the first-registered holder's judgment until #33131. */
+    /** An import mapping of one name, a sealed type judged against every shipper too (#33131). */
     const MAPPING = 'shared_feed';
     const sharedMapping = (ns: string, label: string, extra: Record<string, unknown> = {}) => ({
         name: MAPPING, label, sourceFormat: 'csv', targetObject: `${ns}_task`,
@@ -913,12 +904,14 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
             expect(named[0]).toContain(`flow×1 (${FLOW})`);
         });
 
-        // [#32552 review s1] The census judges a row as the reads serve it. The
-        // reads serve a second holder's declared override per shipper for a flow
-        // and an action only (#32613); the six sealed types keep the name's
-        // first-registered shipper until #33131, so the second holder's mapping
-        // override is unserved and the census still names it.
-        it(`CONTROL, ${nsOf(first)} registered first: a sealed type's census keeps the first-registered holder's judgment (a mapping)`, async () => {
+        // [#32552 review s1] The census judges a row as the reads serve it.
+        // [#33131] The reads serve a second holder's declared override per
+        // shipper for the six sealed types too, so the census names neither
+        // holder's mapping override. FROM: the second holder's was named for
+        // deletion (judged against the first-registered holder alone). The
+        // stranger's row it still names is pinned in
+        // `protocol-custom-override-bare-slot-envelope.test.ts`'s [#33131] describe.
+        it(`${nsOf(first)} registered first: a sealed type's census names neither holder's declared override (a mapping)`, async () => {
             const { engine, protocol } = await bootHolders(first === ALPHA ? [ALPHA, BETA] : [BETA, ALPHA], { mapping: true });
             for (const base of [ALPHA, BETA]) {
                 await engine.insert('sys_metadata', {
@@ -935,8 +928,7 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
             } finally {
                 warn.mockRestore();
             }
-            expect(named).toHaveLength(1);
-            expect(named[0]).toContain(`mapping×1 (${MAPPING})`);
+            expect(named).toEqual([]);
         });
 
 
@@ -1054,5 +1046,150 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
         await expect(protocol.deleteMetaItem({ type: 'flow', name: FLOW, packageId: STRANGER } as any))
             .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
         expect(await census()).toHaveLength(1);
+    });
+});
+
+/**
+ * [#33131 item 3, ADR-0150 D4, epic #31527 red line 2] Two packages ship one
+ * action name and only ONE of them declares an override in its `.custom` pair.
+ * Every face answers each package's own item in its own slot, whichever package
+ * registered first and whichever is overridden: the overridden holder's
+ * override, and the other holder's shipped action, in the served list, the
+ * execution view the automation engine arms from, at each package's address
+ * (plain and layered) and in the registry's package-scoped item.
+ *
+ * FROM (`main`): the hydrator registered the pair's override row under the bare
+ * name wearing the envelope `lookupArtifactItem` answers for the PAIR's id,
+ * which ships nothing, so it fell to the name's first-registered shipper. With
+ * alpha first and only beta overridden, alpha's slot served beta's override
+ * (`alpha:OVR-B` beside `beta:OVR-B`, in the execution view too): the wrong
+ * action body ran, chosen by registration order.
+ */
+describe('[#33131] two packages ship one action name, one declares an override: each slot serves its own package\'s item', () => {
+    const ALPHA = 'com.probe.alpha';
+    const BETA = 'com.probe.beta';
+    const SHARED_ACTION = 'shared_close';
+    const nsOf = (id: string) => (id === ALPHA ? 'alpha' : 'beta');
+    const labelOf = (id: string) => (id === ALPHA ? 'OVR-A' : 'OVR-B');
+    const sharedAction = (label: string, extra: Record<string, unknown> = {}) => ({
+        name: SHARED_ACTION, label, type: 'script', body: { language: 'js', source: `return { ran: '${label}' };` }, ...extra,
+    });
+    const app = (id: string) => ({
+        id, name: nsOf(id), version: '1.0.0', namespace: nsOf(id), type: 'app',
+        objects: [{ name: `${nsOf(id)}_task`, label: 'Task', sharingModel: 'private', fields: { title: { name: 'title', label: 'title', type: 'text' } } }],
+        actions: [sharedAction(`SHIPPED-${nsOf(id)}`)],
+    });
+    /** The shipping apps registered in `order`, each with its pair, and `overridden`'s declared override saved and published. */
+    async function bootHolders(order: readonly string[], overridden: readonly string[]) {
+        const engine = new ObjectQL();
+        const { driver } = makeMemoryDriver();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        engine.registry.registerObject(sysMetadataObject, 'test-package');
+        for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+            engine.registry.registerObject(o as any, 'test-package');
+        }
+        for (const id of order) engine.registerApp(app(id));
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), undefined);
+        for (const base of order) {
+            await (protocol as any).installPackage({
+                manifest: { id: `${base}.custom`, name: `${nsOf(base)}-custom`, version: '0.1.0', type: 'app', namespace: `${nsOf(base)}_custom`, dependencies: { [base]: '^1' } },
+            });
+        }
+        for (const base of overridden) {
+            const item = sharedAction(labelOf(base), { overrides: { package: base, basedOn: '1.0.0' } });
+            await protocol.saveMetaItem({ type: 'action', name: SHARED_ACTION, item, mode: 'draft', packageId: `${base}.custom` } as any);
+            await protocol.publishMetaItem({ type: 'action', name: SHARED_ACTION, packageId: `${base}.custom` } as any);
+        }
+        return { engine, protocol };
+    }
+    const entries = async (protocol: ObjectStackProtocolImplementation, face: 'served' | 'execution') => {
+        const res: any = face === 'served'
+            ? await protocol.getMetaItems({ type: 'action' })
+            : await (protocol as any).getMetaItemsForExecution({ type: 'action' });
+        return (res.items as any[]).filter((i) => i?.name === SHARED_ACTION).map((i) => `${i._packageId}:${i.label}`).sort();
+    };
+    /** The label each face answers at `pkg`'s own address: the by-name read, the layered `effective`, the registry's package-scoped item. */
+    const atAddress = async (engine: ObjectQL, protocol: ObjectStackProtocolImplementation, pkg: string) => {
+        const p: any = protocol;
+        return {
+            byName: (await p.getMetaItem({ type: 'action', name: SHARED_ACTION, packageId: pkg })).item?.label,
+            layered: (await p.getMetaItemLayered({ type: 'action', name: SHARED_ACTION, packageId: pkg })).effective?.label,
+            registry: (engine.registry as any).getPackageScopedItem('action', SHARED_ACTION, pkg)?.label,
+        };
+    };
+    const servedAt = (label: string) => ({ byName: label, layered: label, registry: label });
+
+    for (const order of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+        const first = nsOf(order[0]);
+        for (const [overridden, other] of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+            const shipped = `SHIPPED-${nsOf(other)}`;
+            it(`${first} registered first, only ${nsOf(overridden)} overridden: ${nsOf(overridden)}:${labelOf(overridden)} and ${nsOf(other)}:${shipped}, listed, executed and at each address`, async () => {
+                const { engine, protocol } = await bootHolders(order, [overridden]);
+                for (const face of ['served', 'execution'] as const) {
+                    expect(await entries(protocol, face), face).toEqual([`${overridden}:${labelOf(overridden)}`, `${other}:${shipped}`].sort());
+                }
+                expect(await atAddress(engine, protocol, overridden), nsOf(overridden)).toEqual(servedAt(labelOf(overridden)));
+                expect(await atAddress(engine, protocol, other), nsOf(other)).toEqual(servedAt(shipped));
+            });
+
+            it(`${first} registered first, only ${nsOf(overridden)} overridden, each holder disabled in turn: the enabled holder's own item alone`, async () => {
+                const { engine, protocol } = await bootHolders(order, [overridden]);
+                const registry = engine.registry as any;
+                for (const [disabled, enabled, label] of [[other, overridden, labelOf(overridden)], [overridden, other, shipped]] as const) {
+                    registry.disablePackage(disabled);
+                    for (const face of ['served', 'execution'] as const) {
+                        expect(await entries(protocol, face), `${face}, ${nsOf(disabled)} disabled`).toEqual([`${enabled}:${label}`]);
+                    }
+                    expect(await atAddress(engine, protocol, enabled), `${nsOf(enabled)}, ${nsOf(disabled)} disabled`).toEqual(servedAt(label));
+                    registry.enablePackage(disabled);
+                }
+                for (const face of ['served', 'execution'] as const) {
+                    expect(await entries(protocol, face), `${face}, re-enabled`).toEqual([`${overridden}:${labelOf(overridden)}`, `${other}:${shipped}`].sort());
+                }
+            });
+        }
+    }
+
+    // [#33131 contract review S1] Both holders overridden. Every read face serves each holder's own override,
+    // in both registration orders and both save orders. The registry's package-scoped item cannot yet: it keeps
+    // ONE bare slot per name (`overlaySlotBinding`), so the holder whose override was published LAST is served
+    // there and the other holder's slot answers its own SHIPPED action — never the other package's override
+    // (FROM `main`: alpha's registry item could read `OVR-B`). Carried on the card, not fixed here: the fix is
+    // the registry's slot model, not this hydrator.
+    for (const order of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+        for (const saves of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+            const [savedFirst, savedLast] = saves;
+            it(`${nsOf(order[0])} registered first, ${nsOf(savedFirst)} saved first, both overridden: each read face serves its own override; the registry item serves the last-saved holder's override and the first-saved holder's own shipped action (carried)`, async () => {
+                const { engine, protocol } = await bootHolders(order, saves);
+                for (const face of ['served', 'execution'] as const) {
+                    expect(await entries(protocol, face), face).toEqual([`${ALPHA}:OVR-A`, `${BETA}:OVR-B`]);
+                }
+                const p: any = protocol;
+                for (const holder of [ALPHA, BETA]) {
+                    expect((await p.getMetaItem({ type: 'action', name: SHARED_ACTION, packageId: holder })).item?.label, nsOf(holder)).toBe(labelOf(holder));
+                    expect((await p.getMetaItemLayered({ type: 'action', name: SHARED_ACTION, packageId: holder })).effective?.label, nsOf(holder)).toBe(labelOf(holder));
+                }
+                const registry = engine.registry as any;
+                expect(registry.getPackageScopedItem('action', SHARED_ACTION, savedLast)?.label, 'the last-saved holder').toBe(labelOf(savedLast));
+                expect(registry.getPackageScopedItem('action', SHARED_ACTION, savedFirst)?.label, 'the first-saved holder: its own shipped action, never the other override').toBe(`SHIPPED-${nsOf(savedFirst)}`);
+            });
+        }
+    }
+
+    it('CONTROL: one package ships the action name, with its declared override: its override, listed once and at its address', async () => {
+        const { engine, protocol } = await bootHolders([ALPHA], [ALPHA]);
+        for (const face of ['served', 'execution'] as const) {
+            expect(await entries(protocol, face), face).toEqual([`${ALPHA}:OVR-A`]);
+        }
+        expect(await atAddress(engine, protocol, ALPHA)).toEqual(servedAt('OVR-A'));
+    });
+
+    it('CONTROL: one package ships the action name, not overridden: its shipped action, listed once and at its address', async () => {
+        const { engine, protocol } = await bootHolders([ALPHA], []);
+        for (const face of ['served', 'execution'] as const) {
+            expect(await entries(protocol, face), face).toEqual([`${ALPHA}:SHIPPED-alpha`]);
+        }
+        expect(await atAddress(engine, protocol, ALPHA)).toEqual(servedAt('SHIPPED-alpha'));
     });
 });

@@ -45,6 +45,7 @@ import {
   DEFAULT_CORS_ALLOW_HEADERS,
   DEFAULT_CORS_EXPOSE_HEADERS,
   declaredEnvelopeForThrow,
+  installApiNoindex,
   installRequestBodyLimit,
   requestBodyGuardOf,
   requestBodyTooLargeAnswer,
@@ -668,6 +669,9 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
   // refuses the app instead of serving it with no bound.
   const maxRequestBodyBytes = resolveMaxRequestBodyBytes(options.maxRequestBodyBytes);
   installRequestBodyLimit(app, () => maxRequestBodyBytes);
+  // Every `/api/` answer tells search engines not to index it, the same lane
+  // `HonoHttpServer` installs, so both doors send the same headers.
+  installApiNoindex(app);
   const prefix = options.prefix || '/api';
   // [#16025] Where `/auth/*` is mounted, and the boot refusal that guards it.
   // Computed BEFORE any route is registered so a misaligned composition never

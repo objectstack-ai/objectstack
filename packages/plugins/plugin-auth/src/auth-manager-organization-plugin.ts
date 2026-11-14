@@ -79,6 +79,7 @@ import {
 } from './auth-manager.js';
 import { buildOrganizationPluginSchema } from './auth-schema-config.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
+import { resolveInvitationLimitOption } from './invitation-limit.js';
 import { invitationAcceptPath } from './invitation-link-action.js';
 import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
 import { blankInvitationRoleRefusal } from './invite-role-not-found-code.js';
@@ -179,6 +180,7 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
   // VERY object the vendor plugin was constructed with — it is what the
   // vendor's own `getOrgAdapter(ctx.context, options)` reads, and the
   // declaration it honours lives on it.
+  const invitationLimit = resolveInvitationLimitOption();
   const organizationOptions = {
     schema: buildOrganizationPluginSchema(),
     // Enable the team sub-feature so the framework's `sys_team` /
@@ -235,6 +237,12 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
     // also travels through option plumbing that may assume a finite number,
     // and nine quadrillion members is unlimited by any measure that matters.
     membershipLimit: resolveMembershipLimitOption(),
+    // How many PENDING invitations one organization may hold. better-auth
+    // refuses the next one with 403 `INVITATION_LIMIT_REACHED` and uses 100
+    // when no `invitationLimit` is passed. `OS_ORG_INVITATION_LIMIT` sets it:
+    // unset passes nothing (the vendor's 100, unchanged), N is N, `off` is no
+    // limit. Spread, so an unset value adds no key at all.
+    ...(invitationLimit === undefined ? {} : { invitationLimit }),
     ...(customOrgRoles ? { roles: customOrgRoles } : {}),
     // ── Slug-change guard ─────────────────────────────────────
     // An org's slug is baked into every env hostname at creation

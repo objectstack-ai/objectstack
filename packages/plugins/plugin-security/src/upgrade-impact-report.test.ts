@@ -155,6 +155,10 @@ function fakeRegistry(r: {
     },
     getPackage: (id) => packages[id],
     isPackageDisabled: disabled,
+    packageScopedHoldersOf(type, name, _caller, options) {
+      const ids = items.filter((i) => i.type === type && i.name === name && !i.tenant && i.packageId).map((i) => i.packageId!);
+      return [...new Set(ids)].filter((id) => options?.includeDisabledPackages === true || !disabled(id));
+    },
     getAllApps: () => Object.keys(r.apps ?? {}).map((name) => ({ name })),
     getAppNavDiagnostics: (app) => r.apps?.[app] ?? [],
   };
@@ -398,7 +402,7 @@ describe('webhook: a sys_webhook row holding a declared name', () => {
 
   // [#31699] A webhook is addressed by (package, name): two packages of two
   // namespaces may each declare one name, and a row holding it withholds both.
-  it('[FROM one TO each] two packages declaring the name: one finding per withheld holder, and the remedy names the namespace address', async () => {
+  it('[FROM one TO each] two packages declaring the name: one finding per withheld holder, and the remedy names the exact-qualifier address', async () => {
     const d = deployment({
       webhooks: [{ id: 'wh_1', name: 'acme_deal_won', organization_id: 'org_tenant' }],
       registry: { items: [
@@ -411,8 +415,37 @@ describe('webhook: a sys_webhook row holding a declared name', () => {
       { name: 'acme_deal_won', packageId: OTHER_VENDOR, rowId: 'wh_1', organizationId: 'org_tenant' },
       { name: 'acme_deal_won', packageId: VENDOR, rowId: 'wh_1', organizationId: 'org_tenant' },
     ]);
-    expect(errorLines(r).some((m) => m.includes('POST /api/v1/security/_activation/webhook/<namespace>/<name> with'))).toBe(true);
+    // [#33016 nit 2] The exact qualifier serves every enabled holder, whatever
+    // its namespace; every finding names a package, so no bare-address arm.
+    const line = errorLines(r).find((m) => m.includes('sys_webhook row(s) hold the name of a webhook')) ?? '';
+    expect(line).toContain('POST /api/v1/security/_activation/webhook/<name>?package=<package>');
+    expect(line).not.toContain('names no package');
+    expect(line).not.toContain('<namespace>');
   });
+
+  // [#33016 nit 3] The bare artifact lookup answers one holder; a disabled
+  // SECOND holder used to get no finding. Each holder is reported, in both
+  // registration orders, disabled or not.
+  for (const order of [[VENDOR, OTHER_VENDOR], [OTHER_VENDOR, VENDOR]]) {
+    it(`[FROM one TO each] registered ${order.join(', ')}, ${order[1]} disabled: each holder's withheld declaration is a finding`, async () => {
+      const d = deployment({
+        webhooks: [{ id: 'wh_1', name: 'acme_deal_won', organization_id: 'org_tenant' }],
+        registry: {
+          items: order.map((packageId) => ({ type: 'webhook', name: 'acme_deal_won', packageId })),
+          packages: { [order[1]]: { source: 'code', disabled: true } },
+        },
+      });
+      const r = await boot(d, 'walled');
+      expect(r.report.withheldWebhooks.map((w) => w.packageId).sort()).toEqual([OTHER_VENDOR, VENDOR].sort());
+      // [#33016 S2] The disabled holder's address answers 409 until it is
+      // enabled again: its finding says so, and the line says to enable first.
+      expect(r.report.withheldWebhooks.map((w) => [w.packageId, w.packageDisabled ?? false]).sort())
+        .toEqual([[order[0], false], [order[1], true]].sort());
+      const line = errorLines(r).find((m) => m.includes('sys_webhook row(s) hold the name of a webhook')) ?? '';
+      expect(line).toContain('A finding marked packageDisabled names a disabled package');
+      expect(line).toContain('enable the package first, then switch it there');
+    });
+  }
 
   it('[FROM no finding TO orphan] a webhook switch naming a package that no longer ships the name is an orphan, whichever other package does; its rename is a suspected re-enablement', async () => {
     const d = deployment({

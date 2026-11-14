@@ -46,7 +46,7 @@ import { computeMetadataDiagnostics } from './metadata-diagnostics.js';
 import { hasMetadataRedactor, redactMetadataItem } from './metadata-redaction.js';
 import { isPairRowRemoval } from './protocol-packaged-base-refusal.js';
 import { canonicalMetaType, canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
-import { boundPackageOf } from './protocol-package-bindings.js';
+import { boundPackageOf, servesSealedOverrideRow } from './protocol-package-bindings.js';
 import { remainingRowsPhrase } from './protocol-authoring-refusals.js';
 import { memberOption, mutationEventMember, resolveBundleMemberSelector } from './protocol-bundle-members.js';
 import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
@@ -1178,19 +1178,19 @@ export class ProtocolDiffDeleteLoadFacet {
                         // one predicate, on the row's `package_id` column. The
                         // census only: what this loop loads is unchanged.
                         //
-                        // [ADR-0150 D4, #32552] …judged as the reads judge it
-                        // (`declinesStoredRow`): for a flow and an action
-                        // against every package that ships the name
-                        // ({@link someShipperOf}), so a second holder's
-                        // served override is not named for deletion; for the
-                        // six sealed types against the name's first-registered
-                        // shipper alone, which is the only override the reads
-                        // serve for them until #33131 moves them.
+                        // [ADR-0150 D4, #32552, #33131] …judged as the reads
+                        // judge it (`declinesStoredRow`): against every package
+                        // that ships the name ({@link someShipperOf}), so a
+                        // second holder's served override is not named for
+                        // deletion, for a flow, an action and the six sealed
+                        // types alike ({@link servesSealedOverrideRow}). Any
+                        // other type keeps the name's first-registered shipper.
                         const servedOverrideOf = (base: string | undefined) => isServedOverrideRowOf(
                             record as ServedOverrideRow, base, installedManifestsOfEngine(host.engine),
                         );
                         const recordName = String(record.name);
-                        const perShipperType = ['flow', 'action'].includes(canonicalMetaType(normalizedType));
+                        const perShipperType = ['flow', 'action'].includes(canonicalMetaType(normalizedType))
+                            || servesSealedOverrideRow(normalizedType);
                         if (
                             !host.isHostCodeDatasource(normalizedType, recordName)
                             && !(perShipperType

@@ -251,13 +251,14 @@ describe('the branding read is the visitor\'s own request, re-addressed', () => 
 
 describe('with no branding to read, the document is served as before', () => {
   /**
-   * The shell as it was served before this change: the base tag and the
-   * react-pages capability script added (off by default), nothing else. The
-   * script's per-response nonce is read off by `served`.
+   * The shell as it was served before this change: the robots meta tag, the
+   * base tag and the react-pages capability script added (off by default),
+   * nothing else. The script's per-response nonce is read off by `served`.
    */
   const BEFORE = SHELL.replace(
     '<head>',
-    '<head>\n    <script>window.__OBJECTUI_CAPABILITIES_DISABLED__=(window.__OBJECTUI_CAPABILITIES_DISABLED__||[]).concat(\'react-pages\');</script>'
+    '<head>\n    <meta name="robots" content="noindex, nofollow">'
+      + '\n    <script>window.__OBJECTUI_CAPABILITIES_DISABLED__=(window.__OBJECTUI_CAPABILITIES_DISABLED__||[]).concat(\'react-pages\');</script>'
       + '\n    <base href="/_console/">',
   );
   const served = async (res: Response) => (await res.text()).replace(/ nonce="[^"]*"/g, '');

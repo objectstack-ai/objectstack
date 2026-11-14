@@ -89,9 +89,11 @@
  * serves the name) would still keep off. Nothing is written then.
  *
  * The door's query set is closed (AGENTS route rule 5): `package` for
- * `permission`, nothing for every other type — a name outside it is refused
- * `400 VALIDATION_ERROR` before any lookup, where it used to be dropped
- * without a word ({@link catalogActivationQueryParams}).
+ * `permission` and for the bare `webhook/:name` address (#33016, the exact
+ * qualifier), nothing for the namespace address `webhook/:ns/:name` or any
+ * other type — a name outside it is refused `400 VALIDATION_ERROR` before any
+ * lookup, where it used to be dropped without a word
+ * ({@link catalogActivationQueryParams}).
  *
  * ## A declared webhook two packages declare (ADR-0150 D3/D4/D5, #31699)
  *
@@ -104,6 +106,10 @@
  * RESOURCE_CONFLICT`, naming both (it was a `503`: the reader's refusal
  * carried no `refusal`), and `POST /security/_activation/webhook/:ns/:name`
  * addresses the holder in namespace `:ns` ({@link resolveQualifiedWebhook}).
+ * Two holders the namespace address cannot tell apart — two co-owners of one
+ * namespace, or a package that declares no namespace beside another holder —
+ * are each switched by the exact qualifier, `webhook/:name?package=PKG`
+ * ({@link resolveExactWebhook}, #33016): the one webhook query parameter.
  * A row naming no package becomes the holder's own when the name has that one
  * holder (`adoptPackageless`, ADR-0150 D8), as the name-addressed store wrote
  * it before; under two holders it is neither's and is never written for one.
@@ -289,6 +295,43 @@ async function resolveQualifiedWebhook(
     return { refusal: { ...base, message: packageScopedRefusalMessage(base) } };
 }
 
+/**
+ * [ADR-0150 D2/D5, #33016] The declared webhook `POST /security/_activation/
+ * webhook/:name?package=PKG` addresses: exactly PKG's declaration of `name`
+ * among the served slots — the exact qualifier `/meta` reads, and the address
+ * that switches one holder wherever the namespace address cannot: two
+ * co-owners of one namespace, or a package that declares no namespace beside
+ * another holder. A PKG that does not hold the name is refused naming the
+ * holders (`not-held-by-qualifier`); `404` when nothing serves the name. As
+ * in {@link resolveQualifiedWebhook}, a DISABLED package's declaration is no
+ * slot, so a disabled PKG holds nothing here.
+ */
+async function resolveExactWebhook(
+    reader: DeclaredWebhookReader,
+    packageId: string,
+    name: string,
+): Promise<
+    | { readonly entry: { name: string; packageId: string }; readonly holders: number }
+    | { readonly refusal: PackageScopedRefusal }
+    | { readonly missing: string }
+> {
+    const slots = (await reader.list!()).filter((d) => d.webhook.name === name);
+    if (slots.some((d) => d.packageId === packageId)) return { entry: { name, packageId }, holders: slots.length };
+    if (slots.length === 0) return { missing: 'no enabled package declares the name' };
+    const candidates: PackageScopedHolder[] = slots.map((d) => (d.packageId === undefined
+        ? { kind: 'environment' as const }
+        : { kind: 'package' as const, packageId: d.packageId }));
+    const base = {
+        status: 'refused' as const,
+        reason: 'not-held-by-qualifier' as const,
+        type: 'webhook' as const,
+        name,
+        callerPackageId: packageId,
+        candidates,
+    };
+    return { refusal: { ...base, message: packageScopedRefusalMessage(base) } };
+}
+
 function declaredWebhookReaderOf(service: unknown): DeclaredWebhookReader | undefined {
     const candidate = service as Partial<DeclaredWebhookReader> | null | undefined;
     return typeof candidate?.declaredWebhookNamed === 'function' ? (candidate as DeclaredWebhookReader) : undefined;
@@ -389,15 +432,31 @@ export function refusedNameAnswer(deps: DomainHandlerDeps, refusal: PackageScope
 export const PERMISSION_SET_DOOR_QUERY_PARAMS: readonly string[] = Object.freeze(['package']);
 
 /**
- * [AGENTS route rule 5] The closed query set of this door for every type but
- * `permission`. **Measured**: EMPTY — a position, a declared sharing rule,
- * webhook, queue or assignment rule is addressed by its path alone.
+ * [ADR-0150 D2/D5, #33016; AGENTS route rule 5] The closed query set of
+ * `POST /security/_activation/webhook/:name`. **Measured**: `package` alone,
+ * the exact qualifier ({@link resolveExactWebhook}), read by the same reader
+ * as the permission set's ({@link readPermissionSetPackageQuery}). The
+ * namespace address `webhook/:ns/:name` names its holder by path and keeps
+ * the empty set.
+ */
+export const WEBHOOK_DOOR_QUERY_PARAMS: readonly string[] = Object.freeze(['package']);
+
+/**
+ * [AGENTS route rule 5] The closed query set of this door for every other
+ * address. **Measured**: EMPTY — a position, a declared sharing rule, queue or
+ * assignment rule, and a webhook's namespace address, are addressed by their
+ * path alone.
  */
 const CATALOG_ACTIVATION_NO_QUERY_PARAMS: readonly string[] = Object.freeze([]);
 
-/** The closed query set of `POST /security/_activation/:type/:name`, per type. */
-export function catalogActivationQueryParams(type: string): readonly string[] {
-    return type === 'permission' ? PERMISSION_SET_DOOR_QUERY_PARAMS : CATALOG_ACTIVATION_NO_QUERY_PARAMS;
+/**
+ * The closed query set of `POST /security/_activation/:type/:name`, per type;
+ * `qualified` is the webhook's namespace address, `webhook/:ns/:name`.
+ */
+export function catalogActivationQueryParams(type: string, qualified = false): readonly string[] {
+    if (type === 'permission') return PERMISSION_SET_DOOR_QUERY_PARAMS;
+    if (type === 'webhook' && !qualified) return WEBHOOK_DOOR_QUERY_PARAMS;
+    return CATALOG_ACTIVATION_NO_QUERY_PARAMS;
 }
 
 /**
@@ -411,6 +470,7 @@ export function readPermissionSetPackageQuery(
     deps: DomainHandlerDeps,
     query: unknown,
     declared: readonly string[],
+    noun = 'permission set',
 ): { packageId?: string; refusal?: HttpDispatcherResult } {
     const unknownMessage = unknownQueryParamRefusalMessage(query, declared);
     if (unknownMessage !== undefined) {
@@ -437,8 +497,8 @@ export function readPermissionSetPackageQuery(
             refusal: {
                 handled: true,
                 response: deps.error(
-                    '`package` names the package whose permission set this request addresses — a non-empty package id. '
-                    + 'Leave it out to address the set by its name alone.',
+                    `\`package\` names the package whose ${noun} this request addresses — a non-empty package id. `
+                    + `Leave it out to address the ${noun === 'permission set' ? 'set' : noun} by its name alone.`,
                     400,
                     { code: 'VALIDATION_ERROR' },
                 ),
@@ -754,7 +814,8 @@ function ledgerUnregistered(ql: any): boolean {
  *     or `['_activation', 'webhook', ns, name]` (#31699).
  *     Then the **query**: the type's closed set
  *     ({@link catalogActivationQueryParams}), and `?package=` for a
- *     permission set ({@link readPermissionSetPackageQuery}).
+ *     permission set or a webhook's bare address
+ *     ({@link readPermissionSetPackageQuery}).
  *  3. **Body**: {@link readActivationBody}.
  *  4. **Declaration**, through the catalog reader the security plugin binds to
  *     the engine — the one `resolveUserAuthzGrants` reads, so this door and
@@ -828,7 +889,12 @@ export async function handleCatalogActivationWrite(
     // [AGENTS route rule 5, ADR-0150 D5, #32164] The type's closed set, read
     // before the body and before any lookup, so a refused request reads
     // nothing and writes nothing.
-    const queryReading = readPermissionSetPackageQuery(deps, query, catalogActivationQueryParams(type));
+    const queryReading = readPermissionSetPackageQuery(
+        deps, query, catalogActivationQueryParams(type, namespace !== undefined), type === 'webhook' ? 'webhook' : undefined,
+    );
+    // [ADR-0150 D2/D5, #33016] `webhook/:name?package=PKG` addresses exactly
+    // PKG's declaration, as the namespace address addresses its namespace's.
+    const exactWebhookPackage = type === 'webhook' ? queryReading.packageId : undefined;
     if (queryReading.refusal) return queryReading.refusal;
 
     // ── 3. body ─────────────────────────────────────────────────────────────
@@ -847,7 +913,7 @@ export async function handleCatalogActivationWrite(
         return { handled: true, response: deps.error('Data engine not available', 503) };
     }
     let entry: { name: string; packageId?: string } | undefined;
-    if (namespace !== undefined) {
+    if (namespace !== undefined || exactWebhookPackage !== undefined) {
         const reader = declaredWebhookReaderOf(await deps.resolveService(context, 'declaredWebhooks'));
         if (!reader || typeof reader.list !== 'function') {
             return {
@@ -862,7 +928,9 @@ export async function handleCatalogActivationWrite(
         }
         let address: Awaited<ReturnType<typeof resolveQualifiedWebhook>>;
         try {
-            address = await resolveQualifiedWebhook(reader, ql, namespace, name);
+            address = namespace !== undefined
+                ? await resolveQualifiedWebhook(reader, ql, namespace, name)
+                : await resolveExactWebhook(reader, exactWebhookPackage!, name);
         } catch (err: any) {
             return {
                 handled: true,
@@ -877,10 +945,13 @@ export async function handleCatalogActivationWrite(
         }
         if ('refusal' in address) return refusedNameAnswer(deps, address.refusal);
         if ('missing' in address) {
+            const addressPhrase = namespace !== undefined
+                ? `in namespace '${namespace}'`
+                : `by package '${exactWebhookPackage}'`;
             return {
                 handled: true,
                 response: deps.error(
-                    `Webhook '${name}' is not declared in namespace '${namespace}': ${address.missing}. There is nothing ` +
+                    `Webhook '${name}' is not declared ${addressPhrase}: ${address.missing}. There is nothing ` +
                     `to switch ${enabled ? 'on' : 'off'}. ${DECLARATION_LOOKUPS.webhook.authoredRemedy}`,
                     404,
                 ),
@@ -1064,7 +1135,7 @@ export async function handleCatalogActivationWrite(
         response: deps.success({
             type,
             name: entry.name,
-            ...(namespace !== undefined ? { packageId: entry.packageId } : {}),
+            ...(namespace !== undefined || exactWebhookPackage !== undefined ? { packageId: entry.packageId } : {}),
             enabled,
         }),
     };
