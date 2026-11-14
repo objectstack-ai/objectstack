@@ -57,10 +57,18 @@ export default defineConfig({
     // which drives the stdio exit through the shared ADR-0106 case table: the
     // table is a VALUE import too, and judging this transport against a stale
     // build of it would be the same silent wrong-tree verdict.
+    //
+    // The `@objectstack/objectql` entry is for `mcp-validate-expression.test.ts`,
+    // which provisions the search companion with the engine's own
+    // `provisionSearchCompanion` and reads its name from `SEARCH_COMPANION_FIELD`,
+    // the constant `validate_expression` leaves out of scope: both VALUE imports,
+    // judged against the source in the checkout, not a build of it. Anchored
+    // because `@objectstack/objectql` exports a `./core` subpath.
     alias: [
       { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../metadata-core/src/index.ts') },
       { find: /^@objectstack\/metadata-core\/testing$/, replacement: path.resolve(__dirname, '../metadata-core/src/testing.ts') },
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../lint/src/index.ts') },
+      { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../objectql/src/index.ts') },
     ],
   },
 });
