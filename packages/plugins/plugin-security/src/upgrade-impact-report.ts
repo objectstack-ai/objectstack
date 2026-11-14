@@ -279,6 +279,11 @@ export interface WithheldDeclaredWebhook {
   packageId: string;
   rowId: string;
   organizationId: string | null;
+  /**
+   * [#33016] Set when that package is disabled: it holds nothing for the
+   * activation door until it is enabled again, so its address answers `409`.
+   */
+  packageDisabled?: true;
 }
 
 /** An overlay row bound to a package that no longer ships the item. */
@@ -669,7 +674,10 @@ export async function collectUpgradeImpactFindings(
         const name = nameOf(row.name);
         if (name === undefined) continue;
         for (const packageId of webhookShippers(registry, name)) {
-          report.withheldWebhooks.push({ name, packageId, rowId: String(row.id), organizationId: organizationOf(row) });
+          report.withheldWebhooks.push({
+            name, packageId, rowId: String(row.id), organizationId: organizationOf(row),
+            ...(registry.isPackageDisabled(packageId) ? { packageDisabled: true as const } : {}),
+          });
         }
       }
 
@@ -804,15 +812,16 @@ function logError(logger: UpgradeReportLogger | undefined, message: string, meta
 }
 
 /**
- * [#33016] The webhook switch every finding can use: the exact qualifier
- * names the finding's package whatever its namespace — the namespace address
- * answers 409 for two co-owners of one namespace, and a package that declares
- * no namespace has none — and a finding naming no package (the environment's
- * own declaration) takes the bare address.
+ * [#33016] The webhook switch a finding names: the exact qualifier, which
+ * addresses the finding's package whatever its namespace — the namespace
+ * address answers 409 for two co-owners of one namespace, and a package that
+ * declares no namespace has none. Every webhook finding names a package (a
+ * re-enablement's row records one, and a withheld webhook's holder is a
+ * package), so no finding takes the bare address. A disabled package holds
+ * nothing for the door until it is enabled again (a withheld webhook's
+ * `packageDisabled`).
  */
-const WEBHOOK_SWITCH_DOOR =
-  'POST /api/v1/security/_activation/webhook/<name>?package=<package>, or ' +
-  'POST /api/v1/security/_activation/webhook/<name> for a finding that names no package';
+const WEBHOOK_SWITCH_DOOR = 'POST /api/v1/security/_activation/webhook/<name>?package=<package>';
 
 const SWITCH_DOORS =
   'POST /api/v1/automation/<flow>/toggle, POST /api/v1/actions/_activation/<object>/<action> or ' +
@@ -856,7 +865,8 @@ const CATEGORY_LINES: Record<FindingKey, (count: number) => string> = {
     'answers and the declared webhook is withheld for the whole deployment. Nothing was changed. Fix: rename or ' +
     'delete the row to let the declaration answer; to keep the row as well, rename it, and switch the declared ' +
     `one off if it must not fire (${WEBHOOK_SWITCH_DOOR}, with { "enabled": false }; the package is the one the ` +
-    'finding names).',
+    'finding names). A finding marked packageDisabled names a disabled package: it does not fire now, and that ' +
+    'address answers 409 until the package is enabled again, so enable the package first, then switch it there.',
   overlayOrphans: (n) =>
     `[security] upgrade impact: ${n} customization(s) of a view, dashboard, report, translation or email template ` +
     'are bound to a package that no longer ships the item, so each is served as an item of its own beside ' +

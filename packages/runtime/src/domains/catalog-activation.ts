@@ -89,9 +89,11 @@
  * serves the name) would still keep off. Nothing is written then.
  *
  * The door's query set is closed (AGENTS route rule 5): `package` for
- * `permission`, nothing for every other type — a name outside it is refused
- * `400 VALIDATION_ERROR` before any lookup, where it used to be dropped
- * without a word ({@link catalogActivationQueryParams}).
+ * `permission` and for the bare `webhook/:name` address (#33016, the exact
+ * qualifier), nothing for the namespace address `webhook/:ns/:name` or any
+ * other type — a name outside it is refused `400 VALIDATION_ERROR` before any
+ * lookup, where it used to be dropped without a word
+ * ({@link catalogActivationQueryParams}).
  *
  * ## A declared webhook two packages declare (ADR-0150 D3/D4/D5, #31699)
  *

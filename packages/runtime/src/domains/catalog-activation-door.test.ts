@@ -926,6 +926,29 @@ describe('the catalog activation door — a declared webhook two packages declar
             });
         }
 
+        // The second state: a package that declares no namespace beside another
+        // holder. Its only address is the bare one, which refuses naming both;
+        // `?package=` switches each holder's own row.
+        const N = 'com.acme.nons';
+        for (const order of [[A, N], [N, A]]) {
+            it(`a package with no namespace beside a holder, registered ${order.map((p) => p.split('.').pop()).join(', ')}: the bare address refuses naming both, and \`?package=\` switches each holder's own row`, async () => {
+                const h = bootWith(order, [{ package_id: null, active: false }]);
+                const refused = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`);
+                expect([statusOf(refused), [...candidatesOf(refused)].sort()]).toEqual([409, [A, N]]);
+                expect(h.writes).toEqual([]);
+
+                const res = await flipAt(h, `/_activation/webhook/${HOOK}`, { package: N }, { enabled: true });
+                expect(statusOf(res)).toBe(200);
+                expect(res.response?.body?.data).toEqual({ type: 'webhook', name: HOOK, packageId: N, enabled: true });
+                expect(ledger(h)).toEqual([[null, false], [N, true]]);
+
+                expect(statusOf(await flipAt(h, `/_activation/webhook/${HOOK}`, { package: A }, { enabled: true }))).toBe(200);
+                expect(ledger(h)).toEqual([[null, false], [N, true], [A, true]]);
+                expect(statusOf(await flipAt(h, `/_activation/webhook/${HOOK}`, { package: N }))).toBe(200);
+                expect(ledger(h)).toEqual([[null, false], [N, false], [A, true]]);
+            });
+        }
+
         it('a package that does not hold the name is 409 naming the holders; nothing served is 404; nothing written', async () => {
             const h = bootWith([A, B]);
             const notHeld = await flipAt(h, `/_activation/webhook/${HOOK}`, { package: 'com.acme.gamma' });

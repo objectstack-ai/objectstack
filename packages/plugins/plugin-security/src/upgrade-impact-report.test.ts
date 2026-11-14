@@ -415,11 +415,11 @@ describe('webhook: a sys_webhook row holding a declared name', () => {
       { name: 'acme_deal_won', packageId: OTHER_VENDOR, rowId: 'wh_1', organizationId: 'org_tenant' },
       { name: 'acme_deal_won', packageId: VENDOR, rowId: 'wh_1', organizationId: 'org_tenant' },
     ]);
-    // [#33016 nit 2] The exact qualifier serves every holder, whatever its
-    // namespace; the bare address serves a finding naming no package.
+    // [#33016 nit 2] The exact qualifier serves every enabled holder, whatever
+    // its namespace; every finding names a package, so no bare-address arm.
     const line = errorLines(r).find((m) => m.includes('sys_webhook row(s) hold the name of a webhook')) ?? '';
     expect(line).toContain('POST /api/v1/security/_activation/webhook/<name>?package=<package>');
-    expect(line).toContain('POST /api/v1/security/_activation/webhook/<name> for a finding that names no package');
+    expect(line).not.toContain('names no package');
     expect(line).not.toContain('<namespace>');
   });
 
@@ -435,8 +435,15 @@ describe('webhook: a sys_webhook row holding a declared name', () => {
           packages: { [order[1]]: { source: 'code', disabled: true } },
         },
       });
-      const report = await collectUpgradeImpactFindings(d.engine, d);
-      expect(report.withheldWebhooks.map((w) => w.packageId).sort()).toEqual([OTHER_VENDOR, VENDOR].sort());
+      const r = await boot(d, 'walled');
+      expect(r.report.withheldWebhooks.map((w) => w.packageId).sort()).toEqual([OTHER_VENDOR, VENDOR].sort());
+      // [#33016 S2] The disabled holder's address answers 409 until it is
+      // enabled again: its finding says so, and the line says to enable first.
+      expect(r.report.withheldWebhooks.map((w) => [w.packageId, w.packageDisabled ?? false]).sort())
+        .toEqual([[order[0], false], [order[1], true]].sort());
+      const line = errorLines(r).find((m) => m.includes('sys_webhook row(s) hold the name of a webhook')) ?? '';
+      expect(line).toContain('A finding marked packageDisabled names a disabled package');
+      expect(line).toContain('enable the package first, then switch it there');
     });
   }
 
