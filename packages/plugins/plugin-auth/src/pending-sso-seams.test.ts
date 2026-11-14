@@ -59,12 +59,20 @@ describe('[#33181] the environment-user host notifier', () => {
 });
 
 /** An engine with one `sys_user` row; records updates. */
-function rowEngine(row: Record<string, unknown> | undefined, opts: { readFails?: boolean } = {}) {
+function rowEngine(
+  row: Record<string, unknown> | undefined,
+  opts: { readFails?: boolean; accounts?: Array<Record<string, unknown>> } = {},
+) {
   const updates: Array<Record<string, unknown>> = [];
   return {
     updates,
-    find: vi.fn(async () => {
+    find: vi.fn(async (object: string, query?: { where?: Record<string, unknown> }) => {
       if (opts.readFails) throw new Error('store down');
+      if (object === 'sys_account') {
+        return (opts.accounts ?? []).filter((a) =>
+          Object.entries(query?.where ?? {}).every(([k, v]) => a[k] === v),
+        );
+      }
       return row ? [row] : [];
     }),
     update: vi.fn(async (_object: string, data: Record<string, unknown>) => {
@@ -109,7 +117,7 @@ describe('[#33181] the session admission refusal', () => {
   it('lifts a ban whose expiry has passed and admits the session', async () => {
     const engine = rowEngine({ id: 'u', banned: 1, ban_expires: new Date(Date.now() - 1000).toISOString() });
     await expect(refuseInactiveUserSession(engine, { userId: 'u' }, admitAll)).resolves.toBeUndefined();
-    expect(engine.updates).toEqual([{ id: 'u', banned: false, ban_reason: null, ban_expires: null }]);
+    expect(engine.updates).toEqual([{ id: 'u', banned: false, ban_reason: null, ban_expires: null, updated_at: expect.any(Date) }]);
   });
 
   it('a ban whose expiry has not passed still refuses', async () => {
