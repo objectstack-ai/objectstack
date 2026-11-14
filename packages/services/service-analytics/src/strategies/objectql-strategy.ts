@@ -640,8 +640,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
 
     // #3654 — classify cross-object references. A cross-object DIMENSION within
     // the supported envelope is served by an FK-expand (`executeCrossObject`);
-    // everything the engine cannot serve (cross-object measures/filters,
-    // multi-hop, non-recombinable measures) is REJECTED by `planCrossObject` —
+    // a one-hop cross-object `where` leaf already reached `filter` as the
+    // engine's nested-relation condition (`servedWhere`, above); everything the
+    // engine cannot serve (cross-object measures, a `where` leaf `servedWhere`
+    // left dotted, multi-hop, non-recombinable measures) is REJECTED by `planCrossObject` —
     // the engine has no join, and a silent mis-bucket is worse than a loud
     // error. `null` ⇒ the query is base-only and takes the direct path below.
     //
@@ -1433,8 +1435,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * with a SCOPED read, re-bucket in memory. Returns `null` for a base-only
    * query (direct path), a plan for an in-envelope cross-object query.
    *
-   * THROWS for anything outside the envelope — a cross-object MEASURE or FILTER
-   * (needs a real join to evaluate), a cross-object leaf in the DATASET's own
+   * THROWS for anything outside the envelope — a cross-object MEASURE (needs a
+   * real join to evaluate), a cross-object `where` leaf {@link servedWhere} could
+   * not respell exactly (`unserved`, with its reason), a cross-object leaf in the DATASET's own
    * definition-level `filter` (#10861 — same join it does not have, arriving
    * from the producer PR #10758 added), a cross-object leaf in ONE MEASURE's own
    * `filter` (commit 399ecad58 — the same join again, arriving from the producer #10413
@@ -1497,7 +1500,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
     }
 
-    // A cross-object MEASURE or FILTER can only be evaluated with a real join.
+    // A cross-object MEASURE can only be evaluated with a real join, and a
+    // cross-object `where` leaf reaching here is one `servedWhere` left dotted.
     // [#5716] `member` is the entry AS THE REQUEST SPELLED IT (`revenue`), which
     // is what a caller can act on; `field` is what it RESOLVED to
     // (`account.balance`), which is what the message explains the refusal with.
