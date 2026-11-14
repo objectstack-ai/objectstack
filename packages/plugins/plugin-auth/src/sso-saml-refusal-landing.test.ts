@@ -180,7 +180,11 @@ interface IdpAs {
   attributes?: Record<string, string>;
   /** The NameID, when it is not the email. */
   nameID?: string;
+  /** The NameID format, when it is not the email format (an IdP-initiated Entra ID response sends `persistent`). */
+  nameIDFormat?: string;
 }
+
+const PERSISTENT_FORMAT = 'urn:oasis:names:tc:SAML:2.0:nameid-format:persistent';
 
 const xmlText = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
@@ -189,6 +193,39 @@ const attributeStatement = (attributes: Record<string, string>): string =>
   `<saml:AttributeStatement>${Object.entries(attributes)
     .map(([name, value]) => `<saml:Attribute Name="${xmlText(name)}" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri"><saml:AttributeValue xsi:type="xs:string">${xmlText(value)}</saml:AttributeValue></saml:Attribute>`)
     .join('')}</saml:AttributeStatement>`;
+
+/**
+ * With attributes, another NameID or another NameID format, the Response is
+ * rendered from samlify's default template with every tag filled here, as
+ * samlify fills it itself; `undefined` (samlify's own rendering) otherwise. No
+ * `requestId` renders an IdP-initiated Response (no `InResponseTo`).
+ */
+function customResponse(entityID: string, email: string, idpAs: IdpAs, requestId?: string) {
+  if (!idpAs.attributes && !idpAs.nameID && !idpAs.nameIDFormat) return undefined;
+  return (template: string) => {
+    const now = new Date();
+    const later = new Date(now.getTime() + 5 * 60_000).toISOString();
+    const id = `_${crypto.randomUUID()}`;
+    const filled = samlify.SamlLib.replaceTagsByValue(requestId ? template : template.replace(/ InResponseTo="\{InResponseTo\}"/g, ''), {
+      ID: id,
+      AssertionID: `_${crypto.randomUUID()}`,
+      Destination: ACS,
+      Audience: SP_ENTITY,
+      SubjectRecipient: ACS,
+      Issuer: entityID,
+      IssueInstant: now.toISOString(),
+      StatusCode: 'urn:oasis:names:tc:SAML:2.0:status:Success',
+      ConditionsNotBefore: now.toISOString(),
+      ConditionsNotOnOrAfter: later,
+      SubjectConfirmationDataNotOnOrAfter: later,
+      NameIDFormat: idpAs.nameIDFormat ?? EMAIL_FORMAT,
+      NameID: idpAs.nameID ?? email,
+      InResponseTo: requestId ?? '',
+      AuthnStatement: '',
+    });
+    return { id, context: filled.replace('{AttributeStatement}', idpAs.attributes ? attributeStatement(idpAs.attributes) : '') };
+  };
+}
 
 /** `/sign-in/sso` → the IdP → `POST` ACS; answers the ACS response. */
 async function signInThroughIdp(
@@ -225,34 +262,7 @@ async function signInThroughIdp(
     nameIDFormat: [EMAIL_FORMAT],
     singleSignOnService: [{ Binding: 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect', Location: IDP_SSO }],
   });
-  // With attributes or another NameID, the Response is rendered from the
-  // default template with every tag filled here, as samlify fills it itself.
-  const custom =
-    idpAs.attributes || idpAs.nameID
-      ? (template: string) => {
-          const now = new Date();
-          const later = new Date(now.getTime() + 5 * 60_000).toISOString();
-          const id = `_${crypto.randomUUID()}`;
-          const filled = samlify.SamlLib.replaceTagsByValue(template, {
-            ID: id,
-            AssertionID: `_${crypto.randomUUID()}`,
-            Destination: ACS,
-            Audience: SP_ENTITY,
-            SubjectRecipient: ACS,
-            Issuer: entityID,
-            IssueInstant: now.toISOString(),
-            StatusCode: 'urn:oasis:names:tc:SAML:2.0:status:Success',
-            ConditionsNotBefore: now.toISOString(),
-            ConditionsNotOnOrAfter: later,
-            SubjectConfirmationDataNotOnOrAfter: later,
-            NameIDFormat: EMAIL_FORMAT,
-            NameID: idpAs.nameID ?? email,
-            InResponseTo: requestId,
-            AuthnStatement: '',
-          });
-          return { id, context: filled.replace('{AttributeStatement}', idpAs.attributes ? attributeStatement(idpAs.attributes) : '') };
-        }
-      : undefined;
+  const custom = customResponse(entityID, email, idpAs, requestId);
   const { context } = await idp.createLoginResponse(sp, { extract: { request: { id: requestId } } }, 'post', { email }, custom);
 
   return rp.manager.handleRequest(
@@ -484,6 +494,7 @@ async function idpInitiated(
   rp: Rp,
   email: string,
   shapeResponse: (samlResponse: string) => string = (r) => r,
+  idpAs: IdpAs = {},
 ): Promise<Response> {
   const spMetadata = await (await rp.manager.handleRequest(
     new Request(`${AUTH}/sso/saml2/sp/metadata?providerId=${PROVIDER_ID}`),
@@ -496,7 +507,7 @@ async function idpInitiated(
     nameIDFormat: [EMAIL_FORMAT],
     singleSignOnService: [{ Binding: 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect', Location: IDP_SSO }],
   });
-  const { context } = await idp.createLoginResponse(sp, {}, 'post', { email });
+  const { context } = await idp.createLoginResponse(sp, {}, 'post', { email }, customResponse(IDP_ENTITY, email, idpAs));
   expect(Buffer.from(context, 'base64').toString('utf8')).not.toMatch(/InResponseTo="[^"]+"/);
   return rp.manager.handleRequest(
     new Request(ACS, {
@@ -749,6 +760,154 @@ describe('[#32086] the attribute mapping decides the email and name a SAML sign-
     });
     expect(userNamed(rp, 'mia.chen@acme.com')?.name).toBe('Mia Chen');
     expect(rp.engine.tables.get('sys_user')?.map((u: any) => u.email).sort()).toEqual(['admin@acme.com', 'mia.chen@acme.com']);
+  });
+});
+
+// ── An unmapped SAML sign-in reads the standard claims before the NameID ──
+//
+// `sso-saml-standard-claims.ts` states the rule. Microsoft Entra ID's default
+// claims, an SP-initiated entry (email-format NameID: the user principal name)
+// and an IdP-initiated one (Entra's default persistent NameID: an opaque id),
+// through the real vendor pipeline. Every provider here leaves the mapping
+// unset unless the case says otherwise.
+
+describe('an unmapped SAML sign-in reads the standard claims before the NameID', () => {
+  const C = 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims';
+  const UPN = 'mia.chen@acme.com';
+  const OPAQUE = 'pov4hy2mt2xk9-opaque-pairwise-id';
+  const ENTRA_CLAIMS = {
+    [`${C}/emailaddress`]: 'Mia.Chen@acme.com',
+    [`${C}/givenname`]: 'Mia',
+    [`${C}/surname`]: 'Chen',
+    [`${C}/name`]: UPN,
+  };
+  const spInitiated: IdpAs = { nameID: UPN, attributes: ENTRA_CLAIMS };
+  const idpInitiatedPersistent: IdpAs = { nameID: OPAQUE, nameIDFormat: PERSISTENT_FORMAT, attributes: ENTRA_CLAIMS };
+
+  /** Every user besides the seeded admin, as `email (name)`. */
+  const people = (rp: Rp) =>
+    (rp.engine.tables.get('sys_user') ?? []).filter((u: any) => u.email !== 'admin@acme.com').map((u: any) => `${u.email} (${u.name})`);
+  const entraRp = async (provider: Record<string, unknown> = {}, rest: RpOptions = {}) => {
+    const rp = await makeRp({ ...rest, provider: { allowJit: true, allowIdpInitiated: true, ...provider } });
+    await seedAdmin(rp);
+    return rp;
+  };
+  const admitted = (res: Response) => {
+    expect(res.status).toBe(302);
+    expect(landing(res).error, res.headers.get('location') ?? '').toBeNull();
+    expect(cookiesOf(res)).toMatch(/session_token=[^;]/);
+  };
+
+  it('SP-initiated then IdP-initiated with a persistent NameID: one account, keyed on the emailaddress claim; the second entry makes no other', async () => {
+    const rp = await entraRp();
+    admitted(await signInThroughIdp(rp, UPN, undefined, undefined, spInitiated));
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+
+    const second = await idpInitiated(rp, UPN, undefined, idpInitiatedPersistent);
+    // The second entry resolves to the same address, so it reaches the account
+    // the first one made, and the platform's linking rules judge it there: an
+    // unverified provider's assertion does not link itself to an existing
+    // account (`implicit-account-linking.ts`).
+    expect(landing(second)).toEqual({ base: CONSOLE_LOGIN, error: 'account_not_linked' });
+    expect(cookiesOf(second)).not.toMatch(/session_token=[^;]/);
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+  });
+
+  it('IdP-initiated first, with a persistent NameID: the account is made for the address, never for the opaque id', async () => {
+    const rp = await entraRp();
+    admitted(await idpInitiated(rp, UPN, undefined, idpInitiatedPersistent));
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    // ...and the same person entering SP-initiated next makes no second account.
+    await signInThroughIdp(rp, UPN, undefined, undefined, spInitiated);
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+  });
+
+  it('the claim is read before an "email" attribute the same assertion carries', async () => {
+    const rp = await entraRp();
+    admitted(await idpInitiated(rp, UPN, undefined, { ...idpInitiatedPersistent, attributes: { ...ENTRA_CLAIMS, email: 'other@acme.com' } }));
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+  });
+
+  it("the name claim names the user when the assertion carries no given name or surname", async () => {
+    const rp = await entraRp();
+    admitted(await idpInitiated(rp, UPN, undefined, {
+      nameID: OPAQUE,
+      nameIDFormat: PERSISTENT_FORMAT,
+      attributes: { [`${C}/emailaddress`]: 'mia.chen@acme.com', [`${C}/name`]: 'Mia Chen (Sales)' },
+    }));
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen (Sales))']);
+  });
+
+  it('a member the administrator named is read as named, whatever claims the assertion carries', async () => {
+    const rp = await entraRp({}, { samlConfig: { mapping: { email: 'mail', firstName: 'first' } } });
+    admitted(await idpInitiated(rp, UPN, undefined, {
+      ...idpInitiatedPersistent,
+      attributes: { ...ENTRA_CLAIMS, mail: 'mia@acme.com', first: 'M.' },
+    }));
+    // email and first name as named; the unset last name reads its claim.
+    expect(people(rp)).toEqual(['mia@acme.com (M. Chen)']);
+  });
+
+  it('a stored mapping that names only the groups attribute: the claims are read, and an SP-initiated sign-in still completes', async () => {
+    // The vendor fingerprints the provider configuration at the sign-in's
+    // start and again at the ACS; a mapping member it could see would differ
+    // between the two and refuse this sign-in.
+    const rp = await entraRp({}, { samlConfig: { mapping: { extraFields: { groups: 'http://schemas.microsoft.com/ws/2008/06/identity/claims/groups' } } } });
+    admitted(await signInThroughIdp(rp, UPN, undefined, undefined, { nameID: UPN, attributes: { ...ENTRA_CLAIMS, [`${C}/emailaddress`]: 'mia@acme.com' } }));
+    expect(people(rp)).toEqual(['mia@acme.com (Mia Chen)']);
+  });
+
+  it('CONTROL: an IdP that sends "email" and none of the claims signs in exactly as before', async () => {
+    const rp = await entraRp();
+    admitted(await idpInitiated(rp, 'bob@acme.com', undefined, { nameID: OPAQUE, nameIDFormat: PERSISTENT_FORMAT, attributes: { email: 'bob@acme.com' } }));
+    expect(people(rp)).toEqual(['bob@acme.com (pov4hy2mt2xk9-opaque-pairwise-id)']);
+  });
+
+  it('CONTROL: the stored mapping is unchanged by a sign-in that read the claims', async () => {
+    const rp = await entraRp();
+    admitted(await idpInitiated(rp, UPN, undefined, idpInitiatedPersistent));
+    const row = (rp.engine.tables.get('sys_sso_provider') ?? []).find((p: any) => p.provider_id === PROVIDER_ID);
+    expect(JSON.parse(row.saml_config).mapping).toBeUndefined();
+  });
+});
+
+// ── Verification on or off, an SSO provider creates an account only for an email address ──
+//
+// `sso-account-at-proven-domain.ts` (`refuseSsoAccountWithoutAddress`) states the rule.
+
+describe('verification on or off, a SAML provider creates an account only for an email address', () => {
+  const OPAQUE = 'pov4hy2mt2xk9-opaque-pairwise-id';
+  const entraRp = async () => {
+    const rp = await makeRp({ provider: { allowJit: true, allowIdpInitiated: true } });
+    await seedAdmin(rp);
+    return rp;
+  };
+  const nothingWritten = (rp: Rp) => {
+    expect((rp.engine.tables.get('sys_user') ?? []).map((u: any) => u.email)).toEqual(['admin@acme.com']);
+    expect(rp.engine.tables.get('sys_account') ?? []).toEqual([]);
+    expect(rp.engine.tables.get('sys_session') ?? []).toEqual([]);
+  };
+
+  it('an IdP-initiated persistent NameID and no email attribute or claim: refused error=INVALID_EMAIL, nothing written', async () => {
+    const rp = await entraRp();
+    const res = await idpInitiated(rp, 'ignored@acme.com', undefined, { nameID: OPAQUE, nameIDFormat: PERSISTENT_FORMAT, attributes: { other: 'x' } });
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'INVALID_EMAIL' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    nothingWritten(rp);
+  });
+
+  it('an SP-initiated sign-in whose NameID is not an address: refused on the error URL, nothing written', async () => {
+    const rp = await entraRp();
+    const res = await signInThroughIdp(rp, 'ignored@acme.com', undefined, undefined, { nameID: 'mia.chen', attributes: { other: 'x' } });
+    expect(landing(res)).toEqual({ base: FAILED, error: 'INVALID_EMAIL' });
+    nothingWritten(rp);
+  });
+
+  it('CONTROL: the same sign-in carrying an address is admitted', async () => {
+    const rp = await entraRp();
+    const res = await signInThroughIdp(rp, 'mia.chen@acme.com');
+    expect(res.headers.get('location')).toBe(AFTER);
   });
 });
 
