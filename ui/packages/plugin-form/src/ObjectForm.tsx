@@ -590,6 +590,8 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // confirmation, the loading line, the load-failure heading and the default
   // submit label — in the session locale (objectui#11039). See `formChrome.ts`.
   const { t } = useFormChromeTranslation();
+  // The heading of the trailing ungrouped-fields bucket (`deriveFieldGroupSections`).
+  const ungroupedLabel = t('common.ungroupedSection');
   const isMobile = useIsMobile();
   // Upload-in-flight gate (objectui#10166). Owns the aggregated "is any
   // file/image widget below me still uploading" answer, the Save label while it
@@ -1531,8 +1533,8 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
     () =>
       schema.sections?.length
         ? null
-        : deriveFieldGroupSections(groupableFields, objectSchema?.fieldGroups),
-    [schema.sections, groupableFields, objectSchema],
+        : deriveFieldGroupSections(groupableFields, objectSchema?.fieldGroups, ungroupedLabel),
+    [schema.sections, groupableFields, objectSchema, ungroupedLabel],
   );
   const effectiveSections = schema.sections?.length ? schema.sections : fieldGroupSections;
 

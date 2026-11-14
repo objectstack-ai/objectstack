@@ -71,6 +71,14 @@ export interface RecordDetailSectionsObject {
 export interface RecordDetailSectionLabels {
   /** Heading of the collapsible secondary section (section name `details`). */
   moreDetails: string;
+  /**
+   * Heading of the section holding the fields no declared field group claims
+   * (`deriveFieldGroupLayout`'s keyless trailing bucket). Read only when the
+   * object's `fieldGroups` apply, so the bucket always follows at least one
+   * titled group and never sits headerless under it (a collapsed one
+   * included). An object with no groups keeps its untitled primary section.
+   */
+  ungrouped: string;
 }
 
 /**
@@ -81,6 +89,12 @@ export interface RecordDetailSectionLabels {
  * judges it against the en pack).
  */
 export const MORE_DETAILS_DEFAULT_LABEL = 'More details';
+
+/**
+ * The English heading of the ungrouped-fields section, for the same
+ * translator-less surface: the en text of the `common.ungroupedSection` key.
+ */
+export const UNGROUPED_SECTION_DEFAULT_LABEL = 'Other';
 
 /**
  * The sections the running app's default record page passes to
@@ -165,16 +179,22 @@ export function deriveRecordDetailSections(
     // 1) fieldGroups-derived sections (the ADR-0085 semantic role,
     //    same shared derivation the runtime form honours). Declared
     //    groups render as titled cards in declared order; the
-    //    trailing untitled bucket (ungrouped fields) still goes
+    //    trailing keyless bucket (ungrouped fields) still goes
     //    through the primary/"More details" split so long-form
     //    fields stay tucked away.
     const grouped = deriveFieldGroupDetailSections(objectDef as any);
     if (grouped) {
       return grouped.flatMap<Record<string, unknown>>((sec: any) => {
         if (!sec.name) {
-          return splitPrimarySecondary(
+          // The bucket only exists after at least one declared group, so
+          // its primary half gets its own heading and card: drawn
+          // untitled, its fields read as members of the group above it,
+          // and as hidden ones when that group is collapsed. No `name`, so
+          // `record:details` uses the translated label as written.
+          const [primary, ...rest] = splitPrimarySecondary(
             (sec.fields as any[]).map((f: any) => f.name),
           );
+          return [{ ...primary, label: labels.ungrouped, showBorder: true as const }, ...rest];
         }
         // A declared group is written as the spec's own REFERENCE form,
         // `{ group: KEY }` (`RecordDetailsProps.sections[].group`,

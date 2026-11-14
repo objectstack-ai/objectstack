@@ -139,6 +139,7 @@ const ar = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "يتم عرض أول {{shown}} من أصل {{total}} سجل. ضيّق عامل التصفية.",
     rowCeilingNoteUnknownTotal: "يتم عرض أول {{shown}} سجل. ضيّق عامل التصفية.",
+    ungroupedSection: "أخرى",
   },
   actions: {
     decisionOutput: {

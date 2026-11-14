@@ -26,7 +26,7 @@ There are **two** grouping concepts. Keep them distinct:
 
 **1. Semantic grouping — `field.group` + `fieldGroups` (on the object).** A field's logical home ("billing", "contact_info", "system"). It travels with the model. The Studio field editor folds fields by it, and auto-generated forms use it as the **default** sectioning — so you are not starting from zero.
 
-Semantic grouping has **two halves, and you need both**. `fieldGroups` on the object is the **authorization source** for the derivation: `deriveFieldGroupLayout` (ADR-0085 §5) — the one implementation every renderer and the i18n walker consume — sections only those fields whose `group` matches a declared `fieldGroups[].key`. An **undeclared** `group` renders **exactly like no `group` at all** (the field falls into a trailing untitled bucket); with **no** `fieldGroups` declared at all, grouping does not apply and the form comes out flat. `os lint` (and `os build` / `os validate`) reports the mismatch as **`field-group-undeclared`**.
+Semantic grouping has **two halves, and you need both**. `fieldGroups` on the object is the **authorization source** for the derivation: `deriveFieldGroupLayout` (ADR-0085 §5) — the one implementation every renderer and the i18n walker consume — sections only those fields whose `group` matches a declared `fieldGroups[].key`. An **undeclared** `group` renders **exactly like no `group` at all** (the field falls into the trailing bucket of ungrouped fields, which renderers draw under its own **Other** heading after the declared groups); with **no** `fieldGroups` declared at all, grouping does not apply and the form comes out flat. `os lint` (and `os build` / `os validate`) reports the mismatch as **`field-group-undeclared`**.
 
 {/* os:check */}
 ```ts
