@@ -16,6 +16,8 @@
 
 import net from 'node:net';
 
+import { SMTP_PORT_MAX } from './smtp-port-contract.js';
+
 export interface FakeSmtp {
   port: number;
   /** Commands the client sent, uppercased verb + raw line. */
@@ -31,7 +33,7 @@ export interface StartFakeSmtpOptions {
   /** `false` answers every AUTH with 535. Default `true`. */
   authOk?: boolean;
   /**
-   * The 127.0.0.1 port to listen on. Default `0`: the OS picks a free
+   * The 127.0.0.1 port to listen on, `0` up to the SMTP ceiling. Default `0`: the OS picks a free
    * ephemeral port, which is what an in-process suite wants. A runner that
    * reserves a port range per run passes a port from its own range, so its
    * sink never lands in a range another runner reserved. A port already in
@@ -49,8 +51,8 @@ export interface StartFakeSmtpOptions {
 export async function startFakeSmtp(opts: StartFakeSmtpOptions = {}): Promise<FakeSmtp> {
   const authOk = opts.authOk !== false;
   const requestedPort = opts.port ?? 0;
-  if (!Number.isInteger(requestedPort) || requestedPort < 0 || requestedPort > 65535) {
-    throw new RangeError(`startFakeSmtp: port must be an integer from 0 to 65535, got ${String(opts.port)}`);
+  if (!Number.isInteger(requestedPort) || requestedPort < 0 || requestedPort > SMTP_PORT_MAX) {
+    throw new RangeError(`startFakeSmtp: port must be an integer from 0 to ${SMTP_PORT_MAX}, got ${String(opts.port)}`);
   }
   const commands: string[] = [];
   const messages: string[] = [];
