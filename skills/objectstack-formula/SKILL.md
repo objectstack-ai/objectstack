@@ -169,9 +169,9 @@ tests: every entry resolves at runtime, and this table documents them all.
 
 > **No date arithmetic.** The build refuses `date + n` and `end - start`: a
 > date or date-time mixed with a number, or minus another, reads `null`, and
-> `today()` / `now()` minus a date field reads `{}`. Use `daysBetween(a, b)`.
+> `today()` / `now()` minus a date field reads `{}`. Use `daysBetween(a, b)` for whole days; for hours or minutes, wrap each side in `datetime(…)` and read the Duration (row below).
 
-| Want | Write — never `end - start`, `date + n`, `today() + 30` |
+| Want | Write — never bare `end - start`, `date + n`, `today() + 30` |
 |:---|:---|
 | Inclusive span | `daysBetween(record.start_date, record.end_date) + 1` |
 | Shift a date | `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` |
