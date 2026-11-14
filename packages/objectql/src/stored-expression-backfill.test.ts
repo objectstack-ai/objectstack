@@ -18,6 +18,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 import {
+  DeleteMetaItemResponseSchema,
   PublishMetaItemResponseSchema,
   PublishPackageDraftsResponseSchema,
   RevertPackageCommitResponseSchema,
@@ -1036,6 +1037,96 @@ describe('[#32700] a rollback or revert that makes a changed stored computed fie
     const res: any = await rig.protocol.revertCommit({ commitId: published.commitId!, packageId: PKG });
 
     expect(res.reverted).toEqual([{ type: 'object', name: OBJ, action: 'restored' }]);
+    expect(rig.updates).toEqual([]);
+    expect('advisories' in res).toBe(false);
+  });
+});
+
+describe('[#32958] deleting an own-package object extension that re-declared a stored computed field fills the owner\'s expression back', () => {
+  const TIMES_EIGHT = { type: 'number', expression: cel('(record.end_day - record.start_day) * 8') };
+  /** The package's own extension of the object, re-declaring `days` with another expression (merged over the owner's). */
+  const extension = (fields: Record<string, unknown> = { days: { name: 'days', label: 'Days', ...TIMES_EIGHT } }) => ({ extend: OBJ, fields });
+  const saveExtension = (rig: Awaited<ReturnType<typeof makeRig>>, item = extension()) =>
+    (rig.protocol as any).saveMetaItem({ type: 'object_extension', name: OBJ, packageId: PKG, item });
+  const deleteExtension = (rig: Awaited<ReturnType<typeof makeRig>>, extra: Record<string, unknown> = {}) =>
+    (rig.protocol as any).deleteMetaItem({ type: 'object_extension', name: OBJ, packageId: PKG, ...extra });
+  /** The expression the registry serves for `days` now. */
+  const servedDays = (rig: Awaited<ReturnType<typeof makeRig>>) =>
+    (rig.engine.registry.getObject(OBJ) as any)?.fields?.days?.expression?.source;
+
+  it('object saved first, then the extension: the delete rewrites every row the removed expression computed', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    expect((await saveExtension(rig)).success).toBe(true);
+    // CONTROL: the extension's expression is served and computed on every row before the delete.
+    expect(servedDays(rig)).toBe(TIMES_EIGHT.expression.source);
+    expect(await stored(rig)).toEqual([8, 16, 24]);
+    rig.updates.length = 0;
+
+    const res = await deleteExtension(rig);
+
+    expect(res.success).toBe(true);
+    expect(res.reset).toBe(true);
+    // The registry serves the owner's expression again…
+    expect(servedDays(rig)).toBe(DAYS.source);
+    // …and the rows hold what it computes, not the removed expression's values.
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(await total(rig)).toBe(6);
+    expect(rig.updates).toHaveLength(3);
+    expect(notices(res, 'stored-expression-filled')).toEqual([expect.objectContaining({
+      severity: 'info',
+      path: `objects.${OBJ}.fields.days`,
+      where: `object "${OBJ}" · field "days"`,
+    })]);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('3 rows of 3 written');
+    // The declared answer carries the notice through parse unstripped.
+    expect(DeleteMetaItemResponseSchema.parse(res).advisories).toEqual(res.advisories);
+  });
+
+  it('extension saved first, then the object: the delete rewrites every row the removed expression computed', async () => {
+    const rig = await populated();
+    expect((await saveExtension(rig)).success).toBe(true);
+    await rig.save(STORED);
+    // CONTROL: the extension still wins over the object saved after it, on the registry and on every row.
+    expect(servedDays(rig)).toBe(TIMES_EIGHT.expression.source);
+    expect(await stored(rig)).toEqual([8, 16, 24]);
+    rig.updates.length = 0;
+
+    const res = await deleteExtension(rig);
+
+    expect(res.success).toBe(true);
+    expect(servedDays(rig)).toBe(DAYS.source);
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(rig.updates).toHaveLength(3);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('3 rows of 3 written');
+    expect(DeleteMetaItemResponseSchema.parse(res).advisories).toEqual(res.advisories);
+  });
+
+  it('a delete of an extension that changed no stored computed field writes no row, and its answer carries no advisories key', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    expect((await saveExtension(rig, extension({ note: { name: 'note', label: 'Note', type: 'text' } }))).success).toBe(true);
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    rig.updates.length = 0;
+
+    const res = await deleteExtension(rig);
+
+    expect(res.success).toBe(true);
+    expect(res.reset).toBe(true);
+    expect(rig.updates).toEqual([]);
+    expect('advisories' in res).toBe(false);
+  });
+
+  it('a draft discard makes nothing live and fills nothing', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    await (rig.protocol as any).saveMetaItem({ type: 'object_extension', name: OBJ, packageId: PKG, item: extension(), mode: 'draft' });
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    rig.updates.length = 0;
+
+    const res = await deleteExtension(rig, { state: 'draft' });
+
+    expect(res.success).toBe(true);
     expect(rig.updates).toEqual([]);
     expect('advisories' in res).toBe(false);
   });

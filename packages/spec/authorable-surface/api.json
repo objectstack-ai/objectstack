@@ -525,6 +525,7 @@
     "api/DeleteMetaItemRequest:parentVersion",
     "api/DeleteMetaItemRequest:state",
     "api/DeleteMetaItemRequest:type",
+    "api/DeleteMetaItemResponse:advisories",
     "api/DeleteMetaItemResponse:message",
     "api/DeleteMetaItemResponse:projectionApplied",
     "api/DeleteMetaItemResponse:reset",
