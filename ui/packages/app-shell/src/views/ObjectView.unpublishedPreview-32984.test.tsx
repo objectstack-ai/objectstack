@@ -22,6 +22,9 @@
  * the preview is still an error (only the not-registered answer is read).
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// ObjectView reaches `import('@objectstack/lint')` through the CEL editor.
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen } from '@testing-library/react';

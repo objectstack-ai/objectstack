@@ -103,7 +103,7 @@ function transcript(applies: ApplyPart[]) {
 }
 
 describe('objectstack#32984 item 1 — the plan card says what the build did', () => {
-  it('six refused applies: 搭建未完成, never 已搭建, and Build it is offered again', () => {
+  it('six refused applies: 未搭建成功, never 已搭建, and Build it is offered again', () => {
     const refused = Array.from({ length: 6 }, () => ({ output: NOT_CONFIRMED }));
     render(<ChatbotEnhanced messages={transcript(refused)} onSendMessage={vi.fn()} />);
 

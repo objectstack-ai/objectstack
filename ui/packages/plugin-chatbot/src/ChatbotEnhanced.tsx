@@ -1297,7 +1297,7 @@ export function getToolState(
  * of that fact (objectui#7254).
  *
  * The card BODY already renders a terminal badge from four separate memos:
- * `planBuildStates` (已确认 / 正在搭建 / 已搭建 / 搭建未完成), `confirmedChangeIds`
+ * `planBuildStates` (已确认 / 正在搭建 / 已搭建 / 未搭建成功), `confirmedChangeIds`
  * (已确认) and `replayOutcomeByProposalId` (已生效 / 已暂存为草稿 / 未生效).
  * The HEADER badge read none of them: it derived from `isProposalResult(result)`
  * alone, which is a fact about the tool's *own* output and never changes once
@@ -1355,7 +1355,7 @@ export function resolveProposalCardState(input: {
  * - `building`  — an `apply_blueprint` after the plan is running (正在搭建…).
  * - `built`     — an `apply_blueprint` after the plan answered a build (已搭建).
  * - `failed`    — the newest `apply_blueprint` after the plan built nothing
- *                 (搭建未完成): the card offers Build it again.
+ *                 (未搭建成功): the card offers Build it again.
  */
 export type PlanBuildState = 'pending' | 'confirmed' | 'building' | 'built' | 'failed';
 
@@ -3283,7 +3283,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     //
     // objectstack#32984 — and an invocation that is not a preview is still not
     // a build until it SAYS it built (`resolvePlanBuildStates`): a running one
-    // reads 正在搭建…, a refused one 搭建未完成. Running and built both keep the
+    // reads 正在搭建…, a refused one 未搭建成功. Running and built both keep the
     // #432 guard (no live Build it); a failed one gives the button back.
     const planBuildStates = React.useMemo(
       () => resolvePlanBuildStates(messages, { turnLive: isLoading, approvedAt: approvedPlanIds }),
