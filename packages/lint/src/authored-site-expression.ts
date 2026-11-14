@@ -31,11 +31,14 @@
  * of the flow meets: the probe is a one-flow stack whose start node carries
  * the trigger the caller names, and the condition sits on its one edge. That
  * door gives the null guard on a `record.` / `previous.` read and the
- * unprovisioned-anchor warning. It never judges a bare name's null guard, a
- * root the run does not bind, or a read a flow variable shadows: those are
- * `os validate`'s whole-flow judgments, and they need the flow's variables,
- * node ids and entrances, which the caller does not hand this entry. So `[]`
- * at a flow condition is that door's verdict, not `os validate`'s.
+ * unprovisioned-anchor warning. It never judges a bare name's null guard or a
+ * root the run does not bind: those are `os validate`'s whole-flow judgments,
+ * over the flow's variables, node ids and entrances. The door does warn on a
+ * bare read of a name a flow variable shares with a field
+ * (`warnShadowedFieldReads`), but that needs the flow's declared variables,
+ * and the caller does not hand this entry any, so the probe declares none and
+ * that warning never fires here. So `[]` at a flow condition is that door's
+ * verdict, short of the shadowed-read warning, and not `os validate`'s.
  */
 
 import { analyzeRelationshipTraversals } from '@objectstack/formula';

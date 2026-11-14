@@ -1755,11 +1755,12 @@ function jsonText(value: unknown): string {
  * [#33147] A flow condition is judged too, as the runtime publish gate judges
  * a flow write (the door an MCP or Studio write of the flow meets): the
  * null-guard gate on a record-triggered flow's `record.` / `previous.` reads
- * and the unprovisioned-anchor warning. A bare name's null guard, a root the
- * run does not bind and a read a flow variable shadows are `os validate`'s
- * whole-flow judgments, over the flow's variables, node ids and entrances,
- * which the tool is not handed; that door does not give them, and neither
- * does the tool.
+ * and the unprovisioned-anchor warning. A bare name's null guard and a root
+ * the run does not bind are `os validate`'s whole-flow judgments, over the
+ * flow's variables, node ids and entrances; that door does not give them, and
+ * neither does the tool. The door does warn on a bare read of a name a flow
+ * variable shares with a field, but the tool is never handed the flow's
+ * variables, so it cannot give that warning.
  */
 const VALIDATE_SITE_MAP: Record<
   string,
@@ -2481,7 +2482,7 @@ export function registerObjectTools(
           'a read of another record, the clock, the user or a permission), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. A hop target follows the same system-object fence as ' +
           '`describe_object`. `site` says where the expression will live: a `formula` ' +
-          'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions). ' +
+          'field, a `validation`/predicate, or a `flow_condition` (read fields as `record.<field>` there too). ' +
           'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition), so the verdict is ' +
           'the one the publish gate gives that rule or flow. A time-relative flow\'s conditions read a row of the object ' +
           'its sweep scans (`timeRelative.object`): pass that object as objectName. A start whose objectName names ' +
@@ -2509,7 +2510,7 @@ export function registerObjectTools(
               .enum(['formula', 'validation', 'flow_condition', 'template'])
               .optional()
               .describe(
-                'Where the expression will live. formula/validation bind `record.<field>`; flow_condition binds fields bare. Default: formula.',
+                'Where the expression will live. Every site reads fields as `record.<field>`; a bare field name also resolves in a flow_condition, but this tool cannot judge its null guard there. Default: formula.',
               ),
             severity: z
               .enum(VALIDATION_SEVERITIES)
