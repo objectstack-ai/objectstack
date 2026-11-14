@@ -100,7 +100,7 @@ const CONSOLE_ROBOTS_META = `<meta name="robots" content="${CONSOLE_ROBOTS_DIREC
  * picks the longest matching rule, so each `Allow` wins over the shorter
  * `Disallow` it sits under.
  */
-export const DEFAULT_ROBOTS_TXT = [
+const DEFAULT_ROBOTS_TXT = [
   '# Served by the ObjectStack runtime because the app defines no robots.txt.',
   '# The API and the Console are app surfaces, not content; public forms stay crawlable.',
   'User-agent: *',

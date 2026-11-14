@@ -17,6 +17,10 @@
  * The rule covers `/api` and `/api/…` only. Public, shareable pages live
  * outside it (the Console's public form page is `/_console/f/<slug>`), and a
  * route an app mounts elsewhere is the app's to describe.
+ *
+ * Both HTTP doors install it: `HonoHttpServer` in its constructor and
+ * `createHonoApp` (`@objectstack/hono`) on the app it builds, so the two answer
+ * the same headers.
  */
 import type { Hono } from 'hono';
 

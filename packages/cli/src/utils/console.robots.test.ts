@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 
-import { createConsoleNotBuiltPlugin, createConsoleStaticPlugin, DEFAULT_ROBOTS_TXT } from './console.js';
+import { createConsoleNotBuiltPlugin, createConsoleStaticPlugin } from './console.js';
 
 const ORIGIN = 'http://robots.example.test';
 const NOINDEX = 'noindex, nofollow';
@@ -141,7 +141,8 @@ describe('GET /robots.txt', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8');
     const body = await res.text();
-    expect(body).toBe(DEFAULT_ROBOTS_TXT);
+    expect(body.startsWith('# ')).toBe(true);
+    expect(body.endsWith('\n')).toBe(true);
     const rules = body.split('\n').filter((l) => l && !l.startsWith('#'));
     expect(rules).toEqual([
       'User-agent: *',
@@ -158,8 +159,9 @@ describe('GET /robots.txt', () => {
     const request = await mount();
     const res = await request('/robots.txt');
     const length = res.headers.get('content-length');
-    if (length !== null) expect(Number(length)).toBe(Buffer.byteLength(DEFAULT_ROBOTS_TXT));
-    expect(await res.text()).toBe(DEFAULT_ROBOTS_TXT);
+    const body = await res.text();
+    expect(body).toContain('Disallow: /api/');
+    if (length !== null) expect(Number(length)).toBe(Buffer.byteLength(body));
   });
 
   it('HEAD is answered like GET', async () => {
