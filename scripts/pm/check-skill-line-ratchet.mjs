@@ -1730,7 +1730,16 @@ export const CEILINGS = new Map([
   // the escalation) and amendment 6595840476 (maintainer 「同意：下班席位的卡交给
   // 兄弟席」, the idle reading and the sibling hand-over, which names this
   // file). Measured delta +3 (17 → 20 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 20],
+  // 20 → 24 (#33226): words the maintainer said to one seat are not spread —
+  // the one-line rule first, then the card body's three bullets (bind that
+  // seat's account only; relayed fleet-wide or triage-directed orders only from
+  // triage's own session or seat post; record a relayed order's effect, never
+  // extend it). Ruling of record: the maintainer in the triage#1 session,
+  // 2026-11-14, 「所有座位当前任务处理完就下班，我说的都是针对某个具体 agent 账户」,
+  // 「转述指令要写明对谁说, 其实问题的关键你是分诊你才会关心别人的座位帖」 (card
+  // body) and 「也就是说，对某个座位说的话不要扩散就行」 (comment 6872810212).
+  // Measured delta +4 (20 → 24 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 24],
   // Review seat charter (`review#N`): the seat whose only job is the contract
   // review, held on any account that reaches CONTRACT_REVIEW_TIER — its seat
   // word, mailbox, review-seat-first routing of `Request: contract-review`
