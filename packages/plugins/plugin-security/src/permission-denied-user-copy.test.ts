@@ -176,6 +176,7 @@ interface Denial {
 async function denyDelete(
   locale: string | undefined,
   i18n?: FileI18nAdapter,
+  workspaceLocale?: string,
 ): Promise<Denial> {
   const engine = makeEngine();
   const metadata = {
@@ -221,6 +222,7 @@ async function denyDelete(
       positions: ['org_member'],
       permissions: ['app_reader'],
       ...(locale ? { locale } : {}),
+      ...(workspaceLocale ? { workspaceLocale } : {}),
     },
   };
   try {
@@ -269,6 +271,18 @@ describe('#7414 — the 403 an end user reads', () => {
       expect(denial.message, `locale=${String(locale)}`)
         .toBe(BUILTIN_OPERATION_MESSAGES.en.permission_denied);
     }
+  });
+
+  // [#32656] Ruling C on #32440: the request's language, else the workspace
+  // default, else `en`. `locale` folds the two (the request wins), so the
+  // workspace default rides the context on its own as `workspaceLocale`.
+  it('[#32656] a request language with no text falls back to the workspace default, then to en', async () => {
+    const workspace = await denyDelete('de-DE', undefined, 'zh-CN');
+    expect(workspace.message).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].permission_denied);
+    const request = await denyDelete('ja-JP', undefined, 'zh-CN');
+    expect(request.message, 'the request language wins when it has text').toBe(BUILTIN_OPERATION_MESSAGES['ja-JP'].permission_denied);
+    const floor = await denyDelete('de-DE', undefined, 'de-DE');
+    expect(floor.message).toBe(BUILTIN_OPERATION_MESSAGES.en.permission_denied);
   });
 
   it('names no object, no operation and no position — in every locale it can render', async () => {

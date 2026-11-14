@@ -94,7 +94,13 @@ import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 // [#7414] The SHARED operation-message catalog #7307 built for the data path's
 // operation-level refusals. Second consumer, same mechanism — a second remedy
 // for one defect class is what that module exists to prevent.
-import { objectFieldLabelKey, renderOperationMessage } from '@objectstack/spec/system';
+import {
+  BUILTIN_OPERATION_MESSAGES,
+  objectFieldLabelKey,
+  operationMessageTranslationKey,
+  renderOperationMessage,
+  resolveBundleLocale,
+} from '@objectstack/spec/system';
 // [#19989] The engine's own update-dispatch predicate, asked rather than
 // re-derived: step 3.6 needs to know which row the ENGINE will write.
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
@@ -218,10 +224,51 @@ export interface WriteImageCheckSeam {
 function userFacingDenialMessage(
   ctx: PluginContext,
   messageKey: UserFacingDenialKey,
-  locale: string | undefined,
+  locales: DenialLocales,
   params?: Record<string, unknown>,
 ): string {
-  return renderOperationMessage({ messageKey, params }, { locale, translate: denialTranslator(ctx) });
+  const translate = denialTranslator(ctx);
+  return renderOperationMessage({ messageKey, params }, { locale: denialLocaleOf(messageKey, locales, translate), translate });
+}
+
+/**
+ * [#32656] The caller's language ladder for a refusal's user sentence: the
+ * request's locale, then the workspace default (ruling C on #32440), read off
+ * the operation's execution context. `locale` alone folds the two (the request
+ * locale wins the fold), so a request in a language the platform has no text
+ * in used to fall straight to `en` past a workspace default it does have.
+ */
+type DenialLocales = readonly (string | undefined)[];
+
+function denialLocalesOf(context: { locale?: string; workspaceLocale?: string } | undefined): DenialLocales {
+  return [context?.locale, context?.workspaceLocale];
+}
+
+/**
+ * The first locale of the ladder this sentence has text in: a deployment's
+ * `errors.<key>` override for it, else the built-in catalog (matched by the
+ * platform's one locale ladder). `undefined` when none has it, which
+ * {@link renderOperationMessage} renders in `en`.
+ */
+function denialLocaleOf(
+  messageKey: UserFacingDenialKey,
+  locales: DenialLocales,
+  translate: ReturnType<typeof denialTranslator>,
+): string | undefined {
+  const key = operationMessageTranslationKey(messageKey);
+  for (const locale of locales) {
+    if (typeof locale !== 'string' || locale.length === 0) continue;
+    if (translate) {
+      try {
+        const override = translate(key, locale);
+        if (typeof override === 'string' && override.length > 0 && override !== key) return locale;
+      } catch {
+        // A misbehaving i18n service must not turn a 403 into a 500.
+      }
+    }
+    if (resolveBundleLocale(BUILTIN_OPERATION_MESSAGES, locale) !== undefined) return locale;
+  }
+  return undefined;
 }
 
 /**
@@ -310,10 +357,12 @@ function fieldEditDenialMessage(
   forbidden: readonly string[],
   schema: { fields?: Record<string, { label?: unknown } | null | undefined> } | null | undefined,
   readable: Record<string, { readable: boolean }>,
-  locale: string | undefined,
+  locales: DenialLocales,
 ): string {
   const translate = denialTranslator(ctx);
-  const loc = locale ?? 'en';
+  // Labels are translated in the language the sentence itself resolves to.
+  const loc = denialLocaleOf('field_edit_denied', locales, translate) ?? 'en';
+  const locale = [loc];
   const labels: string[] = [];
   for (const field of forbidden) {
     if (readable[field]?.readable === false) return userFacingDenialMessage(ctx, 'field_edit_denied_opaque', locale);
@@ -344,7 +393,7 @@ function fieldEditDenialMessage(
  * they fill, so they resolve by the catalog's own locale ladder and a
  * deployment's `errors.<key>` override applies to them as to the sentence.
  */
-function labelList(ctx: PluginContext, labels: readonly string[], locale: string | undefined): string {
+function labelList(ctx: PluginContext, labels: readonly string[], locale: DenialLocales): string {
   const separator = userFacingDenialMessage(ctx, 'field_label_list_separator', locale);
   return labels.map((label) => userFacingDenialMessage(ctx, 'field_label_quoted', locale, { label })).join(separator);
 }
@@ -902,7 +951,7 @@ export function registerAuthzMiddleware(
             userId: opCtx.context?.userId ?? 'unknown',
           });
           throw new PermissionDeniedError(
-            userFacingDenialMessage(ctx, 'permission_denied', opCtx.context?.locale),
+            userFacingDenialMessage(ctx, 'permission_denied', denialLocalesOf(opCtx.context)),
             {
               operation: opCtx.operation,
               object: opCtx.object,
@@ -1042,7 +1091,7 @@ export function registerAuthzMiddleware(
           userId: opCtx.context?.userId ?? 'unknown',
         });
         throw new PermissionDeniedError(
-          userFacingDenialMessage(ctx, 'permission_denied', opCtx.context?.locale),
+          userFacingDenialMessage(ctx, 'permission_denied', denialLocalesOf(opCtx.context)),
           { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
           developerMessage,
         );
@@ -1365,7 +1414,7 @@ export function registerAuthzMiddleware(
               userId: opCtx.context?.userId ?? 'unknown',
             });
             throw new PermissionDeniedError(
-              userFacingDenialMessage(ctx, 'record_access_denied', opCtx.context?.locale),
+              userFacingDenialMessage(ctx, 'record_access_denied', denialLocalesOf(opCtx.context)),
               {
                 operation: opCtx.operation,
                 object: opCtx.object,
@@ -1499,7 +1548,7 @@ export function registerAuthzMiddleware(
             forbidden,
             typeof ql?.getSchema === 'function' ? ql.getSchema(opCtx.object) as any : undefined,
             this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets),
-            opCtx.context?.locale,
+            denialLocalesOf(opCtx.context),
           ),
         );
       }
@@ -1695,7 +1744,7 @@ export function registerAuthzMiddleware(
                   `${action} requires the transfer grant (allowTransfer or modifyAllRecords)`,
                 refusalDetails,
               ),
-              userFacingDenialMessage(ctx, userKey, opCtx.context?.locale),
+              userFacingDenialMessage(ctx, userKey, denialLocalesOf(opCtx.context)),
             );
           };
           // [ADR-0142 D4] A claim or a release the step did not admit names the
@@ -1707,7 +1756,7 @@ export function registerAuthzMiddleware(
                   'other change of ownership requires the transfer grant (allowTransfer or modifyAllRecords)',
                 refusalDetails,
               ),
-              userFacingDenialMessage(ctx, userKey, opCtx.context?.locale),
+              userFacingDenialMessage(ctx, userKey, denialLocalesOf(opCtx.context)),
             );
           };
           const denyQueueWrite = (condition: string, userKey: UserFacingDenialKey): never => {
@@ -1717,7 +1766,7 @@ export function registerAuthzMiddleware(
                   '(allowTransfer or modifyAllRecords)',
                 refusalDetails,
               ),
-              userFacingDenialMessage(ctx, userKey, opCtx.context?.locale),
+              userFacingDenialMessage(ctx, userKey, denialLocalesOf(opCtx.context)),
             );
           };
           // [ADR-0138 D1] The guest branch (see the step's header). Its refusal
@@ -2067,7 +2116,7 @@ export function registerAuthzMiddleware(
             userId: opCtx.context?.userId ?? 'unknown',
           });
           throw new PermissionDeniedError(
-            userFacingDenialMessage(ctx, 'record_change_not_allowed', opCtx.context?.locale),
+            userFacingDenialMessage(ctx, 'record_change_not_allowed', denialLocalesOf(opCtx.context)),
             { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
             developerMessage,
           );
@@ -2217,7 +2266,7 @@ export function registerAuthzMiddleware(
                 userId: opCtx.context?.userId ?? 'unknown',
               });
               throw new PermissionDeniedError(
-                userFacingDenialMessage(ctx, 'record_change_not_allowed', opCtx.context?.locale),
+                userFacingDenialMessage(ctx, 'record_change_not_allowed', denialLocalesOf(opCtx.context)),
                 { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
                 developerMessage,
               );
@@ -2642,7 +2691,7 @@ export function registerAuthzMiddleware(
         userId: opCtx.context?.userId ?? 'unknown',
       });
       throw new PermissionDeniedError(
-        userFacingDenialMessage(ctx, 'record_change_not_allowed', opCtx.context?.locale),
+        userFacingDenialMessage(ctx, 'record_change_not_allowed', denialLocalesOf(opCtx.context)),
         { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
         developerMessage,
       );

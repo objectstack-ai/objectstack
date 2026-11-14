@@ -86,6 +86,7 @@
  */
 
 import { isTenantAuthored } from '@objectstack/metadata-core';
+import { resolveBundleLocale } from '@objectstack/spec/system';
 
 /**
  * ⛔ This module imports NOTHING from the rest of the plugin, and that is
@@ -290,18 +291,96 @@ export function classifyPackagedPermissionSet(
  *    carries no host state either: a sandboxed body that catches this error
  *    receives static text.
  *
- * English, like every platform refusal: there is no localization path for a
- * thrown `userMessage`, and these texts do not invent one.
+ * [#32656] In the caller's language (ruling C on #32440): the producer
+ * composes the sentence in the request locale, else the workspace default,
+ * else `en` ({@link packagedSetUserMessage}). The write door states the two
+ * locales (`MetadataAuthoringGateContext.userTextLocales`); a caller that
+ * states none gets `en`, the text this refusal always carried.
  */
-const LOCKED_USER_MESSAGE =
-  `This permission set is provided by an installed package and can't be edited here. Clone it instead `
-  + `with the Clone action, then edit the clone. The clone is your organization's own permission set, `
-  + `and package upgrades keep reaching the original.`;
+type PackagedSetUserText = Readonly<Record<string, string>>;
 
-const PROVENANCE_UNKNOWN_USER_MESSAGE =
-  `This permission set can't be saved right now, because the system couldn't confirm whether an installed `
-  + `package provides it. Try again in a moment. To customize a permission set that a package provides, `
-  + `clone it with the Clone action and edit the clone.`;
+const LOCKED_USER_TEXT: PackagedSetUserText = {
+  en: `This permission set is provided by an installed package and can't be edited here. Clone it instead `
+    + `with the Clone action, then edit the clone. The clone is your organization's own permission set, `
+    + `and package upgrades keep reaching the original.`,
+  'zh-Hans': '此权限集由已安装的软件包提供，不能在这里编辑。请使用“克隆”操作克隆它，然后编辑克隆出的权限集。'
+    + '克隆出的权限集归贵组织所有，软件包升级仍会照常更新原权限集。',
+  'zh-Hant': '此權限集由已安裝的套件提供，無法在這裡編輯。請使用「複製」動作複製它，然後編輯複製出的權限集。'
+    + '複製出的權限集歸貴組織所有，套件升級仍會照常更新原權限集。',
+  ja: 'この権限セットはインストール済みのパッケージが提供しているため、ここでは編集できません。'
+    + '「複製」アクションで複製し、複製したほうを編集してください。複製した権限セットは組織独自のものになり、'
+    + 'パッケージのアップグレードは引き続き元の権限セットに適用されます。',
+  ko: '이 권한 집합은 설치된 패키지가 제공하므로 여기에서 편집할 수 없습니다. 복제 작업으로 복제한 다음 복제본을 '
+    + '편집하세요. 복제본은 조직 고유의 권한 집합이 되며, 패키지 업그레이드는 계속 원본에 적용됩니다.',
+  es: 'Este conjunto de permisos lo proporciona un paquete instalado y no se puede editar aquí. Clónelo con la '
+    + 'acción Clonar y edite el clon. El clon es un conjunto de permisos propio de su organización, y las '
+    + 'actualizaciones del paquete siguen llegando al original.',
+  fr: 'Cet ensemble d’autorisations est fourni par un package installé et ne peut pas être modifié ici. '
+    + 'Clonez-le avec l’action Cloner, puis modifiez le clone. Le clone appartient à votre organisation, et les '
+    + 'mises à jour du package continuent de s’appliquer à l’original.',
+  de: 'Dieser Berechtigungssatz wird von einem installierten Paket bereitgestellt und kann hier nicht bearbeitet '
+    + 'werden. Klonen Sie ihn mit der Aktion „Klonen“ und bearbeiten Sie den Klon. Der Klon gehört Ihrer '
+    + 'Organisation, und Paket-Upgrades erreichen weiterhin das Original.',
+  'pt-BR': 'Este conjunto de permissões é fornecido por um pacote instalado e não pode ser editado aqui. Clone-o '
+    + 'com a ação Clonar e edite o clone. O clone é um conjunto de permissões da sua organização, e as '
+    + 'atualizações do pacote continuam chegando ao original.',
+  ru: 'Этот набор разрешений предоставлен установленным пакетом, и его нельзя изменить здесь. Клонируйте его '
+    + 'действием «Клонировать» и измените клон. Клон принадлежит вашей организации, а обновления пакета '
+    + 'по-прежнему применяются к оригиналу.',
+  ar: 'مجموعة الأذونات هذه يوفرها حزمة مثبتة ولا يمكن تعديلها هنا. انسخها باستخدام إجراء النسخ، ثم عدّل النسخة. '
+    + 'النسخة مجموعة أذونات خاصة بمؤسستك، وتستمر ترقيات الحزمة في الوصول إلى المجموعة الأصلية.',
+};
+
+const PROVENANCE_UNKNOWN_USER_TEXT: PackagedSetUserText = {
+  en: `This permission set can't be saved right now, because the system couldn't confirm whether an installed `
+    + `package provides it. Try again in a moment. To customize a permission set that a package provides, `
+    + `clone it with the Clone action and edit the clone.`,
+  'zh-Hans': '此权限集暂时无法保存，因为系统无法确认它是否由已安装的软件包提供。请稍后重试。'
+    + '如需自定义由软件包提供的权限集，请使用“克隆”操作克隆它，然后编辑克隆出的权限集。',
+  'zh-Hant': '此權限集暫時無法儲存，因為系統無法確認它是否由已安裝的套件提供。請稍後再試。'
+    + '如需自訂由套件提供的權限集，請使用「複製」動作複製它，然後編輯複製出的權限集。',
+  ja: 'この権限セットは現在保存できません。インストール済みのパッケージが提供しているかどうかを確認できなかったためです。'
+    + 'しばらくしてからもう一度お試しください。パッケージが提供する権限セットをカスタマイズするには、'
+    + '「複製」アクションで複製し、複製したほうを編集してください。',
+  ko: '설치된 패키지가 이 권한 집합을 제공하는지 확인할 수 없어 지금은 저장할 수 없습니다. 잠시 후 다시 시도하세요. '
+    + '패키지가 제공하는 권한 집합을 사용자 지정하려면 복제 작업으로 복제한 다음 복제본을 편집하세요.',
+  es: 'Este conjunto de permisos no se puede guardar ahora, porque el sistema no pudo confirmar si lo proporciona '
+    + 'un paquete instalado. Vuelva a intentarlo en un momento. Para personalizar un conjunto de permisos que '
+    + 'proporciona un paquete, clónelo con la acción Clonar y edite el clon.',
+  fr: 'Cet ensemble d’autorisations ne peut pas être enregistré pour le moment, car le système n’a pas pu '
+    + 'confirmer s’il est fourni par un package installé. Réessayez dans un instant. Pour personnaliser un '
+    + 'ensemble d’autorisations fourni par un package, clonez-le avec l’action Cloner et modifiez le clone.',
+  de: 'Dieser Berechtigungssatz kann gerade nicht gespeichert werden, weil das System nicht bestätigen konnte, '
+    + 'ob ein installiertes Paket ihn bereitstellt. Versuchen Sie es gleich noch einmal. Um einen '
+    + 'Berechtigungssatz anzupassen, den ein Paket bereitstellt, klonen Sie ihn mit der Aktion „Klonen“ und '
+    + 'bearbeiten Sie den Klon.',
+  'pt-BR': 'Este conjunto de permissões não pode ser salvo agora, porque o sistema não conseguiu confirmar se um '
+    + 'pacote instalado o fornece. Tente novamente em instantes. Para personalizar um conjunto de permissões '
+    + 'fornecido por um pacote, clone-o com a ação Clonar e edite o clone.',
+  ru: 'Этот набор разрешений сейчас нельзя сохранить: системе не удалось проверить, предоставлен ли он '
+    + 'установленным пакетом. Повторите попытку чуть позже. Чтобы настроить набор разрешений из пакета, '
+    + 'клонируйте его действием «Клонировать» и измените клон.',
+  ar: 'لا يمكن حفظ مجموعة الأذونات هذه الآن، لأن النظام لم يتمكن من التأكد مما إذا كانت حزمة مثبتة توفرها. '
+    + 'حاول مرة أخرى بعد قليل. لتخصيص مجموعة أذونات توفرها حزمة، انسخها باستخدام إجراء النسخ ثم عدّل النسخة.',
+};
+
+/**
+ * The sentence of `text` in the first locale of `locales` it has, each code
+ * matched by the platform's one locale ladder ({@link resolveBundleLocale}:
+ * exact, case-insensitive, the platform table language, one subtag shorter);
+ * `en` when none matches or none is stated.
+ */
+function packagedSetUserMessage(
+  text: PackagedSetUserText,
+  locales: readonly (string | null | undefined)[] | undefined,
+): string {
+  for (const locale of locales ?? []) {
+    if (typeof locale !== 'string' || locale.length === 0) continue;
+    const matched = resolveBundleLocale(text, locale);
+    if (matched !== undefined) return text[matched]!;
+  }
+  return text.en!;
+}
 
 /**
  * The refusal a write door throws for a package-declared set.
@@ -347,7 +426,13 @@ export class PackagedPermissionSetLockedError extends Error {
    * [ADR-0150 D2, #31698] `packageId`: the package that declares the set, or
    * every one that does, each named — never the first found alone.
    */
-  constructor(name: string, packageId: string | readonly string[], _operation: 'insert' | 'update') {
+  constructor(
+    name: string,
+    packageId: string | readonly string[],
+    _operation: 'insert' | 'update',
+    /** [#32656] The caller's language ladder: request locale, then workspace default. */
+    userTextLocales?: readonly (string | null | undefined)[],
+  ) {
     const declarers = (typeof packageId === 'string' ? [packageId] : packageId).map((id) => `'${id}'`);
     const by = declarers.length > 1 ? `packages ${declarers.slice(0, -1).join(', ')} and ${declarers[declarers.length - 1]}` : `package ${declarers[0]}`;
     super(
@@ -359,7 +444,7 @@ export class PackagedPermissionSetLockedError extends Error {
       + `flowing to '${name}' untouched.`,
     );
     this.name = 'PackagedPermissionSetLockedError';
-    this.userMessage = LOCKED_USER_MESSAGE;
+    this.userMessage = packagedSetUserMessage(LOCKED_USER_TEXT, userTextLocales);
   }
 }
 
@@ -375,7 +460,7 @@ export class PackagedPermissionSetProvenanceUnknownError extends Error {
   readonly statusCode = 403;
   /** The guidance addressed to the end user; `message` stays the diagnostic. */
   readonly userMessage: string;
-  constructor(name: string, reason: string) {
+  constructor(name: string, reason: string, userTextLocales?: readonly (string | null | undefined)[]) {
     super(
       `[Security] Permission set '${name}' cannot be saved right now: this system could not determine `
       + `whether the set is declared by an installed package (${reason}). The save is refused rather than `
@@ -383,7 +468,7 @@ export class PackagedPermissionSetProvenanceUnknownError extends Error {
       + `once the metadata layer is readable; if you meant to customize a packaged set, clone it instead.`,
     );
     this.name = 'PackagedPermissionSetProvenanceUnknownError';
-    this.userMessage = PROVENANCE_UNKNOWN_USER_MESSAGE;
+    this.userMessage = packagedSetUserMessage(PROVENANCE_UNKNOWN_USER_TEXT, userTextLocales);
   }
 }
 
@@ -398,13 +483,14 @@ export function assertPermissionSetNotPackageDeclared(
   ql: any,
   operation: 'insert' | 'update',
   layered?: LayeredProbe,
+  userTextLocales?: readonly (string | null | undefined)[],
 ): PackagedSetVerdict {
   const verdict = classifyPackagedPermissionSet(name, ql, layered);
   if (verdict.status === 'packaged') {
-    throw new PackagedPermissionSetLockedError(name, verdict.packageIds, operation);
+    throw new PackagedPermissionSetLockedError(name, verdict.packageIds, operation, userTextLocales);
   }
   if (verdict.status === 'unknown') {
-    throw new PackagedPermissionSetProvenanceUnknownError(name, verdict.reason);
+    throw new PackagedPermissionSetProvenanceUnknownError(name, verdict.reason, userTextLocales);
   }
   return verdict;
 }

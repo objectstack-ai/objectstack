@@ -13,6 +13,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a clocked case (check-test-source-alias).
+import '@objectstack/lint';
 import type { MetadataMutationEvent } from './protocol.js';
 
 function makeProtocol() {
@@ -147,6 +149,16 @@ describe('ObjectStackProtocolImplementation.registerAuthoringGate (#3050)', () =
       type: 'object', name: 'crm_account', state: 'draft',
       body: { sharingModel: 'private' }, isArtifactBacked: false,
     });
+  });
+
+  it('[#32656] hands the gate the caller\'s user-text locales, empty entries dropped; none stated, no key', async () => {
+    const p = makeProtocol();
+    const seen: any[] = [];
+    p.registerAuthoringGate('object', (ctx) => { seen.push(ctx); });
+    await (p as any).runAuthoringGate(save({ userTextLocales: ['zh-CN', undefined, '', 'de'] }));
+    await (p as any).runAuthoringGate(save());
+    expect(seen[0].userTextLocales).toEqual(['zh-CN', 'de']);
+    expect('userTextLocales' in seen[1]).toBe(false);
   });
 
   it('normalizes plural registrations to the singular type', async () => {
