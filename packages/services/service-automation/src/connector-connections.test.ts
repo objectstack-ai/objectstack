@@ -227,8 +227,14 @@ describe('[#31699] a first connect that raced the boot backfill takes its row ba
                 );
                 return ql.insert(o, d, opts as never);
             },
-            update: (o, d, opts) => ql.update(o, d, opts as never),
-            delete: (o, opts) => ql.delete(o, opts as never),
+            update: (o, d, opts) => {
+                assertEngineUpdateDispatch(d as never, opts as never);
+                return ql.update(o, d, opts as never);
+            },
+            delete: (o, opts) => {
+                assertEngineDeleteDispatch(opts as never);
+                return ql.delete(o, opts as never);
+            },
             resolveSecretField: (o, id, f) => (ql as any).resolveSecretField(o, id, f),
         };
         const store = new ConnectorConnectionStore(() => racing);
