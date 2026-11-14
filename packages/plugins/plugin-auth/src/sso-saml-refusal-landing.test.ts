@@ -500,14 +500,15 @@ async function idpInitiated(
     new Request(`${AUTH}/sso/saml2/sp/metadata?providerId=${PROVIDER_ID}`),
   )).text();
   const sp = samlify.ServiceProvider({ metadata: spMetadata });
+  const entityID = idpAs.entityID ?? IDP_ENTITY;
   const idp = samlify.IdentityProvider({
-    entityID: IDP_ENTITY,
+    entityID,
     privateKey: idpKeyPem,
     signingCert: idpCert,
     nameIDFormat: [EMAIL_FORMAT],
     singleSignOnService: [{ Binding: 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect', Location: IDP_SSO }],
   });
-  const { context } = await idp.createLoginResponse(sp, {}, 'post', { email }, customResponse(IDP_ENTITY, email, idpAs));
+  const { context } = await idp.createLoginResponse(sp, {}, 'post', { email }, customResponse(entityID, email, idpAs));
   expect(Buffer.from(context, 'base64').toString('utf8')).not.toMatch(/InResponseTo="[^"]+"/);
   return rp.manager.handleRequest(
     new Request(ACS, {

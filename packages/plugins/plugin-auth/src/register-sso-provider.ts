@@ -32,6 +32,7 @@ import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@obj
 import type { IDataEngine } from '@objectstack/core';
 import { readSsoProviderDeleteImpact, ssoProviderDeleteSummary, type SsoProviderDeleteImpact } from './sso-provider-lifecycle.js';
 import { samlLogoutServiceOf } from './sso-sign-out-of-idp.js';
+import { mappingWithAccountKeyAttribute } from './sso-saml-account-key.js';
 
 export interface RegisterSsoFormResult {
   /** HTTP status to return to the caller. */
@@ -390,7 +391,14 @@ export async function runRegisterSamlProviderFromForm(
     lastName: str(body?.mapLastName),
     name: str(body?.mapName),
   });
-  const mapping = mappingWithGroupsClaim(attributes, str(body?.mapGroups));
+  // The attribute the provider keys its accounts on instead of the NameID,
+  // under `mapping.extraFields.accountKey` (`sso-saml-account-key.ts`);
+  // blank keeps the default (Entra's object id for an Entra issuer, else the
+  // NameID).
+  const mapping = mappingWithAccountKeyAttribute(
+    mappingWithGroupsClaim(attributes, str(body?.mapGroups)),
+    str(body?.mapAccountKey),
+  );
   if (Object.keys(mapping).length > 0) samlConfig.mapping = mapping;
 
   const headers = forwardAuthHeaders(request, origin);
