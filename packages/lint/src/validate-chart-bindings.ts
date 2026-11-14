@@ -219,6 +219,12 @@ export interface ChartBindingFinding {
 import { recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents, type AnyRec } from './page-walk.js';
 import type { UserTextParams } from './finding-user-text.js';
+import {
+  datasetRefusalWording,
+  datasetUnverifiedWording,
+  indexArtifactDatasetResolution,
+  type ArtifactDatasetResolution,
+} from './validate-widget-bindings.js';
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -243,11 +249,26 @@ interface DatasetNames {
   measures: Set<string>;
 }
 
-function indexDatasets(stack: AnyRec): Map<string, DatasetNames> {
+/**
+ * [#33128, ADR-0150 D3] The datasets a chart binding resolves, by name: the
+ * ONE resolution every presentation that binds a dataset by name reads
+ * (`indexArtifactDatasetResolution` in `validate-widget-bindings.ts`, which
+ * the dashboard rule and `validate-report-runtime-filter.ts` read too), so
+ * `chart-dataset-unknown` and `widget-dataset-unknown` cannot disagree about
+ * which dataset a name reaches.
+ *
+ * On the CLI's per-package pass that is the reader's own datasets, then the
+ * one holder in its DECLARED dependency closure (plus `sys`), the walk the
+ * dataset doors resolve `?callerPackage=` by. Every surface this rule judges
+ * sends its item's own served package as `callerPackage` (the report renderer,
+ * the dataset-bound chart, the list view's chart), and on that pass every item
+ * is the judged package's. This file used to read `stack.datasets` alone, so a
+ * report on a declared dependency's dataset was refused at build while the
+ * runtime served it.
+ */
+function indexDatasets(resolution: ArtifactDatasetResolution): Map<string, DatasetNames> {
   const out = new Map<string, DatasetNames>();
-  for (const ds of recordsOf(stack.datasets)) {
-    const name = strName(ds.name);
-    if (!name) continue;
+  for (const [name, ds] of resolution.resolvable) {
     const dimensions = new Set<string>();
     for (const d of recordsOf(ds.dimensions)) {
       const n = strName(d.name);
@@ -392,7 +413,8 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
   const findings: ChartBindingFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  const datasets = indexDatasets(stack);
+  const resolution = indexArtifactDatasetResolution(stack);
+  const datasets = indexDatasets(resolution);
   if (datasets.size === 0 && !stack.reports && !stack.views && !stack.objects && !stack.pages) return findings;
 
   /**
@@ -404,15 +426,39 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
    * A step of its own (#16105) so a surface can resolve its dataset BEFORE it
    * asks whether it has a chart. It reports at most once per call, which is
    * what keeps a charted report's unresolvable dataset a single finding.
+   *
+   * [#33128] A name the artifact's packages declare but the runtime refuses
+   * the judged package's read of (ADR-0150 D3: held only outside its declared
+   * closure, or by two packages inside it) takes the dashboard twin's verdict
+   * and sentences, `reader` naming the surface: an `error` naming every
+   * holder, or, where the reader declares a dependency this artifact does not
+   * carry and the name is held only outside the closure, a `warning` that
+   * says it is not judged (`validateWidgetBindings`, arm (a)). ⛔ Never a
+   * pick: two holders in the closure resolve to nothing.
    */
   const resolveDataset = (
     dsName: string | undefined,
     where: string,
     path: string,
+    reader: string,
   ): DatasetNames | undefined => {
     if (!dsName) return undefined; // nothing bound — the shape rules own that case
     const ds = datasets.get(dsName);
     if (ds) return ds;
+    const refusal = resolution.refused.get(dsName);
+    if (refusal) {
+      const unverified = refusal.reason === 'outside-closure' && resolution.outsideDependencies.length > 0;
+      findings.push({
+        severity: unverified ? 'warning' : 'error',
+        rule: CHART_DATASET_UNKNOWN,
+        where,
+        path: `${path}.dataset`,
+        ...(unverified
+          ? datasetUnverifiedWording(resolution, dsName, reader)
+          : datasetRefusalWording(resolution, dsName, reader)),
+      });
+      return undefined;
+    }
     findings.push({
       severity: 'error',
       rule: CHART_DATASET_UNKNOWN,
@@ -551,8 +597,8 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
   };
 
   /** Resolve a binding's dataset and check its positions — the one-call form. */
-  const check = (binding: ChartBinding) => {
-    const ds = resolveDataset(binding.dataset, binding.where, binding.path);
+  const check = (binding: ChartBinding, reader: string) => {
+    const ds = resolveDataset(binding.dataset, binding.where, binding.path, reader);
     if (!ds || !binding.dataset) return;
     checkAgainst(ds, binding.dataset, binding);
   };
@@ -591,7 +637,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
      */
     const checkReportSurface = (container: AnyRec, where: string, path: string, drawsChart: boolean) => {
       const dsName = strName(container.dataset);
-      const ds = resolveDataset(dsName, where, path);
+      const ds = resolveDataset(dsName, where, path, 'report');
       if (!ds || !dsName) return;
 
       // The REPORT's own selection — what the table shows, independent of any
@@ -667,7 +713,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
       values: { names: strList(chart.values), path: `${path}.chart.values` },
       where,
       path: `${path}.chart`,
-    });
+    }, 'list view');
   };
 
   const views = recordsOf(stack.views);
@@ -742,7 +788,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
         series: seriesRefs,
         where: `page "${pageName}" · ${strName(component.type) ?? 'chart'}`,
         path: `${path}.properties`,
-      });
+      }, 'page');
     }
   }
 
