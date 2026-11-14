@@ -8,6 +8,8 @@ Clause-②: yes (narrowing) — widened: a send of a template name an enabled an
 Metadata-protocol: none
 Skills-docs: none — no skill under `skills/**` and no page under `content/docs/**` teaches what an email template send answers when a package holding the name is disabled.
 
+<!-- adr-0087: not-required (no-migration-prescription) every moved answer follows a package's enabled state, which the operator flips back with the enable door; no authored key, stored row or export changes -->
+
 **BREAKING** for a send of an email template (`createRegistryEmailTemplateLoader`: the `sendTemplate` path and a flow's `notify` delivery) of a name a disabled package holds. Before, the send counted every holder, a disabled package's included: a disabled package was still the answer, and a refusal still named it. Now, when a holder of the name is disabled, the name is resolved over the served holders, and the bundle is read only where no member of a disabled holder's side is listed: the resolved holder's own address, or the built-ins' own address. A caller whose own holding is the disabled one, or that no served holder answers, finds no template. With no holder disabled, every read is the one it was.
 
 Why the read is chosen and never filtered: the environment-wide execution list keeps a disabled holder's customization-pair rows and a dependent's added locales listed, and an item's `_packageId` there is the slot it fills, not the package that stores it (a pair row filling a dependent's locale wears the dependent's id; the environment's item over a disabled holder's slot wears the disabled holder's), so no member can be told apart after the read.

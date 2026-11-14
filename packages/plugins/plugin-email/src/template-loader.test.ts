@@ -31,7 +31,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { SchemaRegistry, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import {
   BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID,
@@ -571,7 +571,10 @@ describe('createRegistryEmailTemplateLoader — a disabled package holds no name
     const engine = {
       registry: reg,
       find: async (_object: string, opts?: { where?: AnyRecord; limit?: number }) => pick(opts),
-      findOne: async (_object: string, opts?: { where?: AnyRecord }) => pick(opts)[0] ?? null,
+      findOne: async (object: string, opts?: { where?: AnyRecord }) => {
+        assertEngineFindOnePredicate(object, opts as never);
+        return pick(opts)[0] ?? null;
+      },
       count: async () => 0,
       aggregate: async () => [],
     };
