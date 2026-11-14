@@ -7,7 +7,13 @@ import {
   TYPED_EXPRESSION_SOURCE_REQUIRED,
 } from '@objectstack/spec/shared';
 
-import { AUTHORED_FORMULA_FIELD_NAME, AUTHORED_RULE_NAME, validateStackExpressions } from '@objectstack/lint';
+import {
+  AUTHORED_CONDITION_ID,
+  AUTHORED_FLOW_NAME,
+  AUTHORED_FORMULA_FIELD_NAME,
+  AUTHORED_RULE_NAME,
+  validateStackExpressions,
+} from '@objectstack/lint';
 
 import { applyInjectedSystemColumns } from '@objectstack/metadata-core';
 
@@ -226,6 +232,12 @@ describe('validate_expression MCP tool (#1928)', () => {
         { site: 'flow_condition', triggerKind: 'record_change', sweepObject: 'crm_task' },
         { site: 'validation', sweepObject: 'crm_task' },
         { sweepObject: 'crm_task' },
+        // [#33147] The start condition describes a flow; the field, a formula's.
+        { site: 'validation', startCondition: 'true' },
+        { startCondition: 'true' },
+        { site: 'validation', field: 'title' },
+        { site: 'flow_condition', field: 'title' },
+        { site: 'template', field: 'title' },
       ]) {
         const { json } = await call(runtime, toolsCall(1, 'validate_expression', { objectName: 'crm_opportunity', expression: 'record.title > 5', ...args }), bridge);
         const { result } = json as { result: { isError?: boolean; content: { text: string }[] } };
@@ -620,9 +632,219 @@ describe("validate_expression answers the gate's own passes at validation and fo
     expect(recordCalls).toEqual([]);
   });
 
-  it('does not judge a flow condition or a template: no definition is read there', async () => {
-    await validate(runtime, gateBridge(), { objectName: 'gp_req', expression: 'days > 3', site: 'flow_condition' });
+  it('does not judge a template: no definition is read there', async () => {
     await validate(runtime, gateBridge(), { objectName: 'gp_req', expression: '{{record.title}}', site: 'template' });
     expect(reads).toEqual([]);
+  });
+
+  // [#33147] Nothing hydrates a hop at a flow condition, so no target is read.
+  it('reads the subject alone at a flow condition, whatever it reads through', async () => {
+    await validate(runtime, gateBridge(), { objectName: 'gp_req', expression: 'record.balance.nope > 1', site: 'flow_condition' });
+    expect(reads).toEqual(['gp_req']);
+    expect(recordCalls).toEqual([]);
+  });
+
+  // ── [#33147] A flow condition, as the runtime publish gate judges a flow write ──
+
+  /**
+   * The gate's verdicts on the same condition in a record-triggered flow on
+   * `objectName` (or the trigger `kind` names), on its one edge after the
+   * start node (carrying `startCondition`), its locator spelled as the
+   * tool's probe spells it.
+   */
+  const flowGateOn = (
+    objectName: string,
+    expression: string,
+    { kind = 'record', startCondition }: { kind?: 'record' | 'schedule'; startCondition?: string } = {},
+  ) => {
+    const { validations: _own, ...subject } = OBJECTS[objectName]!;
+    const others = Object.keys(OBJECTS).filter((n) => n !== objectName).map((n) => OBJECTS[n]!);
+    const trigger = kind === 'record' ? { triggerType: 'record-after-update' } : { schedule: '0 * * * *' };
+    const where = "flow 'g' · edge 'e1' (start→end) condition";
+    const probe = `flow '${AUTHORED_FLOW_NAME}' · edge '${AUTHORED_CONDITION_ID}' (start→end) condition`;
+    return validateStackExpressions({
+      objects: [subject, ...others],
+      flows: [{
+        name: 'g',
+        type: 'autolaunched',
+        nodes: [
+          {
+            id: 'start',
+            type: 'start',
+            config: { objectName, ...trigger, ...(startCondition !== undefined ? { condition: startCondition } : {}) },
+          },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end', condition: expression }],
+      }],
+    })
+      .filter((i) => i.where === where)
+      .map((i) => [i.severity ?? 'error', i.message.split(where).join(probe)]);
+  };
+
+  // [member, object, condition, severity, the subject the finding names]
+  const FLOW_MEMBERS: Array<[string, string, string, 'error' | 'warning', string]> = [
+    ['null-guard gate on a record-triggered flow', 'gp_req', 'record.days > 3', 'error', 'record.days'],
+    ['null-guard gate on `previous`', 'gp_req', 'previous.days > 3', 'error', 'previous.days'],
+    ['unprovisioned anchor (warning)', 'gp_ext', "record.owner_id == 'u1'", 'warning', 'owner_id'],
+  ];
+
+  for (const [member, objectName, expression, severity, names] of FLOW_MEMBERS) {
+    it(`site flow_condition: ${member} — the tool gives the gate's verdict`, async () => {
+      const gate = flowGateOn(objectName, expression);
+      expect(gate.map(([level]) => level)).toEqual([severity]);
+      const r = await validate(runtime, gateBridge(), { objectName, expression, site: 'flow_condition' });
+      expect(r.ok).toBe(severity !== 'error');
+      expect(sorted(verdicts(r))).toEqual(sorted(gate));
+      expect(verdicts(r).some(([, message]) => message!.includes(names))).toBe(true);
+      // Before: the definition-less bridge, the shared validator alone, answered ok.
+      const before = await validate(runtime, gateBridge(false), { objectName, expression, site: 'flow_condition' });
+      expect([before.ok, before.errors, before.warnings]).toEqual([true, [], []]);
+    });
+  }
+
+  it("site flow_condition: a bare name's null guard is os validate's, so the tool answers as before", async () => {
+    // `os validate` refuses it on a flow whose bindings it can see; the
+    // runtime publish gate cannot see them and does not, nor does the tool.
+    expect(flowGateOn('gp_req', 'days > 3').map(([level]) => level)).toEqual(['error']);
+    const args = { objectName: 'gp_req', expression: 'days > 3', site: 'flow_condition' };
+    expect(await validate(runtime, gateBridge(), args)).toEqual(await validate(runtime, gateBridge(false), args));
+  });
+
+  it('site flow_condition: a start condition that guards the read is honoured, as downstream of it at the gate', async () => {
+    const args = { objectName: 'gp_req', expression: 'record.days > 3', site: 'flow_condition' };
+    const startCondition = 'record.days != null';
+    expect(flowGateOn('gp_req', args.expression, { startCondition })).toEqual([]);
+    const guarded = await validate(runtime, gateBridge(), { ...args, startCondition });
+    expect([guarded.ok, guarded.errors, guarded.warnings]).toEqual([true, [], []]);
+    // The start condition's own findings are not this condition's.
+    const clean = await validate(runtime, gateBridge(), { ...args, expression: "record.title == 'x'", startCondition: 'record.days > 3' });
+    expect([clean.ok, clean.errors, clean.warnings]).toEqual([true, [], []]);
+  });
+
+  it('site flow_condition: the null guard is a record-triggered flow\'s alone', async () => {
+    // (`os validate` refuses this flow's `record` root, unbound on a schedule
+    // run; that is a whole-flow judgment the runtime publish gate leaves, so
+    // only the null-guard sentence is read here.)
+    const nullGuard = ([, message]: unknown[]) => String(message).includes('declares as nullable');
+    expect(flowGateOn('gp_req', 'record.days > 3').filter(nullGuard)).toHaveLength(1);
+    expect(flowGateOn('gp_req', 'record.days > 3', { kind: 'schedule' }).filter(nullGuard)).toEqual([]);
+    const r = await validate(runtime, gateBridge(), { objectName: 'gp_req', expression: 'record.days > 3', site: 'flow_condition', triggerKind: 'schedule' });
+    expect([r.ok, r.errors, r.warnings]).toEqual([true, [], []]);
+  });
+
+  it('site flow_condition: CONTROL — a clean condition answers as the definition-less bridge does', async () => {
+    for (const expression of ["record.title == 'x'", 'record.days != null && record.days > 3', "title == 'x'"]) {
+      expect(flowGateOn('gp_req', expression)).toEqual([]);
+      const args = { objectName: 'gp_req', expression, site: 'flow_condition' };
+      const withGate = await validate(runtime, gateBridge(), args);
+      expect([withGate.errors, withGate.warnings], expression).toEqual([[], []]);
+      expect(withGate).toEqual(await validate(runtime, gateBridge(false), args));
+    }
+  });
+});
+
+// [#33147] The field a formula-site expression is authored on (`field`). A
+// field the caller is served keeps its definition with the expression in
+// place: a stored field gets the gate's stored-expression warnings, and a
+// formula the cycle it would close. It resolves only through the definition
+// the caller is served, so a field masked from the caller answers exactly as
+// one the object does not declare.
+describe('validate_expression judges the field being authored at the formula site (#33147)', () => {
+  const STORED: Record<string, any> = {
+    name: 'gp_stored',
+    fields: {
+      days: { type: 'number', label: 'Days', required: true },
+      balance: { type: 'lookup', label: 'Balance', reference: 'gp_target' },
+      stamp: { type: 'number', label: 'Stamp', expression: 'record.days' },
+      f_x: { type: 'formula', label: 'X', expression: 'record.f_y + 1' },
+      f_y: { type: 'formula', label: 'Y', expression: 'record.days * 2' },
+      secret: { type: 'number', label: 'Secret', expression: 'record.days' },
+    },
+  };
+  const TARGET = { name: 'gp_target', fields: { remaining: { type: 'number', label: 'Remaining', required: true } } };
+  const OBJECTS: Record<string, Record<string, any>> = { gp_stored: STORED, gp_target: TARGET };
+  /** As the caller is served it: `secret` is masked from this caller (ADR-0106 D1), at both reads. */
+  const served = (name: string) => {
+    const def = OBJECTS[name];
+    if (!def) return null;
+    const { secret: _masked, ...fields } = def.fields;
+    return applyInjectedSystemColumns({ ...def, fields });
+  };
+  const bridge = (): McpDataBridge => ({
+    ...makeBridge(),
+    async listObjects() {
+      return Object.keys(OBJECTS).map((name) => ({ name }));
+    },
+    async describeObject(name: string) {
+      const def = served(name);
+      if (!def) return null;
+      return { name, fields: Object.entries(def.fields).map(([n, f]) => ({ name: n, ...(f as object) })) };
+    },
+    async servedObjectDefinitionOf(name: string) {
+      return served(name);
+    },
+  });
+  const verdicts = (r: { errors: { message: string }[]; warnings: { message: string }[] }) => [
+    ...r.errors.map((e) => ['error', e.message]),
+    ...r.warnings.map((w) => ['warning', w.message]),
+  ];
+  /** The gate's verdicts on field `name` of `gp_stored` with `expression` in place. */
+  const gateOn = (name: string, expression: string) => {
+    const where = `object 'gp_stored' · field '${name}' expression`;
+    return validateStackExpressions({
+      objects: [{ ...STORED, fields: { ...STORED.fields, [name]: { ...STORED.fields[name], expression } } }, TARGET],
+    })
+      .filter((i) => i.where === where)
+      .map((i) => [i.severity ?? 'error', i.message]);
+  };
+
+  let runtime: MCPServerRuntime;
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
+  });
+
+  it("a stored field gets the gate's stored-expression warnings, where the formula probe gets none", async () => {
+    for (const expression of ['record.balance.remaining + 1', 'record.days + (now() > now() ? 1 : 0)']) {
+      const gate = gateOn('stamp', expression);
+      expect(gate.length, expression).toBeGreaterThan(0);
+      expect(gate.every(([level]) => level === 'warning'), expression).toBe(true);
+      const r = await validate(runtime, bridge(), { objectName: 'gp_stored', expression, site: 'formula', field: 'stamp' });
+      expect(r.ok).toBe(true);
+      expect(r.warnings.map((w: { message: string }) => ['warning', w.message])).toEqual(gate);
+      const unnamed = await validate(runtime, bridge(), { objectName: 'gp_stored', expression, site: 'formula' });
+      expect([unnamed.errors, unnamed.warnings], expression).toEqual([[], []]);
+    }
+  });
+
+  it('a formula is judged under its own name: the cycle it would close is refused', async () => {
+    const expression = 'record.f_x + 1';
+    const gate = gateOn('f_y', expression);
+    expect(gate.map(([level]) => level)).toEqual(['error']);
+    const r = await validate(runtime, bridge(), { objectName: 'gp_stored', expression, site: 'formula', field: 'f_y' });
+    expect(r.ok).toBe(false);
+    expect(verdicts(r)).toEqual(gate);
+    const unnamed = await validate(runtime, bridge(), { objectName: 'gp_stored', expression, site: 'formula' });
+    expect([unnamed.ok, unnamed.errors, unnamed.warnings]).toEqual([true, [], []]);
+  });
+
+  it('a field masked from the caller answers exactly as a field the object does not declare', async () => {
+    for (const expression of ['record.balance.remaining + 1', 'record.days + (now() > now() ? 1 : 0)', 'record.f_x + 1']) {
+      const args = { objectName: 'gp_stored', expression, site: 'formula' };
+      const hidden = await validate(runtime, bridge(), { ...args, field: 'secret' });
+      const absent = await validate(runtime, bridge(), { ...args, field: 'not_declared' });
+      expect(hidden, expression).toEqual(absent);
+      // …and both read as a new formula field: what no field name answers.
+      expect(hidden, expression).toEqual(await validate(runtime, bridge(), args));
+    }
+  });
+
+  it('refuses a field name that is not a field name', async () => {
+    const { json } = await call(
+      runtime,
+      toolsCall(1, 'validate_expression', { objectName: 'gp_stored', expression: 'record.days', site: 'formula', field: 'Bad Name' }),
+      bridge(),
+    );
+    expect((json as { result: { isError?: boolean } }).result.isError).toBe(true);
   });
 });
