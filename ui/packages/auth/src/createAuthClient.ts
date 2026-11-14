@@ -14,6 +14,7 @@ import type {
   SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge, TwoFactorMethod,
 } from './types.js';
 import { AUTH_INVITATION_STATUSES, isAuthInvitationStatus } from './invitation-status.js';
+import { markSignOutRoundTrip } from './signOutRoundTrip.js';
 
 const TOKEN_STORAGE_KEY = 'auth-session-token';
 
@@ -781,8 +782,14 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       // caches after this resolves, before the page unloads: `assign` only
       // starts the navigation, and the document is unloaded in a later task,
       // after the microtasks that run that purge.
+      //
+      // The provider brings the browser back to the sign-in page as a full
+      // page load, so `AuthProvider`'s in-memory "ended by sign-out" is gone by
+      // then; the tab's note carries it across (`./signOutRoundTrip`), and the
+      // page holds instead of starting a direct sign-in (objectstack#33183).
       const url = providerLogoutURL(data);
       if (url && typeof window !== 'undefined') {
+        markSignOutRoundTrip();
         window.location.assign(url);
       }
     },

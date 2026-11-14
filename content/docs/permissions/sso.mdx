@@ -639,6 +639,84 @@ before this rule, turn on `allowJit` for that provider. With
 an account only for an email address at a domain it has proven, under every
 posture, with or without an invitation and with or without `allowJit`.
 
+## Skip the sign-in page (direct sign-in)
+
+When a deployment signs people in through one identity provider, a signed-out
+visit can go straight to that provider and come back to the page it asked for,
+without showing the sign-in page first. It is **off** by default. Turn it on
+with the auth plugin's `directSignIn` option or with the environment, which
+wins field by field:
+
+```bash
+OS_AUTH_DIRECT_SIGN_IN_ENABLED=true
+# Optional: which provider to use. Unset, the one configured provider is used.
+# OS_AUTH_DIRECT_SIGN_IN_PROVIDER=okta
+# Optional: hidden (default) or off.
+# OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden
+```
+
+```ts
+new AuthPlugin({
+  directSignIn: { provider: 'okta', localSignIn: 'hidden' },
+});
+```
+
+| Setting | Values | Effect |
+|---|---|---|
+| `OS_AUTH_DIRECT_SIGN_IN_ENABLED` | `true` / `false` | Turns it on or off, whatever the option says. |
+| `OS_AUTH_DIRECT_SIGN_IN_PROVIDER` | a `providerId` | An [`oidcProviders`](#enterprise-sso-oidc) entry or a registered SSO provider. Unset, the only one configured is used; with none or several configured, the sign-in page is shown as before. |
+| `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH` | `hidden` (default) / `off` | `hidden` keeps the password form at `/login?local=1`. `off` means the sign-in form offers no local way in. Any other value refuses to boot. |
+
+With `off`, the sign-in form offers no local way in, in any of its states: no
+email or phone form, no sign-up link and no "use password" link, also on an
+OAuth client's hand-off and when no provider can be started. It changes the
+form only: `POST /api/v1/auth/sign-in/email` still accepts a password, and the
+`/register` and `/forgot-password` pages are not changed by it.
+
+**What a visit does.** The Console sign-in page reads `features.directSignIn`
+from `GET /api/v1/auth/config`. That is `true` only while a provider can be
+started, and only when this server mounted the door: a setting turned on
+after start-up takes a restart. A signed-out visitor is then sent to
+`GET /api/v1/auth/sign-in/direct?callbackURL=<this page>`, which starts the
+provider's own sign-in and redirects to it. After the sign-in, the visitor
+comes back to the same sign-in URL, which then continues as after any sign-in:
+organization pick, OAuth and mobile hand-offs, and `?redirect=`. The door sets
+no session itself.
+
+**Return address.** Only a same-origin path is kept. An absolute URL,
+`//host`, a backslash, a control character (a tab or a newline included), or
+any of these behind percent-encoding is dropped, and the sign-in returns to
+the Console home page. The query takes `callbackURL` only, once. Anything else
+is refused **400 `VALIDATION_ERROR`**.
+
+**No loops.** The page shows itself, with a **Continue with single sign-on**
+button (and the reason, where there is one), instead of starting again when:
+
+- the provider sends back an error;
+- the visitor comes back without a session (for example, a browser that
+  blocks this site's cookies);
+- the door could not start a sign-in. It redirects to
+  `/login?error=direct_sign_in_unavailable` and writes one `warn` line naming
+  why (`no_provider`, `several_providers`, `provider_not_found` or
+  `start_refused`);
+- the identity provider's sign-in rate limit refused the start (too many
+  starts from one address in a few seconds). It redirects to
+  `/login?error=direct_sign_in_rate_limited`, the page asks the visitor to
+  wait a few seconds and try again, and the `warn` line names `rate_limited`;
+- the person just signed out in that tab. Often the identity provider's
+  session outlives the platform's, so starting again would sign them straight
+  back in. When the provider ends its own session too (an OIDC provider whose
+  discovery document names an `end_session_endpoint`, or an SSO provider with
+  sign-out turned on), the sign-out goes through the provider's logout and
+  comes back to the sign-in page; the page still holds there. The tab keeps a
+  short note of the sign-out for that round trip (at most ten minutes) and
+  reads it once, so a reload of the held page, or another tab, starts the
+  sign-in as for a fresh visit.
+
+An OAuth client's authorization hand-off (`client_id` or `redirect_uri` on the
+sign-in URL) keeps today's sign-in page. API keys, bearer tokens, `/api/*` and
+`/mcp` are never redirected.
+
 ---
 
 ## Grant permission sets from IdP groups

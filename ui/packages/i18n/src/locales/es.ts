@@ -2768,6 +2768,10 @@ const es = {
     },
     login: {
       signingIn: "Iniciando sesión…",
+      directSignIn: {
+        description: "Inicia sesión con el inicio de sesión único de tu organización.",
+        retry: "Continuar con el inicio de sesión único",
+      },
       ssoHandoff: "Continuar a {{target}}",
       devAdminHint: {
         title: "Instancia de desarrollo local",
@@ -2791,6 +2795,9 @@ const es = {
         ssoResponseRejected: "El servicio de inicio de sesión de tu organización envió una respuesta que este sistema no pudo aceptar. Pide a tu administrador que revise la configuración del inicio de sesión único.",
         ssoStartFromLoginPage: "El inicio de sesión debe empezar en la página de acceso de este sistema. Introduce aquí tu correo de trabajo y elige «Iniciar sesión con SSO».",
         ssoTechnicalDetails: "Detalles técnicos",
+        directSignInIncomplete: "No se completó el inicio de sesión: volviste del inicio de sesión único sin haber iniciado sesión. Comprueba que este navegador permite cookies para este sitio y vuelve a intentarlo.",
+        directSignInUnavailable: "No se pudo iniciar el inicio de sesión único para este sistema. Pide a tu administrador que revise qué servicio de inicio de sesión usa.",
+        directSignInRateLimited: "Se iniciaron demasiados inicios de sesión desde esta red hace un momento. Espera unos segundos y vuelve a intentarlo.",
         twoFactorInvalidCode: "Ese código no es válido. Revise su aplicación de autenticación e inténtelo de nuevo.",
         twoFactorInvalidBackupCode: "Ese código de respaldo no es válido o ya se ha utilizado.",
         twoFactorTooManyAttempts: "Demasiados códigos incorrectos. Vuelva a iniciar sesión con su contraseña.",
