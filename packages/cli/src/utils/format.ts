@@ -1816,6 +1816,22 @@ function printAutomationSummary(a: AutomationReadySummary): string[] {
  * DB with zero rows must never pass silently again.
  */
 function printSeedSummary(sources: SeedSourceSummary[]) {
+  const summary = seedSummaryLine(sources);
+  if (!summary) return;
+  if (summary.anyProblem) {
+    console.error(chalk.yellow(`  ⚠ Seeds:   ${summary.line}`));
+    console.error(chalk.dim('      run with OS_LOG_LEVEL=info to see each dropped record'));
+    return;
+  }
+  console.error(chalk.dim(`  Seeds:   ${summary.line}`));
+}
+
+/**
+ * The text of a `Seeds:` row — one fragment per source that touched rows or
+ * had a problem — and whether any source had one. `undefined` when no source
+ * is worth a fragment.
+ */
+function seedSummaryLine(sources: readonly SeedSourceSummary[]): { line: string; anyProblem: boolean } | undefined {
   const shown = sources.filter((s) => {
     // Empty installs and rejections are ALWAYS shown (they're the whole point);
     // a source that touched no rows and had no problem is noise — drop it.
@@ -1842,13 +1858,36 @@ function printSeedSummary(sources: SeedSourceSummary[]) {
     return `${label} ${ok} rows${s.healed ? ' (healed on fresh db)' : ''}`;
   };
 
-  const line = shown.map(fragment).join(' · ');
-  if (anyProblem) {
-    console.error(chalk.yellow(`  ⚠ Seeds:   ${line}`));
-    console.error(chalk.dim('      run with OS_LOG_LEVEL=info to see each dropped record'));
+  return { line: shown.map(fragment).join(' · '), anyProblem };
+}
+
+/**
+ * The seed result the banner promised, printed once when the seed settles
+ * after it (#33233).
+ *
+ * When the banner printed `⚠ Seeds:   pending`, it also said "seeding continues
+ * in the background; its result prints after this banner". Before this line
+ * existed, nothing printed on a clean seed: the seeder's own completion lines
+ * are `info`, under the default `warn` level, so the promise was kept only when
+ * the seed failed loudly. Printed with `console.error` like the banner rows, so
+ * no log level can hide it, and as ONE line: the problems the seed hit were
+ * already logged at `warn` as they happened.
+ *
+ * `sources` is the same per-source summary the banner's `Seeds:` row renders.
+ * Empty means every source settled without recording an outcome (the seeder's
+ * basic-insert fallback records none).
+ */
+export function printSeedResultAfterBanner(sources: readonly SeedSourceSummary[]): void {
+  const summary = seedSummaryLine(sources);
+  if (!summary) {
+    console.error(chalk.dim('  Seeds:   settled — no rows reported'));
     return;
   }
-  console.error(chalk.dim(`  Seeds:   ${line}`));
+  if (summary.anyProblem) {
+    console.error(chalk.yellow(`  ⚠ Seeds:   settled — ${summary.line}`));
+    return;
+  }
+  console.error(chalk.dim(`  Seeds:   settled — ${summary.line}`));
 }
 
 /**

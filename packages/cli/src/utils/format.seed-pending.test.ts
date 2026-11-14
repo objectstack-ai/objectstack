@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { SeedSettlementSnapshot, SeedSuppressionReason } from '@objectstack/spec/contracts';
-import { printServerReady, type ServerReadyOptions, type SeedSourceSummary } from './format.js';
+import { printSeedResultAfterBanner, printServerReady, type ServerReadyOptions, type SeedSourceSummary } from './format.js';
 
 /**
  * #17329 rider — the over-budget banner says seeding is still running, instead
@@ -148,5 +148,45 @@ describe('printServerReady seed-settlement row (#17329)', () => {
       expect(seedLines()[0]).toContain('2 sources still writing');
       expect(seedLines()[1]).toContain('not run this boot (skip-seed-data)');
     });
+  });
+});
+
+describe('printSeedResultAfterBanner — the result the pending banner promised (#33233)', () => {
+  let lines: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    lines = [];
+    // stderr like every banner row, so no log level can hide it.
+    spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      lines.push(args.join(' '));
+    });
+  });
+  afterEach(() => spy.mockRestore());
+
+  const s = (o: Partial<SeedSourceSummary> & { source: string }): SeedSourceSummary => ({
+    inserted: 0, updated: 0, skipped: 0, rejected: 0, ...o,
+  });
+
+  it('a clean seed: one settled line with the counts', () => {
+    printSeedResultAfterBanner([s({ source: 'crm', inserted: 40, skipped: 2 })]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('Seeds:');
+    expect(lines[0]).toContain('settled');
+    expect(lines[0]).toContain('crm 42 rows');
+  });
+
+  it('a seed that dropped records: still one line, marked', () => {
+    printSeedResultAfterBanner([s({ source: 'crm', inserted: 40, rejected: 3 })]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('⚠ Seeds:');
+    expect(lines[0]).toContain('crm 40 ok / 3 errors');
+  });
+
+  it('settled with no outcome recorded: says so rather than printing nothing', () => {
+    printSeedResultAfterBanner([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('settled');
+    expect(lines[0]).toContain('no rows reported');
   });
 });
