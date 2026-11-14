@@ -2111,6 +2111,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Leer las notificaciones solo del token de ID",
         help: "Solo OIDC. Lee el correo electrónico, el nombre y los grupos del token de ID verificado del proveedor de identidad y no llama a su endpoint userinfo. Actívalo para Microsoft Entra ID, cuya respuesta de userinfo no incluye grupos ni preferred_username. Desactivado de forma predeterminada: un proveedor con endpoint userinfo lee sus notificaciones de esa respuesta. Cámbialo con «Editar opciones de inicio de sesión»."
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuario que registró este proveedor"
@@ -2221,6 +2225,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Opcional. Formato de NameID SAML solicitado. Por defecto, el formato configurado en el IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "Mapeo: atributo de correo",
             helpText: "Opcional. Atributo de la aserción asignado al correo del usuario. Por defecto, «email» y, si falta, el NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2305,6 +2313,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "Seguir confiando en el certificado actual",
             helpText: "Mientras el IdP hace el cambio, aceptar aserciones firmadas con cualquiera de los dos certificados. Vuelva a editar sin esta opción para quitar el antiguo."
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {

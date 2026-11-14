@@ -38,6 +38,14 @@ function sentencesOf(copy: UploadLinkCopy): Record<string, string> {
     } else if (key === 'pickCount') {
       out['pickCount(exact)'] = copy.pickCount(7, 7);
       out['pickCount(up to)'] = copy.pickCount(1, 7);
+    } else if (key === 'recordTitled') {
+      out.recordTitled = copy.recordTitled('OBJECT', 'TITLE');
+    } else if (key === 'recordOfObject') {
+      out.recordOfObject = copy.recordOfObject('OBJECT');
+    } else if (key === 'recordNotYetCreated') {
+      out.recordNotYetCreated = copy.recordNotYetCreated('OBJECT');
+    } else if (key === 'intoField') {
+      out.intoField = copy.intoField('FIELD');
     } else {
       out[key] = value as string;
     }
@@ -60,6 +68,12 @@ describe('#32712 — the upload-link page\'s sentences', () => {
       for (const name of ['wantedSeveral', 'wantedExactly', 'pickCount(exact)', 'pickCount(up to)']) {
         expect(sentences[name], `${tag} ${name}`).toContain('7');
       }
+      // [#32712] Ruling B′: the rows carry the names they are given, and only those.
+      expect(sentences.recordTitled, tag).toContain('OBJECT');
+      expect(sentences.recordTitled, tag).toContain('TITLE');
+      expect(sentences.recordOfObject, tag).toBe('OBJECT');
+      expect(sentences.recordNotYetCreated, tag).toContain('OBJECT');
+      expect(sentences.intoField, tag).toContain('FIELD');
     }
   });
 
@@ -68,7 +82,8 @@ describe('#32712 — the upload-link page\'s sentences', () => {
     for (const [key, copy] of Object.entries(UPLOAD_LINK_COPY)) {
       if (key === 'en') continue;
       for (const [name, text] of Object.entries(sentencesOf(copy))) {
-        if (name === 'lang' || name === 'dir' || name === 'refused') continue;
+        // [#32712] The object-only record row is the object's label itself, in every language.
+        if (name === 'lang' || name === 'dir' || name === 'refused' || name === 'recordOfObject') continue;
         expect(english.has(text), `${key} ${name}`).toBe(false);
       }
     }

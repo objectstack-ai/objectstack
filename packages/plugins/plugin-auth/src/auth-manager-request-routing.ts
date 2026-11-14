@@ -68,6 +68,7 @@ import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
 import { OAUTH_REVOKE_PATH } from './mcp-token-revocation.js';
 import { ssoCallbackOf } from './sso-oidc-refusal-cause.js';
+import { samlSingleLogoutProviderId, SIGN_OUT_ENDPOINT_PATH } from './sso-sign-out-of-idp.js';
 import type { ScimRequestScope } from './scim-connection-service.js';
 
 /**
@@ -89,11 +90,12 @@ export interface RequestRoutingHost {
   runSubjectErasureAtomically: AuthManager['runSubjectErasureAtomically'];
   answerOAuthTokenRevocation: AuthManager['answerOAuthTokenRevocation'];
   runSsoCallback: AuthManager['runSsoCallback'];
+  runSsoLogout: AuthManager['runSsoLogout'];
   resolveAuthSecret: AuthManager['resolveAuthSecret'];
 }
 
 /** The body of `AuthManager#handleRequest`; the method's docblock there is its contract. */
-export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'resolveAuthSecret'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'runSsoLogout' | 'resolveAuthSecret'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
   // ADR-0069 D7 — the client address this request's sign-in audit stamps,
   // established ONCE, here, by the same trust rule the D5 allow-list judges
   // with (`resolveClientAddress`). Read before any rewrite below, and carried
@@ -220,6 +222,14 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
   // ID token on the redirect, and a refused SAML sign-in lands on the error URL.
   const ssoCallback = ssoCallbackOf(endpointPath, request);
 
+  // A sign-out, and the vendor's SAML single-logout endpoints, run with the
+  // provider's "sign out of the company sign-in too" switch in scope
+  // (`sso-sign-out-of-idp.ts`, ruling record 6866334319): off, the sign-out
+  // is the platform's alone and the logout endpoints stay closed.
+  const ssoLogout =
+    (endpointPath === SIGN_OUT_ENDPOINT_PATH && request.method === 'POST')
+    || samlSingleLogoutProviderId(endpointPath, request) !== undefined;
+
   // [#3653 / #14522] A SCIM protocol request (`/scim/v2/*`) runs inside
   // `scimRequestScope`, which is what makes the adapter's `transaction`
   // config open a REAL engine transaction around the vendor's provisioning
@@ -284,7 +294,9 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
       }
     : ssoCallback !== undefined
       ? (): Promise<Response> => this.runSsoCallback(ssoCallback, runHandler, transport)
-      : runHandler;
+      : ssoLogout
+        ? (): Promise<Response> => this.runSsoLogout(endpointPath, request, runHandler, transport)
+        : runHandler;
   // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` is answered a
   // second time, AFTER the provider: the provider authenticates the client
   // and answers first, unchanged, and the MCP access token it cannot revoke

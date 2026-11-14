@@ -1117,7 +1117,28 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     expect(((await manager.list(type))[0] as any)?.subject).toBe('en again');
   });
 
-  it.each(UNBUNDLED)('%s: the loaders\' by-name reads still answer the item saved last; the plural reads answer every package\'s item, over the door\'s store [#32517] and over the stored rows (#32521; BEFORE: the database\'s one row per name, the one saved last)', async (type) => {
+  /**
+   * [#32714 item 2] The database half of the registry's take-over rule
+   * (`package-slotted-store.test.ts`): a package's first item of a name whose
+   * bundle the environment holds binds the package-less row of the member it
+   * writes, and leaves the other members' rows package-less, as the registry
+   * and the door's `MemoryLoader` leave their keys.
+   */
+  it.each(BUNDLED)('%s: [#32714] a package\'s first member of an environment-held bundle binds that member\'s row only; the other member\'s row stays package-less', async (type) => {
+    const { driver, rows } = rowDriver();
+    const db = new DatabaseLoader({ driver, tableName: 'sys_metadata' });
+    const body = (packageId: string | undefined, locale: string) => ({
+      name: nameOf(type), label: `${packageId ?? 'env'}:${locale}`, locale,
+      ...(packageId === undefined ? {} : { _packageId: packageId, _provenance: 'package' }),
+    });
+    await db.save(type, nameOf(type), body(undefined, 'en-US'));
+    await db.save(type, nameOf(type), body(undefined, 'fr-FR'));
+    await db.save(type, nameOf(type), body(A, 'en-US'));
+    const stored = rows(type).map((row) => [row.package_id ?? null, row.bundle_member ?? null]).sort((x, y) => String(x[1]).localeCompare(String(y[1])));
+    expect(stored).toEqual([[null, 'fr-FR'], [A, null]]);
+  });
+
+  it.each(UNBUNDLED)('%s: the loaders\' by-name reads still answer the item saved last; the plural reads answer every package\'s item, over the door\'s store ([#32517] under epic record 6818307202 on #32517: an unscoped plural read answers every package\'s slot) and over the stored rows (#32521; BEFORE: the database\'s one row per name, the one saved last)', async (type) => {
     const ctx = await boot(type);
     for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {
       expect(((await peer.load(type, nameOf(type))) as any)?.label).toBe(label(type, B));

@@ -220,6 +220,7 @@ One of the largest consumers of the flag;
 | 61 | Inbox caller refusal names `isSystem` as what was carried | service-messaging | Get: nothing — the refusal still fires. The flag only shapes the diagnostic, because privilege is not an authorization subject | `resolveInboxRecipient` |
 | 61b | **The principal-session mint refuses a system context** | plugin-auth | Get: nothing — `mintPrincipalSession` answers `PERMISSION_DENIED` / `403` before anything is minted. A principal session acts as the requesting user and never as the system, so a render or any other in-process act that needs a session must carry the user's own context | `refuseUpFront` |
 | 62 | **`organization_id` is not auto-stamped on INSERT** — the organization-axis twin of the `owner_id` gap above | organizations | Get: an elevated write may name another organization deliberately, which is what the per-organization seed replay, the orphan-row claim, imports and migrations all rely on. Lose: the fill-only stamp, so an elevated insert that names no organization lands `organization_id = NULL` and the wall hides it. ⛔ Neither path rewrites a supplied `organization_id`: the non-elevated path fills only an absent one, and a supplied value meets the Layer 0 write wall, which refuses a forged one `403 PERMISSION_DENIED` exactly as it refuses an update re-pointing a row. Elevation skips the stamp and the wall alike, which is why it is the seam the legitimate cross-organization writers use | `packages/plugins/organizations/src/organizations-plugin.ts#start` |
+| 62b | **MCP `list_actions` asks no membership-grade mark of a system caller** — an organization action whose endpoint (`/organization/...`) the caller's membership grade does not reach is listed without `unavailable` | runtime | Get: nothing a run would not give. The mark is a courtesy reading of the caller's own `positions` (ruling record 6812625052, letter E: list and mark, do not hide), and a system context carries no person's grades, so it is left unmarked, as a delegated agent's envelope is. Every other caller whose positions name none of the grades the `MEMBERSHIP_REACH` rows for that endpoint list sees the row marked `PERMISSION_DENIED`. Lose: nothing — neither run door reads the mark, and the organization endpoint still judges the call | `membershipReachRefusal` |
 
 ### 6. Reads that only carry the flag onward
 
@@ -674,6 +675,7 @@ and CI refuses one that differs from what the tree produces.
 | `packages/runtime/src/domains/i18n.ts#handleI18nRequest` | 1 | 52 |
 | `packages/runtime/src/domains/mcp.ts#federationService` | 1 | 55b |
 | `packages/runtime/src/domains/mcp.ts#handleMcpRequest` | 1 | 53 |
+| `packages/runtime/src/domains/mcp.ts#membershipReachRefusal` | 1 | 62b |
 | `packages/runtime/src/domains/meta.ts#handleMetadataRequest` | 5 | 50, 52 |
 | `packages/runtime/src/domains/packages.ts#handlePackagesRequest` | 1 | 52 |
 | `packages/runtime/src/domains/packages.ts#refuseWalledCatalogPackageWrite` | 1 | 55b |

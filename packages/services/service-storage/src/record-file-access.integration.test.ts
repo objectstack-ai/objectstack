@@ -54,6 +54,17 @@
  * namespace's `locale` from `workspaceLocale` and announcing a change to it
  * as the real service does (`subscribe`), so the one resolver's cache drops
  * the earlier answer.
+ *
+ * #32712 (b) — ruling B′: the page names the record and the field for the
+ * link's own user, read as that user when the page opens. Pinned through the
+ * page route: both rows in English and Chinese, labels through an `i18n`
+ * service stood in for the case, a masked or hidden title degrading to the
+ * object's label with the value in no byte of the page, an unreadable field
+ * losing its row, a record the owner can no longer read answering the
+ * stranger's 404 byte for byte (nonce aside), and opening writing nothing.
+ * The field-level answers are a `security` service stood in for the case.
+ * The expiry is rewritten in the reader's time zone and checked on the
+ * server's clock by the page's own script, run on a stubbed DOM.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
@@ -75,6 +86,7 @@ import { resolveThrownHttpError } from '@objectstack/types';
 import { UPLOAD_LINK_MAX_FILES, UPLOAD_LINK_UNUSABLE_MESSAGE } from './upload-link-wire.js';
 import { uploadSizeRefusal } from './storage-limits.js';
 import { UPLOAD_LINK_COPY } from './upload-link-copy.js';
+import { sendUploadLinkPage } from './upload-link-page.js';
 
 const BASE = '/api/v1/storage';
 const SYS = { isSystem: true };
@@ -235,6 +247,16 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
         fields: {
           invoice_no: { name: 'invoice_no', type: 'text' },
           invoice: { name: 'invoice', label: 'E-invoice', type: 'file', required: true },
+        },
+      }, {
+        // [#32712] A display field that is not title-typed: an explicit
+        // `nameField` on a lookup, whose served value is the claim's id.
+        name: 'trip',
+        label: 'Trip',
+        nameField: 'claim_ref',
+        fields: {
+          claim_ref: { name: 'claim_ref', label: 'For claim', type: 'lookup', reference: 'claim' },
+          ticket: { name: 'ticket', label: 'Ticket', type: 'file' },
         },
       }],
     } as never);
@@ -796,7 +818,12 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
 
     afterEach(() => setWorkspaceLocale(undefined));
 
-    /** The page's visible copy: no record, object, field or user named, whatever the language. */
+    /**
+     * No id and no API name of the record, object, field or user, whatever the
+     * language. [#32712 (b)] The page names the record and field by their
+     * labels and title for the link's own user (ruling B′), pinned below; a
+     * refusal still names nothing.
+     */
     const expectNamesNothing = (text: string, recordId: string) => {
       for (const named of [recordId, 'claim', 'policy', 'invoices', OWNER.userId]) expect(text).not.toContain(named);
     };
@@ -809,8 +836,9 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       expect(html).toContain('<html lang="zh-CN" dir="ltr">');
       expect(html).toContain(`<title>${zh.pageTitle}</title>`);
       for (const sentence of [zh.wanted('field'), zh.once, zh.fileLabel, zh.send]) expect(html).toContain(sentence);
-      // The expiry, written the Chinese way and named as UTC.
-      expect(html).toMatch(/链接将于 \d{4}年\d{1,2}月\d{1,2}日 UTC \d{2}:\d{2} 失效。/);
+      // The expiry, written the Chinese way and named as UTC [#32712 (b): inside the
+      // time element the page's script rewrites in the reader's own time zone].
+      expect(html).toMatch(/链接将于 <time id="expires" datetime="[^"]+">\d{4}年\d{1,2}月\d{1,2}日 UTC \d{2}:\d{2}<\/time> 失效。/);
       for (const english of ['Upload a file', 'A file was asked for', 'This link works once', 'It stops working']) {
         expect(html).not.toContain(english);
       }
@@ -925,6 +953,400 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
         .toBe(zh.failed);
       expect((await says({ ok: false, body: { success: false, error: { code: 'RECORD_LOCKED', message: 'x', userMessage: zh.recordLocked } } })).after)
         .toBe(zh.recordLocked);
+    });
+  });
+
+  describe('#32712 (b) — ruling B′: the page names the record and the field for the link\'s own user', () => {
+    const zh = UPLOAD_LINK_COPY['zh-CN'];
+    const en = UPLOAD_LINK_COPY.en;
+    const ZH = { 'accept-language': 'zh-CN,zh;q=0.9' };
+    const EN = { 'accept-language': 'en-US,en;q=0.9' };
+    const TITLE = 'Taxi 11-12 to the airport';
+    const openIn = (token: string, headers: Record<string, string>, user: string | null = OWNER.userId) =>
+      call('GET', `${BASE}/upload-links/:token`, { params: { token }, headers: { ...headers, ...sessionOf(user) } });
+    const titledClaim = async (name = TITLE) =>
+      (await engine.insert('claim', { name, owner: OWNER.userId, organization_id: ORG }, { context: SYS } as never)).id as string;
+    /** The page's own escaping, to match a row as the HTML carries it. */
+    const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const row = (term: string, value: string) => `<dt>${esc(term)}</dt><dd>${esc(value)}</dd>`;
+    /** No id and no API name anywhere in the page, the tab title generic. */
+    const expectNoIdOrApiName = (html: string, recordId: string, copy: typeof en, token: string) => {
+      for (const id of [recordId, token.split('.')[0], OWNER.userId, ORG]) expect(html, id).not.toContain(id);
+      // An API name only as a word of its own: a label may contain one ("E-invoice").
+      for (const apiName of ['claim', 'policy', 'photos', 'expense_line', 'invoice']) {
+        expect(html, apiName).not.toMatch(new RegExp(`(?<![\\w-])${apiName}(?![\\w-])`));
+      }
+      expect(/<title>([^<]*)<\/title>/.exec(html)?.[1]).toBe(copy.pageTitle);
+    };
+    /** Stand services in for the span of `fn`. */
+    const withServices = async (stand: Record<string, unknown>, fn: () => Promise<void>) => {
+      for (const [name, svc] of Object.entries(stand)) services.set(name, svc);
+      try {
+        await fn();
+      } finally {
+        for (const name of Object.keys(stand)) services.delete(name);
+      }
+    };
+    /** A security service answering every claim field readable and queryable except those named. */
+    const securityHiding = (opts: { unreadable?: string[]; masked?: string[]; noQueryable?: boolean }) => {
+      const all = Object.keys((engine.getSchema('claim') as any).fields);
+      return {
+        getReadableFields: async (object: string) =>
+          object === 'claim' ? all.filter((f) => !(opts.unreadable ?? []).includes(f)) : undefined,
+        ...(opts.noQueryable
+          ? {}
+          : {
+              getQueryableFields: async (object: string) =>
+                object === 'claim'
+                  ? all.filter((f) => !(opts.unreadable ?? []).includes(f) && !(opts.masked ?? []).includes(f))
+                  : undefined,
+            }),
+      };
+    };
+    /** The unusable-link page with its per-response nonce taken out, for a byte comparison. */
+    const unusableBytes = (res: Res) => ({
+      status: res._status,
+      body: String(res._sent).replace(/nonce="[^"]+"/g, 'nonce="N"'),
+      headers: { ...res._headers, 'content-security-policy': res._headers['content-security-policy'].replace(/'nonce-[^']+'/g, "'nonce-N'") },
+    });
+
+    it('the owner sees both rows, in English and in Chinese, and nothing else that names', async () => {
+      const id = await titledClaim();
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const html = String((await openIn(token, EN))._sent);
+      expect(html).toContain(`<dl>${row(en.recordRow, en.recordTitled('Claim', TITLE))}${row(en.goesIntoRow, en.intoField('Policy'))}</dl>`);
+      expect(html).toContain('<dd>Claim &quot;Taxi 11-12 to the airport&quot;</dd>');
+      expect(html).toContain(en.wanted('field'));
+      expectNoIdOrApiName(html, id, en, token);
+      const page = await openIn(token, ZH);
+      expect(page._status).toBe(200);
+      const zhHtml = String(page._sent);
+      expect(zhHtml).toContain(`<dl>${row(zh.recordRow, zh.recordTitled('Claim', TITLE))}${row(zh.goesIntoRow, zh.intoField('Policy'))}</dl>`);
+      expect(zhHtml).toContain('<dt>记录</dt><dd>Claim「Taxi 11-12 to the airport」</dd><dt>放入</dt><dd>「Policy」字段</dd>');
+      expectNoIdOrApiName(zhHtml, id, zh, token);
+      // The names are page text only: the script's data carries none of them.
+      const script = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(zhHtml)?.[1] ?? '';
+      for (const name of [TITLE, 'Claim', 'Policy']) expect(script).not.toContain(name);
+    });
+
+    it('labels are the object\'s and the field\'s in the page\'s language, through the i18n bundle', async () => {
+      const id = await titledClaim();
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const i18n = {
+        getLocales: () => ['zh-CN'],
+        getTranslations: (locale: string) =>
+          locale === 'zh-CN' ? { objects: { claim: { label: '报销单', fields: { policy: { label: '保单' } } } } } : {},
+      };
+      await withServices({ i18n }, async () => {
+        const zhHtml = String((await openIn(tokenOf(grant.path), ZH))._sent);
+        expect(zhHtml).toContain(`${row(zh.recordRow, zh.recordTitled('报销单', TITLE))}${row(zh.goesIntoRow, zh.intoField('保单'))}`);
+        // English has no entry: the labels as declared.
+        const enHtml = String((await openIn(tokenOf(grant.path), EN))._sent);
+        expect(enHtml).toContain(row(en.recordRow, en.recordTitled('Claim', TITLE)));
+      });
+    });
+
+    it('an attachments link, a multi-file field and a record not yet created each name what they can', async () => {
+      const id = await titledClaim();
+      const attach = await files.createUploadLinkAs('claim', id, { attachments: true }, OWNER as never);
+      expect(String((await openIn(tokenOf(attach.path), ZH))._sent))
+        .toContain(`<dl>${row(zh.recordRow, zh.recordTitled('Claim', TITLE))}${row(zh.goesIntoRow, zh.intoAttachments)}</dl>`);
+      const several = await files.createUploadLinkAs('claim', id, { field: 'photos' }, OWNER as never);
+      const severalHtml = String((await openIn(tokenOf(several.path), EN))._sent);
+      expect(severalHtml).toContain(`<dl>${row(en.recordRow, en.recordTitled('Claim', TITLE))}${row(en.goesIntoRow, en.intoField('Photos'))}</dl>`);
+      expect(severalHtml).toContain(en.wantedSeveral(UPLOAD_LINK_MAX_FILES));
+      // No record yet: the object's label and the field, nothing to title.
+      for (const [object, field, count, objectLabel, fieldLabel] of [
+        ['expense_line', 'invoice', 1, 'Expense line', 'E-invoice'],
+        ['claim', 'photos', 3, 'Claim', 'Photos'],
+      ] as const) {
+        const grant = await files.createUploadLinkForNewRecordAs(object, { field, count }, OWNER as never);
+        const html = String((await openIn(tokenOf(grant.path), ZH))._sent);
+        expect(html).toContain(`<dl>${row(zh.recordRow, zh.recordNotYetCreated(objectLabel))}${row(zh.goesIntoRow, zh.intoField(fieldLabel))}</dl>`);
+        if (count > 1) expect(html).toContain(zh.wantedExactly(count));
+        for (const fileId of grant.fileIds) expectNoIdOrApiName(html, fileId, zh, tokenOf(grant.path));
+      }
+    });
+
+    it('a masked or hidden title shows the object\'s label only, and the value reaches no byte of the page', async () => {
+      const id = await titledClaim('Secret trip to Lisbon');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      for (const security of [
+        securityHiding({ masked: ['name'] }),
+        securityHiding({ unreadable: ['name'] }),
+        // A security service that cannot say what is masked shows less, never more.
+        securityHiding({ noQueryable: true }),
+      ]) {
+        await withServices({ security }, async () => {
+          const page = await openIn(token, EN);
+          expect(page._status).toBe(200);
+          const html = String(page._sent);
+          expect(html).toContain(`<dl>${row(en.recordRow, en.recordOfObject('Claim'))}${row(en.goesIntoRow, en.intoField('Policy'))}</dl>`);
+          for (const part of ['Secret', 'Lisbon']) expect(html).not.toContain(part);
+          expect(JSON.stringify(page._headers)).not.toContain('Lisbon');
+        });
+      }
+    });
+
+    it('a field the owner cannot read loses its row; the record row stays', async () => {
+      const id = await titledClaim();
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      await withServices({ security: securityHiding({ unreadable: ['policy'] }) }, async () => {
+        const html = String((await openIn(tokenOf(grant.path), EN))._sent);
+        expect(html).toContain(`<dl>${row(en.recordRow, en.recordTitled('Claim', TITLE))}</dl>`);
+        expect(html).not.toContain(en.goesIntoRow);
+        expect(html).not.toContain('Policy');
+      });
+    });
+
+    it('a record the owner can no longer read answers the stranger\'s 404, byte for byte', async () => {
+      const id = await titledClaim('Moved away');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const stranger = unusableBytes(await openIn(token, EN, OUTSIDER.userId));
+      const unknown = unusableBytes(await openIn('not-a-token', EN));
+      expect(stranger.status).toBe(404);
+      expect(stranger).toEqual(unknown);
+      await engine.update('claim', { owner: OUTSIDER.userId }, { where: { id }, context: SYS } as never);
+      const owner = unusableBytes(await openIn(token, EN));
+      expect(owner).toEqual(stranger);
+      expect(owner.body).not.toContain('Moved away');
+      // In Chinese too: the same page as a stranger's in that language.
+      expect(unusableBytes(await openIn(token, ZH))).toEqual(unusableBytes(await openIn(token, ZH, OUTSIDER.userId)));
+    });
+
+    it('a user who can no longer act in the link\'s organization answers the stranger\'s 404, byte for byte', async () => {
+      const id = await titledClaim('Left the organization');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const stranger = unusableBytes(await openIn(token, EN, OUTSIDER.userId));
+      expect(stranger.status).toBe(404);
+      const members = engine.getDriverForObject('sys_member')!;
+      await members.delete('sys_member', `mem_${OWNER.userId}`);
+      try {
+        const owner = unusableBytes(await openIn(token, EN));
+        expect(owner).toEqual(stranger);
+        expect(owner.body).not.toContain('Left the organization');
+      } finally {
+        await members.create('sys_member', { id: `mem_${OWNER.userId}`, user_id: OWNER.userId, organization_id: ORG, role: 'member' });
+      }
+      // A member again: the page names the record once more.
+      expect(String((await openIn(token, EN))._sent)).toContain(row(en.recordRow, en.recordTitled('Claim', 'Left the organization')));
+    });
+
+    it('a record read the engine refuses 403 or 404 answers the stranger\'s 404; any other failure names nothing', async () => {
+      const id = await titledClaim('Refused on read');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const stranger = unusableBytes(await openIn(token, EN, OUTSIDER.userId));
+      const findOne = engine.findOne.bind(engine);
+      let refusal: { status?: number } | null = null;
+      const spy = vi.spyOn(engine as any, 'findOne').mockImplementation(async (object: any, query: any, options: any) => {
+        if (refusal && object === 'claim' && query?.where?.id === id && options?.context?.userId === OWNER.userId) {
+          throw Object.assign(new Error('refused'), refusal);
+        }
+        return findOne(object, query, options);
+      });
+      try {
+        for (const status of [403, 404]) {
+          refusal = { status };
+          const owner = unusableBytes(await openIn(token, EN));
+          expect(owner, String(status)).toEqual(stranger);
+          expect(owner.body).not.toContain('Refused on read');
+        }
+        // A failure that is not a refusal: today's page, which names nothing.
+        refusal = { status: 500 };
+        const page = await openIn(token, EN);
+        expect(page._status).toBe(200);
+        expect(String(page._sent)).not.toContain('<dl>');
+        expect(String(page._sent)).not.toContain('Refused on read');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('a display field that is not title-typed (a lookup as nameField) shows the object\'s label only, never the id it serves', async () => {
+      const claimId = await titledClaim('Referenced claim');
+      const trip = await engine.insert('trip', { claim_ref: claimId, organization_id: ORG }, { context: SYS } as never);
+      const tripId = String(trip.id);
+      const fetched = await engine.findOne('trip', { where: { id: tripId } }, { context: OWNER } as never);
+      expect(fetched?.claim_ref, 'the lookup serves the bare foreign id').toBe(claimId);
+      const grant = await files.createUploadLinkAs('trip', tripId, { field: 'ticket' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      for (const [headers, copy] of [[EN, en], [ZH, zh]] as const) {
+        const page = await openIn(token, headers);
+        expect(page._status).toBe(200);
+        const html = String(page._sent);
+        expect(html).toContain(`<dl>${row(copy.recordRow, copy.recordOfObject('Trip'))}${row(copy.goesIntoRow, copy.intoField('Ticket'))}</dl>`);
+        expect(html).not.toContain(claimId);
+        expect(html).not.toContain(tripId);
+        expect(html).not.toContain('Referenced claim');
+        expect(JSON.stringify(page._headers)).not.toContain(claimId);
+      }
+    });
+
+    it('opening the page writes nothing and spends nothing: the link still takes its upload', async () => {
+      const id = await titledClaim();
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const linkId = token.split('.')[0];
+      const rows = async () => ({
+        files: await engine.count('sys_file', { context: SYS } as never),
+        link: await fileRow(linkId),
+        record: await claim(id),
+      });
+      const before = await rows();
+      for (const headers of [EN, ZH, {}]) expect((await openIn(token, headers))._status).toBe(200);
+      expect(await rows()).toEqual(before);
+      const put = await useLink(token, Buffer.from('%PDF-1.4 still usable'));
+      expect(put._status, JSON.stringify(put._json)).toBe(200);
+    });
+
+    it('CONTROL: another user, an expired link and a used link get the one refusal, naming nothing', async () => {
+      const id = await titledClaim('Control claim');
+      const grant = await files.createUploadLinkAs('claim', id, { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const reference = unusableBytes(await openIn('not-a-token', EN));
+      expect(unusableBytes(await openIn(token, EN, OUTSIDER.userId))).toEqual(reference);
+      expect(unusableBytes(await openIn(token, EN, REVIEWER.userId))).toEqual(reference);
+      const now = Date.now();
+      vi.spyOn(Date, 'now').mockReturnValue(now + (UPLOAD_LINK_TTL_SECONDS + 1) * 1000);
+      expect(unusableBytes(await openIn(token, EN))).toEqual(reference);
+      vi.restoreAllMocks();
+      expect((await useLink(token, Buffer.from('%PDF-1.4 once')))._status).toBe(200);
+      const used = unusableBytes(await openIn(token, EN));
+      expect(used).toEqual(reference);
+      expect(used.body).not.toContain('Control claim');
+    });
+
+    /** Run the page's script on a stubbed DOM; the elements it touched. */
+    const runPage = (
+      html: string,
+      clock: () => number = () => Date.now(),
+      answer: () => Promise<unknown> = async () => ({ ok: true, json: async () => ({ success: true, data: { fileId: 'f1' } }) }),
+    ) => {
+      const script = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html)?.[1];
+      expect(script, 'the page carries its upload script').toBeTruthy();
+      const handlers: Record<string, () => void> = {};
+      const timers: Array<{ fn: () => void; ms: number; cleared?: boolean }> = [];
+      let fetched = 0;
+      const el = (id: string) => ({
+        id, disabled: id === 'send', textContent: id === 'expires' ? 'SERVER TEXT' : '',
+        files: id === 'file' ? [{ name: 'scan.pdf', type: 'application/pdf' }] : undefined,
+        addEventListener: (event: string, fn: () => void) => { handlers[`${id}:${event}`] = fn; },
+      });
+      const els: Record<string, ReturnType<typeof el>> = { file: el('file'), send: el('send'), status: el('status'), expires: el('expires') };
+      // The browser's clock is `clock`: the script's `Date` is the page realm's own.
+      const BrowserDate = class extends Date {
+        static now() { return clock(); }
+      };
+      runInNewContext(script!, {
+        Date: BrowserDate,
+        document: { getElementById: (id: string) => els[id] },
+        location: { pathname: '/api/v1/storage/upload-links/t' },
+        fetch: async () => { fetched += 1; return answer(); },
+        setTimeout: (fn: () => void, ms: number) => timers.push({ fn, ms }) - 1,
+        clearTimeout: (handle: number) => { if (timers[handle]) timers[handle].cleared = true; },
+      });
+      return { els, handlers, timers, fetched: () => fetched };
+    };
+    const view = (expiresAt: string) => ({ expiresAt, target: 'field' as const, files: { min: 1, max: 1 } });
+    const render = (expiresAt: string, now: number, copy = zh) => {
+      const res: any = { _sent: '', header() { return res; }, status() { return res; }, send(b: string) { res._sent = b; return res; } };
+      sendUploadLinkPage(res, view(expiresAt), copy, now);
+      return String(res._sent);
+    };
+
+    it('the expiry is printed in the reader\'s own time zone, in the page\'s language', () => {
+      const at = new Date(Date.now() + 5 * 60_000);
+      const html = render(at.toISOString(), Date.now());
+      expect(html).toContain(`<time id="expires" datetime="${at.toISOString()}">`);
+      const { els } = runPage(html);
+      const local = new Intl.DateTimeFormat('zh-CN', {
+        year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+      }).format(at);
+      expect(els.expires.textContent).toBe(local);
+      expect(els.status.textContent).toBe('');
+    });
+
+    it('once the printed expiry has passed, the page says so and disables Send, on the server\'s clock', async () => {
+      // Expired by the server's clock while the browser's is behind: disabled at once, nothing sent.
+      const ahead = Date.now() + 60 * 60_000;
+      const expired = runPage(render(new Date(ahead).toISOString(), ahead + 1_000));
+      expect(expired.els.status.textContent).toBe(zh.expired);
+      expect(expired.els.send.disabled).toBe(true);
+      expect(expired.els.file.disabled).toBe(true);
+      expired.handlers['send:click']!();
+      expect(expired.fetched()).toBe(0);
+      expect(expired.timers).toEqual([]);
+      // Live by the server's clock though the browser's is past it: the link still sends.
+      const behind = Date.now() - 60 * 60_000;
+      const live = runPage(render(new Date(behind).toISOString(), behind - 60_000, en));
+      expect(live.els.status.textContent).toBe('');
+      expect(live.timers).toHaveLength(1);
+      live.handlers['send:click']!();
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+      expect(live.fetched()).toBe(1);
+      expect(live.els.status.textContent).toBe(en.attached);
+      // The timer flips an open page when the moment comes.
+      let browserNow = Date.now();
+      const soon = browserNow + 30_000;
+      const open = runPage(render(new Date(soon).toISOString(), browserNow), () => browserNow);
+      expect(open.timers).toHaveLength(1);
+      expect(open.timers[0].ms).toBeGreaterThan(29_000);
+      expect(open.els.status.textContent).toBe('');
+      browserNow = soon + 1_000;
+      open.timers[0].fn();
+      expect(open.els.status.textContent).toBe(zh.expired);
+      expect(open.els.send.disabled).toBe(true);
+    });
+
+    it('a file that landed is never followed by "expired": the timer stops once Send is pressed', async () => {
+      const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+      let browserNow = Date.now();
+      const end = browserNow + 60_000;
+      const done = runPage(render(new Date(end).toISOString(), browserNow, en), () => browserNow);
+      expect(done.timers).toHaveLength(1);
+      done.handlers['send:click']!();
+      expect(done.timers[0].cleared, 'Send stops the timer').toBe(true);
+      await settle();
+      expect(done.els.status.textContent).toBe(en.attached);
+      // The moment passes with the page still open, and the timer fires anyway (a browser that runs a cleared one late).
+      browserNow = end + 1_000;
+      done.timers[0].fn();
+      expect(done.els.status.textContent).toBe(en.attached);
+      done.handlers['file:change']!();
+      expect(done.els.status.textContent).toBe(en.attached);
+      // A send still running at the moment is not talked over: its answer is the line.
+      browserNow = Date.now();
+      const late = browserNow + 60_000;
+      let land!: (value: unknown) => void;
+      const running = runPage(render(new Date(late).toISOString(), browserNow, en), () => browserNow,
+        () => new Promise((resolve) => { land = resolve; }));
+      running.handlers['send:click']!();
+      expect(running.els.status.textContent).toBe(en.uploading);
+      browserNow = late + 1_000;
+      running.timers[0].fn();
+      expect(running.els.status.textContent).toBe(en.uploading);
+      land({ ok: true, json: async () => ({ success: true, data: { fileId: 'f2' } }) });
+      await settle();
+      expect(running.els.status.textContent).toBe(en.attached);
+      // A send that fails while the link has time left re-arms the timer; the moment then says so.
+      browserNow = Date.now();
+      const later = browserNow + 60_000;
+      const failed = runPage(render(new Date(later).toISOString(), browserNow, en), () => browserNow,
+        async () => ({ ok: false, json: async () => ({ success: false }) }));
+      failed.handlers['send:click']!();
+      await settle();
+      expect(failed.els.status.textContent).toBe(en.failed);
+      expect(failed.timers).toHaveLength(2);
+      expect(failed.timers[1].cleared).toBeUndefined();
+      browserNow = later + 1_000;
+      failed.timers[1].fn();
+      expect(failed.els.status.textContent).toBe(en.expired);
+      expect(failed.els.send.disabled).toBe(true);
     });
   });
 

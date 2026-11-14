@@ -886,3 +886,182 @@ describe('with SSO domain verification on, a SAML provider creates an account on
     expect(written(rp)).toEqual(NOTHING);
   });
 });
+
+// ── Sign out of the company sign-in too: SAML single logout ─────────────────
+//
+// Ruling record 6866334319 (`sso-sign-out-of-idp.ts`). The IdP side of single
+// logout is played with the same `samlify`: a LogoutRequest the IdP sends when
+// the person signs out there, and the LogoutResponse it answers the platform's
+// own LogoutRequest with, each signed with the IdP key above or unsigned.
+
+describe('sign out of the company sign-in too: SAML single logout', () => {
+  const REDIRECT = 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect';
+  const IDP_SLO = 'https://idp.acme.example/slo';
+  const POST = 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST';
+  const SP_SLO = `${AUTH}/sso/saml2/sp/slo/${PROVIDER_ID}`;
+  // As the IdP Logout URL field stores it (`samlLogoutServiceOf`): one address, both bindings.
+  const withLogoutAddress = {
+    idpMetadata: {
+      entityID: IDP_ENTITY,
+      singleLogoutService: [
+        { Binding: REDIRECT, Location: IDP_SLO },
+        { Binding: POST, Location: IDP_SLO },
+      ],
+    },
+  };
+
+  const sessionOf = async (rp: Rp, cookie: string): Promise<{ user?: { email?: string } } | null> => {
+    const res = await rp.manager.handleRequest(new Request(`${AUTH}/get-session`, { headers: { cookie } }));
+    const body = (await res.json().catch(() => null)) as { user?: { email?: string } } | null;
+    return body?.user ? body : null;
+  };
+
+  const signOut = (rp: Rp, cookie: string, body: Record<string, unknown> = {}): Promise<Response> =>
+    rp.manager.handleRequest(
+      new Request(`${AUTH}/sign-out`, {
+        method: 'POST',
+        headers: { cookie, origin: BASE, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  /** The IdP's view of this SP, built from configuration (not the SP metadata, which advertises single logout only while it is on). */
+  const spAsIdpSees = (signed: boolean) =>
+    samlify.ServiceProvider({
+      entityID: SP_ENTITY,
+      assertionConsumerService: [{ Binding: 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST', Location: ACS }],
+      singleLogoutService: [{ Binding: POST, Location: SP_SLO }, { Binding: REDIRECT, Location: SP_SLO }],
+      wantLogoutRequestSigned: signed,
+      wantLogoutResponseSigned: signed,
+    });
+  const idpWithLogout = () =>
+    samlify.IdentityProvider({
+      entityID: IDP_ENTITY,
+      privateKey: idpKeyPem,
+      signingCert: idpCert,
+      nameIDFormat: [EMAIL_FORMAT],
+      singleSignOnService: [{ Binding: REDIRECT, Location: IDP_SSO }],
+      singleLogoutService: [{ Binding: REDIRECT, Location: IDP_SLO }, { Binding: POST, Location: IDP_SLO }],
+    });
+
+  /** A logout message the IdP's page posts to the SP's logout endpoint (HTTP-POST binding, no cookie). */
+  const postToSpSlo = (rp: Rp, type: string, context: string): Promise<Response> =>
+    rp.manager.handleRequest(
+      new Request(SP_SLO, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ [type]: context }).toString(),
+      }),
+    );
+
+  /** The IdP's LogoutRequest for `email` (the person signed out at the IdP). */
+  const idpLogoutRequest = (rp: Rp, email: string, signed: boolean): Promise<Response> => {
+    const { context, type } = idpWithLogout().createLogoutRequest(spAsIdpSees(signed), 'post', { logoutNameID: email });
+    return postToSpSlo(rp, type, context);
+  };
+
+  /** The IdP's LogoutResponse to a LogoutRequest of the SP. */
+  const idpLogoutResponse = (rp: Rp, signed: boolean): Promise<Response> => {
+    const { context, type } = idpWithLogout().createLogoutResponse(
+      spAsIdpSees(signed),
+      { extract: { request: { id: `_${crypto.randomUUID()}` } } },
+      'post',
+    );
+    return postToSpSlo(rp, type, context);
+  };
+
+  it('CONTROL, switch off: sign-out ends the platform session only, and the IdP logout endpoint stays closed', async () => {
+    const rp = await makeRp({ samlConfig: withLogoutAddress });
+    const signedIn = cookiesOf(await signInThroughIdp(rp, 'ann@acme.com'));
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe('ann@acme.com');
+
+    // The IdP's signed LogoutRequest is refused, and the session stands.
+    const refused = await idpLogoutRequest(rp, 'ann@acme.com', true);
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { code?: string }).code).toBe('SINGLE_LOGOUT_NOT_ENABLED');
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe('ann@acme.com');
+
+    const out = await signOut(rp, signedIn);
+    expect(out.status).toBe(200);
+    const body = (await out.json()) as { success?: boolean; url?: string };
+    expect(body.success).toBe(true);
+    expect(body.url).toBeUndefined();
+    expect(out.headers.get('location')).toBeNull();
+    expect(await sessionOf(rp, signedIn)).toBeNull();
+  });
+
+  it('on: sign-out also signs out at the IdP through its single logout, and the session ends', async () => {
+    const rp = await makeRp({ provider: { signOutOfIdp: true }, samlConfig: withLogoutAddress });
+    const signedIn = cookiesOf(await signInThroughIdp(rp, 'ann@acme.com'));
+
+    const out = await signOut(rp, signedIn, { callbackURL: AFTER });
+    expect(out.status).toBe(200);
+    const body = (await out.json()) as { success?: boolean; url?: string; redirect?: boolean };
+    expect(body).toMatchObject({ success: true, redirect: true });
+    const url = new URL(body.url!);
+    expect(`${url.origin}${url.pathname}`).toBe(IDP_SLO);
+    expect(out.headers.get('location')).toBe(body.url);
+    const logoutRequest = inflateRawSync(Buffer.from(url.searchParams.get('SAMLRequest')!, 'base64')).toString('utf8');
+    expect(logoutRequest).toContain('LogoutRequest');
+    expect(logoutRequest).toContain('ann@acme.com');
+    expect(await sessionOf(rp, signedIn)).toBeNull();
+  });
+
+  it('on: an unsigned LogoutRequest and an unsigned LogoutResponse from the IdP are each refused', async () => {
+    const rp = await makeRp({ provider: { signOutOfIdp: true }, samlConfig: withLogoutAddress });
+    const signedIn = cookiesOf(await signInThroughIdp(rp, 'ann@acme.com'));
+
+    const request = await idpLogoutRequest(rp, 'ann@acme.com', false);
+    expect(request.status).toBe(400);
+    expect(((await request.json()) as { code?: string }).code).toBe('INVALID_LOGOUT_REQUEST');
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe('ann@acme.com');
+
+    const response = await idpLogoutResponse(rp, false);
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { code?: string }).code).toBe('INVALID_LOGOUT_RESPONSE');
+
+    // CONTROL: the same LogoutResponse, signed, is accepted (and lands on the app's root).
+    const signed = await idpLogoutResponse(rp, true);
+    expect(signed.status).toBe(302);
+    expect(signed.headers.get('location')).toBe(BASE);
+  });
+
+  it('on: a signed message in the HTTP-Redirect binding is refused too (the vendor verifies no redirect signature): fail closed', async () => {
+    const rp = await makeRp({ provider: { signOutOfIdp: true }, samlConfig: withLogoutAddress });
+    const signedIn = cookiesOf(await signInThroughIdp(rp, 'ann@acme.com'));
+    const { context } = idpWithLogout().createLogoutRequest(spAsIdpSees(true), 'redirect', { logoutNameID: 'ann@acme.com' });
+    expect(new URL(context).searchParams.get('Signature')).toBeTruthy();
+    const res = await rp.manager.handleRequest(new Request(context));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: string }).code).toBe('INVALID_LOGOUT_REQUEST');
+    expect((await sessionOf(rp, signedIn))?.user?.email).toBe('ann@acme.com');
+  });
+
+  it('on: a signed LogoutRequest ends only the session it names', async () => {
+    // `allowJit`: under the default invite-only posture only the first person is admitted without it.
+    const rp = await makeRp({ provider: { signOutOfIdp: true, allowJit: true }, samlConfig: withLogoutAddress });
+    const ann = cookiesOf(await signInThroughIdp(rp, 'ann@acme.com'));
+    const bob = cookiesOf(await signInThroughIdp(rp, 'bob@acme.com'));
+    expect((await sessionOf(rp, ann))?.user?.email).toBe('ann@acme.com');
+    expect((await sessionOf(rp, bob))?.user?.email).toBe('bob@acme.com');
+
+    const res = await idpLogoutRequest(rp, 'ann@acme.com', true);
+    // The vendor answers the IdP in the binding the request came in: a POST form carrying its LogoutResponse.
+    expect(res.status, await res.clone().text()).toBe(200);
+    const form = await res.text();
+    expect(form).toContain(IDP_SLO);
+    expect(form).toContain('SAMLResponse');
+
+    expect(await sessionOf(rp, ann)).toBeNull();
+    expect((await sessionOf(rp, bob))?.user?.email).toBe('bob@acme.com');
+  });
+
+  it('the SP metadata advertises the logout service only while the switch is on', async () => {
+    const metadataOf = async (rp: Rp) =>
+      (await rp.manager.handleRequest(new Request(`${AUTH}/sso/saml2/sp/metadata?providerId=${PROVIDER_ID}`))).text();
+    expect(await metadataOf(await makeRp({ samlConfig: withLogoutAddress }))).not.toContain('SingleLogoutService');
+    expect(await metadataOf(await makeRp({ provider: { signOutOfIdp: true }, samlConfig: withLogoutAddress }))).toContain(
+      'SingleLogoutService',
+    );
+  });
+});
