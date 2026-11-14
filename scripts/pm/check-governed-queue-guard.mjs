@@ -341,6 +341,15 @@
  * `merge_group`, the merge base on `pull_request` — to the register's
  * `applyWorkflowSplit`, and a commit it could not read stays Tier H.
  *
+ * ⚖️ The two skills catalog rows are read off the PULL REQUEST (maintainer
+ * ruling 2026-11-14 on #33501, the register's "The low-risk skills arm"):
+ * `decomposeGovernedWork` keeps every path of every attributed commit
+ * (`allPaths`, ungoverned commits of the same PR included) and reads the arm
+ * NOT MEASURED, so the `pull_request` leg says Tier H; the `merge_group` leg's
+ * `readLowRiskTier` re-reads the tier with the body and label names of the pull
+ * object it already fetched for the head — no read of its own — through the
+ * register's `governedTierFor`. An unread pull stays Tier H.
+ *
  * ⭐ THE TWO CARRIERS ARE ONE DELIVERY, and the location is the governed text's
  * to decide rather than this file's — quoted, untranslated, because it IS the
  * criterion: 「复核记录 = 一条评论落 PR 或卡」
@@ -577,9 +586,11 @@ import {
   GOVERNED_TIER_H,
   GOVERNED_TIER_S,
   HUMAN_MERGE_LINE_THRESHOLD,
+  LOW_RISK_ARM_RULING,
   SELF_REPO_ID,
   WORKFLOWS_PREFIX,
   applyGeneratedExceptions,
+  applyLowRiskArm,
   applyWorkflowSplit,
   assertGovernedRepo,
   generatedExceptionFor,
@@ -594,6 +605,7 @@ import {
   recomputeProvenanceFor,
   readWorkflowDiff,
   renderLiftApprovals,
+  renderLowRiskLines,
   renderWorkflowSplitLines,
   repoIdForSlug,
   testVerdict,
@@ -647,6 +659,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
   '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
   '⭐ the workflows split at the queue (ruling record 6722205630)': 30,
+  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 16,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -659,7 +672,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 27 → 28 with the ENQUEUE leg battery (maintainer ruling 2026-10-26): one battery, one row.
 // Raised 28 → 29 with the cheap early-warning leg battery: one battery, one row.
 // Raised 29 → 30 with the workflows split battery (ruling record 6722205630): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 30;
+// Raised 30 → 31 with the low-risk skills arm battery (#33501): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 31;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1145,6 +1159,17 @@ export function decomposeGovernedWork(rows, repo) {
   assertGovernedRepo(repo, 'decomposeGovernedWork');
   const byPull = new Map();
   const unattributed = [];
+  // ⭐ EVERY path of every attributed row, governed or not, per PR — the low-risk
+  // skills arm's allowlist reads the whole diff (#33501). Collected BEFORE the
+  // governed filter below drops a row, so an ungoverned commit of the same PR
+  // (a `packages/**` edit in a commit of its own) still counts against the arm.
+  const allByPull = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (typeof row?.pr !== 'number' || !Number.isInteger(row.pr) || row.pr <= 0) continue;
+    const all = allByPull.get(row.pr) ?? new Set();
+    for (const p of Array.isArray(row.paths) ? row.paths : []) if (typeof p === 'string' && p !== '') all.add(p);
+    allByPull.set(row.pr, all);
+  }
   for (const row of Array.isArray(rows) ? rows : []) {
     const surfaces = governedPathsIn(row?.paths ?? [], repo);
     if (surfaces.length === 0) continue;
@@ -1171,12 +1196,17 @@ export function decomposeGovernedWork(rows, repo) {
       // SAME governed path list the verdict is judged on — never from the raw
       // diff, which carries files the register does not govern at all — and,
       // for the `workflows` row, from the reading of its diff (the split).
+      // The low-risk skills arm (#33501) needs the PR body and labels, which no
+      // row carries: here it is NOT MEASURED, so a catalog path is Tier H; the
+      // queue leg re-reads the tier with `readLowRiskTier` once the pull is read.
       return {
         pr: entry.pr,
         shas: entry.shas,
         paths,
-        surfaces: applyWorkflowSplit(governedPathsIn(paths, repo), repo, workflowDiff),
-        tier: governedTierFor(paths, repo, GOVERNED_SURFACES, workflowDiff),
+        allPaths: [...(allByPull.get(entry.pr) ?? entry.paths)],
+        workflowDiff,
+        surfaces: applyLowRiskArm(applyWorkflowSplit(governedPathsIn(paths, repo), repo, workflowDiff), repo, null),
+        tier: governedTierFor(paths, repo, GOVERNED_SURFACES, workflowDiff, null),
       };
     })
     .sort((a, b) => a.pr - b.pr);
@@ -1545,6 +1575,7 @@ export function renderGuardVerdict(verdict) {
     lines.push('', `  #${entry.pr} — governed:`);
     lines.push(...surfaceLines(entry));
     lines.push(...renderWorkflowSplitLines(entry.surfaces).split('\n').filter((l) => l !== '').map((l) => `  ${l}`));
+    lines.push(...renderLowRiskLines(entry.surfaces).split('\n').filter((l) => l !== '').map((l) => `  ${l}`));
     // The pre-#19133 `pull_request` byte-identity constraint (2026-08-27) is
     // superseded by that ruling's own requirement: the early warning names the
     // tier and what it waits for.
@@ -1855,6 +1886,25 @@ export function renderGuardVerdict(verdict) {
 }
 
 /**
+ * Re-read one governed entry's tier with the low-risk skills arm's reading
+ * (#33501): `paths` = every path of the PR's commits (`allPaths`), the body and
+ * labels off the pull object the queue leg read. An entry with no catalog row
+ * is left untouched; `pull` null (its read failed) is an UNMEASURED reading, so
+ * the entry stays Tier H with the reason printed. ⛔ The tier comes from the
+ * register's own `governedTierFor` and `applyLowRiskArm` — no second predicate
+ * here. Mutates `entry` (its `surfaces` and `tier`); returns it.
+ */
+export function readLowRiskTier(entry, repo, pull) {
+  if (!entry || !(entry.surfaces ?? []).some((s) => s?.lowRiskVerdict)) return entry;
+  const reading = pull
+    ? { measured: true, reason: null, paths: entry.allPaths ?? entry.paths, body: String(pull.body ?? ''), labels: Array.isArray(pull.labels) ? pull.labels : null }
+    : { measured: false, reason: 'its pull request could not be read, so its body and labels are unknown' };
+  entry.surfaces = applyLowRiskArm(applyWorkflowSplit(governedPathsIn(entry.paths, repo), repo, entry.workflowDiff ?? null), repo, reading);
+  entry.tier = governedTierFor(entry.paths, repo, GOVERNED_SURFACES, entry.workflowDiff ?? null, reading);
+  return entry;
+}
+
+/**
  * The orchestrator, with its one IO dependency injected.
  *
  * ⭐ The early return below is requirement (d)'s ordering guarantee expressed
@@ -1898,7 +1948,7 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
           // head read was not already making.
           const pull = await fetchPull(entry.pr);
           headSha = pull?.sha ?? null;
-          pulls.set(entry.pr, { number: entry.pr, body: pull?.body ?? '', head: { ref: pull?.headRef ?? '' } });
+          pulls.set(entry.pr, { number: entry.pr, body: pull?.body ?? '', labels: Array.isArray(pull?.labels) ? pull.labels : null, head: { ref: pull?.headRef ?? '' } });
         } catch (error) {
           headNotes.push(
             `  ℹ️  #${entry.pr}: the PR head could not be read (${String(error?.message ?? error).split('\n')[0]}) — ` +
@@ -1946,6 +1996,10 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
   // take a pass away), and it is FREE on every merge group that does not need
   // it — no thread is read, and the recognisers are not even loaded.
   if (event === EVENT_MERGE_GROUP) {
+    // ⭐ The low-risk skills arm (#33501) FIRST: a catalog entry's tier is read
+    // off the pull object this leg already holds — body, labels — and the whole
+    // path list of its commits. An unread pull is NOT MEASURED: Tier H.
+    for (const entry of governed) readLowRiskTier(entry, repo, pulls.get(entry.pr) ?? null);
     let recognisers = null;
     for (const entry of governed) {
       if (entry.tier !== TIER_S) continue;
@@ -2721,6 +2775,8 @@ export function makePullReader({ apiUrl, slug, token, fetchImpl = fetch }) {
     return {
       sha,
       body: String(row?.body ?? ''),
+      // The label NAMES (#33501): the low-risk skills arm reads `security` off them. Not a list ⇒ null ⇒ Tier H.
+      labels: Array.isArray(row?.labels) ? row.labels.map((l) => String(l?.name ?? '')) : null,
       headRef: String(row?.head?.ref ?? ''),
       size: pair === null ? null : { ...pair, source: `GET /repos/${slug}/pulls/${pull}` },
     };
@@ -3067,7 +3123,7 @@ export async function selfTest() {
   // SIZE leg judges (#19036) — `null` unless a fixture hands one in, exactly
   // as the reader answers a pull object without the pair. Spelled once, so a
   // fixture can never disagree with `makePullReader` about what a pull row is.
-  const pull = (sha = HEAD, { body = '', headRef = '', size = null } = {}) => ({ sha, body, headRef, size });
+  const pull = (sha = HEAD, { body = '', headRef = '', size = null, labels = [] } = {}) => ({ sha, body, headRef, size, labels });
   const authorizedPass = (login = GOVERNED_APPROVERS[0]) => authorizedApprovalVerdict([approvedAt(login, HEAD)], HEAD);
   // The same authorized approval, on a commit that is no longer the head. Under
   // the retired sha pin this exact fixture was the REFUSAL case.
@@ -4771,15 +4827,17 @@ export async function selfTest() {
     runGit = null,
     baseRef = null,
     workflowDiff = null,
+    labels = [],
+    extraRows = [],
   } = {}) => {
     tierApiCalls = 0;
     tierThreadsRead = [];
     return runGuard({
       repo: REPO,
       event,
-      rows: [{ ...row(pr, files, 'c'.repeat(40), `x (#${pr})`), ...(workflowDiff ? { workflowDiff } : {}) }],
+      rows: [{ ...row(pr, files, 'c'.repeat(40), `x (#${pr})`), ...(workflowDiff ? { workflowDiff } : {}) }, ...extraRows],
       fetchReviews: async () => { tierApiCalls += 1; return reviews; },
-      fetchPull: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return pull(head, { body: prBody, headRef: branch }); },
+      fetchPull: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return pull(head, { body: prBody, headRef: branch, labels }); },
       fetchComments: async (n) => {
         tierApiCalls += 1;
         tierThreadsRead.push(n);
@@ -5547,6 +5605,45 @@ export async function selfTest() {
     const [lostBase] = attachWorkflowReadings([row(7, [WF_PATH], S_SHA)], { event: EVENT_PULL_REQUEST, mergeBase: 'a'.repeat(40), runGit: fakeGit([]) });
     assert('⛔ a-base-git-cannot-read-is-UNMEASURED-and-Tier-H', lostBase.workflowDiff?.measured === false && decomposeGovernedWork([lostBase], REPO).governed[0].tier === TIER_H, JSON.stringify(lostBase.workflowDiff));
     assert('no-rows-attach-nothing', attachWorkflowReadings(undefined, { event: EVENT_MERGE_GROUP, mergeBase: M, runGit: fakeGit([]) }).length === 0);
+  }
+
+  battery('⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)');
+  {
+    const SK = 'skills/objectstack-data/SKILL.md';
+    const CS = '.changeset/33501-skills-wording.md';
+    const LOW = `Fixes #${REF_CARD}\n\nClause-②: no\nMetadata-protocol: none\n`;
+    // The decomposition: a catalog entry is NOT MEASURED there (no row carries a body), and it keeps EVERY path of the PR.
+    const split = decomposeGovernedWork([row(33501, [SK, CS, 'packages/spec/src/a.zod.ts'])], REPO).governed[0];
+    assert('the-decomposition-reads-a-catalog-entry-Tier-H-NOT-MEASURED-and-keeps-every-path', split.tier === TIER_H && split.surfaces[0].lowRiskVerdict?.measured === false && split.allPaths.join() === `${SK},${CS},packages/spec/src/a.zod.ts` && split.paths.join() === SK, JSON.stringify(split));
+    const twoCommits = decomposeGovernedWork([row(9, [SK], '1'.repeat(40)), row(9, ['packages/core/src/x.ts'], '2'.repeat(40))], REPO).governed[0];
+    assert('⛔ an-ungoverned-commit-of-the-same-PR-still-counts-its-published-path-is-in-allPaths', twoCommits.allPaths.includes('packages/core/src/x.ts') && readLowRiskTier(twoCommits, REPO, { body: LOW, labels: [] }).tier === TIER_H, JSON.stringify(twoCommits.allPaths));
+    const untouched = decomposeGovernedWork([row(9, ['AGENTS.md'])], REPO).governed[0];
+    assert('readLowRiskTier-leaves-an-entry-with-no-catalog-row-as-it-was', readLowRiskTier(untouched, REPO, null) === untouched && untouched.tier === TIER_H && !untouched.surfaces.some((s) => s.lowRiskVerdict));
+
+    // ⭐ End to end on the queue leg: pure skills wording + changeset, `Clause-②: no`, a same-head record ⇒ the seat's enqueue clears.
+    const pass = await tierRun({ files: [SK, CS], prBody: LOW, comments: [recordComment()] });
+    assert('⭐ a-pure-skills-PR-on-Clause-2-no-with-a-same-head-record-CLEARS-with-zero-approvals', pass.exitCode === EXIT_CLEAR && pass.conclusion === 'cleared' && pass.entries[0].tier === TIER_S && pass.entries[0].record.state === 'stands', JSON.stringify(pass.entries[0]));
+    assert('and-the-words-name-the-arm-and-its-ruling', /low-risk skills arm .*Tier S/.test(renderGuardVerdict(pass)) && renderGuardVerdict(pass).includes(LOW_RISK_ARM_RULING), renderGuardVerdict(pass));
+    const noRecord = await tierRun({ files: [SK], prBody: LOW, comments: [] });
+    assert('⛔ CONTROL: the-same-skills-PR-with-NO-record-is-REFUSED-Tier-S-without-its-record', noRecord.exitCode === EXIT_REFUSED_UNAPPROVED && noRecord.entries[0].tier === TIER_S && noRecord.entries[0].record.state === 'absent');
+    const old = await tierRun({ files: [SK], prBody: LOW, comments: [recordComment({ sha: REF_OLD.slice(0, 12) })] });
+    assert('⛔ a-record-on-an-OLDER-head-is-REFUSED', old.exitCode === EXIT_REFUSED_UNAPPROVED && old.entries[0].record.state === 'absent');
+
+    // ⛔ Each H case, each WITH a valid record: the record leg is never consulted, the entry needs the maintainer.
+    const hCase = async (over) => { const v = await tierRun({ files: [SK], prBody: LOW, comments: [recordComment()], ...over }); return [v.exitCode, v.entries[0].tier, v.entries[0].record === undefined]; };
+    const H = [EXIT_REFUSED_UNAPPROVED, TIER_H, true];
+    assert('⛔ skills-plus-packages-spec-stays-H', JSON.stringify(await hCase({ files: [SK, 'packages/spec/src/data/field.zod.ts'] })) === JSON.stringify(H));
+    assert('⛔ skills-with-Clause-2-yes-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nClause-②: yes\n` })) === JSON.stringify(H));
+    assert('⛔ skills-with-Clause-2-no-narrowing-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nClause-②: no (narrowing)\n` })) === JSON.stringify(H));
+    assert('⛔ skills-with-NO-Clause-2-line-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}` })) === JSON.stringify(H));
+    assert('⛔ skills-with-the-security-label-stays-H', JSON.stringify(await hCase({ labels: ['security'] })) === JSON.stringify(H));
+    assert('⛔ skills-beside-AGENTS-md-stays-H', JSON.stringify(await hCase({ files: [SK, 'AGENTS.md'] })) === JSON.stringify(H));
+    assert('⛔ a-pull-the-leg-could-not-read-is-NOT-MEASURED-and-H', await (async () => { const v = await tierRun({ files: [SK], prBody: LOW, comments: [recordComment()], headThrows: true }); return v.exitCode === EXIT_REFUSED_UNAPPROVED && v.entries[0].tier === TIER_H && v.entries[0].surfaces[0].lowRiskVerdict?.measured === false; })());
+    assert('⛔ a-published-path-in-ANOTHER-commit-of-the-same-PR-in-the-group-stays-H', JSON.stringify(await hCase({ extraRows: [row(70, ['ui/packages/react/src/x.tsx'], 'd'.repeat(40), 'y (#70)')] })) === JSON.stringify(H));
+
+    // The pull_request leg reads no body: the early warning says Tier H, NOT MEASURED, and that the queue leg reads it.
+    const early = await tierRun({ files: [SK], prBody: LOW, event: EVENT_PULL_REQUEST });
+    assert('the-pull_request-leg-names-the-arm-NOT-MEASURED-and-never-reddens', early.entries[0].tier === TIER_H && /low-risk skills arm .*NOT MEASURED/.test(renderGuardVerdict(early)) && /queue guard reads them on the queue leg/.test(renderGuardVerdict(early)), renderGuardVerdict(early));
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────

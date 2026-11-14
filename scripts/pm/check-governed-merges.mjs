@@ -421,7 +421,8 @@
  * them. What moved is the LANDING each row waits for, carried as `tier` on the
  * row and derived per PR by `governedTierFor`:
  *
- *   H  人合 — every register row except objectstack's `.claude/**` (today: `docs/adr/**`,
+ *   H  人合 — every register row except objectstack's `.claude/**`, and the split
+ *      rows where their reading says S (today: `docs/adr/**`,
  *      `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`, `CLAUDE.md`, and since
  *      the B2 ruling of 2026-10-13 the `workflows` row, `.github/workflows/**`,
  *      scoped to objectstack, objectui and cloud — in objectstack split by
@@ -455,13 +456,55 @@
  * auto-mode classifier still refuses AI writes to it, so the maintainer's hand
  * stays its writer and the tier removes only the approval click.
  *
- * Published `skills/**` stays Tier H: the seat did not propose moving it.
+ * Published `skills/**` stays a Tier H ROW: the 2026-09-18 seat did not propose
+ * moving it, and no row moved since. What moved on 2026-11-14 is a READING on
+ * the two catalog rows (section "The low-risk skills arm" below).
  * `check-governed-queue-guard.mjs` reads `tier` and `governedTierFor` from HERE
  * (a module-scope import; the cycle that forces its mirrors is with
  * `check-half-states.mjs`, not with this file), so there is ONE register and one
  * tier function, and `check-governed-prose.mjs` keeps pinning the SET of globs
  * the instruction prose names — the tier is an attribute the prose states in
  * words, which that gate deliberately does not parse.
+ *
+ * ## The low-risk skills arm (#33501, maintainer ruling 2026-11-14)
+ *
+ * The maintainer, verbatim 「同意 把低风险的 Tier H 放权给座位」, then 「把低风险的
+ * Tier H 放权给座位，立 p1 卡优化」, agreeing to the scope the coordinator put to
+ * him: pure docs, ADR annotations or notes, and skills wording land on the
+ * seat's own contract review; anything touching a contract (spec or published
+ * types, Clause ②, narrowing) or security stays with him.
+ *
+ * Modelled as the workflows split is: the `skills-catalog` and
+ * `ui-skills-catalog` rows KEEP `tier: H` — every path-only reader (`--test`,
+ * `--branch`, the CODEOWNERS mirror, the prose gate, the relay's review plan)
+ * answers exactly as before, and the approvers are still summoned — and carry
+ * `lowRisk`, scoped to objectstack. A READING of the pull request
+ * (`lowRiskArmVerdict`: every changed path, the body, the label names) moves
+ * them to Tier S only when ALL hold:
+ *
+ *   - every governed path lies under a catalog row — `.claude/**`, a workflow,
+ *     `AGENTS.md`, an ADR or any other row beside it is H;
+ *   - every changed path lies under a hit catalog row or `LOW_RISK_RIDER_PREFIXES`
+ *     (`.changeset/`, `docs/`, `content/docs/`) — an ALLOWLIST, so `packages/**`,
+ *     `ui/packages/**`, a gate script, a ratchet ceiling or a lockfile is H;
+ *   - the body declares `Clause-②: no` with no arm (`readClause2Line`, the one
+ *     reader) — `yes`, `(narrowing)`, malformed or absent is H;
+ *   - the labels were read and none is `security`.
+ *
+ * Then the landing is Tier S's: a `## Contract review` record for the current
+ * head at `CONTRACT_REVIEW_TIER` (the record recognisers' `rules` face — no
+ * lower tier stands on a governed path) and every check green; the owning seat
+ * enqueues. ⛔ Fail closed: no reading or an unmeasured one is H. `--pr` reads
+ * it off the same pull object and file walk; the queue guard's `merge_group` leg
+ * off the pull it already reads, over every commit of the PR in the group.
+ *
+ * NOT moved: `docs/adr/**` stays Tier H. The ruling names ADR notes, but a path
+ * cannot tell a note from a changed decision, and no mechanical reading was
+ * ruled; the seat carries that question. Ungoverned `docs/**` and
+ * `content/docs/**` prose needs nothing — it was never on the register. The
+ * post-merge sweep still lists every catalog merge (membership did not move),
+ * so a seat-landed low-risk merge is on the same audit list as a `.claude/**`
+ * one, where a merge without its PASS record is the finding.
  *
  * ## The workflows row's split (#31538, ruling record 6722205630, letter C)
  *
@@ -1037,6 +1080,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { historyHorizon } from './git-history.mjs';
+import { readClause2Line } from './clause2-line.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, INSTALL_FIX, reportPrerequisiteNotMet } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
@@ -1093,12 +1137,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
+  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 24,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too. Raised 35 → 36 with the
 // workflows split battery (ruling record 6722205630): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 36;
+// Raised 36 → 37 with the low-risk skills arm battery (#33501).
+const SELF_TEST_BATTERY_FLOOR = 37;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1260,14 +1306,14 @@ export const WORKFLOWS_PREFIX = '.github/workflows/';
 export const GOVERNED_SURFACES = Object.freeze([
   Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', tier: GOVERNED_TIER_H, what: 'architecture decision records' }),
   Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', tier: GOVERNED_TIER_S, tierRepos: Object.freeze(['objectstack']), what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
-  Object.freeze({ id: 'skills-catalog', prefix: 'skills/', glob: 'skills/**', tier: GOVERNED_TIER_H, what: 'the published skills catalog' }),
+  Object.freeze({ id: 'skills-catalog', prefix: 'skills/', glob: 'skills/**', tier: GOVERNED_TIER_H, lowRisk: Object.freeze({ repos: Object.freeze(['objectstack']) }), what: 'the published skills catalog' }),
   Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', tier: GOVERNED_TIER_H, what: 'the repo-root agent instruction file' }),
   Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', tier: GOVERNED_TIER_H, what: 'the repo-root Claude instruction file' }),
   Object.freeze({ id: 'north-star', exact: 'docs/NORTH-STAR.md', glob: 'docs/NORTH-STAR.md', tier: GOVERNED_TIER_H, what: "the maintainer's North Star — the law above AGENTS.md" }),
   Object.freeze({ id: 'workflows', prefix: '.github/workflows/', glob: '.github/workflows/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack', 'objectui', 'cloud']), split: Object.freeze({ repos: Object.freeze(['objectstack']), reader: 'readWorkflowDiff' }), what: 'CI, deploy and release workflows: what runs on every push, what deploys, what gates the queue' }),
   Object.freeze({ id: 'ui-adr', prefix: 'ui/docs/adr/', glob: 'ui/docs/adr/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's architecture decision records" }),
   Object.freeze({ id: 'ui-claude-tree', prefix: 'ui/.claude/', glob: 'ui/.claude/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's agent instruction tree" }),
-  Object.freeze({ id: 'ui-skills-catalog', prefix: 'ui/skills/', glob: 'ui/skills/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's published skills catalog" }),
+  Object.freeze({ id: 'ui-skills-catalog', prefix: 'ui/skills/', glob: 'ui/skills/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), lowRisk: Object.freeze({ repos: Object.freeze(['objectstack']) }), what: "the ui workspace's published skills catalog" }),
   Object.freeze({ id: 'ui-agents-md', exact: 'ui/AGENTS.md', glob: 'ui/AGENTS.md', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's agent instruction file" }),
   Object.freeze({ id: 'ui-claude-md', exact: 'ui/CLAUDE.md', glob: 'ui/CLAUDE.md', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's Claude instruction file" }),
   Object.freeze({ id: 'ui-workflows', prefix: 'ui/.github/workflows/', glob: 'ui/.github/workflows/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's workflow files" }),
@@ -1601,9 +1647,9 @@ export function landingTierOf(matched) {
  * list answers `H` (see `landingTierOf`). `repo` is required, as for
  * `governedPathsIn`: the rows consulted are the ones that govern it.
  */
-export function governedTierFor(paths, repo, register = GOVERNED_SURFACES, workflowDiff = null) {
+export function governedTierFor(paths, repo, register = GOVERNED_SURFACES, workflowDiff = null, lowRisk = null) {
   const id = assertGovernedRepo(repo, 'governedTierFor');
-  return landingTierOf(applyWorkflowSplit(governedPathsIn(paths, id, register), id, workflowDiff));
+  return landingTierOf(applyLowRiskArm(applyWorkflowSplit(governedPathsIn(paths, id, register), id, workflowDiff), id, lowRisk));
 }
 
 // ── the `workflows` row's content-aware tier (ruling record 6722205630, letter C) ──
@@ -2172,6 +2218,109 @@ export function renderWorkflowSplitLines(matched) {
     .join('');
 }
 
+// ── the low-risk skills arm (maintainer ruling 2026-11-14, card #33501) ─────
+
+/**
+ * Where the arm is ruled (header section "The low-risk skills arm"), printed on
+ * every reading so a queue log names what moved a skills PR to Tier S.
+ */
+export const LOW_RISK_ARM_RULING = 'maintainer ruling 2026-11-14 on #33501, 「同意 把低风险的 Tier H 放权给座位」';
+
+/**
+ * The ungoverned paths a low-risk PR may carry BESIDE its low-risk rows:
+ * prose the register does not govern and the changeset the published catalog
+ * owes. ⭐ An ALLOWLIST, never a denylist of published trees: a path outside
+ * it — `packages/**`, `ui/packages/**`, a gate script, a ratchet ceiling, a
+ * lockfile — keeps the PR Tier H however harmless it reads, because the
+ * ruling's arm is wording and a denylist fails open on the next published tree.
+ * `docs/` holds `docs/adr/**` and `docs/NORTH-STAR.md`; those are register
+ * rows outside the arm, so they keep the PR Tier H by the governed-rows rule.
+ */
+export const LOW_RISK_RIDER_PREFIXES = Object.freeze(['.changeset/', 'docs/', 'content/docs/']);
+
+/** Does this matched row carry the arm in `repo`? */
+function lowRiskArmIn(surface, repo) {
+  return Boolean(surface?.lowRisk) && Array.isArray(surface.lowRisk.repos) && surface.lowRisk.repos.includes(repo);
+}
+
+/**
+ * The arm's verdict over one matched slice, from a READING of the pull request:
+ * `{ measured: true, paths, body, labels }` — every changed path (ungoverned
+ * ones included), the PR body (where its `Clause-②:` line is written) and its
+ * label names. Pure.
+ *
+ * Tier S only when ALL of these hold, each a reason when it does not:
+ *   - every governed row hit is a low-risk row (a `.claude/**`, workflow or
+ *     any Tier H row beside it is H — the card's "no other governed path");
+ *   - every changed path lies under a hit low-risk row or `LOW_RISK_RIDER_PREFIXES`;
+ *   - the reading's path list holds every governed file of the slice;
+ *   - the body declares `Clause-②: no` with NO arm (`readClause2Line`, the
+ *     fleet's one reader; `no (narrowing)`, `yes`, malformed or absent is H);
+ *   - the labels were read and none is `security`.
+ * ⛔ Fail closed: no reading, or one not measured, is Tier H with its reason.
+ */
+export function lowRiskArmVerdict(matched, repo, reading = null) {
+  const rows = (Array.isArray(matched) ? matched : []).filter(Boolean);
+  if (!reading || reading.measured !== true) {
+    return {
+      tier: GOVERNED_TIER_H,
+      measured: false,
+      reason: reading?.reason ?? 'no reading of the pull request was handed in — a path list alone cannot say what its body declares or which labels it carries',
+      reasons: [],
+    };
+  }
+  const reasons = [];
+  const armRows = rows.filter((s) => lowRiskArmIn(s, repo));
+  const outside = rows.filter((s) => !lowRiskArmIn(s, repo));
+  if (armRows.length === 0) reasons.push('no low-risk row was hit');
+  if (outside.length > 0) reasons.push(`a governed path outside the arm: ${outside.map((s) => `\`${s.glob}\``).join(', ')}`);
+  const paths = (Array.isArray(reading.paths) ? reading.paths : []).filter((p) => typeof p === 'string' && p !== '');
+  if (paths.length === 0) reasons.push('the reading carries no path list');
+  const allowed = [...armRows.map((s) => s.prefix).filter(Boolean), ...LOW_RISK_RIDER_PREFIXES];
+  const stray = paths.filter((p) => !allowed.some((prefix) => p.startsWith(prefix)));
+  if (stray.length > 0) reasons.push(`a path outside skills wording and prose: ${stray.slice(0, 4).join(', ')}${stray.length > 4 ? ` (+${stray.length - 4} more)` : ''}`);
+  const listed = new Set(paths);
+  const unlisted = rows.flatMap((s) => s.files ?? []).filter((f) => !listed.has(f));
+  if (paths.length > 0 && unlisted.length > 0) reasons.push(`the reading's path list does not hold ${unlisted.slice(0, 2).join(', ')}`);
+  const clause2 = readClause2Line(reading.body);
+  if (clause2 === null) reasons.push('the PR body carries no `Clause-②:` line');
+  else if (clause2.kind !== 'declared') reasons.push(`the PR body's \`Clause-②:\` line does not read (${clause2.line})`);
+  else if (clause2.value !== 'no' || clause2.arm !== null) reasons.push(`the PR body declares \`Clause-②: ${clause2.value}${clause2.arm ? ` (${clause2.arm})` : ''}\`, which stays with the maintainer`);
+  if (!Array.isArray(reading.labels)) reasons.push('the labels were not read');
+  else if (reading.labels.some((l) => String(l ?? '').toLowerCase() === 'security')) reasons.push('the PR carries the `security` label');
+  return { tier: reasons.length === 0 ? GOVERNED_TIER_S : GOVERNED_TIER_H, measured: true, reason: null, reasons };
+}
+
+/**
+ * The matched slice with every low-risk row's tier read off the pull request,
+ * in `repo`. A slice with no low-risk row in `repo` is returned AS IS — every
+ * reading without a skills hit is byte-identical to before. Run AFTER the
+ * workflow split, so a split workflow row beside a skills path is a governed
+ * row outside the arm. Pure.
+ */
+export function applyLowRiskArm(matched, repo, reading = null) {
+  const list = Array.isArray(matched) ? matched : [];
+  if (!list.some((s) => lowRiskArmIn(s, repo))) return list;
+  const lowRiskVerdict = lowRiskArmVerdict(list, repo, reading);
+  return list.map((s) => (lowRiskArmIn(s, repo) ? Object.freeze({ ...s, tier: lowRiskVerdict.tier, lowRiskVerdict }) : s));
+}
+
+/** The arm's words under a verdict, once, or '' when no low-risk row was hit. Pure. */
+export function renderLowRiskLines(matched) {
+  const v = (Array.isArray(matched) ? matched : []).find((s) => s?.lowRiskVerdict)?.lowRiskVerdict;
+  if (!v) return '';
+  if (!v.measured) {
+    return (
+      `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): NOT MEASURED — ${v.reason}.\n` +
+      '         Tier H, fail closed. `--pr <n>` reads the body and the labels; the queue guard reads them on the queue leg.\n'
+    );
+  }
+  if (v.tier === GOVERNED_TIER_S) {
+    return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — skills wording and prose only, \`Clause-②: no\`, no \`security\` label.\n`;
+  }
+  return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier H —\n${v.reasons.map((r) => `        - ${r}\n`).join('')}`;
+}
+
 /** `owner/name` out of any git remote spelling, or null. Pure. */
 export function slugFromRemote(url) {
   const m = /(?:github\.com[:/])([\w.-]+\/[\w.-]+?)(?:\.git)?\/*\s*$/.exec(String(url ?? ''));
@@ -2315,11 +2464,12 @@ export function classifyCommit({ sha, date, subject }, changedPaths, repo, size 
  * it names which one, and the verdict carries it (`repo`, and
  * `surfacesChecked` counts the rows that govern it, not the whole table).
  */
-export function testVerdict(paths, { repo, size = null, fork = null, checks = null, approval = null, workflowDiff = null } = {}) {
+export function testVerdict(paths, { repo, size = null, fork = null, checks = null, approval = null, workflowDiff = null, lowRisk = null } = {}) {
   assertGovernedRepo(repo, 'testVerdict');
   const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p !== '');
   // The `workflows` row's tier is read off the diff where a reading was handed in (the split): H otherwise.
-  const matched = applyWorkflowSplit(governedPathsIn(list, repo), repo, workflowDiff);
+  // The low-risk skills rows' tier is read off the pull request's body, labels and whole path list: H otherwise.
+  const matched = applyLowRiskArm(applyWorkflowSplit(governedPathsIn(list, repo), repo, workflowDiff), repo, lowRisk);
   const hit = new Set(matched.flatMap((s) => s.files));
   const sized = sizeVerdict(size, approval);
   const forked = fork && typeof fork === 'object' ? fork : forkVerdict(null); // the FORK limb, or NOT MEASURED
@@ -2522,6 +2672,7 @@ export function renderTestVerdict(verdict) {
       `      one Tier H path among the hits and the whole PR would be Tier H.\n` +
       `${lines.join('\n')}${clear}\n` +
       renderWorkflowSplitLines(verdict.matched) +
+      renderLowRiskLines(verdict.matched) +
       `${intake}${renderSizeLines(size)}` +
       renderExceptionLines(verdict)
     );
@@ -2534,6 +2685,7 @@ export function renderTestVerdict(verdict) {
     `      ⚖️ landing tier: H(人合) — ${GOVERNED_TIERS[GOVERNED_TIER_H].landing}.\n` +
     `${lines.join('\n')}${clear}\n` +
     renderWorkflowSplitLines(verdict.matched) +
+    renderLowRiskLines(verdict.matched) +
     `${intake}${renderSizeLines(size)}` +
     renderExceptionLines(verdict)
   );
@@ -3903,6 +4055,8 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
     size,
     fork,
     checks,
+    // The low-risk skills arm's reading (#33501), off the SAME pull object and file walk — no read of its own.
+    lowRisk: pullLowRiskReading(head, paths),
     derivation: {
       kind: 'pull',
       slug,
@@ -3918,6 +4072,17 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
       size,
     },
   };
+}
+
+/**
+ * The low-risk skills arm's reading off a PR object and its WHOLE changed-path
+ * list (`lowRiskArmVerdict`). Pure. Labels the object does not carry as a list
+ * read `null`, which the arm reads as H; a body that is not a string reads as
+ * an empty body, which declares nothing and is H too.
+ */
+export function pullLowRiskReading(head, paths) {
+  const labels = Array.isArray(head?.labels) ? head.labels.map((l) => (typeof l === 'string' ? l : String(l?.name ?? ''))) : null;
+  return { measured: true, reason: null, paths: Array.isArray(paths) ? [...paths] : [], body: typeof head?.body === 'string' ? head.body : '', labels };
 }
 
 /**
@@ -4262,8 +4427,8 @@ function rootFromArgs(args) {
  * leave two readings of the same register in circulation, which is the shape
  * the card is about. `--self-test` pins the identity end to end.
  */
-async function emitVerdict(paths, args, derivation = null, size = null, intake = null, repo = undefined, workflowDiff = null) {
-  let verdict = testVerdict(paths, { repo, size, ...(intake ?? {}), workflowDiff });
+async function emitVerdict(paths, args, derivation = null, size = null, intake = null, repo = undefined, workflowDiff = null, lowRisk = null) {
+  let verdict = testVerdict(paths, { repo, size, ...(intake ?? {}), workflowDiff, lowRisk });
   // The provenance-aware exceptions (#9866 + #11705): recompute only when a
   // registered path is actually among the hits, so every other run stays the
   // zero-git, zero-cost read it always was. The driver applies each row's
@@ -4519,7 +4684,7 @@ async function runPullMode(args) {
   const workflowDiff = derived.paths.some((p) => p.startsWith(WORKFLOWS_PREFIX))
     ? pullWorkflowDiff({ derivation: derived.derivation, paths: derived.paths, sameCheckout: target.slug === selfSlug, run: (argv) => tryGit(root, argv), git: (argv) => git(root, argv) })
     : null;
-  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, { fork: derived.fork, checks: derived.checks }, repo, workflowDiff);
+  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, { fork: derived.fork, checks: derived.checks }, repo, workflowDiff, derived.lowRisk ?? null);
 }
 
 /**
@@ -5385,6 +5550,70 @@ async function selfTest() {
     assert('a-verdict-with-no-workflow-hit-prints-no-split-line', !/split \(ruling record/.test(renderTestVerdict(testVerdict(['AGENTS.md'], { repo: REPO }))) && renderWorkflowSplitLines([]) === '');
     const pr = (over = {}) => pullWorkflowDiff({ derivation: { pull: 7, headSha: 'a'.repeat(40), baseSha: 'b'.repeat(40) }, paths: [WF], sameCheckout: true, run: () => ({ ok: false, out: '' }), git: () => '', ...over });
     assert('--pr-reads-the-split-only-from-a-checkout-holding-both-commits-else-UNMEASURED', pr().measured === false && /not in this checkout/.test(pr().reason) && pr({ sameCheckout: false }).measured === false && pr({ derivation: { pull: 7 } }).measured === false, JSON.stringify([pr().reason, pr({ sameCheckout: false }).reason]));
+  }
+
+  battery('⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)');
+  {
+    const REPO = 'objectstack';
+    const SK = 'skills/objectstack-data/SKILL.md';
+    const UISK = 'ui/skills/objectui-views/SKILL.md';
+    const CS = '.changeset/33501-skills-wording.md';
+    const read = (paths, over = {}) => ({ measured: true, reason: null, paths, body: 'Fixes #1\n\nClause-②: no\nMetadata-protocol: none\n', labels: [], ...over });
+    const tier = (paths, reading, repo = REPO) => governedTierFor(paths, repo, GOVERNED_SURFACES, null, reading);
+    const reasons = (paths, reading) => lowRiskArmVerdict(governedPathsIn(paths, REPO), REPO, reading).reasons.join(' | ');
+
+    // The register: the two catalog rows carry the arm, scoped to objectstack; the row tier stays H for every path-only reader.
+    const armRows = GOVERNED_SURFACES.filter((s) => s.lowRisk);
+    assert('the-arm-rides-exactly-the-two-catalog-rows-scoped-to-objectstack-and-both-keep-row-tier-H',
+      armRows.map((s) => s.id).join() === 'skills-catalog,ui-skills-catalog' && armRows.every((s) => s.tier === GOVERNED_TIER_H && Object.isFrozen(s.lowRisk) && s.lowRisk.repos.join() === REPO), JSON.stringify(armRows.map((s) => [s.id, s.tier, s.lowRisk])));
+    assert('the-rider-allowlist-is-changesets-and-ungoverned-prose-only', LOW_RISK_RIDER_PREFIXES.join() === '.changeset/,docs/,content/docs/' && Object.isFrozen(LOW_RISK_RIDER_PREFIXES));
+
+    // ⛔ Fail closed: no reading, or an unmeasured one, is H — the path-only readers (`--test`, `--branch`, CODEOWNERS, the prose gate) answer as before.
+    assert('⛔ no-reading-is-Tier-H-and-says-NOT-MEASURED', tier([SK], null) === GOVERNED_TIER_H && governedTierFor([SK], REPO) === GOVERNED_TIER_H && testVerdict([SK], { repo: REPO }).tier === GOVERNED_TIER_H && /low-risk skills arm .*NOT MEASURED/.test(renderTestVerdict(testVerdict([SK], { repo: REPO }))));
+    assert('⛔ an-unmeasured-reading-is-Tier-H-with-its-own-reason', tier([SK], { measured: false, reason: 'the pull could not be read' }) === GOVERNED_TIER_H && /the pull could not be read/.test(renderTestVerdict(testVerdict([SK], { repo: REPO, lowRisk: { measured: false, reason: 'the pull could not be read' } }))));
+
+    // ⭐ The arm: pure skills wording, with its changeset and prose riders, on `Clause-②: no` and no security label.
+    assert('⭐ a-pure-skills-diff-on-Clause-2-no-is-Tier-S', tier([SK], read([SK])) === GOVERNED_TIER_S && testVerdict([SK], { repo: REPO, lowRisk: read([SK]) }).tier === GOVERNED_TIER_S);
+    assert('⭐ with-its-changeset-and-docs-prose-riders-it-stays-Tier-S', tier([SK, CS, 'content/docs/guides/x.mdx', 'docs/agents/x.md'], read([SK, CS, 'content/docs/guides/x.mdx', 'docs/agents/x.md'])) === GOVERNED_TIER_S);
+    assert('a-ui-skills-diff-and-both-catalogs-together-are-Tier-S', tier([UISK], read([UISK])) === GOVERNED_TIER_S && tier([SK, UISK, CS], read([SK, UISK, CS])) === GOVERNED_TIER_S);
+    assert('the-words-name-the-arm-and-the-Tier-S-landing', (() => { const t = renderTestVerdict(testVerdict([SK], { repo: REPO, lowRisk: read([SK]) })); return /Tier S\(席内达档复核落地\)/.test(t) && /low-risk skills arm .*Tier S/.test(t) && t.includes(LOW_RISK_ARM_RULING); })());
+
+    // ⛔ Published source or any path outside the allowlist: H.
+    assert('⛔ skills-plus-packages-spec-stays-H', tier([SK, 'packages/spec/src/data/field.zod.ts'], read([SK, 'packages/spec/src/data/field.zod.ts'])) === GOVERNED_TIER_H && /outside skills wording and prose: packages\/spec/.test(reasons([SK, 'packages/spec/src/data/field.zod.ts'], read([SK, 'packages/spec/src/data/field.zod.ts']))));
+    assert('⛔ skills-plus-ui-packages-stays-H', tier([UISK, 'ui/packages/react/src/x.tsx'], read([UISK, 'ui/packages/react/src/x.tsx'])) === GOVERNED_TIER_H);
+    assert('⛔ skills-plus-a-gate-script-or-a-lockfile-stays-H-the-list-is-an-allowlist', tier([SK, 'scripts/check-skills-token-ratchet.mjs'], read([SK, 'scripts/check-skills-token-ratchet.mjs'])) === GOVERNED_TIER_H && tier([SK, 'pnpm-lock.yaml'], read([SK, 'pnpm-lock.yaml'])) === GOVERNED_TIER_H);
+    assert('⛔ a-reading-whose-path-list-misses-a-governed-file-or-is-empty-is-H', tier([SK, UISK], read([SK])) === GOVERNED_TIER_H && tier([SK], read([])) === GOVERNED_TIER_H);
+
+    // ⛔ Any other governed row beside it: H, Tier S rows included (the card's "no other governed path").
+    assert('⛔ skills-beside-AGENTS-md-an-ADR-or-NORTH-STAR-is-H', [['AGENTS.md'], ['docs/adr/0001-x.md'], ['docs/NORTH-STAR.md']].every(([p]) => tier([SK, p], read([SK, p])) === GOVERNED_TIER_H));
+    assert('⛔ skills-beside-a-Tier-S-claude-path-is-H-too', tier([SK, '.claude/agents/os-dev.md'], read([SK, '.claude/agents/os-dev.md'])) === GOVERNED_TIER_H && /outside the arm: `\.claude\/\*\*`/.test(reasons([SK, '.claude/agents/os-dev.md'], read([SK, '.claude/agents/os-dev.md']))));
+
+    // ⛔ The declaration: only a bare `Clause-②: no` lands on the seat.
+    const body = (line) => read([SK], { body: `Fixes #1\n\n${line}\n` });
+    assert('⛔ Clause-2-yes-or-no-narrowing-or-yes-widening-is-H', ['Clause-②: yes', 'Clause-②: no (narrowing)', 'Clause-②: yes (widening)', 'Clause-②: yes (narrowing)'].every((l) => tier([SK], body(l)) === GOVERNED_TIER_H));
+    assert('⛔ a-malformed-absent-or-near-miss-Clause-2-line-is-H', ['Clause-②: maybe', 'no declaration here', 'Clause 2: no', '`Clause-②:` no', ''].every((l) => tier([SK], body(l)) === GOVERNED_TIER_H) && tier([SK], read([SK], { body: null })) === GOVERNED_TIER_H);
+    assert('a-decorated-Clause-2-no-line-reads-as-the-one-reader-reads-it', tier([SK], body('- `Clause-②`: no')) === GOVERNED_TIER_S && tier([SK], body('- **Clause-②:** no')) === GOVERNED_TIER_S);
+
+    // ⛔ Security: the label keeps it with the maintainer; labels not read is H.
+    assert('⛔ a-security-label-in-any-case-is-H', tier([SK], read([SK], { labels: ['security'] })) === GOVERNED_TIER_H && tier([SK], read([SK], { labels: ['docs', 'Security'] })) === GOVERNED_TIER_H);
+    assert('⛔ labels-not-read-is-H', tier([SK], read([SK], { labels: null })) === GOVERNED_TIER_H && tier([SK], read([SK], { labels: undefined })) === GOVERNED_TIER_H);
+
+    // The scope: the arm moves nothing outside objectstack, and nothing without a catalog hit.
+    assert('the-same-S-reading-moves-nothing-in-objectui-cloud-or-hotcrm', ['objectui', 'cloud', 'hotcrm'].every((r) => tier([SK], read([SK]), r) === GOVERNED_TIER_H));
+    assert('a-slice-with-no-catalog-row-is-returned-as-is-byte-identical', (() => { const m = governedPathsIn(['AGENTS.md', '.claude/x.md'], REPO); return applyLowRiskArm(m, REPO, read(['AGENTS.md', '.claude/x.md'])) === m && renderLowRiskLines(m) === ''; })() && tier(['.claude/agents/os-dev.md'], read(['.claude/agents/os-dev.md'])) === GOVERNED_TIER_S);
+
+    // The H words name every reason; `--pr` reads the arm off the SAME pull object and file walk.
+    assert('the-H-words-list-each-reason', (() => { const t = renderTestVerdict(testVerdict([SK, 'packages/core/src/x.ts'], { repo: REPO, lowRisk: read([SK, 'packages/core/src/x.ts'], { labels: ['security'] }) })); return /low-risk skills arm .*Tier H/.test(t) && /packages\/core/.test(t) && /`security` label/.test(t) && /landing tier: H/.test(t); })());
+    const fromPull = pullLowRiskReading({ body: 'Clause-②: no', labels: [{ name: 'skip-changeset' }, { name: 'security' }] }, [SK]);
+    assert('pullLowRiskReading-takes-body-label-names-and-the-whole-path-list', fromPull.measured === true && fromPull.body === 'Clause-②: no' && fromPull.labels.join() === 'skip-changeset,security' && fromPull.paths.join() === SK && pullLowRiskReading({}, [SK]).labels === null && pullLowRiskReading({ body: 7, labels: [] }, [SK]).body === '', JSON.stringify(fromPull));
+    {
+      const respond = (b) => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => b });
+      const walked = await fetchPullFiles({
+        apiUrl: 'https://api', slug: 'o/r', pull: 2, channels: [{ id: 'fixture', name: 'fixture channel', headers: {} }],
+        fetchImpl: async (url) => (/\/files/.test(url) ? respond([{ filename: SK }, { filename: CS }]) : respond({ changed_files: 2, additions: 3, deletions: 1, body: 'Clause-②: no', labels: [{ name: 'docs' }] })),
+      });
+      assert('⭐ --pr-carries-the-arm-reading-off-the-same-GET-and-file-walk-and-it-answers-Tier-S', walked.ok === true && walked.lowRisk?.measured === true && walked.lowRisk.paths.join() === `${SK},${CS}` && tier(walked.paths, walked.lowRisk) === GOVERNED_TIER_S, JSON.stringify(walked.lowRisk ?? walked.reason));
+    }
   }
 
   battery('the nested `ui/` workspace rows, on the register (#25712)');
@@ -6717,6 +6946,7 @@ async function selfTest() {
     const moduleGraph = [
       'scripts/pm/check-governed-merges.mjs',
       'scripts/pm/git-history.mjs',
+      'scripts/pm/clause2-line.mjs',
       'scripts/import-prerequisite.mjs',
       'scripts/cli-build-prerequisite.mjs',
       'scripts/invoked-as.mjs',
