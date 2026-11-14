@@ -785,16 +785,6 @@ export class SeedLoaderService implements ISeedLoaderService {
   /** [#33207] The refused probes this {@link load} has already said, one line each. */
   private refusedProbes = new Set<string>();
   /**
-   * [#33206] The options bag every write of the CURRENT {@link load} uses: the
-   * shared seed posture, with `tenantId` set to the organization the load
-   * stamps its rows with, so a hook on a seeded row sees that organization as
-   * `ctx.session.organizationId`, as it does on the same row written through
-   * the API. A load with no organization (neither pinned nor derived) keeps
-   * {@link SEED_OPTIONS} itself. Set once per load, after the organization is
-   * known.
-   */
-  private seedOptions: { readonly context: Record<string, unknown> } = SeedLoaderService.SEED_OPTIONS;
-  /**
    * [#11339] Declared pointer pairs per seeded object — every `text` field
    * whose definition carries `referenceVia` (ADR-0052 §5 ActivityPointer:
    * `sys_activity.record_id` + `object_name`), mapped to the sibling field
@@ -3347,6 +3337,17 @@ export class SeedLoaderService implements ISeedLoaderService {
    * (derived/default fields, validation) still run.
    */
   private static readonly SEED_OPTIONS = { context: SEED_WRITE_EXECUTION_CONTEXT } as const;
+
+  /**
+   * [#33206] The options bag every write of the CURRENT {@link load} uses: the
+   * shared seed posture, with `tenantId` set to the organization the load
+   * stamps its rows with, so a hook on a seeded row sees that organization as
+   * `ctx.session.organizationId`, as it does on the same row written through
+   * the API. A load with no organization (neither pinned nor derived) keeps
+   * {@link SEED_OPTIONS} itself. Set once per load, after the organization is
+   * known.
+   */
+  private seedOptions: { readonly context: Record<string, unknown> } = SeedLoaderService.SEED_OPTIONS;
 
   /**
    * [#33207] How many same-named people one membership probe weighs. A seed
