@@ -491,7 +491,7 @@
       "title": "The console global search — ⌘K palette, header Search button, and /search page — drives ONE path (GET /api/v1/search): hits group under object headings, RLS hides invisible rows, Enter opens the record, empty input shows recents",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -516,7 +516,7 @@
         "with the input EMPTY (after visiting a couple of records first to populate recents), confirm the palette shows the 'Recently viewed' group and fires NO search request",
         "type a seeded CJK/pinyin query (e.g. 'zhangwei', '张伟', or 'huaning' — ⛔ not the single character '张': the palette sends no request below its minLength of 2, so a one-character query never reaches the wire and the palette reads 'No results found.' — objectui react useRecordSearch minLength = 2, which CommandPalette.tsx leaves at its default) and capture the network request — confirm it is GET /api/v1/search?q=<term> (searchAll), and capture the returned hits",
         "screenshot the settled palette and confirm record hits are grouped under per-object headings (issue #3371); read the DOM only after the screenshot",
-        "press Enter on the top hit (ref-targeted select, not a coordinate click) and confirm navigation to /apps/<app>/<object>/record/<id> — <app> is the app's ADR-0048 address, its package id (com.example.showcase on the showcase), never its name: a route reached through the name alias is rewritten to the package id (ui/packages/app-shell/src/utils/appRoute.ts canonicalAppPathname), and the name stays the address only for a second app in a package that ships several; and the record page renders",
+        "wait until the hit's group heading has settled after the last keystroke (an Enter sent before the re-query settles leaves the palette open, QA run #33096), then press Enter on the top hit (ref-targeted select, not a coordinate click) and confirm navigation to /apps/<app>/<object>/record/<id> — <app> is the app's ADR-0048 address, its package id (com.example.showcase on the showcase), never its name: a route reached through the name alias is rewritten to the package id (ui/packages/app-shell/src/utils/appRoute.ts canonicalAppPathname), and the name stays the address only for a second app in a package that ships several; and the record page renders",
         "reach the SearchResultsPage at /apps/<app>/search?q=<term> by URL and repeat the query there; confirm record hits grouped by object plus nav matches; also run a no-hit query and confirm the designed empty state. The palette's 'Open full search' item is no shortcut for this: the palette offers it only for an EMPTY query or one matching the words of its value 'search all results full page' (e.g. type 'full'), never beside a record query, and it navigates to <baseUrl>/search without carrying the typed term (objectui CommandPalette.tsx FULL_SEARCH_VALUE, objectui#11812)",
         "RLS parity: as the restricted member, run GET /api/v1/search?q=INV-1003 (the row their RLS hides) and the same in the palette; then as admin run the identical query — capture both persona responses",
         "capture the browser console for the whole session"
@@ -525,7 +525,7 @@
         {
           "clause": "one open path: ⌘K, Ctrl+K, the header Search button (action:command-palette:open), and the ?palette=1/?cmdk=1 deep-link all open the SAME idempotent palette overlay (ADR-0054 C1/C3) — calling open when already open through a NON-keyboard affordance (the button, a deep-link, a programmatic caller) is a no-op, not a toggle-closed; the ⌘K/Ctrl+K accelerator toggles by design, so a repeated keystroke closing the palette is not this clause's FAIL",
           "oracle": "dom",
-          "verify": "each affordance yields the overlay:command-palette overlay and the URL carries the palette param; DOM checked only after a screenshot confirms the overlay rendered",
+          "verify": "each affordance yields the overlay:command-palette overlay and the URL carries the palette param; DOM checked only after a screenshot confirms the overlay rendered. The button's open-when-open no-op is testable only by dispatching the click: while the palette is open its modal backdrop covers the header, so a real or coordinate click there closes the palette as a click-outside (QA run #33048), which is not this clause's FAIL",
           "evidence": "screenshots of the palette opened by each affordance + the URL param"
         },
         {
@@ -597,7 +597,8 @@
         { "revision": 3, "date": "2026-08-12", "change": "the executor gap this item's third knownGap recorded is CLOSED, so the gap flips to past tense. #7641 found searchAll to be a SECOND producer of search clauses with the same declared≠enforced defect — metadata-protocol/src/protocol.ts built its AND-of-OR from `$contains` under a comment asserting `$contains` was the case-insensitive operator — and moved it onto `$icontains` in the same PR as search-filter.ts. No clause substance changed; a case-varying miss on a current build is now a real palette/UI defect rather than an expected executor FAIL, which is the scoring instruction this revision corrects", "ref": "#7641" },
         { "revision": 4, "date": "2026-10-13", "change": "fixtures.requires[2] names the recipe's owner rule (persona recipe gap, #23166 A5), and steps[5] reaches /search by URL (stale step, #23166 A6); both parked on #23121, carried by #23169. A member-created showcase_invoice is invisible to its creator unless `owner` is set to the member's email, so the area recipe qa-contributor-bound-member's step 5 now carries it, with a recipe knownGap for the same rule on showcase_task (assignee). The palette's Open Full Search Page is offered only for an empty query or one matching 'search all results full page' (CommandPalette.tsx at objectui 1fb1ced36243, still this repo's .objectui-sha), and it drops the query, so the step reaches the page by URL. QA run #23166 passed both clauses that way", "ref": "#23169" },
         { "revision": 5, "date": "2026-10-19", "change": "steps[2], fixtures.requires[0], acceptance[0].clause and acceptance[2].clause corrected from QA run #24574 (18.0 sweep, 5b14b7f3; carried by #24593 at ba4afcc2), checklist-accuracy findings re-read at the console pin .objectui-sha 4016370af3c9 and unchanged at objectui main 282b138c07. (1) The palette's minLength is 2 (objectui react useRecordSearch, left at its default by CommandPalette.tsx), so the suggested query '张' never reaches the wire and reads 'No results found.' — the CJK example is now '张伟'. (2) The accelerator toggles by source design (CommandPaletteProvider.tsx: only the button, links, deep-links and programmatic callers share the idempotent openCommandPalette()), so 'open when already open is a no-op' now covers the non-keyboard affordances and a repeated ⌘K closing the palette is not a FAIL. Wave anchor #24579 §3", "ref": "#24671" },
-        { "revision": 6, "date": "2026-10-31", "change": "acceptance[3] and steps[4] named the route /apps/<app>/<object>/record/<id> without saying what <app> is. QA run #27441 found the app segment canonicalized to the package id. Source agrees: ADR-0048 keys /apps/<segment> on the package id, and canonicalAppPathname (ui/packages/app-shell/src/utils/appRoute.ts) rewrites a name alias to it unless a package ships several apps. Both now say <app> is the package id (com.example.showcase), which is more precise than before. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6490438726", "ref": "#27441" }
+        { "revision": 6, "date": "2026-10-31", "change": "acceptance[3] and steps[4] named the route /apps/<app>/<object>/record/<id> without saying what <app> is. QA run #27441 found the app segment canonicalized to the package id. Source agrees: ADR-0048 keys /apps/<segment> on the package id, and canonicalAppPathname (ui/packages/app-shell/src/utils/appRoute.ts) rewrites a name alias to it unless a package ships several apps. Both now say <app> is the package id (com.example.showcase), which is more precise than before. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6490438726", "ref": "#27441" },
+        { "revision": 7, "date": "2026-11-14", "change": "steps[4] and acceptance[0].verify re-pointed (runner timing and a test-method note, QA runs #33048 and #33096, comments 6846028996 and 6851700388; ledger row 146 of #32908). Enter waits for the group heading to settle; the button no-op is checked by a dispatched click because the open palette's backdrop covers the header. The clause is unchanged. Read at base 82838e83", "ref": "#33328" }
       ]
     },
     {
@@ -605,7 +606,7 @@
       "title": "The ⌘K palette is a NAVIGATOR beyond record search: the active app's nav corpus renders grouped (Objects/Dashboards/Pages/Reports), Enter navigates each type, app-switch and theme commands dispatch for real, and visibility-gated / inactive entries stay absent",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -636,8 +637,8 @@
         "confirm the corpus is the ACTIVE app's flattened navigation: a leaf inside a nav GROUP (e.g. the grouped showcase items) appears as a flat entry, and another app's nav items do NOT appear while showcase is active",
         "Enter one item PER TYPE (ref-targeted select, never a coordinate click): object → its list route, dashboard/page/report → their routes; confirm each destination page renders and the palette closed",
         "open the Switch-app group: it lists the OTHER active apps; select one and confirm the active app changes (URL + the palette's nav corpus now belongs to the target app); switch back",
-        "run a theme command ('Dark theme'): the root theme class flips immediately and the palette closes — the command dispatched, not just closed (persistence itself is platform-core.theme-mode-persistence's, not re-proven here)",
-        "select 'Open full search' and confirm navigation to /apps/<app>/search (deep coverage of that page stays with search.console-global-search)",
+        "run a theme command ('Dark Theme'): the root theme class flips immediately and the palette closes — the command dispatched, not just closed (persistence itself is platform-core.theme-mode-persistence's, not re-proven here)",
+        "select 'Open Full Search Page' and confirm navigation to /apps/<app>/search (deep coverage of that page stays with search.console-global-search)",
         "the gate-hidden probe (on the scratch copy fixtures.knownGaps describes; blocked on stock seeds): with a scratch nav item whose visibility predicate evaluates false, confirm it appears in NO group while a sibling with a true predicate appears; capture both sides",
         "capture the browser console for the whole session"
       ],
@@ -673,7 +674,7 @@
           "evidence": "the paired present/absent DOM reads"
         },
         {
-          "clause": "'Open full search' hands off to the /search page: selecting it navigates to <baseUrl>/search with the palette closed — the boundary to search.console-global-search, which owns that page's behavior",
+          "clause": "'Open Full Search Page' hands off to the /search page: selecting it navigates to <baseUrl>/search with the palette closed — the boundary to search.console-global-search, which owns that page's behavior",
           "oracle": "screenshot",
           "verify": "post-select the SearchResultsPage route is loaded (CommandPalette.tsx)",
           "evidence": "the handoff capture"
@@ -697,7 +698,8 @@
         { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, angle 1), authored as a SIBLING of search.console-global-search rather than an extension — writer's call per the register: that item's identity is the GET /api/v1/search record path (hits, grouping, RLS, recents, /search page) and already carries seven clauses, while the palette's other half — the client-side nav corpus (objects/dashboards/pages/reports groups from the active app's navigation), per-type Enter navigation, app switching, theme dispatch, and the evaluateVisibility gate — was wholly uncovered and is a different mechanism (app metadata + client filter, no server search). Grounded in CommandPalette.tsx; the gate-hidden side is blocked(fixture) on stock seeds because no showcase nav item declares a visibility expression and app metadata is not runtime-writable", "ref": "#sweep-2026-08-30" },
         { "revision": 2, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 5). A5 was blocked(fixture): no stock nav item carries a visibility predicate. Disposition: fixture recipe. The knownGap now spells the smallest fixture: two nav leaves with visible 'false' and 'true' added in a scratch copy of the showcase, authored from source and not yet run-proven. A5 named `visibleOn`, which a nav item refuses as a near-miss of `visible` (NAV_ITEM_ALIASES in packages/spec/src/ui/app.zod.ts), so the clause names `visible` only; step 8 points at the recipe", "ref": "#22017" },
         { "revision": 3, "date": "2026-10-13", "change": "knownGaps[0] records that the visibility-predicate fixture recipe is run-proven (knownGaps update, #23163 A4; parked on #23121, carried by #23169). QA run #23163 drove the scratch-copy recipe — two grp_data leaves with visible 'false' and 'true' — at objectstack 36b2889c with objectui 1fb1ced36243, and the palette honoured the predicate on both sides. The recipe text is unchanged; without the scratch copy the hidden side still scores blocked(fixture)", "ref": "#23169" },
-        { "revision": 4, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[0].verify cited lines 391-402 of objectui CommandPalette.tsx and source[2] lines 50-65, 92-95 and 102-105 of the showcase apps index.ts in the comma-range spelling (authored in 45397edf53 as the lists 255-328 and 391-402, and 30-40 to 102-105). At the objectui pin that commit shipped, 9602dc820450, 391-402 was the flattenNavigation function and 255-328 the per-type CommandGroup blocks; at the shipped pin 12dc7b47c340 both have moved, and acceptance[0].verify now names them. The apps index.ts lines are unchanged at this base: the ShowcaseApp navigation's object leaves (grp_data), its command-center page and dashboards and its reports (grp_analytics), and the pages above them. source[2] now anchors index.ts#ShowcaseApp. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
+        { "revision": 4, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). acceptance[0].verify cited lines 391-402 of objectui CommandPalette.tsx and source[2] lines 50-65, 92-95 and 102-105 of the showcase apps index.ts in the comma-range spelling (authored in 45397edf53 as the lists 255-328 and 391-402, and 30-40 to 102-105). At the objectui pin that commit shipped, 9602dc820450, 391-402 was the flattenNavigation function and 255-328 the per-type CommandGroup blocks; at the shipped pin 12dc7b47c340 both have moved, and acceptance[0].verify now names them. The apps index.ts lines are unchanged at this base: the ShowcaseApp navigation's object leaves (grp_data), its command-center page and dashboards and its reports (grp_analytics), and the pages above them. source[2] now anchors index.ts#ShowcaseApp. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
+        { "revision": 5, "date": "2026-11-14", "change": "steps[5], steps[6] and acceptance[5].clause respelled to the console's labels (stale spec, QA run #33058, comment 6846283471; ledger row 177 of #32908): 'Dark Theme' and 'Open Full Search Page' (ui/packages/i18n/src/locales/en.ts). The clause substance is unchanged. Read at base 82838e83", "ref": "#33328" }
       ]
     },
     {
@@ -705,7 +707,7 @@
       "title": "Global search (GET /api/v1/search) skips what the caller cannot read instead of failing: an unreadable object is never queried, named or counted; a readable object is searched only on fields the caller may query; row scope still narrows every searched object",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -732,7 +734,7 @@
       "steps": [
         "provision the member (provisioning.use). Premise guards as the member: GET /api/v1/data/W answers 403; GET /api/v1/data/showcase_invoice/<id of INV-1003> is invisible; GET /api/v1/data/sys_user answers 200 (sys_user is readable, only some of its search columns are not)",
         "positive control as admin: GET /api/v1/search?q=T&objects=W,showcase_invoice hits in W. A W with no matching row proves nothing about skipping",
-        "as the member, an UNSCOPED search: GET /api/v1/search?q=T. Capture the status and the full body text",
+        "as the member, an UNSCOPED search: GET /api/v1/search?q=T. Capture the status and the full body text, and check truncated is false: the sweep stops at the overall hit limit (limit, default 20, max 100) before later objects are scanned or counted (packages/metadata-protocol/src/protocol-record-reads.ts, searchAll), so choose T, or pass limit=100, so the limit is not hit. Otherwise W's absence and totalObjects reflect the stop, not the gate",
         "as the member, a mixed scope: GET /api/v1/search?q=T&objects=showcase_invoice,W. Then W alone: objects=W; then a name that matches no object: objects=qa_no_such_object. Capture all three bodies",
         "row scope: as the member, GET /api/v1/search?q=INV&objects=showcase_invoice&perObject=25; as admin, the identical query. ⚠ perObject is required here: searchAll caps each object at 5 hits by default (max 25 — metadata-protocol protocol.ts searchAll), newest updated first, and `truncated` describes only the overall limit, so without it the admin's 5 hits omit INV-1003 and read like acceptance[3]'s admin half failing (QA run #24593). q=INV-1003 is the narrower alternative. Compare the hit sets against each persona's readable rows",
         "hidden field: as admin, read a sys_user row and pick a value V from an admin-only search column (on a fresh boot: `role` = `user`, fixtures.requires[2]) that appears in no column the member may query (premise guard). As admin, GET /api/v1/search?q=V&objects=sys_user must hit (positive control). Then as the member, the identical query",
@@ -742,7 +744,7 @@
         {
           "clause": "a member's search over a scope that includes an object they cannot read answers 200 with the readable objects' hits, never a 403 for the whole request; the unreadable object is never named, never hit and never counted (totalObjects counts searched objects only, and no skipped-objects count exists)",
           "oracle": "api",
-          "verify": "the unscoped member search answers 200; its body text contains neither W's name nor any id of W's rows; totalObjects is the number of objects actually searched",
+          "verify": "the unscoped member search answers 200 with truncated false; its body text contains neither W's name nor any id of W's rows; totalObjects is the number of objects actually searched",
           "evidence": "the unscoped response, status and full body"
         },
         {
@@ -824,6 +826,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[2] said last_login_ip is null on every row, because a direct sign-in sends no forwarded header. QA run #27438 read '127.0.0.1' on the admin and on a signed-up member of a fresh boot. Source agrees: the client-address rule (plugin-auth client-address.ts) falls back to the transport's peer address when server.trustProxy is not declared, and the D7 login audit stamps that address. The fixture now says so and keeps role = user as the item's V, which the run confirmed. No clause changed. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6494110310",
           "ref": "#27438"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "steps[2] and acceptance[0].verify re-pointed (stale spec, QA run #33081, comment 6850173588; ledger row 186 of #32908). searchAll stops sweeping at the overall hit limit before later objects are scanned or counted (protocol-record-reads.ts), so an unscoped probe must not hit the limit or W's absence proves nothing. The clause is unchanged. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     }
