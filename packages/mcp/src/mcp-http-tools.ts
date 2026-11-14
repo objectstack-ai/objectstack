@@ -2632,8 +2632,17 @@ export function registerObjectTools(
           const fieldDefs = Array.isArray(def.fields) ? (def.fields as Array<Record<string, unknown>>) : [];
           const fields: string[] = [];
           const fieldTypes: Record<string, string> = {};
+          // The hidden search companion is served beside the declared fields
+          // (the registry stamps it where pinyin search is on), but no
+          // expression may read it: every read strips it, and `os validate`
+          // judges against the declared and injected columns, which never
+          // include it. Left in, it is listed in `inScope.fields` and a read
+          // of it answers ok here while the gate refuses it. The name is the
+          // engine's own constant, loaded on the first call like `@objectstack/lint`.
+          const { SEARCH_COMPANION_FIELD } = await import('@objectstack/objectql');
           for (const f of fieldDefs) {
             if (typeof f?.name !== 'string') continue;
+            if (f.name === SEARCH_COMPANION_FIELD) continue;
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
