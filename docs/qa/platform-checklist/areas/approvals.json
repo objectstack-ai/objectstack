@@ -191,7 +191,7 @@
       "title": "M-of-N quorum approves at the threshold; one rejection vetoes",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": ["three DISTINCT users each holding one of the approver positions"],
@@ -211,7 +211,7 @@
         "runnable today (the clamp contrast): GET the seeded showcase_committee_quorum request on EXP-DEMO (behavior quorum, minApprovals 2 over manager/finance/legal — all resolving to the admin); record the collapsed pending slate",
         "approve it ONCE as the admin and re-read: it finalizes immediately — the documented runtime clamp (minApprovals can never exceed the resolvable approver count), recorded as the CONTRAST, never as M-of-N proof",
         "apply the runtime fixture (fixtures.requires, steps 1-4) and open a FRESH quorum request; then as approver 1, POST /api/v1/approvals/requests/:id/approve — re-read: status STILL pending (1 of 2), approver 1 dropped from the slate",
-        "repeat-actor probe: as the NON-PRIVILEGED approver who already decided (e.g. Ada), approve the same request again — refused (403) and the tally unchanged; a user holding none of the routed positions is refused the same way. ⛔ Never use the platform/tenant admin for this probe — an admin decision is the documented override (#3424) and finalizes by design",
+        "repeat-actor probe: as the NON-PRIVILEGED approver who already decided (e.g. Ada), approve the same request again — refused 403 FORBIDDEN ('is not a pending approver': her own decision keeps her a reader of the request, and her slot has left the slate) and the tally unchanged. A user holding none of the routed positions, who never acted on the request, is refused too, but with 404 REQUEST_NOT_FOUND, the answer an id naming no request gets: they cannot read the request (no showcase object declares enable.approvalsVisibleToReaders), and packages/plugins/plugin-approvals/src/approval-service.ts#refuseUnreadableRequest answers such a caller before the slate check, so the request's existence never leaks; the tally is unchanged either way. A 403 for that user means they could read the request: record which tier admitted them. ⛔ Never use the platform/tenant admin for this probe — an admin decision is the documented override (#3424) and finalizes by design",
         "as approver 2, approve — re-read: status=approved, remaining pending task for approver 3 closed",
         "GET /:id/actions — exactly two approve rows from two distinct actors",
         "on a SECOND quorum request: as any single approver, POST /reject — re-read immediately",
@@ -299,6 +299,12 @@
           "date": "2026-10-31",
           "change": "acceptance[4] said the tally matches the API 'at each stage'. QA run #27441 found the tally renders only while the request is pending. Source agrees: attachDecisionProgress (approval-service.ts) sets decision_progress on a pending row only, and ApprovalDecisionPanel.tsx draws the tally from it alone. The clause now binds each PENDING stage, and adds that after the decision neither the page nor the read carries a tally. That is a stronger claim than before. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6490438726",
           "ref": "#27441"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-14",
+          "change": "steps[4] re-pointed: the repeat-actor probe's second persona, a user holding none of the routed positions, is answered 404 REQUEST_NOT_FOUND, not 403 (stale spec, card #33275, the sibling half of #33060). ApprovalService.refuseUnreadableRequest (packages/plugins/plugin-approvals/src/approval-service.ts) answers a caller who may not READ a request exactly as a missing id, before decideNode's slate check, so the request's existence never leaks; a user who holds no routed position and never acted on the request is no participant, and no showcase object declares enable.approvalsVisibleToReaders, so that user reads nothing. The first persona is unchanged: Ada's own decision keeps her a reader (visibleRequestIds' already-acted probe on sys_approval_action.actor_id), so her repeat approve reaches the slate check and answers 403 FORBIDDEN 'is not a pending approver'. No clause changed: negative[0] asserts the refusal, not its status. Read from source at base 87330e89, not driven live",
+          "ref": "#33275"
         }
       ]
     },
@@ -546,7 +552,7 @@
       "title": "Every approval action executes its REST route and produces the expected state transition plus a timeline entry",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["dev admin (pending approver on the seeded requests; submitter of the invoice request)"],
@@ -621,8 +627,8 @@
         {
           "clause": "recall is submitter-only and moves pending→recalled; the approver's task disappears from the inbox",
           "oracle": "api",
-          "verify": "recall as submitter succeeds (status=recalled); recall attempted by a non-submitter is FORBIDDEN; 待我审批 no longer lists it",
-          "evidence": "reads + the denied call"
+          "verify": "recall as submitter succeeds (status=recalled). The denied leg names its persona, on a request still pending (e.g. the step-6 request after the reassign): a non-submitter who CAN read the request and holds no override, such as the pending approver the reassign named, with their own token, answers 403 FORBIDDEN and the request re-reads pending; a member who cannot read it (not the submitter, on no slot, never acted on it) answers 404 REQUEST_NOT_FOUND, the answer an id naming no request gets (packages/plugins/plugin-approvals/src/approval-service.ts#refuseUnreadableRequest, asked before the submitter check, so the request's existence never leaks). ⛔ Not the dev admin: the override recalls a PENDING request by design (#3424), so the admin's recall succeeds and proves nothing about this gate. 待我审批 no longer lists the recalled request",
+          "evidence": "reads + the denied calls (the reader's 403 body and the non-reader's 404 body)"
         },
         {
           "clause": "non-finalizing actions mutate only what they own: reassign swaps the slate slot to the target user; remind/request-info/comment leave status=pending and touch nothing but the timeline",
@@ -695,6 +701,12 @@
           "date": "2026-10-27",
           "change": "acceptance[9] made scorable (#26621, the maintainer's 「补测试数据配方。立卡」): fixtures.provisioning opts into the new area recipe qa-cross-org-request, knownGaps[0] is rewritten as CLOSED-by-recipe, acceptance[9].verify and evidence name the cross-organization request in place of the org-less one, steps gains the read-back step, and source cites findRequestRow. The clause sentence is unchanged; its verify named a state that no longer exists, since organization_id is NOT NULL on the approval tables (ADR-0131). Re-driven once on the recipe at main 74db43ef, on a fresh group-posture boot: deciding the second organization's request while narrowed to the Default Organization answered 500 READ_BACK_FAILED with the recorded-write text and the remedy, and the matching-organization re-read showed status approved and the approve action row. Verdict: pass",
           "ref": "#26621"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-14",
+          "change": "acceptance[6] (verify, evidence) names the persona of the denied recall (under-specified, card #33275, the sibling half of #33060). 'A non-submitter is FORBIDDEN' held for one persona only: recall asks ApprovalService.refuseUnreadableRequest (packages/plugins/plugin-approvals/src/approval-service.ts) before its submitter check, so a non-submitter who can read the request (a pending approver) answers 403 FORBIDDEN, while a member who cannot read it answers 404 REQUEST_NOT_FOUND, exactly as a missing id. The verify now states both legs and excludes the dev admin, whose override recalls a pending request by design (#3424) and so would read as the gate failing. The clause sentence is unchanged. negative[2] is unchanged and still right: it fails any accepted POST from an actor the service should deny, whatever status the refusal carries. Read from source at base 87330e89, not driven live",
+          "ref": "#33275"
         }
       ]
     },
@@ -1772,7 +1784,7 @@
       "title": "Approval requests on v18: the request record page serves record:approval_decision and a Reply action that lands in its timeline, `enable.approvalsVisibleToReaders` lets a plain record reader see the record's requests read-only (and only then), the generic /data door serves request rows by approvals visibility, and titles shown to a reader use only what that reader may read",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1806,8 +1818,8 @@
         {
           "clause": "the request page carries record:approval_decision and the reply lands in the timeline (pending approver or submitter only)",
           "oracle": "api",
-          "verify": "page body (GET /api/v1/meta/page/sys_approval_request_detail) + the reply's HTTP legs: as the pending approver and as the submitter, POST /api/v1/approvals/requests/ID/comment {comment}, then GET /:id/actions — one comment row each; as the org member (neither), the same POST answers 403 FORBIDDEN and no row lands. No pin in automated.ref holds either half (RUNNER rule 6): approval-service.test.ts's 'comment: submitter and approver may reply; outsiders may not' and 'a reply the route admits is a comment row on the request timeline, attachments included' hold both at the service layer over a fake engine — evidence of that layer only, so the live legs score the clause",
-          "evidence": "the page excerpt + the timeline reads + the member's refused POST"
+          "verify": "page body (GET /api/v1/meta/page/sys_approval_request_detail) + the reply's HTTP legs: as the pending approver and as the submitter, POST /api/v1/approvals/requests/ID/comment {comment}, then GET /:id/actions — one comment row each; as the org member (neither approver nor submitter, and never acted on the request), the same POST answers 404 with code REQUEST_NOT_FOUND, the answer an id naming no request gets, and no row lands: the member cannot read the request (the record-reader tier is off, since no showcase object declares enable.approvalsVisibleToReaders), and packages/plugins/plugin-approvals/src/approval-service.ts#refuseUnreadableRequest answers such a caller before the slot check, so the request's existence never leaks. 403 FORBIDDEN (\"is not on this request\") is the answer to a caller who CAN read the request and is neither a pending approver nor the submitter, e.g. a past actor whose slot has moved on, or a plain record reader on an object that declares the flag (step 3's scratch object); the stock member is not one, so its 404 is the clause holding, not a FAIL. No pin in automated.ref holds either half (RUNNER rule 6): approval-service.test.ts's 'comment: submitter and approver may reply; outsiders may not' (the outsider's REQUEST_NOT_FOUND), 'every caller shape: the button shows exactly when the route admits the post' (a stranger's REQUEST_NOT_FOUND beside the override admin's FORBIDDEN) and 'a reply the route admits is a comment row on the request timeline, attachments included' hold both at the service layer over a fake engine — evidence of that layer only, so the live legs score the clause",
+          "evidence": "the page excerpt + the timeline reads + the member's refused POST (its 404 body)"
         },
         {
           "clause": "for a caller the app grants read on sys_approval_request, a non-participant's by-id read on /data/sys_approval_request → 404 and list totals exclude it; a caller without that grant, participants included, is refused 403 PERMISSION_DENIED at the object gate and is served no row and no total",
@@ -1872,6 +1884,12 @@
           "date": "2026-10-31",
           "change": "acceptance[2], its verify, steps[2] and the request-read-gate pin's claim in automated.ref now say whom the 404 binds. QA run #27409 measured every non-admin, participants included, refused 403 PERMISSION_DENIED on /api/v1/data/sys_approval_request on the stock showcase. That is by design: the object is engine-owned (ADR-0103, enable.apiMethods get and list in sys-approval-request.object.ts), no stock permission set grants a non-admin read, and the console request page reads only the approvals API. The pin mounts no security plugin, so its callers all hold read. The 404 and total leg now binds a caller the app grants read, and the no-grant caller's 403 with no row is its own leg. Neither leg is looser than the old clause, which no stock persona could reach. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6488948228",
           "ref": "#27409"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "acceptance[1] (verify, evidence) re-pointed: the org member's comment POST answers 404 REQUEST_NOT_FOUND, not 403 FORBIDDEN (stale spec, card #33275, the sibling half of #33060). comment reads its row through loadPendingRow, which asks ApprovalService.refuseUnreadableRequest (packages/plugins/plugin-approvals/src/approval-service.ts) before the slot check, so a caller who may not READ the request is answered as for a missing id and its existence never leaks. The stock member is no participant and the record-reader tier is off, so it reads nothing; FORBIDDEN 'is not on this request' is for a reader who is neither a pending approver nor the submitter. The verify's service-layer evidence now names what approval-service.test.ts holds: the outsider's and the stranger's REQUEST_NOT_FOUND. The clause sentence is unchanged. Read from source at base 87330e89, not driven live",
+          "ref": "#33275"
         }
       ]
     },
