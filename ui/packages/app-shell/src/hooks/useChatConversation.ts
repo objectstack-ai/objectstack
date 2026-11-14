@@ -984,6 +984,8 @@ export function useChatConversation(
       conversationIdRef.current = undefined;
       setConversationId(undefined);
       setInitialMessages([]);
+      // A fresh empty surface: no create has failed for it yet.
+      setCreateError(undefined);
       resolvedForUserRef.current = forUser;
       resolvedScopeRef.current = forScope;
       pendingKeyRef.current = key;
