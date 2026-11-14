@@ -24,8 +24,15 @@ function makeDriver() {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]: [string, any]) => {
       if (k === '$and') return (v as any[]).every((w) => matches(row, w));
-      if (v && typeof v === 'object' && !Array.isArray(v) && '$in' in v) return (v.$in as unknown[]).includes(row[k]);
-      if (v && typeof v === 'object' && !Array.isArray(v) && '$eq' in v) return row[k] === v.$eq;
+      if (k === '$or') return (v as any[]).some((w) => matches(row, w));
+      if (k.startsWith('$')) throw new Error(`test double: unsupported combinator ${k}`);
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        return Object.entries(v).every(([op, target]: [string, any]) => {
+          if (op === '$in') return (target as unknown[]).includes(row[k]);
+          if (op === '$eq') return row[k] === target;
+          throw new Error(`test double: unsupported operator ${op}`);
+        });
+      }
       return row[k] === v;
     });
   };
