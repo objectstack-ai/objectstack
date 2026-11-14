@@ -68,7 +68,11 @@ import {
   AUTH_VERIFICATION_CONFIG,
 } from './auth-schema-config.js';
 import { vendorClientAddressOptions } from './client-address-vendor.js';
-import { PLATFORM_IDP_PROVIDER_ID, refuseImplicitAccountLink } from './implicit-account-linking.js';
+import {
+  PLATFORM_IDP_PROVIDER_ID,
+  refuseImplicitAccountLink,
+  refuseSsoAddressChangeOutsideProvenDomain,
+} from './implicit-account-linking.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './run-after-response.js';
 import { isVisitorResendInEndpointContext } from './visitor-verification-resend.js';
@@ -352,19 +356,26 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // for an email address at a domain it has proven
       // (`sso-account-at-proven-domain.ts`). Judged first, on its own: no
       // posture, invitation or JIT toggle relaxes it, and the audience gate
-      // must admit as well.
+      // must admit as well. The same rule holds when an SSO sign-in links to
+      // an existing account, or asserts an address other than the linked
+      // account's own (`implicit-account-linking.ts`, rule 4).
       validateUserInfo: async (data: any, ctx: any) => {
         this.idpLocale.stage(data, ctx);
-        const outsideProvenDomain = await refuseSsoAccountOutsideProvenDomain(data, {
+        const provenDomain = {
           verificationEnabled: () => this.isSsoDomainVerificationEnabled(),
           reader: this.config.dataEngine ? (withSystemReadContext(this.config.dataEngine) as never) : undefined,
           logger: this.config.logger,
-        });
+        };
+        const outsideProvenDomain = await refuseSsoAccountOutsideProvenDomain(data, provenDomain);
         if (outsideProvenDomain) return outsideProvenDomain;
         return (await refuseImplicitAccountLink(data, ctx, {
           requireLocalEmailVerified: this.implicitLinkRequiresLocalEmailVerified(),
+          provenDomain,
           resolveContext: () => this.linkingContext(),
           logInfo: (m, meta) => this.config.logger?.info?.(m, meta),
+        })) ?? (await refuseSsoAddressChangeOutsideProvenDomain(data, ctx, {
+          provenDomain,
+          resolveContext: () => this.linkingContext(),
         })) ?? this.validateAudienceAdmission(data, ctx);
       },
     },

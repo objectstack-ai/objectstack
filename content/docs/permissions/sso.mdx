@@ -351,8 +351,27 @@ What verification decides, with it on:
   letters) is refused. Any other new account is refused with
   `error=EMAIL_DOMAIN_NOT_ALLOWED`, and nothing is created. No audience
   posture, invitation, first-user carve-out or `allowJit` setting relaxes this.
-- **Accounts that already exist are not re-checked.** A person who already has
-  an account signs in as before.
+- **An SSO sign-in links to an existing account only at a proven domain.** When
+  a sign-in links to an account that already exists (an implicit link), the
+  asserted address must be at one of the provider's listed, verified domains,
+  matched the same way. Two cases, kept apart:
+  - an address at a domain the provider does not list at all was already not
+    linked, and is still refused as before, with the same answer;
+  - an address at a subdomain of a listed domain that is not itself listed and
+    verified is no longer linked: it is refused with
+    `error=EMAIL_DOMAIN_NOT_ALLOWED`.
+
+  Either way no link is written and no session is issued.
+- **A sign-in changes a linked account's address only to a proven domain.** A
+  provider set to update the account from what the identity provider asserts
+  writes a new address at a later sign-in. That sign-in is refused with
+  `error=EMAIL_DOMAIN_NOT_ALLOWED`, and the stored address stays, unless the
+  new address is at one of the provider's listed, verified domains. A sign-in
+  that would not change the stored address is not re-checked: one that asserts
+  the account's own address, and one through a provider that does not update
+  the account (every SAML provider, and an OIDC provider whose update setting
+  is off), signs in as before. An explicit link from account settings is
+  unchanged.
 
 So if your people first sign in with addresses at a subdomain or at another
 domain, list each such domain on the provider as a bare host name and verify it.

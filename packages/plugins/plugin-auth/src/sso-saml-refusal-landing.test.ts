@@ -17,7 +17,7 @@
 import { createPrivateKey, generateKeyPairSync, sign, X509Certificate, type KeyObject } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { inflateRawSync } from 'node:zlib';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
@@ -884,6 +884,83 @@ describe('with SSO domain verification on, a SAML provider creates an account on
     const res = await signInThroughIdp(rp, 'bob@acme.com');
     expect(landing(res)).toEqual({ base: FAILED, error: 'SELF_REGISTRATION_CLOSED' });
     expect(written(rp)).toEqual(NOTHING);
+  });
+});
+
+// ── With SSO domain verification on, an implicit link reaches an existing account only at a proven domain ──
+//
+// The rule above, for an SSO sign-in that links to an account that already
+// exists (`implicit-account-linking.ts`, reusing
+// `sso-account-at-proven-domain.ts`). Verification on, the provider's
+// `domain_verified` on for `acme.com`, and one human already present.
+
+describe('with SSO domain verification on, a SAML implicit link reaches an existing account only with an address at a domain the provider has proven', () => {
+  afterEach(() => vi.restoreAllMocks());
+  const VERIFICATION_ON = { plugins: { sso: true, ssoDomainVerification: true } };
+  const verifiedRp = async () => {
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domain: 'acme.com', domainVerified: true, allowJit: true } });
+    await seedAdmin(rp);
+    return rp;
+  };
+  const seedLocal = (rp: Rp, email: string) =>
+    rp.engine.insert('sys_user', { id: 'usr_local', email, name: 'Erin', email_verified: true });
+  const accounts = (rp: Rp) => (rp.engine.tables.get('sys_account') ?? []).filter((a: any) => a.provider_id === PROVIDER_ID);
+  const sessions = (rp: Rp) => (rp.engine.tables.get('sys_session') ?? []).length;
+
+  it('to an existing account at a subdomain the provider has not listed is refused: no account row, no session', async () => {
+    const rp = await verifiedRp();
+    await seedLocal(rp, 'erin@eng.acme.com');
+    const res = await signInThroughIdp(rp, 'erin@eng.acme.com');
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: FAILED, error: 'EMAIL_DOMAIN_NOT_ALLOWED' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(accounts(rp)).toEqual([]);
+    expect(sessions(rp)).toBe(0);
+  });
+
+  it('to an existing account at a proven domain still links and signs in', async () => {
+    const rp = await verifiedRp();
+    await seedLocal(rp, 'erin@acme.com');
+    const res = await signInThroughIdp(rp, 'erin@acme.com');
+    expect(res.headers.get('location'), res.headers.get('location') ?? '').toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=[^;]/);
+    expect(accounts(rp).map((a: any) => a.user_id)).toEqual(['usr_local']);
+  });
+
+  it('CONTROL: with verification off, the same link is made as today', async () => {
+    const rp = await verifiedRp();
+    await seedLocal(rp, 'erin@eng.acme.com');
+    // The vendor's own provider gate stays on; only the environment's verification switch reads off.
+    vi.spyOn(rp.manager, 'isSsoDomainVerificationEnabled').mockReturnValue(false);
+    const res = await signInThroughIdp(rp, 'erin@eng.acme.com');
+    expect(res.headers.get('location'), res.headers.get('location') ?? '').toBe(AFTER);
+    expect(accounts(rp).map((a: any) => a.user_id)).toEqual(['usr_local']);
+  });
+});
+
+describe('with SSO domain verification on, a later SAML sign-in changes a linked account\'s address only at a domain the provider has proven', () => {
+  const VERIFICATION_ON = { plugins: { sso: true, ssoDomainVerification: true } };
+  // The email comes from an attribute and the NameID is stable, so a later
+  // sign-in reaches the same linked account with another address.
+  const NAME_ID = 'saml-subject-7f3a';
+  const as = (email: string) => ({ nameID: NAME_ID, attributes: { email } });
+
+  it('a SAML provider does not update the account: an outside address asserted later signs in and the stored address is unchanged', async () => {
+    const rp = await makeRp({
+      config: VERIFICATION_ON,
+      provider: { domain: 'acme.com', domainVerified: true, allowJit: true },
+      samlConfig: { mapping: { email: 'email' } },
+    });
+    await seedAdmin(rp);
+    const first = await signInThroughIdp(rp, 'bob@acme.com', undefined, undefined, as('bob@acme.com'));
+    expect(first.headers.get('location'), first.headers.get('location') ?? '').toBe(AFTER);
+    const bob = (rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'bob@acme.com');
+    expect(bob, 'the on-domain account').toBeTruthy();
+    const later = await signInThroughIdp(rp, 'bob@other.example', undefined, undefined, as('bob@other.example'));
+    expect(later.headers.get('location'), later.headers.get('location') ?? '').toBe(AFTER);
+    expect(cookiesOf(later)).toMatch(/session_token=[^;]/);
+    expect((rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.id === bob.id)?.email).toBe('bob@acme.com');
+    expect((rp.engine.tables.get('sys_account') ?? []).filter((a: any) => a.provider_id === PROVIDER_ID)).toHaveLength(1);
   });
 });
 

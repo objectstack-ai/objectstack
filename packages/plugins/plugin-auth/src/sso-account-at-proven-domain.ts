@@ -44,9 +44,14 @@
  * must admit as well. Other creation sources (the cloud IdP and enterprise
  * generic-OAuth providers arrive as `method: 'oauth'`) are outside it.
  *
- * Unchanged: an environment with verification off; an account that already
- * exists (a sign-in into it is not a creation, so it is not re-checked); and
- * linking, which has its own gate (`implicit-account-linking.ts`).
+ * Unchanged: an environment with verification off, and an account that
+ * already exists (a sign-in into it is not a creation, so it is not
+ * re-checked here).
+ *
+ * The same rule holds for the two other ways an SSO sign-in reaches an
+ * account, judged with this module's reading at the same gate in
+ * `implicit-account-linking.ts`: an implicit link to an existing account, and
+ * a later sign-in that asserts an address other than the account's own.
  *
  * ## Fail closed
  *
@@ -211,6 +216,25 @@ export function ssoAddressAtProvenDomain(email: unknown, provenDomains: readonly
   return domain !== null && provenDomains.includes(domain);
 }
 
+/**
+ * The domains the provider `providerId` has proven ({@link ssoProviderProvenDomains}),
+ * read through `reader` (the caller hands a system-context reader). No reader,
+ * no provider id or no row: none. A read that fails answers `null`, and every
+ * caller refuses on it.
+ */
+export async function readSsoProviderProvenDomains(
+  providerId: string,
+  reader: SsoProviderReader | undefined,
+): Promise<string[] | null> {
+  if (!reader || typeof reader.find !== 'function' || !providerId) return [];
+  try {
+    const rows = await reader.find(SSO_PROVIDER_OBJECT, { where: { provider_id: providerId }, limit: 1 });
+    return ssoProviderProvenDomains(Array.isArray(rows) ? rows[0] : undefined, providerId);
+  } catch {
+    return null;
+  }
+}
+
 /** What the rule reads, handed in by the `validateUserInfo` wiring. */
 export interface SsoAccountDomainRuleDeps {
   /** `AuthManager.isSsoDomainVerificationEnabled()`, asked at call time. */
@@ -248,18 +272,13 @@ export async function refuseSsoAccountOutsideProvenDomain(
 
   const providerId = ssoProviderIdOfSource(source);
   const method = source.method;
-  let proven: string[] = [];
-  if (deps.reader && typeof deps.reader.find === 'function' && providerId) {
-    try {
-      const rows = await deps.reader.find(SSO_PROVIDER_OBJECT, { where: { provider_id: providerId }, limit: 1 });
-      proven = ssoProviderProvenDomains(Array.isArray(rows) ? rows[0] : undefined, providerId);
-    } catch {
-      deps.logger?.warn?.(
-        '[sso] the identity provider could not be read, so the account it asked for was not created',
-        { providerId, method },
-      );
-      return refusal();
-    }
+  const proven = await readSsoProviderProvenDomains(providerId, deps.reader);
+  if (proven === null) {
+    deps.logger?.warn?.(
+      '[sso] the identity provider could not be read, so the account it asked for was not created',
+      { providerId, method },
+    );
+    return refusal();
   }
 
   if (ssoAddressAtProvenDomain(data?.user?.email, proven)) return undefined;

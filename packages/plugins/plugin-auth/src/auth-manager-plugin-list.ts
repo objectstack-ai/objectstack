@@ -770,10 +770,13 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
     // when on, @better-auth/sso mounts /sso/request-domain-verification +
     // /sso/verify-domain (DNS TXT proof-of-ownership of every domain the
     // provider lists) and signs nobody in through a provider until its domain
-    // list is verified; editing the list clears it. A new account is limited
-    // to an email address at a domain the provider has proven, by plugin-auth's
-    // own rule at the `validateUserInfo` gate (`sso-account-at-proven-domain.ts`),
-    // asked through the same decision (`AuthManager.isSsoDomainVerificationEnabled`).
+    // list is verified; editing the list clears it. An account a provider
+    // reaches holds an email address only at a domain the provider has proven,
+    // by plugin-auth's own rule at the `validateUserInfo` gate: a new account
+    // (`sso-account-at-proven-domain.ts`), an implicit link to an existing
+    // account, and a sign-in that would change a linked account's stored
+    // address (`implicit-account-linking.ts`, rule 4), each asked through the
+    // same decision (`AuthManager.isSsoDomainVerificationEnabled`).
     // Off by default to preserve the register→login flow.
     //
     // Per-provider sign-in options (ruling record 6718355623, `sso-sign-in-options.ts`):

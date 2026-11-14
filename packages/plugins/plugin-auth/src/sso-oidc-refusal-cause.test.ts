@@ -1415,3 +1415,138 @@ describe('with SSO domain verification on, an OIDC provider creates an account o
     expect(written(rp)).toEqual(NOTHING);
   });
 });
+
+// ── 6. With SSO domain verification on, a sign-in reaches an existing account only at a proven domain ──
+//
+// The rule of section 5, for the two other ways an SSO sign-in reaches an
+// account: an implicit link to an existing account, and an address change made
+// by a later sign-in. `implicit-account-linking.ts` judges both, reusing
+// `sso-account-at-proven-domain.ts`. Every case runs with verification on, the
+// provider's `domain_verified` on for `acme.com`, and one human already present.
+
+describe('with SSO domain verification on, an OIDC sign-in links to an existing account, or changes its address, only at a domain the provider has proven', () => {
+  afterEach(() => vi.restoreAllMocks());
+  const VERIFICATION_ON = { plugins: { sso: true, ssoDomainVerification: true } };
+  const verifiedRp = async (domain = 'acme.com') => {
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domain, domainVerified: true, allowJit: true } });
+    await seedAdmin(rp);
+    return rp;
+  };
+  /** The provider updates a linked account from what its IdP asserts at each sign-in. */
+  const overrideUserInfo = (rp: Rp) => {
+    const row = (rp.engine.tables.get('sys_sso_provider') ?? []).find((r: any) => r.provider_id === PROVIDER_ID);
+    expect(row, 'the provider row').toBeTruthy();
+    row.oidc_config = JSON.stringify({ ...JSON.parse(row.oidc_config), overrideUserInfo: true });
+  };
+  const seedLocal = (rp: Rp, email: string) =>
+    rp.engine.insert('sys_user', { id: 'usr_local', email, name: 'Erin', email_verified: true });
+  const accounts = (rp: Rp) => (rp.engine.tables.get('sys_account') ?? []).filter((a: any) => a.provider_id === PROVIDER_ID);
+  const sessions = (rp: Rp) => (rp.engine.tables.get('sys_session') ?? []).length;
+  const storedEmail = (rp: Rp, id: string) => (rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.id === id)?.email;
+
+  const expectAdmitted = (res: Response) => {
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location'), res.headers.get('location') ?? '').toBe(AFTER);
+    expect(cookiesOf(res)).toMatch(/session_token=[^;]/);
+  };
+  const expectRefused = (res: Response) => {
+    expect(res.status).toBe(302);
+    expect(errorParams(res)).toMatchObject({ base: FAILED, error: 'EMAIL_DOMAIN_NOT_ALLOWED' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+  };
+
+  describe('an implicit link', () => {
+    it('to an existing account at a subdomain the provider has not listed is refused: no account row, no session', async () => {
+      const rp = await verifiedRp();
+      await seedLocal(rp, 'erin@eng.acme.com');
+      expectRefused(await signInThroughIdp(rp, await idToken({ email: 'erin@eng.acme.com' })));
+      expect(accounts(rp)).toEqual([]);
+      expect(sessions(rp)).toBe(0);
+    });
+
+    it('CONTROL: to an existing account at a domain the provider does not list at all is refused as before, by the existing link refusal', async () => {
+      const rp = await verifiedRp();
+      await seedLocal(rp, 'erin@other.example');
+      const res = await signInThroughIdp(rp, await idToken({ email: 'erin@other.example' }));
+      // The answer this refusal gave before the proven-domain rule reached links.
+      expect(errorParams(res)).toMatchObject({ base: FAILED, error: 'account not linked' });
+      expect(accounts(rp)).toEqual([]);
+      expect(sessions(rp)).toBe(0);
+    });
+
+    it('to an existing account at a proven domain still links and signs in', async () => {
+      const rp = await verifiedRp();
+      await seedLocal(rp, 'erin@acme.com');
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'erin@acme.com' })));
+      expect(accounts(rp).map((a: any) => a.user_id)).toEqual(['usr_local']);
+    });
+
+    it('CONTROL: with verification off, the same link is made as today', async () => {
+      const rp = await verifiedRp();
+      await seedLocal(rp, 'erin@eng.acme.com');
+      // The vendor's own provider gate stays on; only the environment's verification switch reads off.
+      vi.spyOn(rp.manager, 'isSsoDomainVerificationEnabled').mockReturnValue(false);
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'erin@eng.acme.com' })));
+      expect(accounts(rp).map((a: any) => a.user_id)).toEqual(['usr_local']);
+    });
+  });
+
+  describe('a later sign-in that would change the stored address', () => {
+    it('to an address outside the proven domains is refused, and the stored email is unchanged', async () => {
+      const rp = await verifiedRp();
+      overrideUserInfo(rp);
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' })));
+      const bob = (rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'bob@acme.com');
+      expect(bob, 'the on-domain account').toBeTruthy();
+      const before = sessions(rp);
+      expectRefused(await signInThroughIdp(rp, await idToken({ email: 'bob@other.example' })));
+      expect(storedEmail(rp, bob.id)).toBe('bob@acme.com');
+      expect(sessions(rp)).toBe(before);
+    });
+
+    it('to an address at a subdomain the provider has not listed is refused, and the stored email is unchanged', async () => {
+      const rp = await verifiedRp();
+      overrideUserInfo(rp);
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' })));
+      const bob = (rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'bob@acme.com');
+      expectRefused(await signInThroughIdp(rp, await idToken({ email: 'bob@eng.acme.com' })));
+      expect(storedEmail(rp, bob.id)).toBe('bob@acme.com');
+    });
+
+    it('to an address at another proven domain still applies', async () => {
+      const rp = await verifiedRp('acme.com, acme.co.uk');
+      overrideUserInfo(rp);
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' })));
+      const bob = (rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'bob@acme.com');
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.co.uk' })));
+      expect(storedEmail(rp, bob.id)).toBe('bob@acme.co.uk');
+    });
+
+    it('with a provider that does not update the account, an outside address asserted later signs in and changes nothing', async () => {
+      const rp = await verifiedRp();
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' })));
+      const bob = (rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'bob@acme.com');
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@other.example' })));
+      expect(storedEmail(rp, bob.id)).toBe('bob@acme.com');
+    });
+
+    it('CONTROL: with verification off, the change applies as today', async () => {
+      const rp = await verifiedRp();
+      overrideUserInfo(rp);
+      vi.spyOn(rp.manager, 'isSsoDomainVerificationEnabled').mockReturnValue(false);
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' })));
+      const bob = (rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'bob@acme.com');
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@other.example' })));
+      expect(storedEmail(rp, bob.id)).toBe('bob@other.example');
+    });
+
+    it('CONTROL: a later sign-in with the stored address signs in, at a domain the provider no longer lists too', async () => {
+      const rp = await verifiedRp();
+      overrideUserInfo(rp);
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' })));
+      const row = (rp.engine.tables.get('sys_sso_provider') ?? []).find((r: any) => r.provider_id === PROVIDER_ID);
+      row.domain = 'acme.co.uk';
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' })));
+    });
+  });
+});

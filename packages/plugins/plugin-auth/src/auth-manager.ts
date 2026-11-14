@@ -5860,8 +5860,11 @@ export class AuthManager {
    * Whether opt-in DNS domain-verification (ADR-0135 D6) is wired — i.e. the
    * `/sso/request-domain-verification` + `/sso/verify-domain` endpoints are
    * mounted, a provider signs nobody in until its listed domains are verified,
-   * and a provider creates an account only for an email address at a domain it
-   * has proven (`sso-account-at-proven-domain.ts`, which asks this method).
+   * and an account a provider reaches holds an email address only at a domain
+   * it has proven: a provider creates an account only for such an address
+   * (`sso-account-at-proven-domain.ts`), links to an existing account only
+   * with one, and changes a linked account's stored address only to one
+   * (`implicit-account-linking.ts`, rule 4). All three ask this method.
    * Resolved with the EXACT logic `buildPluginList` uses for the `sso()`
    * `domainVerification.enabled` option, so the bridge can return a clear
    * "not enabled for this environment" instead of a bare 404 when off.
