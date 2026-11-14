@@ -16,8 +16,8 @@ import {
 describe('PUBLIC_AUTH_FEATURES registry', () => {
   const entries = Object.entries(PUBLIC_AUTH_FEATURES);
 
-  it('classifies all 14 public flags', () => {
-    expect(PUBLIC_AUTH_FEATURE_NAMES).toHaveLength(14);
+  it('classifies all 15 public flags', () => {
+    expect(PUBLIC_AUTH_FEATURE_NAMES).toHaveLength(15);
     expect([...PUBLIC_AUTH_FEATURE_NAMES].sort()).toEqual(
       [
         'admin',
@@ -25,6 +25,7 @@ describe('PUBLIC_AUTH_FEATURES registry', () => {
         'degradedTenancy',
         'developerEditionCreate',
         'deviceAuthorization',
+        'directSignIn',
         'emailDelivery',
         'multiOrgEnabled',
         'oidcProvider',

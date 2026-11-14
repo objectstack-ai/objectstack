@@ -77,11 +77,27 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
     // apart on a whole amount (`$3,456.00` here, `$3,456` in the cell) until
     // triage ruled the declared width the protocol's convention and the cell's
     // whole-amount trimming retired.
-    return (
+    const amount = (
       <span className="text-sm font-medium tabular-nums">
         {formatCurrency(Number(value), currency, locale)}
       </span>
     );
+    // A read-only record-mode amount declaring `homeAmount` (ADR-0144 D5), an
+    // `expression`-computed one included, still has its home amount re-stored
+    // when the form's currency or document date changes, so it carries the
+    // same live preview as the editable face. Only while the field is not
+    // `disabled`: a read-only form (`mode: 'view'`, `readOnly`) disables every
+    // field, has no save to preview, and its home field already says what the
+    // engine stored. The record page draws the cell renderer, not this widget.
+    if (!props.disabled && currencyField?.currencyConfig?.currencyMode === 'record' && currencyField.currencyConfig.homeAmount) {
+      return (
+        <div className="space-y-1">
+          {amount}
+          <HomeAmountPreview field={currencyField} amount={value} record={record} dataSource={dataSource} />
+        </div>
+      );
+    }
+    return amount;
   }
 
   /**

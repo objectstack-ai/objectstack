@@ -187,7 +187,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 18,
+      "revision": 19,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -209,14 +209,14 @@
       },
       "steps": [
         "sign in as seeded admin; open Accounts via its nav entry (/_console/apps/com.example.showcase/showcase_account) — it sits in the Data Model group, which may render collapsed: expand it first",
-        "click New; fill name with a distinctive value (os-qa-<runid>), industry, status=active; leave website empty; submit — the create form's button reads 'Create', not 'Save' (ui/packages/plugin-form: form.create / form.update)",
+        "click New; fill name with a distinctive value (os-qa-<runid>), status=active, and industry: the create form opens with Industry already on Technology (its option is default:true, examples/app-showcase/src/data/objects/account.object.ts), so pick another value if the run wants the field to carry a choice of its own; leave website empty; submit — the create form's button reads 'Create', not 'Save' (ui/packages/plugin-form: form.create / form.update). After the create the console lands on the NEW RECORD's page, not on the list (ui/packages/app-shell/src/console/AppContent.tsx, the objectstack#2604 save invariant: create takes you to the record), so acceptance[3]'s list read at create needs an explicit navigation back to the list and a reload",
         "capture the create request/response (expect POST /api/v1/data/showcase_account). The payload also carries the select defaults of fields the step leaves untouched — sales_region:'amer' (its AMER option is default:true, examples/app-showcase/src/data/objects/account.object.ts) — so expect that key in the body you diff (QA run #24556)",
         "re-read server-side: GET /api/v1/data/showcase_account?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] — field-by-field vs the submitted payload",
         "open the record detail; edit exactly one field, annual_revenue, to a new positive number; submit it (an edit form's button reads 'Update'); capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>. annual_revenue is the field because showcase_account has no rule-free TEXT field the later steps can spare: `name` is the key steps[3] and steps[8] filter on, and tax_id, billing_email and churn_reason are each judged by a validation rule (account.object.ts: tax_id_format, billing_email_format, churn_reason_consistency); annual_revenue carries none (its only constraint is the field's min 0). ⛔ Not `hq`: it is a location field (Field.location), whose input takes 'latitude, longitude', and text that is not a coordinate pair clears the stored value while the save still reports success (#32139) — a defect of its own, not this clause's subject",
         "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the header of the 动态 panel, the first panel of the record page's right column (below the details in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor), or by ?related=timeline (#27524). At 1440 px the page also draws a top-level tab row — Overview, Activity (动态), then its panels (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row) — and its Activity tab is the same door as ?related=timeline. The panel itself shows only the newest lines, with no chips, and can lag the update line until a fresh read (QA run #28545): read the change lines on the Activity tab after a reload, not off the panel. Screenshot first, then read the change lines",
         "clone the record: POST /api/v1/data/showcase_account/<id>/clone (optionally with {overrides:{name:'os-qa-<runid>-clone'}}); capture the 201 result (new id ≠ source, sourceId, record); re-read the clone via GET /api/v1/data/showcase_account/<new id>",
         "RLS probe on clone: as a persona WITHOUT read on the source row (a permission-zoo persona, or a non-owner under owner-RLS), POST the same clone route and capture the refusal — expect 404 RECORD_NOT_FOUND, never a silent duplicate (record blocked(fixture) if no non-reading persona is bound on this boot)",
-        "delete via the row/detail action; confirm the dialog; re-read via the filtered GET. ⚠️ If clause 7's recipe gave the member an own-row invoice pointing at THIS account, the delete answers 409 DELETE_RESTRICTED: the invoice's account lookup is required, and the engine turns a required set_null into restrict (packages/objectql/src/engine.ts). Point that invoice at a seeded account instead (the recipe's step 5 says so)",
+        "delete via the record header's 'More actions' (⋯) menu → Delete (the menu also holds Refresh / Add to favorites / Share; detail.moreActions), or the list row's menu; confirm the dialog; re-read via the filtered GET. ⚠️ If clause 7's recipe gave the member an own-row invoice pointing at THIS account, the delete answers 409 DELETE_RESTRICTED: the invoice's account lookup is required, and the engine turns a required set_null into restrict (packages/objectql/src/engine.ts). Point that invoice at a seeded account instead (the recipe's step 5 says so)",
         "reload the list view and confirm final state"
       ],
       "acceptance": [
@@ -241,7 +241,7 @@
         {
           "clause": "the list reflects each mutation after a full reload with correct display values (grid repaint is NOT the oracle — the reload is)",
           "oracle": "screenshot",
-          "verify": "post-reload screenshots of the list at create and at delete",
+          "verify": "post-reload screenshots of the list at create and at delete. The create lands on the record page (steps[1]), so the 'at create' screenshot is taken after navigating back to the list and reloading it",
           "evidence": "screenshots"
         },
         {
@@ -253,7 +253,7 @@
         {
           "clause": "unicode round-trips: a create with a CJK name (e.g. os-qa-<runid>-华宁) reads back byte-identical and is findable via list quick-search",
           "oracle": "api",
-          "verify": "filtered GET returns the CJK name unmangled; $search finds it (the seed's 华宁科技 proves the pattern — ADR-0061)",
+          "verify": "filtered GET returns the CJK name unmangled; $search finds it (the list's quick search has no visible input until its search icon is pressed, data-testid search-icon-button, ui/packages/plugin-list/src/ListView.tsx) (the seed's 华宁科技 proves the pattern — ADR-0061)",
           "evidence": "re-read JSON + search response"
         },
         {
@@ -391,6 +391,12 @@
           "date": "2026-11-10",
           "change": "steps[4] says why annual_revenue is the single-field edit and steers off `hq`. Checklist-accuracy finding of QA run #32135 (at ff04ad81; card #32168): the runner reached for `hq` as a text field to edit, but it is Field.location — a non-coordinate text cleared the stored value with a success toast, extracted as #32139 — and the run asked for a rule-free text field to be named. Re-read at base 8523ef9a: examples/app-showcase/src/data/objects/account.object.ts has no rule-free text field besides `name`, which the filtered reads key on (tax_id, billing_email and churn_reason each meet a validation rule), so the step keeps annual_revenue, which no rule names, and says so. No clause changed",
           "ref": "#32168"
+        },
+        {
+          "revision": 19,
+          "date": "2026-11-14",
+          "change": "steps[1], steps[8], acceptance[3].verify and acceptance[5].verify re-pointed to the console as QA run #32953 met it (R1 record 6840055541, parked on #32908 and listed in the #33329 batch as rows 29 and 216; #33087 comment 6850382730). The record header holds Delete under its 'More actions' menu; the list's quick search opens from its search icon (search-icon-button, ui/packages/plugin-list/src/ListView.tsx); a create lands on the new record's page, not the list (ui/packages/app-shell/src/console/AppContent.tsx, the objectstack#2604 save invariant), so the 'list at create' screenshot needs an explicit navigation back and a reload; and Industry opens on Technology, its default:true option (examples/app-showcase/src/data/objects/account.object.ts). No clause changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -1602,7 +1608,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1623,7 +1629,7 @@
         ]
       },
       "steps": [
-        "open the Northwind account detail page (/_console/apps/com.example.showcase/showcase_account → Northwind)",
+        "open the Northwind account's full record page: from /_console/apps/com.example.showcase/showcase_account, clicking Northwind opens a ~720 px record DRAWER (the console's default record-open mode, ui/packages/app-shell/src/views/ObjectView.tsx), not the column-tier page steps[1] reads — open it full page with the drawer's 'Open as full page' (↗), or load /_console/apps/com.example.showcase/showcase_account/record/ID directly",
         "screenshot at a column-tier width (a record view of 760 px or wider, which a 1440×900 window gives; ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor); enumerate the related lists. Record page v3 draws no tab strip there. The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables in the details column, and the non-primary children — Contacts among them — are compact cards in the related column, each naming at most 3 rows with no pager (packages/spec/src/data/field.zod.ts relatedList: 'true/absent = shown as a supporting list, a side card in the record's related column (the shared \"Related\" tab on the tabbed page)'). Only below 760 px is the page tabbed, with those cards under one 'Related' tab (?tab=related)",
         "open Contacts' whole list: its card's header or count chip enlarges it in place (?related=showcase_contact.account); capture the page-1 data request. An enlarged list whose block names no limit pages 25 rows (ui/packages/plugin-detail/src/RecordPageColumns.tsx, ENLARGED_PAGE_SIZE), so the pager reads 'Page 1 of 2' for Northwind's 26 contacts (QA run #27438)",
         "click next-page; capture the page-2 request; note the pager text ('Page 2 of 2', one row)",
@@ -1751,6 +1757,12 @@
           "date": "2026-10-31",
           "change": "steps[1], [2], [3], [5] and [7], acceptance[1]–[3] and [5] (verify, plus clause [3]) and automated.ref re-pointed from the related tabs to record page v3's layout. From QA run #27438 (W3-C2b, at c4c515ad; the finding line is truncated in the record, so its tail was read from source; wave anchor #27377, wave-3 accuracy slice S1). At a column-tier width the account page has no tabs. The primary lists, Invoices and Projects, are body tables in the details column, and Contacts is a compact card in the related column naming at most 3 rows (5 at the run's c4c515ad) with no pager. Paging lives in the card's enlarged view (?related=showcase_contact.account), 25 rows a page, so Northwind's 26 contacts read 'Page 1 of 2' then 'Page 2 of 2', not the old Related tab's 'Page 1 of 6'. The tabbed page, below 760 px, keeps a Related tab. Read at base a0f865491d: buildDefaultPageSchema.ts (body tables vs side cards), relatedListCompact.ts (COMPACT_RELATED_ROWS 3), RelatedList.tsx (a compact card reads $top 3), RecordPageColumns.tsx (ENLARGED_PAGE_SIZE 25), the field.zod.ts relatedList describe. The paging, partition and read-gate contracts are unchanged; a prior pager reading of 'Page 1 of 6' does not carry",
           "ref": "#27438"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-14",
+          "change": "steps[0] names the route to the full record page (QA run #33048's note, comment 6846028996): a list click opens the record drawer, the console's default record-open mode (ui/packages/app-shell/src/views/ObjectView.tsx), so the column-tier page steps[1] reads is reached by 'Open as full page' or the /record/ID route. No clause changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -2724,7 +2736,7 @@
       "title": "A named import mapping maps foreign CSV headers and re-imports idempotently",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2746,13 +2758,13 @@
         {
           "clause": "foreign headers land on the mapped fields — 'Full Name' → the name field, 'Channel' → the source field — per the named mapping, not positional guessing",
           "oracle": "api",
-          "verify": "created rows carry the CSV values on the mapped target fields",
+          "verify": "created rows carry the CSV values on the mapped target fields. Channel goes through a `map` transform whose valueMap is a partial translation (Webform → website, Partner Referral → referral): a Channel value outside it (e.g. 'Fax') passes through verbatim to source (packages/core/src/utils/import-mapping.ts), which is the transform's design, not a fail",
           "evidence": "the reads"
         },
         {
-          "clause": "re-importing the same file is idempotent (upsert on the mapping's key, e.g. email) — no duplicate rows",
+          "clause": "re-importing the same file AS THE SAME CALLER is idempotent (upsert on the mapping's key, email) — no duplicate rows. Idempotent per caller: showcase_inquiry is sharingModel 'private' (examples/app-showcase/src/data/objects/inquiry.object.ts), so the upsert matches only rows the importer can read, and a different caller (a member re-importing the admin's file) creates new rows — RLS working, not a fail",
           "oracle": "api",
-          "verify": "row count unchanged after the second import",
+          "verify": "row count unchanged after the second import by the same caller",
           "evidence": "before/after counts"
         },
         {
@@ -2778,6 +2790,12 @@
           "date": "2026-08-08",
           "change": "initial — the coverage.json `mapping` waiver was STALE (showcase ships showcase_inquiry_feed); un-waived",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "acceptance[1] says 'idempotent per caller' and acceptance[0].verify names the partial value map (QA run #33092's C-api notes, comment 6850793622, for idempotent-per-caller; QA run #33058's P2 notes, comment 6846283471, for the Channel pass-through): showcase_inquiry is private-OWD (inquiry.object.ts), so the upsert match sees only the caller's rows; and the map transform passes an unmapped Channel value through verbatim (packages/core/src/utils/import-mapping.ts). The clause's obligation for one caller is unchanged. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -2786,7 +2804,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2805,11 +2823,11 @@
       },
       "steps": [
         "sign in as admin; open showcase_task and switch to the in_progress saved view (stored filter status=in_progress); screenshot",
-        "open the FilterBuilder toolbar; add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); type a term into the list's quick search that keeps rows (acceptance[2] reads it back; QA run #29890 used 'pipeline'); capture the data request",
+        "open the FilterBuilder toolbar (an icon button, aria-label 'Filter', data-testid toolbar-filter-trigger, whose accessible name gains the badge count once a condition is active; the SortBuilder is the 'Sort' icon button beside it, ui/packages/plugin-list/src/ListView.tsx); add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); type a term into the list's quick search that keeps rows (acceptance[2] reads it back; QA run #29890 used 'pipeline'); capture the data request",
         "assert the request's `filter` param is the MERGE of the view's stored rule AND the two toolbar conditions (buildEffectiveFilter/mergeFilterNodes), and `sort` carries the toolbar sort (e.g. sort=-due_date) — the console spells its list params without a `$`; the returned rows satisfy view-filter AND toolbar conditions",
-        "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress; screenshot; confirm the toolbar filter + sort restored",
+        "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress through the Tasks nav entry and the view switcher (it lands on /view/showcase_task.in_progress). ⛔ Not the sidebar's 'In-Progress Tasks' Data Slices link: it opens /showcase_task/data?filter[status]=in_progress, a different surface from the saved view; screenshot; confirm the toolbar filter + sort restored",
         "read where the toolbar filter and sort are kept: the signed-in user's own sys_user_preference row keyed ui.list.showcase_task (GET /api/v1/data/sys_user_preference filtered to that key; its value's perView.<view> carries the filters and the sort — objectui ListPreferencesProvider.tsx, objectui#12418), and its localStorage write-through cache list-state:<userId>:showcase_task. Confirm both are the signed-in user's: the row's user_id, and the cache key's user segment. (Only the search term stays under the older list-filters:<userId>:showcase_task:<viewId> key)",
-        "sign out through the account menu (the avatar menu's Log out, user.logout in ui/packages/app-shell/src/layout/AppHeader.tsx; never by clearing storage, which would also wipe the cache this step tests); sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
+        "sign out through the account menu (the avatar menu's Log out, user.logout in ui/packages/app-shell/src/layout/AppHeader.tsx; never by clearing storage). That Log out itself removes the signed-out user's list-state:* and list-filters:* keys from localStorage (purgeSignedOutUserClientState, ui/packages/auth/src/ActiveOrganizationStorage.ts, run by AuthProvider's sign-out), so the first account's keys are gone by the time the second signs in; the clause holds by that wipe AND by the user-keyed row. Sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
         "userFilters/URL: where UserFilters are hosted (an interface page or the userFilters surface — NOT a bare object list, ADR-0053), apply a quick-filter; copy the URL; open it in a fresh tab; confirm the uf_<field> params (comma-joined, URI-encoded) reproduce the same rows and uf__tab carries the active preset (ADR-0047)",
         "negative sweep: confirm tabs-element userFilters (preset chips, uf__tab) do NOT leak onto the bare object list view — dropdown chips the object view itself declares are allowed there (ADR-0047 amendment) and their uf_<field> params are not a leak"
       ],
@@ -2921,6 +2939,12 @@
           "date": "2026-11-04",
           "change": "steps[1], steps[5], acceptance[2].verify, acceptance[3].verify and negative[2] corrected from QA run #29890 (W5-FAIL, at 589049b0): the clause restores filter AND search, so the steps add a quick search and the verify reads it back; the sign-out between accounts is the account menu's Log out, which keeps the cache under test. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-14",
+          "change": "steps[1], steps[3] and steps[5] re-pointed to the console as QA run #33048 met it (comment 6846028996): the FilterBuilder / SortBuilder are icon buttons (toolbar-filter-trigger, ui/packages/plugin-list/src/ListView.tsx); the sidebar's In-Progress Tasks link is a Data Slices surface, so the return to the saved view goes through Tasks and the view switcher; and Log out sweeps the signed-out user's list-state / list-filters keys (ui/packages/auth/src/ActiveOrganizationStorage.ts purgeSignedOutUserClientState), so a runner should not expect the first account's keys beside the second's. No clause changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -3042,7 +3066,7 @@
       "title": "Concurrent edits collide loudly (OCC 409 + conflict dialog), never silent last-write-wins; inline two-surface edit is ONE atomic OCC-guarded save",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3062,9 +3086,9 @@
         "open the SAME record's detail in session A and session B (both hold the same updated_at)",
         "in A: edit one field, Save; capture the PATCH carrying If-Match: <updated_at> → 200; the record's updated_at advances",
         "in B (still holding the STALE updated_at): edit the same field, Save; capture the response",
-        "assert B receives 409 CONCURRENT_UPDATE and the conflict dialog appears — on the modal edit form it is occSave's 'Save conflict' dialog offering Keep editing / Overwrite; on an inline edit it is the ConcurrentUpdateDialog offering Reload / Overwrite — NOT a silent overwrite, NOT a bare error",
-        "Reload lives on the INLINE-edit ConcurrentUpdateDialog (objectui plugin-detail), not on the modal form's dialog: drive this leg as an inline stale save — in B double-click the field on the record page, let A's write land, Save → 409 → choose Reload; the page refetches and shows A's value, and B sends no further write",
-        "in B re-edit and choose Overwrite → the retry re-keys ifMatch to the version the 409 reported → 200; re-read shows exactly one winner (B's value)",
+        "assert B receives 409 CONCURRENT_UPDATE and the conflict dialog appears — on the modal edit form it is occSave's 'Save conflict' dialog offering Keep editing / Overwrite; on an inline edit it is the ConcurrentUpdateDialog offering 'Reload latest' / 'Overwrite anyway' / Cancel (detail.concurrentUpdateReload / concurrentUpdateOverwrite, ui/packages/i18n/src/locales/en.ts) — NOT a silent overwrite, NOT a bare error",
+        "Reload lives on the INLINE-edit ConcurrentUpdateDialog (objectui plugin-detail), not on the modal form's dialog: drive this leg as an inline stale save — in B double-click the field on the record page, let A's write land, Save → 409 → choose 'Reload latest'; the page refetches and shows A's value, and B sends no further write",
+        "in B re-edit and choose 'Overwrite anyway' on the inline dialog (Overwrite on the modal form's) → the retry re-keys ifMatch to the version the 409 reported → 200; re-read shows exactly one winner (B's value)",
         "INLINE two-surface (§E1): on the detail, enter the shared inline-edit session; edit one details-BODY field AND one header-HIGHLIGHT field; confirm ONE Save bar; Save; capture the single PATCH and its keys + headers",
         "stale-ifMatch inline path: repeat the inline save holding a stale updated_at (a concurrent write landed between) and capture the outcome"
       ],
@@ -3076,7 +3100,7 @@
           "evidence": "B's 409 response + the intact re-read"
         },
         {
-          "clause": "the conflict surfaces a conflict DIALOG offering a structured choice — Keep editing / Overwrite on the modal edit form (occSave), Reload / Overwrite on an inline edit (ConcurrentUpdateDialog) — not a silent overwrite and not a raw stack trace",
+          "clause": "the conflict surfaces a conflict DIALOG offering a structured choice — Keep editing / Overwrite on the modal edit form (occSave), 'Reload latest' / 'Overwrite anyway' on an inline edit (ConcurrentUpdateDialog) — not a silent overwrite and not a raw stack trace",
           "oracle": "dom",
           "verify": "after screenshot, the ConcurrentUpdateDialog (plugin-detail) / occSave conflict dialog (plugin-form) renders with the racer's version and the two actions",
           "evidence": "the conflict-dialog screenshot"
@@ -3157,6 +3181,12 @@
           "date": "2026-10-26",
           "change": "automated.ref rewritten from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/packages/plugin-form/src/occSave.test.tsx on main cc378e93. (1) The overwrite case runs over a mocked data source, so it pins acceptance[3]'s client re-key only, not its api oracle. (2) The modal Keep editing / Overwrite case runs in jsdom; acceptance[1]'s dom oracle wants a rendered dialog, and the inline ConcurrentUpdateDialog half has no pin. (3) The ref no longer names the inline-edit spec it dropped at revision 4, which a ref parser read as a pin; its pointer to a list-view-capabilities 'automated.stale' key that no longer exists goes with it. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "steps[3], steps[4], steps[5] and acceptance[1].clause name the inline conflict dialog's buttons as the product labels them, 'Reload latest' / 'Overwrite anyway' / Cancel (ui/packages/i18n/src/locales/en.ts concurrentUpdateReload / concurrentUpdateOverwrite; QA run #33048, comment 6846028996). The modal form's Keep editing / Overwrite (ui/packages/plugin-form/src/occSave.tsx) is unchanged. No clause's substance changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -3165,7 +3195,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -3177,7 +3207,7 @@
         "requires": [
           "a showcase object with feeds enabled (default — enable.feeds !== false) so the discussion panel mounts and sys_comment writes are accepted (packages/spec/src/data/object.zod.ts feeds default true; plugin-audit enforceFeedsCapability)",
           "a record to comment on (e.g. a seeded showcase_task or showcase_account)",
-          "for the recipient read-gate clause (acceptance[9]) on a stock `single` boot: the knownGaps[0] second user, a member of the same organization, and two admin-owned records — a showcase_private_note (sharingModel 'private', owner-only, examples/app-showcase/src/data/objects/private-note.object.ts), which the member cannot read, and a showcase_account (public_read_write), which the member can. The cross-organization leg needs its OWN boot under the group posture, separate from the stock `single` boot: `OS_TENANCY_POSTURE=group OS_PLATFORM_OWNER_EMAIL=admin@objectos.ai OS_AUTH_MEMBERSHIP_POLICY=invite-only pnpm dev -- --fresh -p PORT` (each variable answers a measured boot refusal: RUNNER.md 'A walled boot is a fixture of its own'), on which steps[13]'s walled sequence places the comment's record in organization A and the mentioned user in organization B only. The mentioned user must hold read on sys_comment on BOTH boots, the stock `single` one included: no showcase permission set grants it, so a minted member's GET /api/v1/data/sys_comment answers 403 PERMISSION_DENIED and every mention of them on a record they can read is withheld `cannot_read_thread` (measured, #26625; met again on the single boot by QA run #27441). Both sequences in steps[13] bind a scratch set that grants it (the walled sequence's item (4))"
+          "for the recipient read-gate clause (acceptance[9]) on a stock `single` boot: the knownGaps[0] second user, a member of the same organization, and two admin-owned records — a showcase_private_note (sharingModel 'private', owner-only, examples/app-showcase/src/data/objects/private-note.object.ts), which the member cannot read, and a showcase_account (public_read_write), which the member can. The cross-organization leg needs its OWN boot under the group posture, separate from the stock `single` boot: `OS_TENANCY_POSTURE=group OS_PLATFORM_OWNER_EMAIL=admin@objectos.ai OS_AUTH_MEMBERSHIP_POLICY=invite-only pnpm dev -- --fresh -p PORT` (each variable answers a measured boot refusal: RUNNER.md 'A walled boot is a fixture of its own'), on which steps[13]'s walled sequence places the comment's record in organization A and the mentioned user in organization B only. The mentioned user must hold read on sys_comment. The platform baseline member_default now grants it (read, create, edit; packages/plugins/plugin-security/src/objects/default-permission-sets.ts, pinned by member-default-explicit-allow.test.ts), so a freshly minted member's GET /api/v1/data/sys_comment answers 200 on both boots (QA run #33048 at ee9ad834, comment 6846028996); before that grant it answered 403 and every mention was withheld `cannot_read_thread` (#26625, #27441). steps[13] proves the read rather than granting it; the scratch qamention_comment_reader set is needed only on a boot where the member's read answers 403"
         ],
         "provisioning": {
           "use": "qa-feeds-disabled",
@@ -3186,7 +3216,8 @@
         "knownGaps": [
           "the @mention TARGET and the bell/notification clauses need a SECOND user. A stock showcase boot is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the user with POST /api/v1/auth/admin/create-user, which answers mustChangePassword true, and the user calls POST /api/v1/auth/change-password and signs in again before it drives anything (steps[13]; RUNNER.md, 'A stock showcase boot refuses self-registration'). ⛔ Do not record those clauses blocked(fixture) on the 403: the refusal is the posture working, and the admin door mints the user on the same boot. The optimistic-reconcile, sys_comment and activity-interleave clauses need only the author",
           "CLOSED by the qa-feeds-disabled recipe (#12118) for the two FEEDS_DISABLED clauses: before it, no showcase object declared enable.feeds:false and there was no scratch recipe for this area, so the code appeared only in `negative`. Fall back to the pinned engine/API suites named in `automated` ONLY if the recipe cannot be replayed on the boot under test — and when you do, record WHICH of the two the verdict rests on, because the pins run against their own fixtures (cmt_nofeeds / lead_walled) and not against the showcase surface this item otherwise drives.",
-          "acceptance[9]'s cross-organization leg runs live on its own group-posture boot (fixtures.requires[2]) through steps[13]'s walled sequence, which #26625 wrote and drove once at main 1708115e2f: the control mention in organization B notified the user, and both mentions on organization A's account (by id, by email) were withheld cannot_read_source. A run that cannot boot the posture records that leg blocked(fixture) citing RUNNER.md's walled entry. Its pin (automated.ref, packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts) reaches the ENGINE layer, not HTTP: a real kernel, ObjectQL engine and SQLite driver with AuditPlugin and the real core grant resolver, while plugin-security's read layer is played by one middleware composing the posture's tenant clause and an owner-only rule, and messaging is played by an emit() recorder. Under RUNNER rule 6 the pin scores the clause partial at most, naming the HTTP layer and the real plugin-security as missing; both live legs, the stock `single` one and the walled one, are driven live"
+          "acceptance[9]'s cross-organization leg runs live on its own group-posture boot (fixtures.requires[2]) through steps[13]'s walled sequence, which #26625 wrote and drove once at main 1708115e2f: the control mention in organization B notified the user, and both mentions on organization A's account (by id, by email) were withheld cannot_read_source. A run that cannot boot the posture records that leg blocked(fixture) citing RUNNER.md's walled entry. Its pin (automated.ref, packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts) reaches the ENGINE layer, not HTTP: a real kernel, ObjectQL engine and SQLite driver with AuditPlugin and the real core grant resolver, while plugin-security's read layer is played by one middleware composing the posture's tenant clause and an owner-only rule, and messaging is played by an emit() recorder. Under RUNNER rule 6 the pin scores the clause partial at most, naming the HTTP layer and the real plugin-security as missing; both live legs, the stock `single` one and the walled one, are driven live",
+          "acceptance[7]'s changes_only leg has no stock carrier: the panel offers that mode only on an object with field history (ui/packages/plugin-detail/src/RecordActivityTimeline.tsx getFilterOptions), and the stock showcase's only authored record:discussion panel sits on showcase_project (examples/app-showcase/src/ui/pages/project-detail.page.ts), which has none (QA run #33048, comment 6846028996). Until a fixture puts the panel on such an object, that leg is blocked(fixture)"
         ]
       },
       "steps": [
@@ -3196,14 +3227,14 @@
         "reload the record page (no sys_comment refetch follows a post within ~6 s, QA run #24616), then confirm the optimistic row reconciles with the server row (same id → union-by-id merge, no duplicate, no phantom)",
         "read sys_comment over the API: GET /api/v1/data/sys_comment?$filter for the record's thread_id, ordered by created_at asc — the posted comment is present",
         "perform an attributable change on the record (e.g. an edit) and confirm the resulting sys_activity row interleaves into the SAME feed, in time order. The direction depends on the surface: the default record page's timeline stream is newest-first (record page v3, ui/packages/plugin-detail/src/recordTimelineStream.ts mergeTimelineStream), while an authored record:discussion panel — e.g. the footer of the Project Detail page on a showcase_project record (examples/app-showcase/src/ui/pages/project-detail.page.ts) — lists oldest-first (RecordDetailView mergeFeedRows). Record which surface you read. On an object with enable.trackHistory (showcase_account) the stream drops the activity's own `updated` row in favour of the audit's field-change line (mergeTimelineStream), so read this on a showcase_task, or on the panel",
-        "as the mentioned second user, open the notification bell — it gains the mention notification with a deep link back to the record; unreadCount increments; mark-as-read drops it. The bell is SERVER-backed: plugin-audit writes one sys_notification (topic collab.mention) per mentioned user (packages/plugins/plugin-audit/src/audit-writers.ts), and the console's bell reads the inbox feed over GET /api/v1/notifications (objectui app-shell useInboxBell.ts) — read unreadCount there",
+        "as the mentioned second user, open the notification bell — it gains the mention notification with a deep link back to the record; unreadCount increments; mark-as-read drops it. The bell is SERVER-backed: plugin-audit writes one sys_notification (topic collab.mention) per mentioned user (packages/plugins/plugin-audit/src/audit-writers.ts), and the console's bell reads sys_inbox_message joined with sys_notification_receipt (ui/packages/app-shell/src/hooks/useInboxBell.ts), its badge counting unread TOPICS (two mentions on one thread read '1 unread topic'); GET /api/v1/notifications still carries the per-row unreadCount the clause reads, and mark-read is POST /api/v1/notifications/read or /read/all — read unreadCount there",
         "confirm a NON-mentioned user's bell does NOT gain the notification (recipient scoping)",
         "CREATE-SIDE FEEDS_DISABLED probe — as admin, POST one throwaway qafeeds_nofeeds record ({ name: 'qa-nofeeds-probe' }) for a real parent_id (qafeeds_nofeeds is a scratch OBJECT from the qa-feeds-disabled recipe with no standing rows), then POST /api/v1/data/sys_comment with { thread_id: 'qafeeds_nofeeds:<that record id>', body: 'should be refused by the feeds gate' } and capture the refusal. Admin can read AND edit that record (public_read_write), which is what isolates the refusal from the sibling RECORD_NOT_ACCESSIBLE code",
         "RE-THREAD (UPDATE-SIDE) FEEDS_DISABLED probe — take the sys_comment row posted earlier against the feeds-ENABLED record and PATCH /api/v1/data/sys_comment/<its id> with { thread_id: 'qafeeds_nofeeds:<the throwaway record id>' } as admin, capturing the refusal. This is the UPDATE half of the #10170 gate (enforceFeedsCapability registered on beforeUpdate as well as beforeInsert, packages/plugins/plugin-audit/src/audit-writers.ts): re-read the comment afterward and confirm its thread_id is UNCHANGED",
         "control for both probes — repeat the same two calls against a feeds-ENABLED parent (the seeded showcase record used above) and confirm they SUCCEED. A 403 that also fires on the enabled parent is measuring access, not the capability gate, and neither clause may be scored from it",
-        "FEED FILTER — the four FeedFilterMode values are offered by an authored record:discussion panel, not by the default record page, whose timeline stream has its own chips All / Activity / Discussion / Changes (record page v3, ui/packages/plugin-detail/src/recordTimelineStream.ts TIMELINE_STREAM_FILTERS). Drive it on a showcase_project record, whose Project Detail page ends in a record:discussion panel (examples/app-showcase/src/ui/pages/project-detail.page.ts): post one comment there and make one attributable edit, then cycle the panel's filter control through all four FeedFilterMode values, screenshotting each state before reading the rendered rows",
+        "FEED FILTER — the four FeedFilterMode values are offered by an authored record:discussion panel, not by the default record page, whose timeline stream has its own chips All / Activity / Discussion / Changes (record page v3, ui/packages/plugin-detail/src/recordTimelineStream.ts TIMELINE_STREAM_FILTERS). Drive it on a showcase_project record, whose Project Detail page ends in a record:discussion panel (examples/app-showcase/src/ui/pages/project-detail.page.ts): post one comment there and make one attributable edit, then cycle the panel's filter control through every value it offers, screenshotting each state before reading the rendered rows. It offers changes_only only on an object with field history (getFilterOptions, ui/packages/plugin-detail/src/RecordActivityTimeline.tsx), and showcase_project has none, so on stock the panel offers three: all, comments_only, tasks_only (see acceptance[7])",
         "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the unit pin ui/packages/plugin-detail/src/renderers/__tests__/recordActivityFeed.test.ts and record the substitution",
-        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. Grant the member read on sys_comment exactly as the walled leg's item (4) below does (the scratch package, the qamention_comment_reader set, the sys_user_permission_set row) and prove it as the member: GET /api/v1/data/sys_comment answers 200. Without the grant every mention below is withheld (fixtures.requires[2]), the account comment's included, and the leg measures nothing. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). WALLED LEG, on the group-posture boot of fixtures.requires[2] (#26625), as the seeded admin, the platform owner: (1) POST /api/v1/auth/sign-in/email and keep the session's activeOrganizationId, organization A; (2) POST /api/v1/auth/organization/create {name: 'QA Mention Org B', slug: a fresh one per run} → organization B, then POST /api/v1/auth/organization/set-active {organizationId: B}; (3) POST /api/v1/auth/admin/create-user {email, password, name} → the user lands in B as member with mustChangePassword true; (4) grant the user read on sys_comment: POST /api/v1/packages {manifest: {id: 'com.objectstack.qamention.walled', name: 'QA walled mention fixture', version: '1.0.0', type: 'app', namespace: 'qamention'}, enableOnInstall: true} (201), PUT /api/v1/meta/permission/qamention_comment_reader?package=com.objectstack.qamention.walled {name: 'qamention_comment_reader', label: 'QA mention comment reader', objects: {sys_comment: {allowRead: true}}} (200, saved env-wide), POST /api/v1/data/sys_user_permission_set {user_id, permission_set: 'qamention_comment_reader'} (201); (5) the user signs in, calls POST /api/v1/auth/change-password, signs in again, and proves the grant: GET /api/v1/data/sys_comment answers 200; (6) CONTROL in B: as admin, POST /api/v1/data/showcase_account {name} (organization_id B), confirm the user reads it (200), then POST /api/v1/data/sys_comment on its thread with mentions naming the user by id: the user's inbox gains exactly one collab.mention whose actionUrl names that account. A control that gains nothing means the user cannot read comments and the leg below measures nothing; (7) set-active A, POST /api/v1/data/showcase_account {name} (organization_id A), confirm the user's read of it answers 404 RECORD_NOT_FOUND, then post one comment on its thread naming the user by id and one naming them by email; (8) re-read the user's and the admin's inboxes: no new collab.mention for either comment, and the boot log carries '[audit] mention notification withheld' with reason cannot_read_source, the user id and each comment's id. Teardown: stop the boot (--fresh discards its DB; no repo file is touched)"
+        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. Prove the member reads sys_comment: GET /api/v1/data/sys_comment as the member answers 200 (member_default grants it, fixtures.requires[2]); only if it answers 403, grant it as the walled leg's item (4) below does. Without the read every mention below is withheld, the account comment's included, and the leg measures nothing. sys_comment.mentions is a JSON-STRING field (a textarea, packages/plugins/plugin-audit/src/objects/sys-comment.object.ts): send it as a string such as \"[\\\"USER_ID\\\"]\", since an array body answers 400 'expected a string, received an array'. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). WALLED LEG, on the group-posture boot of fixtures.requires[2] (#26625), as the seeded admin, the platform owner: (1) POST /api/v1/auth/sign-in/email and keep the session's activeOrganizationId, organization A; (2) POST /api/v1/auth/organization/create {name: 'QA Mention Org B', slug: a fresh one per run} → organization B, then POST /api/v1/auth/organization/set-active {organizationId: B}; (3) POST /api/v1/auth/admin/create-user {email, password, name} → the user lands in B as member with mustChangePassword true; (4) prove the user reads sys_comment (member_default grants it; GET /api/v1/data/sys_comment as the user answers 200) and, only on a boot where it answers 403, grant it: POST /api/v1/packages {manifest: {id: 'com.objectstack.qamention.walled', name: 'QA walled mention fixture', version: '1.0.0', type: 'app', namespace: 'qamention'}, enableOnInstall: true} (201), PUT /api/v1/meta/permission/qamention_comment_reader?package=com.objectstack.qamention.walled {name: 'qamention_comment_reader', label: 'QA mention comment reader', objects: {sys_comment: {allowRead: true}}} (200, saved env-wide), POST /api/v1/data/sys_user_permission_set {user_id, permission_set: 'qamention_comment_reader'} (201); (5) the user signs in, calls POST /api/v1/auth/change-password, signs in again, and proves the grant: GET /api/v1/data/sys_comment answers 200; (6) CONTROL in B: as admin, POST /api/v1/data/showcase_account {name} (organization_id B), confirm the user reads it (200), then POST /api/v1/data/sys_comment on its thread with mentions naming the user by id: the user's inbox gains exactly one collab.mention whose actionUrl names that account. A control that gains nothing means the user cannot read comments and the leg below measures nothing; (7) set-active A, POST /api/v1/data/showcase_account {name} (organization_id A), confirm the user's read of it answers 404 RECORD_NOT_FOUND, then post one comment on its thread naming the user by id and one naming them by email; (8) re-read the user's and the admin's inboxes: no new collab.mention for either comment, and the boot log carries '[audit] mention notification withheld' with reason cannot_read_source, the user id and each comment's id. Teardown: stop the boot (--fresh discards its DB; no repo file is touched)"
       ],
       "acceptance": [
         {
@@ -3227,7 +3258,7 @@
         {
           "clause": "the mentioned user's bell gains the notification with a WORKING deep link to the record, and unreadCount increments; mark-as-read / mark-all-read drop the count",
           "oracle": "dom",
-          "verify": "as the mentioned user, the bell shows the new mention notification, its link navigates to the commented record, and reading it decrements unreadCount — GET /api/v1/notifications as that user, the server inbox the bell reads (useInboxBell.ts; plugin-audit writes the collab.mention row)",
+          "verify": "as the mentioned user, the bell shows the new mention notification, its link navigates to the commented record, and reading it decrements unreadCount — GET /api/v1/notifications as that user carries the per-row unreadCount (plugin-audit writes the collab.mention row); the bell itself reads sys_inbox_message + sys_notification_receipt and badges unread TOPICS (ui/packages/app-shell/src/hooks/useInboxBell.ts), so two mentions on one thread badge as one topic",
           "evidence": "bell screenshots before/after + the deep-link navigation"
         },
         {
@@ -3249,9 +3280,9 @@
           "evidence": "the 403 response body, the unchanged-thread_id re-read, and the body-edit control"
         },
         {
-          "clause": "PER-VARIANT: each of the four FeedFilterMode values shows exactly its subset — 'all' the full merged feed, 'comments_only' rows of feed type comment, 'changes_only' rows of feed type field_change, 'tasks_only' rows of feed type task (an EMPTY subset is a correct rendering when the record has no rows of that type — record it, don't fail it) — and switching back to 'all' restores every row",
+          "clause": "PER-VARIANT: each FeedFilterMode value the panel offers shows exactly its subset — 'all' the full merged feed, 'comments_only' rows of feed type comment, 'changes_only' rows of feed type field_change, 'tasks_only' rows of feed type task (an EMPTY subset is a correct rendering when the record has no rows of that type — record it, don't fail it) — and switching back to 'all' restores every row",
           "oracle": "dom",
-          "verify": "after each screenshot settles, the rendered rows against the mode's filter arm (objectui RecordActivityTimeline.tsx filterItems; the four options offered are getFilterOptions). The mode TYPE is imported from @objectstack/spec/data, so the control cannot offer a mode the spec does not declare. Read it on the record:discussion panel of steps[11]: the default record page's stream chips (TIMELINE_STREAM_FILTERS) are a different control and score nothing here",
+          "verify": "after each screenshot settles, the rendered rows against the mode's filter arm (objectui RecordActivityTimeline.tsx filterItems; the four options offered are getFilterOptions). The mode TYPE is imported from @objectstack/spec/data, so the control cannot offer a mode the spec does not declare. The panel offers changes_only only on an object with field history (getFilterOptions, ui/packages/plugin-detail/src/RecordActivityTimeline.tsx, objectstack#30074 ruling C, filled from sys_audit_log), so on the stock showcase_project panel three modes are offered and scored; the changes_only leg needs a record:discussion panel on an object with field history, which no stock showcase page carries (fixtures.knownGaps): record it blocked(fixture), never pass, and never fail the absent option. Read it on the record:discussion panel of steps[11]: the default record page's stream chips (TIMELINE_STREAM_FILTERS) are a different control and score nothing here",
           "evidence": "four screenshots + the per-mode row census against the API-read feed"
         },
         {
@@ -3386,6 +3417,12 @@
           "date": "2026-10-31",
           "change": "steps[5], steps[11], steps[13], acceptance[2] (clause and verify), acceptance[7].verify and fixtures.requires[2] corrected. From QA run #27441 (W3-C3b, at c4c515ad); QA run #27438 (W3-C2b) made the same two feed findings. Wave anchor #27377, wave-3 accuracy slice S1. Record page v3 (#27310) draws the record's feed as one timeline stream, newest first, with chips All / Activity / Discussion / Changes. The four FeedFilterMode values and the oldest-first order belong to an authored record:discussion panel, such as the Project Detail page's. So steps[5] and acceptance[2] say 'in time order' and name both directions, plus the trackHistory case where the stream swaps the activity's updated row for the audit line; steps[11] drives the filter on a showcase_project record. The single-boot recipient leg also needs the sys_comment read grant: without it the account comment's mention is withheld cannot_read_thread like every other. So steps[13] binds the walled leg's scratch set on the single boot too, and fixtures.requires[2] says both boots need it. Read at base a0f865491d: recordTimelineStream.ts (mergeTimelineStream, TIMELINE_STREAM_FILTERS), RecordActivityTimeline.tsx (the FeedFilterMode select renders only off the stream variant), RecordDetailView.tsx (mergeFeedRows, ascending), mention-recipient-gate.ts (the source read is judged before the comment read). acceptance[9]'s contract is unchanged",
           "ref": "#27441"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[2], steps[6], steps[11], steps[13], acceptance[3].verify and acceptance[7] re-pointed, with one knownGaps line added, from QA run #33048's notes (comment 6846028996) and the B-browser record (#33094 comment 6852480973). member_default now grants sys_comment read (packages/plugins/plugin-security/src/objects/default-permission-sets.ts), so the scratch reader set becomes a fallback; the bell reads sys_inbox_message + sys_notification_receipt and badges topics (ui/packages/app-shell/src/hooks/useInboxBell.ts); sys_comment.mentions is a JSON string (sys-comment.object.ts); and since objectstack#30074 ruling C the panel offers changes_only only on an object with field history (RecordActivityTimeline.tsx getFilterOptions), so acceptance[7] scores the modes offered and its changes_only leg is blocked(fixture) on stock. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -4099,7 +4136,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4111,7 +4148,7 @@
           "the eight seeded showcase hooks (examples/app-showcase/src/data/hooks/index.ts, bound via defineStack({ hooks: allHooks })) — the four this item drives, plus showcase_guard_task_reopen (showcase_task, beforeUpdate, condition previous.done == true && record.done != true, body throws a user-facing sentence, onError:'abort', priority 60), the refusal fixture records-forms.script-action-hook-refusal-toast drives, plus the three paid-invoice line guards on showcase_invoice_line, which this item does not drive: showcase_guard_paid_invoice_line_add (beforeInsert), showcase_guard_paid_invoice_line_move (beforeUpdate, condition record.invoice != previous.invoice) and showcase_guard_paid_invoice_line_remove (beforeDelete), each reading the header invoice under runAs:'system' and throwing a user-facing sentence when it is paid (onError:'abort', priority 60; a system write and a cascade delete pass); showcase_normalize_task_title (showcase_task, events ['beforeInsert','beforeUpdate'], trims title, priority 50, onError:'abort'); showcase_stamp_inquiry_defaults (showcase_inquiry, beforeInsert, stamps status='new'/source='web', onError:'abort'); showcase_audit_task_completion (showcase_task, afterUpdate, condition previous.done!=true && record.done==true, async, retryPolicy {maxRetries:3,backoffMs:1000}, capabilities:['log'], onError:'log', priority 90); showcase_warn_over_budget (showcase_project, afterUpdate, condition record.spent!=null && record.budget!=null && record.spent>record.budget, async, capabilities:['log'], onError:'log')",
           "showcase_task (title required text + done boolean, defaultValue false), showcase_inquiry (status select whose 'new' option is default:true + source plain text with NO default), showcase_project (budget/spent currency + the spent_within_budget script rule that REJECTS spent > budget*1.2)",
           "seeded rows: not-done task 'Build homepage' (done:false) for the transition PATCH; already-done tasks 'Audit current IA' and 'App wireframes' (done:true) for the non-transition proof; projects 'Data Platform' (budget 600000 / spent 420000) and 'Website Relaunch' (budget 150000 / spent 60000)",
-          "server log capture — the async audit/warn bodies call ctx.log.info/warn, routed to the engine logger (packages/runtime/src/sandbox/body-runner.ts log: engineCtx.logger); AND the ability to register a scratch hook (throwing / ordered) for the variants the four fixtures cannot observe. Run-proven recipe (QA run #24616): on a scratch app copy, put every scratch hook on showcase_inquiry behind a name-prefix condition (record.name.startsWith('qa-…')) so it touches only the probe rows; for the fail-closed probe, `record.name.startsWith('qa-fc') && int(record.name) > 0` compiles and faults only for a 'qa-fc…' row",
+          "server log capture — the async audit/warn bodies call ctx.log.info/warn, routed to the engine logger (packages/runtime/src/sandbox/body-runner.ts log: engineCtx.logger); AND the ability to register a scratch hook (throwing / ordered) for the variants the four fixtures cannot observe. A scratch hook needs no scratch package: a package-less PUT /api/v1/meta/hook/NAME of a fresh name saves env-wide on a stock boot (hook is allowRuntimeCreate in packages/spec/src/kernel/metadata-plugin.zod.ts; QA run #33048 read 200). Run-proven recipe (QA run #24616): on a scratch app copy, put every scratch hook on showcase_inquiry behind a name-prefix condition (record.name.startsWith('qa-…')) so it touches only the probe rows; for the fail-closed probe, `record.name.startsWith('qa-fc') && int(record.name) > 0` compiles and faults only for a 'qa-fc…' row",
           "a real running server: hooks fire in the ObjectQL engine on the live /api/v1/data/* route, never on a simulated dispatch"
         ],
         "knownGaps": [
@@ -4143,7 +4180,7 @@
       "steps": [
         "boot the showcase on its own port and DB WITH OS_LOG_LEVEL=info exported (or --log-level info): the audit oracle is a ctx.log.info line, and `os dev` defaults the kernel logger to warn (packages/cli/src/utils/log-level.ts DEFAULT_LOG_LEVEL), so on a default boot a correct product prints no audit line and every 'fires' clause reads as a no-fire; sign in as seeded admin; confirm the four hooks this item drives actually registered before asserting any no-fire — GET /api/v1/meta/hook (or the boot log; ⛔ not /meta/types/hook — /meta/types is the type listing and /meta/types/hook answers 404) lists showcase_normalize_task_title / showcase_stamp_inquiry_defaults / showcase_audit_task_completion / showcase_warn_over_budget (a hook that never bound fakes every no-fire — seed-data-thin)",
         "stamp defaults (beforeInsert): POST /api/v1/data/showcase_inquiry {name:'os-qa-<runid>', email, message} — email and message are required, so a name-only body answers 400 VALIDATION_FAILED before any hook runs — OMITTING status AND source; re-read via GET and confirm source == 'web' — the hook is the SOLE producer of that value (the source field carries no default), so a correct read proves the hook fired; status == 'new' corroborates but is NOT hook-attributable alone (the 'new' status option is default:true)",
-        "title trim (beforeInsert + beforeUpdate): POST /api/v1/data/showcase_task with title '  os-qa-<runid>  ' (leading/trailing spaces) and valid required fields; re-read → title == 'os-qa-<runid>' (insert trim); then PATCH the same row's title to another padded value and re-read → trimmed again (update trim); ONE multi-event hook covered both",
+        "title trim (beforeInsert + beforeUpdate): POST /api/v1/data/showcase_task with title '  os-qa-<runid>  ' (leading/trailing spaces), status, and project = a seeded showcase_project id (project is a required master_detail, examples/app-showcase/src/data/objects/task.object.ts; without it the POST answers 400 VALIDATION_FAILED, required, and no hook effect can be read); re-read → title == 'os-qa-<runid>' (insert trim); then PATCH the same row's title to another padded value and re-read → trimmed again (update trim); ONE multi-event hook covered both",
         "completion audit — FIRES (transition): PATCH /api/v1/data/showcase_task/<Build homepage id> {done:true} (previous done:false); after the HTTP response resolves, settle briefly (the audit is async fire-and-forget, it runs after the write returns), then read the server log for 'task completed: Build homepage'",
         "completion audit — DOES NOT FIRE (two-root proof): PATCH an already-done task (<App wireframes id>, done:true) changing ONLY priority (medium→high), leaving done untouched; settle; confirm NO new 'task completed: App wireframes' line — previous.done == true makes the transition condition false even though record.done == true",
         "over-budget warn — FIRES: PATCH /api/v1/data/showcase_project/<Data Platform id> {spent:650000} (budget 600000 → over budget, but ≤ 720000 so the spent_within_budget rule still permits the write); settle; read the log for 'project over budget: Data Platform (650000 / 600000)'",
@@ -4308,6 +4345,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the two dogfood pins that score acceptance[0]–[9] and negative[0]–[4] over REST and the server log (#26573 slice 3): the showcase hooks for [0]–[5], scratch hooks for [6]–[9]. The 'NOT yet dogfood-pinned — drive them by hand' sentence is retired. No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-14",
+          "change": "steps[2] names showcase_task's required project, and fixtures.requires[3] names the package-less hook PUT (QA run #33048, comment 6846028996): project is a required master_detail (examples/app-showcase/src/data/objects/task.object.ts), so a padded-title POST without it answers 400 before the hook's effect is readable; and hook is allowRuntimeCreate (packages/spec/src/kernel/metadata-plugin.zod.ts), so a fresh-name PUT with no ?package= saves env-wide. No clause changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -4316,7 +4359,7 @@
       "title": "Per-type CONSTRAINT enforcement on the write path (not just widget render): length/range/option/reference/computed limits, and where the platform deliberately does NOT enforce",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4325,7 +4368,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_field_zoo (examples/app-showcase/src/data/objects/field-zoo.object.ts): name text maxLength 200; f_number min 0 max 1000; f_currency min 0 currencyConfig{currencyMode fixed, defaultCurrency USD}, no scale and no precision (`scale` is retired from currency); f_percent min 0 max 100; f_select {low,medium,high}; f_multiselect {red,green,blue}; f_lookup→showcase_account; f_master_detail→showcase_project; f_tree→showcase_field_zoo (self-reference); f_autonumber (default counter, NO autonumberFormat); f_formula = f_number*f_percent/100",
+          "showcase_field_zoo (examples/app-showcase/src/data/objects/field-zoo.object.ts): name text maxLength 200; f_number min 0 max 1000; f_currency min 0 currencyConfig{currencyMode fixed, defaultCurrency USD}, no scale and no precision (`scale` is retired from currency); f_percent min 0 max 100; f_select {low,medium,high}; f_multiselect {red,green,blue}; f_lookup→showcase_account; f_master_detail→showcase_project, required: true — so every zoo POST in steps[1]–[8] carries f_master_detail = a seeded showcase_project id, or the refusal under test arrives beside a second 'required' field error; f_tree→showcase_field_zoo (self-reference); f_autonumber (default counter, NO autonumberFormat); f_formula = f_number*f_percent/100",
           "showcase_invoice (invoice.object.ts): status select {draft,sent,paid,void} required; account lookup with lookupFilters status!=churned (also guarded by the script validation no_invoice_for_churned_account); contact lookup with dependsOn ['account']; total summary(sum showcase_invoice_line.amount) — the summary carrier the zoo lacks"
         ],
         "knownGaps": [
@@ -4361,7 +4404,7 @@
       ],
       "steps": [
         "boot the showcase on its own port and DB; sign in as the seeded admin; capture an API token for direct /api/v1/data/* POST/PATCH/GET",
-        "STRING length: POST /api/v1/data/showcase_field_zoo with name = a 201-char string (maxLength 200) and capture the refusal; then POST a 200-char name and capture success — confirm the long value was NOT silently truncated-and-stored",
+        "STRING length (every zoo body from here to steps[8] also carries f_master_detail = a seeded showcase_project id, the zoo's one required field — fixtures.requires[0]): POST /api/v1/data/showcase_field_zoo with name = a 201-char string (maxLength 200) and capture the refusal; then POST a 200-char name and capture success — confirm the long value was NOT silently truncated-and-stored",
         "NUMBER range: POST f_number = -1, then = 1001, then a non-number ('abc'); capture each refusal; POST f_number = 500 and re-read verbatim",
         "SCALE: in a writable package (the metadata-authoring-roundtrip fixture), author a scratch object with a number field declaring scale 2; POST 1234.567 → 400 with a max_scale field error and no row, POST 1234.56 → 201 read back verbatim. Then try to save a currency field declaring scale 2 → refused at save (422). Control: POST f_currency = 1234.567 on the zoo → 201 and read back 1234.567, because currency carries no scale",
         "SELECT server boundary: POST f_select = 'not-a-value' AND (second carrier) POST showcase_invoice status = 'archived'; capture both invalid_option refusals with their options[] echo; confirm neither row count grew",
@@ -4483,6 +4526,12 @@
           "date": "2026-10-31",
           "change": "acceptance[0]'s clause, acceptance[5] (verify and evidence), steps[6], fixtures.requires[1] and knownGaps[2] corrected. From QA run #27438 (W3-C2b, at c4c515ad; the A5 finding line is truncated in the record, so its tail was read from source; wave anchor #27377, wave-3 accuracy slice S1). acceptance[0] named text/textarea/email/url/phone length, but on the zoo only `name` declares a maxLength (200); the clause now names that carrier and says the other string types carry no bound. The existence-only reference boundary is shown on the dependsOn carrier (showcase_invoice.contact from another account → 201): the lookupFilters carrier's churned-account case is refused by the app's no_invoice_for_churned_account script rule, not by the reference gate. Read at base a0f865491d: field-zoo.object.ts, invoice.object.ts (contact dependsOn, account lookupFilters, the script validation). The reject-not-truncate and existence-only contracts are unchanged",
           "ref": "#27438"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[0] and steps[1] name the zoo's required f_master_detail (QA run #33048, comment 6846028996): it is Field.masterDetail('showcase_project', { required: true }) (examples/app-showcase/src/data/objects/field-zoo.object.ts), so a 201-char probe without it answered two field errors (max_length + required). Every zoo POST in steps[1]–[8] carries it. No clause changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -4491,7 +4540,7 @@
       "title": "Cascade clear-semantics and the server boundary: stale-child clear on parent change, the WRITTEN-value server gate, and where cascade scope is client-only",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4528,7 +4577,7 @@
         {
           "clause": "SELECT server WRITTEN-value gate: a directly-POSTed child inconsistent with its parent (both in the payload) is rejected with code 'invalid_option' naming province; the consistent one is accepted — the objectql rule-validator, not the picker, is the boundary",
           "oracle": "api",
-          "verify": "{country:'cn',province:'ca'} → invalid_option (message key option_unavailable) on province; {country:'cn',province:'zj'} → 201 (the write is a create). rule-validator.ts evaluateOptionVisibility re-evaluates the picked option's visibleWhen over the merged record. Pinned at the HTTP door by objectui e2e/live/cascading-options.spec.ts 'the server rejects an out-of-set option value, and accepts an in-set one' ({country:'us', province:'zj'} → 400 VALIDATION_FAILED with invalid_option on province; {country:'cn', province:'zj'} → 201). The pin drives {country:'us', province:'zj'}, not this verify's cn/ca vector, and asserts the code alone, never the option_unavailable message key: the cn/ca refusal and its message key are the run's. packages/objectql/src/validation/rule-validator.option-visibility.test.ts calls evaluateValidationRules directly: validator-layer evidence only, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives)",
+          "verify": "{country:'cn',province:'ca'} → 400 VALIDATION_FAILED with code invalid_option on province and the rendered message (\"Province / State: option 'ca' is not available\"); option_unavailable is the server-side messageKey that message is rendered from (packages/objectql/src/validation/rule-validator.ts, invalid_option / messageKey 'option_unavailable') and is not in the HTTP body, so score on the code; {country:'cn',province:'zj'} → 201 (the write is a create). rule-validator.ts evaluateOptionVisibility re-evaluates the picked option's visibleWhen over the merged record. Pinned at the HTTP door by objectui e2e/live/cascading-options.spec.ts 'the server rejects an out-of-set option value, and accepts an in-set one' ({country:'us', province:'zj'} → 400 VALIDATION_FAILED with invalid_option on province; {country:'cn', province:'zj'} → 201). The pin drives {country:'us', province:'zj'}, not this verify's cn/ca vector, and asserts the code alone: the cn/ca refusal and its rendered message are the run's. packages/objectql/src/validation/rule-validator.option-visibility.test.ts calls evaluateValidationRules directly: validator-layer evidence only, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives)",
           "evidence": "both responses"
         },
         {
@@ -4633,6 +4682,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin for acceptance[2], [4], [5] and negative[2] at the REST data door (#26573 slice 2). The two KNOWN GAP clauses are pinned as recorded, 201/200 today, so new server enforcement turns them red to be filed rather than read as a pass. acceptance[0] and [1] keep the objectui pin; acceptance[3] stays a browser leg. No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-14",
+          "change": "acceptance[1].verify re-pointed to the wire (QA run #33048, comment 6846028996): the 400 carries code invalid_option and the rendered message, and option_unavailable is the messageKey the server renders it from (packages/objectql/src/validation/rule-validator.ts), absent from the HTTP body. The clause already scores on the code; the verify no longer asks for a key the body does not carry. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -4773,7 +4828,7 @@
       "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4792,7 +4847,7 @@
       },
       "steps": [
         "boot the showcase on its own port and DB; sign in as the seeded admin; keep an API token",
-        "author the scratch carrier: install a scratch package that DECLARES its namespace — POST /api/v1/packages { manifest: { id: 'com.objectstack.qa.group', name: 'QA field-group fixture', version: '1.0.0', type: 'app', namespace: 'qagroup' }, enableOnInstall: true } (a manifest with no namespace gets one derived from the id's last segment, and the object save then answers 422 NAMESPACE_PREFIX; not 'qa', which attachments-storage's qa-scratch-authz package owns — a second 'qa' install answers 422 NAMESPACE_CONFLICT) — then PUT /api/v1/meta/object/qagroup_group_gate?package=com.objectstack.qa.group with a `kind` select (options basic|pro, basic default), two member fields declaring group: 'pro_details', fieldGroups: [{ key: 'pro_details', label: 'Pro details', visibleWhen: \"record.kind == 'pro'\" }], and highlightFields: ['kind'] — without highlightFields the derived detail page puts every field in its highlight strip and draws no body sections, so step 5's detail half has nothing to observe — the same call sequence the area's qa-feeds-disabled recipe grounds",
+        "author the scratch carrier: install a scratch package that DECLARES its namespace — POST /api/v1/packages { manifest: { id: 'com.objectstack.qa.group', name: 'QA field-group fixture', version: '1.0.0', type: 'app', namespace: 'qagroup' }, enableOnInstall: true } (a manifest with no namespace gets one derived from the id's last segment, and the object save then answers 422 NAMESPACE_PREFIX; not 'qa', which attachments-storage's qa-scratch-authz package owns — a second 'qa' install answers 422 NAMESPACE_CONFLICT) — then PUT /api/v1/meta/object/qagroup_group_gate?package=com.objectstack.qa.group with sharingModel declared (e.g. 'public_read_write': an object body without it answers 422 INVALID_METADATA security-owd-unset at objects.qagroup_group_gate.sharingModel), a `kind` select (options basic|pro, basic default), two member fields declaring group: 'pro_details', fieldGroups: [{ key: 'pro_details', label: 'Pro details', visibleWhen: \"record.kind == 'pro'\" }], and highlightFields: ['kind'] — without highlightFields the derived detail page puts every field in its highlight strip and draws no body sections, so step 5's detail half has nothing to observe — the same call sequence the area's qa-feeds-disabled recipe grounds",
         "GET the object back over /api/v1/meta and read fieldGroups[0].visibleWhen — expect the body AS AUTHORED: a bare string comes back a bare string, because runtime-authored object metadata persists verbatim (ADR-0005 appendix (c)). Then PUT the envelope spelling and read it back the same way. The string → envelope normalization belongs to the schema parse and is proven by the batch20 pin (step 5), not by this read",
         "PUT a second draft spelling the key `visibleOn` and capture the refusal body",
         "run the spec pins: vitest run over packages/spec/src/data/object-strictness-batch20.test.ts and field-group-layout.test.ts",
@@ -4915,6 +4970,12 @@
           "date": "2026-10-31",
           "change": "steps[5] pre-fills a member value before the console leg. From QA run #27441 (W3-C3b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). The record page's details sections default hideEmpty to true (record-details.tsx resolves `s.hideEmpty ?? true`, and DetailSection hides an all-empty section from a reader), so an empty Pro details section is absent on the detail page whatever kind says, and a run could score the gate from an absence the gate did not cause. Read at base a0f865491d. No clause changed",
           "ref": "#27441"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-14",
+          "change": "steps[1]'s object body names sharingModel (QA run #33048, comment 6846028996): the runtime publish door enforces security-owd-unset (packages/spec/src/kernel/metadata-create-seeds.ts), so the PUT as written answered 422 INVALID_METADATA at objects.qagroup_group_gate.sharingModel. No clause changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -5335,7 +5396,7 @@
       "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the record page's sys_audit_log field-change read and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -5394,7 +5455,7 @@
       "negative": [
         "an untracked edit producing an old→new diff in the sys_activity summary is a FAIL — trackHistory is opt-in per field (spec default false, object.zod.ts family note), and the per-field opt-in governs exactly that surface. ⛔ Not the timeline stream's audit-log lines (on a trackHistory object they fill the Changes chip, and the stream's sys_activity `updated` rows step aside for them: ui/packages/plugin-detail/src/recordTimelineStream.ts#mergeTimelineStream): they come from sys_audit_log (the compliance audit, ui/packages/app-shell/src/views/RecordDetailView.tsx), which records every field and is not per-field-gated, so 'Website old → new' there for the untracked field is correct; sys_activity.metadata also carries raw old/new for untracked fields by design — only the rendered summary is gated (QA runs #24616, #27438)",
         "a sys_audit_log read on the task detail is a FAIL — per-field flags without the object-level opt-in must not summon the field-change history; judged on the network log, never on an empty Changes chip or a missing tab (acceptance[2].verify says why)",
-        "a tracked select rendering raw option VALUES ('in_progress') instead of labels is a FAIL (#7289 closed exactly that)"
+        "a tracked select rendering raw option VALUES ('in_progress') instead of labels is a FAIL (#7289 closed exactly that). To stage it on showcase_task's status, walk its state machine: a direct backlog → in_progress PATCH answers 400 invalid_transition, so PATCH backlog → todo → in_progress (examples/app-showcase/src/data/objects/task.object.ts, transitions)"
       ],
       "traps": [
         "hydration-race",
@@ -5477,6 +5538,12 @@
           "date": "2026-11-01",
           "change": "Two QA run #28656 (W3-RT) findings. steps[3] said 'No width draws a tab strip on the synthesized page', stale since #28469: the record page draws a tab row, Overview · Activity · the related panels (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row), which #28656 read at 1440, 1000 and 700 px. The step now opens the stream from the Activity tab, the 动态 panel header, or ?related=timeline. automated.ref names a requirement of ui/e2e/live/record-history-display.spec.ts: it runs only against the vite console (LIVE_APP_URL, default port 5180, ui/playwright.live.config.ts; its page.goto paths are root-relative), not a built /_console boot. acceptance[2] is unaffected. No clause changed. Re-verified against source at base 1c5b1773ec. Wave anchor #27377, wave-3 accuracy slice S10 (#28701); findings parked in anchor comment 6557904764",
           "ref": "#28656"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-14",
+          "change": "negative[2] says how to stage the status change it reads (QA run #33048, comment 6846028996): showcase_task's status runs a state machine (examples/app-showcase/src/data/objects/task.object.ts transitions: backlog → todo → in_progress), so a direct backlog → in_progress PATCH answers 400 invalid_transition. No clause changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -6398,7 +6465,7 @@
       "title": "Undo a business-record delete from its toast: the confirm asks without promising permanence, the toast offers Undo, and Undo restores the record through the recycle bin, while a platform-object delete keeps \"cannot be undone\"",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -6417,14 +6484,14 @@
         "read the toast; click its Undo before it closes",
         "reload the project's record page and its Tasks related list",
         "from the showcase_project list view, delete QA-RB2-<run> from its row menu, read the toast and click Undo",
-        "select two rows of this run in the list and bulk-delete them; read the toast",
+        "bulk delete on Tasks: in the showcase_task All Tasks list select the two tasks of this run (the ones under PID) and bulk-delete them; read the toast. ⛔ Not on the project list: the stock showcase's only project grid (All Projects) declares its own bulkActionDefs (examples/app-showcase/src/ui/views/project.view.ts), and a grid that declares them draws no implicit bulk Delete (ui/packages/plugin-grid/src/ObjectGrid.tsx, effectiveBulkActions), so no project surface offers a bulk delete",
         "open Setup → Exchange Rates (or any sys_ object the admin may delete), choose Delete on a scratch row and read the confirm text, then cancel"
       ],
       "acceptance": [
         {
           "clause": "a business-object delete asks the question alone, with no permanence promise",
           "oracle": "dom",
-          "verify": "the dialog body reads \"Are you sure you want to delete this record?\" (objectActions.deleteConfirmQuestion) and not \"…This cannot be undone.\" (ui/packages/core/src/actions/recordDelete.ts#recordDelete, confirmText)",
+          "verify": "the dialog body reads \"Are you sure you want to delete this record?\" (objectActions.deleteConfirmQuestion) — on a record with cascading children followed by a second sentence naming them, \"This also deletes their related records in: …\" (objectActions.deleteCascade; on PID it names Task among others) — and not \"…This cannot be undone.\" (ui/packages/core/src/actions/recordDelete.ts#recordDelete, confirmText)",
           "evidence": "a screenshot of the dialog"
         },
         {
@@ -6436,7 +6503,7 @@
         {
           "clause": "a list-row delete offers the same Undo, and a bulk delete keeps its summary toast with no Undo",
           "oracle": "dom",
-          "verify": "the row delete's toast carries Undo and restores the row; the bulk toast reads \"Deleted 2 Project records\" with no action (recordDelete: a batch keeps its summary toast)",
+          "verify": "the row delete's toast carries Undo and restores the row; the bulk toast on the All Tasks list (steps[4]) reads \"Deleted 2 Task records\" with no action (recordDelete: a batch keeps its summary toast)",
           "evidence": "the two toasts and the list after Undo"
         },
         {
@@ -6471,6 +6538,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0148 recycle bin: undo a delete from its toast (#31795, #31877). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
           "ref": "#32020"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "steps[4], acceptance[0].verify and acceptance[2].verify re-pointed (checklist-accuracy notes of QA run #32940, parked in its body and in #33048 comment 6846028996 and #33094 comment 6852480973). The bulk leg moves to the showcase_task All Tasks list: the only project grid declares bulkActionDefs (examples/app-showcase/src/ui/views/project.view.ts), and ObjectGrid draws the implicit bulk Delete only when a grid declares none (ui/packages/plugin-grid/src/ObjectGrid.tsx effectiveBulkActions), so the expected toast is 'Deleted 2 Task records'. The confirm dialog on a record with cascading children carries a second sentence naming them (ui/packages/core/src/actions/recordDelete.ts, objectActions.deleteCascade); it is still no permanence promise. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -6680,7 +6753,7 @@
       "title": "An action's param dialog runs its declared preflight read: the panel moves from loading to ready with the declared fields, a seeded param is drawn read-only from the answer and submitted as it, and a failed read draws the error panel, leaves the seed empty and holds Confirm",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -6695,7 +6768,8 @@
           "one seeded showcase_task with a title; record its id, title and estimate_hours"
         ],
         "knownGaps": [
-          "the panel's `waiting` state (a URL hole on a param not yet filled), a stale answer dropped after the URL moved on, and the seed cleared on a URL change have no live leg here: a `${param.X}` hole needs a query parameter the record read accepts, and GET /api/v1/data/OBJECT/ID refuses every parameter but select and expand (packages/rest/src/rest-server.ts#DATA_RECORD_READ_PARAMS). acceptance[4] scores them from the pins"
+          "the panel's `waiting` state (a URL hole on a param not yet filled), a stale answer dropped after the URL moved on, and the seed cleared on a URL change have no live leg here: a `${param.X}` hole needs a query parameter the record read accepts, and GET /api/v1/data/OBJECT/ID refuses every parameter but select and expand (packages/rest/src/rest-server.ts#DATA_RECORD_READ_PARAMS). acceptance[4] scores them from the pins",
+          "the two scratch actions draw NO button on a showcase_task record page as stock ships it: that object's default record page is a custom page (examples/app-showcase/src/ui/pages/task-detail.page.ts, isDefault) whose page:header lists its header actions BY ID, so a runtime action declaring location record_header is not drawn there (QA run #32940; #33094 comment 6852480973). The fixture needs the actions on a record page that draws them: an object served by the synthesized default record page (no isDefault page in examples/app-showcase/src/ui/pages), with the read URL, path and fields re-pointed to it, or the task page's header list extended by a metadata overlay for the run and reverted afterwards (the shape the 18.4.0 round 2 run passed on). Record which one the verdict rests on"
         ]
       },
       "steps": [
@@ -6764,6 +6838,12 @@
           "date": "2026-11-10",
           "change": "initial — the console half of an action's `preflight` read (#31808) and its bundle labels (#31937). Scoped sweep #32269 (epic #32022 M3, theme 6: action preflight and page bindings), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "fixtures.knownGaps gains the record-page fact behind QA run #32940's fixture note (#32908 parked line; #33094 comment 6852480973): showcase_task's default record page is task-detail.page.ts (isDefault), whose page:header lists its actions by id, so the two scratch record_header actions draw no button there. The gap names the two shapes a run can use and asks it to record which; no fixture body was rewritten, because neither shape was driven at this base. No clause changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },

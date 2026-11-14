@@ -1522,13 +1522,18 @@ export async function supersede({ workflow, dryRun = false, env = process.env, h
  * waiting runs through `collectWaitingRuns` (the `?status=waiting` filter PLUS
  * each version commit's push run by `head_sha`, since the filter was measured
  * omitting a waiting run) and the in-flight runs through `collectPublishRuns`
- * (`in_progress` and `queued`), merged by id with the jobs each read. Throws
- * on anything unread -- a `TransientReadFailure` after the retries, a status
+ * (`in_progress` and `queued`), merged by id with the jobs each read; a run
+ * in flight whose jobs neither reader read has them read here. A status
  * filter whose count stays above its page after the re-reads `budget` allows
- * (the run's one `boardReadBudget`, the one `http` retries on), or any other
- * failed read -- which the caller reports NOT MEASURED, never "clear".
+ * (the run's one `boardReadBudget`, the one `http` retries on) is resolved by
+ * the in-flight reader's walk of the unfiltered runs back to `now` minus 31
+ * days (release-pending-publish.mjs, `readWholeRunList`): a run whose row
+ * lagged is judged, a count naming no run is recorded with its proof. Throws
+ * on anything unread -- a `TransientReadFailure` after the retries, an unread
+ * or unbounded walk, or any other failed read -- which the caller reports NOT
+ * MEASURED, never "clear".
  */
-export async function readStableLane({ http, repo, workflow, currentRunId, versionCommits, budget }) {
+export async function readStableLane({ http, repo, workflow, currentRunId, versionCommits, budget, now = Date.now() }) {
   // The walk is a generator (one `git show` per version commit): the newest
   // version commit's tips are taken off the front and the rest is handed on
   // unwalked, so the sweep's own bounds (its read-back and cap) still apply.
@@ -1538,20 +1543,34 @@ export async function readStableLane({ http, repo, workflow, currentRunId, versi
     if (!first.done) yield first.value;
     yield* iter;
   };
-  const waiting = await collectWaitingRuns({ http, repo, workflow, versionCommits: rest(), currentRunId });
-  const inFlight = await collectPublishRuns({ http, repo, workflow, tips: first.done ? [] : first.value.tips, currentRunId, budget });
+  const waiting = await collectWaitingRuns({ http, repo, workflow, versionCommits: rest(), currentRunId, now });
+  const inFlight = await collectPublishRuns({ http, repo, workflow, tips: first.done ? [] : first.value.tips, currentRunId, budget, now });
   const byId = new Map();
   for (const run of [...waiting.runs, ...inFlight.runs]) {
     const id = String(run.id);
     const prev = byId.get(id);
-    // The first reading that holds jobs speaks for the run (the waiting
-    // reader leaves `[]` on a run it did not read past its status).
-    const jobs = prev && Array.isArray(prev.jobs) && prev.jobs.length > 0 ? prev.jobs : run.jobs;
+    // A reading that read the jobs speaks for the run: `null` is NOT READ
+    // (the waiting reader leaves it on a run it did not read past its status).
+    const jobs = prev && Array.isArray(prev.jobs) ? prev.jobs : run.jobs;
     byId.set(id, { id, event: run.event, status: run.status, jobs });
   }
+  // A run still in flight that only the waiting reader found -- an older
+  // version commit's push run, which the in-flight reader does not probe --
+  // has its jobs read here, so a publish running in it is judged, never
+  // merged as a run holding no job. The judge passes over the calling run.
+  const jobsRead = [];
+  for (const run of byId.values()) {
+    if (run.id === String(currentRunId) || run.status === 'completed' || Array.isArray(run.jobs)) continue;
+    const what = `listing run ${run.id}'s jobs`;
+    const jobs = expectOk(await http('GET', `/repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`), what);
+    if (!jobs || !Array.isArray(jobs.jobs)) throw new Error(`${what} answered no jobs list`);
+    run.jobs = jobs.jobs.map((j) => ({ name: j.name, status: j.status }));
+    jobsRead.push(run.id);
+  }
+  const extra = jobsRead.length === 0 ? '' : `; jobs read for the waiting reader's in-flight run(s) ${jobsRead.join(', ')}`;
   return {
     runs: [...byId.values()],
-    readings: `\`?status=waiting\` listed ${waiting.filtered.ids.length} run(s), ${waiting.targeted.pushes.length} version-commit push(es) read, ${waiting.targeted.probes} head_sha probe(s); in flight: ${inFlight.readings}`,
+    readings: `\`?status=waiting\` listed ${waiting.filtered.ids.length} run(s), ${waiting.targeted.pushes.length} version-commit push(es) read, ${waiting.targeted.probes} head_sha probe(s); in flight: ${inFlight.readings}${extra}`,
     anomalies: waiting.anomalies,
   };
 }
@@ -1559,11 +1578,11 @@ export async function readStableLane({ http, repo, workflow, currentRunId, versi
 /**
  * `stable-lane`: read, then judge. Reads only -- the client refuses every
  * non-GET structurally (`dryRun: true`), so this mode cannot cancel or write.
- * `env`, `http`, `sleep` and `versionCommits` are injectable for the self-test;
- * the defaults are the live job's (the version commits walked on main's tip as
- * this checkout fetched it, `fetch-depth: 0`).
+ * `env`, `http`, `sleep`, `versionCommits` and `now` are injectable for the
+ * self-test; the defaults are the live job's (the version commits walked on
+ * main's tip as this checkout fetched it, `fetch-depth: 0`; the clock).
  */
-export async function stableLane({ workflow, env = process.env, http = null, sleep, versionCommits = null, root = REPO_ROOT, mainRef = MAIN_REF }) {
+export async function stableLane({ workflow, env = process.env, http = null, sleep, versionCommits = null, root = REPO_ROOT, mainRef = MAIN_REF, now = Date.now() }) {
   const repo = env.GITHUB_REPOSITORY;
   if (!repo) throw new Error('GITHUB_REPOSITORY is required');
   const currentRunId = env.GITHUB_RUN_ID || '';
@@ -1573,7 +1592,7 @@ export async function stableLane({ workflow, env = process.env, http = null, sle
   // in-flight listing's re-reads spend it alike.
   const budget = boardReadBudget({ sleep });
   const reads = retryingReads(raw, budget);
-  const read = await readStableLane({ http: reads, repo, workflow, currentRunId, budget, versionCommits: versionCommits ?? versionCommitsOf({ cwd: root, head: mainRef }) });
+  const read = await readStableLane({ http: reads, repo, workflow, currentRunId, budget, now, versionCommits: versionCommits ?? versionCommitsOf({ cwd: root, head: mainRef }) });
   return { ...judgeStableLane({ runs: read.runs, currentRunId }), read };
 }
 
@@ -1593,7 +1612,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the registry read: 404 is never published, anything unread is never guessed': 5,
   'verify: next names the snapshot, latest never moves to it': 4,
   'the same-commit check: next records the commit it was cut from, read back from npm': 10,
-  'the stable lane: a waiting stable prompt or a running stable publish refuses, read as the sweep reads': 13,
+  'the stable lane: a waiting stable prompt or a running stable publish refuses, read as the sweep reads': 16,
   'the quiet skip: each expected kind skips on the schedule and refuses loudly on a dispatch; the unexpected stay red': 13,
   'record-commit: gitHead into every manifest, read back by the guard': 4,
   'dry-run: every early return records its reason': 3,
@@ -1876,8 +1895,10 @@ export async function selfTest() {
   });
   // The live path, with the stable sweep's readers over a stubbed Actions API.
   // `counts[status]` is that filter's `total_count`, read by read, its last
-  // value repeating; absent, the count is what the page lists.
-  const laneHttp = ({ waiting = [], inProgress = [], queued = [], pushes = {}, runs = {}, fail = null, counts = {} }) => {
+  // value repeating; absent, the count is what the page lists. `walkRows` is
+  // page 1 of the UNFILTERED list the walk behind a short page reads, each
+  // `{ id, status }` (later pages empty).
+  const laneHttp = ({ waiting = [], inProgress = [], queued = [], pushes = {}, runs = {}, fail = null, counts = {}, walkRows = [] }) => {
     const seen = [];
     const reads = {};
     const http = async (method, path) => {
@@ -1892,6 +1913,11 @@ export async function selfTest() {
       if (/\/runs\?status=waiting/.test(path)) return list(waiting);
       if (/\/runs\?status=in_progress/.test(path)) return list(inProgress, 'in_progress');
       if (/\/runs\?status=queued/.test(path)) return list(queued, 'queued');
+      const walkPage = /\/workflows\/[^/]+\/runs\?per_page=\d+&page=(\d+)/.exec(path);
+      if (walkPage) {
+        const rows = walkPage[1] === '1' ? walkRows.map((w) => ({ ...w, event: runs[w.id]?.event ?? 'push', created_at: '2026-11-14T00:00:00Z' })) : [];
+        return { status: 200, body: { total_count: rows.length, workflow_runs: rows } };
+      }
       const sha = /\/runs\?head_sha=([0-9a-f]+)/.exec(path);
       if (sha) return list(pushes[sha[1]] ?? []);
       const m = /\/actions\/runs\/(\d+)(\/jobs|\/pending_deployments)?/.exec(path);
@@ -1938,14 +1964,38 @@ export async function selfTest() {
     const r = await lane(s);
     return r.refusals.length === 0 && r.unread.length === 0 && s.reads.in_progress === 2;
   });
-  await t('⛔ live: a count still above the page after every re-read the run allows THROWS (NOT MEASURED) -- never "clear"', async () => {
-    const s = laneHttp({ inProgress: [200], counts: { in_progress: [2] }, runs: { 200: current } });
+  // Run 43540146973 at 01:24:46Z, 11-14: the count stayed at 2 over the
+  // calling run alone through every re-read, while no other release.yml run
+  // was alive. The walk behind the short page is what tells the two apart.
+  const walked = (s) => s.seen.filter((x) => /[?&]page=\d/.test(x.path)).length;
+  await t('⭐ live: the 11-14 reading -- a count still above the calling run alone after every re-read, and a walk listing no other run in progress -> a pass, with the proof on the readings line', async () => {
+    const s = laneHttp({ inProgress: [200], counts: { in_progress: [2] }, runs: { 200: current, 90: { event: 'push', status: 'completed' } }, walkRows: [{ id: 200, status: 'in_progress' }, { id: 90, status: 'completed' }] });
+    const r = await lane(s);
+    return r.refusals.length === 0 && r.unread.length === 0 && s.reads.in_progress === 3 && walked(s) === 1 &&
+      /count 2 over page 1 names no run: the walk of 2 runs back to \S+ \(the start of history, 1 page\) found none other/.test(r.read.readings);
+  });
+  await t('⛔ live: a count above the page whose walk finds a run in progress the rows left out -> that run is read with its jobs, and its stable publish refuses', async () => {
+    const s = laneHttp({ inProgress: [200], counts: { in_progress: [2] }, runs: { 200: current, 160: { event: 'workflow_dispatch', status: 'in_progress', jobs: [publishJob('in_progress')] } }, walkRows: [{ id: 160, status: 'in_progress' }, { id: 200, status: 'in_progress' }] });
+    const r = await lane(s);
+    return r.refusals.length === 1 && /stable publish is running/.test(r.refusals[0].text) && r.refusals[0].text.includes('run 160') &&
+      s.seen.some((x) => /\/runs\/160\/jobs/.test(x.path)) && /found 1 more in in_progress \[160\], whose row lagged the filter/.test(r.read.readings);
+  });
+  await t('⛔ live: a count above the page whose walk cannot be read THROWS (NOT MEASURED) -- never "clear"', async () => {
+    const s = laneHttp({ inProgress: [200], counts: { in_progress: [2] }, runs: { 200: current }, fail: /[?&]page=1(&|$)/ });
     try {
       await lane(s);
       return false;
     } catch (err) {
-      return !(err instanceof TransientReadFailure) && s.reads.in_progress === 3;
+      return s.reads.in_progress === 3 && /the walk of the unfiltered run list, page 1/.test(err.message);
     }
+  });
+  await t('⛔ live: an older version commit\'s push run in flight, found by the waiting reader alone -> its jobs are read here, and its stable publish refuses (never merged as a run holding no job)', async () => {
+    const C3 = 'c'.repeat(40);
+    const older = [...walk, { versionCommit: C3, version: '18.3.0', tips: [C3] }];
+    const s = laneHttp({ inProgress: [200], pushes: { [C3]: [140] }, runs: { 200: current, 140: { event: 'push', status: 'in_progress', jobs: [publishJob('in_progress', '18.3.0')] } } });
+    const r = await stableLane({ workflow: 'release.yml', env: laneEnv, http: s.http, sleep: async () => {}, versionCommits: older });
+    return r.refusals.length === 1 && /stable publish is running/.test(r.refusals[0].text) && r.refusals[0].text.includes('18.3.0') &&
+      s.seen.filter((x) => /\/runs\/140\/jobs/.test(x.path)).length === 1 && /jobs read for the waiting reader's in-flight run\(s\) 140/.test(r.read.readings);
   });
   await t('⛔ live: a total_count that is no number THROWS (NOT MEASURED) on the first read, never re-read', async () => {
     const s = laneHttp({ inProgress: [200], counts: { in_progress: ['1'] }, runs: { 200: current } });

@@ -83,6 +83,9 @@ describe('date subtraction the runtime cannot answer (#28944)', () => {
     ['value', 'daysBetween(record.start_date, today())', null, 'value'],
     ['predicate', 'today() - record.start_date > duration("72h")', null, 'value'],
     ['value', '(today() - record.start_date).getHours()', null, 'value'],
+    // The sub-day form the refusals prescribe: each side parsed, the Duration read.
+    ['value', 'double((datetime(record.end_at) - datetime(record.start_at)).getMinutes()) / 60.0', null, 'value'],
+    ['value', '(now() - datetime(record.start_at)).getHours()', null, 'value'],
     ['predicate', 'record.end_date < record.start_date', null, 'value'],
     ['predicate', 'record.start_date < today()', null, 'value'],
     ['predicate', 'record.start_at > now()', null, 'value'],
@@ -117,6 +120,15 @@ describe('date subtraction the runtime cannot answer (#28944)', () => {
     expect(since.params).toEqual({ reference: 'record.start_date' });
     expect(since.message).toMatch(/reads `\{\}`/);
     expect(since.message).toMatch(/daysBetween\(a, b\)/);
+  });
+
+  it('the sub-day form reads the hours between two date-time fields', () => {
+    const source = 'double((datetime(record.end_at) - datetime(record.start_at)).getMinutes()) / 60.0';
+    expect(validateExpression('value', source, RECORD_SCOPE).ok).toBe(true);
+    const r = celEngine.evaluate({ dialect: 'cel', source }, { record: SERVED_ROW });
+    expect(r).toMatchObject({ ok: true, value: 98 });
+    const half = { ...SERVED_ROW, start_at: '2026-11-05T08:30:00.000Z' };
+    expect(celEngine.evaluate({ dialect: 'cel', source }, { record: half })).toMatchObject({ ok: true, value: 3.5 });
   });
 
   it('judges a flattened (flow) condition the same way, under the flow codes (#30016)', () => {
