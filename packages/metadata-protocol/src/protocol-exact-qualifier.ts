@@ -647,7 +647,9 @@ export function packageLessRowOwners(
     name: string,
     options?: { includeDisabledPackages?: boolean },
 ): string[] {
-    if (!judgesPackageLessRows(registry, type)) return [];
+    // `isPackageScopedType` narrows `type` (its answer is the type's alone);
+    // `judgesPackageLessRows` is a plain boolean (its answer is the registry's too).
+    if (!isPackageScopedType(type) || !judgesPackageLessRows(registry, type)) return [];
     if (isPlatformRequestedBareName(type, name)) return [];
     // [#32183] The served holders: a read judges them, so a package-less row
     // of a name an enabled and a disabled package hold is the enabled one's.
