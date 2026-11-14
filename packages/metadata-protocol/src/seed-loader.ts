@@ -34,7 +34,7 @@ import { resolveSeedRecord } from '@objectstack/formula';
 import {
   bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup,
   temporalComparandKind, temporalStorageForm, type TemporalComparandKind, isMissing,
-  blankAsNullColumns, blankStorageForm, type BlankAsNullReach,
+  blankAsNullColumns, blankStorageForm, type BlankAsNullReach, resolveTenantFieldName,
 } from '@objectstack/core';
 // [#8442] The repo's ONE recogniser for "this throw is a record-validation
 // failure" — duck-typed on `code`/`name`, the same predicate `mapDataError` and
@@ -2926,13 +2926,14 @@ export class SeedLoaderService implements ISeedLoaderService {
    * - `own-organization` — `sys_organization`, the tenant table itself: the load
    *   may name its own organization and no other.
    * - `global` — an author's object (no `managedBy`) with no organization
-   *   column that its author declared global (`tenancy: { enabled: false }`):
-   *   its rows belong to every organization, so the probe is unscoped.
+   *   column that resolves no tenant field at all (`resolveTenantFieldName`,
+   *   the same reading the wall scopes by; e.g. `tenancy: { enabled: false }`):
+   *   no organization walls its rows, so the probe is unscoped.
    * - any other target with no organization column keeps the `organization`
    *   probe, and its refusal is reported, not swallowed: a platform-managed
-   *   table is not a seed target, and an object that is still tenant-scoped
-   *   by another column (`tenancy.tenantField`) is walled per organization, so
-   *   an unscoped probe would borrow another organization's row. A scope rule
+   *   table is not a seed target, and an object that resolves another tenant
+   *   column (`tenancy.tenantField`) is walled per organization, so an
+   *   unscoped probe would borrow another organization's row. A scope rule
    *   for either is not this loader's to invent.
    */
   private async probeScopeOf(targetObject: string): Promise<'organization' | 'members' | 'own-organization' | 'global'> {
@@ -2949,7 +2950,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     if (definition && typeof definition === 'object' && !carriesOrganizationColumn(definition)) {
       if (targetObject === SystemObjectName.USER) scope = 'members';
       else if (targetObject === SystemObjectName.ORGANIZATION) scope = 'own-organization';
-      else if (!(definition as { managedBy?: unknown }).managedBy && isTenancyDisabled(definition)) scope = 'global';
+      else if (!(definition as { managedBy?: unknown }).managedBy && resolveTenantFieldName(definition) === null) scope = 'global';
     }
     this.probeScopeCache.set(targetObject, scope);
     return scope;
@@ -3320,10 +3321,23 @@ export class SeedLoaderService implements ISeedLoaderService {
     recordId: string,
     resolvedValue: unknown,
   ): Promise<void> {
-    await withTransientRetry(() => this.engine.update(deferred.objectName, {
+    const updated = await withTransientRetry(() => this.engine.update(deferred.objectName, {
       id: recordId,
       [deferred.field]: resolvedValue,
     }, this.writeOptionsFor(deferred.rowOrganization) as any)); // [#33206] the organization the row was written as
+    // [#33206] A by-id update that matched no row answers `null`: the row is
+    // gone since pass 1, or (under a walled posture) the organization the write
+    // carries cannot see it. The link was NOT written, so it is never counted
+    // as resolved: the caller reports it like any other failed back-fill.
+    if (updated === null) {
+      throw Object.assign(
+        new Error(
+          `The back-fill update of ${deferred.objectName} '${recordId}' matched no row: the row is gone, or the ` +
+            `organization the write carries cannot see it.`,
+        ),
+        { code: 'SEED_BACKFILL_NO_ROW' },
+      );
+    }
   }
 
   /**

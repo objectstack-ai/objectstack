@@ -372,6 +372,29 @@ describe('#33206 a seed write carries the organization its rows are stamped with
     expect(byName.Child.parent).toBe(byName.Parent.id);
   });
 
+  it('a pass-2 back-fill the write organization cannot see is reported as an error, never counted as resolved', async () => {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    const { engine, metadata, logger } = await boot({ posture: 'isolated', data: [] });
+    // By the time pass 2 writes its link, the source row has moved to another
+    // organization: the by-id update, scoped to the organization the row was
+    // written as, finds no row (ObjectQL answers it with a not-found refusal).
+    engine.registerHook('afterInsert', async (hctx: any) => {
+      if (hctx.input?.data?.name !== 'Parent') return;
+      const [child] = (await engine.find('crm_task', { where: { name: 'Child' }, context: { isSystem: true } } satisfies EngineQueryOptions)) as Row[];
+      await engine.update('crm_task', { id: child.id, organization_id: ORG_SOUTH }, { context: { isSystem: true } } as any);
+    }, { object: 'crm_task' });
+    const loader = new SeedLoaderService(engine as any, metadata as any, logger as any);
+
+    const result = await loader.load({
+      seeds: [{ object: 'crm_task', mode: 'upsert', externalId: 'name', records: [{ name: 'Child', parent: 'Parent' }, { name: 'Parent' }] }],
+      config: { multiPass: true, organizationId: ORG_NORTH },
+    } as any);
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatchObject({ sourceObject: 'crm_task', field: 'parent' });
+    expect(result.errors[0].message).toContain('not found in crm_task');
+  });
+
   it('CONTROL — a load with no organization, pinned or derived, writes with the seed posture unchanged', async () => {
     const { seen } = await boot({ posture: 'single', organizations: false, data: [deals([{ name: 'Deal 1' }])] });
     expect(seen).toHaveLength(1);
