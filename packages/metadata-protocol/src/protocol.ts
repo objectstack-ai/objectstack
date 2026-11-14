@@ -359,6 +359,7 @@ import { legacyOrganizationRowsOf, withoutLegacyOrganizationRows } from './proto
 import { foldObjectExtendersFromRegistry } from './protocol-object-extender-fold.js';
 // [#25467 cut 31] The disabled-package face of the by-name item read.
 import { readMetaItemFace } from './protocol-meta-item-face.js';
+import type { PrereadActiveRows } from './protocol-meta-item-reads.js';
 // [#25467 cut 32] A stored commit row's `items` column read back as its revert plan.
 import { parseCommitItems } from './protocol-commit-items.js';
 // [#25467 cut 33] What a stored overlay row binds: the lock layer, the package binding, the external datasource.
@@ -4157,11 +4158,15 @@ export class ObjectStackProtocolImplementation implements
      * [#24535] `face: 'execution'` skips the serving decorations at this
      * read's exits, and nothing else: see {@link getMetaItemForExecution}. An
      * authoring caller is decorated as the served face is, as before.
+     *
+     * [#32607] `activeRows`: the item's active rows a face already read for
+     * its served-holder judgment ({@link readMetaItemFace}), taken instead of
+     * a second read when they are this read's item's (#24371: one read).
      */
     private async readMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
-    }, opts: { face?: 'served' | 'execution' } = {}) {
+    }, opts: { face?: 'served' | 'execution'; activeRows?: PrereadActiveRows } = {}) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return readMetaItem(protocolHost(this), request, opts);
     }

@@ -756,6 +756,25 @@ describe('[#32607] RestServer: two enabled row holders and no shipper', () => {
         expect(messageOf(layers.body)).not.toContain(WRITES_SENTENCE);
     }, 60_000);
 
+    // [contract review S1] Only the row judgment's own refusal is handed over: a name two packages ship in code,
+    // each with its own bound row, keeps the plain read's refusal (the registry's) on `/layers`, as on `main`.
+    it.each(ORDERS)('%s, A1 CONTROL (S1): /layers of a name two packages ship in code, each with its own stored row, keeps the plain read\'s refusal', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of packages) {
+            host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+            host.registry.registerItem('dashboard', { name: 's1_dash', label: `${label(pkg)} code`, widgets: [] } as any, 'name', pkg);
+            await (host.protocol as any).engine.insert('sys_metadata', {
+                type: 'dashboard', name: 's1_dash', package_id: pkg, state: 'active', scope: 'platform', strategy: 'merge', version: 1,
+                metadata: JSON.stringify({ name: 's1_dash', label: label(pkg), widgets: [] }),
+            });
+        }
+        const read = await host.plain('dashboard', 's1_dash');
+        const layers = await host.layers('dashboard', 's1_dash');
+        expect([read.status, layers.status], JSON.stringify([read.body, layers.body])).toEqual([409, 409]);
+        expect(messageOf(layers.body), JSON.stringify(layers.body)).toBe(messageOf(read.body));
+        expect(messageOf(layers.body)).not.toContain(WRITES_SENTENCE);
+    }, 60_000);
+
     it.each(ORDERS)('%s, A1 CONTROL: /layers of two served row holders beside a disabled one keeps the plain read\'s refusal (#32354 Q2)', async (_order, packages) => {
         const host = setup();
         for (const pkg of [...packages, PKG]) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');

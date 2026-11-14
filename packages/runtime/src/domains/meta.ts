@@ -599,8 +599,12 @@ function metaItemReadGateSources(
                 // [#32607] The plain read's refusal of a name several packages
                 // hold only as stored rows is step 1c's to answer: the
                 // package-less writes' own refusal (#28337), as `RestServer`'s
-                // owner step leaves it. Every other refusal is rethrown.
-                if (!packageId && typeof protocol.packagelessLayeredReadRefusal === 'function'
+                // owner step leaves it. Only that refusal, which the protocol
+                // marks under the registered key below
+                // (`protocol-meta-item-face.ts`); every other error is
+                // rethrown (contract review S1).
+                if (!packageId && (error as Record<symbol, unknown> | null)?.[Symbol.for('objectstack.metadata-protocol.storedRowHoldersRefusal')] === true
+                    && typeof protocol.packagelessLayeredReadRefusal === 'function'
                     && await protocol.packagelessLayeredReadRefusal({ type, name, ...(member !== undefined ? { member } : {}) }) !== undefined) {
                     return false;
                 }
