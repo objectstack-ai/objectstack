@@ -30,6 +30,7 @@ import type { ServiceInfo } from '@objectstack/spec/api';
 import { metaCallerOrganizationId } from '@objectstack/rest';
 import { apiErrorResponse } from './error-envelope.js';
 import { resolveRuntimeVersion } from './runtime-version.js';
+import { readSeedReadiness, type SeedReadiness } from './seed-readiness.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
 // `import * as actionExec from './action-execution.js'` was dropped in #4936:
@@ -388,6 +389,24 @@ function withClusterReading<T extends { status: string }>(
 ): T | (Omit<T, 'status'> & { status: string; cluster: ClusterDriverHealth }) {
     if (!cluster) return body;
     return { ...body, status: cluster.reachable ? body.status : 'degraded', cluster };
+}
+
+/**
+ * A `/ready` 200 body with the boot seed's state folded in (#33233).
+ *
+ * With no reading — no seed pipeline on this kernel — the body is returned AS
+ * GIVEN, the same object and no key added, so a deployment that seeds nothing
+ * answers byte-identically to before. With one, the body gains `seed`:
+ * `'pending'` while a source is still writing, then `'settled'` or `'failed'`
+ * (see `./seed-readiness.ts`). The status code is not touched: a seed still
+ * writing does not take a replica out of rotation.
+ */
+function withSeedReading<T extends { status: string }>(
+    body: T,
+    seed: SeedReadiness | undefined,
+): T | (T & { seed: SeedReadiness }) {
+    if (seed === undefined) return body;
+    return { ...body, seed };
 }
 
 /**
@@ -881,6 +900,11 @@ export class HttpDispatcher {
         // ⛔ The rejected fourth option stays rejected: a failed driver is
         // never filtered OUT of this response to make it green. It is named in
         // `degraded.drivers` on the 200 precisely so alerting still sees it.
+        //
+        // [#33233] Both 200 bodies also say whether the boot seed has landed
+        // (`seed: 'pending' | 'settled' | 'failed'`, see `withSeedReading`),
+        // so a process that does not hold the `os serve` IPC channel can wait
+        // for it. It never changes the status code.
         this.domainRegistry.register({
             prefix: '/ready', match: 'exact', methods: ['GET'],
             handler: async () => {
@@ -897,7 +921,8 @@ export class HttpDispatcher {
                 const { unhealthy, primary } = await this.driverReadiness();
                 if (unhealthy.length === 0) {
                     const cluster = await this.clusterReadiness();
-                    return { handled: true, response: this.success(withClusterReading({ status: 'ready', state }, cluster)) };
+                    const body = withSeedReading({ status: 'ready', state }, readSeedReadiness(host));
+                    return { handled: true, response: this.success(withClusterReading(body, cluster)) };
                 }
                 // #13408: drain only when the PRIMARY datasource is the one
                 // that is down — or when we could not establish which
@@ -914,11 +939,11 @@ export class HttpDispatcher {
                         // only on this branch, so a probe consumer that never
                         // sees a degraded secondary sees exactly what it saw
                         // before #13408.
-                        response: this.success(withClusterReading({
+                        response: this.success(withClusterReading(withSeedReading({
                             status: 'ready',
                             state,
                             degraded: { drivers: unhealthy, primaryDatasource: primary.datasource },
-                        }, cluster)),
+                        }, readSeedReadiness(host)), cluster)),
                     };
                 }
                 // Byte-identical to the pre-#13408 envelope, deliberately: this
