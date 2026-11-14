@@ -318,7 +318,7 @@ describe('the clause that moved out of validateSemanticRoles', () => {
     const findings = validateSemanticRoles(stackOf({ stageField: 'pipeline' }));
     expect(findings.map((f) => f.rule)).toContain(SEMANTIC_ROLE_FIELD_UNKNOWN);
     expect(findings.find((f) => f.rule === SEMANTIC_ROLE_FIELD_UNKNOWN)!.severity).toBe('warning');
-    // …and this rule does not take it: lists only, see the module note.
+    // …and this rule does not take it: the module note keeps it out.
     expect(validateObjectFieldRefs(stackOf({ stageField: 'pipeline' }))).toEqual([]);
   });
 
@@ -334,6 +334,179 @@ describe('the clause that moved out of validateSemanticRoles', () => {
     };
     const findings = validateSemanticRoles({ objects: [external] });
     expect(findings.map((f) => f.rule)).toContain('semantic-role-field-unprovisioned');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#33101] The title pointer and the milestone's watched field — scalars the
+// earlier deferral held back, measured in. Each reader takes the name as a
+// record key, so each is judged verbatim against the authored field map PLUS
+// the registry-injected columns: every correct name passes (the #5378 trap the
+// deferral named), and a name no record carries is refused.
+// ---------------------------------------------------------------------------
+const INJECTED_ON_AN_OWNED_TENANT_OBJECT = [
+  'id', 'created_at', 'created_by', 'updated_at', 'updated_by', 'organization_id', 'owner_id',
+];
+
+describe('validateObjectFieldRefs — nameField / displayNameField (#33101)', () => {
+  it('REFUSES a dangling nameField at `error`, at the pointer\'s path', () => {
+    const findings = validateObjectFieldRefs(stackOf({ nameField: 'nope' }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: OBJECT_FIELD_REF_UNKNOWN,
+      path: 'objects[0].nameField',
+    });
+    // The verdict names the string the author typed, the pointer and the object.
+    expect(findings[0]!.message).toContain('nameField "nope"');
+    expect(findings[0]!.message).toContain('proj_task');
+    expect(findings[0]!.hint).toBe(
+      'Fix the name — the record title is read from this field of the object, spelled exactly; '
+        + 'a name no record carries titles every record by its id.',
+    );
+  });
+
+  it('REFUSES a dangling displayNameField — the deprecated alias the card wrote', () => {
+    const findings = validateObjectFieldRefs(stackOf({ nameField: undefined, displayNameField: 'nope' }));
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [OBJECT_FIELD_REF_UNKNOWN, 'objects[0].displayNameField'],
+    ]);
+  });
+
+  it('reports a name the pair SHARES once, at the alias — the parsed shape copies it onto nameField', () => {
+    const findings = validateObjectFieldRefs(stackOf({ nameField: 'nope', displayNameField: 'nope' }));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].displayNameField']);
+  });
+
+  it('judges each pointer of a pair that says two different things', () => {
+    expect(validateObjectFieldRefs(stackOf({ nameField: 'name', displayNameField: 'nope' }))
+      .map((f) => f.path)).toEqual(['objects[0].displayNameField']);
+    expect(validateObjectFieldRefs(stackOf({ nameField: 'nope', displayNameField: 'name' }))
+      .map((f) => f.path)).toEqual(['objects[0].nameField']);
+  });
+
+  it('passes a pointer at an authored field, on either spelling', () => {
+    expect(validateObjectFieldRefs(stackOf({ nameField: 'health_score' }))).toEqual([]);
+    expect(validateObjectFieldRefs(stackOf({ nameField: undefined, displayNameField: 'name' }))).toEqual([]);
+  });
+
+  it.each(INJECTED_ON_AN_OWNED_TENANT_OBJECT)(
+    'stays silent on nameField: %s — a column the platform injects is a record key',
+    (column) => {
+      expect(validateObjectFieldRefs(stackOf({ ownership: 'user', nameField: column }))).toEqual([]);
+    },
+  );
+
+  it('REFUSES owner_id under `ownership: none` — the platform injects none', () => {
+    expect(validateObjectFieldRefs(stackOf({ ownership: 'none', nameField: 'owner_id' }))
+      .map((f) => f.path)).toEqual(['objects[0].nameField']);
+  });
+
+  it('judges a dotted pointer as ONE name — the title reader takes it verbatim', () => {
+    expect(validateObjectFieldRefs(stackOf({ nameField: 'name.first' }))
+      .map((f) => f.path)).toEqual(['objects[0].nameField']);
+  });
+});
+
+describe('validateObjectFieldRefs — activityMilestones[].field (#33101)', () => {
+  const milestone = (field: unknown) => ({ field, value: 'won', summary: 'Deal won: {name}' });
+  const withStatus = (over: Record<string, unknown>) => stackOf({
+    fields: {
+      name: { type: 'text' },
+      status: { type: 'select', options: [{ label: 'Won', value: 'won' }] },
+    },
+    ...over,
+  });
+
+  it('REFUSES a dangling watched field at `error`, at the milestone\'s `.field`', () => {
+    const findings = validateObjectFieldRefs(withStatus({
+      activityMilestones: [milestone('status'), milestone('nope')],
+    }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: OBJECT_FIELD_REF_UNKNOWN,
+      path: 'objects[0].activityMilestones[1].field',
+    });
+    expect(findings[0]!.message).toContain('activityMilestones[1].field "nope"');
+    expect(findings[0]!.message).toContain('proj_task');
+    expect(findings[0]!.hint).toBe(
+      'Fix `field` — a milestone watches a field of this object (or a column the platform injects '
+        + 'on it), spelled exactly; a name no record carries never fires.',
+    );
+  });
+
+  it('passes a milestone over an authored field', () => {
+    expect(validateObjectFieldRefs(withStatus({ activityMilestones: [milestone('status')] }))).toEqual([]);
+  });
+
+  it.each(INJECTED_ON_AN_OWNED_TENANT_OBJECT)(
+    'stays silent on a milestone watching %s — a column the platform injects is a record key',
+    (column) => {
+      expect(validateObjectFieldRefs(withStatus({ ownership: 'user', activityMilestones: [milestone(column)] })))
+        .toEqual([]);
+    },
+  );
+
+  it('REFUSES owner_id under `ownership: none`, and a dotted name, each as one name', () => {
+    expect(validateObjectFieldRefs(withStatus({
+      ownership: 'none',
+      activityMilestones: [milestone('owner_id'), milestone('status.value')],
+    })).map((f) => f.path)).toEqual([
+      'objects[0].activityMilestones[0].field',
+      'objects[0].activityMilestones[1].field',
+    ]);
+  });
+
+  it('is inert on junk entries and a non-array value', () => {
+    expect(validateObjectFieldRefs(withStatus({ activityMilestones: 'status' }))).toEqual([]);
+    expect(validateObjectFieldRefs(withStatus({
+      activityMilestones: [null, 3, {}, milestone(''), milestone(7)],
+    }))).toEqual([]);
+  });
+});
+
+describe('the #33101 positions at the RUNTIME publish door', () => {
+  // The card's repro body, item by item: the door a Studio, REST `/meta` or
+  // MCP author has, which stored and published both misses before.
+  const probe = (over: Record<string, unknown>) => ({
+    name: 'x_probe',
+    sharingModel: 'public_read_write',
+    fields: { name: { type: 'text' } },
+    ...over,
+  });
+  const write = (item: Record<string, unknown>) => runRuntimeAuthoringRules({
+    type: 'object',
+    item,
+    context: { objects: [] },
+  });
+
+  it('refuses a dangling milestone field, name-keyed on the wire', () => {
+    const result = write(probe({ activityMilestones: [{ field: 'nope', value: 'won', summary: 'x' }] }));
+    const refusal = result.errors.find((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
+    expect(refusal, JSON.stringify(result.errors)).toBeDefined();
+    expect(refusal!.path).toBe('objects.x_probe.activityMilestones[0].field');
+    expect(refusal!.severity).toBe('error');
+  });
+
+  it('refuses a dangling displayNameField, and a dangling nameField', () => {
+    for (const key of ['displayNameField', 'nameField']) {
+      const result = write(probe({ [key]: 'nope' }));
+      const refusals = result.errors.filter((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
+      expect(refusals.map((f) => f.path), JSON.stringify(result.errors)).toEqual([`objects.x_probe.${key}`]);
+    }
+  });
+
+  it('a body whose pointers all resolve still publishes', () => {
+    const result = write(probe({
+      fields: { name: { type: 'text' }, stage: { type: 'select', options: [{ label: 'Won', value: 'won' }] } },
+      displayNameField: 'name',
+      activityMilestones: [
+        { field: 'stage', value: 'won', summary: 'Won: {name}' },
+        { field: 'updated_at', value: 'x', summary: 'x' },
+      ],
+    }));
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
   });
 });
 
@@ -862,6 +1035,11 @@ describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
       'read verbatim',
       '`ownership: \'none\'`',
       '`searchable-field-unknown`',
+      '`nameField`',
+      'reported once, at the alias',
+      '`activityMilestones[].field`',
+      'the milestone never fires',
+      '`stageField` role pointer',
     ]) {
       expect(text, `explanation names ${fact}`).toContain(fact);
     }
@@ -880,6 +1058,9 @@ describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
       '.lookupFilters[',
       '.dependsOn[',
       '.summaryOperations.filter.',
+      '.nameField',
+      '.displayNameField',
+      '.activityMilestones[',
     ]) {
       expect(converted.some((f) => f.path.includes(position)), position).toBe(true);
     }
@@ -898,7 +1079,7 @@ describe('[#22161] one-line fix — object-field-ref-unknown', () => {
     const converted = fired.filter((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
     // Coverage control: every position fired (the verdict block above names
     // them), so the bound reads each prescription.
-    for (const position of ['.highlightFields[', '.publicSharing.redactFields[', '.indexes[', '.relatedListColumns[', '.lookupColumns[', '.lookupFilters[', '.dependsOn[', '.summaryOperations.filter.']) {
+    for (const position of ['.highlightFields[', '.publicSharing.redactFields[', '.indexes[', '.relatedListColumns[', '.lookupColumns[', '.lookupFilters[', '.dependsOn[', '.summaryOperations.filter.', '.nameField', '.displayNameField', '.activityMilestones[']) {
       expect(converted.some((f) => f.path.includes(position)), position).toBe(true);
     }
     for (const f of converted) {
