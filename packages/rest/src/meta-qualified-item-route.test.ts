@@ -490,12 +490,17 @@ describe('a composition with no package-scoped resolver: the protocol\'s 501, wi
         expect501(await drive(QUALIFIED, { type: 'page', ns: '_env', name: 'home' }));
     });
 
+    // The first served `view` read in a worker loads `@objectstack/lint` cold
+    // (metadata-diagnostics.ts attaches its lint warnings lazily): ~0.8s on an
+    // idle box, past 5s on a loaded merge-queue runner. This is the file's only
+    // view read, so it carries that one-off load; the budget is for the load,
+    // not for the read under test.
     it('CONTROL — a type ADR-0150 does not address by package (view) is served as before', async () => {
         registry.registerItem('view', { name: 'all', label: 'alpha view' }, 'name' as never, A);
         const answer = await drive(ITEM, { type: 'view', name: 'all' });
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(labelOf(answer)).toBe('alpha view');
-    });
+    }, 30_000);
 });
 
 /**
