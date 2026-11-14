@@ -132,6 +132,7 @@ const ru = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "Показаны первые {{shown}} из {{total}} записей. Сузьте фильтр.",
     rowCeilingNoteUnknownTotal: "Показаны первые {{shown}} записей. Сузьте фильтр.",
+    ungroupedSection: "Прочее",
   },
   actions: {
     decisionOutput: {

@@ -125,6 +125,7 @@ const ko = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "전체 {{total}}개 중 처음 {{shown}}개를 표시합니다. 필터를 좁히세요.",
     rowCeilingNoteUnknownTotal: "처음 {{shown}}개를 표시합니다. 필터를 좁히세요.",
+    ungroupedSection: "기타",
   },
   actions: {
     decisionOutput: {

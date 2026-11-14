@@ -145,6 +145,12 @@ const base = { type: 'object-form', objectName: 'invoice', mode: 'create' } as c
 const ARMS: Array<{
   label: string;
   mount: (member: Record<string, unknown>) => Promise<HTMLElement>;
+  /**
+   * Headings drawn after the member's own. On the DERIVED arms the fixture's
+   * ungrouped `customer` lands in the trailing bucket, which every arm heads
+   * "Other" (objectstack#33229).
+   */
+  trailing?: string[];
 }> = [
   {
     label: 'ObjectForm — default layout, explicit `sections` (ObjectForm.tsx)',
@@ -158,6 +164,7 @@ const ARMS: Array<{
   },
   {
     label: 'ObjectForm — default layout, DERIVED `fieldGroups` (ObjectForm.tsx)',
+    trailing: ['Other'],
     mount: (group) =>
       mounted(
         <ObjectForm schema={{ ...base } as any} dataSource={makeDataSource(groupedSchema(group))} />,
@@ -184,6 +191,7 @@ const ARMS: Array<{
     // ⭐ THE SUBJECT of objectui#9849: the one site still rebuilding the row
     // without `description` when this card was filed.
     label: 'ModalForm — DERIVED `fieldGroups`, the derived push (ModalForm.tsx)',
+    trailing: ['Other'],
     mount: (group) =>
       mounted(
         <ModalForm
@@ -211,6 +219,7 @@ const ARMS: Array<{
   },
   {
     label: 'DrawerForm — DERIVED `fieldGroups` (DrawerForm.tsx)',
+    trailing: ['Other'],
     mount: (group) =>
       mounted(
         <DrawerForm
@@ -229,7 +238,7 @@ describe('objectui#9849 — one path from a section configuration to its divider
         expect(
           headings(f),
           'the live control: the sibling member on the SAME section, in the SAME call',
-        ).toEqual(['Money']);
+        ).toEqual(['Money', ...(arm.trailing ?? [])]);
         expect(
           blurbs(f),
           '`projectSectionDivider` is the only layer that copies this key now, so a miss here ' +
@@ -244,7 +253,7 @@ describe('objectui#9849 — one path from a section configuration to its divider
     for (const arm of ARMS) {
       it(`${arm.label}`, async () => {
         const f = await arm.mount({ label: 'Money' });
-        expect(headings(f)).toEqual(['Money']);
+        expect(headings(f)).toEqual(['Money', ...(arm.trailing ?? [])]);
         expect(
           blurbs(f),
           'the instrument block 1 uses can report NONE, so its hits are readings',
@@ -303,15 +312,14 @@ describe('objectui#9849 — one path from a section configuration to its divider
     it('a declared group with a `description` and NO `label` still yields a heading, from its key', async () => {
       // `deriveFieldGroupSections` defaults a section's label to the group
       // KEY, so a declared group always yields a heading on the two derived
-      // pushes — the only headingless derived section is the trailing
-      // ungrouped bucket, which declares no `description`, predicate or
-      // collapse. ⇒ block 3's headingless member is reachable by an author
-      // only on the EXPLICIT-sections routes.
+      // pushes, and the trailing ungrouped bucket is headed "Other" by the
+      // arm (objectstack#33229). ⇒ block 3's headingless member is reachable
+      // by an author only on the EXPLICIT-sections routes.
       const f = await ARMS[3].mount({ description: BLURB });
       expect(
         headings(f),
         'the key stands in for the missing label, so the group is never headingless',
-      ).toEqual(['money']);
+      ).toEqual(['money', 'Other']);
       expect(blurbs(f), 'and its blurb rides the same row').toEqual([BLURB]);
     });
   });

@@ -127,6 +127,7 @@ const fr = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "Affichage des {{shown}} premiers enregistrements sur {{total}}. Affinez le filtre.",
     rowCeilingNoteUnknownTotal: "Affichage des {{shown}} premiers enregistrements. Affinez le filtre.",
+    ungroupedSection: "Autres",
   },
   actions: {
     decisionOutput: {

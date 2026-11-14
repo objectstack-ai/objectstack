@@ -125,6 +125,7 @@ const de = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "Erste {{shown}} von {{total}} Datensätzen. Filter eingrenzen.",
     rowCeilingNoteUnknownTotal: "Erste {{shown}} Datensätze. Filter eingrenzen.",
+    ungroupedSection: "Sonstiges",
   },
   actions: {
     decisionOutput: {
