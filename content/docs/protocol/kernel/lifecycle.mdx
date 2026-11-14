@@ -626,6 +626,9 @@ GET /ready
         { status: "degraded", state,
           cluster: { driver: "redis", reachable: false, reason } }
         while Redis cannot be reached (still 200, never 503)
+  → 200 with a seed entry when the app declares seed data:
+        { status: "ready", state, seed: "pending" | "settled" | "failed" }
+        (the status code never depends on it)
 ```
 
 The two probes answer deliberately different questions (#3756). `/health`
@@ -654,6 +657,21 @@ only on the 200 paths: the booting / shutting-down 503 and the data-driver 503
 are answered before it, unchanged. A single node, a deployment on the in-process
 `memory` cluster driver, and one with no cluster service see exactly the body
 they saw before, and their Redis, if any, is never probed.
+
+When the app declares seed data, both 200 bodies also report the boot seed in
+`seed`. The inline seed can still be writing after the kernel runs: past its
+budget (`OS_INLINE_SEED_BUDGET_MS`, default 8 s) it continues in the background,
+and a seed that waits for demo accounts or seed files starts after
+`kernel:ready`. `seed` reads `"pending"` while any source is still writing,
+then `"settled"`, or `"failed"` when a source dropped a record, dropped a
+reference from a written row, or installed no rows. A multi-tenant or
+`skipSeedData` boot runs no inline seed, so it reads `"settled"`: nothing more
+is coming. A script, an e2e suite or a health check in another process can
+poll `/ready` until `seed` is not `"pending"`. The status code stays 200 while
+the seed writes, so a replica is not taken out of rotation for it, and an app
+with no seed data sees exactly the body it saw before. `os serve` reports the
+same fact on its IPC channel as `objectstack:seed-settled`, and prints the seed
+result once it lands when its ready banner said the seed was still writing.
 
 <Callout type="info">
 `GET /health` returns a compact liveness body (`status`, `timestamp`, `version`,

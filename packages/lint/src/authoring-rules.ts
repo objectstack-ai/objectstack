@@ -160,6 +160,8 @@ import { lintViewRefs } from './lint-view-refs.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
 import { validateEmailTemplateHoleGrammar } from './validate-email-template-hole-grammar.js';
+import { validateEmailTemplateDefaultArguments } from './validate-email-template-default-arguments.js';
+import { validateNotifyTemplateVariables } from './validate-notify-template-variables.js';
 import { validateCustomizationNamespace } from './validate-customization-namespace.js';
 import {
   lintUniqueDeclarations,
@@ -2836,6 +2838,39 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         liveUniverse: ctx.runtimeWriteType !== undefined,
         ...(ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
       }),
+  },
+  // Ruling record 6845318122 (letter B): a template default is literal text,
+  // and there is no syntax that falls back to another variable. A hole whose
+  // unquoted `default` argument reads like a variable path
+  // (`{{ person_name | default:first_name }}`) prints that text to the
+  // recipient, so it is advised at every door the hole grammar runs at — the
+  // publish door included, where it rides the save response as an advisory.
+  // Advisory: the hole renders as the grammar defines, and quoting the
+  // argument says the literal is meant.
+  {
+    name: 'validateEmailTemplateDefaultArguments',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-email-template-default-arguments.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['email_template'],
+    run: (stack) => validateEmailTemplateDefaultArguments(stack),
+  },
+  // Ruling record 6845318122 (letter B): a `notify` node that sends an email
+  // template without a variable the template declares `required` — every such
+  // send fails with MISSING_VARIABLES — is advised at validation. Advisory,
+  // not gating: a host may supply the variable through a default template
+  // context the stack does not state (the rule's module note).
+  {
+    name: 'validateNotifyTemplateVariables',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-notify-template-variables.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateNotifyTemplateVariables(stack),
   },
   // [#28473] ADR-0146 D3: a package whose `manifest.namespace` is too long to
   // have a paired customization namespace (`customizationNamespace` answers

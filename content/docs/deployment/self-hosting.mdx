@@ -515,6 +515,15 @@ the data-driver check, and recovery needs no restart. A single-node deployment
 sees no change: its body and status code are exactly what they were, and its
 Redis, if any, is never probed.
 
+**`/ready` reports whether the boot seed has landed.** When the app declares
+seed data, the 200 body carries `seed`: `"pending"` while the boot seed is
+still writing (past its budget it continues in the background after the kernel
+runs), then `"settled"`, or `"failed"` when a source dropped records or
+references. It never changes the status code, so a replica stays in rotation
+while it seeds. A setup script or test that needs the seed rows polls
+`/api/v1/ready` until `seed` is not `"pending"`; a deployment without seed
+data sees no `seed` key.
+
 **Scheduled jobs' leader election has a window, not a deadline.** `cron` /
 `interval` / `once` schedules dedupe across replicas by holding a lock for
 the duration of each fire — the mutual-exclusion window is the handler's
