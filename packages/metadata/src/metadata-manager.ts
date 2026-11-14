@@ -3867,17 +3867,19 @@ export class MetadataManager implements IMetadataService {
             // protocol's own read binds a row), so a caller that registers it
             // back — the boot priming pass — fills that package's slot and its
             // member's row, never a package-less one.
-            // [#32458] An unbundled type stored per `(package, name)` (`api`,
-            // `agent`, `skill`, `action`, `permission`) keeps every body the
-            // loader's `loadMany` answers, a body its keyed read cannot name
-            // included, and stamps each one the loader holds for a package the
-            // same way ({@link withLoaderEntryPackages}): handed on unstamped,
+            // [#32458, #32680] An unbundled type stored per `(package, name)`
+            // reads them too, from a loader that holds items per package
+            // (`loadManySlots`), and stamps each body that names its own key
+            // the same way ({@link keyedEntryBodies}): handed on unstamped,
             // such a row filled the name's package-less slot, and with two
-            // holders its save inserted a package-less row.
+            // holders its save inserted a package-less row. Each body is its
+            // own entry's, so nothing pairs a body to a row by its content.
+            // Any other loader's bodies are handed on as its `loadMany`
+            // answers them.
             const items = PACKAGE_SLOTTED_STORE_TYPES.has(type) && isBundledStoreType(type) && typeof loader.loadManyKeyed === 'function'
                 ? (await loader.loadManyKeyed<T>(type, options)).map((entry) => withEntryPackage(entry))
-                : PACKAGE_SLOTTED_STORE_TYPES.has(type)
-                    ? await withLoaderEntryPackages(loader, type, await loader.loadMany<T>(type, options), options)
+                : PACKAGE_SLOTTED_STORE_TYPES.has(type) && typeof loader.loadManyKeyed === 'function' && typeof loader.loadManySlots === 'function'
+                    ? keyedEntryBodies(await loader.loadManyKeyed<T>(type, options))
                     : await loader.loadMany<T>(type, options);
             for (const item of items) gathered.push({ item, loader });
             this.reportLoaderReadRecovered(loader.contract.name);
@@ -3960,6 +3962,10 @@ export class MetadataManager implements IMetadataService {
    * enumeration down, and it is reported once through
    * {@link reportLoaderReadFailure} rather than in a third vocabulary.
    * Earlier loaders win a key collision, mirroring `list()`.
+   *
+   * [#32680] An entry carries the package its loader holds it for
+   * ({@link MetadataKeyedItem.packageId}, absent for an item it holds for no
+   * package), so two packages' entries of one name are told apart.
    */
   async loadManyKeyed<T = any>(
     type: string,
@@ -3991,7 +3997,9 @@ export class MetadataManager implements IMetadataService {
    * its loader holds it for), then one entry per `(package, name)`
    * ({@link pluralEntryKeys}): two packages' items of one name are both
    * answered, and a one-holder name answers the first loader's entry, as
-   * before. Same failure posture as {@link loadManyKeyed}.
+   * before. [#32680] Each entry carries the package its loader holds it for
+   * ({@link keyedEntryOf}), so the two are told apart. Same failure posture as
+   * {@link loadManyKeyed}.
    */
   private async loadManyKeyedSlotted<T = any>(type: string, options?: MetadataLoadOptions): Promise<MetadataKeyedItem<T>[]> {
     const gathered: MetadataKeyedItem<T>[] = [];
@@ -4020,7 +4028,7 @@ export class MetadataManager implements IMetadataService {
       const key = keys[at]!;
       if (kept.has(key)) return;
       kept.add(key);
-      out.push({ name: entry.name, data: entry.data });
+      out.push(keyedEntryOf(entry));
     });
     return out;
   }
@@ -4051,7 +4059,7 @@ export class MetadataManager implements IMetadataService {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
         const key = bundleEntryKey(type, entry.name, entry.data, entry.packageId) ?? entry.name;
         if (items.has(key)) continue;
-        items.set(key, { name: entry.name, data: entry.data });
+        items.set(key, keyedEntryOf(entry));
       }
       return;
     }
@@ -4737,7 +4745,7 @@ function historyAddressSuffix(type: string, address?: MetadataHistoryAddress): s
  * [#31699 R4-B] A keyed entry's body, stamped with the entry's package when the
  * body names none itself; the body unchanged otherwise. [#32458] The same stamp
  * for an unbundled type stored per `(package, name)`, through
- * {@link withLoaderEntryPackages}.
+ * {@link keyedEntryBodies}.
  */
 function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
   const data = entry.data as unknown;
@@ -4747,73 +4755,38 @@ function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
 }
 
 /**
- * [#32458] `items`, the bodies `loader.loadMany` answered for an unbundled type
- * stored per `(package, name)`, each stamped with the package the loader holds
- * it for ({@link withEntryPackage}) when the body names none itself. The
- * package is read off the loader's keyed entries, and only from a loader that
- * holds items per package (`loadManySlots`): a body is stamped when its `name`
- * is the key of exactly one keyed entry, that entry carries a package and its
- * own body carries the entry's key as its `name`, and no other body `loadMany`
- * answered carries that `name`. A body whose `name` is another row's key is
- * never stamped with that row's package — a row's key and its body's `name`
- * are two identities (#14205), and a save does not make them agree. Every body
- * is kept, in `loadMany`'s order — a body the keyed read cannot
- * name (a nested or extension-less file, a row whose `name` column is empty)
- * is answered as before, unstamped. A loader that holds nothing per package is
- * not read twice.
- *
- * [#32521; epic #31527 red line 2] A name two or more of the loader's keyed
- * entries carry with their own packages (a name two packages hold, which
- * `DatabaseLoader` now answers a row per package of): each body of that name
- * is stamped with the package of the one keyed entry whose own body it is
- * (the same content, each entry used once), so both holders are handed on
- * stamped and the boot priming pass registers each. A body no such entry's
- * body equals — a package-less row's among them — stays unstamped. Only where
- * the bodies of the name are exactly the rows keyed by it (each of those rows'
- * bodies carries the name, and as many bodies carry it as rows are keyed by
- * it); otherwise none of them is stamped, as above.
+ * [#32680] A loader's keyed entry as `MetadataManager.loadManyKeyed` answers
+ * it: its key, its body, and the package the loader holds it for when it holds
+ * it for one, FROM the key and the body alone — two packages' entries of one
+ * name were two entries a caller could not tell apart.
  */
-async function withLoaderEntryPackages<T>(
-  loader: MetadataLoader,
-  type: string,
-  items: T[],
-  options?: MetadataLoadOptions,
-): Promise<T[]> {
-  if (typeof loader.loadManyKeyed !== 'function' || typeof loader.loadManySlots !== 'function') return items;
-  const nameOf = (body: unknown): unknown => (body as { name?: unknown } | null)?.name;
-  const packageOf = new Map<string, string | null>();
-  const entriesKeyed = new Map<string, { count: number; ownBodies: boolean }>();
-  const heldBodies = new Map<string, Array<{ body: string; packageId: string }>>();
-  for (const entry of await loader.loadManyKeyed<T>(type, options)) {
-    const ownBody = nameOf(entry.data) === entry.name;
-    const own = ownBody ? entry.packageId ?? null : null;
-    packageOf.set(entry.name, packageOf.has(entry.name) ? null : own);
-    const keyed = entriesKeyed.get(entry.name) ?? { count: 0, ownBodies: true };
-    entriesKeyed.set(entry.name, { count: keyed.count + 1, ownBodies: keyed.ownBodies && ownBody });
-    if (own !== null) heldBodies.set(entry.name, [...(heldBodies.get(entry.name) ?? []), { body: JSON.stringify(entry.data), packageId: own }]);
-  }
-  const bodiesNamed = new Map<string, number>();
-  for (const item of items) {
-    const name = nameOf(item);
-    if (typeof name === 'string') bodiesNamed.set(name, (bodiesNamed.get(name) ?? 0) + 1);
-  }
-  // [#32521] Paired by content only where the bodies of the name are exactly
-  // the rows keyed by it: every such row's body carries the name, and no other
-  // body does.
-  const severallyHeld = new Set([...heldBodies]
-    .filter(([name, held]) => held.length > 1 && entriesKeyed.get(name)!.ownBodies && entriesKeyed.get(name)!.count === bodiesNamed.get(name))
-    .map(([name]) => name));
-  return items.map((item) => {
-    const name = nameOf(item);
-    if (typeof name !== 'string') return item;
-    const held = heldBodies.get(name);
-    if (held !== undefined && severallyHeld.has(name)) {
-      const body = JSON.stringify(item);
-      const at = held.findIndex((entry) => entry.body === body);
-      return at === -1 ? item : withEntryPackage({ name, data: item, packageId: held.splice(at, 1)[0]!.packageId });
-    }
-    if (bodiesNamed.get(name) !== 1) return item;
-    const packageId = packageOf.get(name);
-    return packageId ? withEntryPackage({ name, data: item, packageId }) : item;
-  });
+function keyedEntryOf<T>(entry: MetadataKeyedItem<T>): MetadataKeyedItem<T> {
+  return entry.packageId === undefined
+    ? { name: entry.name, data: entry.data }
+    : { name: entry.name, data: entry.data, packageId: entry.packageId };
+}
+
+/**
+ * [#32458, #32680] The bodies an unbundled type stored per `(package, name)`
+ * is handed on with, off a loader that holds items per package
+ * (`loadManySlots`): each keyed entry's own body, in the keyed read's order,
+ * stamped with the package the loader holds it for ({@link withEntryPackage})
+ * when the body carries the entry's key as its `name` and names no package
+ * itself. A body whose `name` is not its own entry's key is handed on
+ * unstamped: a row's key and its body's `name` are two identities (#14205),
+ * and its package is never given to the name its body says.
+ *
+ * Each body is its own entry's, so no body is paired to a row by its content
+ * (#32680, FROM matching `loadMany`'s bodies to the keyed entries by their
+ * serialisation): every holder of a name two packages hold is handed on
+ * stamped with its own row's package, whatever another row's body says and
+ * however the loader serialises its two reads (#32521; epic #31527 red line
+ * 2), and a name one package holds is stamped whatever another row's body
+ * says. An entry the loader holds for no package — the environment's own row,
+ * or a holder's customization (ADR-0150 D4) — is handed on unstamped. A row
+ * the keyed read cannot name (its `name` column empty) is not handed on, as
+ * the keyed read, `list` and a bundled type's plural read leave it out.
+ */
+function keyedEntryBodies<T>(entries: ReadonlyArray<MetadataKeyedItem<T>>): T[] {
+  return entries.map((entry) => ((entry.data as { name?: unknown } | null)?.name === entry.name ? withEntryPackage(entry) : entry.data));
 }

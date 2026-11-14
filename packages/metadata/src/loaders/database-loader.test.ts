@@ -3191,7 +3191,7 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     }
   });
 
-  it('agent, two holders of a name and another row\'s body that says the same name: no body of the name is stamped, so none takes a package its row is not bound to (contract review F3 of #32458)', async () => {
+  it('agent, two holders of a name and another row\'s body that says the same name: each holder is stamped with its own row\'s package and the other row\'s body with none, so none takes a package its row is not bound to (contract review F3 of #32458; #32680, FROM no body of the name stamped)', async () => {
     await seed('agent', ALPHA, 1);
     await seed('agent', BETA, 2);
     // Row keyed `stray` whose body says `name: 'helper'`, byte for byte ALPHA's row's body.
@@ -3201,7 +3201,7 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     });
     const m = cold();
     expect((await m.loadMany('agent') as Array<Record<string, unknown>>).map((item) => [item._packageId ?? null, item.label]))
-      .toEqual([[null, ALPHA]]);
+      .toEqual([[ALPHA, ALPHA], [BETA, BETA], [null, ALPHA]]);
   });
 
   it('CONTROL email_template (bundled): every row was already primed — a bare read is refused naming both, list keeps both', async () => {
@@ -3572,4 +3572,153 @@ describe('[#33003] a write that rewrites an environment row the boot pass stampe
     await m.unregisterPackage(EXT);
     expect(await state(m)).toEqual(kept());
   });
+});
+
+/**
+ * [#32680; follow-up of #32521, contract review F2/F3/F4, epic #31527 red line
+ * 2, ADR-0150 D3/D4] `MetadataManager.loadMany` reads a by-package type's
+ * bodies and packages off the loader's keyed entries (each body its own row's,
+ * stamped with that row's package), FROM pairing `loadMany`'s bodies to the
+ * keyed entries by content. So no body of a name is left unstamped because
+ * another row's body says the same name (F2) or because the loader serialises
+ * its two reads differently (F3), and `MetadataManager.loadManyKeyed` carries
+ * each entry's package (F4).
+ *
+ * BEFORE (measured on main d4fbb4db, same fixtures, every type below): in the
+ * F2 shape `loadMany` handed on one unstamped body of the name, the pass filed
+ * it in the bare slot (registry keys `['helper']`) and a bare read after the
+ * pass answered it (`com.alpha.app`); with F3's loader both holders were
+ * handed on unstamped; `loadManyKeyed` entries carried no package; one holder
+ * beside another row's body of its name was handed on unstamped. The CONTROLs
+ * answered as here.
+ */
+describe('[#32680] the plural read takes a by-package name\'s bodies and packages off the keyed entries', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  const GAMMA = 'com.gamma.app';
+  const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  const BOOT_PASS_READS = UNBUNDLED.filter((type) => DEFAULT_METADATA_TYPE_REGISTRY.some((entry) => entry.type === type));
+  let driver: IDataDriver;
+
+  const seed = (type: string, packageId: string | null, version: number, name = 'helper', body: Record<string, unknown> = {}) =>
+    driver.create('sys_metadata', {
+      id: `${type}_${name}_${packageId ?? 'env'}_${version}`, type, name, state: 'active', version, checksum: `${type}_${name}_${version}`,
+      source: 'database', package_id: packageId, metadata: JSON.stringify({ name: 'helper', label: packageId ?? 'env', ...body }),
+    });
+  /** The F2 shape: two holders of `helper`, and a package-less row keyed `stray` whose body says `helper`, byte for byte ALPHA's. */
+  const seedF2 = async (type: string, strayFirst = false) => {
+    if (strayFirst) await seed(type, null, 3, 'stray', { label: ALPHA });
+    await seed(type, ALPHA, 1);
+    await seed(type, BETA, 2);
+    if (!strayFirst) await seed(type, null, 3, 'stray', { label: ALPHA });
+  };
+  const cold = (loader: MetadataLoader = new DatabaseLoader({ driver })) => {
+    const m = new MetadataManager({ formats: ['json'], loaders: [] });
+    m.registerLoader(loader);
+    return m;
+  };
+  const bootPass = async (loader: MetadataLoader = new DatabaseLoader({ driver })) => {
+    const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(loader);
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  const answer = async (m: MetadataManager, type: string, name: string, packageId?: string) => {
+    try {
+      const item = (await m.get(type, name, packageId)) as { label?: string } | undefined;
+      return item?.label;
+    } catch (e: any) {
+      return [e?.code, e?.status, e?.refusal?.reason, ...(e?.refusal?.candidates ?? []).map((c: any) => c.packageId ?? c.kind).sort()];
+    }
+  };
+  const REFUSED = ['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ALPHA, BETA];
+  const stamps = async (m: MetadataManager, type: string) =>
+    ((await m.loadMany(type)) as Array<Record<string, unknown>>).map((item) => [item._packageId ?? null, item.label]);
+  const keyedPackages = async (m: MetadataManager, type: string) =>
+    (await m.loadManyKeyed(type)).map((entry) => [entry.name, entry.packageId ?? null, (entry.data as { label?: string }).label]);
+  const registryKeys = (m: MetadataManager, type: string) => [...(((m as any).registry.get(type) as Map<string, unknown> | undefined)?.keys() ?? [])];
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  for (const type of BOOT_PASS_READS) {
+    for (const strayFirst of [false, true]) {
+      it(`${type}, F2 shape (another row's body says the name, ${strayFirst ? 'stored first' : 'stored last'}): both holders are handed on stamped, and after the pass a bare read is refused 409 naming both, as without it`, async () => {
+        await seedF2(type, strayFirst);
+        expect(await answer(cold(), type, 'helper')).toEqual(REFUSED);
+        expect((await stamps(cold(), type)).filter(([packageId]) => packageId !== null)).toEqual([[ALPHA, ALPHA], [BETA, BETA]]);
+        const m = await bootPass();
+        // The other row's body is filed in the name's bare slot, as the pass files any
+        // package-less body beside two holders (by its body's name, as before).
+        expect(registryKeys(m, type)).toEqual([`${ALPHA}\u0000helper`, `${BETA}\u0000helper`, 'helper']);
+        // An action name's package-less registry slot no loader stores under the name is
+        // counted as the platform's (#32560), so its refusal names it too.
+        expect(await answer(m, type, 'helper')).toEqual(type === 'action' ? [...REFUSED, 'platform'] : REFUSED);
+        for (const packageId of [ALPHA, BETA, GAMMA]) {
+          expect([packageId, await answer(m, type, 'helper', packageId)]).toEqual([packageId, await answer(cold(), type, 'helper', packageId)]);
+        }
+        expect(driver.update).not.toHaveBeenCalled();
+      });
+    }
+  }
+
+  it('agent, F3: a loader whose two reads serialise a body differently still hands both holders on stamped', async () => {
+    await seed('agent', ALPHA, 1);
+    await seed('agent', BETA, 2);
+    class ReorderingLoader extends DatabaseLoader {
+      override async loadMany<T = any>(type: string, options?: any): Promise<T[]> {
+        // The same bodies, keys in another order: their serialisations no longer agree.
+        return (await super.loadMany<Record<string, unknown>>(type, options))
+          .map((body) => Object.fromEntries(Object.entries(body).reverse())) as T[];
+      }
+    }
+    expect(await stamps(cold(new ReorderingLoader({ driver })), 'agent')).toEqual([[ALPHA, ALPHA], [BETA, BETA]]);
+    const m = await bootPass(new ReorderingLoader({ driver }));
+    expect(await answer(m, 'agent', 'helper')).toEqual(REFUSED);
+  });
+
+  for (const type of UNBUNDLED) {
+    it(`${type}, F4: MetadataManager.loadManyKeyed carries each entry's package`, async () => {
+      await seed(type, ALPHA, 1);
+      await seed(type, BETA, 2);
+      await seed(type, null, 3, 'solo', { name: 'solo' });
+      expect(await keyedPackages(cold(), type)).toEqual([['helper', ALPHA, ALPHA], ['helper', BETA, BETA], ['solo', null, 'env']]);
+    });
+  }
+
+  it('email_template, F4: MetadataManager.loadManyKeyed carries each entry\'s package', async () => {
+    for (const [packageId, version] of [[ALPHA, 1], [BETA, 2]] as const) {
+      await driver.create('sys_metadata', {
+        id: `et_${packageId}`, type: 'email_template', name: 'welcome', state: 'active', version, checksum: `et_${packageId}`,
+        source: 'database', package_id: packageId, metadata: JSON.stringify({ name: 'welcome', locale: 'en-US', subject: packageId, bodyHtml: '<p/>', label: packageId }),
+      });
+    }
+    expect(await keyedPackages(cold(), 'email_template')).toEqual([['welcome', ALPHA, ALPHA], ['welcome', BETA, BETA]]);
+  });
+
+  for (const type of BOOT_PASS_READS) {
+    it(`${type}, one holder beside another row's body that says its name: handed on stamped, and after the pass every read answers as without it`, async () => {
+      await seed(type, ALPHA, 1);
+      await seed(type, null, 2, 'stray', { label: 'stray' });
+      expect(await stamps(cold(), type)).toEqual([[ALPHA, ALPHA]]);
+      const m = await bootPass();
+      expect(registryKeys(m, type)).toEqual([`${ALPHA}\u0000helper`]);
+      for (const packageId of [undefined, ALPHA, GAMMA]) {
+        expect([packageId ?? null, await answer(m, type, 'helper', packageId)]).toEqual([packageId ?? null, await answer(cold(), type, 'helper', packageId)]);
+      }
+    });
+
+    it(`CONTROL ${type}, one holder: handed on stamped with its row's package, and after the pass a bare read answers it, as before`, async () => {
+      await seed(type, ALPHA, 1);
+      expect(await stamps(cold(), type)).toEqual([[ALPHA, ALPHA]]);
+      const m = await bootPass();
+      expect(registryKeys(m, type)).toEqual([`${ALPHA}\u0000helper`]);
+      expect(await answer(m, type, 'helper')).toBe(ALPHA);
+      expect(await answer(m, type, 'helper', ALPHA)).toBe(ALPHA);
+      expect(await answer(m, type, 'helper', GAMMA)).toBeUndefined();
+    });
+  }
 });
