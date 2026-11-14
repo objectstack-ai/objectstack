@@ -1260,6 +1260,10 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
    * reserved rows the rest, each with the same binding. A failure on any of
    * them discards every one, the rows not reached yet included, so no id of
    * the submit is left.
+   *
+   * [#33125] Each lands with `deleted_at` set to the upload time, so the
+   * platform sweep reclaims a file no record ever took once the `sys_file`
+   * ttl has passed (ruling A, record 6868819455).
    */
   private async filesForNewRecordThroughLink(
     storage: IStorageService,
@@ -1270,6 +1274,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     writeContext: StorageWriteContext,
   ): Promise<UploadLinkFilesOutcome> {
     const field = state.field as string;
+    const landedAt = new Date(this.now()).toISOString();
     const claimUntil = new Date(this.now() + PRE_RECORD_CLAIM_WINDOW_SECONDS * 1000).toISOString();
     const keys = fileIds.map((fileId, i) => buildKey(FIELD_UPLOAD_SCOPE, fileId, uploads[i].filename));
     let attempted = 0;
@@ -1286,6 +1291,12 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
             mime_type: upload.mimeType,
             size: upload.data.byteLength,
             status: 'committed',
+            // [#33125] The reclaim stamp: a committed file whose `deleted_at`
+            // is set is a candidate of the `sys_file` ttl once that window
+            // has passed. The write that names the file clears it, and the
+            // reap guard reclaims only a bound file no record ever held
+            // (`attachment-lifecycle.ts`, `isReclaimStampedUpload`).
+            deleted_at: landedAt,
             metadata: preRecordBindingMetadata({
               kind: PRE_RECORD_UPLOAD_KIND,
               object: state.object,

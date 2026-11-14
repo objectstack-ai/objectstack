@@ -4,6 +4,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { IStorageService } from '@objectstack/spec/contracts';
 import type { FileRecord } from './metadata-store.js';
 import { isFileUploader } from './upload-ownership.js';
+import { preRecordBindingOf } from './pre-record-upload.js';
 
 /**
  * sys_file orphan lifecycle (#2755, ADR-0057).
@@ -101,6 +102,32 @@ const SYSTEM_CTX = { isSystem: true } as const;
  */
 function isLiveAttachmentsFile(file: Record<string, unknown> | null | undefined): file is Record<string, unknown> {
   return !!file && file.scope === 'attachments' && file.status === 'committed';
+}
+
+/**
+ * [#33125] Does this row carry the reclaim stamp of an upload made before its
+ * record: `committed`, with `deleted_at` set?
+ *
+ * A file uploaded through an upload link that names no record lands this way
+ * (`record-file-access.ts`): the stamp is what makes it a candidate of the
+ * `sys_file` lifecycle's one `ttl`, so no sweeper is added (ADR-0057 §3.3).
+ * It is not a tombstone: the file stays `committed`, so its uploader still
+ * downloads it and the write it was uploaded for still takes it. That write
+ * clears the stamp (`file-reference-lifecycle.ts`), and the reap guard below
+ * reclaims only a bound file no record ever held, after its claim window
+ * (ruling A, record 6868819455).
+ *
+ * Nothing else writes `deleted_at` on a `committed` row: a tombstone writes it
+ * with `status: 'deleted'`, and an un-tombstone clears both together.
+ */
+export function isReclaimStampedUpload(row: Record<string, unknown> | null | undefined): boolean {
+  return !!row && row.status === 'committed' && row.deleted_at != null && row.deleted_at !== '';
+}
+
+/** Whether a record held the file and let it go (#26046: `released_ref_*`). */
+function wasReleased(row: Record<string, unknown>): boolean {
+  return (row.released_ref_id != null && row.released_ref_id !== '')
+    || (row.released_ref_object != null && row.released_ref_object !== '');
 }
 
 /**
@@ -615,6 +642,15 @@ async function tombstoneRefusedAttachFile(
  *    Clear on both counts → delete bytes; a byte-delete failure vetoes so
  *    the row is retried next sweep (the row is the only pointer to the
  *    bytes — dropping it first would leak the bytes forever).
+ *  - `committed` with `deleted_at` set ({@link isReclaimStampedUpload},
+ *    #33125): a file uploaded through a link that named no record, nominated
+ *    by the ttl from its upload. The same hold question first: held → clear
+ *    the stamp and veto. Not a bound file a record never held (no binding, a
+ *    damaged one, or a record that let it go) → clear the stamp and veto: it
+ *    is an ordinary committed file again. Its claim window still open (a ttl
+ *    shortened below it) → veto, stamp kept. Otherwise it is a file no write
+ *    can name any more, and it goes behind the same `isCollectionOpen` gate
+ *    as a field-file tombstone: closed → kept; open → delete bytes, confirm.
  *  - anything else: veto (shouldn't be a candidate; fail toward retention).
  *
  * `isCollectionOpen` absent (an older caller, a test fake) reads as "gate
@@ -669,6 +705,43 @@ export function createSysFileReapGuard(
         continue;
       }
 
+      if (isReclaimStampedUpload(row)) {
+        try {
+          // The one hold question first, as for every candidate: a record or
+          // an attachment that names the file keeps it, whatever else holds.
+          const holder = await findFileHolder(engine, id, row);
+          const binding = preRecordBindingOf(row);
+          const claimUntil = binding ? Date.parse(binding.claim_until) : Number.NaN;
+          if (holder || !binding || wasReleased(row) || !Number.isFinite(claimUntil)) {
+            // Not a bound upload no record ever held (or its binding is
+            // damaged): the stamp is dropped and the row is an ordinary
+            // committed file again, kept as every other one is.
+            await engine.update('sys_file', { id, deleted_at: null }, { context: { ...SYSTEM_CTX } });
+            logger.info(
+              `[storage] reap guard: sys_file ${id} ` +
+                (holder
+                  ? `is held by ${describeHolder(holder, row)} — its upload reclaim stamp cleared, not reaped`
+                  : 'is not an unclaimed upload-link file — its reclaim stamp cleared, not reaped'),
+            );
+            continue;
+          }
+          // Its claim window is still open: only a ttl shortened below it gets
+          // here. Kept, still stamped, for a later sweep.
+          if (Date.now() < claimUntil) continue;
+          if (!(await collectionOpen())) {
+            keptGateClosed += 1;
+            continue;
+          }
+          if (storage && typeof row.key === 'string' && row.key) await storage.delete(row.key);
+          confirmed.push(id);
+        } catch (err) {
+          logger.warn(
+            `[storage] reap guard: reclaim failed for unclaimed upload sys_file ${id} (${(err as Error)?.message ?? err}); retrying next sweep`,
+          );
+        }
+        continue;
+      }
+
       if (row.status === 'deleted') {
         try {
           const holder = await findFileHolder(engine, id, row);
@@ -706,7 +779,7 @@ export function createSysFileReapGuard(
       // causes are stated, and they share one remedy, so the instruction is
       // unambiguous either way. `sys_migration` has the answer.
       logger.info(
-        `[storage] reap guard: kept ${keptGateClosed} released field file(s) — this deployment's ` +
+        `[storage] reap guard: kept ${keptGateClosed} field file(s) — released, or uploaded through a link no record took — this deployment's ` +
           `file-as-reference migration is not verified, or a deviation has been observed since it ` +
           `was (a value an OS_ALLOW_LAX_* escape hatch admitted against the migration's own ` +
           `contract). Either way: fix the data, then run \`os migrate files-to-references --apply\`. ` +
