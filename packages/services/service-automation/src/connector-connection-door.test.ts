@@ -1087,6 +1087,24 @@ describe('ADR-0150 D4 [#31699] — the connection door connects one instance, by
         }
     });
 
+    it('[contract review F1] a declaration that moves to another package keeps its connection: read, dispatch and revoke, one row', async () => {
+        const declared: unknown[] = [crm({ _packageId: 'com.example.crm' })];
+        const registry = registryHolding('com.example.crm');
+        const { engine, connect, call, ql } = await boot(declared, { registry });
+        await (await connect()).done();
+        expect(await rowPackages(ql)).toEqual(['com.example.crm']);
+        // The name moves: the old package is uninstalled and another declares it. One holder throughout.
+        registry.uninstallPackage('com.example.crm');
+        registry.unregisterItemsByPackage('com.example.crm');
+        hold(registry, OTHER);
+        declared.splice(0, 1, crm({ _packageId: OTHER }));
+        expect(await engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
+            .toMatchObject({ status: 'connected' });
+        await expect(call('org_a')).resolves.toMatchObject({ status: 200 });
+        await engine.revokeConnectorConnection({ connector: 'crm', context: ADMIN_A as never });
+        expect(await rowsOf(ql)).toHaveLength(0);
+    });
+
     it('a resolved holder no declared entry is the instance of: the one declared entry is served, with its own package', async () => {
         const { connect, ql } = await boot([crm({ _packageId: OTHER })], { registry: registryHolding('com.example.crm') });
         await expect((await connect()).done()).resolves.toMatchObject({ status: 'connected' });

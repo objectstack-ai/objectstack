@@ -2070,8 +2070,9 @@ export class AutomationServicePlugin implements Plugin {
         this.connectorCredentialStore = new ConnectorCredentialStore(() => this.resolveDataEngine(ctx));
         // ADR-0143 D3 / D5 — the connector connection store, and the door the
         // `automation` service's connection members answer through.
-        // [#31699] A row naming no package is the package the name's durable
-        // resolution binds it to: the question the boot backfill asks.
+        // [#31699] While the name's durable resolution (the question the boot
+        // backfill asks) answers one holder, every row of the name is the one
+        // instance's; under two holders each package's rows are its own.
         const connectionNullRowHolder = connectorNameResolver(ctx);
         this.connectorConnectionStore = new ConnectorConnectionStore(
             () => this.resolveDataEngine(ctx),

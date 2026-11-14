@@ -58,16 +58,18 @@ export const CONNECTOR_CONNECTION_PACKAGE_FIELD = 'connector_package';
 export type ConnectorInstancePackage = string | null | undefined;
 
 /**
- * [#31699] Whose a row naming no package is: the connector name's durable
- * resolution for a caller with no package (disabled packages counted), the
- * question the boot backfill asks before it binds such a row. `undefined`
- * when the composition has no registry to ask.
+ * [#31699] How many holders the connector name has: its durable resolution
+ * for a caller with no package (disabled packages counted), the question the
+ * boot backfill asks before it binds a row naming no package. While it
+ * answers one holder, every row of the name is the one instance's; when it
+ * refuses (two holders), each package's rows are its own. `undefined` when
+ * the composition has no registry to ask.
  */
 export type ConnectorNullRowHolder = (connectorName: string) => PackageScopedResolution | undefined;
 
 /**
- * [#31699] Two rows answer one instance in one organization, or a row naming
- * no package of a name two packages hold: answered `409`, never one of them
+ * [#31699] Two rows answer one instance in one organization, or a row of a
+ * name two packages hold names none of them: answered `409`, never one of them
  * picked.
  */
 export class ConnectorConnectionConflictError extends Error {
@@ -118,8 +120,8 @@ export interface ConnectorConnectionRecord {
     /**
      * [#31699] Set only on a {@link ConnectorConnectionStore.listFor} entry:
      * the refusal a read of this organization's connection answers (two rows
-     * answering the instance, or a package-less row of a name two packages
-     * hold). The entry stands for the organization, never as its connection.
+     * answering the instance, or a row of a name two packages hold that
+     * names none of them). The entry stands for the organization, never as its connection.
      */
     conflict?: string;
 }
@@ -208,19 +210,23 @@ export class ConnectorConnectionStore {
      * [ADR-0150 D4, #31699] The rows of one organization's connections of
      * `connectorName` that answer the instance of `packageId`, by one rule:
      *
-     * - the rows naming that package (`null`: the rows naming none);
-     * - for a package, also each row naming no package that the name's
-     *   durable resolution binds to that package, or that no registry can
-     *   judge: the row the boot backfill would stamp, which the package adopts
-     *   (a connect stamps it, {@link connect});
+     * - while the name has one holder (its durable resolution, disabled
+     *   packages included, answers one), or no registry can judge it: every
+     *   row of the name, whatever package it names, as the read by name
+     *   answered before the key carried a package. A connection follows its
+     *   name across a move of the declaration (another package, the
+     *   environment), and a connect adopts the row and stamps it with the
+     *   instance's package in place ({@link connect}), so a one-holder
+     *   answer never moves (ADR-0150 red line 3, epic ruling R2-C);
+     * - while two packages hold the name: the rows naming that package
+     *   (`null`: the rows naming none). A row naming no package, or a package
+     *   that is not one of the holders, is no package's: when it is all a
+     *   package has, the read is refused, naming the bind that settles it,
+     *   never handed to one of them (ADR-0150 red line 2). It is not the R9
+     *   rule (#31696), where such a row beside the package's own row wins and
+     *   is refused: here the package's own row is its connection, and the
+     *   backfill reports the stray row;
      * - for a caller that knows only the name, every row.
-     *
-     * A row naming no package of a name two packages hold is no package's:
-     * when it is all a package has, the read is refused, naming the bind that
-     * settles it, never handed to one of them (ADR-0150 red line 2). It is
-     * not the R9 rule (#31696), where such a row beside the package's own row
-     * wins and is refused: here the package's own row is its connection, and
-     * the backfill reports the stray row.
      */
     private answering(
         rows: readonly Record<string, unknown>[],
@@ -229,19 +235,21 @@ export class ConnectorConnectionStore {
     ): Record<string, unknown>[] {
         if (packageId === undefined) return [...rows];
         const own = rows.filter((r) => rowPackage(r) === packageId);
-        if (packageId === null) return own;
-        const unbound = rows.filter((r) => rowPackage(r) === null);
-        if (unbound.length === 0) return own;
+        if (own.length === rows.length) return own;
         const holder = this.nullRowHolderOf(connectorName);
-        if (holder === undefined || holder.status === 'not-found') return [...own, ...unbound];
-        if (holder.status === 'resolved') {
-            return holder.holder.kind === 'package' && holder.holder.packageId === packageId ? [...own, ...unbound] : own;
-        }
-        if (own.length > 0) return own;
+        if (holder?.status !== 'refused') return [...rows];
+        if (packageId === null || own.length > 0) return own;
+        const holders = new Set(holder.candidates.flatMap((c) => (c.kind === 'package' ? [c.packageId] : [])));
+        const unclaimed = rows.filter((r) => {
+            const named = rowPackage(r);
+            return named === null || !holders.has(named);
+        });
+        if (unclaimed.length === 0) return own;
         throw new ConnectorConnectionConflictError(
-            `The connection of connector instance '${connectorName}' in this organization names no package, and `
-                + `${holder.candidates.length} packages hold that name, so it is no one package's connection. Bind it to its package with `
-                + '`os migrate stored-references bind --table sys_connector_connection`, then read it again.',
+            `The connection of connector instance '${connectorName}' in this organization names no package that holds `
+                + `that name, and ${holder.candidates.length} packages hold it, so it is no one package's connection. Bind it to `
+                + 'its package with `os migrate stored-references bind --table sys_connector_connection`, or uninstall one of '
+                + 'the packages, then read it again.',
         );
     }
 
@@ -344,8 +352,8 @@ export class ConnectorConnectionStore {
 
     /**
      * How many rows answer one instance in one organization: one at most, but
-     * for a connect that raced the backfill. A row naming no package of a
-     * name two packages hold counts as none.
+     * for a connect that raced the backfill. A row of a name two packages
+     * hold that names none of them counts as none.
      */
     private async rowCount(
         engine: ConnectorCredentialEngine,
@@ -365,8 +373,8 @@ export class ConnectorConnectionStore {
     /**
      * Every organization's connection of one instance, one per organization
      * (`packageId` names the instance, as {@link read}). An organization whose
-     * read is refused (two rows answering, or a package-less row of a name two
-     * packages hold) is still listed, once, carrying that refusal in
+     * read is refused (two rows answering, or a row of a name two packages
+     * hold that names none of them) is still listed, once, carrying that refusal in
      * `conflict`: the list counts organizations as the read would, and a
      * caller never takes such an entry for the organization's connection.
      */
@@ -470,10 +478,14 @@ export class ConnectorConnectionStore {
         const engine = this.engineOrThrow(`Connector instance '${args.connectorName}' was not connected`);
         const existing = await this.readOrRefuse(args.organizationId, args.connectorName, args.packageId);
         const context = { ...SYSTEM_CONTEXT, ...(args.userId ? { userId: args.userId } : {}) };
-        // [#31699] The row names the instance's package. A row naming none that
-        // the package adopts (`answering`) is stamped by this same write, so the
-        // package's connection is one row (design review M2).
-        const stamp = typeof args.packageId === 'string' ? { [CONNECTOR_CONNECTION_PACKAGE_FIELD]: args.packageId } : {};
+        // [#31699] The row names the instance's package. A row the instance
+        // adopts (`answering`: one naming no package, or another package, while
+        // the name has one holder) is stamped by this same write, so the
+        // instance's connection is one row (design review M2). `null` (the
+        // environment's or the platform's instance) clears another package's
+        // stamp; an absent package (a caller that knows only the name) leaves
+        // the row as it is.
+        const stamp = args.packageId === undefined ? {} : { [CONNECTOR_CONNECTION_PACKAGE_FIELD]: args.packageId };
         const row = {
             grant: 'authorization_code',
             [CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD]: args.refreshToken ?? null,
@@ -614,11 +626,12 @@ export class ConnectorConnectionStore {
     /**
      * Remove the connection of one instance in one organization: every row
      * answering it ({@link answering}), so a revoke also clears the second row
-     * a read refuses. A row naming no package of a name two packages hold is
-     * no package's, so a package's revoke leaves it (the bind settles it), and
-     * where it is all that package has, the revoke is refused as the read is
-     * ({@link ConnectorConnectionConflictError}), never answered "not
-     * connected". `false` when it was not connected there.
+     * a read refuses, and, while the name has one holder, a row its moved
+     * declaration left under another package. Under two holders a row that
+     * names none of them is no package's, so a package's revoke leaves it (the
+     * bind settles it), and where it is all that package has, the revoke is
+     * refused as the read is ({@link ConnectorConnectionConflictError}), never
+     * answered "not connected". `false` when it was not connected there.
      */
     async revoke(
         organizationId: string,
@@ -634,14 +647,7 @@ export class ConnectorConnectionStore {
         } catch {
             throw new ConnectorCredentialUnavailableError(`${what}: the connection store did not answer the read.`);
         }
-        let answering: Record<string, unknown>[];
-        try {
-            answering = this.answering(rows, connectorName, packageId);
-        } catch (err) {
-            if (!(err instanceof ConnectorConnectionConflictError)) throw err;
-            answering = rows.filter((r) => rowPackage(r) === packageId);
-            if (answering.length === 0) throw err;
-        }
+        const answering = this.answering(rows, connectorName, packageId);
         const ids = answering.flatMap((r) => (typeof r.id === 'string' || typeof r.id === 'number' ? [String(r.id)] : []));
         if (ids.length === 0) return false;
         const context = { ...SYSTEM_CONTEXT, ...(userId ? { userId } : {}) };

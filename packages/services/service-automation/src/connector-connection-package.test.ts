@@ -94,14 +94,18 @@ function storeOver(ql: ObjectQL, holder?: ConnectorNullRowHolder): ConnectorConn
 }
 
 describe('[#31699] one instance is read and written by its package', () => {
-    it('a connect names the instance\'s package; that package reads it, the environment\'s instance does not', async () => {
+    it('a connect names the instance\'s package and that package reads it; another instance reads it only while the name has one holder', async () => {
         const ql = await dataEngine();
         const store = storeOver(ql, resolvedTo(A));
         const record = await store.connect({ organizationId: 'org_a', connectorName: 'crm', packageId: A, refreshToken: 'dummy-rt' });
         expect(record.packageId).toBe(A);
         expect((await store.read('org_a', 'crm', A))?.id).toBe(record.id);
-        expect(await store.read('org_a', 'crm', null)).toBeUndefined();
         expect((await store.read('org_a', 'crm'))?.id).toBe(record.id);
+        // One holder: the name's connection, as the read by name answered (red line 3).
+        expect((await store.read('org_a', 'crm', null))?.id).toBe(record.id);
+        // Two holders: the package's row is that package's alone.
+        expect(await storeOver(ql, twoHolders).read('org_a', 'crm', null)).toBeUndefined();
+        expect(await storeOver(ql, twoHolders).read('org_a', 'crm', B)).toBeUndefined();
     });
 
     it('an environment instance (package null) writes and reads the row naming none', async () => {
@@ -110,8 +114,9 @@ describe('[#31699] one instance is read and written by its package', () => {
         const record = await store.connect({ organizationId: 'org_a', connectorName: 'crm', packageId: null, refreshToken: 'dummy-rt' });
         expect(record.packageId).toBeNull();
         expect((await store.read('org_a', 'crm', null))?.id).toBe(record.id);
-        // The environment's item answers the name: its row is not a package's.
-        expect(await store.read('org_a', 'crm', A)).toBeUndefined();
+        // Two holders: a row naming no package is no one package's.
+        await expect(storeOver(ql, twoHolders).read('org_a', 'crm', A)).rejects.toBeInstanceOf(ConnectorConnectionConflictError);
+        expect((await storeOver(ql, twoHolders).read('org_a', 'crm', null))?.id).toBe(record.id);
     });
 });
 
@@ -133,10 +138,51 @@ describe('[#31699, design review M2] a row naming no package is the package\'s t
         expect((await storeOver(ql).read('org_a', 'crm', A))?.id).toBe('c0');
     });
 
-    it('the name resolves to another package: the row is not this package\'s', async () => {
+    it('the name resolves to another package: one holder, so the row answers by its name, as before', async () => {
         const ql = await dataEngine();
         await insertRow(ql, 'c0', null);
-        expect(await storeOver(ql, resolvedTo(B)).read('org_a', 'crm', A)).toBeUndefined();
+        expect((await storeOver(ql, resolvedTo(B)).read('org_a', 'crm', A))?.id).toBe('c0');
+    });
+});
+
+describe('[#31699, contract review F1] a declaration that moves keeps its connection while the name has one holder', () => {
+    it('to another package: the new package reads the old package\'s row, a connect stamps it in place, and a revoke removes it', async () => {
+        const ql = await dataEngine();
+        await insertRow(ql, 'c0', A);
+        const store = storeOver(ql, resolvedTo(B));
+        expect((await store.read('org_a', 'crm', B))?.id).toBe('c0');
+        const record = await store.connect({ organizationId: 'org_a', connectorName: 'crm', packageId: B, refreshToken: 'dummy-rt-b' });
+        expect(record.id).toBe('c0');
+        expect(await packages(ql)).toEqual([B]);
+        expect(await store.revoke('org_a', 'crm', undefined, B)).toBe(true);
+        expect(await packages(ql)).toEqual([]);
+    });
+
+    it('to the environment: the environment\'s instance reads the package\'s row, and a connect clears its stamp', async () => {
+        const ql = await dataEngine();
+        await insertRow(ql, 'c0', A);
+        const store = storeOver(ql, environmentHolds);
+        expect((await store.read('org_a', 'crm', null))?.id).toBe('c0');
+        const record = await store.connect({ organizationId: 'org_a', connectorName: 'crm', packageId: null, refreshToken: 'dummy-rt-env' });
+        expect(record.id).toBe('c0');
+        expect(record.packageId).toBeNull();
+        expect(await packages(ql)).toEqual([null]);
+    });
+
+    it('two holders: a row naming a package that holds no longer is no one package\'s; a row naming a holder is that holder\'s', async () => {
+        const ql = await dataEngine();
+        await insertRow(ql, 'c0', 'com.acme.gone');
+        const store = storeOver(ql, twoHolders);
+        const refusal = await store.read('org_a', 'crm', A).then(() => undefined, (e: unknown) => e);
+        expect(refusal).toBeInstanceOf(ConnectorConnectionConflictError);
+        expect((refusal as Error).message).toMatch(/os migrate stored-references bind/);
+        await expect(store.revoke('org_a', 'crm', undefined, A)).rejects.toBeInstanceOf(ConnectorConnectionConflictError);
+        expect(await packages(ql)).toEqual(['com.acme.gone']);
+
+        const held = await dataEngine();
+        await insertRow(held, 'c1', A);
+        expect(await storeOver(held, twoHolders).read('org_a', 'crm', B)).toBeUndefined();
+        expect((await storeOver(held, twoHolders).read('org_a', 'crm', A))?.id).toBe('c1');
     });
 });
 
