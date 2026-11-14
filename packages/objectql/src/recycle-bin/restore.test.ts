@@ -61,6 +61,8 @@ function makeDriver() {
     supports: {},
     /** When set, `create` of this object refuses as a store's unique constraint would. */
     refuseCreateOf: undefined as string | undefined,
+    /** The error that refusal throws; unset, SQLite's single-column sentence on `contact.email`. */
+    createRefusal: undefined as (() => unknown) | undefined,
     rowsOf: (o: string) => Array.from(storeFor(o).values()),
     rowOf: (o: string, id: string) => storeFor(o).get(id),
     seed(o: string, row: Row) { storeFor(o).set(String(row.id), { ...row }); },
@@ -80,6 +82,7 @@ function makeDriver() {
     },
     async create(o: string, data: Row) {
       if (driver.refuseCreateOf === o) {
+        if (driver.createRefusal) throw driver.createRefusal();
         const err: any = new Error('UNIQUE constraint failed: contact.email');
         err.code = 'SQLITE_CONSTRAINT_UNIQUE';
         throw err;
@@ -188,6 +191,18 @@ const deal = {
   },
 };
 
+/** An organization-scoped unique field that declares a label, beside a second authored column. */
+const invoice = {
+  name: 'invoice',
+  label: 'Invoice',
+  fields: {
+    id: text('id'),
+    invoice_no: { name: 'invoice_no', type: 'text' as const, unique: 'organization' as const, label: 'Invoice Number' },
+    series: text('series'),
+    organization_id: text('organization_id'),
+  },
+};
+
 interface Dispatch { object: string; operation: string; hasAst: boolean; hasId: boolean }
 
 async function makeEngine(options: { withBin?: boolean } = {}) {
@@ -196,7 +211,7 @@ async function makeEngine(options: { withBin?: boolean } = {}) {
   const driver = makeDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  const objects: any[] = [account, contact, task, customer, order, line, deal];
+  const objects: any[] = [account, contact, task, customer, order, line, deal, invoice];
   if (options.withBin !== false) objects.push(bin);
   for (const o of objects) engine.registry.registerObject(o as any, '__test__');
   const dispatches: Dispatch[] = [];
@@ -715,5 +730,123 @@ describe('the four refusals (409, ADR-0148 D2): nothing is written and the entry
     // The master was written first and is undone: no transaction covers it here.
     expect(driver.rowsOf('account')).toHaveLength(0);
     expect(entriesOf(driver)).toHaveLength(1);
+  });
+});
+
+/**
+ * The store's own unique violation at the write names the field it is about
+ * when the dialect determinably does, and by its label too, as the engine's
+ * unique envelope does (`duplicate-record-error.ts`). A field declared
+ * `unique: 'organization'` is keyed `(organization_id, FIELD)`: the
+ * organization part is the implied scope, so the refusal asks
+ * `uniqueViolationField`, which sets it aside, never the routing question
+ * `uniqueViolationColumn`, whose answer for that composite is no column.
+ */
+describe('RESTORE_UNIQUE_VALUE_TAKEN names an organization-scoped unique field and its label', () => {
+  const INVOICE = { id: 'inv1', invoice_no: 'INV-0001', series: 'A', organization_id: 'org_1' };
+  const ZH: Record<string, string> = { 'objects.invoice.fields.invoice_no.label': '发票号' };
+  const i18n = {
+    t: (key: string, locale: string) => (locale === 'zh-CN' && ZH[key]) || key,
+    getLocales: () => ['en', 'zh-CN'],
+  };
+
+  async function deleteInvoice(engine: ObjectQL, driver: any) {
+    driver.seed('invoice', INVOICE);
+    await engine.delete('invoice', { where: { id: 'inv1' }, ...ORG1_USER });
+    return entryOf(driver, 'inv1').id as string;
+  }
+
+  async function refusalOf(run: () => Promise<unknown>): Promise<any> {
+    try {
+      await run();
+    } catch (error) {
+      return error;
+    }
+    throw new Error('expected the restore to be refused');
+  }
+
+  const sqlite = () =>
+    Object.assign(new Error('UNIQUE constraint failed: invoice.organization_id, invoice.invoice_no'), { code: 'SQLITE_CONSTRAINT_UNIQUE' });
+  const postgres = () =>
+    Object.assign(new Error('duplicate key value violates unique constraint "uniq_invoice_invoice_no"'), {
+      code: '23505',
+      detail: 'Key (organization_id, invoice_no)=(org_1, INV-0001) already exists.',
+    });
+
+  it.each([
+    ['SQLite', sqlite],
+    ['Postgres', postgres],
+  ])("%s: the store's refusal at the write names the field and its label", async (_dialect, refusal) => {
+    const { engine, driver } = await makeEngine();
+    const entryId = await deleteInvoice(engine, driver);
+    driver.refuseCreateOf = 'invoice';
+    driver.createRefusal = refusal;
+
+    const failure = await refusalOf(() => engine.restore(entryId, ORG1_USER));
+
+    expect(failure).toMatchObject({
+      code: 'RESTORE_UNIQUE_VALUE_TAKEN', status: 409, object: 'invoice', recordId: 'inv1', entryId,
+      field: 'invoice_no', fieldLabel: 'Invoice Number',
+    });
+    expect(failure.message).toContain("'Invoice Number'");
+    expect(entriesOf(driver)).toHaveLength(1);
+  });
+
+  it.each([
+    ['SQLite', () => Object.assign(
+      new Error('UNIQUE constraint failed: invoice.organization_id, invoice.series, invoice.invoice_no'),
+      { code: 'SQLITE_CONSTRAINT_UNIQUE' },
+    )],
+    ['Postgres', () => Object.assign(new Error('duplicate key value violates unique constraint "uniq_invoice_series_invoice_no"'), {
+      code: '23505',
+      detail: 'Key (organization_id, series, invoice_no)=(org_1, A, INV-0001) already exists.',
+    })],
+  ])('%s control: two authored columns beside the organization part still name no field', async (_dialect, refusal) => {
+    const { engine, driver } = await makeEngine();
+    const entryId = await deleteInvoice(engine, driver);
+    driver.refuseCreateOf = 'invoice';
+    driver.createRefusal = refusal;
+
+    const failure = await refusalOf(() => engine.restore(entryId, ORG1_USER));
+
+    expect(failure).toMatchObject({ code: 'RESTORE_UNIQUE_VALUE_TAKEN', status: 409, object: 'invoice', recordId: 'inv1', entryId });
+    expect(failure).not.toHaveProperty('field');
+    expect(failure).not.toHaveProperty('fieldLabel');
+  });
+
+  it('the probe before the write names the label too', async () => {
+    const { engine, driver } = await makeEngine();
+    const entryId = await deleteInvoice(engine, driver);
+    driver.seed('invoice', { id: 'inv9', invoice_no: 'INV-0001', series: 'B', organization_id: 'org_1' });
+
+    const failure = await refusalOf(() => engine.restore(entryId, ORG1_USER));
+
+    expect(failure).toMatchObject({
+      code: 'RESTORE_UNIQUE_VALUE_TAKEN', status: 409, object: 'invoice', recordId: 'inv1', entryId,
+      field: 'invoice_no', fieldLabel: 'Invoice Number',
+    });
+  });
+
+  it("in the restorer's locale: the translated label", async () => {
+    const { engine, driver } = await makeEngine();
+    engine.setI18nService(i18n);
+    const entryId = await deleteInvoice(engine, driver);
+    driver.refuseCreateOf = 'invoice';
+    driver.createRefusal = sqlite;
+
+    const failure = await refusalOf(() => engine.restore(entryId, { context: { ...ORG1_USER.context, locale: 'zh-CN' } }));
+
+    expect(failure).toMatchObject({ code: 'RESTORE_UNIQUE_VALUE_TAKEN', status: 409, field: 'invoice_no', fieldLabel: '发票号' });
+  });
+
+  it('a field that declares no label carries no `fieldLabel`: the API name is never repeated there', async () => {
+    const { engine, driver } = await makeEngine();
+    const entryId = await deleteAcme(engine, driver);
+    driver.seed('account', { id: 'acc9', name: 'Acme Two', code: 'ACME', organization_id: 'org_1' });
+
+    const failure = await refusalOf(() => engine.restore(entryId, ORG1_USER));
+
+    expect(failure).toMatchObject({ code: 'RESTORE_UNIQUE_VALUE_TAKEN', status: 409, field: 'code' });
+    expect(failure).not.toHaveProperty('fieldLabel');
   });
 });

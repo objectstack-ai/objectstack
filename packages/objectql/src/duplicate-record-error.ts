@@ -220,8 +220,11 @@ export function envelopeUniqueViolation(
  * `resolveFieldLabel` climb. Their last rung, the API name itself, is not
  * returned: the sentence then falls back to the API name and `fieldLabel`
  * stays absent.
+ *
+ * The recycle bin's `RESTORE_UNIQUE_VALUE_TAKEN` refusal (`recycle-bin/restore.ts`)
+ * names its field by the same resolution, so both unique refusals read one label.
  */
-function displayLabels(
+export function displayLabels(
   schema: unknown,
   object: string,
   field: string | undefined,

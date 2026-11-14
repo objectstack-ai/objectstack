@@ -4968,6 +4968,7 @@ export class ObjectQL implements IObjectQLEngine {
       update: (...a) => this.update(...a),
       recomputeSummaries: (...a) => this.recomputeSummaries(...a),
       publishDataEvent: (...a) => this.publishDataEvent(...a),
+      validationMessageContext: (...a) => this.validationMessageContext(...a),
     };
     return restoreRecycleBinEntry.call(host, entryId, options);
   }
