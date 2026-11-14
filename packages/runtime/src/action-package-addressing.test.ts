@@ -29,6 +29,7 @@ import '@objectstack/metadata';
 import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { PackageScopedNameRefusedError, resolvePackageScopedHolders } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { actionHandlerOwnerRefusal, executeRegisteredAction, resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
 
 const A = 'com.acme.alpha';
@@ -1287,8 +1288,9 @@ describe('[#32681] /actions/account/approve judges and runs one item over the st
             });
         const rowEngine = {
             async find(table: string, q: any) {
-                const hits = table === 'sys_metadata' ? rows.filter((r) => matches(r, q?.where ?? {})).map((r) => ({ ...r })) : [];
-                return typeof q?.limit === 'number' ? hits.slice(0, q.limit) : hits;
+                const hits = table === 'sys_metadata' ? rows.filter((r) => matches(r, q?.where ?? {})) : [];
+                const page = typeof q?.limit === 'number' ? hits.slice(0, q.limit) : hits;
+                return page.map((r) => ({ ...r }));
             },
             async findOne(table: string, q: any) {
                 assertEngineFindOnePredicate(table, q);
@@ -1302,14 +1304,16 @@ describe('[#32681] /actions/account/approve judges and runs one item over the st
                 if (table === 'sys_metadata') rows.push({ ...data });
                 return { ...data };
             },
-            async update(table: string, data: Record<string, unknown>) {
+            async update(table: string, data: Record<string, unknown>, options?: any) {
+                assertEngineUpdateDispatch(data as any, options);
                 const row = table === 'sys_metadata' ? rows.find((r) => r.id === data.id) : undefined;
                 if (!row) return null;
                 Object.assign(row, data);
                 return { ...row };
             },
-            async delete() {
-                return null;
+            async delete(_table: string, options?: any) {
+                assertEngineDeleteDispatch(options);
+                throw new Error('writableEngine: no case here deletes a row');
             },
             async aggregate() {
                 return [];
