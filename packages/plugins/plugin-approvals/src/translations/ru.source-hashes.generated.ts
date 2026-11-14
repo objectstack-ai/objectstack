@@ -18,6 +18,8 @@
  */
 
 export const ruGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_approval_delegation._validations.delegate_not_delegator.message": "e4924bc4008bd3b5",
+  "objects.sys_approval_delegation._validations.validity_window_order.message": "e6a6433d70cb122d",
   "objects.sys_approval_request.fields.process_package.help": "2c4cfa5880a99e24",
   "objects.sys_approval_request.fields.process_package.label": "e2102a7a50e2a26d",
 };

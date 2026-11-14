@@ -194,6 +194,39 @@ describe('seed deferred back-fill failure is reported, not swallowed (framework#
   });
 
   /**
+   * #33206 — the data-engine contract lets `update` answer `null` for a by-id
+   * update that matched no row (the row is gone, or the organization the write
+   * carries cannot see it). The link was not written, so the back-fill is a
+   * failure like a thrown one, never counted as resolved.
+   */
+  it('a pass-2 reference update that matched no row (null) is reported, not counted as resolved (#33206)', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = createMetadata();
+
+    const realUpdate = (engine.update as any).getMockImplementation();
+    (engine.update as any).mockImplementation(async (obj: string, data: any, opts: any) => {
+      if (obj === 'audit_department') return null;
+      return realUpdate(obj, data, opts);
+    });
+
+    const logger = createLogger();
+    const result = await new SeedLoaderService(engine, metadata, logger).load({
+      seeds: SEEDS,
+      config: CONFIG,
+    });
+
+    expect(store.audit_department.find((r) => r.name === 'Engineering')!.head_id == null).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.errors.some((e: { field: string }) => e.field === 'head_id')).toBe(true);
+    const line = logger.error.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .find((m: string) => m.includes('audit_department.head_id'));
+    expect(line).toContain('matched no row');
+    const dept = result.results.find((r: { object: string }) => r.object === 'audit_department');
+    expect(dept?.referencesResolved ?? 0).toBe(0);
+  });
+
+  /**
    * #4729 — the LOG LEVEL has to agree with the count.
    *
    * The comment above this catch has always said the failure "must be a

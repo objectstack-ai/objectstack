@@ -34,9 +34,9 @@ export const CrmApp = App.create({
     {
       id: 'group_approvals', type: 'group', label: 'Approvals', icon: 'check-circle',
       children: [
-        // Reference system objects via `requiresObject` so the menu auto-hides
-        // when the capability is not installed.
-        { id: 'nav_approval_requests', type: 'object', objectName: 'sys_approval_request', label: 'Approval Requests', icon: 'inbox', requiresObject: 'sys_approval_request' },
+        // The inbox component, gated on the approvals service. Not `requiresObject`:
+        // the object read answers 404 to approvers until a request involves them.
+        { id: 'nav_approvals', type: 'component', componentRef: 'approvals:inbox', label: 'Approvals', icon: 'inbox', requiresService: 'approvals' },
       ],
     },
   ],

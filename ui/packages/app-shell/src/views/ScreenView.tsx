@@ -112,6 +112,7 @@ import {
 } from '@object-ui/components';
 import { ObjectForm } from '@object-ui/plugin-form';
 import { evalFieldPredicate } from '@object-ui/core';
+import { usePermissions } from '@object-ui/permissions';
 import { fileIdOf, getLazyFieldWidget } from '@object-ui/fields';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { SCREEN_FIELD_RECORD_LINK_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
@@ -806,7 +807,8 @@ function RoutedRecordLink({
   children: React.ReactNode;
 }) {
   const { appName } = useParams<{ appName?: string }>();
-  const path = appRecordPath(appName, routableObjectNames(objects), objectName, recordId);
+  const perms = usePermissions();
+  const path = appRecordPath(appName, routableObjectNames(objects, perms), objectName, recordId);
   if (path === null) return <>{children}</>;
   return (
     <Link to={path} className="text-primary underline-offset-4 hover:underline">
