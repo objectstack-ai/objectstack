@@ -18,7 +18,7 @@
  * not move.
  */
 
-import { ITEM_KEY_DISCRIMINATORS, isTenantAuthored, pairsOf } from '@objectstack/metadata-core';
+import { ITEM_KEY_DISCRIMINATORS, isTenantAuthored, packageDependencyClosure, pairsOf } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { isAggregatedViewContainer } from '@objectstack/spec/ui';
 import {
@@ -49,7 +49,12 @@ import { storedEntryRow } from './protocol-stored-overlay-types.js';
 import { viewIdentityPatch } from './protocol-view-normalization.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { declinesPackageLessRowAt, packageLessRowWithheld, pairMemberWithheldAt } from './protocol-exact-qualifier.js';
+import {
+    declinesPackageLessRowAt,
+    disabledExactAddressHolder,
+    packageLessRowWithheld,
+    pairMemberWithheldAt,
+} from './protocol-exact-qualifier.js';
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItems`; the method's docblock there is its contract. */
 export async function getMetaItems(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
@@ -90,6 +95,68 @@ function decorateListedItem(type: string, item: unknown): unknown {
     if (stored === undefined) return decorateMetadataItem(type, item);
     const { _diagnostics, ...served } = decorateMetadataItem(type, stored);
     return { ...served, name: (item as { name: string }).name, ...(_diagnostics !== undefined ? { _diagnostics } : {}) };
+}
+
+/**
+ * [#32354, ADR-0150 D3] Whether the effective or execution list withholds an
+ * item of `name` it serves at `packageId` because the item belongs to a
+ * disabled holder: a disabled package holds no name, and the list hides what
+ * the by-name read naming the same address hides, independent of the order
+ * things were registered or saved. `undefined` (nothing withheld) for a type
+ * the registry does not read by package, a registry that cannot answer, and
+ * while no package is disabled, so no list moves then.
+ *
+ *  - `'address'` (a list scoped to `packageId`): the exact read of the name at
+ *    that address is the disabled package's withheld item
+ *    ({@link disabledExactAddressHolder}: the package is disabled, or it is a
+ *    customization pair whose every base holding the name is). Before, the
+ *    list scoped to a disabled base, or to its pair, listed the pair's row at
+ *    a member the base does not ship while both exact reads answered 404.
+ *  - `'unscoped'` (the list naming no package, `packageId` the item's own
+ *    binding): the same, which leaves out a disabled holder's pair row; and,
+ *    for a bundle (`ITEM_KEY_DISCRIMINATORS`), an addition to a disabled
+ *    holder's bundle: `packageId` holds the name only as an addition (the
+ *    registry's served holders leave it out for every other reader) and each
+ *    holder in its declared dependency closure is disabled. Both were listed,
+ *    so a send naming no package, which reads this list, sent them. The
+ *    dependent's own address keeps serving its addition, as its exact read
+ *    does.
+ *
+ * Every holder is read with `includeDisabledPackages`, so a disable never
+ * promotes a dependent's addition to a holder. Answers are cached per call.
+ */
+function disabledHolderListing(
+    host: Pick<ProtocolHost, 'engine'>,
+    type: string,
+): ((name: string, packageId: string, naming: 'address' | 'unscoped') => boolean) | undefined {
+    const registry: any = host.engine?.registry;
+    if (typeof registry?.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function'
+        || typeof registry.getAllPackages !== 'function') return undefined;
+    if (!(registry.getAllPackages() as ReadonlyArray<{ enabled?: unknown; status?: unknown } | undefined>)
+        .some((pkg) => pkg?.enabled === false || pkg?.status === 'disabled')) return undefined;
+    const disabled = (id: string): boolean => registry.isPackageDisabled(id) === true;
+    const isBundle = ITEM_KEY_DISCRIMINATORS[type] !== undefined;
+    const answers = new Map<string, boolean>();
+    const judge = (name: string, packageId: string, naming: 'address' | 'unscoped'): boolean => {
+        if (disabledExactAddressHolder(host, { type, name, packageId }) !== undefined) return true;
+        if (naming !== 'unscoped' || !isBundle) return false;
+        const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+        if (every.includes(packageId)) return false;
+        const own: readonly string[] = registry.packageScopedHoldersOf(type, name, packageId, { includeDisabledPackages: true }) ?? [];
+        if (!own.includes(packageId)) return false;
+        const reach = new Set(packageDependencyClosure(packageId, registry)?.dependencies ?? []);
+        const bases = every.filter((holder) => holder !== packageId && reach.has(holder));
+        return bases.length > 0 && bases.every(disabled);
+    };
+    return (name, packageId, naming) => {
+        const key = `${naming}\u0000${packageId}\u0000${name}`;
+        let answer = answers.get(key);
+        if (answer === undefined) {
+            answer = judge(name, packageId, naming);
+            answers.set(key, answer);
+        }
+        return answer;
+    };
 }
 
 /** The body of `ObjectStackProtocolImplementation#readFlattenedMetaItems`; the method's docblock there is its contract. */
@@ -865,6 +932,21 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // package's items installed elsewhere as an empty package.
     if (request.type !== 'package' && !keepDisabledPackages) {
         items = (items as any[]).filter((it) => !isItemOfDisabledPackage(host.engine.registry, it));
+        // [#32354, ADR-0150 D3] …and an item another package carries for a
+        // disabled holder ({@link disabledHolderListing}): the list scoped to
+        // a package serves no name its exact read withholds as a disabled
+        // package's, and the list naming no package leaves out a disabled
+        // holder's pair row and a dependent's addition to its bundle.
+        const withheld = disabledHolderListing(host, request.type);
+        if (withheld) {
+            items = (items as any[]).filter((it) => {
+                const itemName = (it as { name?: unknown } | null)?.name;
+                if (typeof itemName !== 'string') return true;
+                if (packageId) return !withheld(itemName, packageId, 'address');
+                const bound = boundPackageOf((it as { _packageId?: unknown })._packageId);
+                return bound === undefined || !withheld(itemName, bound, 'unscoped');
+            });
+        }
     }
     // [#28877] …and, on the effective served list, an action that launches
     // into a disabled package ({@link isActionWithheldByDisabledPackage}),
