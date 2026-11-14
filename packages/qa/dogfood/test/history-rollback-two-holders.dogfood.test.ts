@@ -26,8 +26,8 @@
 //    bare, an unattributed version included, and so does a name first saved
 //    as the environment's own item and later under a package (M1): its bare
 //    rollback restores the environment's versions as `main` does;
-//  - a name two packages ship, one of them customized, is two holders to the
-//    bare doors as it is to the bare plain read (ADR-0150 D5);
+//  - a name two packages ship, one of them customized or neither, is two
+//    holders to the bare doors as it is to the bare plain read (ADR-0150 D5);
 //  - `?package=` on a type not stored per package is refused 400, never
 //    accepted and dropped; and a rollback naming no installed package, of a
 //    name no row holds, is refused rather than minting a row for it.
@@ -52,6 +52,8 @@ const SHIPPED = 'qa_hist_shipped_32905';
 const SOLO = 'qa_hist_solo_32905';
 /** A flow both packages ship, only alpha's pair customizes. */
 const SHIPPED_ONE = 'qa_hist_shipped_one_32905';
+/** A flow both packages ship and neither customizes: no stored row. */
+const SHIPPED_NONE = 'qa_hist_shipped_none_32905';
 /** A runtime flow saved as the environment's own item, deleted, then saved in alpha's pair (M1). */
 const TAKEN_OVER = 'qa_hist_taken_over_32905';
 /** A runtime flow alpha's pair saved and then deleted: no row holds it. */
@@ -66,7 +68,7 @@ const flowBody = (name: string, label: string) => ({
 function holderPackage(p: 'alpha' | 'beta') {
   return defineStack({
     manifest: { id: `com.qa.hist32905.${p}`, namespace: `h32905${p}`, name: `qa_hist32905_${p}`, version: '1.0.0', type: 'app' },
-    flows: [flowBody(SHIPPED, `${p} shipped`), flowBody(SHIPPED_ONE, `${p} shipped one`)],
+    flows: [flowBody(SHIPPED, `${p} shipped`), flowBody(SHIPPED_ONE, `${p} shipped one`), flowBody(SHIPPED_NONE, `${p} shipped none`)],
   } as never);
 }
 
@@ -220,6 +222,18 @@ describe('the /meta history and rollback doors of a flow name two packages hold 
     expect(rollback.status, JSON.stringify(rollback.json)).toBe(409);
     expect(codeOf(rollback.json)).toBe('RESOURCE_CONFLICT');
     expect(await labelAt(SHIPPED_ONE, ALPHA_PAIR)).toBe('alpha one r2');
+  });
+
+  it('a name two packages ship and neither customized, no row stored, is refused bare at both doors, as the bare plain read refuses it', async () => {
+    const read = await call('GET', `/meta/flow/${SHIPPED_NONE}`);
+    expect(read.status, JSON.stringify(read.json)).toBe(409);
+    const history = await call('GET', `/meta/flow/${SHIPPED_NONE}/history`);
+    expect(history.status, JSON.stringify(history.json)).toBe(409);
+    expect(codeOf(history.json)).toBe('RESOURCE_CONFLICT');
+    expect(candidatesOf(history.json)).toEqual(candidatesOf(read.json));
+    const rollback = await call('POST', `/meta/flow/${SHIPPED_NONE}/rollback`, { toVersion: 1 });
+    expect(rollback.status, JSON.stringify(rollback.json)).toBe(409);
+    expect(codeOf(rollback.json)).toBe('RESOURCE_CONFLICT');
   });
 
   it('?package= on a type not stored per package is refused 400 at both doors, never accepted and dropped', async () => {

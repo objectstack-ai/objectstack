@@ -3103,3 +3103,28 @@ describe('seedApplied.landed (#30348) — one shared schema on both publish resp
     expect(SeedAppliedLandedSchema.safeParse({ object: 'a', inserted: list([]) }).success).toBe(false);
   });
 });
+
+import { RollbackMetaItemRequestSchema } from './protocol.zod';
+
+describe('RollbackMetaItemRequestSchema declares what the rollback door enforces', () => {
+  // The REST door reads `toVersion` through this declaration (body and query),
+  // and the protocol method refuses a version below 1 as well: a history
+  // version is a whole number of at least 1, so the published contract says
+  // so instead of a bare number the door would refuse.
+  const base = { type: 'flow', name: 'shared_flow' } as const;
+
+  it.each([[0], [-1], [1.5], ['2'], [true]])('refuses toVersion %j', (toVersion) => {
+    expect(RollbackMetaItemRequestSchema.safeParse({ ...base, toVersion }).success).toBe(false);
+  });
+
+  it('CONTROL: accepts toVersion 1 with every optional member, preserving each through parse', () => {
+    const full = { ...base, toVersion: 1, message: 'back', member: 'flow', packageId: 'com.acme.alpha.custom' };
+    const result = RollbackMetaItemRequestSchema.safeParse(full);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(full);
+  });
+
+  it('requires toVersion', () => {
+    expect(RollbackMetaItemRequestSchema.safeParse(base).success).toBe(false);
+  });
+});

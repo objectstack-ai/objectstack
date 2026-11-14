@@ -2609,7 +2609,10 @@ export const FindReferencesToMetaResponseSchema = lazySchema(() => z.object({
 export const RollbackMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
-  toVersion: z.number().describe('The history version whose body is restored as the new live row.'),
+  toVersion: z.number().int().min(1).describe(
+    'The history version whose body is restored as the new live row: a whole number of at least 1, '
+    + 'as the history lists it. The rollback door reads this declaration and refuses anything else `400`.',
+  ),
   message: z.string().optional().describe('Rollback note, recorded on the new history row.'),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
   packageId: z.string().optional().describe(HISTORY_PACKAGE_SELECTOR_DESCRIPTION),

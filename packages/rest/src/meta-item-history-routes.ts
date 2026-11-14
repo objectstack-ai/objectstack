@@ -165,7 +165,7 @@ import {
 // [#20061 / #20062 / #20139] The DECLARED request schemas the change log and the
 // audit trail parse their numeric parameters through — see
 // `readDeclaredQueryNumber` in `rest-server.ts`.
-import { AuditMetaItemRequestSchema, HistoryMetaItemRequestSchema } from '@objectstack/spec/api';
+import { AuditMetaItemRequestSchema, HistoryMetaItemRequestSchema, RollbackMetaItemRequestSchema } from '@objectstack/spec/api';
 import type { AuditMetaItemRequest, HistoryMetaItemRequest, PublishMetaItemRequest } from '@objectstack/spec/api';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { handleRouteError, sendFieldVisibilityFault, thrownAnswerIsBareNotFound } from './error-response.js';
@@ -832,23 +832,28 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 // SDK's `rollbackItem` and the console's metadata client both
                 // send a JSON number); only the untyped query string goes
                 // through `readDeclaredQueryNumber`'s faithful coercion.
+                // [#32905] The whole-number declaration is the rollback
+                // request's own (`RollbackMetaItemRequestSchema.toVersion`, a
+                // whole number of at least 1), so the published contract and
+                // this door spell a version one way.
                 // Precedence is unchanged — `toVersion`, then the `version`
                 // alias, then `?toVersion=` — and every refusal stays this
                 // door's own `INVALID_REQUEST`.
                 const bodyVersion = body.toVersion ?? body.version;
+                const declaredVersion = RollbackMetaItemRequestSchema.shape.toVersion.optional();
                 let toVersion: number | undefined;
                 if (bodyVersion !== undefined && bodyVersion !== null) {
-                    const parsed = UNDECLARED_WHOLE_NUMBER_PARAM.safeParse(bodyVersion);
+                    const parsed = declaredVersion.safeParse(bodyVersion);
                     toVersion = parsed.success ? parsed.data : undefined;
                 } else {
                     try {
                         toVersion = readDeclaredQueryNumber(req.query, 'toVersion',
-                            UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
+                            declaredVersion, { emptyIsAbsent: false });
                     } catch {
                         toVersion = undefined;
                     }
                 }
-                if (toVersion === undefined || toVersion < 1) {
+                if (toVersion === undefined) {
                     res.status(400).json({
                         error: `'toVersion' (positive integer) is required`,
                         code: 'INVALID_REQUEST',
