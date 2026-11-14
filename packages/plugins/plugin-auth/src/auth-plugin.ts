@@ -127,7 +127,7 @@ import type { CounterStore } from './rate-limit-storage.js';
 import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
-import { DIRECT_SIGN_IN_PATH, type DirectSignInOptions } from './direct-sign-in.js';
+import { DIRECT_SIGN_IN_PATH, resolveDirectSignIn, type DirectSignInOptions } from './direct-sign-in.js';
 import {
   devSeedAdminEmail,
   devSeedAdminPassword,
@@ -3975,8 +3975,11 @@ export class AuthPlugin implements Plugin {
     // Direct sign-in's start door (`direct-sign-in.ts`): mounted only while the
     // setting is on, so with it off this path is better-auth's 404 as before.
     // Registered before the wildcard so it takes precedence; the IP allow-list
-    // above applies to it like every sign-in door.
-    if (this.authManager!.directSignInSetting().enabled) {
+    // above applies to it like every sign-in door. The setting is resolved from
+    // this plugin's own option and the environment, the same inputs the
+    // manager resolves it from.
+    const env = ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>;
+    if (resolveDirectSignIn(this.options.directSignIn, env).enabled) {
       rawApp.get(`${basePath}${DIRECT_SIGN_IN_PATH}`, (c: any) =>
         this.authManager!.startDirectSignIn(c.req.raw, transportOf(c)),
       );
