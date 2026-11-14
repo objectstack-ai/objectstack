@@ -826,6 +826,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           assertSsoSignOutOfIdpSupported: (...a) => this.assertSsoSignOutOfIdpSupported(...a),
           get config() { return readConfig(); },
           existingAddressSignUpAnswersSuccess: (...a) => this.existingAddressSignUpAnswersSuccess(...a),
+          getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
           getDataEngine: (...a) => this.getDataEngine(...a),
           hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),
           isAuthGateActive: (...a) => this.isAuthGateActive(...a),

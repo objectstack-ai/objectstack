@@ -69,6 +69,7 @@ import {
   LAST_LOCAL_CREDENTIAL_CODE,
   LAST_LOCAL_CREDENTIAL_MESSAGE,
 } from './last-local-credential.js';
+import { answerRefusedAuthorization } from './oauth-authorize-refusal.js';
 import { refuseRequestNamingDifferentAccounts } from './one-account-per-request.js';
 import {
   SSO_ONLY_RESET_UNREADABLE_MESSAGE,
@@ -108,6 +109,7 @@ export interface BeforeHookHost {
   assertSsoSignOutOfIdpSupported: AuthManager['assertSsoSignOutOfIdpSupported'];
   readonly config: AuthManager['config'];
   existingAddressSignUpAnswersSuccess: AuthManager['existingAddressSignUpAnswersSuccess'];
+  getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
   hasExistingUserFor: AuthManager['hasExistingUserFor'];
   isAuthGateActive: AuthManager['isAuthGateActive'];
@@ -131,7 +133,7 @@ export async function globalBeforeHook(
   this: BeforeHookHost,
   ctx: any,
   setShouldSkipSessionRefresh: typeof import('better-auth/api').setShouldSkipSessionRefresh,
-): Promise<ReturnType<typeof ssoDiscoveryCompanionContext> | void> {
+): Promise<ReturnType<typeof ssoDiscoveryCompanionContext> | Response | void> {
   // ── #4586: hand the attribution scope its actor resolver ─────
   // FIRST, and unconditionally: this global before-hook is the one
   // seam every better-auth endpoint passes through (`matcher: () =>
@@ -508,10 +510,13 @@ export async function globalBeforeHook(
           clientId: String(clientId),
         });
         if (!allowed) {
-          const { APIError } = await import('better-auth/api');
-          throw new APIError('FORBIDDEN', {
-            message: 'You are not authorized to sign in to this environment.',
-            code: 'ENV_ACCESS_DENIED',
+          // The refusal, delivered by who is asking (`oauth-authorize-refusal.ts`):
+          // the `403` envelope for a fetch or an API client, unchanged; for a
+          // browser navigating here, `access_denied` back to the client's
+          // REGISTERED `redirect_uri`, or a readable page when there is none.
+          return answerRefusedAuthorization(ctx, {
+            userId: actor.userId,
+            consoleUrl: this.getConsolePageUrl('/'),
           });
         }
       }
