@@ -50,6 +50,7 @@ const result = BaseEngineOptionsSchema.parse(data);
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
@@ -107,6 +108,7 @@ Options for DataEngine.aggregate operations
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
@@ -162,6 +164,7 @@ Options for DataEngine.count operations
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
@@ -218,6 +221,7 @@ Options for DataEngine.delete operations
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
@@ -296,6 +300,7 @@ Options for DataEngine.insert operations
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
@@ -357,6 +362,7 @@ Query options for IDataEngine.find() operations
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
@@ -444,6 +450,7 @@ Options for DataEngine.update operations
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
@@ -520,6 +527,7 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
@@ -608,6 +616,7 @@ QueryAST-aligned options for DataEngine.count operations
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
@@ -678,6 +687,7 @@ QueryAST-aligned options for DataEngine.delete operations
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
@@ -743,6 +753,7 @@ QueryAST-aligned query options for IDataEngine.find() operations
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
@@ -836,6 +847,7 @@ QueryAST-aligned options for DataEngine.update operations
 | **tenantId** | `string` | optional |  |
 | **timezone** | `string` | optional |  |
 | **locale** | `string` | optional |  |
+| **workspaceLocale** | `string` | optional |  |
 | **currency** | `string` | optional |  |
 | **positions** | `string[]` | optional (default: `[]`) |  |
 | **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |

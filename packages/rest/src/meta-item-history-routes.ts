@@ -151,7 +151,7 @@
  * the module `rest-server.ts` imported it from.
  */
 
-import { rethrowAuthzStoreUnavailable } from '@objectstack/core';
+import { rethrowAuthzStoreUnavailable, userTextLocalesOf } from '@objectstack/core';
 // [#12702 · #20156] The `/meta` item write doors' capability predicate — see
 // `rest-server.ts`' import of the same name for why it is shared — and the
 // metadata-plane FLS names the comparison door's and the published read's mask
@@ -710,6 +710,9 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                     ...(packageId ? { packageId } : {}),
                     // [#22877] Publishes ONE member's draft of a bundled type.
                     ...metaMemberSelector(req.query),
+                    // [#32656] The languages the findings' `userMessage` is
+                    // composed in, read off the resolved context.
+                    userTextLocales: userTextLocalesOf(ctx),
                 };
                 const result = await p.publishMetaItem(publishRequest);
                 res.json(result);

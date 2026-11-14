@@ -37,6 +37,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a clocked case (check-test-source-alias).
+import '@objectstack/lint';
 
 interface Row {
     id: string;
@@ -339,6 +341,40 @@ describe('publishPackageDrafts carries per-draft advisories on published[] eleme
         // `failed[]` elements are unaffected by #9343 — the ruling's explicit
         // boundary: no advisories key appears anywhere on a refused batch.
         expect(JSON.stringify(res.failed)).not.toContain('advisories');
+    });
+});
+
+describe('[#32656] publishPackageDrafts states the caller\'s user-text locales to the authoring gate', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    // Ruling C on #32440: a finding's user sentence is composed in the request
+    // locale, else the workspace default, else `en`. The batch door's `/meta`
+    // twin (the runtime `packages` domain) states the two locales; the batch
+    // promotes each draft through the same gate the single-item doors judge
+    // with, so the locales must reach it for every element — and an
+    // unstated request must reach it unstated (the gate then composes `en`).
+    it('every promoted draft is judged with the stated locales; an unstated request states none', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageFlowDraft(protocol, 'nightly_purge', advisoryFlow('nightly_purge'));
+        await stageFlowDraft(protocol, 'purge_clean', cleanFlow('purge_clean'));
+        const gate = vi.spyOn(protocol as any, 'assertRuntimeAuthoringRules');
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG, userTextLocales: ['zh-CN', 'en'] });
+        expect(res).toMatchObject({ success: true, publishedCount: 2 });
+        const stated = gate.mock.calls.map(([evt]: any[]) => [evt.name, evt.userTextLocales]);
+        expect(stated).toEqual(expect.arrayContaining([
+            ['nightly_purge', ['zh-CN', 'en']],
+            ['purge_clean', ['zh-CN', 'en']],
+        ]));
+
+        gate.mockClear();
+        await stageFlowDraft(protocol, 'nightly_purge', advisoryFlow('nightly_purge'));
+        await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(gate.mock.calls.length).toBeGreaterThan(0);
+        for (const [evt] of gate.mock.calls as any[]) expect(evt.userTextLocales).toBeUndefined();
     });
 });
 

@@ -84,6 +84,8 @@ import {
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a clocked case (check-test-source-alias).
+import '@objectstack/metadata';
 
 /**
  * [#26708] The packages this file's saves name, installed: a save naming a
@@ -405,8 +407,9 @@ describe('#15068 · 0 · the publish-then-read path really runs', () => {
         // probes read a widget's dataset AS that caller (the renderer's path),
         // and nothing in the publish derives a write scope from it.
         // [ADR-0146 D1] Its user id is the recorded actor; no organization is.
+        // [#32656] The caller's language ladder rides too (none named here).
         const caller = PKG_ADMIN(ORG).executionContext;
-        expect(publishRequest()).toEqual({ packageId: PKG, actor: caller.userId, context: caller });
+        expect(publishRequest()).toEqual({ packageId: PKG, actor: caller.userId, context: caller, userTextLocales: [] });
         expect(publishRequest()).not.toHaveProperty('organizationId');
     });
 });

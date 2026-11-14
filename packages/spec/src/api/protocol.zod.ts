@@ -1067,6 +1067,27 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * The two locales a write door states for the user-facing sentences its
+ * findings carry (`RuntimeAuthoringIssueSchema.userMessage`), in ladder order:
+ * the locale the request names, then the workspace default. A write door holds
+ * both (`ExecutionContext.locale` and `ExecutionContext.workspaceLocale`); the
+ * metadata protocol that composes the sentences never sees the request. Two
+ * values, not their fold: once a request names a locale the fold has lost the
+ * workspace default, and the ladder needs it as its second rung (see
+ * `ApiErrorSchema.userMessage`, "Language").
+ */
+const userTextLocalesMember = () => z.array(z.string()).max(2).optional().describe(
+  'The locales the user-facing sentences of this write\'s findings (`advisories[].userMessage`, and '
+  + '`issues[].userMessage` on its 422) are composed in, in ladder order: the locale the request names, '
+  + 'then the workspace default. Each is read against the platform locale table, whole and then one '
+  + 'subtag shorter at a time; a value that names no table language is passed over, and `en` is the '
+  + 'last rung. Stated by the door that holds the request (the REST door and the dispatcher state '
+  + '`[ExecutionContext.locale, ExecutionContext.workspaceLocale]`), never read from a wire body. '
+  + 'ABSENT ⇒ the sentences are composed in `en`. It selects a language only: what is judged, refused '
+  + 'or saved does not depend on it.',
+);
+
+/**
  * Save Metadata Item Request
  * Create or update a metadata item — the request shape for
  * `PUT /api/v1/meta/:type/:name` (the `saveMetaItem` protocol method).
@@ -1232,6 +1253,7 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'dispatcher build this request member by member, so a `client` in a wire body or query is never '
     + 'read.',
   ),
+  userTextLocales: userTextLocalesMember(),
 }));
 
 /**
@@ -1432,6 +1454,7 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     + '`no_draft`.',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  userTextLocales: userTextLocalesMember(),
 }));
 
 /**

@@ -85,7 +85,7 @@
  * re-exports nothing from here, and the published surface does not move.
  */
 
-import { rethrowAuthzStoreUnavailable } from '@objectstack/core';
+import { rethrowAuthzStoreUnavailable, userTextLocalesOf } from '@objectstack/core';
 // [#12702 · #20156] The `/meta` item write doors' capability predicate — see
 // `rest-server.ts`' import of the same name for why it is shared.
 import { metaWriteCapabilityVerdict } from '@objectstack/metadata-core';
@@ -360,6 +360,10 @@ export function registerMetaItemWriteRoutes(this: MetaItemWriteRouteHost, scope:
                     ...(actor ? { actor } : {}),
                     ...(force ? { force: true } : {}),
                     ...(packageId ? { packageId } : {}),
+                    // [#32656] The request's locale, then the workspace
+                    // default: the languages the findings' `userMessage` is
+                    // composed in. Read off the resolved context, never the body.
+                    userTextLocales: userTextLocalesOf(ctx),
                 };
                 const result = await p.saveMetaItem(saveRequest);
                 res.json(result);

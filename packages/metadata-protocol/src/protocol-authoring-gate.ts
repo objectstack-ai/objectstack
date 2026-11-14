@@ -323,6 +323,12 @@ export async function judgeRuntimeAuthoringRules(
      * round trip for a secret it still holds.
      */
     restoredCredentialPaths?: () => Promise<readonly string[]>;
+    /**
+     * [#32656] The locales the findings' user-facing sentences are composed in
+     * (the write request's `userTextLocales`: the request's locale, then the
+     * workspace default). Absent ⇒ `en`. Selects a language, never a verdict.
+     */
+    userTextLocales?: readonly (string | undefined)[];
 }): Promise<RuntimeAuthoringVerdict> {
     const clean: RuntimeAuthoringVerdict = { error: null, advisories: [] };
     // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
@@ -379,6 +385,7 @@ export async function judgeRuntimeAuthoringRules(
                 state: evt.state,
                 body: evt.body,
                 ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
+                ...(evt.userTextLocales !== undefined ? { userTextLocales: evt.userTextLocales } : {}),
             }).advisories,
         };
     }
@@ -572,6 +579,7 @@ export async function judgeRuntimeAuthoringRules(
         ...(tenancyPostureInForce !== undefined ? { tenancyPostureInForce } : {}),
         ...(engineJudge !== undefined ? { judgeFilter: engineJudge } : {}),
         ...(restoredCredentialPaths !== undefined ? { restoredCredentialPaths } : {}),
+        ...(evt.userTextLocales !== undefined ? { userTextLocales: evt.userTextLocales } : {}),
         // [#20312] The deployment's component manifest, read per publish;
         // with it the gate compiles an html page's source (ADR-0080 §5).
         ...(sduiManifest !== undefined ? { sduiManifest } : {}),

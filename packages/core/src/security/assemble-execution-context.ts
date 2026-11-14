@@ -162,6 +162,7 @@ export const ENTRY_EXECUTION_CONTEXT_FIELDS = [
   'oauthScopes',
   'timezone',
   'locale',
+  'workspaceLocale',
   'currency',
 ] as const satisfies readonly EntryExecutionContextField[];
 
@@ -422,6 +423,9 @@ function entryFields(
     // beside the Chinese label of the very field it names.
     timezone: anonymous ? undefined : localization?.timezone,
     locale: anonymous ? undefined : (requestLocale ?? localization?.locale),
+    // The workspace default alone, beside the fold above: the second rung of
+    // the user-text ladder (`ExecutionContextSchema.workspaceLocale`).
+    workspaceLocale: anonymous ? undefined : localization?.locale,
     currency: anonymous ? undefined : localization?.currency,
   };
 }
@@ -453,4 +457,23 @@ export function assembleExecutionContextOrGuest(
   input: ExecutionContextAssemblyInput,
 ): ExecutionContext {
   return emit(entryFields(input, !input.authz.userId));
+}
+
+/**
+ * The locales a door hands a producer of user-facing text, in ladder order: the
+ * request's locale (the fold `locale`, which is the request's own when it names
+ * one and the workspace default otherwise), then the workspace default alone
+ * (`workspaceLocale`). That is the ladder `ApiErrorSchema.userMessage`
+ * ("Language") declares, before its `en` floor, as the two values
+ * `SaveMetaItemRequestSchema.userTextLocales` carries. Unset rungs are left
+ * out, so an anonymous or unlocalized caller yields `[]`: the producer's `en`.
+ */
+export function userTextLocalesOf(
+  ctx: { readonly locale?: string; readonly workspaceLocale?: string } | null | undefined,
+): string[] {
+  const locales: string[] = [];
+  for (const value of [ctx?.locale, ctx?.workspaceLocale]) {
+    if (typeof value === 'string' && value.length > 0) locales.push(value);
+  }
+  return locales;
 }

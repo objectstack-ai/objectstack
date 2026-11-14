@@ -247,6 +247,8 @@ describe('[#22877] PRESERVATION — the request each protocol door receives', ()
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(protocol.publishMetaItem.mock.calls[0][0]).toEqual({
             type: 'email_template', name: 'acme.welcome', actor: 'u1', packageId: 'com.acme.mail', member: 'zh-CN',
+            // [#32656] Server-stated off the caller's context, never read from the wire.
+            userTextLocales: [],
         });
     });
 
