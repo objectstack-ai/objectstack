@@ -135,6 +135,8 @@ export default function DocPage() {
   // Landing on a URL that names a section scrolls to it once the doc renders.
   // The body mounts after the doc loads and behind the markdown renderer's lazy
   // boundary, so the heading may not exist yet: watch the article until it does.
+  // A new `:slug` is a new landing (the book-name redirect below keeps this page
+  // mounted and the doc loaded, but draws a new article).
   useEffect(() => {
     if (state !== 'ready' || doc?.name !== name || !hash) return;
     let id: string;
@@ -151,7 +153,7 @@ export default function DocPage() {
     });
     observer.observe(article, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [state, doc, name, hash]);
+  }, [state, doc, name, slug, hash]);
 
   // SPA navigation for rewritten doc-to-doc links: anchors render as plain
   // <a href="{docsHref}/...">; intercept same-app clicks so following a
