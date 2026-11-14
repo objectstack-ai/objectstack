@@ -125,32 +125,6 @@ const myHook = defineHook({
 
 ### Key Properties Explained
 
-#### `object` — Target Scope
-
-```typescript
-// Single object
-object: 'account'
-
-// Multiple objects
-object: ['account', 'contact', 'lead']
-
-// All objects (use sparingly — performance impact)
-object: '*'
-```
-
-#### `events` — Lifecycle Events
-
-```typescript
-// Single event
-events: ['beforeInsert']
-
-// Multiple events (common pattern)
-events: ['beforeInsert', 'beforeUpdate']
-
-// After events for side effects
-events: ['afterInsert', 'afterUpdate', 'afterDelete']
-```
-
 #### `body` — Implementation
 
 A `source` of statements against `ctx`; a throw aborts the write
@@ -165,42 +139,6 @@ body: {
 
 The deprecated `handler` takes an inline function or a registered function's
 name ([Registration Methods](#registration-methods)).
-
-#### `priority` — Execution Order
-
-Lower numbers execute first:
-
-```typescript
-// System hooks (framework internals)
-priority: 50
-
-// Application hooks (your app logic)
-priority: 100  // default
-
-// User customizations
-priority: 1000
-```
-
-#### `async` — Background Execution
-
-Only applicable for `after*` events:
-
-```typescript
-// Blocking (default) — runs within transaction
-async: false
-
-// Fire-and-forget — runs in background
-async: true
-```
-
-**When to use async: true:**
-- Sending notifications
-- Non-critical side effects
-
-**When to use async: false:**
-- Creating related records
-- Updating dependent data
-- Critical consistency requirements
 
 #### `condition` — Declarative Filtering
 
@@ -283,20 +221,6 @@ Practical consequence when authoring: spell keys against the object's **declared
 fields, and on an insert event read `previous` only against `null` — a column
 read off it there is the mistake that used to cost you a hook that quietly never
 ran, and now costs you every write the hook is attached to.
-
-#### `onError` — Error Handling
-
-The default is `'abort'` **unconditionally** — for `after*` hooks too, a sync
-after-hook that throws rolls back the transaction. Set `onError: 'log'`
-explicitly on `after*` side-effect hooks:
-
-```typescript
-// Abort operation on error — the default for ALL hooks (before* AND after*)
-onError: 'abort'
-
-// Log error and continue — set this on after* side-effect hooks
-onError: 'log'
-```
 
 ---
 
@@ -697,31 +621,6 @@ result: {
 }
 ```
 
-### `previous` — Previous State
-
-Available in update/delete hooks:
-
-```typescript
-// beforeUpdate, afterUpdate
-ctx.previous: {
-  id: '123',
-  status: 'pending',  // Old value
-  updated_at: '2026-04-01T00:00:00Z',
-}
-
-// beforeDelete, afterDelete
-ctx.previous: {
-  id: '123',
-  name: 'Old Account',
-  // ... full record state
-}
-```
-
-### Cross-Object API
-
-Access other objects within the same transaction. `ctx.api.object(name)` is the
-same repository in both forms; the canonical query key is **`where`**.
-
 ---
 
 ## Common Patterns
@@ -851,6 +750,48 @@ const maskSensitiveData = defineHook({
   },
 });
 ```
+
+### 5. No two of mine overlap (sandboxed `body`)
+
+No declarative key refuses two overlapping leave requests of one person; copy
+this hook, renaming its `name`, `object` and fields (`date` fields: set `DATE_ONLY`).
+
+<!-- os:check -->
+```typescript
+import { defineHook } from '@objectstack/spec/data';
+
+export default defineHook({
+  name: 'leave_request_no_overlap',
+  object: 'leave_request',
+  events: ['beforeInsert', 'beforeUpdate'],
+  runAs: 'system', // count the rows the saver cannot read too
+  refusals: { OVERLAP: { message: 'This overlaps another request of yours.', status: 409 } },
+  body: {
+    language: 'js',
+    capabilities: ['api.read'],
+    source: `
+      const DATE_ONLY = false; // true when start_at / end_at are date fields: the end day is booked too
+      const r = Object.assign({}, ctx.previous, ctx.input); // update: stored row under the patch
+      const off = ['rejected', 'cancelled'];
+      if (!r.owner_id || !r.start_at || !r.end_at || off.includes(r.status)) return;
+      const where = {
+        owner_id: r.owner_id,
+        status: { $nin: off },  // fail closed: a new status counts until listed here
+        start_at: DATE_ONLY ? { $lte: r.end_at } : { $lt: r.end_at },  // datetime is half-open:
+        end_at: DATE_ONLY ? { $gte: r.start_at } : { $gt: r.start_at }, // 18:00 end, 18:00 start is no overlap
+      };
+      if (ctx.previous) where.id = { $ne: ctx.previous.id }; // not the record itself
+      if (await ctx.api.object(ctx.object).count({ where }) > 0)
+        throw Object.assign(new Error(), { code: 'OVERLAP' });
+    `,
+  },
+});
+```
+
+Known limits: it is a read-then-write check, so two concurrent saves can both
+pass; a recycle-bin restore runs no insert hook; an import with automations off
+skips hooks; rows of one bulk insert or update do not see each other; and a row
+with no start or end is neither checked nor counted.
 
 ---
 
