@@ -1406,4 +1406,53 @@ describe('[#32681] /actions/account/approve judges and runs one item over the st
         const onAccount = await routeTo('account');
         expect([onAccount.action?.label, onAccount.packageId, onAccount.refusal, onAccount.degraded]).toEqual(['custom', undefined, undefined, undefined]);
     });
+
+    /**
+     * [#32681, second half] The unscoped plural read the boot pass registers
+     * counts an action name's holders per `(object, name)` too: a package-less
+     * row bound to an object no package binds the name to is the
+     * environment's own entry, registered beside the holder's item. So after
+     * the pass the registry holds both, a read naming the holder answers its
+     * own item, and the package-less row's route judges that row and runs the
+     * environment's handler.
+     *
+     * BEFORE (main `fc283d6d97`, the metadata fix reverted and rebuilt): the
+     * pass registered one of the two rows (the one saved last), so the
+     * registry held one key, and with the package-less row saved last a read
+     * naming the holder answered it (`custom`).
+     *
+     * Not pinned here: the holder's own route. Its declaration read (the
+     * protocol's execution face, `getMetaItemForExecution`) answers the
+     * environment's item on the other object beside one package holder, so
+     * that route judges no declaration, before and after this change alike
+     * (measured both ways); the execution face is carried separately.
+     */
+    const SHAPES = [
+        { shape: 'mirror shape: A on account, a package-less row on contact', holder: A, held: 'account', label: 'alpha', other: 'contact' },
+        { shape: 'single holder: B on contact, a package-less row on account', holder: B, held: 'contact', label: 'beta', other: 'account' },
+    ] as const;
+    for (const { shape, holder, held, label, other } of SHAPES) {
+        for (const order of ['the package-less save last', 'the package-less save first'] as const) {
+            it(`${shape} (${order}): after the pass the registry holds both items, a read naming the holder answers its own, and the package-less row's route judges and runs that one item`, async () => {
+                const { rowEngine, rows } = writableEngine();
+                if (order === 'the package-less save last') {
+                    await save(rowEngine, holder, held, label);
+                    await save(rowEngine, undefined, other, 'custom');
+                } else {
+                    await save(rowEngine, undefined, other, 'custom');
+                    await save(rowEngine, holder, held, label);
+                }
+                expect(storedRowsOf(rows).sort()).toEqual([[holder, held], [null, other]].sort());
+                install(holder);
+                ship(holder, held);
+                engine.registerAction(held, 'approve', () => `ran ${holder}`, `app:${holder}`);
+                engine.registerAction(other, 'approve', () => 'ran env');
+                const manager = await boot(rowEngine, rows);
+                const keys = [...manager.registry.get('action').keys()].map((key: string) => key.replace(/\u0000/g, '|').replace(/\u0001/g, '>')).sort();
+                expect(keys).toEqual([`${holder}|${held}>approve`, `${other}>approve`].sort());
+                expect((await manager.get('action', 'approve', holder))?.label).toBe(label);
+                expect(await judgedAndRun(other)).toEqual({ judged: 'custom', refusal: undefined, degraded: undefined, run: 'ran env' });
+            });
+        }
+    }
 });
