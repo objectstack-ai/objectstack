@@ -191,6 +191,36 @@ describe('useDeferredFirstSend', () => {
     expect(doSend).toHaveBeenCalledWith('with a file', [file]);
   });
 
+  // objectstack#32984 — a doubled submit that carries a file is the same
+  // message: the first turn gets the text once and the file once.
+  it('a doubled submit with a file is held once, not twice', async () => {
+    const { result, rerender, pendingRef, doSend } = setup({ chatApi: API, conversationId: undefined });
+    const file = new File(['hi'], 'spec.txt', { type: 'text/plain', lastModified: 1 });
+
+    act(() => result.current('with a file', [file]));
+    act(() => result.current('with a file', [file]));
+    expect(pendingRef.current).toEqual({ content: 'with a file', files: [file] });
+
+    act(() => rerender({ chatApi: API, conversationId: 'c1' }));
+    await flushReplay();
+    expect(doSend).toHaveBeenCalledTimes(1);
+    expect(doSend).toHaveBeenCalledWith('with a file', [file]);
+  });
+
+  it('control: a second submit with a different file joins, and the shared file is not doubled', async () => {
+    const { result, rerender, doSend } = setup({ chatApi: API, conversationId: undefined });
+    const spec = new File(['hi'], 'spec.txt', { type: 'text/plain', lastModified: 1 });
+    const logo = new File(['png'], 'logo.png', { type: 'image/png', lastModified: 2 });
+
+    act(() => result.current('with a file', [spec]));
+    act(() => result.current('and the logo', [spec, logo]));
+
+    act(() => rerender({ chatApi: API, conversationId: 'c1' }));
+    await flushReplay();
+    expect(doSend).toHaveBeenCalledTimes(1);
+    expect(doSend).toHaveBeenCalledWith('with a file\n\nand the logo', [spec, logo]);
+  });
+
   it('local/echo mode (no chatApi) sends immediately so the offline-demo bot still responds', () => {
     const { result, pendingRef, doSend } = setup({ chatApi: undefined, conversationId: undefined });
 

@@ -4346,6 +4346,9 @@ const zhHant = {
       issuesSummary: '這次搭建有部分內容需要修復後才能使用。回覆「修復這些問題」，助手會幫你處理。',
       warningsSummary: '應用已搭建好，有幾處值得檢查。想進一步完善的話，可以問問助手具體是哪些。',
       issuesDetails: '技術詳情',
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention_one: '{{count}} 項需要處理',
+      needsAttention_other: '{{count}} 項需要處理',
       unknownPhase: '未知的構建階段',
       nextStepsLead: '接下來可以說：{{steps}}',
       nextStepQuote: '「{{step}}」',

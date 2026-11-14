@@ -4097,6 +4097,9 @@ const ko = {
       issuesSummary: "이번 빌드에는 사용하기 전에 수정해야 할 부분이 있습니다. \"문제를 수정해 줘\"라고 답하면 어시스턴트가 수정합니다.",
       warningsSummary: "앱이 빌드되었지만 확인해 볼 만한 부분이 몇 가지 있습니다. 개선하고 싶다면 어시스턴트에게 무엇인지 물어보세요.",
       issuesDetails: "기술 세부 정보",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention_one: "확인 필요 {{count}}건",
+      needsAttention_other: "확인 필요 {{count}}건",
       unknownPhase: "알 수 없는 빌드 단계",
       nextStepsLead: "다음으로 이렇게 말할 수 있습니다: {{steps}}",
       nextStepQuote: "“{{step}}”",

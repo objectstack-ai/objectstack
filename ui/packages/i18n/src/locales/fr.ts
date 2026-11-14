@@ -4183,6 +4183,10 @@ const fr = {
       issuesSummary: "Certaines parties de cette construction doivent être corrigées avant d’être utilisables. Répondez « corrige les problèmes » et l’assistant s’en chargera.",
       warningsSummary: "L’application est construite, avec quelques points à vérifier. Demandez à l’assistant lesquels si vous voulez l’améliorer.",
       issuesDetails: "Détails techniques",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention_one: "{{count}} nécessite une vérification",
+      needsAttention_many: "{{count}} d’éléments nécessitent une vérification",
+      needsAttention_other: "{{count}} nécessitent une vérification",
       unknownPhase: "Phase de création inconnue",
       nextStepsLead: "Ensuite, vous pouvez dire : {{steps}}",
       nextStepQuote: "« {{step}} »",

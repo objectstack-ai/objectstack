@@ -4451,6 +4451,13 @@ const ar = {
       issuesSummary: "تحتاج بعض أجزاء هذا البناء إلى إصلاح قبل أن يصبح جاهزًا. أجب بـ «أصلح المشكلات» وسيقوم المساعد بإصلاحها.",
       warningsSummary: "تم بناء التطبيق، مع بعض النقاط التي تستحق المراجعة. اسأل المساعد عنها إذا أردت تحسينه.",
       issuesDetails: "تفاصيل تقنية",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention_zero: "بحاجة إلى مراجعة: {{count}}",
+      needsAttention_one: "بحاجة إلى مراجعة: {{count}}",
+      needsAttention_two: "بحاجة إلى مراجعة: {{count}}",
+      needsAttention_few: "بحاجة إلى مراجعة: {{count}}",
+      needsAttention_many: "بحاجة إلى مراجعة: {{count}}",
+      needsAttention_other: "بحاجة إلى مراجعة: {{count}}",
       unknownPhase: "مرحلة إنشاء غير معروفة",
       nextStepsLead: "بعد ذلك يمكنك أن تقول: {{steps}}",
       nextStepQuote: "«{{step}}»",

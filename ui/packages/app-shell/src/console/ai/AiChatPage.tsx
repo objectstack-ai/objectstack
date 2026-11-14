@@ -18,6 +18,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import { useAuth } from '@object-ui/auth';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
+import { readObjectsByName } from '../../hooks/useObjectPresence.js';
 import { toast } from 'sonner';
 import { Package as PackageIcon, Sparkles as SparklesIcon } from 'lucide-react';
 import { useAdapter } from '../../providers/AdapterProvider.js';
@@ -927,6 +928,24 @@ export interface PendingFirstMessage {
  *
  * Exported for unit testing.
  */
+/** Two attachments are one file when they are the same object, or agree on name, size, type and lastModified. */
+function isSameFile(a: File, b: File): boolean {
+  return (
+    a === b ||
+    (a.name === b.name && a.size === b.size && a.type === b.type && a.lastModified === b.lastModified)
+  );
+}
+
+/**
+ * objectstack#32984 — is this submit a repeat of the held first message? The
+ * same text and the same files, file for file; anything that differs joins.
+ */
+function isSameFirstSend(held: PendingFirstMessage, content: string, files?: File[]): boolean {
+  const a = held.files ?? [];
+  const b = files ?? [];
+  return content === held.content && a.length === b.length && a.every((f, i) => isSameFile(f, b[i]));
+}
+
 export function useDeferredFirstSend(opts: {
   /** The chat endpoint — defined once an agent is resolved (server-backed mode). */
   chatApi: string | undefined;
@@ -1026,11 +1045,16 @@ export function useDeferredFirstSend(opts: {
         // objectstack#32984 — nor may the second one vanish: it used to be
         // dropped without a word. It joins the held first message, which has
         // not left the client yet, so both reach the agent as the first turn.
-        // The same text again (a doubled submit event) is not repeated.
+        // A repeat of the held message (a doubled submit event: the same
+        // text AND the same files) is not sent twice.
         const held = pendingRef.current;
         if (!held || held.targetAgentRoute) pendingRef.current = { content, files };
-        else if (content !== held.content || (files?.length ?? 0) > 0) {
-          const joined = [...(held.files ?? []), ...(files ?? [])];
+        else if (!isSameFirstSend(held, content, files)) {
+          const heldFiles = held.files ?? [];
+          const joined = [
+            ...heldFiles,
+            ...(files ?? []).filter((f) => !heldFiles.some((h) => isSameFile(h, f))),
+          ];
           pendingRef.current = {
             content: [held.content, content].filter((part) => part.trim() !== '').join('\n\n'),
             files: joined.length > 0 ? joined : undefined,
@@ -2310,7 +2334,8 @@ export function ChatPane({
   // visible (the Claude-Code-shows-the-repo idiom). The magic flow starts
   // unbound ("New app") and binds the moment its build mints a package.
   const isBuildSurface = activeAgent ? agentRouteName(activeAgent) === 'build' : false;
-  const { apps, objects: metadataObjects } = useMetadata();
+  const metadata = useMetadata();
+  const { apps } = metadata;
   // Narrow the loosely-typed provider apps once (see MetadataAppItem) so the
   // derivations below read fields without per-access casts.
   const metadataApps = apps as MetadataAppItem[] | undefined;
@@ -2368,11 +2393,17 @@ export function ChatPane({
   // then shows the name as given.
   const { objectLabel: i18nObjectLabel, fieldLabel: i18nFieldLabel } = useObjectLabel();
   const metadataLocale = useMetadataLocale();
+  // By name, when a change card asks (objectui#12811): the chat dock mounts
+  // this pane on an app's object-list open, where reading the whole
+  // `objects` registry at render would bring it back onto that open.
   const findMetadataObject = useCallback(
     (objectName: string) =>
-      ((metadataObjects ?? []) as Array<{ name?: string; label?: string; fields?: Record<string, { label?: string }> }>)
-        .find((o) => o?.name === objectName),
-    [metadataObjects],
+      (readObjectsByName(metadata, [objectName]) as Array<{
+        name?: string;
+        label?: string;
+        fields?: Record<string, { label?: string }>;
+      }>).find((o) => o?.name === objectName),
+    [metadata],
   );
   const resolveObjectLabel = useCallback(
     (objectName: string) => {

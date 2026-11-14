@@ -20,11 +20,13 @@
  *
  * In the preview that answer is not a fault: an unpublished object holds no
  * records, which is the empty list the page should draw, with a sentence that
- * says why. This wrapper reads exactly that answer, and only on the list read
- * (`find`) of the object asked for. Every other failure (a 403, a 500, a read
- * of some OTHER object) reaches the list unchanged, and outside the preview it
- * is never installed, so a missing object on the live console is still an
- * error.
+ * says why. This wrapper reads exactly that answer, and only on a list read
+ * (`find`): any object the engine has not registered, through this source,
+ * answers an empty page (a lookup into another drafted object included), and
+ * reports its name, so only the listed object's own empty state carries the
+ * publish sentence. Every other failure (a 403, a 500, a refused `findOne`)
+ * reaches the list unchanged, and outside the preview it is never installed,
+ * so a missing object on the live console is still an error.
  */
 
 import { answeredLoadFailure } from '@object-ui/react';

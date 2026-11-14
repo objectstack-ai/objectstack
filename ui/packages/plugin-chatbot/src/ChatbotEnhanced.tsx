@@ -565,6 +565,11 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    * true the proposed-plan card's actions are disabled as well
    * (objectui#10925), so a click cannot send the next turn while this one is
    * still streaming.
+   *
+   * objectstack#32984 — the plan card reads a build call with no result as
+   * building only while this is true, and as not built once it is false, and
+   * withholds a second Build it while building: a host that never sets it
+   * shows a running build as not built and offers Build it again.
    */
   isLoading?: boolean;
   /** Current streaming/API error */
@@ -3735,8 +3740,12 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                       <span className="inline-flex h-7 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700">
                         <CheckCircle2 className="size-3.5" />
                         {publishedLabel}
+                        {/* objectstack#32984 — through the pack; it was English in every locale. */}
                         {tool.draftReview.failedCount
-                          ? ` · ${tool.draftReview.failedCount} need${tool.draftReview.failedCount === 1 ? 's' : ''} attention`
+                          ? ` · ${tCount('chatbot.build.needsAttention', {
+                              count: tool.draftReview.failedCount,
+                              defaultValue: '{{count}} need attention',
+                            })}`
                           : ''}
                       </span>
                     ) : (
