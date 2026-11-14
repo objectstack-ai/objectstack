@@ -421,7 +421,8 @@ as a projection is retired, its object is no longer registered, and no data
 route serves it (ADR-0131 D3). Studio's All metadata area lists the catalog
 (`/studio/~all/metadata/permission?scope=environment`; Setup's old
 `/apps/setup/metadata/permission` address redirects there), a grant
-names its set by name (`sys_user_permission_set.permission_set`), and a write
+names its set by its package and name (`sys_user_permission_set.permission_set_package`
+and `permission_set`), and a write
 goes through the metadata door (`PUT` or `DELETE /api/v1/meta/permission/:name`),
 which requires `manage_metadata` — and, under a `group` or `isolated` tenancy
 posture, the platform operator. This has three author-visible consequences:
@@ -441,7 +442,8 @@ posture, the platform operator. This has three author-visible consequences:
   has one holder per namespace: packages of two namespaces may each ship a set
   of one name, each granted by its own package and name, while two packages of
   one namespace, a package with no namespace, a platform package (`base`,
-  `system`, `sys`) and the platform-requested `guest_portal` keep one holder.
+  `system`, `sys`), the environment and the platform-requested `guest_portal`
+  keep one holder.
   Positions and capabilities keep one name per deployment. Every other set
   (one authored in this system, a clone, or one saved into a writable runtime package) is edited in place: the edit
   lands on its one stored definition.
