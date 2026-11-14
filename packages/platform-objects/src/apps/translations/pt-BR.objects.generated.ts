@@ -2111,6 +2111,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Ler declarações apenas do token de ID",
         help: "Somente OIDC. Lê o e-mail, o nome e os grupos do token de ID verificado do provedor de identidade e não chama o endpoint userinfo dele. Ative para o Microsoft Entra ID, cuja resposta de userinfo não traz grupos nem preferred_username. Desativado por padrão: um provedor com endpoint userinfo lê suas declarações dessa resposta. Altere em “Editar opções de login”."
       },
+      sign_out_of_idp: {
+        label: "Sign Out of the Company Sign-In Too",
+        help: "When someone signs out, also sign them out of the identity provider, so the next sign-in through it asks for their credentials again (for shared computers). SAML: single logout, which needs the IdP Logout URL; logout messages from the identity provider are accepted only when signed. OIDC: the identity provider’s end-session endpoint, read from its discovery document. Off by default: signing out ends only this system’s session. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuário que registrou este provedor"
@@ -2221,6 +2225,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Opcional. Formato de NameID SAML solicitado. O padrão é o formato configurado no IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "Optional. The IdP’s SAML single logout (redirect) endpoint. Needed only to turn on “Sign Out of the Company Sign-In Too” in Edit Sign-In Options."
+          },
           mapEmail: {
             label: "Mapear: atributo de e-mail",
             helpText: "Opcional. Atributo da asserção mapeado para o e-mail do usuário. O padrão é \"email\" e, depois, o NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -2305,6 +2313,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           keepCurrentCert: {
             label: "Continuar confiando no certificado atual",
             helpText: "Enquanto o IdP faz a troca, aceitar asserções assinadas por qualquer um dos certificados. Edite novamente sem esta opção para remover o antigo."
+          },
+          logoutUrl: {
+            label: "IdP Logout URL",
+            helpText: "The IdP’s SAML single logout (redirect) endpoint, used when “Sign Out of the Company Sign-In Too” is on. Leave blank to keep the stored one."
           }
         },
         resultDialog: {

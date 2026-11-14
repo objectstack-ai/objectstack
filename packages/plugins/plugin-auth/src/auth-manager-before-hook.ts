@@ -96,6 +96,7 @@ export interface BeforeHookHost {
   assertRevokeSessionIdentifiesRecord: AuthManager['assertRevokeSessionIdentifiesRecord'];
   assertSsoProviderDeletable: AuthManager['assertSsoProviderDeletable'];
   assertSsoProviderDomainFree: AuthManager['assertSsoProviderDomainFree'];
+  assertSsoSignOutOfIdpSupported: AuthManager['assertSsoSignOutOfIdpSupported'];
   readonly config: AuthManager['config'];
   existingAddressSignUpAnswersSuccess: AuthManager['existingAddressSignUpAnswersSuccess'];
   hasExistingUserFor: AuthManager['hasExistingUserFor'];
@@ -335,6 +336,9 @@ export async function globalBeforeHook(
   // held-caller refusal, before the vendor writes.
   if (ctx?.path === '/sso/update-provider') {
     await this.assertSsoProviderDomainFree(ctx);
+    // Ruling record 6866334319: "sign out of the company sign-in too" is
+    // saved on only for a provider that can honour it.
+    await this.assertSsoSignOutOfIdpSupported(ctx);
     // fall through — the vendor's own provider-access check still runs
   }
 
@@ -403,6 +407,8 @@ export async function globalBeforeHook(
       // [#32085] One email domain, one provider: a domain another
       // provider already serves is refused 409, naming that provider.
       await this.assertSsoProviderDomainFree(ctx);
+      // Ruling record 6866334319: the sign-out switch, as on update-provider.
+      await this.assertSsoSignOutOfIdpSupported(ctx);
     }
     // A known IdP's companion origins (Microsoft Entra ID's userinfo on
     // graph.microsoft.com), trusted for this endpoint's discovery validation
