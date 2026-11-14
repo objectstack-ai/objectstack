@@ -36,7 +36,7 @@ import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
-import { SysMember, SysOrganization, SysUser } from '@objectstack/platform-objects/identity';
+import { SysMember, SysOrganization, SysUser } from '@objectstack/platform-objects';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
