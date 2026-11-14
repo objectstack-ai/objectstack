@@ -175,7 +175,9 @@ describe('[#31699, contract review F1] a declaration that moves keeps its connec
         const store = storeOver(ql, twoHolders);
         const refusal = await store.read('org_a', 'crm', A).then(() => undefined, (e: unknown) => e);
         expect(refusal).toBeInstanceOf(ConnectorConnectionConflictError);
-        expect((refusal as Error).message).toMatch(/os migrate stored-references bind/);
+        // The bind never moves a row that already names a package: the remedy is to uninstall one holder.
+        expect((refusal as Error).message).toMatch(/Uninstall one of the packages/);
+        expect((refusal as Error).message).not.toMatch(/stored-references bind/);
         await expect(store.revoke('org_a', 'crm', undefined, A)).rejects.toBeInstanceOf(ConnectorConnectionConflictError);
         expect(await packages(ql)).toEqual(['com.acme.gone']);
 

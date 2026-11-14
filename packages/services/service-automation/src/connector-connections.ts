@@ -245,11 +245,14 @@ export class ConnectorConnectionStore {
             return named === null || !holders.has(named);
         });
         if (unclaimed.length === 0) return own;
+        const remedy = unclaimed.some((r) => rowPackage(r) === null)
+            ? 'Bind a connection naming no package to its package with `os migrate stored-references bind --table '
+                + 'sys_connector_connection`, or uninstall one of the packages, then read it again.'
+            // The bind never moves a row that already names a package.
+            : 'Uninstall one of the packages, then read it again: the one remaining instance reads it, and a revoke removes it.';
         throw new ConnectorConnectionConflictError(
             `The connection of connector instance '${connectorName}' in this organization names no package that holds `
-                + `that name, and ${holder.candidates.length} packages hold it, so it is no one package's connection. Bind it to `
-                + 'its package with `os migrate stored-references bind --table sys_connector_connection`, or uninstall one of '
-                + 'the packages, then read it again.',
+                + `that name, and ${holder.candidates.length} packages hold it, so it is no one package's connection. ${remedy}`,
         );
     }
 

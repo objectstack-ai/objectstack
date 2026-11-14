@@ -33,7 +33,8 @@ import { FLOW_RESERVED_NODE_TYPES, defineActionDescriptor, resolveFlowTriggerKin
 import type { Connector, ConnectorOrigin } from '@objectstack/spec/integration';
 import { ConnectorSchema, isConnectorUpstreamChanged } from '@objectstack/spec/integration';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
-import type { AutomationEngine, ConnectorActionHandler, ConnectorHold, FlowTrigger, FlowTriggerBinding, NodeExecutor } from './engine.js';
+import type { AutomationEngine, ConnectorActionHandler, ConnectorHold, FlowTrigger, FlowTriggerBinding, NodeExecutor, RegisteredConnector } from './engine.js';
+import type { ConnectorInstances } from './connector-instances.js';
 
 /**
  * The `AutomationEngine` members the moved bodies read, each typed as the class
@@ -343,6 +344,7 @@ export function registerConnector(
     def: Connector,
     handlers: Record<string, ConnectorActionHandler>,
     origin: ConnectorOrigin,
+    instance: ConnectorInstanceOptions = {},
 ): void {
     const parsed = ConnectorSchema.parse(def);
     for (const action of parsed.actions ?? []) {
@@ -352,8 +354,11 @@ export function registerConnector(
             );
         }
     }
-    this.assertSameOriginOrFree(parsed.name, origin);
-    this.connectors.set(parsed.name, { def: parsed, handlers, origin, state: 'ready' });
+    const packageId = instance.packageId ?? null;
+    this.assertSameOriginOrFree(parsed.name, origin, packageId, instance.soleOfName === true);
+    placeInstance(this.connectors, parsed.name, packageId, origin, instance.soleOfName === true, {
+        def: parsed, handlers, origin, state: 'ready',
+    });
     this.logger.info(
         `Connector registered: ${parsed.name} (${Object.keys(handlers).length} action handlers, origin: ${origin})`,
     );
@@ -367,10 +372,12 @@ export function registerDegradedConnector(
     origin: ConnectorOrigin,
     cause?: unknown,
     hold?: ConnectorHold,
+    instance: ConnectorInstanceOptions = {},
 ): void {
     const parsed = ConnectorSchema.parse(def);
-    this.assertSameOriginOrFree(parsed.name, origin);
-    this.connectors.set(parsed.name, {
+    const packageId = instance.packageId ?? null;
+    this.assertSameOriginOrFree(parsed.name, origin, packageId, instance.soleOfName === true);
+    placeInstance(this.connectors, parsed.name, packageId, origin, instance.soleOfName === true, {
         def: parsed,
         handlers: {},
         origin,
@@ -410,9 +417,19 @@ export function describeHold(hold: ConnectorHold): string {
 }
 
 /** The body of {@link AutomationEngine.assertSameOriginOrFree}, moved unedited; that method's docblock is its contract. */
-export function assertSameOriginOrFree(this: Pick<PluginExtensionHost, 'connectors' | 'logger'>, name: string, origin: ConnectorOrigin): void {
-    const existing = this.connectors.get(name);
-    if (!existing) return;
+export function assertSameOriginOrFree(
+    this: Pick<PluginExtensionHost, 'connectors' | 'logger'>,
+    name: string,
+    origin: ConnectorOrigin,
+    packageId: string | null = null,
+    soleOfName = false,
+): void {
+    // [#31699] Two sources of truth are judged by NAME, whatever package each
+    // instance is of: a plugin's connector and a declarative instance never
+    // share a name. Two declarative instances of one name are two packages'.
+    const instances = this.connectors.ofName(name);
+    if (instances.length === 0) return;
+    const existing = instances.find((i) => i.registered.origin !== origin)?.registered ?? instances[0]!.registered;
     if (existing.origin !== origin) {
         const describe = (o: ConnectorOrigin) =>
             o === 'plugin'
@@ -425,7 +442,39 @@ export function assertSameOriginOrFree(this: Pick<PluginExtensionHost, 'connecto
                 `Rename one of them.`,
         );
     }
-    this.logger.warn(`Connector '${name}' replaced`);
+    if (soleOfName || instances.some((i) => i.packageId === packageId)) this.logger.warn(`Connector '${name}' replaced`);
+}
+
+/**
+ * [#31699] Where a registration lands: the instance of `(packageId, name)`,
+ * replaced in place. With `soleOfName`, every other instance of `name` of the
+ * same origin is dropped first: the declared-connector reconcile keeps one
+ * instance per name until the one-holder backstop narrows.
+ */
+function placeInstance(
+    connectors: ConnectorInstances,
+    name: string,
+    packageId: string | null,
+    origin: ConnectorOrigin,
+    soleOfName: boolean,
+    registered: RegisteredConnector,
+): void {
+    if (soleOfName) {
+        for (const other of connectors.ofName(name)) {
+            if (other.packageId !== packageId && other.registered.origin === origin) connectors.delete(name, other.packageId);
+        }
+    }
+    connectors.set(name, packageId, registered);
+}
+
+/**
+ * [#31699] Which instance a registration is: its package (`null`, the
+ * default: a plugin's connector, or an instance the environment authored),
+ * and whether it is to be the one instance of its name ({@link placeInstance}).
+ */
+export interface ConnectorInstanceOptions {
+    readonly packageId?: string | null;
+    readonly soleOfName?: boolean;
 }
 
 /** The body of {@link AutomationEngine.unregisterNodeExecutor}, moved unedited; that method's docblock is its contract. */
@@ -472,7 +521,12 @@ export function unregisterTrigger(this: Pick<PluginExtensionHost, 'boundFlowTrig
 }
 
 /** The body of {@link AutomationEngine.unregisterConnector}, moved unedited; that method's docblock is its contract. */
-export function unregisterConnector(this: Pick<PluginExtensionHost, 'connectors' | 'logger'>, name: string): void {
-    this.connectors.delete(name);
+export function unregisterConnector(
+    this: Pick<PluginExtensionHost, 'connectors' | 'logger'>,
+    name: string,
+    packageId?: string | null,
+): void {
+    // [#31699] `packageId` absent: every instance of the name, as before.
+    this.connectors.delete(name, packageId);
     this.logger.info(`Connector unregistered: ${name}`);
 }

@@ -3354,7 +3354,13 @@ export class AutomationServicePlugin implements Plugin {
                 );
                 continue;
             }
-            desired.set(bound.name, { entry: bound, signature: connectorInstanceSignature(bound) });
+            // [#31699] The instance package joins the signature: an entry whose
+            // package moves (an unstamped entry's durable holder changing) is
+            // registered again under the new one, never left under the old.
+            desired.set(bound.name, {
+                entry: bound,
+                signature: `${connectorInstanceSignature(bound)}|package:${this.declaredInstance(ctx, bound).packageId ?? ''}`,
+            });
         }
 
         // [#27237] Where each instance's `credentialRef` resolves from joins its
@@ -3455,6 +3461,7 @@ export class AutomationServicePlugin implements Plugin {
         for (const name of [...this.degradedInstances.keys()]) {
             if (desired.has(name)) continue;
             this.degradedInstances.delete(name);
+            // [#31699] By name, as {@link dematerializeConnector} says why.
             try { engine.unregisterConnector(name); } catch { /* ignore */ }
             ctx.logger.info(`[Automation] dropped degraded connector instance '${name}' (no longer declared)`);
         }
@@ -3919,6 +3926,7 @@ export class AutomationServicePlugin implements Plugin {
                 def,
                 withFailureTextRewritten(handlers, connectorReadWithheldText(entry)),
                 'declarative',
+                this.declaredInstance(ctx, entry),
             );
             this.materializedConnectors.set(name, tracked);
             if (credentialHandle) this.grantHandles.set(name, credentialHandle);
@@ -4027,6 +4035,8 @@ export class AutomationServicePlugin implements Plugin {
                     info.reason,
                     'declarative',
                     info.cause,
+                    undefined,
+                    this.declaredInstance(ctx, info.entry),
                 );
             } catch (err) {
                 // Can't even register the husk (e.g. the entry's def no longer
@@ -4096,6 +4106,7 @@ export class AutomationServicePlugin implements Plugin {
                     'declarative',
                     info.cause,
                     { kind: 'declaration' },
+                    this.declaredInstance(ctx, info.entry),
                 );
             } catch (err) {
                 ctx.logger.warn(
@@ -4171,7 +4182,9 @@ export class AutomationServicePlugin implements Plugin {
         // the client its administrator entered (`clientSource: 'installer'`).
         return createOAuth2GrantHandle({
             connector: name,
-            packageId: connectorInstancePackage(connectorNameResolver(ctx), entry),
+            // [#31699] Asked on every read: an unstamped entry's package is the
+            // one its name resolves to now (red-line r3 note on 3a-ii).
+            packageId: () => connectorInstancePackage(connectorNameResolver(ctx), entry),
             config: {
                 grant: auth.grant,
                 ...(takesInstallerClient(auth) ? { clientSource: 'installer' as const } : {}),
@@ -4258,7 +4271,10 @@ export class AutomationServicePlugin implements Plugin {
         this.degradedInstances.set(name, { attempts: 1, signature: info.signature, reason, held: true });
         if (!info.hasLive) {
             try {
-                engine.registerDegradedConnector(this.buildDegradedHuskDef(name, info.entry), reason, 'declarative', info.cause, { kind: 'connection' });
+                engine.registerDegradedConnector(
+                    this.buildDegradedHuskDef(name, info.entry), reason, 'declarative', info.cause, { kind: 'connection' },
+                    this.declaredInstance(ctx, info.entry),
+                );
             } catch (err) {
                 ctx.logger.warn(
                     `[Automation] could not register degraded husk for '${name}' — the instance stays absent from the `
@@ -4304,6 +4320,7 @@ export class AutomationServicePlugin implements Plugin {
                 'declarative',
                 undefined,
                 { kind: 'connection' },
+                this.declaredInstance(ctx, info.entry),
             );
         } catch (err) {
             ctx.logger.warn(
@@ -4479,6 +4496,17 @@ export class AutomationServicePlugin implements Plugin {
         }
         const userId = typeof request?.context?.userId === 'string' && request.context.userId.length > 0 ? request.context.userId : undefined;
         return { name, entry, packageId, auth, organizationId, userId };
+    }
+
+    /**
+     * [ADR-0150 D4, #31699] Which engine instance a declared entry is
+     * registered as: its instance package ({@link connectorInstancePackage}),
+     * the one the connection door and the dispatch address it by, and the one
+     * instance of its name (`soleOfName`), as the reconcile keeps them until
+     * the one-holder backstop narrows.
+     */
+    private declaredInstance(ctx: PluginContext, entry: unknown): { packageId: string | null; soleOfName: true } {
+        return { packageId: connectorInstancePackage(connectorNameResolver(ctx), entry), soleOfName: true };
     }
 
     /**
@@ -4868,7 +4896,7 @@ export class AutomationServicePlugin implements Plugin {
         });
         // The access token the exchange answered serves the next dispatch; it is
         // never stored (D3).
-        this.grantHandles.get(name)?.seed(organizationId, record.revision, token);
+        this.grantHandles.get(name)?.seed(organizationId, record.revision, token, record.id);
         return this.describeConnection(name, organizationId, record);
     }
 
@@ -5006,7 +5034,10 @@ export class AutomationServicePlugin implements Plugin {
         if (repeat) return;
         if (!hasLive) {
             try {
-                engine.registerDegradedConnector(this.buildDegradedHuskDef(info.name, info.entry), reason, 'declarative');
+                engine.registerDegradedConnector(
+                    this.buildDegradedHuskDef(info.name, info.entry), reason, 'declarative', undefined, undefined,
+                    this.declaredInstance(ctx, info.entry),
+                );
             } catch (err) {
                 ctx.logger.warn(
                     `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
@@ -5409,6 +5440,7 @@ export class AutomationServicePlugin implements Plugin {
                     'declarative',
                     info.cause,
                     held ? (stored ? { kind: 'credential', ref: stored.ref } : { kind: 'declaration' }) : undefined,
+                    this.declaredInstance(ctx, info.entry),
                 );
             } catch (err) {
                 ctx.logger.warn(
@@ -5642,6 +5674,10 @@ export class AutomationServicePlugin implements Plugin {
         ctx: PluginContext,
         why = 'no longer declared',
     ): Promise<void> {
+        // [#31699] By name: every instance of it, which is the one the
+        // reconcile keeps ({@link declaredInstance}'s `soleOfName`) whatever
+        // package it was registered under. Addressed by package once the
+        // reconcile's bookkeeping is keyed by instance.
         try { engine.unregisterConnector(name); } catch { /* ignore */ }
         if (tracked.close) {
             try { await tracked.close(); } catch { /* best-effort */ }

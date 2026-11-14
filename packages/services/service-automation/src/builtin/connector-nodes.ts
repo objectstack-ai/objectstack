@@ -65,13 +65,17 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             // [ADR-0150 D3, epic #31527 child E5] A packaged flow names its
             // connector from its package: refused (every candidate named) when
             // the name does not resolve for that package — never dispatched on
-            // a guess.
-            const nameRefusal = engine.connectorNameRefusal(cfg.connectorId, context);
-            if (nameRefusal) {
-                return refuseNode(`connector_action '${node.id}': ${nameRefusal.message}`);
+            // a guess. [ADR-0150 D4, #31699] Otherwise the step dispatches the
+            // one instance that answer addresses, by its package.
+            const instance = engine.resolveConnectorInstance(cfg.connectorId, context);
+            if (instance.status === 'refused') {
+                return refuseNode(`connector_action '${node.id}': ${instance.refusal.message}`);
             }
+            // `none`: an address no instance answers; every read below then
+            // finds nothing registered, as for a name never registered.
+            const packageId = instance.status === 'instance' ? instance.packageId : undefined;
 
-            const handler = engine.resolveConnectorAction(cfg.connectorId, cfg.actionId);
+            const handler = packageId === undefined ? undefined : engine.resolveConnectorAction(cfg.connectorId, cfg.actionId, packageId);
             if (!handler) {
                 // A degraded declarative instance (#3017) is registered but has no
                 // handlers — say WHY dispatch fails and what recovers it, instead
@@ -80,9 +84,9 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
                 // was refused. [#28016] Recovery is automatic only on the backoff:
                 // a held instance (a configuration fault met on a retry, a refused
                 // credential the platform will not re-send) names its fix instead.
-                const degraded = engine.getConnectorDegradedReason(cfg.connectorId);
+                const degraded = packageId === undefined ? undefined : engine.getConnectorDegradedReason(cfg.connectorId, packageId);
                 if (degraded) {
-                    const hold = engine.getConnectorDegradedHold(cfg.connectorId);
+                    const hold = engine.getConnectorDegradedHold(cfg.connectorId, packageId);
                     // A reason that is a full sentence keeps one full stop.
                     const reason = degraded.replace(/\.\s*$/, '');
                     return {
@@ -123,7 +127,7 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             // #4395 lets the action declare `effect`, and this is where the
             // declaration is spent. Resolved BEFORE dispatch so both the
             // success and the failure path read one value.
-            const effect = engine.resolveConnectorActionEffect(cfg.connectorId, cfg.actionId);
+            const effect = engine.resolveConnectorActionEffect(cfg.connectorId, cfg.actionId, packageId);
 
             // #27327 — `input` is a value-slot map: a top-level CEL envelope is
             // evaluated in the run's scope, every other value handed on as a
@@ -143,7 +147,7 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             // (#28040). A `runtime` failure, not a guard: the input can come
             // from run data, so a `fault` edge may handle it.
             const verdict = judgeConnectorInput(
-                findConnectorActionInputSchema(engine, cfg.connectorId, cfg.actionId),
+                findConnectorActionInputSchema(engine, cfg.connectorId, cfg.actionId, packageId),
                 input,
             );
             if (verdict) {
