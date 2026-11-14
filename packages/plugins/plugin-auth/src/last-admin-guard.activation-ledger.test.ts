@@ -198,6 +198,18 @@ describe('[ADR-0131 D3] the ledger half — what a ledger write can and cannot t
 
     await expect(
       engine.insert('sys_metadata_activation', ledgerRow('act_admin', 'permission', ADMIN_FULL_ACCESS, false), SYSTEM),
+    ).rejects.toThrow(/'usr_admin', 'usr_second'/);
+    expect(await readLedger(engine, 'act_admin')).toBeFalsy();
+  });
+
+  it('#33082 — …and with an organization owner also standing, the platform verdict names both holders', async () => {
+    const engine = await boot();
+    await seedGrantAdmin(engine);
+    await seedGrantAdmin(engine, 'usr_second');
+    await engine.insert('sys_member', { id: 'mem_admin', user_id: 'usr_admin', organization_id: DEFAULT_ORG, role: 'owner' }, SYSTEM);
+
+    await expect(
+      engine.insert('sys_metadata_activation', ledgerRow('act_admin', 'permission', ADMIN_FULL_ACCESS, false), SYSTEM),
     ).rejects.toThrow(/'usr_admin', 'usr_second', who are the last platform administrators/);
     expect(await readLedger(engine, 'act_admin')).toBeFalsy();
   });

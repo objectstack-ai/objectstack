@@ -1978,9 +1978,6 @@ export function registerLastAdminGuard(
       const ids = await targetIds();
       if (ids.size === 0 && !inserted) return;
 
-      // [#33082] The ledger halves also answer to the PLATFORM-admin population.
-      if (table === METADATA_ACTIVATION) await refuseIfPlatformStandingEnds(op, pendingOf(ids));
-
       const after = await resolveAdminUserIds(op, pendingOf(ids));
       // A patch that re-homes standing onto a DIFFERENT user (a `user_id`
       // rewrite) can put someone in `after` who was not in `before`, so the
@@ -1990,12 +1987,17 @@ export function registerLastAdminGuard(
         after.size > 0 ? await resolveUnbannedAdmins(op, after) : new Set<string>();
 
       const losing = [...unbannedBefore].filter((id) => !unbannedAfter.has(id));
-      // The write leaves every administrator's standing intact → not our case.
-      // This is the common path for the vast majority of membership and grant
-      // writes, and it costs no refusal and no surprise.
-      if (losing.length === 0) return;
-      // Somebody can still administer the environment afterwards.
-      if (unbannedAfter.size > 0) return;
+      // The write leaves every administrator's standing intact, or somebody can
+      // still administer the environment afterwards → not this verdict's case.
+      // The first is the common path for the vast majority of membership and
+      // grant writes, and it costs no refusal and no surprise.
+      if (losing.length === 0 || unbannedAfter.size > 0) {
+        // [#33082] …but a ledger write also answers to the PLATFORM-admin
+        // population, asked only once this verdict would let it through, so a
+        // write that empties every administrator keeps this verdict's refusal.
+        if (table === METADATA_ACTIVATION) await refuseIfPlatformStandingEnds(op, pendingOf(ids));
+        return;
+      }
 
       logger?.warn(
         `[LastAdminGuard] refused a ${words.noun} on '${table}' that would have left this ` +
