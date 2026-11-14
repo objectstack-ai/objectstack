@@ -46,7 +46,7 @@ import {
     requestBodyTooLargeAnswer,
     requestBodyTooLargeEnvelope,
     resolveMaxRequestBodyBytes,
-    type RequestBodyTooLarge,
+    RequestBodyTooLarge,
 } from './body-limit';
 import { compressResponse } from './response-compression';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
@@ -904,8 +904,15 @@ export class HonoHttpServer implements IHttpServer {
              * request-body limit, because the door bounds it by its own
              * (`./body-limit.ts`). Hono's body cache once a pre-read of a body
              * within the limit went through it.
+             *
+             * A route that read `body`, was refused it for size, and then
+             * reads `rawBody()` is a door taking over the read under its own
+             * bound (an upload door's form larger than the request-body
+             * limit), so that refusal no longer stands as the answer. Every
+             * other refusal still does.
              */
             rawBody: async () => {
+                if (refusedBodyRead instanceof RequestBodyTooLarge) refusedBodyRead = undefined;
                 const original = requestBodyGuardOf(c)?.readOriginal();
                 if (original) {
                     const bytes = await original;

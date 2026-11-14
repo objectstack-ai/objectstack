@@ -73,6 +73,17 @@ describe('over a real listener, a body over the limit is refused unread and a by
             const bytes = await req.rawBody!();
             res.json({ success: true, data: { size: bytes.byteLength } });
         });
+        // A door with its own bound beyond the request-body limit: it is refused
+        // `req.body` for size, and takes the read over through `rawBody()`.
+        server.put('/api/v1/forms/:id', async (req, res) => {
+            try {
+                res.json({ success: true, data: { parsed: Object.keys(req.body ?? {}).length } });
+            } catch (err) {
+                if ((err as { code?: unknown }).code !== 'PAYLOAD_TOO_LARGE') throw err;
+                const bytes = await req.rawBody!();
+                res.json({ success: true, data: { size: bytes.byteLength } });
+            }
+        });
         await server.listen(0);
         return server.getPort();
     }
@@ -125,6 +136,32 @@ describe('over a real listener, a body over the limit is refused unread and a by
         expect(res.status, await res.clone().text()).toBe(200);
         expect(((await res.json()) as any).data.size).toBe(LIMIT * 8);
     });
+
+    it.each([['declared', true], ['not declared', false]])(
+        'a door refused req.body for size takes the read over through rawBody() and its own answer stands, length %s',
+        async (_label, declare) => {
+            const port = await start();
+            const form = new FormData();
+            form.append('file0', new Blob([new Uint8Array(LIMIT * 8).fill(0x62)]), 'f.bin');
+            const encoded = new Response(form);
+            const bytes = new Uint8Array(await encoded.arrayBuffer());
+            const res = await fetch(`http://127.0.0.1:${port}/api/v1/forms/f_1`, {
+                method: 'PUT',
+                headers: { 'content-type': encoded.headers.get('content-type')! },
+                body: declare
+                    ? bytes
+                    : new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(bytes);
+                            controller.close();
+                        },
+                    }),
+                duplex: 'half',
+            } as RequestInit);
+            expect(res.status, await res.clone().text()).toBe(200);
+            expect(((await res.json()) as any).data.size).toBe(bytes.byteLength);
+        },
+    );
 
     it('CONTROL: a JSON body within the limit is read as before', async () => {
         const port = await start();

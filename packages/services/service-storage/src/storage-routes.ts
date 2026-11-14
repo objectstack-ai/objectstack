@@ -1920,7 +1920,12 @@ export function registerStorageFamily(
         return;
       }
       if (linkFiles !== undefined) {
-        const uploads = await uploadLinkFormFiles(req.body, linkFiles);
+        const form = await uploadLinkFormBody(req, formLimit);
+        if (form.refused) {
+          sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, form.refused, { userMessage: copy.tooLarge });
+          return;
+        }
+        const uploads = await uploadLinkFormFiles(form.body, linkFiles);
         if (!Array.isArray(uploads)) {
           sendError(res, uploads.status, uploads.code, uploads.message, { userMessage: copy.refused(uploads.message) });
           return;
@@ -2500,6 +2505,59 @@ function isUploadLinkForm(contentType: string | string[] | undefined, marker: st
     typeof mark === 'string' &&
     mark.trim().toLowerCase() === UPLOAD_LINK_FORM_HEADER_VALUE
   );
+}
+
+/**
+ * Whether a read of `req.body` was refused by the transport's request-body
+ * limit (`PAYLOAD_TOO_LARGE`), a limit that bounds what the HTTP door reads, not
+ * what this door accepts.
+ */
+function isTransportBodyTooLarge(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'PAYLOAD_TOO_LARGE';
+}
+
+/**
+ * The several-file form, bounded by this door's own form limit rather than the
+ * transport's request-body limit. The form the transport parsed when it fits
+ * within that limit; when the transport refused it for size, the form's bytes
+ * read through `rawBody()` (a declared length over this door's limit was
+ * already refused unread), judged against this door's limit, and parsed here.
+ * `refused` names why the bytes read are over this door's limit.
+ */
+async function uploadLinkFormBody(
+  req: IHttpRequest,
+  formLimit: number | undefined,
+): Promise<{ body: unknown; refused?: undefined } | { body?: undefined; refused: string }> {
+  try {
+    return { body: req.body };
+  } catch (err) {
+    if (!isTransportBodyTooLarge(err) || !req.rawBody) throw err;
+  }
+  const bytes = await req.rawBody();
+  if (formLimit !== undefined && bytes.byteLength > formLimit) {
+    return {
+      refused:
+        `The upload body is ${bytes.byteLength} bytes, over the ${formLimit} bytes this link's upload can carry ` +
+        '(its files, each within the "Max upload size (MB)" storage setting).',
+    };
+  }
+  const contentType = req.headers?.['content-type'];
+  let parsed: FormData;
+  try {
+    parsed = await new Response(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), {
+      headers: { 'content-type': String(Array.isArray(contentType) ? contentType[0] : contentType) },
+    }).formData();
+  } catch {
+    // Not a readable form: the form checks below refuse it as one that names no files.
+    return { body: {} };
+  }
+  // A name sent twice is kept as a list, which the form checks refuse.
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of parsed.entries()) {
+    const held = body[key];
+    body[key] = held === undefined ? value : Array.isArray(held) ? [...held, value] : [held, value];
+  }
+  return { body };
 }
 
 /** [#32747] A form value that is a file: what a form parser hands for a file part. */

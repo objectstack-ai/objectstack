@@ -1,6 +1,7 @@
 ---
 '@objectstack/plugin-hono-server': patch
 '@objectstack/hono': patch
+'@objectstack/service-storage': patch
 ---
 
 fix(plugin-hono-server, hono): a request body over the server's limit is answered 413 PAYLOAD_TOO_LARGE and is not read past the limit
@@ -13,3 +14,5 @@ Both HTTP doors, the self-hosted server (`@objectstack/plugin-hono-server`) and 
 To change the limit, set `maxRequestBodyBytes` (in bytes) on `HonoServerPlugin`, call `HonoHttpServer.setMaxRequestBodyBytes()` on an embedded adapter, or pass `maxRequestBodyBytes` to `createHonoApp`. Without an option, the `OS_HTTP_MAX_BODY_BYTES` environment variable sets it. A value that is not a positive whole number of bytes fails the boot instead of serving with no limit or the wrong one.
 
 Upload doors keep their own limit. The storage byte doors (the presigned raw PUT, the chunk PUT and the upload-link PUT) read the raw bytes through `IHttpRequest.rawBody()`, which still serves the whole body, so a file is bounded by the storage `max_upload_mb` setting exactly as before, even when that is larger than the request-body limit.
+
+The upload link's several-file form is bounded by that door's own form limit (each file within `max_upload_mb`, times the files the link takes, plus the form's framing), not by the request-body limit. A route that is refused `req.body` for size and then reads `rawBody()` takes the read over under its own bound, and its own answer stands.
