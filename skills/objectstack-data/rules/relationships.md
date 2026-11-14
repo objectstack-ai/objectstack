@@ -11,7 +11,7 @@
 | Type | Lifecycle | Required | Sharing | Roll-ups | Use Case |
 |:-----|:----------|:---------|:--------|:---------|:---------|
 | `lookup` | Independent | Optional by default | Independent | Supported via `summary` | "Related to" |
-| `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`, unless the optional master (below); else lint-warned | Inherits parent; owner opt-in `ownerMayEdit` (below) | Supported via `summary` | "Owned by" |
+| `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`, unless the optional master (below); else lint-warned | Inherits parent; read-on-master opt-ins (below) | Supported via `summary` | "Owned by" |
 | `tree` | Self-reference | Optional — and so is `reference`, which when written must name this object itself; any other object is refused at parse, not lint-warned | N/A | Not available | Hierarchical |
 
 ## Patterns
@@ -19,16 +19,7 @@
 ### One-to-Many: lookup
 
 ```typescript
-// Parent: Account
-export default ObjectSchema.create({
-  name: 'account',
-  sharingModel: 'public_read_write',
-  fields: {
-    name: { type: 'text', required: true },
-  }
-});
-
-// Child: Contact (independent lifecycle)
+// Child: Contact (independent lifecycle) of an account
 export default ObjectSchema.create({
   name: 'contact',
   sharingModel: 'public_read_write',
@@ -80,22 +71,28 @@ export default ObjectSchema.create({
 });
 ```
 
-#### Owner edits under `controlled_by_parent` — `ownerMayEdit`
+#### Writes under `controlled_by_parent` — two opt-ins
 
 A `controlled_by_parent` detail row naming a master inherits its access: reads are scoped
-to accessible masters and **every write needs edit on the master**. To
-let a detail row's owner (`owner_id`) update that row with only *read* access
-to the master, opt in on the detail:
+to accessible masters and, by default, **every write needs edit on the master**.
+An opt-in on the detail asks *read* on it instead:
 
 ```typescript
 sharingModel: 'controlled_by_parent',
-sharing: { controlledByParent: { ownerMayEdit: true } },   // by-id update only
+sharing: { controlledByParent: { writeRequiresMasterRead: true } },  // or ownerMayEdit
 ```
 
-Nothing else widens — insert, delete, predicate (`multi: true`) updates and
-on-behalf-of writes under a master still need its edit; the detail's own row policies
-still AND in. Refused at parse under any other `sharingModel` (the owner
-already writes there) and one level up (`sharing.ownerMayEdit`).
+- `ownerMayEdit: true` widens only the row owner's (`owner_id`) by-id update; insert,
+  delete, predicate (`multi: true`) updates and on-behalf-of writes still need master edit.
+- `writeRequiresMasterRead: true`: whoever reads the master inserts, updates and
+  deletes the detail under its own object permissions, RLS and FLS (re-points and
+  each opted-in chain hop too; on-behalf-of, both users must read the master). The
+  ownership floor (rows you created) still binds predicate and on-behalf-of updates
+  and deletes. Refused beside `ownerMayEdit: true`, which it covers. Lint
+  `security-controlled-by-parent-owner-policy-without-opt-in` is silent here.
+
+The detail's own row policies AND in under both. Each is refused at parse under any
+other `sharingModel` and one level up (`sharing.KEY`).
 
 #### Optional master — a detail row with no master
 
@@ -110,7 +107,8 @@ account: { type: 'master_detail', reference: 'account', required: false },
 A row with no master is its owner's (`owner_id`): the owner or View All on the
 detail reads it, the owner or Modify All writes it (no owner: View All / Modify
 All only). An insert naming no master is admitted. Setting a master asks edit
-on it; emptying one asks edit on the stored master, even under `ownerMayEdit`. A
+on it, emptying one edit on the stored master (even under `ownerMayEdit`; read
+under `writeRequiresMasterRead`). A
 chain hop with no master ends there under the same rule. Refused beside a
 second `master_detail` or as `readonly`/`system`; `ObjectSchema.create()` reads
 an omitted `required` as `true`.
@@ -118,25 +116,7 @@ an omitted `required` as `true`.
 ### Many-to-Many: Junction Object
 
 ```typescript
-// Side A: Project
-export default ObjectSchema.create({
-  name: 'project',
-  sharingModel: 'private',
-  fields: {
-    name: { type: 'text', required: true },
-  }
-});
-
-// Side B: Employee
-export default ObjectSchema.create({
-  name: 'employee',
-  sharingModel: 'private',
-  fields: {
-    name: { type: 'text', required: true },
-  }
-});
-
-// Junction: Project Assignment
+// Junction: Project Assignment between project and employee
 export default ObjectSchema.create({
   name: 'project_assignment',
   sharingModel: 'public_read_write',
