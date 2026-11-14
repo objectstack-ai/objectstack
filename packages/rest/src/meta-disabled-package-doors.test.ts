@@ -882,3 +882,56 @@ describe('[ruling record 6787890900] RestServer: an object the caller may not re
             .toEqual({ status: 503, code: 'FIELD_VISIBILITY_UNRESOLVED' });
     }, 60_000);
 });
+
+/**
+ * [#32814] The bare doors at the member only a holder's customization pair
+ * stores, where every package holding the name is disabled: an `email_template`
+ * one module of an App ships (`en-US`), the App's pair (`<App>.custom`)
+ * storing an undeclared `fr-FR` row. FROM (`main` e540baf88, measured on the
+ * protocol): the plain read served the pair's row. TO: the missing name, as
+ * with no row stored, on the plain read and the layered view; re-enabled, the
+ * pair's row on both.
+ */
+describe('[#32814] RestServer: a pair row of a name only a disabled package holds, read naming no package', () => {
+    const APP = 'com.qa.suite';
+    const MODULE = 'com.qa.suitex';
+    const PAIR = `${APP}.custom`;
+    const install = (host: ReturnType<typeof setup>) => {
+        host.registry.installPackage({ id: APP, name: APP, version: '1.0.0', type: 'app', namespace: 'suite' } as any, 'code');
+        host.registry.installPackage({ id: MODULE, name: MODULE, version: '1.0.0', type: 'module', namespace: 'suitex', dependencies: { [APP]: '^1.0.0' } } as any, 'code');
+        host.registry.registerItem('email_template', {
+            name: 'welcome', label: 'suitex en-US', locale: 'en-US', subject: 'en', bodyHtml: '<p>x</p>',
+        } as any, 'name', MODULE);
+    };
+    const pairRow = (host: ReturnType<typeof setup>) => (host.protocol as any).engine.insert('sys_metadata', {
+        type: 'email_template', name: 'welcome', package_id: PAIR, bundle_member: 'fr-FR', state: 'active', scope: 'platform', strategy: 'merge', version: 1,
+        metadata: JSON.stringify({ name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>' }),
+    });
+
+    it.each([['the row saved, then the module disabled', false], ['the module disabled, then the row saved', true]] as const)('%s: the plain read and `/layers` at the member answer 404, never the pair\'s row; re-enabled, the pair\'s row', async (_order, disableFirst) => {
+        const host = setup();
+        install(host);
+        if (disableFirst) host.registry.disablePackage(MODULE);
+        await pairRow(host);
+        if (!disableFirst) host.registry.disablePackage(MODULE);
+        const read = await host.plainWith('email_template', 'welcome', { member: 'fr-FR' });
+        const layers = await host.layers('email_template', 'welcome', { member: 'fr-FR' });
+        expect([read.status, read.body?.error?.code], JSON.stringify(read.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+        expect([layers.status, layers.body?.error?.code], JSON.stringify(layers.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+        for (const answer of [read, layers]) expect(JSON.stringify(answer.body ?? null)).not.toContain('pair fr-FR');
+        // CONTROL — the module enabled again: the pair's row on both doors.
+        host.registry.enablePackage(MODULE);
+        const again = await host.plainWith('email_template', 'welcome', { member: 'fr-FR' });
+        const againLayers = await host.layers('email_template', 'welcome', { member: 'fr-FR' });
+        expect([again.status, again.body?.item?.label], JSON.stringify(again.body)).toEqual([200, 'pair fr-FR']);
+        expect([againLayers.status, againLayers.body?.effective?.label], JSON.stringify(againLayers.body)).toEqual([200, 'pair fr-FR']);
+    }, 60_000);
+
+    it('CONTROL — no row stored: the plain read at the member answers the same 404', async () => {
+        const host = setup();
+        install(host);
+        host.registry.disablePackage(MODULE);
+        const read = await host.plainWith('email_template', 'welcome', { member: 'fr-FR' });
+        expect([read.status, read.body?.error?.code], JSON.stringify(read.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+    }, 60_000);
+});
