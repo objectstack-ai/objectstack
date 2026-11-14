@@ -490,6 +490,15 @@ interface IndexDef {
  * organization is exempt through that part's non-null type list, as it was
  * under the old three-part unique this driver built NULL-distinct.
  *
+ * `sys_connector_connection` is the same case on the connector connection
+ * (ADR-0150 D8 row R11, #31699): its key `(organization_id, connector_package,
+ * connector_name)` gained the nullable package column. This driver built the
+ * earlier `{ fields: ['connector_name'], unique: 'organization' }` verbatim, as
+ * `(connector_name)` alone (no row-level tenancy here, #3724), so the guard is
+ * keyed on exactly that — the narrower key {@link retireWidenedUniques} asks a
+ * guard of — over the connections naming no package
+ * (`connector-connection-packageless-index.ts` on SQL keys it per organization).
+ *
  * Keyed by collection name, never a generic rule: it widens nothing any other
  * collection declares.
  */
@@ -519,6 +528,19 @@ const RUNTIME_OWNED_UNIQUES: Readonly<Record<string, ReadonlyArray<{ spec: Index
           permission_set: { $type: [...NON_NULL_BSON_TYPES] },
           organization_id: { $type: [...NON_NULL_BSON_TYPES] },
           permission_set_package: null,
+        },
+      },
+    },
+  ],
+  sys_connector_connection: [
+    {
+      spec: { connector_name: 1 },
+      options: {
+        name: 'uniq_sys_connector_connection_packageless',
+        unique: true,
+        partialFilterExpression: {
+          connector_name: { $type: [...NON_NULL_BSON_TYPES] },
+          connector_package: null,
         },
       },
     },

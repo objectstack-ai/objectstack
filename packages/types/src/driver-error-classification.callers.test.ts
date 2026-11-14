@@ -426,6 +426,10 @@ const OPERATOR_TEXT_CALLERS: Readonly<Record<string, { readonly calls: number; r
     calls: 1,
     sentinelPin: 'packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.test.ts',
   },
+  'packages/metadata-protocol/src/migrations/connector-connection-packageless-index.ts': {
+    calls: 3,
+    sentinelPin: 'packages/metadata-protocol/src/migrations/connector-connection-packageless-index.test.ts',
+  },
   'packages/metadata-protocol/src/migrations/overlay-index.ts': {
     calls: 1,
     sentinelPin: 'packages/metadata-protocol/src/migrations/raw-exec-operator-detail-16657.test.ts',

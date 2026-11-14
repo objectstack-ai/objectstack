@@ -67,7 +67,7 @@
 import type { SecurityPlugin } from './security-plugin.js';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
-import { delegatedOrganizationRefusal, intersectFieldMasks, resolveDelegatorContext } from './explain-engine.js';
+import { delegatedOrganizationRefusal, intersectFieldMasks } from './explain-engine.js';
 
 /**
  * The `SecurityPlugin` members the functions below read — every one of them,
@@ -89,6 +89,7 @@ export interface FieldReadersHost {
   getObjectFieldNames: SecurityPlugin['getObjectFieldNames'];
   getObjectSecurityMeta: SecurityPlugin['getObjectSecurityMeta'];
   resolveCallerPosture: SecurityPlugin['resolveCallerPosture'];
+  resolveDelegatorForContext: SecurityPlugin['resolveDelegatorForContext'];
   resolveFallbackPermissionSets: SecurityPlugin['resolveFallbackPermissionSets'];
   resolvePermissionSetsForContext: SecurityPlugin['resolvePermissionSetsForContext'];
   resolveProjectionFieldMask: SecurityPlugin['resolveProjectionFieldMask'];
@@ -134,7 +135,7 @@ export async function computeReadableFields(
 
 /** The body of `SecurityPlugin#resolveProjectionFieldMask`; the method's docblock there is its contract. */
 export async function resolveProjectionFieldMask(
-  this: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveFallbackPermissionSets' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
+  this: Pick<FieldReadersHost, 'computeForbiddenFieldWrites' | 'computeQueryGuardFieldPerms' | 'computeReadPartialMaskRules' | 'foldFieldRequiredPermissions' | 'getObjectFieldNames' | 'metadata' | 'permissionEvaluator' | 'ql' | 'resolveCallerPosture' | 'resolveDelegatorForContext' | 'resolveFallbackPermissionSets' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   object: string,
   context: any,
   options: { fallbackOnEmptySets: boolean },
@@ -208,7 +209,9 @@ export async function resolveProjectionFieldMask(
   let delBasePerms: Record<string, { readable: boolean; editable: boolean }> | null = null;
   let delegatorSets: PermissionSet[] | null = null;
   if (permissionSets.length > 0 && context?.onBehalfOf?.userId) {
-    const del = await resolveDelegatorContext(this.ql, context);
+    // Once per context while no write intervenes (`resolveDelegatorForContext`):
+    // a schema-serving door asks this of every object it serves.
+    const del = await this.resolveDelegatorForContext(context);
     if (del.kind === 'missing') return { kind: 'answer', fields: [] };
     if (del.kind === 'resolved') {
       if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) {

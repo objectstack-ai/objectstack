@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 313 |
-| Object name statically decidable | 218 |
+| Write call sites | 314 |
+| Object name statically decidable | 219 |
 | Object name chosen at run time | 95 |
-| Against a tenancy-enabled object | 211 |
+| Against a tenancy-enabled object | 212 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 242 |
+| Threading a tenant context | 243 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 59 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 176 |
+| Threading a decidably elevated context | 177 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 125 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-14 at `6bc9e8c39`.
+Measured on 2026-11-14 at `aad3132fa`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1156 |
+| tracked non-test sources scanned | 1160 |
 | engine-shaped types recognised | 138 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 294 |
+| same-named calls subtracted as non-engine | 298 |
 
 ## Every site
 
@@ -237,6 +237,7 @@ Measured on 2026-11-14 at `6bc9e8c39`.
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `delete` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `update` | `objectName` | undecidable | context, elevation undecidable | 1 |
+| `packages/services/service-automation/src/connector-connections.ts` | `delete` | `sys_connector_connection` | enabled | elevated | 1 |
 | `packages/services/service-automation/src/connector-connections.ts` | `delete` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/connector-connections.ts` | `insert` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/connector-connections.ts` | `update` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |

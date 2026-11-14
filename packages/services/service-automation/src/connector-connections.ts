@@ -205,6 +205,16 @@ export class ConnectorConnectionStore {
         return affectedRows(result) > 0;
     }
 
+    /** How many rows one instance has in one organization: one at most, but for a connect that raced the backfill. */
+    private async rowCount(engine: ConnectorCredentialEngine, organizationId: string, connectorName: string): Promise<number> {
+        const found = await engine.find(CONNECTOR_CONNECTION_OBJECT, {
+            where: { organization_id: organizationId, connector_name: connectorName },
+            fields: ['id'],
+            context: SYSTEM_CONTEXT,
+        });
+        return rowsOf(found).length;
+    }
+
     /** Every organization's row for one instance. */
     async listFor(connectorName: string): Promise<ConnectorConnectionRecord[]> {
         const engine = this.resolveEngine();
@@ -296,15 +306,18 @@ export class ConnectorConnectionStore {
             connected_by: args.userId ?? null,
         };
         let moved = false;
+        let insertedId: string | undefined;
         try {
             if (existing) {
                 moved = !(await this.updateAtRevision(engine, existing.id, existing.revision, row, context));
             } else {
-                await engine.insert(
+                const created = await engine.insert(
                     CONNECTOR_CONNECTION_OBJECT,
                     { organization_id: args.organizationId, connector_name: args.connectorName, ...row },
                     { context },
                 );
+                const id = (created as { id?: unknown } | null | undefined)?.id;
+                insertedId = typeof id === 'string' || typeof id === 'number' ? String(id) : undefined;
             }
         } catch (err) {
             if (isSecretProtectionFailure(err)) {
@@ -317,6 +330,40 @@ export class ConnectorConnectionStore {
             throw new ConnectorCredentialUnavailableError(
                 `Connector instance '${args.connectorName}' was not connected: the connection store refused the write. Nothing was kept.`,
             );
+        }
+        // [#31699] The key is `(organization_id, connector_package,
+        // connector_name)`, so a row the boot backfill stamped with its package
+        // between this connect's read and its insert no longer refuses the
+        // insert, as the old `(organization_id, connector_name)` key did. Two
+        // rows of one instance in one organization would leave `read` answering
+        // either and `revoke` deleting one. So the insert that made the second
+        // row takes itself back and is refused, as the old key refused it.
+        // (3a-ii counts by package once the store carries it.) A foreign
+        // message is never quoted, as above.
+        if (!existing && !moved) {
+            const twice = new ConnectorCredentialUnavailableError(
+                `Connector instance '${args.connectorName}' was connected twice in this organization: another connect `
+                    + 'landed while this one was completing. Revoke the connection until it reads as not connected, then connect again.',
+            );
+            let rows: number;
+            try {
+                rows = await this.rowCount(engine, args.organizationId, args.connectorName);
+            } catch {
+                throw new ConnectorCredentialUnavailableError(
+                    `Connector instance '${args.connectorName}' was connected, but the connection store did not answer the `
+                        + 'read that checks it is the only connection of this instance here. Read the connection before using it.',
+                );
+            }
+            if (rows > 1) {
+                // An engine that does not answer the created row's id: the row cannot be told apart, so say so.
+                if (insertedId === undefined) throw twice;
+                try {
+                    await engine.delete(CONNECTOR_CONNECTION_OBJECT, { where: { id: insertedId }, context: SYSTEM_CONTEXT });
+                } catch {
+                    throw twice;
+                }
+                moved = true;
+            }
         }
         if (moved) {
             throw new ConnectorCredentialUnavailableError(

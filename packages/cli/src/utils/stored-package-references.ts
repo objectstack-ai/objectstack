@@ -99,7 +99,7 @@
 import type { PackageScopedHolder, PackageScopedResolution } from '@objectstack/core';
 import { PACKAGE_SCOPED_TYPES } from '@objectstack/core';
 import { resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
-import { keysetWalk } from '@objectstack/types';
+import { isUniqueViolationError, keysetWalk } from '@objectstack/types';
 import { isCustomizationPackage, validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
 import { ITEM_KEY_DISCRIMINATORS, installedManifestsOf } from '@objectstack/metadata-core';
 import { judgesPackageLessRows, packageLessRowOwners, pairMemberOwners } from '@objectstack/metadata-protocol';
@@ -591,7 +591,7 @@ export interface BindRequest {
 /** Why a bind wrote nothing. */
 export type BindRefusal =
   | 'unknown-table' | 'report-only' | 'table-not-carried' | 'no-such-row' | 'already-bound' | 'not-asked'
-  | 'no-name' | 'resolved' | 'not-held' | 'environment-only' | 'outside-closure' | 'not-a-candidate';
+  | 'no-name' | 'resolved' | 'not-held' | 'environment-only' | 'outside-closure' | 'not-a-candidate' | 'duplicate';
 
 /** What one bind did. */
 export type BindOutcome =
@@ -678,11 +678,23 @@ export async function bindStoredPackageReference(
   // landed between the re-ask above and this one (another bind, a boot's
   // backfill) wins: this one updates 0 rows and refuses, naming what is stored.
   // A bound row is never moved, concurrency included.
-  const written = await engine.update(reference.table, { [packageColumn]: request.packageId }, {
-    where: { id: { $eq: row.id }, [packageColumn]: { $null: true } },
-    multi: true,
-    context: SYSTEM_CTX,
-  });
+  let written: unknown;
+  try {
+    written = await engine.update(reference.table, { [packageColumn]: request.packageId }, {
+      where: { id: { $eq: row.id }, [packageColumn]: { $null: true } },
+      multi: true,
+      context: SYSTEM_CTX,
+    });
+  } catch (e: unknown) {
+    // [#31699] A table whose unique key carries the package column (R1's
+    // grant, R11's connection) refuses a bind that would make the row a second
+    // row of one key: another row of the same key already names the package.
+    // Said as what it is, never a crash; the row stays naming no package.
+    if (!isUniqueViolationError(e)) throw e;
+    return refuse('duplicate', `${reference.table} "${request.id}" cannot be bound to "${request.packageId}": another row of `
+      + `the same key already names that package in ${packageColumn}, so this row would be a second one. Review the pair `
+      + 'and remove the row that should not stand. Nothing written.', candidates);
+  }
   if (rowsWritten(written) === 0) {
     const now = await engine.find(reference.table, { where: { id: request.id }, limit: 1, fields: ['id', packageColumn], context: SYSTEM_CTX });
     const stored = Array.isArray(now) ? (now[0] as Row | undefined)?.[packageColumn] : undefined;

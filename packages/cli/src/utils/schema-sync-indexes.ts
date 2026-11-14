@@ -98,6 +98,10 @@ const SCHEMA_SYNC_INDEX_OWNERS: Readonly<Record<string, SchemaSyncIndexOwner>> =
     seam: (mp, engine) => mp.resolveUserPermissionSetIndexSeam(engine),
     presenceSql: (mp, client) => mp.buildUserPermissionSetPackagelessIndexPresenceSql(client),
   },
+  ensureConnectorConnectionPackagelessIndex: {
+    seam: (mp, engine) => mp.resolveConnectorConnectionIndexSeam(engine),
+    presenceSql: (mp, client) => mp.buildConnectorConnectionPackagelessIndexPresenceSql(client),
+  },
 };
 
 /** The migrations {@link collectSchemaSyncIndexes} reads, for the pin that holds the list to its rule. */

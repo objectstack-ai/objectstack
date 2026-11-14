@@ -47,6 +47,7 @@ import {
     resolveActivationLedgerIndexSeam,
 } from './migrations/activation-ledger-packageless-index.js';
 import { createUserPermissionSetGuardAtSchemaSync } from './migrations/user-permission-set-packageless-index.js';
+import { createConnectorConnectionGuardAtSchemaSync } from './migrations/connector-connection-packageless-index.js';
 import { createRecordedBySentinelPlan } from './migrations/recorded-by-sentinel.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
@@ -288,8 +289,15 @@ export function assembleMetadataProtocol(
             // table lock. A refusal is reported once per boot
             // (`createUserPermissionSetGuardAtSchemaSync`).
             const ensureGrantGuard = createUserPermissionSetGuardAtSchemaSync(ql, ctx.logger);
+            // [ADR-0150 D8 row R11, #31699] The same guard on the connector
+            // connection table, built the same way and for the same reason:
+            // the old `(organization_id, connector_name)` key stood from the
+            // table's first DDL, so its package-less half must too
+            // (`createConnectorConnectionGuardAtSchemaSync`).
+            const ensureConnectionGuard = createConnectorConnectionGuardAtSchemaSync(ql, ctx.logger);
             (ctx as any)?.hook?.('objectql:schema-synced', async () => {
                 await ensureGrantGuard();
+                await ensureConnectionGuard();
             });
 
             // The `kernel:ready` platform-table repairs this assembly arms: #8629
