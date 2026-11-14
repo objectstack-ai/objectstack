@@ -2532,7 +2532,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 `\`refusals\`, so nothing resolves this key.`
               : `Translations are keyed to refusal "${code}", a code hook "${hookName}" does not declare ` +
                 `under \`refusals\`, so nothing resolves this key.` +
-                suggest(code, declared),
+                suggest(code, declared.keys()),
             `Refusal translations are keyed by a code the hook's \`refusals\` declares; declare it there, ` +
               `or drop the key.`,
           );

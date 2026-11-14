@@ -4922,6 +4922,53 @@ describe('validateTranslationReferences — hook refusals (#26170)', () => {
   });
 });
 
+describe('validateTranslationReferences — hook refusal reasons (#33214)', () => {
+  const planStack = {
+    hooks: [
+      {
+        name: 'plan_gate',
+        object: 'plan',
+        events: ['beforeUpdate'],
+        handler: 'planGate',
+        refusals: {
+          VALIDATION_FAILED: { message: 'Cannot submit.', reasons: { plan_locked: { message: 'Locked.' } } },
+          CREDIT_LIMIT: { message: 'Over.' },
+        },
+      },
+    ],
+  };
+  const bundle = (refusals: unknown) => ({ ...planStack, translations: [{ 'zh-CN': { hooks: { plan_gate: { refusals } } } }] });
+
+  it('reports nothing for a translation of a declared reason', () => {
+    expect(validateTranslationReferences(bundle({
+      VALIDATION_FAILED: { message: '不能提交。', reasons: { plan_locked: { message: '已锁定。' } } },
+    }))).toEqual([]);
+  });
+
+  it('refuses a reason the code does not declare, with the nearest declared reason offered', () => {
+    const findings = validateTranslationReferences(bundle({ VALIDATION_FAILED: { reasons: { plan_lockd: { message: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].hooks.plan_gate.refusals.VALIDATION_FAILED.reasons.plan_lockd');
+    expect(findings[0].message).toContain('a reason refusal "VALIDATION_FAILED" of hook "plan_gate" does not declare');
+    expect(findings[0].message).toContain('Did you mean "plan_locked"?');
+  });
+
+  it('refuses a reason key under a code that declares no reasons', () => {
+    const findings = validateTranslationReferences(bundle({ CREDIT_LIMIT: { reasons: { any: { message: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].hooks.plan_gate.refusals.CREDIT_LIMIT.reasons.any');
+    expect(findings[0].message).toContain('declares no `reasons` under that code');
+  });
+
+  it('a reason under an undeclared code is reported once, at the code', () => {
+    const findings = validateTranslationReferences(bundle({ NOPE: { reasons: { any: { message: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].hooks.plan_gate.refusals.NOPE');
+  });
+});
+
 describe('validateTranslationReferences — doc books (#26690)', () => {
   const stack = (data: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
     books: [{

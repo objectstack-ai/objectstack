@@ -117,3 +117,67 @@ describe('the skeleton `os i18n extract` writes (#26170)', () => {
     }
   });
 });
+
+// objectstack#33214 (ruling 6879477573, S1) — a declared reason under a code is
+// one more key, `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`,
+// harvested, demanded and scaffolded like the code's own message.
+
+const PRIMARY = 'This plant already has a primary.';
+const LOCKED = 'The plan is {{ state }} and can no longer change.';
+
+const planGate = {
+  name: 'plan_gate',
+  object: 'plan',
+  events: ['beforeUpdate'],
+  handler: 'planGate',
+  refusals: {
+    VALIDATION_FAILED: {
+      message: 'This plan cannot be submitted.',
+      params: ['state'],
+      reasons: { plan_locked: { message: LOCKED }, second_primary: { message: PRIMARY } },
+    },
+  },
+};
+
+describe('a declared reason is one more demand (#33214)', () => {
+  it('the walker emits one key per reason, keyed as the runtime reads it, seeded with its sentence', () => {
+    const entries = hookEntries({ hooks: [planGate] });
+    expect(entries.map((e) => e.path.join('.'))).toEqual([
+      hookRefusalMessageKey('plan_gate', 'VALIDATION_FAILED'),
+      hookRefusalMessageKey('plan_gate', 'VALIDATION_FAILED', 'plan_locked'),
+      hookRefusalMessageKey('plan_gate', 'VALIDATION_FAILED', 'second_primary'),
+    ]);
+    expect(entries[2]).toMatchObject({ sourceValue: PRIMARY, source: 'hook' });
+  });
+
+  it('the coverage gate reports an untranslated reason, and goes quiet once it is translated', () => {
+    const tree = (refusals?: Record<string, unknown>) => ({
+      i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
+      hooks: [planGate],
+      translations: [{ 'zh-CN': refusals ? { hooks: { plan_gate: { refusals } } } : {} }],
+    });
+    const zh = (config: any) =>
+      computeI18nCoverage(config).issues.filter((i) => i.locale === 'zh-CN' && i.key.startsWith('hooks.')).map((i) => i.key).sort();
+    expect(zh(tree())).toEqual([
+      'hooks.plan_gate.refusals.VALIDATION_FAILED.message',
+      'hooks.plan_gate.refusals.VALIDATION_FAILED.reasons.plan_locked.message',
+      'hooks.plan_gate.refusals.VALIDATION_FAILED.reasons.second_primary.message',
+    ]);
+    expect(zh(tree({
+      VALIDATION_FAILED: {
+        message: '该计划不能提交。',
+        reasons: { plan_locked: { message: '计划已{{ state }}，不能再修改。' }, second_primary: { message: '该工厂已有主工厂。' } },
+      },
+    }))).toEqual([]);
+  });
+
+  it('the skeleton writes each reason, and parses through the translation schema', () => {
+    const result = extractTranslations({ hooks: [planGate] }, { locales: ['en', 'zh-CN'] });
+    expect((result.bundles.en as any).hooks.plan_gate.refusals.VALIDATION_FAILED.reasons).toEqual({
+      plan_locked: { message: LOCKED },
+      second_primary: { message: PRIMARY },
+    });
+    expect((result.bundles['zh-CN'] as any).hooks.plan_gate.refusals.VALIDATION_FAILED.reasons.plan_locked).toEqual({ message: '' });
+    for (const bundle of Object.values(result.bundles)) expect(TranslationDataSchema.safeParse(bundle).success).toBe(true);
+  });
+});
