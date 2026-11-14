@@ -230,8 +230,8 @@ export interface WidgetContext {
   /**
    * The authored label of each object in `objectNames`, keyed by name and read
    * off the SAME list response, so the two never come from different reads.
-   * `ref:object` draws an option as its label with the name beneath it, the
-   * face the Studio `ObjectPicker` draws. A name absent here declares no label
+   * `ref:object` draws an option as its label with the name after it in
+   * secondary monospace text, the face the Studio `ObjectPicker` draws. A name absent here declares no label
    * and is drawn as itself, once. Display only: the value written is the name.
    */
   objectLabels?: ReadonlyMap<string, string>;
