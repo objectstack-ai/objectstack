@@ -847,13 +847,24 @@ describe('[#25107] every reader in this package that resolves a delegator asks t
   const SRC = dirname(fileURLToPath(import.meta.url));
   const calls = (text: string, name: string) =>
     (text.match(new RegExp(`\\b${name}\\(`, 'g')) ?? []).length - (text.match(new RegExp(`function ${name}\\(`, 'g')) ?? []).length;
+  // The per-context memo (`SecurityPlugin.resolveDelegatorForContext`) resolves
+  // in ONE place for the readers that ask it, and asks nothing itself: each of
+  // its askers asks the check beside its own call, so an ask of the memo counts
+  // as a resolution in the asker's file, and the memo's one resolution counts
+  // in none.
+  const MEMO_FILE = 'security-plugin.ts';
+  const memoAsks = (text: string) => (text.match(/\bthis\.resolveDelegatorForContext\(context\b/g) ?? []).length;
 
   it('per source file, the asks equal the resolutions — and the seven files that resolve one are all counted', () => {
     const counted: Record<string, [number, number]> = {};
     for (const file of readdirSync(SRC, { recursive: true }) as string[]) {
       if (!file.endsWith('.ts') || file.endsWith('.test.ts') || file.includes('.testkit.')) continue;
       const text = readFileSync(join(SRC, file), 'utf8');
-      const resolutions = calls(text, 'resolveDelegatorContext');
+      let resolutions = calls(text, 'resolveDelegatorContext') + memoAsks(text);
+      if (file === MEMO_FILE) {
+        expect(calls(text, 'resolveDelegatorContext'), 'the memo resolves in exactly one place').toBe(1);
+        resolutions -= 1;
+      }
       if (resolutions === 0) continue;
       counted[file] = [resolutions, calls(text, 'delegatedOrganizationRefusal')];
     }

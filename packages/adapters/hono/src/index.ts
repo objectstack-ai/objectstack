@@ -45,6 +45,12 @@ import {
   DEFAULT_CORS_ALLOW_HEADERS,
   DEFAULT_CORS_EXPOSE_HEADERS,
   declaredEnvelopeForThrow,
+  installApiNoindex,
+  installRequestBodyLimit,
+  requestBodyGuardOf,
+  requestBodyTooLargeAnswer,
+  resolveMaxRequestBodyBytes,
+  RequestBodyTooLarge,
 } from '@objectstack/plugin-hono-server';
 
 export interface ObjectStackHonoCorsOptions {
@@ -83,6 +89,18 @@ export interface ObjectStackHonoOptions {
   prefix?: string;
   /** CORS configuration. Set to `false` to disable entirely. */
   cors?: ObjectStackHonoCorsOptions | false;
+  /**
+   * The request-body limit, in bytes: `@objectstack/plugin-hono-server`'s
+   * rule (`src/body-limit.ts`), on this door too. A body over it is not read
+   * past the limit and is answered `413 PAYLOAD_TOO_LARGE`; a declared length
+   * over it is not read at all, by this adapter or by a domain or auth service
+   * the request is forwarded to.
+   *
+   * Unset, the limit is `OS_HTTP_MAX_BODY_BYTES`, else 10 MiB. A value that is
+   * not a positive whole number of bytes makes `createHonoApp` throw.
+   * @default 10485760
+   */
+  maxRequestBodyBytes?: number;
   /**
    * @deprecated RETIRED (ADR-0006 Phase 5) — ignored. Multi-tenant routing is
    * owned by the host's `KernelResolver` (registered as the
@@ -403,6 +421,15 @@ export function objectStackMiddleware(kernel: ObjectKernel) {
  * ahead of a route handler on `plugin-hono-server`. No list of routes is kept
  * here: whether a domain reads the body is answered by the domain reading it.
  *
+ * ## A body over the request-body limit
+ *
+ * `createHonoApp` installs `@objectstack/plugin-hono-server`'s limit
+ * (`src/body-limit.ts`) ahead of every route, so this reading, the auth
+ * service and every domain the request is forwarded to read through it. A
+ * declared length over the limit is not read here: the body handed on refuses
+ * with `413 PAYLOAD_TOO_LARGE` when read. A body with no declared length is
+ * read up to the limit, and a read the guard stopped is refused as too large.
+ *
  * `@objectstack/plugin-hono-server` answers the same body with the same
  * `status`, `code` and `message` (`hono-body-refusal.test.ts` drives both
  * doors over one table).
@@ -411,12 +438,20 @@ async function readDispatchBody(c: Context): Promise<DispatchBody> {
   const lowered = (c.req.header('content-type') ?? '').toLowerCase();
   const raw = c.req.raw;
 
+  // The request-body limit (`@objectstack/plugin-hono-server`'s
+  // `src/body-limit.ts`): a declared length over it is never read, and a read
+  // the guard stopped past it is refused as too large, not as unreadable.
+  const guard = requestBodyGuardOf(c);
+  if (guard?.declaredOverLimit) return refusedOnRead(new RequestBodyTooLarge(guard.limit));
+  const tooLargeOr = (refusal: RequestBodyRefusal): DispatchBody =>
+    refusedOnRead(guard?.tripped() ? new RequestBodyTooLarge(guard.limit) : refusal);
+
   if (lowered.includes('application/json')) {
     let text: string;
     try {
       text = raw.bodyUsed ? await c.req.text() : await raw.clone().text();
     } catch {
-      return refusedOnRead(new RequestBodyRefusal(UNREADABLE_BODY_MESSAGE));
+      return tooLargeOr(new RequestBodyRefusal(UNREADABLE_BODY_MESSAGE));
     }
     if (text.trim() === '') return readable({});
     try {
@@ -431,7 +466,7 @@ async function readDispatchBody(c: Context): Promise<DispatchBody> {
     try {
       return readable(raw.bodyUsed ? await c.req.parseBody() : await parseBody(raw.clone()));
     } catch {
-      return refusedOnRead(new RequestBodyRefusal(malformedFormMessage(mediaType)));
+      return tooLargeOr(new RequestBodyRefusal(malformedFormMessage(mediaType)));
     }
   }
 
@@ -446,7 +481,7 @@ interface DispatchBody {
   /** The `body` argument for `dispatch()` / `handleAuth()`. */
   readonly value: any;
   /** The refusal, once something READ a body this adapter could not parse; `undefined` otherwise. */
-  readonly refusalRead: () => RequestBodyRefusal | undefined;
+  readonly refusalRead: () => RequestBodyRefusal | RequestBodyTooLarge | undefined;
 }
 
 const readable = (value: any): DispatchBody => ({ value, refusalRead: () => undefined });
@@ -458,7 +493,7 @@ const readable = (value: any): DispatchBody => ({ value, refusalRead: () => unde
  * is not a read: `typeof` is `'object'`, `Array.isArray` is `false`, and
  * passing it along, comparing it or testing it with `??` touch nothing.
  */
-function refusedOnRead(refusal: RequestBodyRefusal): DispatchBody {
+function refusedOnRead(refusal: RequestBodyRefusal | RequestBodyTooLarge): DispatchBody {
   let read = false;
   const refuse = (): never => {
     read = true;
@@ -628,6 +663,15 @@ function dispatchedMethod(method: string): string {
  */
 export function createHonoApp(options: ObjectStackHonoOptions): Hono {
   const app = new Hono();
+  // The request-body limit, first: every reader of a request body below (this
+  // adapter's own `readDispatchBody`, the auth service and every domain the
+  // request is forwarded to) reads through it. Resolved now, so a bad value
+  // refuses the app instead of serving it with no bound.
+  const maxRequestBodyBytes = resolveMaxRequestBodyBytes(options.maxRequestBodyBytes);
+  installRequestBodyLimit(app, () => maxRequestBodyBytes);
+  // Every `/api/` answer tells search engines not to index it, the same lane
+  // `HonoHttpServer` installs, so both doors send the same headers.
+  installApiNoindex(app);
   const prefix = options.prefix || '/api';
   // [#16025] Where `/auth/*` is mounted, and the boot refusal that guards it.
   // Computed BEFORE any route is registered so a misaligned composition never
@@ -769,6 +813,10 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
    * unchanged; only the message is replaced.
    */
   const thrownJson = (c: any, err: any) => {
+    // A body over the request-body limit: `413` is a status
+    // `declaredEnvelopeForThrow` does not render, so it is answered here.
+    const tooLarge = requestBodyTooLargeAnswer(err);
+    if (tooLarge) return c.json(tooLarge.body, tooLarge.status);
     const declared = declaredEnvelopeForThrow(err);
     if (declared) return c.json(declared.body, declared.status);
     const status = err.statusCode || 500;

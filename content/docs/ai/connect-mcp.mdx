@@ -457,10 +457,10 @@ to typed per-action tools) is the planned next step, consistent with ADR-0097's
 
 ## Prompts: your skills, served to the client
 
-Tools are not the only primitive. Every **skill** you author (`*.skill.ts`,
+Tools are not the only primitive. A **skill** you author (`*.skill.ts`,
 `defineSkill`) that carries `instructions` is served as an MCP **prompt** — so
 a connected client can list your app's playbooks by name and pull one into the
-conversation:
+conversation, on a connection that serves the tools the skill binds (below):
 
 ```typescript
 export const CaseTriageSkill = defineSkill({
@@ -486,15 +486,29 @@ prompts in their own picker. Nothing to enable — the surface appears as soon a
 the app has a skill with instructions, and `prompts/list` simply returns an
 empty list until then.
 
+**A skill is offered only where its tools are.** A skill's instructions teach
+the model to call the tools it binds, so `prompts/list` and `prompts/get` offer
+a skill only when the connection's own tool list carries every entry of its
+`tools`: a plain name by a tool of that name, a trailing wildcard (`describe_*`)
+by any listed tool it matches, and an `action_<name>` entry (or `action_*`) also
+by `run_action`. `case_triage` above is offered on a connection that lists
+`query_records` and `run_action`. A token without the `actions:execute` scope
+lists no `run_action`, so it is not offered `case_triage`, and `prompts/get`
+answers it as it answers an unknown prompt name. A skill that binds no tool is
+offered as before. When a prompt you expect is missing, connect with a grant
+that registers the skill's tools, or bind the skill only to tools its intended
+connections serve.
+
 **Only the instructions half projects.** A skill's `tools` / `surface` /
-`triggerConditions` are read by the **in-product agent runtime** (the `ask` /
+`triggerConditions` are bound by the **in-product agent runtime** (the `ask` /
 `build` agents, cloud / Enterprise), which is the thing that composes a tool set
 and decides when a skill activates. MCP has neither step: the model lives in
 *your* client, driving one flat tool list, and your AI-exposed actions are
 already reachable there as `list_actions` / `run_action`. So on the open
-framework a skill contributes its judgment (as a prompt), not its wiring — and
-the same skill file keeps its full meaning when the app runs on the cloud
-runtime. See [AI Agents](/docs/ai/agents#you-extend-the-platform-with-skills-not-agents).
+framework a skill contributes its judgment (as a prompt), not its wiring — its
+`tools` are read only to decide the offer above — and the same skill file keeps
+its full meaning when the app runs on the cloud runtime. See
+[AI Agents](/docs/ai/agents#you-extend-the-platform-with-skills-not-agents).
 
 <Callout type="warn">
 **Two different "skills" again.** These are **agent skills** — `defineSkill`

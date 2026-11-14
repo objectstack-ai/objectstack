@@ -280,7 +280,7 @@ export const SystemFile = ObjectSchema.create({
     deleted_at: Field.datetime({
       label: 'Deleted At',
       description:
-        'Tombstone timestamp — set when the last sys_attachment reference to an attachments-scope file is removed; the lifecycle TTL reaps the row (and its storage bytes, via the sys_file reap guard) after the grace window. NULL for live rows.',
+        'Tombstone timestamp — set when the last sys_attachment reference to an attachments-scope file is removed; the lifecycle TTL reaps the row (and its storage bytes, via the sys_file reap guard) after the grace window. Also set on a committed file uploaded through an upload link that named no record, cleared when a record takes it, so the same TTL reclaims an upload no record ever took. NULL for every other live row.',
     }),
   },
 
@@ -297,7 +297,10 @@ export const SystemFile = ObjectSchema.create({
   //     the attachment lifecycle hooks when the last join row is removed)
   //   - never-completed presigned/chunked uploads (status='pending')
   // Committed rows carry neither trigger (NULL deleted_at, status≠pending),
-  // so they are immortal. Byte reclaim + sweep-time re-verification happen in
+  // so they are immortal — except a file uploaded through an upload link that
+  // named no record (#33125): it lands committed with deleted_at stamped, the
+  // write that names it clears the stamp, and the reap guard reclaims it only
+  // when no record ever held it, after its claim window. Byte reclaim + sweep-time re-verification happen in
   // the reap guard registered by StorageServicePlugin. A kernel that loads
   // ObjectQL without this plugin reaps matching rows without byte cleanup —
   // harmless there, since only this plugin's hooks ever write the triggers.

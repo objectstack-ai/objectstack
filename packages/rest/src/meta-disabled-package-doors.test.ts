@@ -694,6 +694,127 @@ describe('[#32354] RestServer: a disabled customization pair and a disabled base
 });
 
 /**
+ * [#32607, ADR-0150 D3] With NO package disabled, a name two enabled packages
+ * hold only as stored rows (no package ships it) is refused on every bare door
+ * naming both, whichever was saved first; each exact address serves its own
+ * row, and one row holder is served as before. The reboot leg (the registry's
+ * one bare slot hydrated from the last row) is pinned on a booted kernel in
+ * `packages/runtime/src/domains/meta-disabled-holder-served-stack.test.ts`.
+ *
+ * Measured on the #32183 head plus #32354's work (step 0 of #32607): the plain
+ * read and `/published` served the row saved first, while `/layers` refused 409
+ * naming both.
+ */
+describe('[#32607] RestServer: two enabled row holders and no shipper', () => {
+    const THIRD_PKG = 'app.third_demo';
+    const label = (pkg: string) => (pkg === OTHER_PKG ? 'healthy row' : 'third row');
+    const save = (host: ReturnType<typeof setup>, name: string, pkg: string) => host.protocol.saveMetaItem({
+        type: 'dashboard', name, packageId: pkg, item: { name, label: label(pkg), widgets: [] },
+    });
+    const ORDERS = [['healthy registered first', [OTHER_PKG, THIRD_PKG]], ['third registered first', [THIRD_PKG, OTHER_PKG]]] as const;
+
+    it.each(ORDERS.flatMap(([order, packages]) => [
+        [`${order}, the healthy row saved first`, packages, [OTHER_PKG, THIRD_PKG]],
+        [`${order}, the third row saved first`, packages, [THIRD_PKG, OTHER_PKG]],
+    ] as const))('%s: the plain read, /layers, /published and the execution face refuse naming both', async (_label, packages, saved) => {
+        const host = setup();
+        for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+        for (const pkg of saved) await save(host, 'two_rows_dash', pkg);
+        const read = await host.plain('dashboard', 'two_rows_dash');
+        expect([read.status, read.body?.code], JSON.stringify(read.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect([...(read.body?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(read.body))
+            .toEqual([OTHER_PKG, THIRD_PKG].sort());
+        // `/published` answers the plain read's refusal; `/layers` keeps the package-less writes' own (#28337). Both name both holders and serve no row.
+        for (const answer of [await host.layers('dashboard', 'two_rows_dash'), await host.published('dashboard', 'two_rows_dash')]) {
+            expect(answer.status, JSON.stringify(answer.body)).toBe(409);
+            for (const pkg of [OTHER_PKG, THIRD_PKG]) expect(JSON.stringify(answer.body)).toContain(pkg);
+            expect(JSON.stringify(answer.body)).not.toMatch(/(healthy|third) row/);
+        }
+        await expect(host.protocol.getMetaItemForExecution({ type: 'dashboard', name: 'two_rows_dash' }))
+            .rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', httpStatus: 409 });
+        for (const pkg of [OTHER_PKG, THIRD_PKG]) {
+            const exact = await host.plainWith('dashboard', 'two_rows_dash', { package: pkg });
+            expect([exact.status, exact.body?.item?.label], JSON.stringify(exact.body)).toEqual([200, label(pkg)]);
+        }
+    }, 60_000);
+
+    // [#32607, A1] The layered chain's owner step reads the plain read first; its refusal of two row holders is
+    // left to step 1c (the writes' own refusal, #28337), and every other refusal of it is answered as before.
+    const WRITES_SENTENCE = 'Name the package this layered read is for';
+    const messageOf = (body: any): string => String(body?.error?.message ?? body?.message ?? body?.error ?? '');
+
+    it.each(ORDERS)('%s, A1 CONTROL: /layers of a name two packages ship in code keeps the plain read\'s refusal', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of packages) {
+            host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+            host.registry.registerItem('dashboard', { name: 'two_code_dash', label: `${label(pkg)} code`, widgets: [] } as any, 'name', pkg);
+        }
+        const read = await host.plain('dashboard', 'two_code_dash');
+        const layers = await host.layers('dashboard', 'two_code_dash');
+        expect([read.status, layers.status], JSON.stringify([read.body, layers.body])).toEqual([409, 409]);
+        expect(messageOf(layers.body), JSON.stringify(layers.body)).toBe(messageOf(read.body));
+        expect(messageOf(layers.body)).not.toContain(WRITES_SENTENCE);
+    }, 60_000);
+
+    // [contract review S1] Only the row judgment's own refusal is handed over: a name two packages ship in code,
+    // each with its own bound row, keeps the plain read's refusal (the registry's) on `/layers`, as on `main`.
+    it.each(ORDERS)('%s, A1 CONTROL (S1): /layers of a name two packages ship in code, each with its own stored row, keeps the plain read\'s refusal', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of packages) {
+            host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+            host.registry.registerItem('dashboard', { name: 's1_dash', label: `${label(pkg)} code`, widgets: [] } as any, 'name', pkg);
+            await (host.protocol as any).engine.insert('sys_metadata', {
+                type: 'dashboard', name: 's1_dash', package_id: pkg, state: 'active', scope: 'platform', strategy: 'merge', version: 1,
+                metadata: JSON.stringify({ name: 's1_dash', label: label(pkg), widgets: [] }),
+            });
+        }
+        const read = await host.plain('dashboard', 's1_dash');
+        const layers = await host.layers('dashboard', 's1_dash');
+        expect([read.status, layers.status], JSON.stringify([read.body, layers.body])).toEqual([409, 409]);
+        expect(messageOf(layers.body), JSON.stringify(layers.body)).toBe(messageOf(read.body));
+        expect(messageOf(layers.body)).not.toContain(WRITES_SENTENCE);
+    }, 60_000);
+
+    it.each(ORDERS)('%s, A1 CONTROL: /layers of two served row holders beside a disabled one keeps the plain read\'s refusal (#32354 Q2)', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of [...packages, PKG]) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+        for (const pkg of [PKG, ...packages]) await save(host, 'q2_rows_dash', pkg);
+        host.registry.disablePackage(PKG);
+        const read = await host.plain('dashboard', 'q2_rows_dash');
+        const layers = await host.layers('dashboard', 'q2_rows_dash');
+        expect([read.status, layers.status], JSON.stringify([read.body, layers.body])).toEqual([409, 409]);
+        expect(messageOf(layers.body), JSON.stringify(layers.body)).toBe(messageOf(read.body));
+        expect(messageOf(layers.body)).not.toContain(WRITES_SENTENCE);
+        expect(JSON.stringify(layers.body)).not.toContain(PKG);
+    }, 60_000);
+
+    it.each(ORDERS)('%s, A1: /layers of two enabled row holders answers the package-less writes\' refusal, not the plain read\'s', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+        for (const pkg of packages) await save(host, 'a1_rows_dash', pkg);
+        const read = await host.plain('dashboard', 'a1_rows_dash');
+        const layers = await host.layers('dashboard', 'a1_rows_dash');
+        expect([read.status, layers.status], JSON.stringify([read.body, layers.body])).toEqual([409, 409]);
+        expect(messageOf(layers.body).startsWith(WRITES_SENTENCE), JSON.stringify(layers.body)).toBe(true);
+        for (const pkg of packages) expect(messageOf(layers.body)).toContain(pkg);
+    }, 60_000);
+
+    it.each(ORDERS)('%s, CONTROL: one row holder is served on every bare door as before', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+        await save(host, 'one_row_dash', OTHER_PKG);
+        const read = await host.plain('dashboard', 'one_row_dash');
+        expect([read.status, read.body?.item?.label, read.body?.packageId], JSON.stringify(read.body)).toEqual([200, 'healthy row', OTHER_PKG]);
+        const layers = await host.layers('dashboard', 'one_row_dash');
+        expect([layers.status, layers.body?.effective?.label], JSON.stringify(layers.body)).toEqual([200, 'healthy row']);
+        const published = await host.published('dashboard', 'one_row_dash');
+        expect([published.status, published.body?.label], JSON.stringify(published.body)).toEqual([200, 'healthy row']);
+        const executed: any = await host.protocol.getMetaItemForExecution({ type: 'dashboard', name: 'one_row_dash' });
+        expect(executed?.item?.label).toBe('healthy row');
+    }, 60_000);
+});
+
+/**
  * [ruling record 6787890900] An object the caller may not read is answered on
  * every object door exactly as a name with nothing behind it — decided BEFORE
  * the store is read, so no store answer about that object (the protocol's own

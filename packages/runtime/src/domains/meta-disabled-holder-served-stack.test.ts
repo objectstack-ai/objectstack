@@ -333,3 +333,243 @@ describe.each([
         }
     }, 120_000);
 });
+
+// ---------------------------------------------------------------------------
+// [#32607, ADR-0150 D3] With NO package disabled, a name two enabled packages
+// hold only as stored rows (no package ships it) is refused on every bare door
+// naming both, by the row-aware served-holder judgment above, so the answer
+// follows no save order; each exact address serves its own row, and one row
+// holder is served as before.
+//
+// Measured on the #32183 head plus #32354's work (step 0 of #32607): the plain
+// read and `/published` served one row (the plain read the row saved first,
+// `/published` on this dispatcher the same package in every order), while
+// `/layers` refused 409 naming both, before and after a reboot. `/layers` keeps
+// that refusal, the package-less writes' own (#28337).
+// ---------------------------------------------------------------------------
+
+describe.each([
+    { regOrder: 'E registered first', registered: [ROW_E, ROW_F] },
+    { regOrder: 'F registered first', registered: [ROW_F, ROW_E] },
+])('[#32607] two enabled row holders and no shipper, $regOrder', ({ registered }) => {
+    const roots: string[] = [];
+    afterAll(() => { for (const dir of roots) rmSync(dir, { recursive: true, force: true }); });
+    const freshFile = () => {
+        const dir = mkdtempSync(join(tmpdir(), 'os-meta-two-rows-db-'));
+        roots.push(dir);
+        return join(dir, 'meta.sqlite');
+    };
+    const down = async (booted: Booted) => {
+        if (booted.kernel.getState() === 'running') await booted.kernel.shutdown();
+        roots.push(booted.root);
+    };
+    const expectRefusedNamingBoth = async (booted: Booted, name: string) => {
+        const read = await get(booted.kernel, `/meta/dashboard/${name}`);
+        expect([read.status, codeOf(read.body)], JSON.stringify(read.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect([...(read.body?.error?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(read.body))
+            .toEqual([ROW_E, ROW_F].sort());
+        // `/published` answers the plain read's refusal; `/layers` keeps the package-less writes' own (#28337). Both name both holders and serve no row.
+        for (const door of ['layers', 'published']) {
+            const answer = await get(booted.kernel, `/meta/dashboard/${name}/${door}`);
+            expect([answer.status, codeOf(answer.body), door], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', door]);
+            for (const id of [ROW_E, ROW_F]) expect(JSON.stringify(answer.body)).toContain(id);
+            expect(JSON.stringify(answer.body)).not.toMatch(/(enabled|third) row/);
+            // [#32607, A1] The dispatcher's layered chain leaves the plain read's refusal to step 1c too: `/layers`
+            // leads with the writes' sentence, `/published` does not.
+            const message = String(answer.body?.error?.message ?? '');
+            expect([door, message.startsWith('Name the package this layered read is for')], message).toEqual([door, door === 'layers']);
+        }
+        // The execution face takes the same refusal.
+        const protocol: any = booted.kernel.getService('protocol');
+        await expect(protocol.getMetaItemForExecution({ type: 'dashboard', name }))
+            .rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', httpStatus: 409 });
+        // Each exact address serves its own row.
+        for (const id of [ROW_E, ROW_F]) {
+            const exact = await get(booted.kernel, `/meta/dashboard/${name}`, { package: id });
+            expect([exact.status, unwrap(exact.body)?.item?.label], JSON.stringify(exact.body)).toEqual([200, `${rowTag(id)} row`]);
+        }
+    };
+
+    it.each([
+        { saveOrder: 'E saved first', saved: [ROW_E, ROW_F] },
+        { saveOrder: 'F saved first', saved: [ROW_F, ROW_E] },
+    ])('$saveOrder: the plain read, /layers, /published and the execution face refuse naming both, before and after a reboot', async ({ saved }) => {
+        const file = freshFile();
+        let booted = await bootRowKernel(registered, file);
+        try {
+            for (const id of saved) await layStoredRow(booted.engine, 'two_rows_dash', id, `${rowTag(id)} row`);
+            await expectRefusedNamingBoth(booted, 'two_rows_dash');
+        } finally {
+            await down(booted);
+        }
+        booted = await bootRowKernel(registered, file);
+        try {
+            await expectRefusedNamingBoth(booted, 'two_rows_dash');
+        } finally {
+            await down(booted);
+        }
+    }, 120_000);
+
+    it('CONTROL: one row holder is served on every bare door as before, before and after a reboot', async () => {
+        const file = freshFile();
+        let booted = await bootRowKernel(registered, file);
+        const expectServed = async (b: Booted) => {
+            const read = await get(b.kernel, '/meta/dashboard/one_row_dash');
+            expect([read.status, unwrap(read.body)?.item?.label, unwrap(read.body)?.packageId], JSON.stringify(read.body)).toEqual([200, 'enabled row', ROW_E]);
+            const layers = await get(b.kernel, '/meta/dashboard/one_row_dash/layers');
+            expect([layers.status, unwrap(layers.body)?.effective?.label], JSON.stringify(layers.body)).toEqual([200, 'enabled row']);
+            const published = await get(b.kernel, '/meta/dashboard/one_row_dash/published');
+            expect([published.status, unwrap(published.body)?.label], JSON.stringify(published.body)).toEqual([200, 'enabled row']);
+            const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'dashboard', name: 'one_row_dash' });
+            expect(executed?.item?.label).toBe('enabled row');
+        };
+        try {
+            await layStoredRow(booted.engine, 'one_row_dash', ROW_E, 'enabled row');
+            await expectServed(booted);
+        } finally {
+            await down(booted);
+        }
+        booted = await bootRowKernel(registered, file);
+        try {
+            await expectServed(booted);
+        } finally {
+            await down(booted);
+        }
+    }, 120_000);
+});
+
+// ---------------------------------------------------------------------------
+// [#32607 contract review M1, M2, n1] The no-disabled arm judges a name's
+// holders at the rows' grain alone, never united with the registry's one bare
+// slot. M1: a package's row and its customization pair's undeclared row are
+// one holder, whichever was saved (and so hydrated) last; the pair is never
+// named. M2: a dependent's added member over a base that holds the name only
+// as a stored row is the dependent's alone at that member (#28802); the
+// base's row of another member is no second holder there, and `/layers` does
+// not move. Both save orders, before and after a reboot. Measured on this
+// branch before the fix (1ab9370442): M1 refused 409 naming the base and its
+// pair in one save order; M2 refused 409 naming the base and the dependent.
+// On `main` 89d7bef033 neither refuses, and both answer as below.
+// ---------------------------------------------------------------------------
+
+// A bundled type's non-canonical member carries its `bundle_member` key column, as the save door writes it.
+const layRow = (engine: ObjectQL, type: string, name: string, packageId: string, metadata: Record<string, unknown>) => engine.insert('sys_metadata', {
+    type, name, namespace: 'default', package_id: packageId, scope: 'platform', strategy: 'merge', state: 'active', version: 1,
+    ...(type === 'email_template' && metadata.locale !== 'en-US' ? { bundle_member: metadata.locale } : {}),
+    metadata: JSON.stringify({ name, ...metadata }),
+}, { context: { isSystem: true } } as any);
+
+async function bootManifests(manifests: readonly Record<string, unknown>[], file: string): Promise<Booted> {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    const root = mkdtempSync(join(tmpdir(), 'os-meta-row-grain-'));
+    const engine = new ObjectQL();
+    engine.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true }) as any, true);
+    await kernel.use(new MetadataPlugin({ watch: false, rootDir: root }));
+    await kernel.use(new ObjectQLPlugin({ ql: engine }));
+    const host: Plugin = {
+        name: 'qa.row-grain-host',
+        dependencies: ['com.objectstack.engine.objectql'],
+        init: async (ctx: PluginContext) => {
+            for (const manifest of manifests) await ctx.getService<ManifestDoor>('manifest').register(manifest);
+        },
+    };
+    await kernel.use(host);
+    await kernel.bootstrap();
+    await engine.syncSchemas();
+    return { kernel, engine, root };
+}
+
+describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain', () => {
+    const roots: string[] = [];
+    afterAll(() => { for (const dir of roots) rmSync(dir, { recursive: true, force: true }); });
+    const freshFile = () => {
+        const dir = mkdtempSync(join(tmpdir(), 'os-meta-row-grain-db-'));
+        roots.push(dir);
+        return join(dir, 'meta.sqlite');
+    };
+    const down = async (booted: Booted) => {
+        if (booted.kernel.getState() === 'running') await booted.kernel.shutdown();
+        roots.push(booted.root);
+    };
+    const appManifest = (id: string, extra: Record<string, unknown> = {}) => ({
+        id, name: id.split('.').pop(), namespace: id.split('.').pop()!.replace(/[^a-z]/g, ''), version: '1.0.0', type: 'app', objects: [], ...extra,
+    });
+
+    // M1: X (an id that derives a pair: no underscore) and X's pair, each storing an undeclared row; nobody ships the name.
+    const X = 'com.qa.rowpairbase';
+    const PAIR = `${X}.custom`;
+    it('M1: a package\'s row and its pair\'s undeclared row are one holder in both save orders, before and after a reboot: no door refuses or names the pair', async () => {
+        const answers: string[] = [];
+        for (const saved of [[X, PAIR], [PAIR, X]]) {
+            const file = freshFile();
+            const manifests = [appManifest(X), appManifest(PAIR, { dependencies: { [X]: '*' } })];
+            let booted = await bootManifests(manifests, file);
+            const observe = async (b: Booted, leg: string) => {
+                const read = await get(b.kernel, '/meta/dashboard/pair_rows_dash');
+                const published = await get(b.kernel, '/meta/dashboard/pair_rows_dash/published');
+                const where = `${saved.join(' then ')} saved, ${leg}`;
+                expect([read.status, published.status, where], JSON.stringify([read.body, published.body])).toEqual([200, 200, where]);
+                for (const answer of [read, published]) expect(JSON.stringify(answer.body ?? null)).not.toContain('RESOURCE_CONFLICT');
+                const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'dashboard', name: 'pair_rows_dash' });
+                answers.push(JSON.stringify([unwrap(read.body)?.item?.label, unwrap(published.body)?.label, executed?.item?.label]));
+            };
+            try {
+                for (const id of saved) await layRow(booted.engine, 'dashboard', 'pair_rows_dash', id, { label: id === X ? 'base row' : 'pair row', widgets: [] });
+                await observe(booted, 'before a reboot');
+            } finally {
+                await down(booted);
+            }
+            booted = await bootManifests(manifests, file);
+            try {
+                await observe(booted, 'after a reboot');
+            } finally {
+                await down(booted);
+            }
+        }
+        // Each save order answers the same before and after a reboot. Which
+        // row it serves still follows the save order (the row saved first),
+        // exactly as on `main` 89d7bef033: that is the plain read's own pick
+        // between a base's row and its pair's undeclared row, not this
+        // judgment's, and it is carried separately.
+        expect([answers[0] === answers[1], answers[2] === answers[3]], answers.join(' | ')).toEqual([true, true]);
+    }, 240_000);
+
+    // M2 (n1: a bundled type at a member other than the canonical one): base A stores `en-US`, dependent D stores `fr-FR`.
+    const A = 'com.qa.mailrowbase';
+    const D = 'com.qa.mailrowaddon';
+    const template = (locale: string, subject: string) => ({ label: subject, locale, subject, bodyHtml: `<p>${subject}</p>` });
+    it.each([
+        { order: 'A saved first', saved: [A, D] },
+        { order: 'D saved first', saved: [D, A] },
+    ])('M2, $order: the dependent\'s added `fr-FR` over a row-held base is served as the dependent\'s on the plain read, /layers and the execution face, before and after a reboot', async ({ saved }) => {
+        const file = freshFile();
+        const manifests = [appManifest(A), appManifest(D, { dependencies: { [A]: '*' } })];
+        let booted = await bootManifests(manifests, file);
+        const observe = async (b: Booted) => {
+            const read = await get(b.kernel, '/meta/email_template/rowmail', { member: 'fr-FR' });
+            expect([read.status, unwrap(read.body)?.item?.subject, unwrap(read.body)?.packageId], JSON.stringify(read.body)).toEqual([200, 'addon fr', D]);
+            const layers = await get(b.kernel, '/meta/email_template/rowmail/layers', { member: 'fr-FR' });
+            expect([layers.status, unwrap(layers.body)?.effective?.subject], JSON.stringify(layers.body)).toEqual([200, 'addon fr']);
+            // `/published` takes no member selector (400 VALIDATION_ERROR): it reads the canonical member only.
+            const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'rowmail', member: 'fr-FR' });
+            expect(executed?.item?.subject).toBe('addon fr');
+            // CONTROL: the base's own `en-US` stays the base's.
+            const en = await get(b.kernel, '/meta/email_template/rowmail', { member: 'en-US' });
+            expect([en.status, unwrap(en.body)?.item?.subject], JSON.stringify(en.body)).toEqual([200, 'base en']);
+        };
+        try {
+            for (const id of saved) {
+                await layRow(booted.engine, 'email_template', 'rowmail', id, id === A ? template('en-US', 'base en') : template('fr-FR', 'addon fr'));
+            }
+            await observe(booted);
+        } finally {
+            await down(booted);
+        }
+        booted = await bootManifests(manifests, file);
+        try {
+            await observe(booted);
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
+});

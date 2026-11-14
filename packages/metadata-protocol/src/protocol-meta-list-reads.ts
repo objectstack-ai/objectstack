@@ -92,15 +92,6 @@ function decorateListedItem(type: string, item: unknown): unknown {
     return { ...served, name: (item as { name: string }).name, ...(_diagnostics !== undefined ? { _diagnostics } : {}) };
 }
 
-/**
- * [#32613] The types whose env-wide list drops a two-shipper override's pair
- * slot: the two whose answer, for a name two or more packages ship, each with
- * its declared override, is measured and pinned (each override once, in its
- * own package's slot, in either registration order). Any other type of such a
- * name keeps its pair's entry, as before.
- */
-const TWO_HOLDER_PAIR_SLOT_TYPES: ReadonlySet<string> = new Set(['flow', 'action']);
-
 /** The body of `ObjectStackProtocolImplementation#readFlattenedMetaItems`; the method's docblock there is its contract. */
 export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'baseServesBundleMember' | 'convertStoredItem' | 'declinesStoredRow' | 'disabledActionsOf' | 'engine' | 'environmentId' | 'expandStoredViewContainers' | 'findEnvironmentRows' | 'flowRegistrationsOf' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'hydrateOverlayIntoRegistry' | 'isStoredEntryOfDeclinedName' | 'isUnservedSealedOverlay' | 'isWritablePackage' | 'lookupArtifactItem' | 'namesWithOwnStoredRow' | 'readActiveOverlayRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf' | 'shippingPackagesOf' | 'shipsBundleName' | 'storedOverlayEntries'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
         audience: 'served' | 'execution',
@@ -802,8 +793,13 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // and body, against each shipper. Every other item of such a name is kept
     // as before (ADR-0048 §3.3), and a name one package ships is narrowed
     // above as before, which already drops the pair's slot.
-    // Only for `flow` and `action` ({@link TWO_HOLDER_PAIR_SLOT_TYPES}): any
-    // other type of such a name keeps its pair's entry, as before.
+    // [#33131] …for every type, not `flow` and `action` alone: measured for
+    // the six sealed types and a dashboard, report and email template, the
+    // pair's slot of the second holder's declared override was listed under
+    // the FIRST holder's package beside its own slot. A bundle's row is
+    // dropped only at a member its declared base ships, where the base's slot
+    // serves it; a pair's added member is kept, as the sole-shipper rule keeps
+    // it ({@link baseServesBundleMember}).
     if (servedOverride && !packageId && request.type !== 'package') {
         const typeShipping = host.shippingPackagesOf(request.type);
         const isBundle = ITEM_KEY_DISCRIMINATORS[request.type] !== undefined;
@@ -818,12 +814,9 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             const shippers = shippersOf.get(itemName)!;
             if (shippers.has(bound)) return true;
             if (shippers.size > 1) {
-                // Scoped to the two types whose two-holder answer is measured
-                // and pinned (flow, action); every other type keeps the item
-                // as before, carried to its own follow-up card (#33131).
-                if (!TWO_HOLDER_PAIR_SLOT_TYPES.has(PLURAL_TO_SINGULAR[request.type] ?? request.type)) return true;
                 return ![...shippers].some((shipper) =>
-                    isServedOverrideRowOf({ type: request.type, package_id: bound, metadata: it }, shipper, installed));
+                    isServedOverrideRowOf({ type: request.type, package_id: bound, metadata: it }, shipper, installed)
+                    && (!isBundle || !host.baseServesBundleMember(request.type, itemName, shipper, it, typeShipping)));
             }
             if (shippers.size === 0) return true;
             const [soleShipper] = shippers;

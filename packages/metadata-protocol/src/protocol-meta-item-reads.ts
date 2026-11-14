@@ -505,10 +505,21 @@ export async function getMetaItemForExecution(host: Pick<ProtocolHost, 'readMeta
 }
 
 /** The body of `ObjectStackProtocolImplementation#readMetaItem`; the method's docblock there is its contract. */
+/**
+ * [#32607] The item's active rows a face read before {@link readMetaItem}
+ * (`readItemActiveRows`, on the face's cache key), named by the type and name
+ * they were read for: the read takes them only for that same item.
+ */
+export interface PrereadActiveRows {
+    readonly type: string;
+    readonly name: string;
+    readonly rows: readonly StoredOverlayRow[];
+}
+
 export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'draftPublishVerdict' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'isArtifactBacked' | 'isStoredEntryOfDeclinedName' | 'isStoredFlowEntryOfShippedName' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'readVersionToken' | 'registryMemberServedAt' | 'resolveAppPackageIdKey' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'shippedArtifactsOf' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
-    }, opts: { face?: 'served' | 'execution' } = {}) {
+    }, opts: { face?: 'served' | 'execution'; activeRows?: PrereadActiveRows } = {}) {
     // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
     request = canonicalizeMetaRequestType(request);
     // [#23183] ADR-0048 §3.1: the app read keyed by PACKAGE ID, resolved
@@ -725,7 +736,12 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // [#24535], execution) the read goes through the overlay cache; an
     // authoring read is never kept.
     let activeRows: StoredOverlayRow[] | undefined;
-    if (readState === 'active') {
+    // [#32607] …or taken from the face that already read them for its
+    // served-holder judgment, when they are this item's: still one read.
+    const preread = opts.activeRows;
+    if (readState === 'active' && preread !== undefined && preread.type === request.type && preread.name === request.name) {
+        activeRows = [...preread.rows];
+    } else if (readState === 'active') {
         try {
             activeRows = await host.readItemActiveRows(request.type, request.name, opts.face !== undefined);
         } catch (error) {

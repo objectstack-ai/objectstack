@@ -91,12 +91,13 @@ export interface ObjectAdmissionHost {
   getObjectSecurityMeta: SecurityPlugin['getObjectSecurityMeta'];
   objectReadAdmission: SecurityPlugin['objectReadAdmission'];
   organizationWallRefusal: SecurityPlugin['organizationWallRefusal'];
+  resolveDelegatorForContext: SecurityPlugin['resolveDelegatorForContext'];
   resolvePermissionSetsForContext: SecurityPlugin['resolvePermissionSetsForContext'];
 }
 
 /** The body of `SecurityPlugin#canReadObject`; the method's docblock there is its contract. */
 export async function canReadObject(
-  this: Pick<ObjectAdmissionHost, 'delegatedAdminGate' | 'logger' | 'objectReadAdmission' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
+  this: Pick<ObjectAdmissionHost, 'delegatedAdminGate' | 'logger' | 'objectReadAdmission' | 'ql' | 'resolveDelegatorForContext' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   object: string,
   context?: any,
 ): Promise<boolean> {
@@ -121,7 +122,9 @@ export async function canReadObject(
     // ({@link delegatedOrganizationRefusal}).
     let delegatorSets: PermissionSet[] | null = null;
     if (context?.onBehalfOf?.userId) {
-      const del = await resolveDelegatorContext(this.ql, context);
+      // Once per context while no write intervenes (`resolveDelegatorForContext`):
+      // a schema-serving door asks this of every object it serves.
+      const del = await this.resolveDelegatorForContext(context);
       if (del.kind === 'missing') return false;
       if (del.kind === 'resolved') {
         if (delegatedOrganizationRefusal(context, del.context, this.tenancyPosture) !== undefined) return false;

@@ -197,6 +197,12 @@ export interface UpgradeImpactRegistry {
   getPackagedObjectOwner(name: string): { packageId?: string } | undefined;
   getPackage(id: string): { source?: string } | undefined;
   isPackageDisabled(id?: string): boolean;
+  /**
+   * Every package holding `(type, name)`; with `includeDisabledPackages`, a
+   * disabled package's included (`SchemaRegistry.packageScopedHoldersOf`).
+   */
+  packageScopedHoldersOf?(type: string, name: string, callerPackageId?: string | null,
+    options?: { includeDisabledPackages?: boolean }): string[];
   getAllApps?(): unknown[];
   getAppNavDiagnostics?(app: string): readonly NavDiagnosticLike[];
 }
@@ -273,6 +279,11 @@ export interface WithheldDeclaredWebhook {
   packageId: string;
   rowId: string;
   organizationId: string | null;
+  /**
+   * [#33016] Set when that package is disabled: it holds nothing for the
+   * activation door until it is enabled again, so its address answers `409`.
+   */
+  packageDisabled?: true;
 }
 
 /** An overlay row bound to a package that no longer ships the item. */
@@ -462,7 +473,11 @@ function shipsAt(registry: UpgradeImpactRegistry, type: string, name: string, pa
 /**
  * [#31699] Every package that declares webhook `name`: the one the bare
  * artifact lookup answers (a disabled package's included, as before), then
- * each other package the served listing holds it under, in listing order.
+ * each other package the served listing holds it under, in listing order,
+ * then [#33016] each other holder the registry counts with the disabled
+ * packages included, so a disabled SECOND holder is reported too, not only
+ * the one the bare lookup happens to answer. Each is confirmed against its
+ * own code artifact ({@link shipsAt}).
  */
 function webhookShippers(registry: UpgradeImpactRegistry, name: string): string[] {
   const out = new Set<string>();
@@ -471,6 +486,11 @@ function webhookShippers(registry: UpgradeImpactRegistry, name: string): string[
   for (const item of registry.listItems('webhook')) {
     if (!isRecord(item) || !isCodeArtifactBody(item) || nameOf(item.name) !== name) continue;
     out.add(String(item._packageId));
+  }
+  if (typeof registry.packageScopedHoldersOf === 'function') {
+    for (const packageId of registry.packageScopedHoldersOf('webhook', name, null, { includeDisabledPackages: true })) {
+      if (shipsAt(registry, 'webhook', name, packageId)) out.add(packageId);
+    }
   }
   return [...out];
 }
@@ -654,7 +674,10 @@ export async function collectUpgradeImpactFindings(
         const name = nameOf(row.name);
         if (name === undefined) continue;
         for (const packageId of webhookShippers(registry, name)) {
-          report.withheldWebhooks.push({ name, packageId, rowId: String(row.id), organizationId: organizationOf(row) });
+          report.withheldWebhooks.push({
+            name, packageId, rowId: String(row.id), organizationId: organizationOf(row),
+            ...(registry.isPackageDisabled(packageId) ? { packageDisabled: true as const } : {}),
+          });
         }
       }
 
@@ -788,9 +811,21 @@ function logError(logger: UpgradeReportLogger | undefined, message: string, meta
   else logger?.warn(message, meta);
 }
 
+/**
+ * [#33016] The webhook switch a finding names: the exact qualifier, which
+ * addresses the finding's package whatever its namespace — the namespace
+ * address answers 409 for two co-owners of one namespace, and a package that
+ * declares no namespace has none. Every webhook finding names a package (a
+ * re-enablement's row records one, and a withheld webhook's holder is a
+ * package), so no finding takes the bare address. A disabled package holds
+ * nothing for the door until it is enabled again (a withheld webhook's
+ * `packageDisabled`).
+ */
+const WEBHOOK_SWITCH_DOOR = 'POST /api/v1/security/_activation/webhook/<name>?package=<package>';
+
 const SWITCH_DOORS =
   'POST /api/v1/automation/<flow>/toggle, POST /api/v1/actions/_activation/<object>/<action> or ' +
-  'POST /api/v1/security/_activation/webhook/<namespace>/<name>, with { "enabled": false }';
+  `${WEBHOOK_SWITCH_DOOR}, with { "enabled": false }`;
 
 /** The finding set as stable data: what the digest, the notification and the log carry. */
 export function upgradeImpactSummary(report: UpgradeImpactReport): Record<FindingKey, unknown[]> {
@@ -829,8 +864,9 @@ const CATEGORY_LINES: Record<FindingKey, (count: number) => string> = {
     `[security] upgrade impact: ${n} sys_webhook row(s) hold the name of a webhook a package declares, so the row ` +
     'answers and the declared webhook is withheld for the whole deployment. Nothing was changed. Fix: rename or ' +
     'delete the row to let the declaration answer; to keep the row as well, rename it, and switch the declared ' +
-    'one off if it must not fire (POST /api/v1/security/_activation/webhook/<namespace>/<name> with { "enabled": false }, ' +
-    'the namespace of the package the finding names).',
+    `one off if it must not fire (${WEBHOOK_SWITCH_DOOR}, with { "enabled": false }; the package is the one the ` +
+    'finding names). A finding marked packageDisabled names a disabled package: it does not fire now, and that ' +
+    'address answers 409 until the package is enabled again, so enable the package first, then switch it there.',
   overlayOrphans: (n) =>
     `[security] upgrade impact: ${n} customization(s) of a view, dashboard, report, translation or email template ` +
     'are bound to a package that no longer ships the item, so each is served as an item of its own beside ' +
