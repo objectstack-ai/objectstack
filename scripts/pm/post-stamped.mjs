@@ -2517,13 +2517,15 @@ export function decisionFacetRefusalText(rows) {
  * review seat, then to a sibling seat that can take the tier, else leaves the PR on the owed-review list — ⛔ never
  * to triage. This is the write tool's input check on its own act, the same class as the signature and the keyed
  * lines above it: no landing, check, workflow or queue reads it, and a knock it refuses was never on the board.
- * The doorbell is read by its owner (`readMailboxLine`), never restated here; only a knock that reader READS is
- * judged — a malformed knock stays the doorbell patrol's half-state (H72), whatever seat it names. Comments only.
- * Answers the reading, or null. Pure.
+ * The doorbell is read by its owner (`readMailboxLine`), never restated here. A knock it reads AND one it finds
+ * unreadable (no reason, a bare PR number, a second line) are both judged: an unreadable reading still carries the
+ * `id` and `to` parsed before the template failed, and a malformed knock to triage is still a knock to triage. A
+ * comment the reader refuses outright (no `To:` seat, a key outside the table) names no contract-review knock at
+ * all and passes, as it does today. Comments only. Answers the reading, or null. Pure.
  */
 export function triageContractReviewKnock(body) {
   const knock = readMailboxLine(String(body ?? ''));
-  if (knock.state !== 'read' || knock.id !== 'request:contract-review') return null;
+  if ((knock.state !== 'read' && knock.state !== 'unreadable') || knock.id !== 'request:contract-review') return null;
   return /^triage#/u.test(knock.to) ? knock : null;
 }
 
@@ -3918,8 +3920,9 @@ const USAGE = [
   '  A comment that is a decision analysis — a decision frame, an options table or lettered options, and a',
   `  recommendation naming one — is REFUSED when it carries no \`${DECISION_FACET_MARKER}\` marker outside code; the`,
   '  refusal prints the four-facet block it owes. Card bodies and every other route are untouched.',
-  '  A mailbox comment whose `To:` is a triage seat and whose key is `Request: contract-review` is REFUSED: a lane',
-  '  without the review tier knocks a review seat, then a sibling seat with the tier — never triage.',
+  '  A mailbox comment whose `To:` is a triage seat and whose key is `Request: contract-review` is REFUSED, whether',
+  '  or not the key line spells its template: a lane without the review tier knocks a review seat, then a sibling',
+  '  seat with the tier — never triage.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
   '',
   `  Exit: 0 written and stored · ${EXIT_USAGE} usage · ${EXIT_REFUSED} refused, nothing written ·`,
@@ -4151,7 +4154,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
   'the signature: every body opens with LANE#N · ACCOUNT · SESSION or is refused, beside the stamp contract; one leading signature changes no reading': 11,
   'the one judge: every body refusal on ONE path — `main` and `label-write.mjs --comment-file` call `judgeBody`, never a copy': 8,
-  'the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes': 9,
+  'the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes': 10,
 });
 const SELF_TEST_BATTERY_FLOOR = 18;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -5700,6 +5703,7 @@ export function selfTest() {
     const refused = judged('triage#1');
     t('⭐ a contract-review knock addressed to `triage#1` is refused, and the refusal names the seat it was addressed to', !refused.ok && refused.text.startsWith('post-stamped: REFUSED') && refused.text.includes('`To: triage#1`'));
     t('⭐ …and the refusal names the review seat\'s mailbox, the sibling fallback, the owed-review list and the rule\'s home', refused.text.includes('`To: review#N`') && refused.text.includes('`Mailbox:`') && refused.text.includes('sibling lane seat') && refused.text.includes('check-owed-reviews.mjs') && refused.text.includes('references/contract-review.md') && refused.text.includes('Nothing was written'));
+    t('⭐ a MALFORMED knock to triage is refused too — no reason, a bare PR number, a second line: the reader\'s unreadable reading still names the key and the seat', [`Request: contract-review · PR #26766 · head ${HEAD}`, 'Request: contract-review · 26766 · rationed', `Request: contract-review · PR #26766 · head ${HEAD} · rationed\nbecause fable is short today`].every((key) => { const r = judged('triage#1', key); return !r.ok && r.text.includes('`To: triage#1`'); }) && judged('review#1', `Request: contract-review · PR #26766 · head ${HEAD}`).ok);
     t('a bare `To: triage` reads as `triage#1` (the doorbell reader\'s seat spelling) and is refused the same way', !judged('triage').ok && !judged('Triage#2').ok);
     t('⭐ the same knock addressed to a review seat passes', judged('review#1').ok && judged('review#2').ok);
     t('…and to a sibling lane seat, the fallback while no review seat is seated', judged('domain:server#2').ok);

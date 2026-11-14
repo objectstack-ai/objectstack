@@ -582,17 +582,16 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  // Raised 60 → 65 by the contract-review route (maintainer, 2026-11-13, in the
-  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」,
-  // 「没有 fable 时，找 review 座位」, after 「现在已经有了专用的 review 席位啊」 and
-  // 「契约复审只有在车道没有fable的时候才会找你执行，你也可以考虑是否需要单独设一个车道」;
-  // quoted in the body of card #33157, claim comment 6879512661): the one
-  // routing rule — a lane self-reviews only when it reaches the tier; otherwise
-  // (unreachable, 429, rationed) it knocks a seated review seat, never triage,
-  // then a sibling seat with the tier, else the owed-review list — replaces the
-  // 429-only line (+2), and its verbatim provenance (+3). Measured delta +5.
+  // Raised 60 → 63 by the contract-review route (maintainer, 2026-11-13, in the
+  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」
+  // and 「没有 fable 时，找 review 座位」; quoted in the body of card #33157, claim
+  // comment 6879512661): the one routing rule — a lane self-reviews only when it
+  // reaches the tier; otherwise (unreachable, 429, rationed) it knocks a seated
+  // review seat, never triage, then a sibling seat with the tier, else the
+  // owed-review list — replaces the 429-only line (+2), and its one-line verbatim
+  // provenance carrying those two operative quotes (+1). Measured delta +3.
   // Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 65],
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 63],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
