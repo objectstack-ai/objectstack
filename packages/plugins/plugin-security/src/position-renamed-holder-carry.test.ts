@@ -35,6 +35,7 @@ import {
   carryRenamedPositionHoldersAtBoot,
   createPositionRenameCarryRuns,
   logPositionRenameCarry,
+  positionRenameReloadScope,
 } from './position-renamed-holder-carry.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
@@ -452,7 +453,7 @@ const hotPackage = (version: '1.0.0' | '2.0.0') => ({
   ],
 });
 
-async function runningKernel() {
+async function runningKernel(alsoAtBoot: Array<Record<string, unknown>> = []) {
   const kernel = new ObjectKernel({ logger: { level: 'silent' } });
   const logger = (kernel as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger;
   const warnings: string[] = [];
@@ -479,6 +480,7 @@ async function runningKernel() {
       // The identity objects the security plugin's store reads (a test kit's `createIdentityObjectsPlugin`).
       await manifest.register({ id: 'test.hot.identity', name: 'Identity', version: '1.0.0', type: 'plugin', objects: [SysUser, SysMember, SysOrganization] });
       await manifest.register(hotPackage('1.0.0'));
+      for (const m of alsoAtBoot) await manifest.register(m);
     },
   } as Plugin);
   await kernel.bootstrap();
@@ -496,8 +498,12 @@ async function runningKernel() {
       await door!.trigger('metadata:reloaded', { changed: [`app/${HOT}`] });
     },
     /** The door's uninstall: the running kernel withdraws the package; its holder rows stay. */
-    uninstall(): void {
-      (ql as any).registry.uninstallPackage(HOT);
+    uninstall(id: string = HOT): void {
+      (ql as any).registry.uninstallPackage(id);
+    },
+    /** A door's announcement, spelled as that door spells its payload. */
+    async announce(changed: string[]): Promise<void> {
+      await door!.trigger('metadata:reloaded', { changed });
     },
   };
 }
@@ -550,6 +556,9 @@ describe('after the boot: a hot install carries its holders without a restart (#
   }, 60_000);
 });
 
+/** A per-item publish's announcement of `crm_sales_rep` (`ObjectQLPlugin`'s spelling). */
+const NAMES_CRM = { changed: ['position/crm_sales_rep'] };
+
 describe('the runner: one boot run, then one run per reload', () => {
   const quietEngine = () => ({ find: vi.fn(async () => []), update: vi.fn(async () => ({})) });
 
@@ -558,13 +567,13 @@ describe('the runner: one boot run, then one run per reload', () => {
     const list = vi.fn(async () => [entry('crm_sales_rep', CRM, ['sales_rep'])]);
     const runs = createPositionRenameCarryRuns(engine as any, () => ({ catalog: { list }, switchedOff: async () => new Set() }), { warn: vi.fn() });
 
-    expect(await runs.afterReload()).toBeUndefined();
+    expect(await runs.afterReload(NAMES_CRM)).toBeUndefined();
     expect(list).not.toHaveBeenCalled();
     expect(engine.find).not.toHaveBeenCalled();
 
     await runs.atBoot();
     expect(list).toHaveBeenCalledTimes(1);
-    await runs.afterReload();
+    await runs.afterReload(NAMES_CRM);
     expect(list).toHaveBeenCalledTimes(2);
   });
 
@@ -577,14 +586,14 @@ describe('the runner: one boot run, then one run per reload', () => {
     await runs.atBoot();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0][0])).toContain("'sales_rep' → 'crm_sales_rep'");
-    await runs.afterReload();
+    await runs.afterReload(NAMES_CRM);
     expect(warn).toHaveBeenCalledTimes(1);
 
     catalog = [entry('crm_sales_rep', CRM, ['sales_rep'])];
-    await runs.afterReload();
+    await runs.afterReload(NAMES_CRM);
     expect(warn).toHaveBeenCalledTimes(1);
     catalog = [entry('crm_sales_rep', CRM, ['sales_rep']), entry('sales_rep', HR)];
-    await runs.afterReload();
+    await runs.afterReload(NAMES_CRM);
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
@@ -600,7 +609,7 @@ describe('the runner: one boot run, then one run per reload', () => {
       return [];
     };
     const runs = createPositionRenameCarryRuns(engine as any, () => ({ catalog: { list } }), { warn: vi.fn() });
-    await Promise.all([runs.atBoot(), runs.afterReload(), runs.afterReload()]);
+    await Promise.all([runs.atBoot(), runs.afterReload(NAMES_CRM), runs.afterReload(NAMES_CRM)]);
     expect(most).toBe(1);
   });
 
@@ -614,6 +623,98 @@ describe('the runner: one boot run, then one run per reload', () => {
     expect(await runs.atBoot()).toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
     fail = false;
-    expect(await runs.afterReload()).toEqual({ carried: [], refused: [], failed: [], leftBehind: [], notRead: [] });
+    expect(await runs.afterReload(NAMES_CRM)).toEqual({ carried: [], refused: [], failed: [], leftBehind: [], notRead: [] });
+  });
+});
+
+const OTHER = 'com.acme.other';
+const CLAIMER = 'com.acme.claimer';
+
+describe('condition 2 on the reload path: a reload judges only what its announcement names as registered (#33238)', () => {
+  it('through the announcing doors: a claim on a name another package holds is refused; a withdrawal and an announcement of another package judge nothing; the announced package\'s own rename is carried', async () => {
+    const k = await runningKernel([{ id: OTHER, name: 'Other', version: '1.0.0', type: 'app', namespace: 'other', positions: [{ name: 'other_rep', label: 'Other rep' }] }]);
+    try {
+      // A package whose position claims a name another package holds, registered without an announcement.
+      installWithPositions((k.ql as any).registry, CLAIMER, [{ name: 'claimer_rep', renamedFrom: ['other_rep'] }]);
+      await seed(k.ql, 'sys_user_position', [holder('h1', 'u1', 'hot_sales_rep', 'org_a'), holder('h3', 'u3', 'other_rep', 'org_a')]);
+
+      // Refused: the install door names the claimant while the old name is held by another package.
+      await k.announce([`app/${CLAIMER}`]);
+      expect(await positionsById(k.ql)).toEqual({ h1: 'hot_sales_rep', h3: 'other_rep' });
+      expect(renameWarnings(k.warnings).filter((w) => w.includes("'other_rep' → 'claimer_rep'") && w.includes('another holder declares'))).toHaveLength(1);
+
+      // A withdrawal carries nothing: the uninstall door names a package the registry no longer holds.
+      k.uninstall(OTHER);
+      await k.announce([`app/${OTHER}`]);
+      expect(await positionsById(k.ql)).toEqual({ h1: 'hot_sales_rep', h3: 'other_rep' });
+
+      // An announcement naming another package or position judges only that one's claims.
+      k.uninstall(HOT);
+      await k.hotInstall('2.0.0');
+      await k.announce(['position/hot_crm_sales_rep', 'position/hot_auditor']);
+      // Carried: the announced package's own rename; the standing claim it did not name is not judged.
+      expect(await positionsById(k.ql)).toEqual({ h1: 'hot_crm_sales_rep', h3: 'other_rep' });
+    } finally {
+      await Promise.race([k.kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+    }
+  }, 60_000);
+});
+
+describe('positionRenameReloadScope: what each announcer\'s payload names', () => {
+  const holding = (...ids: string[]) => ({ registry: { getPackage: (id: string) => (ids.includes(id) ? { id } : undefined) } }) as any;
+  const scope = (payload: unknown, engine: any) => {
+    const s = positionRenameReloadScope(payload, engine);
+    return { packages: [...s.packages], positions: [...s.positions] };
+  };
+
+  it('the marketplace install-local door: `app/ID` names that package while the registry holds it, and nothing once it is withdrawn', () => {
+    expect(scope({ changed: [`app/${HOT}`] }, holding(HOT))).toEqual({ packages: [HOT], positions: [] });
+    expect(scope({ changed: [`app/${HOT}`] }, holding())).toEqual({ packages: [], positions: [] });
+  });
+
+  it('the per-item publish and the publish-drafts route: `position/NAME` names that position; another type, and an app name that is no package, name nothing', () => {
+    expect(scope({ changed: ['position/crm_sales_rep'] }, holding())).toEqual({ packages: [], positions: ['crm_sales_rep'] });
+    expect(scope({ changed: ['position/crm_sales_rep', 'object/crm_account', 'app/crm_console'] }, holding(HOT))).toEqual({ packages: [], positions: ['crm_sales_rep'] });
+  });
+
+  it('the artifact reload names a file path: nothing; nor does a payload with no list, or a malformed entry', () => {
+    expect(scope({ changed: ['/srv/app/dist/objectstack.json'], metadata: {} }, holding(HOT))).toEqual({ packages: [], positions: [] });
+    expect(scope(undefined, holding(HOT))).toEqual({ packages: [], positions: [] });
+    expect(scope({ changed: ['position/', '/position', 'position/Not_Grammar', 7] }, holding(HOT))).toEqual({ packages: [], positions: [] });
+  });
+
+  it('a reload that names nothing reads nothing', async () => {
+    const list = vi.fn(async () => [entry('crm_sales_rep', CRM, ['sales_rep'])]);
+    const runs = createPositionRenameCarryRuns({ find: vi.fn(async () => []), update: vi.fn() } as any, () => ({ catalog: { list } }), { warn: vi.fn() });
+    await runs.atBoot();
+    expect(await runs.afterReload({ changed: ['/srv/app/dist/objectstack.json'] })).toBeUndefined();
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a reload run that moves nothing does not read what it would leave behind', () => {
+  it('the boot run reads the pending approvals; a reload that moves no row does not; a reload that moves one does', async () => {
+    const engine = await boot();
+    await seed(engine, 'sys_user_position', [holder('h1', 'u1', 'sales_rep', 'org_a')]);
+    await seed(engine, 'sys_approval_request', [{ id: 'r1', organization_id: 'org_a', status: 'pending', pending_approvers: 'position:sales_rep' }]);
+    const runs = createPositionRenameCarryRuns(engine as any, () => ({ catalog: catalogOf(entry('crm_sales_rep', CRM, ['sales_rep'])) }), { warn: vi.fn(), info: vi.fn() });
+    const find = vi.spyOn(engine, 'find');
+    const approvalReads = () => find.mock.calls.filter(([object]) => object === 'sys_approval_request').length;
+
+    await runs.atBoot();
+    expect((await positionsById(engine)).h1).toBe('crm_sales_rep');
+    expect(approvalReads()).toBeGreaterThan(0);
+
+    find.mockClear();
+    const quiet = await runs.afterReload(NAMES_CRM);
+    expect(quiet?.carried).toEqual([expect.objectContaining({ from: 'sales_rep', rows: 0 })]);
+    expect(approvalReads()).toBe(0);
+
+    await seed(engine, 'sys_user_position', [holder('h2', 'u2', 'sales_rep', 'org_b')]);
+    find.mockClear();
+    const moving = await runs.afterReload(NAMES_CRM);
+    expect(moving?.carried).toEqual([expect.objectContaining({ from: 'sales_rep', rows: 1 })]);
+    expect(approvalReads()).toBeGreaterThan(0);
+    expect(moving?.leftBehind.map((l) => l.object)).toEqual(['sys_approval_request']);
   });
 });
