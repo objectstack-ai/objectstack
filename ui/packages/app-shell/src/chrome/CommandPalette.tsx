@@ -294,10 +294,11 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   const navItems = gates ? flattenNavigation(navEntriesShownToMember(activeApp?.navigation || [], gates)) : [];
 
   // The entries the palette shows for the query: a navigation entry or app by
-  // its label and its machine name, a built-in command by its value. They are
-  // matched here, on word prefixes and contiguous substrings, and only the
-  // matches are rendered, so cmdk's default subsequence scorer (it found
-  // "Field Zoo" for `zzzz`) no longer decides what shows (objectui#11812).
+  // its label and its machine name, a built-in command by its label and its
+  // value. They are matched here, on word prefixes and contiguous substrings,
+  // and only the matches are rendered, so cmdk's default subsequence scorer
+  // (it found "Field Zoo" for `zzzz`) no longer decides what shows
+  // (objectui#11812).
   const matches = (...terms: Array<string | undefined>) => matchesPaletteQuery(inputValue, terms);
   const navOfType = (type: string, nameKey: string) =>
     navItems.filter((item) => item.type === type && matches(navLabel(item), item[nameKey]));
@@ -327,15 +328,21 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
     switchableApps.length > 1
       ? switchableApps.filter((app) => matches(resolveKeyedI18nLabel(app.label, t), app.name))
       : [];
-  const themeCommands = THEME_COMMANDS.filter((command) => matches(command.value));
+  // A built-in command is found by the words of the label it shows, in the
+  // member's language, and by its value (objectstack#33061): matched on the
+  // value alone, "Open Full Search Page" was not found by `open` or
+  // `full search`, and under a non-English locale no command was found by any
+  // word of its label.
   const themeLabel = {
     light: t('console.commandPalette.lightTheme'),
     dark: t('console.commandPalette.darkTheme'),
     system: t('console.commandPalette.systemTheme'),
   };
+  const themeCommands = THEME_COMMANDS.filter((command) => matches(themeLabel[command.theme], command.value));
+  const fullSearchLabel = t('console.commandPalette.openFullSearch');
   // The full-search page lives under an app (`/apps/APP/search`), so the
   // `studio` scope, which has none, offers no such command (objectui#11863).
-  const showFullSearch = !inStudio && matches(FULL_SEARCH_VALUE);
+  const showFullSearch = !inStudio && matches(fullSearchLabel, FULL_SEARCH_VALUE);
 
   // objectui#11863 — the Studio's packages, objects and flows, read only while
   // the palette is open in the `studio` scope, matched like the entries above.
@@ -735,7 +742,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                 onSelect={() => leaveTo(`${baseUrl}/search`)}
               >
                 <Search className="mr-2 h-4 w-4" />
-                <span>{t('console.commandPalette.openFullSearch')}</span>
+                <span>{fullSearchLabel}</span>
               </CommandItem>
             </CommandGroup>
           </>
@@ -788,14 +795,14 @@ function PaletteDialog({
 const PALETTE_COMMAND_CLASS =
   '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5';
 
-/** The theme commands, matched by their value (objectui#11812). */
+/** The theme commands, matched by their label and their value (objectui#11812, objectstack#33061). */
 const THEME_COMMANDS = [
   { value: 'theme light', theme: 'light', Icon: Sun },
   { value: 'theme dark', theme: 'dark', Icon: Moon },
   { value: 'theme system', theme: 'system', Icon: Monitor },
 ] as const;
 
-/** The full-search command's value, which it is matched by (objectui#11812). */
+/** The full-search command's value, matched beside its label (objectui#11812, objectstack#33061). */
 const FULL_SEARCH_VALUE = 'search all results full page';
 
 /** One Studio entry the `studio` scope lists (objectui#11863). */
