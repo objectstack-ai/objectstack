@@ -461,6 +461,26 @@ const contactsSeed = defineSeed(Contact, {
 export const SeedData = [accountsSeed, contactsSeed];
 ```
 
+### References on an organization's own load
+
+A load that seeds one organization (the per-organization replay, a reseed, a
+package install into an organization) resolves a natural key **inside that
+organization**, by what the target object carries:
+
+| Target | Resolves to |
+|:---|:---|
+| An object with an `organization_id` column (every business object) | a row of the load's organization only; another organization's row with the same key is never used |
+| `sys_user` (people: `owner_id`, people lookups) | a person who is a **member** of the load's organization (a `sys_member` row there); a same-named person outside it is never used |
+| `sys_organization` | the load's own organization only |
+| An object no organization walls: no `organization_id` column and no tenant field (for example `tenancy: { enabled: false }`) | any row: global rows belong to every organization |
+| An object walled by another tenant column (`tenancy.tenantField`) with no `organization_id` column | nothing on such a load: the lookup is refused and reported, never answered from another organization |
+
+A load with no organization (the single-tenant boot) resolves across the whole
+database, as it always has. When the database refuses a lookup outright (for
+example a column the target does not have), the load logs the refusal once,
+with its code, and the reference's error says the lookup was refused instead
+of claiming the row does not exist.
+
 ### Multi-Value Lookups (`multiple: true`)
 
 A lookup declared `multiple: true` stores an **array** of related record ids, so its
@@ -628,6 +648,12 @@ same way. A row someone already owns is never touched.
   passes `config.identity`).
 - `os.org.id` resolves to the current organization; during a per-tenant replay
   it is that tenant's id, falling back to the load's `organizationId`.
+- Hooks run on seeded rows (seeds skip only flow automation), and a hook sees
+  the organization the row is stamped with as `ctx.session.organizationId`,
+  the same as for a row written through the API (a row that supplies its own
+  `organization_id` is written as that organization). Under a walled tenancy
+  posture its `ctx.api` reads, and every engine read the write triggers, are
+  scoped to that organization. A load with no organization gives hooks none.
 
 ### Failure is loud, not silent
 
