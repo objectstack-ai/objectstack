@@ -58,6 +58,12 @@
  *   `gateAdmin` admits platform administrators only, so the exception is the
  *   caller naming themselves (`actor.id === userId`).
  *
+ * The two differ on one population: `isPlatformAdminUser` also admits the
+ * legacy `role = 'admin'` scalar, while `isPlatformAdminUserId` reads the
+ * anchoring grant alone. A user who carries only the legacy scalar is
+ * admitted at the set doors and refused at the reset doors; the reset doors'
+ * answer is the stricter one.
+ *
  * ## Why the doors are where the rule bites
  *
  * ADR-0135 D5.2 (second bullet) records D4's stamp: gaining a local credential
