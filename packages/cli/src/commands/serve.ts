@@ -174,6 +174,8 @@ import {
 // [#16630] The reader half of the degraded-boot data path — the kernel's own
 // missing-core-service list, fetched, never re-derived. See its header.
 import { readMissingCoreServices } from '../utils/degraded-capabilities.js';
+// [#33233] The seed result the banner promised, printed once it settles.
+import { createSeedResultAfterBanner } from '../utils/seed-result-after-banner.js';
 import { redirectStdoutToStderr } from '../utils/json-stdout.js';
 import {
   CONSOLE_PATH,
@@ -979,52 +981,6 @@ export function createSeedSettlementAnnouncer(channels: SeedSettlementChannels):
     release: () => {
       released = true;
       check();
-    },
-  };
-}
-
-/**
- * Keep the banner's promise: "seeding continues in the background; its result
- * prints after this banner" (#33233).
- *
- * The banner says that when the seed is still writing as it prints
- * (`⚠ Seeds:   pending`). Nothing kept the promise on a clean seed: the
- * seeder's completion lines are `info`, under the default `warn` level, so the
- * terminal went quiet and a reader could not tell a seed that landed from one
- * still writing. This wraps the settlement channels so the one settle that
- * {@link createSeedSettlementAnnouncer} sends also prints the result, ONCE, and
- * only when the banner promised it — a seed that settled before the banner
- * already has its `Seeds:` row there, and printing it again would be noise.
- *
- * {@link noteBanner} is handed the snapshot the banner prints, in the banner
- * thunk, so the promise is read from exactly what the reader was shown. It
- * returns the snapshot unchanged.
- *
- * Best-effort like the IPC send it rides beside: a print that throws must not
- * cost the message, and must not take a healthy server down.
- */
-export function createSeedResultAfterBanner(
-  channels: SeedSettlementChannels,
-  printResult: (sources: readonly SeedSourceSummary[]) => void,
-): {
-  channels: SeedSettlementChannels;
-  noteBanner: (snapshot: SeedSettlementSnapshot | undefined) => SeedSettlementSnapshot | undefined;
-} {
-  let promised = false;
-  return {
-    noteBanner: (snapshot) => {
-      promised = !!snapshot && snapshot.inFlight > 0;
-      return snapshot;
-    },
-    channels: {
-      ...channels,
-      announceSettled: (message) => {
-        if (promised) {
-          promised = false;
-          try { printResult(message.sources); } catch { /* human-facing nicety — best-effort */ }
-        }
-        channels.announceSettled(message);
-      },
     },
   };
 }
@@ -5878,9 +5834,17 @@ export default class Serve extends Command {
       // sniffing past that to reach it would be the coupling the published
       // contract exists to avoid. Same shape as the artifact gate above.
       // [#33233] …and the same settle prints the seed result the banner
-      // promised, when the banner said the seed was still writing.
-      const seedResult = createSeedResultAfterBanner(runtimeSeedSettlementChannels(kernel), printSeedResultAfterBanner);
-      const seedSettlement = createSeedSettlementAnnouncer(seedResult.channels);
+      // promised, when the banner said the seed was still writing (see
+      // `../utils/seed-result-after-banner.ts`).
+      const seedResult = createSeedResultAfterBanner(printSeedResultAfterBanner);
+      const settlementChannels = runtimeSeedSettlementChannels(kernel);
+      const seedSettlement = createSeedSettlementAnnouncer({
+        ...settlementChannels,
+        announceSettled: (message) => {
+          seedResult.settled(message.sources);
+          settlementChannels.announceSettled(message);
+        },
+      });
       await kernel.use({
         name: 'com.objectstack.cli.seed-settlement-announcer',
         version: '1.0.0',

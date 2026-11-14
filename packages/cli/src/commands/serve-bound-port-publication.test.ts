@@ -48,7 +48,6 @@ import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 import {
   composeSeedSettledMessage,
-  createSeedResultAfterBanner,
   createSeedSettlementAnnouncer,
   publishBoundPort,
   readSeedSettlement,
@@ -726,83 +725,5 @@ describe('#17329 the `objectstack:seed-settled` ipc message', () => {
       // beside it: a second `publishBoundPort` call is that defect returning.
       expect(SERVE.match(/publishBoundPort\(/g) ?? []).toHaveLength(2);
     });
-  });
-});
-
-describe('#33233 the seed result prints after the banner, when the banner promised it', () => {
-  const snap = (inFlight: number): SeedSettlementSnapshot => ({ pending: inFlight, inFlight, suppressed: [] });
-  const s = (o: Partial<SeedSourceSummary> & { source: string }): SeedSourceSummary => ({
-    inserted: 0, updated: 0, skipped: 0, rejected: 0, ...o,
-  });
-
-  /**
-   * The real announcer over the real wrapper, on a tally the test drives: the
-   * order the boot calls them in is the order here — the banner notes its
-   * snapshot, the bound-port channels release the latch, a hook checks.
-   */
-  const boot = (atBanner: SeedSettlementSnapshot | undefined) => {
-    const state = { snapshot: atBanner, summary: undefined as SeedSourceSummary[] | undefined };
-    const sent: SeedSettledMessage[] = [];
-    const printed: (readonly SeedSourceSummary[])[] = [];
-    const seedResult = createSeedResultAfterBanner({
-      readSettlement: () => state.snapshot,
-      readSummary: () => state.summary,
-      announceSettled: (m) => { sent.push(m); },
-    }, (sources) => { printed.push(sources); });
-    const announcer = createSeedSettlementAnnouncer(seedResult.channels);
-    return { state, sent, printed, announcer, seedResult };
-  };
-
-  it('over budget: the banner says pending, and the settle prints the result ONCE, beside the message', () => {
-    const { state, sent, printed, announcer, seedResult } = boot(snap(1));
-    expect(seedResult.noteBanner(state.snapshot)).toBe(state.snapshot);
-    announcer.release();
-    expect(printed, 'printed before the seed settled').toEqual([]);
-
-    state.snapshot = snap(0);
-    state.summary = [s({ source: 'crm', inserted: 42 })];
-    announcer.check();   // `app:seeded`
-    announcer.check();   // a second config app's `app:seeded`
-
-    expect(printed).toEqual([[s({ source: 'crm', inserted: 42 })]]);
-    expect(sent, 'the print cost the ipc message').toHaveLength(1);
-  });
-
-  it('in budget: the banner already carries the Seeds row, so nothing prints after it', () => {
-    const { state, sent, printed, announcer, seedResult } = boot(snap(0));
-    state.summary = [s({ source: 'crm', inserted: 42 })];
-    seedResult.noteBanner(state.snapshot);
-    announcer.release();
-    expect(sent).toHaveLength(1);
-    expect(printed).toEqual([]);
-  });
-
-  it('no seed pipeline: no promise, no print — the message still goes', () => {
-    const { sent, printed, announcer, seedResult } = boot(undefined);
-    seedResult.noteBanner(undefined);
-    announcer.release();
-    expect(sent).toHaveLength(1);
-    expect(printed).toEqual([]);
-  });
-
-  it('a print that throws costs neither the ipc message nor the boot', () => {
-    const sent: SeedSettledMessage[] = [];
-    const seedResult = createSeedResultAfterBanner({
-      readSettlement: () => snap(0),
-      readSummary: () => undefined,
-      announceSettled: (m) => { sent.push(m); },
-    }, () => { throw new Error('stderr closed'); });
-    seedResult.noteBanner(snap(1));
-    expect(() => seedResult.channels.announceSettled(composeSeedSettledMessage(snap(0), undefined))).not.toThrow();
-    expect(sent).toHaveLength(1);
-  });
-
-  it('`os serve` wires it: the banner notes its snapshot, and the announcer runs over the wrapped channels', () => {
-    // The two halves above are only the fix if the command composes them; a
-    // helper nobody calls keeps every leg green and the promise broken.
-    const code = SERVE;
-    expect(code).toMatch(/createSeedResultAfterBanner\(runtimeSeedSettlementChannels\(kernel\), printSeedResultAfterBanner\)/);
-    expect(code).toMatch(/createSeedSettlementAnnouncer\(seedResult\.channels\)/);
-    expect(code).toMatch(/seedSettlement: seedResult\.noteBanner\(readSeedSettlement\(kernel\)\)/);
   });
 });
