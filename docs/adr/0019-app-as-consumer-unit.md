@@ -215,32 +215,42 @@ as a wrapper that surfaces N apps.
 > - [#32898](https://github.com/objectstack-ai/objectstack/pull/32898), merged as `0b23b2a0c4`:
 >   `composeStacks` judges what a composition puts under each package id
 >   (`packages/spec/src/stack.zod.ts#collectComposedSingleAppErrors`). A flat composition (the
->   default `manifest: 'last'`, `'first'` or an index) keeps one manifest and puts every input's
->   apps under its id, so when that manifest is an `app` or `module` package and the inputs bring
->   two or more apps, it is refused with `STACK_SINGLE_APP_VIOLATION` (422), naming each app and
->   the input it came from (`#flatSingleAppFinding`). The remedy the finding names is
->   `manifest: 'preserve'`, which keeps each package's own id (`#SINGLE_APP_COMPOSE_REMEDY`), the
->   shape `examples/app-multi-package/objectstack.config.ts` composes. Every `packages[]` body of
->   a composition is held to one app too (`#collectPackageBodySingleAppErrors`). A composition
->   of one input is handed back as it is, judged only by its own `defineStack`.
+>   default `manifest: 'last'`, `'first'` or an index) of inputs that carry no `packages[]` keeps
+>   one manifest and puts every input's apps under its id, so when that manifest is an `app` or
+>   `module` package and the inputs bring two or more apps, it is refused with
+>   `STACK_SINGLE_APP_VIOLATION` (422), naming each app and the input it came from
+>   (`#flatSingleAppFinding`). The remedy the finding names is `manifest: 'preserve'`, which keeps
+>   each package's own id (`#SINGLE_APP_COMPOSE_REMEDY`), the shape
+>   `examples/app-multi-package/objectstack.config.ts` composes. A composition whose result
+>   carries `packages[]` (under `'preserve'`, or a flat option with an input that carries
+>   `packages[]`) is judged by the residual rule instead: a top-level app that no body declares
+>   is registered under the artifact's manifest id, beside the apps of that id's own body, and
+>   two or more there are refused (`packages/spec/src/stack.zod.ts#residualSingleAppFinding`). The
+>   same merge holds every `packages[]` body to one app, each by its own `type`, `id` and `apps`,
+>   at `composeStacks` and at strict `defineStack`
+>   (`packages/spec/src/stack.zod.ts#collectPackageBodySingleAppErrors`). A composition of one
+>   input is handed back as it is, judged only by its own `defineStack`.
 > - [#33074](https://github.com/objectstack-ai/objectstack/pull/33074), merged as `2c98485db5`:
->   strict `defineStack` judges a stack that carries `packages[]` per body, each by its own
->   `type`, `id` and `apps`, and its top level by the residual rule (`#validateSingleApp`,
->   `#residualSingleAppFinding`). A top-level app that no body declares is registered under
->   `manifest.id`, beside the apps of that id's own body, and two or more there are refused; a
->   top-level app a body declares is a copy of that body's app and counts against that body only.
->   It is the judge #32898 gave `composeStacks` for a result that carries `packages[]`.
+>   changes only how strict `defineStack` counts the top level of a stack that carries
+>   `packages[]`; the bodies are judged as before. Until then every top-level app counted against
+>   `manifest.id`; since, the top level is judged by the residual rule #32898 gave `composeStacks`
+>   (`packages/spec/src/stack.zod.ts#validateSingleApp`), so a top-level app a body declares is a
+>   copy of that body's app and counts against that body only.
 > - [#33122](https://github.com/objectstack-ai/objectstack/pull/33122), merged as `5b2ec820c8`:
->   strict `defineStack` judges namespace prefixes the same way (`#namespacePrefixErrors`), each
->   body's objects against that body's own `namespace` and a top-level object that no body
->   declares against `manifest.namespace`, refused with `STACK_NAMESPACE_PREFIX_INVALID`. A body
->   with no `namespace` is not judged, the rule's legacy skip.
+>   strict `defineStack` judges namespace prefixes per body
+>   (`packages/spec/src/stack.zod.ts#namespacePrefixErrors`), each body's objects against that
+>   body's own `namespace` and a top-level object that no body declares against
+>   `manifest.namespace`, refused with `STACK_NAMESPACE_PREFIX_INVALID`. A body with no
+>   `namespace` is not judged, the rule's legacy skip. `composeStacks` runs no namespace-prefix
+>   check.
 >
 > `packages/spec/src/stack.test.ts` pins each of the three. At `defineStack`, package types other
-> than `app` and `module`, a stack with no manifest and `strict: false` are still not judged; a
-> `strict: false` stack that reaches `composeStacks` is judged there. The placement
-> sentence stands: on `main` at `b392ff7b`, a module package that defines no object builds with
-> an app that names an object of a sibling package, at `defineStack` and in a
+> than `app` and `module` are not judged by the single-app rule, and `strict: false` skips both
+> rules. A stack with no manifest goes unjudged only at its top level: every `packages[]` body it
+> carries is still judged by both rules. A `strict: false` stack meets a rule only when it is one
+> of two or more inputs to `composeStacks`, and then only the single-app rule. The
+> placement sentence stands: on `main` at `b392ff7b`, a module package that defines no object
+> builds with an app that names an object of a sibling package, at `defineStack` and in a
 > `manifest: 'preserve'` composition (probed once, not kept as a test; reason 2's first bullet
 > gives the reason).
 >
