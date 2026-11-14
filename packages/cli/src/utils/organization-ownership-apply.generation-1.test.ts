@@ -48,6 +48,16 @@ import {
   type NotNullPort,
   type OrganizationOwnershipApplyReport,
 } from './organization-ownership-apply.js';
+// Clocked windows measure behaviour, never loading: the ceremony's dynamic
+// imports are paid here, at collection (`check:test-source-alias`).
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/metadata-protocol';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
 
 const ORG = 'org_default';
 
