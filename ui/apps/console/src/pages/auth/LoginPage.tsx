@@ -288,7 +288,6 @@ export function LoginPage() {
     if (directSignIn !== 'start' || !hasBootstrapped || !signInNeeded) return;
     if (directSignInStartedRef.current) return;
     startDirectSignIn();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [directSignIn, hasBootstrapped, signInNeeded]);
   const directSignInRetry = directSignIn === 'hold' || directSignIn === 'incomplete';
 
