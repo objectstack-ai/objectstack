@@ -186,7 +186,8 @@ rowLevelSecurity: [
   candidate, and the position grants nothing through that name (its other sets
   still do). `outside-closure`: only a non-dependency holds it or only the
   environment (a set authored in Setup). `ambiguous-in-closure`: two holders
-  it reaches. Fix: declare the dependency. Stored grants,
+  it reaches (a second package shipping a name is refused at install). Fix:
+  declare the dependency. Stored grants,
   environment-authored positions, admin overlays of a package position and the
   `everyone`/`guest` anchors resolve environment-wide.
 - A portal or partner user is an organization member on the `external`
@@ -304,9 +305,8 @@ requiredPermissions: ['manage_platform_settings'], // capability AND-gate → me
 
 > ⚠️ **Both keys are load-bearing.** `tenancy: { enabled:
 > false }` alone switches the wall off for **every** caller, so any set with a
-> wildcard (`'*'`) read grant — the shipped `viewer_readonly`, an app-declared
-> default profile, a customer-authored set; not `member_default`, which is
-> explicit-allow — reads every row env-wide. `requiredPermissions` alone leaves a
+> wildcard (`'*'`) read grant — the shipped `viewer_readonly`; not
+> `member_default`, which is explicit-allow — reads every row env-wide. `requiredPermissions` alone leaves a
 > tenant object whose untagged rows the wall denies to everyone (above). Posture model: ADR-0066.
 
 ## Renaming or removing a shipped access item
