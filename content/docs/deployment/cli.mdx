@@ -1167,8 +1167,8 @@ performed. So `plan` really is a dry run, and everything `apply` is about to do
   In place (existing rows converged when you apply)
     ~ crm_contact [normalize_datetime_storage: signed_at — 1,240 row update(s)]
 
-  Safe (loosening — applied without --allow-destructive)
-    ✓ crm_contact.email [relax_not_null]
+  Needs confirmation
+    ~ crm_contact.email [relax_not_null]
 ```
 
 Answering `n` leaves every table and row exactly as it was. The boot's first
@@ -1274,9 +1274,15 @@ occupancy on its own.
 
 | Category | Examples | Applied by |
 |----------|----------|------------|
-| `safe` | relax `NOT NULL` → nullable, widen a `varchar`, create a declared index (a `UNIQUE` one only when its duplicate pre-flight comes back clean), replace a legacy installation-wide unique with its per-organization composite | `os migrate apply` (and dev auto-reconcile) |
-| `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_column_type_change` (only `os migrate multi-value-columns --apply` runs it), and `manual_widen_varchar_to_text` and `unbuildable_index`, which nothing applies |
+| `safe` | widen a `varchar`, widen a `date` column to the declared `datetime` (`widen_date_to_datetime`), create a declared index (a `UNIQUE` one only when its duplicate pre-flight comes back clean), replace a legacy installation-wide unique with its per-organization composite | `os migrate apply` (and dev auto-reconcile) |
+| `needs_confirm` | relax `NOT NULL` → nullable (`relax_not_null`, ADR-0113 D5), non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_column_type_change` (only `os migrate multi-value-columns --apply` runs it), and `manual_widen_varchar_to_text` and `unbuildable_index`, which nothing applies. Never dev auto-reconcile |
 | `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE`, create a `UNIQUE` index existing rows already violate | `os migrate apply --allow-destructive` |
+
+Publishing an object (a save in publish mode, a publish, or a package's publish-drafts) also applies
+its column changes to the existing table: every `safe` column change, and a `relax_not_null` whose
+field declares `storage: { notNull: false }`, since that declaration is the deliberate relax. Index
+changes stay with `os migrate apply`. A column change the database could not apply leaves the publish
+a success with an `object-column-changes-not-applied` warning on its answer naming each column.
 
 On a Turso remote primary (`libsql://`), a tightened or relaxed `NOT NULL` and a dropped DEFAULT stay drift, because that transport runs no SQLite table rebuild. `os migrate plan` and `os migrate apply` list each such entry with `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.`, offer `--allow-destructive` only for the destructive changes that database can apply, and count the rest as drift a re-run cannot apply.
 
@@ -1318,9 +1324,9 @@ drift, and `--allow-destructive` will not delete it.
 
 <Callout type="tip">
 **Dev self-heal.** `os dev` runs the SQL driver with `autoMigrate: 'safe'`, so
-safe changes (you just made a field optional; a `unique` field became
-organization-scoped) are applied to your existing dev database automatically on
-restart — no `os migrate` needed, no data loss. Auto-reconcile is **dev-only and
+safe changes (a `unique` field became organization-scoped) are applied to your
+existing dev database automatically on restart — no `os migrate` needed, no data
+loss. Relaxing a `NOT NULL` column is not one of them: it is `needs_confirm`. Auto-reconcile is **dev-only and
 never destructive**; it is force-disabled under `NODE_ENV=production`, where
 every change is shown by `os migrate plan` before you apply it deliberately.
 </Callout>
