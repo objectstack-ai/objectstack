@@ -464,37 +464,47 @@ describe('[#33072] the publish door judges an extension field\'s formula as `os 
 
 describe('[#33152] a package-wide publish judges each draft with the batch\'s own extension drafts folded onto their targets', () => {
     // The card's measured shape: the pair drafts an extension of the region
-    // that adds `tier__c`, and a draft that reads `tier__c` across a lookup.
-    // `os build` accepts the package; the batch door read the region as
-    // served live (without `tier__c`), refused `unknown field`, and rolled
-    // every draft back. Publishing the region's extension first worked.
+    // that adds `tier__c`, and a draft whose formula reads `tier__c` across a
+    // lookup to the region. `os build` accepts the package; the batch door
+    // read the region as served live (without `tier__c`), refused `unknown
+    // field`, and rolled every draft back. Publishing the region's extension
+    // first through the per-item door worked.
     const region = { name: 'crm_region', label: 'Region', fields: { code: { name: 'code', label: 'Code', type: 'text' } } };
-    const tierBody = (field = 'tier__c') => ({ extend: 'crm_region', fields: { [field]: { type: 'text', label: 'Tier' } } });
-    /** The account's extension: a lookup to the region and a formula hopping into `tier__c`. */
-    const accountBody = {
-        extend: TARGET,
+    /** A base object with a lookup to the region, which the pair extends. */
+    const SITE = 'crm_site';
+    const site = {
+        name: SITE,
+        label: 'Site',
         fields: {
-            region__c: { type: 'lookup', label: 'Region', reference: 'crm_region' },
-            tier_label__c: { type: 'formula', label: 'Tier label', expression: "record.region__c.tier__c + '!'" },
+            name: { name: 'name', label: 'Name', type: 'text' },
+            region: { name: 'region', label: 'Region', type: 'lookup', reference: 'crm_region' },
         },
+    };
+    const tierBody = (field = 'tier__c') => ({ extend: 'crm_region', fields: { [field]: { type: 'text', label: 'Tier' } } });
+    /** The site's extension: a formula hopping across the base lookup into `tier__c`. */
+    const siteBody = {
+        extend: SITE,
+        fields: { tier_label__c: { type: 'formula', label: 'Tier label', expression: "record.region.tier__c + '!'" } },
     };
     const draft = (p: any, type: string, name: string, item: unknown) =>
         p.saveMetaItem({ type, name, item, mode: 'draft', packageId: PAIR });
     const states = async (engine: ObjectQL) => ((await engine.find('sys_metadata', { where: { package_id: PAIR }, context: { isSystem: true } })) ?? [])
         .filter((r: any) => r.type !== 'package')
         .map((r: any) => `${r.type}/${r.name}:${r.state}`).sort();
+    const fieldsOf = (engine: ObjectQL, name: string) => Object.keys((engine.registry.getObject(name) as any)?.fields ?? {});
 
     it('⭐ LIT — an extension draft whose formula hops into a field a sibling extension draft adds publishes in one batch', async () => {
-        const rig = await boot([region]);
+        const rig = await boot([region, site]);
         await draft(rig.protocol, TYPE, 'crm_region', tierBody());
-        await draft(rig.protocol, TYPE, TARGET, accountBody);
+        await draft(rig.protocol, TYPE, SITE, siteBody);
 
-        const out = await rig.protocol.publishPackageDrafts({ packageId: PAIR }).catch((e: any) => e);
+        const res = await rig.protocol.publishPackageDrafts({ packageId: PAIR });
 
-        expect(out, JSON.stringify((out as any)?.issues ?? (out as any)?.message)).not.toBeInstanceOf(Error);
-        expect(await states(rig.engine)).toEqual([`${TYPE}/${TARGET}:active`, `${TYPE}/crm_region:active`]);
-        expect(Object.keys((rig.engine.registry.getObject('crm_region') as any)?.fields ?? {})).toContain('tier__c');
-        expect((await rig.fieldsOn()).registry).toContain('tier_label__c');
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 2 });
+        expect(await states(rig.engine)).toEqual([`${TYPE}/crm_region:active`, `${TYPE}/${SITE}:active`]);
+        expect(fieldsOf(rig.engine, 'crm_region')).toContain('tier__c');
+        expect(fieldsOf(rig.engine, SITE)).toContain('tier_label__c');
     }, 60_000);
 
     it('⭐ LIT — an object draft whose formula hops into a field a sibling extension draft adds publishes in one batch', async () => {
@@ -510,29 +520,28 @@ describe('[#33152] a package-wide publish judges each draft with the batch\'s ow
             },
         });
 
-        const out = await rig.protocol.publishPackageDrafts({ packageId: PAIR }).catch((e: any) => e);
+        const res = await rig.protocol.publishPackageDrafts({ packageId: PAIR });
 
-        expect(out, JSON.stringify((out as any)?.issues ?? (out as any)?.message)).not.toBeInstanceOf(Error);
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 2 });
         expect(await states(rig.engine)).toEqual([`object/${DEAL}:active`, `${TYPE}/crm_region:active`]);
     }, 60_000);
 
     it('⭐ CONTROL — a hop into a field no sibling adds is still refused, and the whole batch stays drafts', async () => {
-        const rig = await boot([region]);
+        const rig = await boot([region, site]);
         // The sibling adds `tir__c`, not `tier__c`: the fold makes the batch's
-        // fields resolvable and nothing else.
+        // own fields resolvable and nothing else.
         await draft(rig.protocol, TYPE, 'crm_region', tierBody('tir__c'));
-        await draft(rig.protocol, TYPE, TARGET, accountBody);
+        await draft(rig.protocol, TYPE, SITE, siteBody);
 
-        const err: any = await rig.protocol.publishPackageDrafts({ packageId: PAIR }).catch((e: any) => e);
+        const res = await rig.protocol.publishPackageDrafts({ packageId: PAIR });
 
-        expect(err, 'the batch was admitted').toBeInstanceOf(Error);
-        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
-        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
-        expect(issue?.where, JSON.stringify(err.issues))
-            .toBe("object 'crm_account' · objectExtensions[0] · field 'tier_label__c' expression");
-        expect(issue.message).toContain('tier__c');
-        expect(await states(rig.engine)).toEqual([`${TYPE}/${TARGET}:draft`, `${TYPE}/crm_region:draft`]);
-        expect(Object.keys((rig.engine.registry.getObject('crm_region') as any)?.fields ?? {})).not.toContain('tir__c');
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        const causal = res.failed.find((f: any) => f.name === SITE);
+        expect(causal?.code, JSON.stringify(res.failed)).toBe('INVALID_METADATA');
+        expect(JSON.stringify(causal), 'the refusal does not name the missing field').toContain('tier__c');
+        expect(await states(rig.engine)).toEqual([`${TYPE}/crm_region:draft`, `${TYPE}/${SITE}:draft`]);
+        expect(fieldsOf(rig.engine, 'crm_region')).not.toContain('tir__c');
     }, 60_000);
 });
 
