@@ -65,7 +65,7 @@ import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import type { HistoryVersionOwner } from './sys-metadata-repository.js';
 import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
-import { reportObjectRegistryRefusal } from './protocol-registry-hydration.js';
+import { OBJECT_REGISTRY_REFUSED, reportObjectRegistryRefusal } from './protocol-registry-hydration.js';
 
 /**
  * [#32396] A promotion a package publish wrote: what {@link undoLandedPromotions}
@@ -1533,8 +1533,12 @@ export class ProtocolHistoryAndPublishFacet {
          * `success === (outcome === 'published')` — `success` keeps its exact
          * pre-#10462 value and is now derivable. Values are lowercase snake,
          * matching the `sys_metadata_audit` outcome vocabulary.
+         * [#33277] `published_unregistered`: the drafts landed as on
+         * `published`, but the runtime registry refused a promoted object, so
+         * it is not served; `unregistered` is present if and only if this is
+         * the outcome, and `success` is false on it.
          */
-        outcome: 'published' | 'refused' | 'nothing_to_publish';
+        outcome: 'published' | 'published_unregistered' | 'refused' | 'nothing_to_publish';
         publishedCount: number;
         failedCount: number;
         published: Array<{
@@ -1559,6 +1563,14 @@ export class ProtocolHistoryAndPublishFacet {
             advisories?: RuntimeAuthoringIssue[];
         }>;
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
+        /**
+         * [#33277] Each promoted object the runtime registry refused, in
+         * publish order, under the rule its `published[]` element's warning
+         * carries. Present only on `outcome: 'published_unregistered'`, and
+         * then non-empty; the object stays in `published[]` (its metadata is
+         * live) but is not served until something registers it.
+         */
+        unregistered?: Array<{ type: string; name: string; rule: 'object-registry-refused' }>;
         /** Aggregate result of materializing every published `seed` (absent when no seeds). */
         seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
         /**
@@ -2495,6 +2507,10 @@ export class ProtocolHistoryAndPublishFacet {
             if (capture && !storedExpressions.has(capture.object)) storedExpressions.set(capture.object, { capture, at });
         });
         const storageRefusedObjects = new Set<string>();
+        // [#33277] The promoted objects the registry refused at their own
+        // write-through below, in publish order: what turns the answer into
+        // `published_unregistered`.
+        const unregistered: Array<{ type: string; name: string; rule: typeof OBJECT_REGISTRY_REFUSED }> = [];
         await registerAdmittedBatchRows(this, promotedObjects, admittedOrder);
         for (const p of promoted) {
             // [#9343] Omitted-when-empty, never `advisories: []` — the #4717
@@ -2530,7 +2546,13 @@ export class ProtocolHistoryAndPublishFacet {
                 // `object-registry-refused`: the batch still answers
                 // `published` (outcome and `success` unchanged), and this is
                 // the element a caller reads to learn the object is not served.
-                if (eff.registryRefused) element.advisories = [...(element.advisories ?? []), eff.registryRefused];
+                // [#33277] …and the batch no longer answers `published` over
+                // it: the object is named in `unregistered[]` under the same
+                // rule, and the outcome below is `published_unregistered`.
+                if (eff.registryRefused) {
+                    element.advisories = [...(element.advisories ?? []), eff.registryRefused];
+                    unregistered.push({ type: p.d.type, name: p.d.name, rule: OBJECT_REGISTRY_REFUSED });
+                }
                 if (eff.storageRefused) {
                     element.advisories = [...(element.advisories ?? []), eff.storageRefused];
                     storageRefusedObjects.add(p.d.name);
@@ -2644,20 +2666,28 @@ export class ProtocolHistoryAndPublishFacet {
             );
         }
 
+        const outcome = failed.length > 0
+            ? 'refused'
+            : published.length === 0
+                ? 'nothing_to_publish'
+                : unregistered.length > 0 ? 'published_unregistered' : 'published';
         return {
-            success: failed.length === 0 && published.length > 0,
+            // [#33277] Still exactly `outcome === 'published'`: a batch whose
+            // drafts landed while the registry refused an object among them is
+            // not a successful publish for a caller about to use that object.
+            success: outcome === 'published',
             // [#10462] Derived, never stored: 'refused' the moment anything is
             // in `failed[]` (defensive — every failure on this route unwinds
-            // through the Phase-1 catch above today), else 'published' iff
-            // something landed, else the no-op. Exactly the three-way fact
-            // `success` compresses into one boolean.
-            outcome: failed.length > 0
-                ? 'refused'
-                : published.length > 0 ? 'published' : 'nothing_to_publish',
+            // through the Phase-1 catch above today), else the no-op when
+            // nothing landed, else [#33277] 'published_unregistered' when the
+            // registry refused a promoted object, else 'published'. Exactly the
+            // fact `success` compresses into one boolean.
+            outcome,
             publishedCount: published.length,
             failedCount: failed.length,
             published,
             failed,
+            ...(unregistered.length > 0 ? { unregistered } : {}),
             ...(seedApplied ? { seedApplied } : {}),
             ...(materialize.any
                 ? { materializeApplied: {

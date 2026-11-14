@@ -475,9 +475,10 @@ describe('[#30693] publishPackageDrafts reports a refused object-storage sync on
 // The registry write-through runs after the metadata commit (ADR-0067 D2) and
 // used to keep a refused `registerObject` to a `warn` line: the batch answered
 // `published` with nothing naming the object, and a seed load right after it
-// answered OBJECT_NOT_FOUND. The ruled interim answer (option D): outcome and
-// `success` unchanged, one `error` line for the operator, and one warning under
-// the stable rule `object-registry-refused` on the refused object's element.
+// answered OBJECT_NOT_FOUND. The ruled interim answer (option D): one `error`
+// line for the operator, and one warning under the stable rule
+// `object-registry-refused` on the refused object's element. Its follow-up
+// (#33277, below) moves the batch's outcome off `published`.
 
 const REGISTRY_REFUSED_RULE = 'object-registry-refused';
 
@@ -499,7 +500,7 @@ describe('[#33005] publishPackageDrafts reports a registry-refused object on tha
         vi.restoreAllMocks();
     });
 
-    it('the batch still answers published; exactly the refused element carries the rule, logged at error once', async () => {
+    it('exactly the refused element carries the rule, logged at error once', async () => {
         vi.spyOn(console, 'warn').mockImplementation(() => {});
         const error = vi.spyOn(console, 'error').mockImplementation(() => {});
         const { engine } = makeStubEngine();
@@ -510,9 +511,9 @@ describe('[#33005] publishPackageDrafts reports a registry-refused object on tha
 
         const res = await protocol.publishPackageDrafts({ packageId: PKG });
 
-        // Option D changes neither the outcome nor `success`.
+        // Nothing is refused or rolled back: both drafts landed.
         expect(res.failed).toEqual([]);
-        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 2, failedCount: 0 });
+        expect(res).toMatchObject({ publishedCount: 2, failedCount: 0 });
 
         const byName = new Map(res.published.map((p) => [p.name, p]));
         const refused = byName.get('ticket')!;
@@ -558,5 +559,80 @@ describe('[#33005] publishPackageDrafts reports a registry-refused object on tha
             .toEqual([[REGISTRY_REFUSED_RULE, 'object "invoice"']]);
         expect(registryRefusedLines(error, 'ticket')).toHaveLength(1);
         expect(registryRefusedLines(error, 'invoice')).toHaveLength(1);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [#33277] A batch whose registry refused an object answers a distinct outcome.
+// ---------------------------------------------------------------------------
+// The follow-up the #33005 ruling named (option A): the drafts landed and stay
+// live, so the object stays in `published[]` with its warning, but the batch
+// no longer answers `published`. It answers `published_unregistered`,
+// `success: false`, and names each refused object in `unregistered[]` under
+// the same rule id, in publish order.
+
+describe('[#33277] publishPackageDrafts answers published_unregistered naming each object the registry refused', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    // Publish order follows the staging order here, so both orders put the
+    // refused object on either side of a sibling the registry accepts.
+    for (const order of [['ticket', 'invoice'], ['invoice', 'ticket']] as const) {
+        it(`names the refused object and does not answer published (publish order ${order.join(', ')})`, async () => {
+            vi.spyOn(console, 'warn').mockImplementation(() => {});
+            vi.spyOn(console, 'error').mockImplementation(() => {});
+            const { engine } = makeStubEngine();
+            refuseRegistration(engine, new Set(['ticket']));
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            for (const name of order) await stageObjectDraft(protocol, name);
+
+            const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+            expect(res.outcome).toBe('published_unregistered');
+            expect(res.success).toBe(false);
+            expect(res.unregistered).toEqual([{ type: 'object', name: 'ticket', rule: REGISTRY_REFUSED_RULE }]);
+            // The drafts landed: nothing failed, both are published, and the
+            // refused object's element still carries the warning it names.
+            expect(res.failed).toEqual([]);
+            expect(res).toMatchObject({ publishedCount: 2, failedCount: 0 });
+            expect(res.published.map((p) => p.name)).toEqual([...order]);
+            const refused = res.published.find((p) => p.name === 'ticket')!;
+            expect((refused.advisories ?? []).map((a) => a.rule)).toEqual([REGISTRY_REFUSED_RULE]);
+        });
+    }
+
+    it('names every refused object, in publish order', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const { engine } = makeStubEngine();
+        refuseRegistration(engine, new Set(['ticket', 'invoice']));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        for (const name of ['invoice', 'account', 'ticket']) await stageObjectDraft(protocol, name);
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.outcome).toBe('published_unregistered');
+        expect(res.success).toBe(false);
+        expect(res.unregistered).toEqual([
+            { type: 'object', name: 'invoice', rule: REGISTRY_REFUSED_RULE },
+            { type: 'object', name: 'ticket', rule: REGISTRY_REFUSED_RULE },
+        ]);
+        expect(res.publishedCount).toBe(3);
+    });
+
+    it('CONTROL: a batch the registry takes whole still answers published, with no unregistered key', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const { engine } = makeStubEngine();
+        refuseRegistration(engine, new Set());
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'ticket');
+        await stageObjectDraft(protocol, 'invoice');
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 2, failedCount: 0 });
+        expect('unregistered' in res).toBe(false);
     });
 });

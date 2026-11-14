@@ -648,6 +648,11 @@ function packageIsUnknown(registry: unknown, id: string): boolean {
  * someone else's success, so it runs only on a success the producer NAMES.
  *
  * - `published` — the drafts landed; the package is live and becomes visible.
+ * - `published_unregistered` — the drafts landed exactly as on `published`,
+ *   but the runtime registry refused an object among them (#33277), which
+ *   `unregistered[]` names. Kept in the list on purpose, pending a ruling: this
+ *   answer used to read `published`, so the flip ran on it, and dropping it
+ *   would change visibility beyond what the outcome change was asked to do.
  * - `nothing_to_publish` — kept on purpose: for a materialized (additive)
  *   build there are no drafts, and this flip IS the publish (ADR-0045 §3).
  *
@@ -659,6 +664,7 @@ function packageIsUnknown(registry: unknown, id: string): boolean {
  */
 const PUBLISH_OUTCOMES_THAT_FLIP: ReadonlySet<unknown> = new Set<PublishPackageDraftsResponse['outcome']>([
     'published',
+    'published_unregistered',
     'nothing_to_publish',
 ]);
 
