@@ -398,7 +398,9 @@ export interface SysMetadataEngine {
    * (`engineCanRollBack` answers no: a default driver with no
    * `beginTransaction`, or one declaring `supports.transactionsUnsupported`
    * as remote Turso does). The in-memory driver rolls back, by restoring a
-   * snapshot of its whole store.
+   * snapshot of its whole store to its state at begin: no isolation, and a
+   * rollback also discards what other callers wrote since that begin, so it
+   * is not safe with concurrent writers.
    *
    * Typed off the `objectql` slot contract (ADR-0119 D1) rather than restated
    * by hand, so this stub surface cannot drift from `ObjectQL.transaction`.
@@ -767,7 +769,9 @@ export class SysMetadataRepository implements MetadataRepository {
    * `supports.transactionsUnsupported` as remote Turso declares), get no
    * rollback: the degrade ADR-0119 D1 declares. A SQL driver is not by
    * itself a guarantee of rollback (ADR-0067, 2026-11-12 amendment); the
-   * in-memory driver does roll back, by restoring a snapshot of its store.
+   * in-memory driver does roll back, by restoring a snapshot of its whole
+   * store to its state at begin: no isolation, and a rollback also discards
+   * what other callers wrote since that begin.
    */
   private async withTxn<T>(cb: (ctx: any) => Promise<T>): Promise<T> {
     if (typeof this.engine.transaction === 'function') {

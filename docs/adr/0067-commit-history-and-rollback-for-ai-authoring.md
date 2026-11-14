@@ -377,19 +377,27 @@ of the decision:
   code, where it has one), and the walk goes on to the next item. `failed[]` says the item's revert did
   not complete, not that nothing of it was written: a fault after the item's
   row write (its registry write-through, say) reports it there too. When the
-  walk ends, the revert commit is recorded from `reverted[]` — what was
+  walk ends, the revert commit is written from `reverted[]` — what was
   reverted, not what the commit named — and the answer's `success` is true
   only when `failed[]` is empty and at least one item was reverted.
+- **The revert commit itself is best effort.** `recordPackageCommit` catches
+  every error: where `sys_metadata_commit` is unprovisioned it logs once at
+  `info`, and where the write fails it logs at `error`, and either way it
+  returns no record. `revertCommit` then answers without `revertCommitId` and
+  returns normally. Such a revert is on no timeline and cannot itself be
+  reverted — D3's append-only promise holds only where the record write
+  lands.
 - **`rollbackToPackageCommit`** runs one `revertCommit` per `apply` commit
   newer than the target, newest first. A step that throws, and every item a
   step reports in its own `failed[]`, goes into the rollback's `failed[]`;
-  neither stops the rollback, and every step that returns has recorded its own
-  revert commit.
+  neither stops the rollback, and every step that returns has attempted its
+  own revert commit, best effort as above.
 
 So a revert in which one item fails leaves the package **partly reverted**:
-the item's neighbours are reverted and recorded, the failed item is named in
-the response, and `success` is false. That is the half-land shape D2 exists
-to prevent on publish, here on the revert side — reported, not prevented.
+the item's neighbours are reverted (and recorded, where the record write
+lands), the failed item is named in the response, and `success` is false.
+That is the half-land shape D2 exists to prevent on publish, here on the
+revert side — reported, not prevented.
 
 ### What this amendment does not decide
 
@@ -399,7 +407,8 @@ to prevent on publish, here on the revert side — reported, not prevented.
   only where the engine can roll back. That is a maintainer decision, not made
   here.
 - It changes nothing in Decision-2, the package-publish door, or the
-  2026-08-06 carve-out (audit rows written during reverted work still remain).
+  2026-08-06 carve-out (audit rows written during rolled-back work still
+  remain).
 
 **Recorded by**: the triage of #32504 ("stale text only"), dispatched as a text
 correction: this record follows the code; no historical text is rewritten.
