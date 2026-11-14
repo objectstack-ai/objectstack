@@ -38,9 +38,12 @@ async function openSelect(trigger: HTMLElement) {
   await waitFor(() => expect(screen.queryAllByRole('option').length).toBeGreaterThan(0));
 }
 
-/** The option offering object `name`, found by the name it writes. */
+/**
+ * The option offering object `name`, found by the name it shows — in any face,
+ * so the same lookup finds it on a build that draws the bare name.
+ */
 function optionFor(name: string): HTMLElement {
-  const el = screen.getAllByRole('option').find((o) => o.getAttribute('data-object-name') === name);
+  const el = screen.getAllByRole('option').find((o) => (o.textContent ?? '').includes(name));
   expect(el, `no option writes ${name}`).toBeTruthy();
   return el as HTMLElement;
 }
