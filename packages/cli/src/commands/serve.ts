@@ -166,6 +166,7 @@ import {
   printInfo,
   printServerReady,
   printBootDiagnostics,
+  printSeedResultAfterBanner,
   type AutomationReadySummary,
   type HttpServerComposition,
   type SeedSourceSummary,
@@ -173,6 +174,8 @@ import {
 // [#16630] The reader half of the degraded-boot data path — the kernel's own
 // missing-core-service list, fetched, never re-derived. See its header.
 import { readMissingCoreServices } from '../utils/degraded-capabilities.js';
+// [#33233] The seed result the banner promised, printed once it settles.
+import { createSeedResultAfterBanner } from '../utils/seed-result-after-banner.js';
 import { redirectStdoutToStderr } from '../utils/json-stdout.js';
 import {
   CONSOLE_PATH,
@@ -5830,7 +5833,18 @@ export default class Serve extends Command {
       // context and nowhere else — `ObjectKernel.context` is private, and
       // sniffing past that to reach it would be the coupling the published
       // contract exists to avoid. Same shape as the artifact gate above.
-      const seedSettlement = createSeedSettlementAnnouncer(runtimeSeedSettlementChannels(kernel));
+      // [#33233] …and the same settle prints the seed result the banner
+      // promised, when the banner said the seed was still writing (see
+      // `../utils/seed-result-after-banner.ts`).
+      const seedResult = createSeedResultAfterBanner(printSeedResultAfterBanner);
+      const settlementChannels = runtimeSeedSettlementChannels(kernel);
+      const seedSettlement = createSeedSettlementAnnouncer({
+        ...settlementChannels,
+        announceSettled: (message) => {
+          seedResult.settled(message.sources);
+          settlementChannels.announceSettled(message);
+        },
+      });
       await kernel.use({
         name: 'com.objectstack.cli.seed-settlement-announcer',
         version: '1.0.0',
@@ -6214,7 +6228,9 @@ export default class Serve extends Command {
         // byte-identical to one that declared no seeds at all, which is how
         // this defect hid: the louder the seed went on to fail, the more
         // complete the omission looked at the moment it was read.
-        seedSettlement: readSeedSettlement(kernel),
+        // [#33233] Noted as it is printed: a `pending` here is the promise
+        // that the result prints after the banner, kept by `seedResult`.
+        seedSettlement: seedResult.noteBanner(readSeedSettlement(kernel)),
         // #16630 — what the kernel already knows about this boot, so the ready
         // line can say what state it is ready in. `undefined` on a healthy
         // boot, where the ready block prints exactly what it always has.
