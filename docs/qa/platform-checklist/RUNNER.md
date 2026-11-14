@@ -302,51 +302,71 @@ contradicts it, and correct it here when it does.
   **Check:** fetch `/api/v1/meta/app` with no query first and read the names it actually
   returns, then filter.
 
-- **A boot on its own non-3000 port breaks the showcase's self-pinging connectors
-  unless you export `OS_PORT` — `-p` alone is not enough, and the symptom impersonates an
-  egress block.** The showcase's REST/OpenAPI connector instances point at the running
-  server itself, resolved by `resolveShowcaseSelfUrl()`
+- **The showcase's self-pinging connectors dial the self-URL the artifact was COMPILED
+  with — on a `--no-compile` boot an exported `OS_PORT` does not move it, and the symptom
+  impersonates an egress block.** The showcase's REST/OpenAPI connector instances point at
+  the running server itself, resolved by `resolveShowcaseSelfUrl()`
   (`examples/app-showcase/src/system/self-url.ts`) in this order: `SHOWCASE_SELF_URL` →
-  `OS_PORT` → `PORT` → the literal `http://127.0.0.1:3000`. Those are **environment**
-  reads. The CLI's `-p` flag is only a *default sourced from* `OS_PORT`
-  (`packages/cli/src/commands/serve.ts`: `port: Flags.string({ char: 'p', … default:
-  readEnvWithDeprecation('OS_PORT','PORT') ?? '3000' })`) and nothing writes the variable
-  back, so the dogfood §0 boot on its own port — `objectstack dev … -p <port>` with the env
-  untouched — listens on `<port>` while every declarative connector dials **3000**. Every
-  dispatch then fails `connector_action(showcase_status_api.request) failed: fetch failed`.
+  `OS_PORT` → `PORT` → the literal `http://127.0.0.1:3000`. Those are environment reads
+  made when the config is evaluated, which for the served connectors is the compile into
+  `dist/objectstack.json`. A default `os dev` compiles under the boot's own environment
+  first (#26130; the `compile` flag of `packages/cli/src/commands/dev.ts`, default on), and
+  exports its `-p` for that compile (`portFlagEnv`, `packages/cli/src/utils/port-contract.ts`),
+  so a default boot dials its own port. A `--no-compile` boot serves the artifact as last
+  built, which is the behaviour `self-url.ts`'s header documents: its connectors dial the
+  port that compile saw — `3000` when it saw none, another runner's when another runner
+  compiled last. Measured at `e0ce1b52`: an artifact compiled with no `OS_PORT`, booted
+  `--no-compile -p 41781` with `OS_PORT=41781` exported, failed the
+  `showcase_declarative_connector_ping` run with
+  `connector_action(showcase_status_api.request) failed: fetch failed`, and
+  `GET /api/v1/meta/connector/showcase_status_api` answered `baseUrl`
+  `http://127.0.0.1:3000` (QA runs #33048 and #33093 met the same).
   ⚠️ **That string is not evidence of a sandbox network restriction**, and reading it as
   one is the expensive mistake: the module's own header records that #7516 burned a run
-  proving it was an address problem by putting a TCP forwarder on 3000, and #7538 fixed
-  the resolution but could not fix a boot that never exports the variable. **Check:**
-  before scoring any connector clause, prove where the live dispatch lands: create a
-  `showcase_task`, read the `showcase_declarative_connector_ping` run it fires, and confirm
-  it completed with a `ping.body` whose uptime matches THIS boot, not another server's.
-  ⛔ Do not read the instance metadata for it: an `os dev --no-compile` boot serves the
-  existing `dist/objectstack.json` as built, so `GET /api/v1/meta/connector/showcase_status_api`'s
-  `item.providerConfig.baseUrl` can carry the build-time value. Since #26130 a default
-  `os dev` compiles the config under the boot's own environment first
-  (`packages/cli/src/commands/dev.ts`, the `compile` flag, default on), so on a default
-  boot that read can follow an exported `OS_PORT` — the dispatch check above stays the
-  proof on either boot. Before #26130 `os dev` booted the prebuilt artifact unless
-  `--compile` was passed, and QA run #25817 at `6679644a` measured that old default: with `OS_PORT=41302`
-  exported, that read still answered `http://127.0.0.1:3000`, while the live
-  `connector_action` reached 41302 (`ping.body` uptime matched the boot, and nothing
-  listened on 3000) — so the metadata read misreports the fixture in both directions.
-  ⛔ Nor `GET /api/v1/automation/connectors`: that route lists registry descriptors —
-  `name`, `label`, `type`, `description`, `icon`, `origin`, `state`, `degradedReason`,
-  `actions` (`getConnectorDescriptors()`,
+  proving it was an address problem by putting a TCP forwarder on 3000.
+
+  **Two routes work, each measured at `e0ce1b52`; only the first is safe on a shared
+  checkout.**
+  1. **Compile in a private copy.** Make the scratch copy the `rsync` entry below
+     describes, and boot the COPY without `--no-compile`, with `OS_PORT=<port>` exported
+     beside `-p <port>` and `--no-watch`: `os dev` compiles into the copy's own
+     `dist/objectstack.json`. With `-p 41782` the ping run completed, the
+     metadata read answered `http://127.0.0.1:41782`, and the tree's
+     `dist/objectstack.json` was byte-identical before and after (`-p 41786` with
+     `OS_PORT` unset measured the same).
+  2. **The default compile on the tree**, the canonical line without `--no-compile`: with
+     `-p 41785` the ping completed and the metadata read answered `41785`, but the boot
+     rewrote the tree's `dist/objectstack.json` with that port baked in, so every later
+     `--no-compile` boot on the tree dials it. ⛔ Only on a checkout no other runner boots.
+
+  ⛔ Exporting `OS_PORT` or `SHOWCASE_SELF_URL` for a `--no-compile` boot is not a fix:
+  neither is read until the next compile.
+
+  **A held port moves the boot, not your shell's `OS_PORT`.** When the requested port is
+  in use, `os dev` takes the next free one before it compiles and says so twice:
+  `⚠ Port <port> is in use — serving on <next> instead.` at the top of its log, and
+  `↪ server bound to port <next> (requested <port>)` once it listens
+  (`formatDevPortShiftNotice()` in `packages/cli/src/commands/serve.ts`). The compile
+  follows the shifted port, so the connectors still reach the boot (41783 held: served on
+  41784, metadata `41784`, ping completed, at `e0ce1b52`), but the runner's shell keeps
+  the `OS_PORT` it exported, and that port answers whatever holds it. **So:** read the
+  port from the boot log's `server bound to port` line, or confirm no shift was printed,
+  before the first request.
+
+  **Check:** before scoring any connector clause, prove where the live dispatch lands:
+  create a `showcase_task`, read the `showcase_declarative_connector_ping` run it fires
+  (`GET /api/v1/automation/showcase_declarative_connector_ping/runs`), and confirm it
+  completed with a `ping.body` whose uptime matches THIS boot, not another server's. On
+  every boot measured at `e0ce1b52` the metadata read above agreed with the dispatch, but
+  the dispatch stays the proof. ⛔ Nor `GET /api/v1/automation/connectors`: that route
+  lists registry descriptors — `name`, `label`, `type`, `description`, `icon`, `origin`,
+  `state`, `degradedReason`, `actions` (`getConnectorDescriptors()`,
   `packages/services/service-automation/src/engine.ts`) — and carries no `baseUrl` at all.
-  An older measurement, on `main` at `2889760a`, read the metadata as following the
-  serving environment: `-p 47311`
-  alone answered `http://127.0.0.1:3000`, and `showcase_declarative_connector_ping`
-  (fired by a `showcase_task` create) failed `fetch failed`; `OS_PORT=47312` with
-  `-p 47312` answered `http://127.0.0.1:47312` and the same flow completed, while
-  `dist/objectstack.json` still held `http://127.0.0.1:3000`. The `self-url.ts` header
-  still says only an artifact-only boot (`os start --artifact`) freezes the value at build
-  time; at `6679644a` the served metadata was frozen on `os dev` too, which is why the
-  Check reads the dispatch. If the ping does not complete, or its uptime belongs to
-  another server, the fixture is misconfigured, not blocked. **Fix:** boot with `OS_PORT=<port>` exported (or
-  `SHOWCASE_SELF_URL=http://127.0.0.1:<port>`) *in addition to* `-p <port>`. ⛔ Do not
+  An older reading does not hold: QA run #25817 at `6679644a`, before #26130 made the
+  compile the `os dev` default, measured an exported `OS_PORT=41302` reaching the live
+  dispatch while the metadata read answered `3000`; at `87330e89` and `e0ce1b52` a
+  `--no-compile` boot fails the dispatch instead. If the ping does not complete, or its
+  uptime belongs to another server, the fixture is misconfigured, not blocked. ⛔ Do not
   record a connector clause as `blocked(environment)` on the strength of `fetch failed`
   alone.
 
@@ -431,7 +451,7 @@ contradicts it, and correct it here when it does.
   means under the environment of whichever run compiled it last, not this boot's: every
   value the config reads from the environment at compile time is that run's, which is how
   a `--no-compile` boot in QA run #33025 sent the showcase's self-pinging connector to
-  another runner's port. Add
+  another runner's port (the connector entry above names the routes that work). Add
   `--no-watch` too while anyone may edit the app's sources: `--no-compile` stops only the
   boot compile, not the watch loop's recompiles. This one rule covers every item whose
   `fixtures.requires` carries that boot line; an item need not repeat it (QA run #27481).
@@ -623,7 +643,8 @@ contradicts it, and correct it here when it does.
   run adds what the entries above name: `OS_PORT=<port>` and
   `OS_STORAGE_LOCAL_ROOT=/tmp/<run>/uploads` exported, and `--no-compile --no-watch` after
   `dev` (a boot without the uploads root wrote nine files into the tree's
-  `.objectstack/data/uploads/`, QA run #33081).
+  `.objectstack/data/uploads/`, QA run #33081). A run that scores a self-pinging connector
+  boots a private copy that compiles instead (the connector entry).
 
   ⚠️ **Why this is briefed rather than left to the error message: backgrounded — which is
   how a runner boots a server — a rejected flag looks exactly like a server that booted
