@@ -68,6 +68,10 @@ import { render, cleanup, act, screen, fireEvent, waitFor, within } from '@testi
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 import { toast } from 'sonner';
+// The page reaches `celAuthoring`'s dynamic `@objectstack/lint` import; its
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 
 vi.mock('@object-ui/permissions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/permissions')>();
@@ -429,6 +433,82 @@ describe('set-as-default says a refused write with the door\'s message (objectui
       fireEvent.click(screen.getByTestId('stub-set-default'));
     });
     await waitFor(() => expect((dataSource as any).updateView).toHaveBeenCalledWith(OBJECT_NAME, SAVED_ID, { isDefault: true }));
+    await settle();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('set-as-default over a refused clear of the previous default leaves ONE default (handleSetDefaultView)', () => {
+  /**
+   * The previous default is a view a read-only package ships. Clearing its
+   * `isDefault` is a write the server can refuse (a package-less write onto a
+   * shipped item is closed, ADR-0146 D11), and the handler used to fire the
+   * clear and the set together: the clear was refused, the set landed, and the
+   * object had two defaults. The writes now go one at a time, clears first, and
+   * the first refusal stops the run.
+   */
+  const SHIPPED_DEFAULT = { name: SYSTEM_ID, object: OBJECT_NAME, label: 'All', type: 'grid', columns: ['name'], isDefault: true };
+  const OTHER_DEFAULT = { name: `${OBJECT_NAME}.mine`, object: OBJECT_NAME, label: 'Mine', type: 'grid', columns: ['name'], isDefault: true };
+
+  it('a refused clear of a shipped default does not apply the new default, and says why', async () => {
+    const updateView = vi.fn(async (_object: string, viewId: string, patch: Record<string, unknown>) => {
+      if (viewId === SYSTEM_ID && patch.isDefault === false) {
+        throw refusal("'view/crm_deal.all' ships in 'com.example.crm': save it into 'com.example.crm.custom'.");
+      }
+      return {};
+    });
+    const dataSource = makeDataSource({ listViews: vi.fn(async () => [SHIPPED_DEFAULT, SAVED_ROW]), updateView });
+    await mountOnSavedView(dataSource);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('stub-set-default'));
+    });
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    await settle();
+    // The clear was asked, and refused…
+    expect(updateView).toHaveBeenCalledWith(OBJECT_NAME, SYSTEM_ID, { isDefault: false });
+    // …so the set was never issued: there is no second default.
+    expect(updateView).not.toHaveBeenCalledWith(OBJECT_NAME, SAVED_ID, { isDefault: true });
+    expect(updateView).toHaveBeenCalledTimes(1);
+    expect(errorDescription()).toContain("ships in 'com.example.crm'");
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: both views user-owned, the previous default is cleared and the new one set, and nothing is raised', async () => {
+    const dataSource = makeDataSource({ listViews: vi.fn(async () => [OTHER_DEFAULT, SAVED_ROW]) });
+    await mountOnSavedView(dataSource);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('stub-set-default'));
+    });
+    await waitFor(() => expect((dataSource as any).updateView).toHaveBeenCalledWith(OBJECT_NAME, SAVED_ID, { isDefault: true }));
+    expect((dataSource as any).updateView).toHaveBeenCalledWith(OBJECT_NAME, OTHER_DEFAULT.name, { isDefault: false });
+    expect((dataSource as any).updateView).toHaveBeenCalledTimes(2);
+    await settle();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('the set is issued only once the clear has landed (both views user-owned)', async () => {
+    let landClear!: () => void;
+    const clearPending = new Promise<void>((resolve) => { landClear = resolve; });
+    const updateView = vi.fn(async (_object: string, viewId: string, _patch: Record<string, unknown>) => {
+      if (viewId === OTHER_DEFAULT.name) await clearPending;
+      return {};
+    });
+    const dataSource = makeDataSource({ listViews: vi.fn(async () => [OTHER_DEFAULT, SAVED_ROW]), updateView });
+    await mountOnSavedView(dataSource);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('stub-set-default'));
+    });
+    await waitFor(() => expect(updateView).toHaveBeenCalledWith(OBJECT_NAME, OTHER_DEFAULT.name, { isDefault: false }));
+    // While the clear is in flight, the set is not issued.
+    expect(updateView).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      landClear();
+    });
+    await waitFor(() => expect(updateView).toHaveBeenCalledWith(OBJECT_NAME, SAVED_ID, { isDefault: true }));
+    expect(updateView.mock.calls.map(([, viewId, patch]) => [viewId, patch])).toEqual([
+      [OTHER_DEFAULT.name, { isDefault: false }],
+      [SAVED_ID, { isDefault: true }],
+    ]);
     await settle();
     expect(toast.error).not.toHaveBeenCalled();
   });
