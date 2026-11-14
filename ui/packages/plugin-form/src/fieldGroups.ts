@@ -339,9 +339,11 @@ const DIVIDER_COL_SPAN = 4;
  *    the predicate gates the whole group and not just the heading. The form
  *    renderer also ends the group's field grid where the claim ends
  *    (`splitAtUntitledRuns`, `@object-ui/components`, objectui#11777), which is
- *    how an untitled section after it — the trailing ungrouped bucket, which
- *    gets no row here — is drawn as its own block instead of under this
- *    heading. A row that dropped the claim would put those fields back under it.
+ *    how an untitled section after it — an authored section with neither a
+ *    label nor a description, which gets no row here — is drawn as its own
+ *    block instead of under this heading. A row that dropped the claim would
+ *    put those fields back under it. (The derived trailing bucket is not such a
+ *    section: `deriveFieldGroupSections` heads it with `ungroupedLabel`.)
  *  - `colSpan` — see `DIVIDER_COL_SPAN`.
  *  - `collapsible` / `collapsed` / `onToggle` — on the visible row only (the
  *    control lives on the row), and only when the arm hands over a resolved
