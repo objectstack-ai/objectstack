@@ -29,6 +29,13 @@
 // service and the security plugin alone hands the grant out, with the opt-in
 // (`enable.files`) still refusing: every gate the grant relies on is the
 // storage service's own.
+//
+// The set carries no delete. The uploader withdraws an attachment they
+// uploaded through the storage service's removal door
+// (`DELETE /api/v1/attachments/:id`), which admits only the row's
+// `uploaded_by`: another member is refused even on a record they edit, the
+// data door's delete stays refused to a member, and an administrator still
+// deletes through it.
 
 import { createHash, randomBytes } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -353,6 +360,79 @@ describe('a member attaches to the records they edit and sees the files of the r
     const out = await completeOnto(memberTok, 'att_nofiles', nofilesId);
     expect([out.status, out.body.error?.code]).toEqual([403, 'FILES_DISABLED']);
     expect(await linksOn(nofilesId)).toEqual([]);
+  });
+
+  // The uploader withdraws an attachment they uploaded (maintainer ruling
+  // 6879388034): own uploads only, through the storage service's removal door
+  // (`DELETE /api/v1/attachments/:id`), and with no delete bit on the member
+  // grant — the data door's delete stays what it was, refused to a member and
+  // served to an administrator.
+  describe('the uploader withdraws their own attachment through the removal door, and nobody else\'s', () => {
+    const OTHER_EMAIL = 'att-baseline-other-member@verify.test';
+    let otherTok: string;
+
+    const row = (id: string) => ql.findOne('sys_attachment', { where: { id }, context: SYS });
+    const answerOf = async (res: Response) => {
+      const body = (await res.json()) as any;
+      return { status: res.status, code: (body?.error?.code ?? body?.code) as string | undefined, body };
+    };
+    const removeAs = async (token: string, id: string) => answerOf(await stack.apiAs(token, 'DELETE', `/attachments/${id}`));
+    const dataDeleteAs = async (token: string, id: string) => answerOf(await stack.apiAs(token, 'DELETE', `/data/sys_attachment/${id}`));
+    /** The member attaches a file to their case, through the panel's door: the row's uploader is the member. */
+    const memberAttachment = async () => {
+      const out = await completeOnto(memberTok, 'att_case', caseId);
+      expect(out.status, JSON.stringify(out.body)).toBe(200);
+      const id = String(out.body.data.attachmentId);
+      expect((await row(id))?.uploaded_by).toBe(memberId);
+      return id;
+    };
+
+    beforeAll(async () => {
+      otherTok = await stack.signUp(OTHER_EMAIL, MEMBER_PASSWORD);
+    });
+
+    it('the uploader removes their own attachment through the door: 200, and the row is gone', async () => {
+      const id = await memberAttachment();
+      const answer = await removeAs(memberTok, id);
+      expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+      expect(answer.body).toEqual({ success: true, data: { id, deleted: true } });
+      expect(await row(id)).toBeNull();
+    });
+
+    it('CONTROL: the member grant gains no delete bit — the data door still refuses the uploader, and read and create are unchanged', async () => {
+      const id = await memberAttachment();
+      expect(await dataDeleteAs(memberTok, id)).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+      expect(await row(id)).toMatchObject({ id, uploaded_by: memberId });
+      const explain = async (operation: string) =>
+        ((await (await stack.apiAs(memberTok, 'GET', `/security/explain?object=sys_attachment&operation=${operation}`)).json()) as any).allowed;
+      expect({ read: await explain('read'), create: await explain('create'), delete: await explain('delete') }).toEqual({
+        read: true,
+        create: true,
+        delete: false,
+      });
+      expect((await stack.apiAs(memberTok, 'GET', `/data/sys_attachment/${id}`)).status).toBe(200);
+    });
+
+    it('another member is refused on the door and on the data door, and the row stays — though they can edit the record it is on', async () => {
+      const id = await memberAttachment();
+      // The other member edits the case: their own attach to it is admitted.
+      const theirs = await completeOnto(otherTok, 'att_case', caseId);
+      expect(theirs.status, JSON.stringify(theirs.body)).toBe(200);
+
+      expect(await removeAs(otherTok, id)).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+      expect(await dataDeleteAs(otherTok, id)).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+      expect(await row(id)).toMatchObject({ id, uploaded_by: memberId });
+    });
+
+    it('an administrator still deletes any attachment through the data door; the door grants them nothing more', async () => {
+      const id = await memberAttachment();
+      expect(await removeAs(adminTok, id)).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+      expect(await row(id)).toMatchObject({ id, uploaded_by: memberId });
+
+      const answer = await dataDeleteAs(adminTok, id);
+      expect(answer.status, JSON.stringify(answer.body)).toBeLessThan(300);
+      expect(await row(id)).toBeNull();
+    });
   });
 });
 
