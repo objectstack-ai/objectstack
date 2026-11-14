@@ -3821,19 +3821,19 @@ export class SecurityPlugin implements Plugin {
    * operation prologue, explain): those keep resolving their own.
    */
   private resolveDelegatorForContext(context: any): Promise<DelegatorResolution> {
-    if (!context || typeof context !== 'object') return resolveDelegatorContext(this.ql, context);
-    const key = JSON.stringify([
-      context.onBehalfOf?.userId ?? null,
-      context.tenantId ?? null,
-      context.org_user_ids ?? null,
-    ]);
-    const hit = this.delegatorMemo.get(context);
+    // A primitive/absent context has no identity to key on: resolved, not kept.
+    const keyed = !!context && typeof context === 'object';
+    const key = keyed
+      ? JSON.stringify([context.onBehalfOf?.userId ?? null, context.tenantId ?? null, context.org_user_ids ?? null])
+      : '';
+    const hit = keyed ? this.delegatorMemo.get(context) : undefined;
     if (hit && hit.epoch === this.epoch.current && hit.key === key) return hit.resolution;
     const resolution = resolveDelegatorContext(this.ql, context).then((resolved) => {
       if (resolved.kind !== 'resolved') return Object.freeze(resolved);
       for (const value of Object.values(resolved.context)) if (Array.isArray(value)) Object.freeze(value);
       return Object.freeze({ kind: 'resolved' as const, context: Object.freeze(resolved.context) });
     });
+    if (!keyed) return resolution;
     const entry = { epoch: this.epoch.current, key, resolution };
     this.delegatorMemo.set(context, entry);
     resolution.catch(() => {
