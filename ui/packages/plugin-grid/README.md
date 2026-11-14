@@ -896,7 +896,7 @@ a user who holds no permission set beyond the baseline (objectui#13330).
 A host that owns the row click (`onRowClick`) and knows that it opens nothing
 for these rows passes `rowOpensRecord={false}`. The grid then draws its
 record-link cells (the first column, and any column authored `link: true`) as
-plain text, with no anchor and no `role="link"`, and the row's right-click menu
+plain text, with no anchor and no ARIA link semantics, and the row's right-click menu
 offers no Open or Open in new tab; the row's actions stay. The row click still
 reaches `onRowClick`, so anything else the host does with it is unchanged.
 Absent (or `true`), every row is drawn as before. It is a host prop, not a
