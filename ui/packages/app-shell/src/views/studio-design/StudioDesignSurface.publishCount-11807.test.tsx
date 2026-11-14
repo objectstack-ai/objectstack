@@ -198,6 +198,25 @@ describe('the package publish names how many items went live, and what was refus
     expect(toasts().success).toEqual([tFormat('engine.studio.publishedAllCountOne', 'en', { count: 1 })]);
   });
 
+  // objectstack#33277 — the registry refused an object of a batch that landed:
+  // `success` is false and `failed[]` empty. Studio names the count, as it did
+  // while the server answered `published` for this (the object's warning rides
+  // its element and reaches the author through the client), never "Action failed".
+  it('a published_unregistered batch: the count row, not a failure', async () => {
+    batchBody = batch({
+      outcome: 'published_unregistered',
+      publishedCount: 2,
+      failedCount: 0,
+      published: published('repairs_repair_ticket', 'visit'),
+      failed: [],
+      unregistered: [{ type: 'object', name: 'visit', rule: 'object-registry-refused' }],
+    });
+    await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(toasts().success).toEqual([tFormat('engine.studio.publishedAllCount', 'en', { count: 2 })]);
+    expect(toasts().error).toEqual([]);
+  });
+
   it('nothing to publish: said as such, neither a success nor a failure', async () => {
     batchBody = batch({ outcome: 'nothing_to_publish', publishedCount: 0, failedCount: 0, published: [], failed: [] });
     await publishAt(`/studio/${PACKAGE_ID}/interfaces`, 1);

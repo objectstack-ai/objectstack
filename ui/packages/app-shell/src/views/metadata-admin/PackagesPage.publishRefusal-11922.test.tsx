@@ -180,6 +180,24 @@ describe('controls: the answers that are not a refusal read as before (objectui#
     expect(await publishAndRead((text) => text === ok)).toBe(ok);
   });
 
+  // objectstack#33277 — the registry refused an object of a batch that landed:
+  // `success` is false, nothing is in `failed[]`, and the object's warning
+  // rides its element. The sheet keeps the success row it showed while the
+  // server answered `published` for this, not "Action failed".
+  it('a published_unregistered batch keeps the success row', async () => {
+    batchBody = batch({
+      outcome: 'published_unregistered',
+      publishedCount: 2,
+      failedCount: 0,
+      published: DRAFTS.map((d, i) => ({ ...d, version: `sha256:${i}` })),
+      failed: [],
+      unregistered: [{ type: 'object', name: 'lead', rule: 'object-registry-refused' }],
+    });
+    const ok = t('engine.packages.detail.publishDraftsOk', 'en');
+    expect(await publishAndRead((text) => text === ok)).toBe(ok);
+    expect(screen.queryByText(t('engine.packages.detail.actionFailed', 'en'))).toBeNull();
+  });
+
   it('a batch whose envelope carries an error and an empty failed[] still shows the envelope’s text', async () => {
     const message = 'Publishing is temporarily unavailable. Nothing was changed.';
     batchBody = batch({
