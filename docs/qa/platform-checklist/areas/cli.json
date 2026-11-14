@@ -43,9 +43,10 @@
       "teardown": "delete /tmp/RUN/n5.db and /tmp/RUN/n5.telemetry.db with their -wal and -shm files; the restore writes nothing else",
       "knownGaps": [
         "no magic-link mail and no email.attachment.reclaim job: 18.0.0-next.5's served composition mounts no magic-link door, and identity mail carries no attachment, so acceptance[5]'s magic-link and reclaim arms read nothing here (QA run #24838 planted both by hand). All four mail jobs are `pending`; none is `running` or `completed`, so the 'completed jobs unchanged' arm reads the two organization-invitation jobs only",
-        "the second boot keeps delivering: the mail settings still name the closed port, so it retries the re-pointed sends, and each moved sys_identity_email row's attempt_count and updated_at advance (2 → 3 in the #26624 re-drive). Read 'equal over the columns both tables hold' at the apply, before the second boot, and after it on every column but those two; that the retry reads the row from sys_identity_email is itself evidence the job was re-pointed",
+        "the second boot keeps delivering: the mail settings still name the closed port, so it retries the re-pointed sends, and each moved sys_identity_email row's attempt_count and updated_at advance, by as many retries as the boot lives through (2 → 3 in the #26624 re-drive; QA run #33087 read attempt_count 4 and status failed after its second boot): never score the digits, only that they moved. Read 'equal over the columns both tables hold' at the apply, before the second boot, and after it on every column but those two; that the retry reads the row from sys_identity_email is itself evidence the job was re-pointed",
         "the database carries no sys_http_delivery row: on 18.0.0-next.5 the organization-less declared webhook refuses to fan out an organization's event ('belongs to NO organization … refusing to fan out', QA run #24838), so the ceremony's deliveriesResourced is 0 here and the delivery leg is the post-upgrade PATCH alone",
-        "the restored telemetry sibling holds 9 sys_automation_run rows, two of them showcase_task_follow_up runs paused at the `hold` wait node on the two fixture tasks (status paused, node_type wait; packages/qa/dogfood/test/upgrade-harness/fixture-18.0.0-next.5/telemetry.sql). Their PT1M timers fell due one minute after the dump was generated (hold.waitUntil 2026-10-27T16:43Z; examples/app-showcase/src/automation/flows/index.ts TaskFollowUpFlow), so every boot that serves the restore resumes both, and both fail at the `remind` notify node: the two tasks carry assignee null, and the node's recipient expression then adds no recipient. QA run #28545 (at eeec88d1) read the two paused rows replaced by run_run_ history rows on the second boot: the table's count held 9 → 9 while the two pre-existing ids vanished. Count sys_automation_run like any table; do not expect its paused ids to survive the second boot, and do not score their absence against the apply (cli.organization-ownership-ceremony acceptance[5])"
+        "the restored telemetry sibling holds 9 sys_automation_run rows, two of them showcase_task_follow_up runs paused at the `hold` wait node on the two fixture tasks (status paused, node_type wait; packages/qa/dogfood/test/upgrade-harness/fixture-18.0.0-next.5/telemetry.sql). Their PT1M timers fell due one minute after the dump was generated (hold.waitUntil 2026-10-27T16:43Z; examples/app-showcase/src/automation/flows/index.ts TaskFollowUpFlow), so every boot that serves the restore resumes both, and both fail at the `remind` notify node: the two tasks carry assignee null, and the node's recipient expression then adds no recipient. QA run #28545 (at eeec88d1) read the two paused rows replaced by run_run_ history rows on the second boot: the table's count held 9 → 9 while the two pre-existing ids vanished. Count sys_automation_run like any table; do not expect its paused ids to survive the second boot, and do not score their absence against the apply (cli.organization-ownership-ceremony acceptance[5])",
+        "the restore does not re-date rotation shards: the telemetry sibling's sys_activity rows sit in shard tables named by the dump's day (sys_activity__r20261027, 66 rows), and sys_activity keeps 14 daily shards with retention maxAge 14d (packages/plugins/plugin-audit/src/objects/sys-activity.object.ts). Once that day is outside the window, the FIRST boot over the restore, the refused one before any plan, drops the shard through driver-sql's rotation retention (packages/drivers/driver-sql/src/sql-driver-rotation.ts#initObjects calls ensureRotation at boot), by design. The dogfood harness re-dates shards for exactly this (packages/qa/dogfood/test/upgrade-harness/fixture-as-of.ts#readFixtureAsOf), but cli-prerelease-fixture.ts restore does not apply it. Take sys_activity's before-count after the refused boot, not from the fresh restore, and do not score the dropped shard against the apply (QA runs #32953 and #33087 read it gone; A-3 of #32102)"
       ]
     }
   },
@@ -55,7 +56,7 @@
       "title": "os dev boots to healthy with a loginable seeded admin, honest DB selection, reported port shifts, and a staleness warning",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -73,11 +74,11 @@
         "stop; restart the SAME command against the SAME DB but with `--admin-password changed99`; attempt login with the ORIGINAL password (the seed is empty-DB-only and must not overwrite)",
         "stop; in a scratch dir with NO objectstack.config.ts and no --artifact, run `os dev; echo $?` and capture the message",
         "back in the app dir with the server DOWN, touch a src file so it is newer than dist/objectstack.json, boot with --no-compile, and capture the staleness warning block. Since #26130 `os dev` compiles by default whenever a config exists, so a boot that merely omits --compile rebuilds the artifact first and prints no warning (packages/cli/src/commands/dev.ts: the compile flag defaults on; the staleness check runs only when no compile is due)",
-        "with instance A still running, boot instance B on the same requested port and capture the '↪ server bound to port <actual> (requested <requested>)' line",
-        "run once with NONE of --database/--fresh/env-db set and no config-declared default datasource, and record the printed Database line (must be the project-anchored UNIFIED default file:<cwd>/.objectstack/data/objectstack.db); then run with `--fresh` and record the '🧪 Fresh OS_HOME' tempdir line (its DB is the SAME unified filename under the ephemeral home) and its deletion on exit",
+        "with instance A still running, boot instance B on the same requested port and capture the '↪ server bound to port <actual> (requested <requested>)' line. B takes the first free port counting up from the requested one, requested+1 when only A holds it (packages/plugins/plugin-hono-server/src/adapter.ts, listen walks the requested port plus each attempt), so hold two adjacent ports of the run's range for this leg",
+        "run once with NONE of --database/--fresh/env-db set, OS_HOME unset, and no config-declared default datasource, and record the printed Database line (must be the project-anchored UNIFIED default file:<cwd>/.objectstack/data/objectstack.db). An exported OS_HOME is the state directory, read before the project root (packages/runtime/src/resolve-project-database.ts, resolveDatabaseStateDir), so with it set the line reads file:$OS_HOME/data/objectstack.db: the clause's state-dir default holding, not a FAIL; then run with `--fresh` and record the '🧪 Fresh OS_HOME' tempdir line (its DB is the SAME unified filename under the ephemeral home) and its deletion on exit",
         "legacy compat-read: in a scratch project whose .objectstack/data holds a legacy dev.db and NO objectstack.db, boot with nothing chosen and capture both the Database line (must resolve to the legacy file — never a fresh empty objectstack.db beside it) and the one loud notice line naming that file and how to converge on the unified name",
-        "capture `echo $?` after every terminated invocation, against the expected codes: Ctrl-C/SIGINT ends a plain `os dev` with its serve child's exit code — 0 on a clean shutdown (the parent follows `code ?? 0`, packages/cli/src/utils/dev-restart.ts#ServeRestartCoordinator); a `--fresh` run's own SIGINT handler deletes the tempdir and exits 130 (SIGTERM 143); the no-config case of steps[3] exits 1",
-        "config-declared default datasource tier, for acceptance[2] (derived from the resolver source, not yet replayed live): in your own scratch project (fixtures.requires[1]), declare a NAMED sqlite datasource with a relative config.filename, e.g. `{ name: 'qa_home', driver: 'sqlite', config: { filename: '.objectstack/data/qa_home.db' } }` (the shape of the showcase's showcase-external.datasource.ts without its external block), plus a datasourceMapping rule `{ default: true, datasource: 'qa_home' }`, with every object declaring sharingModel (variants[6]). This tier reads the compiled dist/objectstack.json: `os dev` compiles it at boot by default (#26130), and `os build` first works as well. Boot with NONE of --database, --fresh, OS_DATABASE_URL, DATABASE_URL or TURSO_DATABASE_URL set, and record the Database line: it must name file: plus that filename resolved against the project root, never .objectstack/data/objectstack.db (packages/runtime/src/resolve-project-database.ts#readConfigDeclaredDefault, the rung after the explicit URL and the environment). If the boot cannot be staged, record this variant blocked(fixture) with the reason"
+        "capture `echo $?` after every terminated invocation, against the expected codes: Ctrl-C/SIGINT ends a plain `os dev` with its serve child's exit code — 0 on a clean shutdown (the parent follows `code ?? 0`, packages/cli/src/utils/dev-restart.ts#ServeRestartCoordinator); a `--fresh` run's own SIGINT handler deletes the tempdir and exits 130 (SIGTERM 143, read by signalling the `os dev` pid itself: the handlers sit on that process, packages/cli/src/commands/dev.ts, and a process-group SIGTERM also kills the wrapping shell, so its `echo $?` never prints); the no-config case of steps[3] exits 1",
+        "config-declared default datasource tier, for acceptance[2] (first replayed live by QA run #32953, whose scratch project resolved node_modules through a symlink to the showcase's): in your own scratch project (fixtures.requires[1]), declare a NAMED sqlite datasource with a relative config.filename, e.g. `{ name: 'qa_home', driver: 'sqlite', config: { filename: '.objectstack/data/qa_home.db' } }` (the shape of the showcase's showcase-external.datasource.ts without its external block), plus a datasourceMapping rule `{ default: true, datasource: 'qa_home' }`, with every object declaring sharingModel (variants[6]). This tier reads the compiled dist/objectstack.json: `os dev` compiles it at boot by default (#26130), and `os build` first works as well. Boot with NONE of --database, --fresh, OS_DATABASE_URL, DATABASE_URL or TURSO_DATABASE_URL set, and record the Database line: it must name file: plus that filename resolved against the project root, never .objectstack/data/objectstack.db (packages/runtime/src/resolve-project-database.ts#readConfigDeclaredDefault, the rung after the explicit URL and the environment). If the boot cannot be staged, record this variant blocked(fixture) with the reason"
       ],
       "acceptance": [
         {
@@ -191,6 +192,12 @@
           "date": "2026-10-27",
           "change": "steps[4], steps[9] and acceptance[5].clause follow #26130's compile default. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26481, priority:P0, at 756220c4; wave anchor #25807, slice A): `os dev` now compiles by default when a config exists, so steps[4]'s boot 'without --compile' printed no staleness warning; the step needs --no-compile, and steps[9]'s 'compiles only when no artifact exists' is stale. Re-read at base e4ba846f (packages/cli/src/commands/dev.ts: compile Flags.boolean default true, allowNo; the #5148 staleness block runs under !needsCompile). The clause's assertion is unchanged; it names the boot it applies to",
           "ref": "#25807"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-14",
+          "change": "steps[5], steps[6], steps[8] and steps[9] re-pointed (stale and under-specified, card #33330, row 27 of the #32908 close-out ledger; QA run #32953 runner R6 comment 6840067290 and QA run #33087 comment 6850382730 on #32908). steps[9] no longer says not yet replayed live: #32953 replayed it. steps[5]: B takes requested+1 when only A holds the port, since HonoHttpServer.listen (packages/plugins/plugin-hono-server/src/adapter.ts) walks upward from the requested port, so the leg holds two ports. steps[6]: the nothing-chosen leg runs with OS_HOME unset, because resolveDatabaseStateDir (packages/runtime/src/resolve-project-database.ts) reads OS_HOME before the project root, as #33087 measured (file:$OS_HOME/data/objectstack.db). steps[8]: SIGTERM 143 is read by signalling the os dev pid, which holds the --fresh handlers (packages/cli/src/commands/dev.ts exits 130 on SIGINT and 143 on SIGTERM). No clause changed. Read from source at base 87330e89, not driven live",
+          "ref": "#33330"
         }
       ]
     },
@@ -296,7 +303,7 @@
       "title": "os migrate: bare command is a read-only plan, apply is safe-by-default, re-runs are idempotent, and --json exits 0 on success (#4873)",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -311,14 +318,14 @@
       },
       "steps": [
         "boot the scratch app once with `os dev -d file:/tmp/<run>/migrate.db` so the base schema exists; stop it",
-        "add a new field to one object in the config and `os build`; run bare `os migrate` twice — both runs must print the SAME pending add-column plan and mutate nothing. On a DB an `os dev` boot synced, that plan also carries create_table entries for the lifecycle-classed objects (seven at 5b14b7f3, QA run #24551): the dev boot kept them in its telemetry sibling (ADR-0057 §3.6), and a plain `os migrate` mirrors a non-dev boot, which has no sibling, so it plans them against the primary. Expect them beside the add-column, or run plan and apply under NODE_ENV=development (or OS_TELEMETRY_DB naming the sibling) so the one-shot boot provisions it as the syncing boot did (schema-migrate.ts, #22579)",
+        "add a new field to one object in the config and `os build`; run bare `os migrate` twice — both runs must print the SAME pending add-column plan and mutate nothing. On a DB an `os dev` boot synced, that plan also carries create_table entries for the lifecycle-classed objects (eight at ee9ad834, QA run #33025; seven at 5b14b7f3, QA run #24551: the count moves as lifecycle-classed objects join, so read it from the plan): the dev boot kept them in its telemetry sibling (ADR-0057 §3.6), and a plain `os migrate` mirrors a non-dev boot, which has no sibling, so it plans them against the primary. Expect them beside the add-column, or run plan and apply under NODE_ENV=development (or OS_TELEMETRY_DB naming the sibling) so the one-shot boot provisions it as the syncing boot did (schema-migrate.ts, #22579)",
         "run `os migrate plan --json; echo $?` and capture the payload ({ database, managedTables, total, changes, pending })",
         "run `os migrate apply --yes; echo $?` and capture the applied list; then `os migrate plan` again and `os migrate apply --json --yes; echo $?` — the idempotent re-run. On the showcase (it declares federated showcase_external objects, which have no managed table) expect the PARTIAL reading: plan prints 'No drift over the N object(s) this plan examined — but M of T declared object(s) were NOT examined … PARTIAL plan', and the JSON re-apply answers message in_sync_partial with composition.coverage.reasons.federated > 0. Plain in_sync is the answer only for an app whose every declared object was examined",
         "remove a field from the config + `os build`; run `os migrate apply --yes` WITHOUT --allow-destructive (the drop must be SKIPPED with a warning), then with `--allow-destructive --yes` (applied)",
         "with the dev server booted and holding the DB, run `os migrate apply --yes; echo $?` (expect the busy refusal, exit 1, without --force) and `os migrate plan` (proceeds with a warning — a plan writes nothing either way)",
         "run `os migrate apply --json` WITHOUT --yes on a pending change: the payload must say confirmation_required with the pass--yes hint and mutate nothing",
         "the #4873 pair: on the scratch DB run `os migrate recorded-by --json; echo $?` and `os migrate resume --json; echo $?`",
-        "the #4873 --json sweep over every subcommand: read the set from the CLI itself, never from a list typed into this item. `os migrate --help` prints it under COMMANDS (oclif pattern strategy: one default-exported Command per non-test file in packages/cli/src/commands/migrate/, index.ts being the bare command); capture that list. For each listed subcommand the steps above did not already run, run its dry-run form `os migrate <name> --json; echo $?` on the scratch DB, adding only what that subcommand's own `os migrate <name> --help` USAGE line marks required (unmapped-columns takes --object <name>). audit-key-material (#26772) is in the set and takes the same flags as audit-mail-bodies (--apply, --yes, --force, --json), so its dry run is the probe. ⛔ The one exception: duplicates (#8928) is ALWAYS JSON on stdout and has NO --json flag, so run it bare (`os migrate duplicates; echo $?`) and never feed it --json, whose oclif Nonexistent-flag exit 2 is not a #4873 violation (deep coverage at cli.migrate-duplicates-inventory). A subcommand added later joins the sweep through the --help list, with no edit here, unless it too lacks --json"
+        "the #4873 --json sweep over every subcommand: read the set from the CLI itself, never from a list typed into this item. `os migrate --help` prints it under COMMANDS (oclif pattern strategy: one default-exported Command per non-test file in packages/cli/src/commands/migrate/, index.ts being the bare command); capture that list. For each listed subcommand the steps above did not already run, run its dry-run form `os migrate <name> --json; echo $?` on the scratch DB, adding only what that subcommand's own `os migrate <name> --help` USAGE line marks required (unmapped-columns takes --object <name>). `meta` without --stored reads the authored config, not a database, and refuses any stored-only flag the operator typed, --database-url included, with exit 1 (packages/cli/src/commands/migrate/meta.ts, STORED_ONLY_FLAGS: apply, yes, force, type, database-url): run its dry run as `os migrate meta --json`, never with the scratch DB's --database-url, and do not score that refusal as a #4873 violation. audit-key-material (#26772) is in the set and takes the same flags as audit-mail-bodies (--apply, --yes, --force, --json), so its dry run is the probe. ⛔ The one exception: duplicates (#8928) is ALWAYS JSON on stdout and has NO --json flag, so run it bare (`os migrate duplicates; echo $?`) and never feed it --json, whose oclif Nonexistent-flag exit 2 is not a #4873 violation (deep coverage at cli.migrate-duplicates-inventory). A subcommand added later joins the sweep through the --help list, with no edit here, unless it too lacks --json"
       ],
       "acceptance": [
         {
@@ -413,6 +420,12 @@
           "date": "2026-10-27",
           "change": "variants list removed; the #4873 sweep now reads the subcommand set from the CLI. #26772 added audit-key-material, the 20th registered subcommand, and the typed list (19 names, the source note saying 19) missed it, as revisions 2, 3, 4 and 6 each had to re-count it before. Under the #26431 rule a retyped list of a set that already has an authority goes, so a new steps entry derives the set from `os migrate --help` (oclif pattern strategy over packages/cli/src/commands/migrate/), keeps the duplicates exception explicit (always JSON, no --json flag, run bare), takes each subcommand's required inputs from its own --help USAGE line, and names audit-key-material, which takes the audit-mail-bodies flags. acceptance[2] verify and evidence name the derived list; the source note drops the count. No gate added: the list it would hold equal to the tree is the one removed. Clause text unchanged. Read at base 4c29f384, where `os migrate --help` lists 20 subcommands",
           "ref": "#26795"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-14",
+          "change": "steps[1] and steps[8] re-pointed (stale count and a sweep trap, card #33330, row 64 of the #32908 close-out ledger; QA run #33025 comment 6844741021 on #32908). steps[1]: the plan on a dev-synced DB lists eight lifecycle create_tables at ee9ad834, not seven, and the step now says to read the count from the plan. steps[8]: migrate meta refuses a typed --database-url without --stored, exit 1, by design (packages/cli/src/commands/migrate/meta.ts, STORED_ONLY_FLAGS and storedOnlyFlagsIn), so the sweep runs its dry run without it and does not read that exit 1 as a #4873 violation. No clause changed. Read from source at base 87330e89; the eight is #33025's live reading, not re-driven",
+          "ref": "#33330"
         }
       ]
     },
@@ -732,7 +745,7 @@
       "title": "Wrong flags and unknown commands error with usage and a nonzero exit — never silently ignored, never executed anyway",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -771,7 +784,7 @@
         {
           "clause": "--help exits 0 with a usage block for the root and for EVERY registered command and topic — per-variant, none inferred",
           "oracle": "log",
-          "verify": "the sweep records exit 0 + a USAGE section for EVERY variant: 33 at framework 1fb274e61c (20 top-level commands, 12 topics and the `g` alias of generate). The count is DERIVED, never a constant. Before the sweep, enumerate packages/cli/src/commands (each top-level command file, each topic directory) and every `static aliases` entry; if the count differs from the variants list, the list is stale, so record the measured count and the drift",
+          "verify": "the sweep records exit 0 + a USAGE section for EVERY variant: 36 at 87330e89 (21 top-level command files, deploy among them; 14 topic directories, audit and mcp among them; and the `g` alias of generate), as QA runs #33058 and #33081 measured at ee9ad834 and 8e3d4a54 (33 at framework 1fb274e61c). The count is DERIVED, never a constant. Before the sweep, enumerate packages/cli/src/commands (each top-level command file, each topic directory) and every `static aliases` entry; if the count differs from the variants list, the list is stale, so record the measured count and the drift",
           "evidence": "the sweep's exit-code/usage table"
         }
       ],
@@ -783,6 +796,7 @@
         "build",
         "compile",
         "create",
+        "deploy",
         "dev",
         "diff",
         "doctor",
@@ -812,17 +826,20 @@
         "plugin (topic)",
         "g (alias of generate — static aliases in generate.ts)",
         "storage (topic)",
-        "secret (topic)"
+        "secret (topic)",
+        "audit (topic)",
+        "mcp (topic)"
       ],
       "source": [
-        "packages/cli/src/commands/ (the 20 top-level commands + 12 topics enumerated as variants, plus generate.ts's `g` alias — oclif pattern discovery per package.json oclif.commands)",
+        "packages/cli/src/commands/ (the 21 top-level commands + 14 topics enumerated as variants, plus generate.ts's `g` alias — oclif pattern discovery per package.json oclif.commands)",
         "packages/cli/package.json (no oclif.plugins at all — no plugin manager, no help command and no not-found plugin, so unknown commands hard-error)",
         "@oclif/core parse contract (Nonexistent flag / enum FailedFlagValidation / command-not-found, exit 2)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: flag/command error UX with the full registered command surface enumerated from src/commands/ as variants, and never-executed-anyway as the load-bearing negative", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-10-02", "change": "source: package.json no longer declares oclif.plugins — the two listed plugins sat in devDependencies and never loaded, so the array was dropped; the registered surface and the unknown-command hard-error are unchanged (os --help and the full command table read byte-identical before and after)", "ref": "claude/issue-21285-drop-dead-oclif-plugins" },
-        { "revision": 3, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21721 parked on #22017 (row 23), re-pointed clause. A4 pinned 30 variants; the run measured 33 registered (20 commands, 12 topics with secret and storage new, and g), all exiting 0 with a USAGE block. Verified in source: package.json oclif.commands uses the pattern strategy over dist/commands; src/commands holds 20 command files and 12 topic directories; generate.ts declares static aliases ['g']. The variants gain the three, source says 12 topics, and A4's count is derived per run instead of pinned", "ref": "#22017" }
+        { "revision": 3, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21721 parked on #22017 (row 23), re-pointed clause. A4 pinned 30 variants; the run measured 33 registered (20 commands, 12 topics with secret and storage new, and g), all exiting 0 with a USAGE block. Verified in source: package.json oclif.commands uses the pattern strategy over dist/commands; src/commands holds 20 command files and 12 topic directories; generate.ts declares static aliases ['g']. The variants gain the three, source says 12 topics, and A4's count is derived per run instead of pinned", "ref": "#22017" },
+        { "revision": 4, "date": "2026-11-14", "change": "variants and acceptance[3].verify recounted (stale list, card #33330, row 163 of the #32908 close-out ledger; QA run #33058 comment 6846283471 and QA run #33081 comment 6850173588 on #32908). packages/cli/src/commands holds 21 command files (deploy.ts new beside the 20 listed) and 14 topic directories (audit and mcp new beside the 12), plus generate.ts's static alias g: 36 variants, not 33. variants gains deploy, audit (topic) and mcp (topic); the source row's counts follow. The clause still derives its count per run. Read from source at base 87330e89; both runs swept all 36 live", "ref": "#33330" }
       ]
     },
     {
@@ -830,7 +847,7 @@
       "title": "os migrate meta replays the spec migration chain over authored sources and PRINTS the mechanical edit list the retirement messages prescribe — by default it rewrites no source file, and --write rewrites in place exactly the edits it can prove, held to a re-run of the chain; its --out snapshot is schema-valid, replay is idempotent, and a below-floor --from is refused",
       "since": "v14.7",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "cli",
       "personas": ["build-time author (no session)"],
@@ -849,12 +866,12 @@
       "steps": [
         "enumerate the migration registries and record their sizes: packages/spec/src/migrations/entries/{retired-defs,retired-keys,semantic}",
         "collect the command's advertised contract from the SHIPPED retirement messages: grep the spec for the house sentence they carry — `Run \\`os migrate meta --from <N>\\` to list the mechanical edits for existing sources; \\`--write\\` applies the ones it can prove, and you apply the rest by hand.` (shared text in packages/spec/src/shared/retired-key.ts, reworded class-wide by #9529 and given its `--write` clause by #9591) — and record which majors are named. ⚠️ The sentence promises a LIST by default and an in-place write only for the edits --write can prove: the default run is judged on the listing being complete and honest, the --write run on writing exactly the provable edits and nothing else",
-        "copy an authored source tree to a scratch dir and plant retired spellings sampled from the retired-keys registry (at minimum one ui/ key and one data/ key); record a per-file checksum of the scratch tree BEFORE the run",
+        "copy an authored source tree to a scratch dir and plant retired spellings sampled from the retired-keys registry (at minimum one ui/ key and one data/ key), choosing entries retired AT 18, whose conversion sits in packages/spec/src/conversions/entries/18/: `--from 17` replays only the 17 → 18 step (packages/spec/src/migrations/chain.ts takes the majors above --from up to --to), so a key retired at 17 or earlier is not converted by it and reads as an unlisted spelling (QA run #33025); record a per-file checksum of the scratch tree BEFORE the run",
         "run `os migrate meta --from <previous major>` and capture stdout + the exit code",
         "confirm every planted spelling appears in the printed `Applied <N> mechanical change(s):` block as `<path>: <from> → <to> (<conversionId>)`, naming the successor the registry declares",
         "re-checksum the scratch tree and confirm every authored file is byte-identical — the run's only file write is --out",
         "re-run with `--out <snapshot>.json`, read the snapshot back, and confirm the run states its schema verdict honestly: `Migrated stack is schema-valid` when it is, and, when the migrated stack still fails the schema, the `Migrated stack does not yet pass schema validation — <n> refusal(s) left after the chain. Resolve them, then run \\`os validate\\`:` warning, followed by each refusal (packages/cli/src/commands/migrate/meta.ts#printSchemaVerdict)",
-        "idempotence: replay a CANONICAL source — one carrying no shape the 17 → 18 chain converts; the tree the WRITE MODE leg wrote is one, while the stock showcase tree is NOT (three edge-branched decisions omit `mode`, so flow-decision-mode-inclusive-explicit lists three edits over it) — over a real range — `os migrate meta --from 17` (--to defaults to 18, CHAIN_TERMINUS_MAJOR: the higher of the runtime's PROTOCOL_MAJOR and the highest major the registries carry a step for, 18 on both counts since PROTOCOL_VERSION moved to 18 (#22215); the run's `Chain:` line prints both) — and confirm NO `Applied <N> mechanical change(s):` block and exit 0; the step-18 semantic advisories are still listed (every hop lists its semantic entries unconditionally), so `Nothing to migrate …` is NOT the expected line here. Then run the identical `--from <previous major>` command on the planted tree a second time and diff the two stdouts with the verdict line's elapsed-time stamp (`(<n>ms)`) normalized away — it is a timing, not report content. Separately record the EMPTY-RANGE answer: `--from 18` (range 18 → 18, no step) prints `⚠ No migration step exists for protocol 18 → 18, so this run replayed nothing — that is not a finding that the metadata is canonical.` — never the canonical success line",
+        "idempotence: replay a CANONICAL source — one carrying no shape the 17 → 18 chain converts; the tree the WRITE MODE leg wrote is one, while the stock showcase tree is NOT (two edge-branched decisions omit `mode`, needs_exec and any_found in examples/app-showcase/src/automation/flows/index.ts, each with two conditioned out-edges, so flow-decision-mode-inclusive-explicit lists two edits over it; QA runs #33025, #33081 and #33092 read two) — over a real range — `os migrate meta --from 17` (--to defaults to 18, CHAIN_TERMINUS_MAJOR: the higher of the runtime's PROTOCOL_MAJOR and the highest major the registries carry a step for, 18 on both counts since PROTOCOL_VERSION moved to 18 (#22215); the run's `Chain:` line prints both) — and confirm NO `Applied <N> mechanical change(s):` block and exit 0; the step-18 semantic advisories are still listed (every hop lists its semantic entries unconditionally), so `Nothing to migrate …` is NOT the expected line here. Then run the identical `--from <previous major>` command on the planted tree a second time and diff the two stdouts with the verdict line's elapsed-time stamp (`(<n>ms)`) normalized away — it is a timing, not report content. Separately record the EMPTY-RANGE answer: `--from 18` (range 18 → 18, no step) prints `⚠ No migration step exists for protocol 18 → 18, so this run replayed nothing — that is not a finding that the metadata is canonical.` — never the canonical success line. A --to above the chain terminus (e.g. `--from 17 --to 19`) replays the 17 → 18 step and says nothing about 18 → 19 having no step (QA run #33092): read it as the 17 → 18 run, never as 18 → 19 coverage",
         "run it with a --from BELOW the supported floor and capture the MigrationFloorError path (`Cannot migrate from protocol <N>: the chain's support floor is <F>`)",
         "run it with --json where supported and check the exit code in the same way #4873 required of every other migrate subcommand",
         "confirm the semantic-only entries behave as ADVISORIES: they are reported under `<N> manual change(s) require your judgment:` with their why/verify text, never silently 'fixed' (a semantic change has no mechanical rewrite by definition)",
@@ -917,7 +934,7 @@
         "a --write that changes any byte outside a listed site (a site the 'Wrote N of M mechanical change(s) into K file(s)' block lists, or the declared protocol range its 'Rewrote the declared protocol range' block names), writes a semantic advisory, drops a planted spelling from both its written and its by-hand list, or reports the write done while the re-run over the written tree still converts a written site, is a FAIL of the write clause",
         "a below-floor --from that silently no-ops and exits 0",
         "a replay from the target major that reports changes, or two identical runs whose stdouts disagree",
-        "`Migrated stack is schema-valid` printed while manual changes are still outstanding — the same dishonesty as reporting 'migrated' over a semantic change nobody applied"
+        "`Migrated stack is schema-valid` printed while the migrated stack still fails the schema (a refusal left after the chain), or disagreeing with --json schemaValid for the same input — the same dishonesty as reporting 'migrated' over a semantic change nobody applied. The per-hop semantic advisories every run lists unconditionally (steps[7], steps[10]) are not outstanding work in this sense: the canonical replay of steps[7] prints the schema-valid line beside them, and that is the expected output"
       ],
       "traps": ["destructive-in-place", "absence-inference"],
       "source": [
@@ -976,6 +993,12 @@
           "date": "2026-10-20",
           "change": "negative[3], steps[11] and acceptance[7].verify count the declared-protocol-range rewrite as a listed site. Checklist-accuracy finding n3 of QA run #24841 (18.0 sweep round 4 at 307ce4c4): `--write` also moved engines.protocol (^17 → ^18) in objectstack.config.ts, announced outside the 'Wrote N … into K file(s)' block, so 'the changed files are exactly the files the block names' read a correct write as a FAIL. Measured on main's CLI text at base feb09db14a (meta.ts, since #22252): the 'Wrote …' block lists only the chain's files and sites; printRangeOutcome prints a separate 'Rewrote the declared protocol range, so the load admits protocol N:' block naming the file and line; the closing 'Re-ran the chain …' line then adds ' The declared protocol range now admits protocol N.'; and --json reports it as write.range, apart from write.written[]. No clause changed",
           "ref": "#24963"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-14",
+          "change": "steps[2], steps[7] and negative[6] re-pointed (stale count, stale fixture and a negative that failed the step's own expected output; card #33330, row 65 of the #32908 close-out ledger; QA run #33025 comment 6844741021, QA run #33081 comment 6850173588 and QA run #33092 comment 6850793622 on #32908). steps[7]: the stock showcase has two edge-branched decisions with no mode (needs_exec and any_found, examples/app-showcase/src/automation/flows/index.ts), the shape flow-decision-mode-inclusive-explicit (packages/spec/src/conversions/entries/18/) rewrites, not three; and a --to past the terminus is read as the 17 to 18 run. steps[2]: plant keys retired at 18, since chain.ts replays only the majors above --from. negative[6] fails a schema-valid line over a stack that still fails the schema, not one printed beside the unconditional semantic advisories, which steps[7] expects. No clause weakened. Read from source at base 87330e89, not driven live",
+          "ref": "#33330"
         }
       ]
     },
@@ -1181,14 +1204,14 @@
       "title": "os doctor --scan-deprecations: every retired pattern is found with file:line attribution, decoys are skipped, the run warns without gating — and the remediation hint prescribes NO command, routing the operator to the per-finding → replacement instead",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "cli",
       "personas": ["operator (local shell)", "upgrading author (pre-major sweep)"],
       "fixtures": {
         "app": "scaffold",
         "requires": [
-          "a scratch blank scaffold (`npx -y create-objectstack@latest qa-depscan -t blank` — the template ships src/objects/note.object.ts, the same provisioning cli.scaffold-first-run drives) whose src/ the run seeds with one hit per pattern",
+          "a scratch blank scaffold (`npx -y create-objectstack@latest qa-depscan -t blank` — the template ships src/objects/note.object.ts, the same provisioning cli.scaffold-first-run drives) whose src/ the run seeds with one hit per pattern, with its dependencies installed (node_modules present, or symlinked from an installed app). A `--skip-install` scaffold makes doctor exit 1 from its own `✗ Dependencies Not installed` error row (packages/cli/src/commands/doctor.ts, the node_modules check), which reads like the scan gating and voids acceptance[2]'s exit-0 reading",
           "decoy files staged per run: a src/*.test.ts twin, a src/node_modules/dep/index.ts, and a src/*.json metadata file carrying a retired key — all three must stay unreported"
         ],
         "knownGaps": [
@@ -1197,7 +1220,7 @@
         ]
       },
       "steps": [
-        "scaffold and seed src/legacy.ts with one line per DEPRECATED_PATTERNS entry — count the table yourself at doctor.ts (recounted at this revision's base: still 8 entries): EnhancedObjectKernel, max_length, default_value, min_length, the retired lookup-scoping pair (one entry, BOTH spellings: reference_filters AND referenceFilters — seed both lines), unique_name, `import... from '@objectstack/core/enhanced'`, `import... from '@objectstack/spec/dist/x'`",
+        "scaffold and seed src/legacy.ts with one line per DEPRECATED_PATTERNS entry — count the table yourself at doctor.ts (recounted at this revision's base: still 8 entries): EnhancedObjectKernel, max_length, default_value, min_length, the retired lookup-scoping pair (one entry, BOTH spellings: reference_filters AND referenceFilters — seed both lines), unique_name, `import... from '@objectstack/core/enhanced'`, `import... from '@objectstack/spec/dist/x'`. The scan reports one hit per matching line per entry, so the two retired-lookup lines are two hits of one entry: 8 entries seeded this way yield 9 rows and the closing line reads 'Found 9 deprecated pattern(s).' (QA run #33058), not 8",
         "stage the decoys: src/legacy.test.ts with the same content, src/node_modules/dep/index.ts with the same content, and src/meta.json carrying \"referenceFilters\"",
         "run `os doctor --scan-deprecations; echo $?` and capture the per-hit rows and the closing hint line verbatim; re-run with `--scan-deprecations --verbose` and capture the replacement prescriptions AND that run's closing hint line too — the hint is a two-branch template (doctor.ts) and the two runs do not print the same sentence",
         "clean pass: delete the seeds (keep the decoys) and re-run — expect '✓ Deprecation scan      No deprecated patterns found' and exit 0",
@@ -1264,7 +1287,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能), found independently by two hunters and re-verified against source: --scan-deprecations had zero coverage of any kind (no test in the repo references it). The 8-entry pattern table was recounted from doctor.ts; brief line-drift corrected during authoring (absent-dir return is not, the scanner body ends not). The dead `objectstack codemod v2-to-v3` prescription is encoded as an expected-fail clause with the docs' own 'not yet available' admission as corroborating source", "ref": "claude/new-session-0pv25p" },
         { "revision": 2, "date": "2026-08-21", "change": "corrected the two descriptors that called `os migrate meta` a codemod — the expected-fail clause's 'The real metadata codemod is os migrate meta' and the source list's 'cli.migrate-meta-codemod (the codemod that actually exists)'. It is not one. Re-derived at this base: the command declares exactly from/to/step/out/stored/database-url/apply/yes/force/type/json (commands/migrate/meta.ts) with no --write/--fix/in-place; its only file writes are the two `if (flags.out)`-guarded writeFileSync calls, which emit a JSON snapshot; and its header states the command does not silently rewrite TS config source because that AST rewrite is 'unsafe and lossy'. Both descriptors now say what it is — a chain replayer that PRINTS the mechanical edits for hand application — and name #9591 (v18, pm:on-hold) as the commissioned-but-unbuilt in-place codemod, which was added to `source` so the reference resolves. The clause the item turns on is UNCHANGED and still an expected-fail: the hint at doctor.ts prescribes `objectstack codemod v2-to-v3`, registered nowhere. The clause also now warns that a FIX which merely repoints the hint at `os migrate meta` must describe it as a list, not an auto-fix — otherwise the dead prescription is replaced by a false one. Sibling cli.migrate-meta-codemod was read and deliberately left alone: its revision-3 text (#9733 via PR #10412) already states the print-only contract correctly, and its `-codemod` id is immutable by README lifecycle", "ref": "#10418" },
-        { "revision": 3, "date": "2026-08-24", "change": "text refresh only, no capability change: #10680 landed the fix revision 2's expected-fail described, so acceptance[5] inverts — but NOT into 'the hint now names a registered command'. The route taken was prescribe-nothing: at this base the hint is a two-branch printInfo (doctor.ts) reading 'Found <N> deprecated pattern(s). No automated codemod ships with the CLI — apply each finding’s replacement by hand (re-run with --verbose to print them).' bare and '… — apply the → replacement shown under each finding above.' under --verbose, so revision 2's assertion 'the hint must name a command os actually registers' was the wrong SHAPE for head, not a fail that merely flipped. The print site's comment records why a repoint at `os migrate meta` was refused, and the clause now cites that comment instead of re-deriving the migrate/meta.ts anchors. Six texts changed beyond the named clause, all re-derived at this base: (a) the title's trailing expected-fail phrase inverted; (b) fixtures.knownGaps — revision 2's 'no test anywhere in the repo references --scan-deprecations' is FALSE at head, #10680 added packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts, and the gap text now states what that pin does and does NOT reach (no decoys, no absent-src probe, two seeded lines rather than eight patterns, in-process Doctor.run rather than the shipped binary — so stale-dist stays this item's to catch), with the test added to source; (c) step 6 repurposed from 'record the command the hint prescribes' into a corroboration probe — `os codemod --help` must STILL be not-found, which is what makes 'No automated codemod ships' true rather than the next false statement; (d) step 3 now demands the closing hint from BOTH runs, since it is not the same sentence; (e) three negatives added for the inverted clause's wrong shapes — an unregistered name returning, a repoint at the registered-but-incapable `os migrate meta`, and the count line vanishing with the prescription; (f) every doctor.ts anchor re-derived by content: #10679 moved the scanner block +76 and #10680's comment pushed the print site to +109, so of the eleven numbers revision 2 quoted only walkDir's node_modules prune still held. Verified accurate at head and deliberately LEFT ALONE: content/docs/protocol/backward-compatibility.mdx (the 'not yet available' admission still reads as quoted — and at head the tool is consistent WITH it), packages/cli/README.md §os doctor, the blank template's src/objects/note.object.ts, #9591 (still open, target:v18, pm:on-hold), sibling cli.migrate-meta-codemod (still revision 3), the DEPRECATED_PATTERNS count of 8, the four original negatives, both personas and both traps. Out of scope and filed instead: FOLLOW-UPS.md §7b still lists this prescription as unfixed and names `os migrate meta` as 'the real path', the repoint #10680 refused (#11628)", "ref": "#11420" }
+        { "revision": 3, "date": "2026-08-24", "change": "text refresh only, no capability change: #10680 landed the fix revision 2's expected-fail described, so acceptance[5] inverts — but NOT into 'the hint now names a registered command'. The route taken was prescribe-nothing: at this base the hint is a two-branch printInfo (doctor.ts) reading 'Found <N> deprecated pattern(s). No automated codemod ships with the CLI — apply each finding’s replacement by hand (re-run with --verbose to print them).' bare and '… — apply the → replacement shown under each finding above.' under --verbose, so revision 2's assertion 'the hint must name a command os actually registers' was the wrong SHAPE for head, not a fail that merely flipped. The print site's comment records why a repoint at `os migrate meta` was refused, and the clause now cites that comment instead of re-deriving the migrate/meta.ts anchors. Six texts changed beyond the named clause, all re-derived at this base: (a) the title's trailing expected-fail phrase inverted; (b) fixtures.knownGaps — revision 2's 'no test anywhere in the repo references --scan-deprecations' is FALSE at head, #10680 added packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts, and the gap text now states what that pin does and does NOT reach (no decoys, no absent-src probe, two seeded lines rather than eight patterns, in-process Doctor.run rather than the shipped binary — so stale-dist stays this item's to catch), with the test added to source; (c) step 6 repurposed from 'record the command the hint prescribes' into a corroboration probe — `os codemod --help` must STILL be not-found, which is what makes 'No automated codemod ships' true rather than the next false statement; (d) step 3 now demands the closing hint from BOTH runs, since it is not the same sentence; (e) three negatives added for the inverted clause's wrong shapes — an unregistered name returning, a repoint at the registered-but-incapable `os migrate meta`, and the count line vanishing with the prescription; (f) every doctor.ts anchor re-derived by content: #10679 moved the scanner block +76 and #10680's comment pushed the print site to +109, so of the eleven numbers revision 2 quoted only walkDir's node_modules prune still held. Verified accurate at head and deliberately LEFT ALONE: content/docs/protocol/backward-compatibility.mdx (the 'not yet available' admission still reads as quoted — and at head the tool is consistent WITH it), packages/cli/README.md §os doctor, the blank template's src/objects/note.object.ts, #9591 (still open, target:v18, pm:on-hold), sibling cli.migrate-meta-codemod (still revision 3), the DEPRECATED_PATTERNS count of 8, the four original negatives, both personas and both traps. Out of scope and filed instead: FOLLOW-UPS.md §7b still lists this prescription as unfixed and names `os migrate meta` as 'the real path', the repoint #10680 refused (#11628)", "ref": "#11420" },
+        { "revision": 4, "date": "2026-11-14", "change": "fixtures.requires[0] and steps[0] re-pointed (stale count and an under-specified fixture, card #33330, row 165 of the #32908 close-out ledger; QA run #33058 comment 6846283471 on #32908). doctor.ts's scan loop pushes one result per line per DEPRECATED_PATTERNS entry, so the retired-lookup entry's two seeded spellings are two hits and the count line reads 9 over 8 entries. The scaffold keeps its dependencies: doctor's Dependencies row is an error when node_modules is absent, and an error row exits 1, which a reader could take for the advisory scan gating. No clause changed. Read from source at base 87330e89, not driven live", "ref": "#33330" }
       ]
     },
     {
@@ -1409,7 +1433,7 @@
       "title": "os datasource list-tables/introspect/validate: the federation door answers, the generated draft is cwd-jailed and compiles, and schema drift maps to ✗ diffs with exit 1",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "cli",
       "personas": ["operator (local shell) whose token HOLDS manage_platform_settings — all three commands address federation READ routes, which require it since #9901/#10255", "integration author (adopting a remote table), same capability"],
@@ -1423,18 +1447,18 @@
         "knownGaps": [
           "the three CLI commands are unit-tested against the server's wrapped envelope since #10675 (packages/cli/src/commands/datasource/envelope-unwrap.test.ts). That suite drives each command over a stubbed fetch, so this item stays their only end-to-end coverage against a live server",
           "the #5594 carve-out applies to the fixture DB: .objectstack/data/showcase_external.db is a cwd-relative app-declared path that survives --fresh by documented design — do not file its persistence as a bug",
-          "acceptance[0]'s NARROWING half (--schema narrows; a non-matching schema prints 'No remote tables found.') cannot be observed on the stock fixture. SQLite tables carry no schema, and listRemoteTables applies ?schema= only to a table it can attribute to one (packages/services/service-datasource/src/external-datasource-service.ts: a table with no schema part is never filtered), so every --schema run lists all tables (QA run #21721, parked on #22017 row 24). On the stock fixture record that half blocked(fixture), with the pins knownGaps[3] names beside it as evidence of their own layers only (RUNNER rule 6). The unpinned remainder, the CLI turning --schema into ?schema= (list-tables.ts), is observable live against a schema-bearing driver such as postgres, or with no driver at all: the request line a local echo server receives (steps[1])",
+          "acceptance[0]'s NARROWING half (--schema narrows; a non-matching schema prints 'No remote tables found.') cannot be observed on the stock fixture. SQLite tables carry no schema, and listRemoteTables REFUSES a schema filter over tables its driver named no schema for (packages/services/service-datasource/src/external-datasource-service.ts, unattributedSchemaFilterError: 400 EXTERNAL_DATASOURCE_ERROR, 'Cannot narrow the remote tables of datasource 'showcase_external': its driver named no schema for 2 of its 2 table(s).'), so every --schema run on the stock fixture is refused and the CLI exits 2 (QA run #33058; QA run #21721 read every table listed before that refusal landed). On the stock fixture record that half blocked(fixture), with the pins knownGaps[3] names beside it as evidence of their own layers only (RUNNER rule 6). The unpinned remainder, the CLI turning --schema into ?schema= (list-tables.ts), is observable live against a schema-bearing driver such as postgres, or with no driver at all: the request line a local echo server receives (steps[1])",
           "no pin scores a full clause of this item at its layer (RUNNER rule 6, a pin scores only the layer it drives), so the item carries no automated ref. Every clause's oracle is the CLI's own output or exit code against a served datasource, or os build's verdict. packages/rest/src/remote-tables-twin.equivalence.test.ts drives the real ExternalDatasourceService, over a fake introspector, behind the federation route this CLI calls (GET …/external/tables), through the real HonoHttpServer adapter: '?schema= returns the SAME filtered set on both spellings' and 'a ?schema= that matches nothing returns the SAME empty set on both spellings' (the route layer). packages/services/service-datasource/src/__tests__/external-datasource-service.test.ts 'filters by requested schema' asserts the service's filter, and packages/cli/src/commands/datasource/envelope-unwrap.test.ts 'keeps \"no remote tables\" reachable from an empty server list' runs the CLI over a stubbed fetch. That is evidence for acceptance[0]'s narrowing half at those three layers, never its pass, and the CLI's flag-to-query forwarding is not pinned. automated may return when a pin runs `os datasource list-tables --schema` against a served schema-bearing datasource and reads its printed listing"
         ]
       },
       "steps": [
         "boot showcase on a scratch port and mint the admin token (the cli.qa-suite-execution recipe)",
-        "`os datasource list-tables showcase_external --url http://localhost:<port> --token <t>` — capture the table listing; repeat with `--schema <s>` and with a schema that matches nothing ('No remote tables found.'). On the stock SQLite fixture both runs list every table, since there is no schema to filter on: record that, and record the narrowing blocked(fixture) with the pins cited beside it (RUNNER rule 6). The forwarding half (the CLI turning --schema into ?schema=) needs no schema-bearing driver: re-run list-tables with --url pointed at a local echo server (any listener that prints the request line) and read GET /api/v1/datasources/showcase_external/external/tables?schema=S off it (QA run #24551 observed ?schema=mart)",
+        "`os datasource list-tables showcase_external --url http://localhost:<port> --token <t>` — capture the table listing; repeat with `--schema <s>` and with a schema that matches nothing ('No remote tables found.'). On the stock SQLite fixture both --schema runs are refused, since there is no schema to filter on: the CLI prints the server's 'Cannot narrow the remote tables of datasource …: its driver named no schema for N of its N table(s).' and exits 2. Record that refusal (it is the product declining to guess, not a FAIL), and record the narrowing blocked(fixture) with the pins cited beside it (RUNNER rule 6). The forwarding half (the CLI turning --schema into ?schema=) needs no schema-bearing driver: re-run list-tables with --url pointed at a local echo server (any listener that prints the request line) and read GET /api/v1/datasources/showcase_external/external/tables?schema=S off it (QA run #24551 observed ?schema=mart)",
         "`os datasource introspect showcase_external --table <t> --url … --token <t>` — draft printed to stdout; then re-run with `--out objects/qa_external.object.ts` and capture 'Wrote objects/qa_external.object.ts' plus any 'REVIEW: column …' warnings",
         "escape probes: re-run with `--out ../qa-escape.object.ts` and `--out /tmp/qa-escape.object.ts` — capture both refusals and `echo $?`, and confirm neither file exists afterwards",
         "wire the generated object into the scratch config and run `os build; echo $?`. The draft is named after the datasource's own prefix (introspecting showcase_external's customers table yields showcase_customers), and defineStack's namespace-prefix check refuses an object whose name lacks the package namespace — so give the scratch manifest namespace: 'showcase' (the draft's prefix), or rename the object to NAMESPACE_…, before reading the build verdict; a mismatched namespace scores the scratch wiring, not the generated draft",
         "`os datasource validate showcase_external --url … --token <t>; echo $?` on the untouched fixture (expect ✓ rows, exit 0); then rename a column in the fixture DB (sqlite3 ALTER TABLE) or edit the adopted object's column mapping, re-run, and capture the ✗ diff rows and exit 1",
-        "negative: run list-tables and introspect against a datasource name that does not exist and capture each error + exit code. Also run `os datasource validate <that name>; echo $?` and RECORD (do not score as an error-arm probe) its vacuous ok: the validate route is scoped by the call to the federated objects bound to :name, an unknown name binds none, so the server answers {ok:true, results:[]} and the CLI prints 'No federated objects to validate.' with exit 0 — by design"
+        "negative: run list-tables and introspect against a datasource name that does not exist and capture each error + exit code. Also run `os datasource validate <that name>; echo $?`: the validate door answers an unknown name as every by-name door does (validateDatasource throws datasourceNotFoundError, 404 RESOURCE_NOT_FOUND, packages/services/service-datasource/src/external-datasource-service.ts), so the CLI prints 'Datasource \"NAME\" does not exist.' and exits 2 (QA run #33058). 'No federated objects to validate.' with exit 0 is now only the answer for a datasource that EXISTS and has no federated object bound to it"
       ],
       "acceptance": [
         {
@@ -1462,16 +1486,16 @@
           "evidence": "build exit code + the artifact excerpt"
         },
         {
-          "clause": "validate is the drift detector with an honest exit: matching objects print '✓ <object> matches'; a mismatch prints per-diff rows (kind, column, expected vs actual, ✗ for error / ⚠ for warning) and the run exits 1 exactly when an error-severity diff exists",
+          "clause": "validate is the drift detector with an honest exit: matching objects print '✓ <object> matches'; a mismatch prints per-diff rows (kind and OBJECT.COLUMN, plus '(expected …, actual …)' where the diff carries them, as a type or nullability diff does: a missing_column row has nothing actual and prints `✗ missing_column: OBJECT.COLUMN` alone, validate.ts; ✗ for error / ⚠ for warning) and the run exits 1 exactly when an error-severity diff exists",
           "oracle": "log",
           "verify": "the untouched run is all-✓ exit 0; the staged-drift run prints the ✗ row naming the renamed column and echo $? is 1 (validate.ts — hasError gates this.error(…, {exit: 1}))",
           "evidence": "both transcripts + exit codes"
         },
         {
-          "clause": "the server's error arm is honored: a body.error (unknown datasource on list-tables / introspect, a driver failure on any of the three) becomes this.error — a printed error WITH a nonzero exit, never a 0. The unknown-name probe is limited to list-tables and introspect: validate on an unknown name is NOT an error by design — it validates the federated objects bound to that name, of which there are none, and answers a vacuous ok (exit 0)",
+          "clause": "the server's error arm is honored: a body.error (unknown datasource on list-tables / introspect, a driver failure on any of the three) becomes this.error — a printed error WITH a nonzero exit, never a 0. The unknown-name probe covers all three: validate on an unknown name is refused like the other two (404 'Datasource \"NAME\" does not exist.'), and only a datasource that exists with no federated object bound answers the vacuous 'No federated objects to validate.' (exit 0)",
           "oracle": "log",
-          "verify": "the list-tables and introspect unknown-name probes each exit nonzero with the server's own error text (list-tables.ts, introspect.ts); the validate unknown-name run prints 'No federated objects to validate.' and exits 0 (external-datasource-routes.ts validate route → validateDatasource(:name), which filters to objects whose datasource is :name; validate.ts empty-results branch) — recorded, not failed",
-          "evidence": "the two error captures + exit codes, and the validate vacuous-ok capture + exit code"
+          "verify": "the list-tables and introspect unknown-name probes each exit nonzero with the server's own error text (list-tables.ts, introspect.ts); the validate unknown-name run prints 'Datasource \"NAME\" does not exist.' and exits nonzero (external-datasource-routes.ts validate route → validateDatasource(:name), which refuses a name with no datasource definition before it filters the objects bound to it; validate.ts relays the error envelope through this.error)",
+          "evidence": "the three error captures + exit codes"
         }
       ],
       "negative": [
@@ -1527,6 +1551,12 @@
           "date": "2026-10-20",
           "change": "automated removed and fixtures.knownGaps[3] added; knownGaps[2] and acceptance[0].verify now point at it. PR #24963's carried finding (round 16's acceptance notes): automated.ref still claimed 'acceptance[0]'s NARROWING half ONLY'. Read at base e4d604efd3 under RUNNER rule 6, as round 15 applied it: acceptance[0] is a log clause, the CLI's printed listing against a served datasource, and its three pins drive the federation route through the real Hono adapter over a fake introspector, the service, and the CLI over a stubbed fetch. None holds a full clause of this item at its layer, so automated goes, and the knownGap names what each pin asserts and when automated may return. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-14",
+          "change": "knownGaps[2], steps[1], steps[6], acceptance[4] and acceptance[5] re-pointed (stale: the product is stricter than the item; card #33330, row 166 of the #32908 close-out ledger; QA run #33058 comment 6846283471 on #32908). listRemoteTables now refuses a schema filter over tables its driver named no schema for (unattributedSchemaFilterError, packages/services/service-datasource/src/external-datasource-service.ts), so --schema on the stock SQLite fixture is refused with exit 2 instead of listing every table; the narrowing half stays blocked(fixture). validateDatasource throws datasourceNotFoundError (404) for an unknown name, so validate joins list-tables and introspect in acceptance[5]'s error arm, a stronger clause than the vacuous ok it replaces. acceptance[4] says the expected/actual pair prints only where the diff carries one (packages/cli/src/commands/datasource/validate.ts), so a missing_column row is right without it. Read from source at base 87330e89, not driven live",
+          "ref": "#33330"
         }
       ]
     },
@@ -1878,7 +1908,7 @@
       "title": "autoMigrate off|safe: a dev boot self-heals ONLY the safe-categorized drift and reports each applied op, `off` (the driver default) and NODE_ENV=production never touch the schema, and a unique index the stored rows already violate is blocked, never auto-applied",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -1891,7 +1921,7 @@
         ],
         "knownGaps": [
           "the duplicates-BLOCKED leg (the ADR-0120 D4 duplicate pre-flight on a unique create_index: rows that already violate the declared key → the op BLOCKED, category destructive, an applyLimit naming the conflicting group, no index created) needs duplicate rows under a newly declared unique field — stageable only by writing them into the STOPPED scratch sqlite file before the boot that declares `unique: true`. The block is unit-pinned (sql-driver-25031-blocked-unique-apply-limit.test.ts), but that pin runs initObjects with autoMigrate unset and never boots a safe driver over the blocked op, so 'never auto-applied under safe' is the hand-staged leg's; a run may cite the pin per RUNNER rule 6 for the rest, and must record WHICH route each half rests on. Since ADR-0131 D1 a pre-18 bare (organization_id, COLUMN) unique composite proposes no tightening at all — it is the plain composite new DDL declares (sql-driver-unique-tenancy.test.ts › 'bare composite from a pre-18 database — no tightening proposed (ADR-0131 D1)') — so duplicate NULL-organization rows under it are no blocker and stage nothing here",
-          "`autoMigrate` is honoured by the native sqlite / postgres / mysql drivers only — the sqlite-wasm driver is constructed without it (the guidance entry on SqliteWasmConfigSchema says writing it there changes nothing), and turso's config declares no such key (standalone-stack.ts). Do not stage the wasm/turso arms expecting behavior"
+          "`autoMigrate` is honoured by the native sqlite / postgres / mysql drivers only. A sqlite-wasm datasource REFUSES the key: SqliteWasmConfigSchema (packages/spec/src/data/driver/sqlite.zod.ts) is a strict object whose guidance entry for autoMigrate is the refusal sentence ('`autoMigrate` is honoured by the native sqlite / postgres / mysql drivers only — the wasm driver is constructed without it, so writing it here would change nothing'), so a build that writes it there fails naming the key; it is not accepted and ignored. turso's config declares no such key (standalone-stack.ts). Do not stage the wasm/turso arms expecting behavior"
         ]
       },
       "variants": [
@@ -1907,8 +1937,8 @@
         "stage three drifts in the scratch copy, one per category: (1) needs_confirm — declare a field with `storage: { notNull: true }` (`required: true` no longer makes a NOT NULL column, ADR-0113), build, boot once against the file DB so the NOT NULL column lands, stop, drop the storage constraint and build: relax_not_null is needs_confirm, so it is the warn-only specimen on every boot; (2) safe — give a field `unique: true` (the boot lands the tenant-scoped uniq_TABLE_organization_id_COLUMN index), then with the server STOPPED plant the legacy platform-wide index on the scratch file: CREATE UNIQUE INDEX TABLE_COLUMN_unique ON TABLE(COLUMN) — the replace_unique_index drift, safe after a clean duplicate probe; (3) destructive — remove a field from metadata. Dump the scratch file's schema (sqlite_master for the table) before every boot below",
         "the off side first: boot with the datasource's config carrying `autoMigrate: 'off'` (and once more with the key OMITTED — the driver default); capture the [schema-drift] WARNING for each of the three divergences in both boots and confirm the schema dump before/after the two boots is identical. ⚠ `os migrate plan` is not the pending oracle here: with the primary on a config-declared datasource it composes no driver for it and prints a PARTIAL plan ('Examined 0 managed table(s)', 'N of N declared object(s) are NOT … bound to no driver'), so the next boot's warning plus the dump stands in for it",
         "the safe side: boot the same DB with `autoMigrate: 'safe'`; capture the `[schema-drift] auto-reconciled replace_unique_index on TABLE.COLUMN` info line and confirm the dump lost the legacy index, while the relax_not_null and orphaned-column warnings still print; boot AGAIN and confirm no further reconcile lines (the heal converged)",
-        "production force-off: re-plant the legacy index, then boot with NODE_ENV=production and `autoMigrate: 'safe'` still declared; capture the exact warning `[schema-drift] autoMigrate='safe' is ignored under NODE_ENV=production — schema is never auto-altered in production. Run 'os migrate' deliberately.` and confirm via schema dump that nothing was altered",
-        "the injected arm: in a scratch project with NO config-declared datasource (os dev -d file:HOST_DB), boot once, stop, plant the same legacy index in that file and boot plain `os dev` — the default datasource carries autoMigrate:'safe' on a dev boot (devAutoMigrateConfig, packages/runtime/src/dev-auto-migrate.ts — the one decision createStandaloneStack's default datasource and the CLI's config-load fallback both read since #21733), so the same auto-reconciled line must appear with no authored key anywhere; then re-plant it and boot non-dev `os start` over the same file — warnings only, the index stays",
+        "production force-off: re-plant the legacy index, then boot with NODE_ENV=production, OS_AUTH_SECRET exported and `autoMigrate: 'safe'` still declared (outside development a boot with no OS_AUTH_SECRET refuses before any schema sync: packages/plugins/plugin-auth/src/auth-manager-database-secret.ts#generateSecret); capture the exact warning `[schema-drift] autoMigrate='safe' is ignored under NODE_ENV=production — schema is never auto-altered in production. Run 'os migrate' deliberately.` and confirm via schema dump that nothing was altered. The line is not deduplicated: it prints for each table whose drift a safe driver would reconcile, on every SQL datasource of the boot (packages/drivers/driver-sql/src/sql-driver-schema-sync.ts, reconcileAndWarnDrift), so read its presence, not its count (QA run #33081 read it three times)",
+        "the injected arm: in a scratch project with NO config-declared datasource (os dev -d file:HOST_DB), boot once, stop, plant the same legacy index in that file and boot plain `os dev` — the default datasource carries autoMigrate:'safe' on a dev boot (devAutoMigrateConfig, packages/runtime/src/dev-auto-migrate.ts — the one decision createStandaloneStack's default datasource and the CLI's config-load fallback both read since #21733), so the same auto-reconciled line must appear with no authored key anywhere; then re-plant it and boot non-dev `os start` over the same file, OS_AUTH_SECRET exported as in steps[3] — warnings only, the index stays",
         "the destructive and needs_confirm boundary on the same boots: the removed field (orphaned column, destructive) and the relaxed NOT NULL (needs_confirm) stay warnings on every safe boot — `os migrate apply` (with --allow-destructive for the drop) remains the only door (cross-ref cli.migrate-plan-apply-json)",
         "the duplicates-blocked leg: run the unit pins (packages/drivers/driver-sql/src/sql-driver-25031-blocked-unique-apply-limit.test.ts, and sql-driver-unique-tenancy.test.ts's ADR-0131 D1 no-tightening describe) and cite their output; for the safe-boot half, hand-stage it: with the server STOPPED, write two rows sharing one value of a field into the scratch sqlite file, give that field `unique: true`, build, boot with safe, and capture the BLOCKED report while the schema dump still has no index on it; record which route each half rests on"
       ],
@@ -1954,7 +1984,7 @@
         "a `safe` boot applying anything the drift detector categorised destructive (a drop, a narrowing) is THE fail the loosen-only contract exists for — reproduce twice, file",
         "an `off` (or omitted, or production) boot whose schema dump changes across the boot is a FAIL even if no [schema-drift] line printed — the dump pair is the authority, not the log's silence",
         "a unique index created over rows that already violate it (rows lost to the constraint, or the boot failing) instead of blocked-with-report is a FAIL against the ADR-0120 D4 probe contract; so is a recreate_index proposed for a pre-18 bare composite, which ADR-0131 D1 retired",
-        "an authored `autoMigrate` on a sqlite-wasm datasource appearing to DO something is a FAIL of the declared boundary (the wasm driver is constructed without it — the guidance entry says writing it changes nothing); conversely, do not file the wasm no-op as a missing capability"
+        "an authored `autoMigrate` on a sqlite-wasm datasource that a build or boot ACCEPTS is a FAIL of the declared boundary: SqliteWasmConfigSchema refuses the key by name with its guidance sentence (knownGaps[1]); conversely, do not file that refusal as a missing capability"
       ],
       "traps": ["stale-dist", "destructive-in-place"],
       "automated": { "kind": "unit", "ref": "packages/drivers/driver-sql/src/sql-driver-25031-blocked-unique-apply-limit.test.ts + packages/drivers/driver-sql/src/sql-driver-unique-tenancy.test.ts — acceptance[4] and negative[2], at the driver: the first holds a unique create_index over duplicate rows BLOCKED, its applyLimit naming the conflicting group (plain and organization-scoped), refused even by an allowDestructive apply, beside a duplicate-free CONTROL that creates it; the second's 'bare composite from a pre-18 database — no tightening proposed (ADR-0131 D1)' describe boots under autoMigrate 'safe' with the bare composite untouched and zero drift, and proposes no op over duplicate NULL-organization rows. Neither boots a safe driver over the blocked create, so that half is steps[6]'s hand-staged leg; + packages/drivers/driver-sql/src/sql-driver-schema-drift.test.ts — negative[0] ('does NOT auto-apply destructive drift (orphan column kept; warned instead)'), and acceptance[2] at the driver layer only. Its 'is force-disabled under NODE_ENV=production (warns, does not alter)' case, re-staged by #24903 (PR #24967) with a safe drift, sits beside its development control 'applies the safe drop_column_default drift outside production (control for the guard below)'. Under NODE_ENV=production with autoMigrate 'safe', SqlDriver.initObjects over in-memory better-sqlite3, with a stub logger, keeps the column's current_user DEFAULT, still reports that drift safe / drop_column_default, and warns with the prefix \"[schema-drift] autoMigrate='safe' is ignored under NODE_ENV=production\"; the control applies the same drift under development. The case reads no boot log and leaves the warning's remedy, the text after its em dash, unasserted, so under RUNNER rule 6 it scores acceptance[2] partial, never pass, and steps[3]'s production boot is that clause's live leg. acceptance[0], [1], [3] and [5], acceptance[2]'s boot log, and negative[1] and [3] are boot-log and schema-dump clauses: they need the scratch boots. Three pins corroborate them and were not named before: packages/cli/test/dev-standalone-self-heal.integration.test.ts spawns the BUILT CLI over a blank scaffold (`os dev` twice, then a production boot) and asserts that a plain dev restart relaxes the staged legacy unique while the production boot reports the staged drift and does not auto-migrate it (it needs packages/cli dist built); packages/drivers/driver-sql/src/sql-driver-14902-plain-unique-duplicate-preflight.test.ts pins, at the driver, that a boot over a unique create on duplicate rows survives and logs the rows and the remedy; packages/runtime/src/dev-auto-migrate.test.ts pins acceptance[5]'s injection decision (devAutoMigrateConfig) at unit" },
@@ -1979,6 +2009,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names three corroborating pins it under-claimed. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, release-18.2.0-w2-tier1-a, at 756220c4; wave anchor #25807, slice A): the mapping pass found dev-standalone-self-heal.integration.test.ts, sql-driver-14902-plain-unique-duplicate-preflight.test.ts and dev-auto-migrate.test.ts asserting halves of this item's clauses. Re-read at base e4ba846f (their describe and case names). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-14",
+          "change": "knownGaps[1], negative[3], steps[3] and steps[4] re-pointed (stale wording, card #33330, row 63 of the #32908 close-out ledger; QA run #33025 comment 6844741021 and QA run #33081 comment 6850173588 on #32908). A sqlite-wasm autoMigrate is refused at build, not accepted and ignored: SqliteWasmConfigSchema (packages/spec/src/data/driver/sqlite.zod.ts) is a strictObject and its guidance entry for autoMigrate is the refusal's sentence; negative[3] now fails an ACCEPTED key. The production and non-dev legs export OS_AUTH_SECRET, because generateSecret (plugin-auth auth-manager-database-secret.ts) refuses a non-development boot without it. The production warning is not deduplicated in reconcileAndWarnDrift (driver-sql sql-driver-schema-sync.ts), so the step reads its presence; #33081 read it three times. No clause weakened. Read from source at base 87330e89, not driven live",
+          "ref": "#33330"
         }
       ]
     },
@@ -2080,7 +2116,7 @@
       "title": "`os migrate organization-ownership` upgrades a database 17.x or an 18.0 pre-release (18.0.0-next.*) created (18.x): a bare run writes the reviewed plan and changes nothing; `--apply --plan-file PLAN --backup-taken` runs every step — attribution through the moves, the declared webhook and sharing-rule settlements, the column drops and NOT NULL — and certifies the marker at this release's ownership shape generation; the served boot refuses an uncertified database, naming the command, and boots a certified one; `os migrate apply --allow-destructive` still withholds every organization_id drop the ceremony owns, and `os migrate comment-reactions --apply` stays pinned",
       "since": "v18",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -2145,7 +2181,7 @@
         {
           "clause": "an 18.0 pre-release database (one an 18.0.0-next.* release created and served) takes the same path as a v17 one and keeps its data: the served boot refuses it, the reviewed apply completes, and the next boot serves it with its identity mail, its global setting audit, its pending mail jobs and its declared webhook carried over",
           "oracle": "build",
-          "verify": "steps[5], each leg read at its own layer. Boot output: the first `os serve` exits 1 before any listening line, opening \"This database carries no organization-ownership marker\" and naming the tables still carrying organization_id (sys_flow_credential and sys_secret on 18.0.0-next.5); a database an 18.0.0-next.3 ceremony already certified at shape generation 0 is refused instead with \"… certified by an organization-ownership ceremony of shape generation 0, and this release requires generation 1 …\". The apply exits 0 with complete true and blocking 0, and the second boot reaches its serving line. Row reads, before the plan and after the second boot: every identity mail row (related_object sys_user, which is the reset and verification mail, and any magic-link mail) is in sys_identity_email under its original id, equal over the columns both tables hold, and gone from sys_email, while organization invitations stay in sys_email (packages/cli/src/utils/organization-ownership-apply.ts#SIBLING_MOVES); every sys_setting_audit row with scope 'global' is in sys_platform_setting_audit and gone from sys_setting_audit; every pending or running email.send.async or email.attachment.reclaim job naming a moved mail carries object sys_identity_email in its payload and metadata, while completed jobs and the organization-invitation job are unchanged; and no row disappears outside the apply report: each pre-existing table's count after equals its count before, less what the report's steps say they moved or deleted. On the cli-18-prerelease-db restore, sys_automation_run in the telemetry sibling keeps its count across the second boot but not two of its ids: the recipe's knownGaps[3] says why, and those two ids are not data the apply lost. The door's answer: each pre-release user signs in with its 18.0 password (200; a wrong one 401); the token read from the moved reset mail resets (200); and the one showcase_task PATCH writes exactly one sys_http_delivery row whose ref_id is declared:com.example.showcase/showcase_task_changed (the declaring package's id, then the name: packages/qa/dogfood/test/upgrade-18x-harness.dogfood.test.ts pins it)",
+          "verify": "steps[5], each leg read at its own layer. Boot output: the first `os serve` exits 1 before any listening line, opening \"This database carries no organization-ownership marker\" and naming the tables still carrying organization_id (sys_flow_credential and sys_secret on 18.0.0-next.5); a database an 18.0.0-next.3 ceremony already certified at shape generation 0 is refused instead with \"… certified by an organization-ownership ceremony of shape generation 0, and this release requires generation 1 …\". The apply exits 0 with complete true and blocking 0, and the second boot reaches its serving line. Row reads, before the plan and after the second boot: every identity mail row (related_object sys_user, which is the reset and verification mail, and any magic-link mail) is in sys_identity_email under its original id, equal over the columns both tables hold, and gone from sys_email, while organization invitations stay in sys_email (packages/cli/src/utils/organization-ownership-apply.ts#SIBLING_MOVES); every sys_setting_audit row with scope 'global' is in sys_platform_setting_audit and gone from sys_setting_audit; every pending or running email.send.async or email.attachment.reclaim job naming a moved mail carries object sys_identity_email in its payload and metadata, while completed jobs and the organization-invitation job are unchanged; and no row disappears outside the apply report: each pre-existing table's count after equals its count before, less what the report's steps say they moved or deleted. On the cli-18-prerelease-db restore, sys_automation_run in the telemetry sibling keeps its count across the second boot but not two of its ids: the recipe's knownGaps[3] says why, and those two ids are not data the apply lost. On the same restore, the telemetry sibling's sys_activity shard named by the dump's day (sys_activity__r20261027) is dropped by the FIRST, refused boot once that day is outside sys_activity's 14-day retention window: rotation retention at boot, before any plan (the recipe's knownGaps[4]). Take sys_activity's before-count after the refused boot, and do not count the dropped shard as a row the apply lost. The door's answer: each pre-release user signs in with its 18.0 password (200; a wrong one 401); the token read from the moved reset mail resets (200); and the one showcase_task PATCH writes exactly one sys_http_delivery row whose ref_id is declared:com.example.showcase/showcase_task_changed (the declaring package's id, then the name: packages/qa/dogfood/test/upgrade-18x-harness.dogfood.test.ts pins it)",
           "evidence": "the refused boot's excerpt and exit code, the apply report's complete and blocking, the serving line; the before and after reads of sys_email, sys_identity_email, sys_setting_audit, sys_platform_setting_audit and the mail jobs, with per-table counts; the sign-in, reset and delivery answers"
         }
       ],
@@ -2228,6 +2264,12 @@
           "date": "2026-11-14",
           "change": "acceptance[5].verify's delivery reference follows the per-holder slot a declared webhook is dispatched under since its ref_id names the declaring package: ref_id declared:com.example.showcase/showcase_task_changed, as packages/qa/dogfood/test/upgrade-18x-harness.dogfood.test.ts pins. The bare declared:showcase_task_changed failed a correct product. No clause weakened; read from source at base 4c152685",
           "ref": "#33016"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-14",
+          "change": "acceptance[5].verify carves out the restored sys_activity shard (stale fixture assumption, card #33330, rows 18 and 213 of the #32908 close-out ledger; row 213 routed from batch E #33331). QA runs #32953 and #33087 (comment 6850382730 on #32908; A-3 of #32102) read the cli-18-prerelease-db restore's sys_activity__r20261027 shard (66 rows) gone after the first, refused boot. Source agrees that this is designed retention: sys_activity keeps 14 daily shards with retention maxAge 14d (packages/plugins/plugin-audit/src/objects/sys-activity.object.ts), driver-sql's initObjects runs ensureRotation at every boot, and cli-prerelease-fixture.ts restore does not re-date shards the way the harness's fixture-as-of.ts does. 'No row disappears outside the apply report' now takes sys_activity's before-count after the refused boot. The recipe gains knownGaps[4] saying the same, and its knownGaps[1] no longer pins the retry digits (QA run #33087 read attempt_count 4 and status failed, not 2 to 3). No clause weakened: every table the apply touches is still counted. Read from source at base 87330e89, not driven live",
+          "ref": "#33330"
         }
       ]
     },
@@ -2236,7 +2278,7 @@
       "title": "CLI authoring commands on v18: `os meta delete|register --package ID` address one package's row (an empty --package is refused before send), `os meta register --force` passes a 409 DESTRUCTIVE_CHANGE, a no-op delete prints \"Nothing deleted\", and `os explain RULE_ID` explains a lint rule (unknown id exits 1)",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -2248,7 +2290,7 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "the CLI pointed at the fresh boot (OS_URL / --url and a login token)",
-          "a WRITABLE package for the positive package-addressed save — install one with POST /api/v1/packages. The stock code package com.example.showcase is read-only: a create addressed to it answers 422 WRITABLE_PACKAGE_REQUIRED (ADR-0070 D1), which still shows ?package= was sent but is no save"
+          "a WRITABLE package for the positive package-addressed save — install one with POST /api/v1/packages, its manifest declaring a dependency on com.example.showcase (dependencies: { 'com.example.showcase': RANGE }). A package write is validated inside the written package plus its declared dependency closure (packages/metadata-protocol/src/protocol-write-package-scope.ts, resolveWritePackageScope), so a view on showcase_project saved into a package that does not depend on the showcase cannot see that object and is refused 422 (QA run #33025): the fixture's gap, not the clause failing. The stock code package com.example.showcase is read-only: a create addressed to it answers 422 WRITABLE_PACKAGE_REQUIRED (ADR-0070 D1), which still shows ?package= was sent but is no save"
         ]
       },
       "steps": [
@@ -2310,6 +2352,12 @@
           "date": "2026-10-26",
           "change": "acceptance[1].verify names the request instead of a server log — checklist-accuracy finding of QA run #25815 (18.2.0 sweep, Tier 1 at 6679644a), parked on wave anchor #25807 and filed as #25841: verify named 'server log' as evidence, while the pin observes the wire (`?package=` on the PUT) and the door's parsed request, and no server log is read. Equivalent evidence, now named. Read at base 9753d163 (packages/cli/src/commands/meta/register-package.test.ts). No clause changed",
           "ref": "#25841"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[2] re-pointed (under-specified fixture, card #33330, row 82 of the #32908 close-out ledger; QA run #33025 comment 6844741021 on #32908). The writable package must declare a dependency on com.example.showcase, or the view save the step makes is refused 422: resolveWritePackageScope (packages/metadata-protocol/src/protocol-write-package-scope.ts) scopes a package write's validation to the written package and its declared dependency closure, and showcase_project lives outside a package that declares none. No clause changed. Read from source at base 87330e89, not driven live",
+          "ref": "#33330"
         }
       ]
     },
@@ -2645,7 +2693,7 @@
       "title": "The address grammar reserves its segments: a bucket 2/3 name led by _ is refused at defineStack and os validate; a namespace that spells a grammar literal is refused by os validate and os build (exit 1, no artifact) and at the running install door, while a package the boot registers keeps booting with a warning; and lint's namespace-prefix rule judges only capabilities and positions",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["developer at the CLI", "admin (the seeded admin): the install leg"],
@@ -2660,7 +2708,7 @@
         "os validate the app with _qa_flow; record the exit code and output",
         "os validate, then os build, the hooks app; record each exit code and output, and whether dist/objectstack.json was written; repeat both with the triggers copy",
         "install the hand-edited hooks artifact into a running boot: os package install FILE; record status and body",
-        "add the hooks package to a scratch app's code-registered packages and boot it with os dev (not a build); read the boot log",
+        "add the hooks package to a scratch app's code-registered packages and boot it with `os serve --dev` (no compile); read the boot log. ⚠️ Not `os dev`: it compiles before it serves by default (#26130), and that compile refuses the literal namespace exactly as os build does (packages/cli/src/commands/compile.ts asks packages/cli/src/utils/namespace-address-literals.ts#findNamespaceAddressLiteralRefusals), so an `os dev` boot stops at its compile and never reaches the warnings acceptance[3] reads. That stop is acceptance[1]'s refusal, not a FAIL of this step",
         "os lint the app whose flow name has no namespace prefix; record findings for naming/namespace-prefix"
       ],
       "acceptance": [
@@ -2723,6 +2771,12 @@
           "date": "2026-11-11",
           "change": "the install-door clause's list of NAMESPACE_REFUSED_LITERALS gains runs: the inbound hook's namespace position now carries it (the run doors of a flow named hooks serve it there), so the same judge refuses it at the same three doors. Steps, fixtures and the other clauses are unchanged; read from source, no live run made",
           "ref": "#32075"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-14",
+          "change": "steps[3] re-pointed (stale step, card #33330, row 47 of the #32908 close-out ledger; QA run #32940 runner R5 comment 6839694279, C4 and section 6, and QA run #33094 comment 6852480973 on #32908). The boot leg runs on `os serve --dev`: `os dev` compiles by default since #26130, and packages/cli/src/commands/compile.ts runs findNamespaceAddressLiteralRefusals, so the literal namespace is refused at the compile and the boot-warning clause cannot be read there; both runs passed acceptance[3] on serve --dev. No clause changed. Read from source at base 87330e89, not driven live",
+          "ref": "#33330"
         }
       ]
     },
@@ -2731,14 +2785,14 @@
       "title": "os migrate stored-references reports every stored package reference the boot could not bind, read-only, and os migrate stored-references bind writes one reviewed row per run with its audit row, refusing a package that is not a candidate",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator at the CLI, pointed at the deployment's database"],
       "fixtures": {
         "app": "any",
         "requires": [
-          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build (QA record #32093 made one with npm `create-objectstack@18.3.0`; copy the file and its telemetry sibling X.telemetry.db together). (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns, after its first boot on this tree, with one sys_queue_member row left null because two installed packages in two namespaces both hold its queue qa_desk",
+          "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. Either way, a file DB is opened in WAL journal mode unless configured otherwise (packages/drivers/driver-sql/src/sql-driver-lifecycle.ts, resolveSqliteJournalMode defaults to 'wal'), so the boot's last writes can still sit in X.db-wal: copy only after that boot has stopped, and checkpoint each file first (PRAGMA wal_checkpoint(TRUNCATE)) or copy its -wal and -shm beside it. This holds for the main file and the telemetry sibling alike; a sibling copied without its -wal still has the older shape. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build (QA record #32093 made one with npm `create-objectstack@18.3.0`; copy the file and its telemetry sibling X.telemetry.db together). (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns, after its first boot on this tree, with one sys_queue_member row left null because two installed packages in two namespaces both hold its queue qa_desk",
           "on a dev database, pass --dev to every command, so the telemetry sibling, which holds the paused runs and the audit row, is composed. Run the commands with the server stopped: bind refuses an SQLite file another process holds unless --force"
         ]
       },
@@ -2786,6 +2840,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child S4 (#31961), with the literalNamespaces section #31968 added. Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e and, for that section, at 0f7389cc; no live run made. Corrected from QA record #32093 (a live run of this item on a real 18.3.0 database), before this item reached main: no clause failed on the text, but the text would have misled the next runner",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[0] adds the copy recipe's WAL step (card #33330, row 228 of the #32908 close-out ledger; QA run #33090 comment 6850495479 on #32908). A first pass there copied the telemetry sibling without its -wal, so the copies held the 18.3.0 shape and the pass was discarded and re-run on checkpointed copies. The SQL driver opens a file DB in WAL mode by default (packages/drivers/driver-sql/src/sql-driver-lifecycle.ts, resolveSqliteJournalMode), so the recipe now says to checkpoint, or to copy the -wal and -shm, before taking a copy. No acceptance clause changed. Read from source at base 87330e89, not driven live",
+          "ref": "#33330"
         }
       ],
       "variants": [
@@ -2935,7 +2995,7 @@
       "title": "os deploy to a self-hosted runtime builds, previews the upgrade plan and installs: --dry-run prints the plan and installs nothing, --json writes one document to stdout with every human line on stderr, and an install that needs a confirmation says so and how",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2946,7 +3006,7 @@
         "requires": [
           "a showcase boot as the target runtime: `pnpm dev -- --fresh -p PORT --seed-admin`, and an osk_ admin key minted on it via POST /api/v1/keys",
           "a scratch app directory outside examples/ holding a defineStack project (manifest id com.qa.deploy, version 1.0.0, one object qa_deploy_item with fields name and note) that `objectstack build` compiles; v1.1.0 of it renames the note field to memo with no renamedFrom (note removed and memo added on one object: a suspected rename)",
-          "`os environments use-runtime http://localhost:PORT --token osk_…` run once in the scratch directory, so os deploy targets the runtime"
+          "`os environments use-runtime http://localhost:PORT --token osk_…` run once, so os deploy targets the runtime. The target is NOT stored in the scratch directory: use-runtime writes it into the user's ~/.objectstack/cloud.json (packages/cli/src/utils/runtime-target.ts#recordRuntimeTarget, via packages/cli/src/utils/cloud-config.ts#writeDeployTargetRecord), which every runner on the host shares, so export HOME=<the run's work dir> for use-runtime and every os deploy of this item"
         ]
       },
       "steps": [
@@ -3016,6 +3076,12 @@
           "date": "2026-11-13",
           "change": "assertion-defect correction of acceptance[3] (with fixtures.requires[1], steps[3] and a negative). The fixture's v1.1.0 dropped the note field, and a removed field keeps its column, so the upgrade verdict finds nothing to confirm and the --json run installs (packages/metadata-core/src/package-upgrade-verdict.ts#schemaUpgradeVerdict). v1.1.0 now renames note to memo with no renamedFrom, a suspected rename, which the runtime stops with 409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED and the confirm command; the clause names that finding and that refusal. Found by the 18.4.0 acceptance run #32940 (F-4 to F-8 and its R4/R5 comments; wave anchor #32908). Re-read at main cf1b55c0. Card #32945",
           "ref": "#32945"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[2] says where use-runtime stores the deploy target and tells runners to isolate HOME (card #33330, row 223 of the #32908 close-out ledger; QA run #33089 comment 6850460138 on #32908, which ran with an isolated HOME). recordRuntimeTarget writes the target through writeDeployTargetRecord into join(homedir(), '.objectstack', 'cloud.json') (packages/cli/src/utils/cloud-config.ts#getCloudCredentialsPath), not into the scratch directory the line named, so two runners on one host would retarget each other. No acceptance clause changed. Read from source at base 87330e89, not driven live",
+          "ref": "#33330"
         }
       ]
     },
@@ -3024,7 +3090,7 @@
       "title": "os validate --target judges the stack against a target's restriction profile: each refused item printed as [rule] where: message with exit 1, a profile that cannot be read refused and never judged as no restriction, and a version drift warned only",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -3034,7 +3100,7 @@
         "app": "showcase",
         "requires": [
           "a scratch copy of the showcase outside examples/ (it declares hooks with handlers, sandboxed bodies and flows)",
-          "a profile file qa-profile.json: { allowCode: false, allowSandboxedJs: false, allowScheduledAutomation: false, allowedFlowNodeTypes: ['assignment', 'decision'], versions: { spec: '0.0.1', skills: '0.0.1' } }, and a copy with every allow true and every node type listed",
+          "a profile file qa-profile.json: { allowCode: false, allowSandboxedJs: false, allowScheduledAutomation: false, allowedFlowNodeTypes: ['assignment', 'decision'], versions: { spec: '0.0.1', skills: '0.0.1' } }, and a copy with every allow true and every node type listed. 'Every node type' is the profile's vocabulary, packages/spec/src/system/restriction-profile.zod.ts#RestrictionProfileNodeType: the FlowNodeAction built-ins PLUS the plugin node types approval and approval_revise. The showcase's flows use both, and the list judges them (packages/cli/src/utils/restriction-profile.ts, reader rule 2), so a copy listing the FlowNodeAction built-ins alone still refuses the showcase's approval nodes and acceptance[1] cannot pass (QA run #32940)",
           "a running showcase boot for the URL leg: no open-tree server serves the profile route, so it answers 404"
         ]
       },
@@ -3091,6 +3157,12 @@
           "date": "2026-11-10",
           "change": "initial — os validate --target and the restriction profile. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[1] names the permissive copy's node-type list (under-specified fixture, card #33330, row 48 of the #32908 close-out ledger; QA run #32940 runner R5 comment 6839694279, C2 and section 6). The run passed C2 only after adding approval and approval_revise: RestrictionProfileNodeType (packages/spec/src/system/restriction-profile.zod.ts) is the FlowNodeAction built-ins plus that plugin pair, the restriction-profile judge's reader rule 2 judges the pair by the list (packages/cli/src/utils/restriction-profile.ts), and the showcase's flows use them. No clause changed. Read from source at base 87330e89, not driven live",
+          "ref": "#33330"
         }
       ]
     },
@@ -3099,7 +3171,7 @@
       "title": "A package upgrade's dry run returns the plan and writes nothing, and lists as advice the customizations that would hide a change of the upgrade; the upgrade installs without a token",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3109,8 +3181,8 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
-          "a scratch package directory outside examples/ (manifest id com.qa.upgrade, namespace qa_up, version 1.0.0) holding an object qa_up_ticket and a list view of it with columns name and status, compiled with `objectstack build`; v1.1.0 changes that view's columns",
-          "v1.0.0 installed with `os package install DIR/dist/objectstack.json` (admin credentials), then its view customized in Studio into com.qa.upgrade.custom and published, as studio-authoring.package-customize-restore-display does for a showcase view"
+          "a scratch package directory outside examples/ (manifest id com.qa.upgrade, namespace qa_up, version 1.0.0) holding an object qa_up_ticket and a list view of it with columns name and status (declared under a view container's `list` key, it registers as the view named qa_up_ticket.default: the default list implicitly claims '<object>.default', packages/spec/src/ui/view.zod.ts; that is the name every read and customization below addresses), compiled with `objectstack build`; v1.1.0 changes that view's columns",
+          "v1.0.0 installed with `os package install DIR/dist/objectstack.json` (admin credentials), then its view customized into com.qa.upgrade.custom: in Studio and published, as studio-authoring.package-customize-restore-display does for a showcase view, or over the API with RUNNER.md's pair recipe (POST /api/v1/packages/com.qa.upgrade/ensure-customization, then PUT /api/v1/meta/view/qa_up_ticket.default?package=com.qa.upgrade.custom with the view body plus overrides: { package: 'com.qa.upgrade', basedOn: '1.0.0' }), which writes the overlay active in one step. The upgrade plan's hiding-customization advice reads the same either way (QA run #33048)"
         ]
       },
       "steps": [
@@ -3175,6 +3247,12 @@
           "date": "2026-11-10",
           "change": "initial — the package upgrade plan's dry run (#30884) and its override advice (#31627). Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[1] and [2] re-pointed (under-specified fixture, card #33330, row 109 of the #32908 close-out ledger; QA run #33048 comment 6846028996 on #32908). requires[1] names the view the build registers, qa_up_ticket.default: a container's list key expands to '<object>.default' (packages/spec/src/ui/view.zod.ts, the default list's implicit claim). requires[2] admits RUNNER.md's ensure-customization plus PUT ?package=PAIR recipe beside the Studio route, since #33048 drove it and read the same hidesChange advice. No clause changed. Read from source at base 87330e89, not driven live",
+          "ref": "#33330"
         }
       ]
     }
