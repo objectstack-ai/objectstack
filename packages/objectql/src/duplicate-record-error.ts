@@ -116,8 +116,7 @@ import { resolveFieldLabel, type ValidationMessageContext } from './validation/r
  *  - **The fields of a composite unique index** — named in `endUserMessage`
  *    and in `message` ONLY when the columns the store named
  *    (`uniqueViolationColumns`, organization part set aside) match, as a set,
- *    the `fields` of a unique index the object DECLARES (organization part set
- *    aside there too). Driver text alone is evidence, not a verdict: a
+ *    the `fields` of a unique index the object DECLARES. Driver text alone is evidence, not a verdict: a
  *    `tenancy.tenantField` column prints beside the authored ones and cannot
  *    be told from them, so anything short of a declared match names nothing —
  *    the rule `field` follows, for the reason it does. `field` itself keeps
@@ -305,16 +304,16 @@ export function envelopeUniqueViolation(
   });
 }
 
-/** The implied organization key part, set aside on both sides of the match as `uniqueViolationColumns` sets it aside. */
-const IMPLIED_ORGANIZATION_KEY_PART = 'organization_id';
-
 /**
- * The `fields` of the unique index the object DECLARES whose column set equals
+ * The `fields` of the unique index the object DECLARES whose field set equals
  * the composite key the store named — in the index's declared order — or
- * `undefined` when none matches exactly. The organization key part is set
- * aside on the declared side too: a `unique: 'organization'` index lists only
- * its authored fields, and a legacy hand-written `['organization_id', …]`
- * global index lists it. A non-unique index never matches: it refuses nothing.
+ * `undefined` when none matches exactly. The store's side arrives with the
+ * organization key part already set aside (`uniqueViolationColumns`), which
+ * is what a `unique: 'organization'` index lists: only its authored fields.
+ * The declared side is compared as written, so a legacy hand-written global
+ * index that lists the organization column itself matches nothing and names
+ * nothing — the conservative answer. A non-unique index never matches: it
+ * refuses nothing.
  */
 function declaredCompositeIndex(schema: unknown, columns: readonly string[] | undefined): readonly string[] | undefined {
   if (!columns || columns.length < 2) return undefined;
@@ -327,9 +326,9 @@ function declaredCompositeIndex(schema: unknown, columns: readonly string[] | un
     if (!index || typeof index !== 'object') continue;
     if (index.unique !== 'global' && index.unique !== 'organization') continue;
     if (!Array.isArray(index.fields) || !index.fields.every((f): f is string => typeof f === 'string')) continue;
-    const authored = index.fields.filter((f) => f !== IMPLIED_ORGANIZATION_KEY_PART);
-    if (authored.length === wanted.size && new Set(authored).size === authored.length && authored.every((f) => wanted.has(f))) {
-      return authored;
+    const declared = index.fields;
+    if (declared.length === wanted.size && new Set(declared).size === declared.length && declared.every((f) => wanted.has(f))) {
+      return declared;
     }
   }
   return undefined;
