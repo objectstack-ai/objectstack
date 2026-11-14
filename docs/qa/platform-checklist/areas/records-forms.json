@@ -596,12 +596,6 @@
           "date": "2026-10-31",
           "change": "acceptance[1]'s count and steps[2]'s location widget corrected. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). The form's 47 is a count of TYPES, not fields: it draws 49 f_* fields (every zoo field but f_autonumber) plus `name`, and f_lookups, f_users and f_owner repeat the lookup and user types. A location field renders one 'latitude, longitude' text input (ui/packages/fields/src/widgets/LocationField.tsx), not structured inputs; address keeps its structured ones. Counted at base a0f865491d: field-zoo.object.ts declares 50 f_* fields of 47 distinct types, autonumber among them, so the form's 47 are its 46 drawn f_* types plus name's text. No clause's contract changed",
           "ref": "#27438"
-        },
-        {
-          "revision": 9,
-          "date": "2026-11-14",
-          "change": "fixtures.requires[0], knownGaps[0], variants[2] and steps[3]: the stock Schedule (Gantt) view now declares lockField 'done' (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt), so the locked-leaf drag is driven on the stock boot with no overlay; the auto-schedule half stays blocked(fixture) by design. Maintainer ruling 2026-11-14 on #33351 (row 263, option C: add lockField now, narrow the dependency half). Read at base ba35dfd78: GanttConfigSchema lockField (view.zod.ts), ObjectGantt.tsx (locked = record[lockField]), task.object.ts (done is a boolean). No clause changed",
-          "ref": "#33351"
         }
       ],
       "enumSource": {
@@ -2567,6 +2561,12 @@
           "date": "2026-10-31",
           "change": "fixtures.knownGaps[0] and steps[3]: the direct drag on a locked leaf is run-proven. From QA run #27438 (W3-C2b, G4a, at c4c515ad; the finding line is truncated in the record, and its tail is in the run's own per-clause table; wave anchor #27377, wave-3 accuracy slice S1). The run overlaid showcase_task.gantt with lockField 'done', dragged a done bar (no PATCH, row unchanged, updated_at identical), dragged an unlocked bar on the same overlay as the control (PATCH 200), and reverted with DELETE. So the sub-leg is scored live on that overlay instead of blocked(fixture). acceptance[2] stays blocked(fixture) only on its auto-schedule half, which still needs a dependenciesField no stock view declares. Read at base a0f865491d: view.zod.ts (GanttConfigSchema lockField), task.view.ts (the gantt view). No clause changed",
           "ref": "#27438"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-14",
+          "change": "fixtures.requires[0], knownGaps[0], variants[2] and steps[3]: the stock Schedule (Gantt) view now declares lockField 'done' (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt), so the locked-leaf drag is driven on the stock boot with no overlay; the auto-schedule half stays blocked(fixture) by design. Maintainer ruling 2026-11-14 on #33351 (row 263, option C: add lockField now, narrow the dependency half). Read at base ba35dfd78: GanttConfigSchema lockField (view.zod.ts), ObjectGantt.tsx (locked = record[lockField]), task.object.ts (done is a boolean). No clause changed",
+          "ref": "#33351"
         }
       ]
     },

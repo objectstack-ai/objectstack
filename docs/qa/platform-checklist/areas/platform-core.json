@@ -4467,7 +4467,7 @@
       "title": "An 18.3.0 database's activation ledger moves to the (metadata_type, package_id, name) key on its first boot: the package-less index is built, each package-less row binds to its one holder, ambiguous and environment rows stay null, a second boot writes nothing, and os migrate plan offers the old index as a safe replacement",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["operator at the CLI, with direct access to the database file"],
@@ -4476,6 +4476,9 @@
         "requires": [
           "an 18.3.0-shaped SQLite file, copied, never the original, by one of two routes. (a) A file a boot of npm `@objectstack/cli@18.3.0` (published; the tree is 18.3.0 plus the unreleased v18.4 work) wrote for a blank scaffold, with the rows the steps name planted through that release's own doors; a blank scaffold, because the showcase is a private workspace package with no published build (QA record #32093 made one with npm `create-objectstack@18.3.0`; copy the file and its telemetry sibling X.telemetry.db together). (b) The planted shape: a copy of a file DB this tree's own boot wrote, in which the step's columns are set back to NULL (and, for the activation ledger, the index uniq_sys_metadata_activation_packageless is dropped), which is what a database an earlier release built holds once this release's schema sync has added the columns. Its sys_metadata_activation holds a package-less row (package_id NULL) for a flow one installed package ships, and a row for a position. On route (a), 18.3.0's door already writes package_id (for a name two packages hold, the first holder), and its position door does too (com.objectstack.plugin-security, QA run #33048), so set the flow row's AND the position row's package_id to NULL by SQL: the backfill never asks about a position row and leaves it as it is (packages/objectql/src/activation-ledger-backfill.ts), so an unplanted route (a) position row keeps 18.3.0's package and the clause's 'stays null' cannot be read. On route (b) it also holds a package-less row for a name two packages hold. An environment item's row is planted by SQL on either route: 18.3.0's door answers 409 for one. Every boot of this tree then logs ERROR \"[security] upgrade impact: 1 activation ledger row(s) for a flow, action or webhook name an item no package ships at this boot …\" for that planted row (packages/plugins/plugin-security/src/upgrade-impact-report.ts, the orphans line): expected for a switch row on an environment item, not a finding",
           "a copy of the same file with two package-less rows planted by SQL for one (metadata_type, name), for the conflict leg. On a route (a) file, drop 18.3.0's unique (metadata_type, name) index first, because it forbids the pair"
+        ],
+        "knownGaps": [
+          "the ambiguous-row leg stays RUNNER-BUILT, by design (maintainer ruling 2026-11-14 on #33351, row 90, option B): it needs one item name held by two installed packages, and no stock boot carries a second package. The showcase cannot grow one: an app package defines at most one app and a suite's other packages are module packages composed beside it (ADR-0019), so a second holder is a separate package, not a seed line. Plant it per requires[0] route (a) or (b). A permanent multi-package fixture, if a later item needs one, extends examples/app-multi-package (two packages composed with composeStacks(…, { manifest: 'preserve' })), not the showcase"
         ]
       },
       "steps": [
@@ -4547,6 +4550,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[0] re-pointed (stale fixture recipe, card #33330, row 44 of the #32908 close-out ledger; QA run #33048 comment 6846028996 on #32908). On route (a), 18.3.0's position door also writes package_id, as #33048 measured, and the backfill never asks about a position row (packages/objectql/src/activation-ledger-backfill.ts: 'its rows stay as they are'), so the position row is nulled by SQL like the flow row before acceptance's 'stays null' can be read. The planted environment row's upgrade-impact ERROR (plugin-security upgrade-impact-report.ts, orphans line) is named as expected so a runner does not chase it. No clause changed. Read from source at base 87330e89; 18.3.0's own door behaviour is #33048's live reading, not re-driven",
           "ref": "#33330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-14",
+          "change": "fixtures.knownGaps added: the ambiguous-row leg (a name two packages hold) stays runner-built by design (maintainer ruling 2026-11-14 on #33351, row 90, option B; QA run #33048 comment 6846028996 named the gap). Read at base ba35dfd78: ADR-0019 (an app package defines at most one app; measured on #33351 round 1, where a second app in the showcase failed its build), examples/app-multi-package (composeStacks with manifest 'preserve'). No clause changed",
+          "ref": "#33351"
         }
       ]
     },
