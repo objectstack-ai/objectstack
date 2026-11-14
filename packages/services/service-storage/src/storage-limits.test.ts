@@ -359,6 +359,95 @@ describe('[#22283] §1 · the upload doors refuse a file over max_upload_mb, bef
 });
 
 // ---------------------------------------------------------------------------
+// §1b — a body with no declared length is held to the door's own bound
+// ---------------------------------------------------------------------------
+
+/**
+ * A transport's `rawBody` as `IHttpRequest.rawBody` contracts it: it records
+ * the bound each read states, and refuses past it (413 `PAYLOAD_TOO_LARGE`),
+ * handing back nothing. No `content-length` is sent, so only the stated bound
+ * can hold the body.
+ */
+function boundedRawBody(bytes: number) {
+  const asked: Array<number | undefined> = [];
+  const rawBody = vi.fn(async (options?: { maxBytes?: number }) => {
+    asked.push(options?.maxBytes);
+    if (options?.maxBytes !== undefined && bytes > options.maxBytes) {
+      throw Object.assign(new Error('refused past the bound'), { status: 413, code: 'PAYLOAD_TOO_LARGE' });
+    }
+    return Buffer.alloc(bytes);
+  });
+  return { asked, rawBody };
+}
+
+describe('a byte door holds a body with no declared length to its own bound, as it holds a declared one', () => {
+  it('local raw PUT: the read is bounded by max_upload_mb and refused past it — 413, nothing stored', async () => {
+    const { adapter, routes } = await mountDoors(SAVED_ONE_MB);
+    const presigned = await call(routes, 'POST', `${BASE}/upload/presigned`, {
+      body: { filename: 'u.bin', mimeType: 'application/octet-stream', size: 10 },
+    });
+    const token = String(presigned.body.data.uploadUrl).split('/_local/raw/')[1]!;
+    const key = adapter.verifyToken(token, 'put').k;
+    const upload = vi.spyOn(adapter, 'upload');
+
+    const over = boundedRawBody(MIB + 1);
+    expectTooLarge(await call(routes, 'PUT', `${BASE}/_local/raw/:token`, { params: { token }, rawBody: over.rawBody }));
+    expect(over.asked).toEqual([MIB]);
+    expect(upload).not.toHaveBeenCalled();
+    expect(await adapter.exists(key)).toBe(false);
+
+    // CONTROL — exactly the bound is read whole and stored.
+    const at = boundedRawBody(MIB);
+    expect((await call(routes, 'PUT', `${BASE}/_local/raw/:token`, { params: { token }, rawBody: at.rawBody })).status).toBe(200);
+    expect(at.asked).toEqual([MIB]);
+    expect(await adapter.exists(key)).toBe(true);
+  });
+
+  it('chunk door: the read is bounded by what the limit leaves this chunk, and refused past it — not stored, progress unchanged', async () => {
+    const { adapter, store, routes } = await mountDoors(SAVED_ONE_MB);
+    const started = await call(routes, 'POST', `${BASE}/upload/chunked`, {
+      body: { filename: 'u.bin', mimeType: 'application/octet-stream', totalSize: MIB },
+    });
+    const { uploadId, resumeToken } = started.body.data;
+    await store.updateSession(uploadId, { total_chunks: 2 } as never);
+    const uploadChunk = vi.spyOn(adapter, 'uploadChunk');
+    const chunk = (index: number, read: ReturnType<typeof boundedRawBody>) =>
+      call(routes, 'PUT', `${BASE}/upload/chunked/:uploadId/chunk/:chunkIndex`, {
+        params: { uploadId, chunkIndex: String(index) },
+        headers: { 'x-resume-token': resumeToken },
+        rawBody: read.rawBody,
+      });
+
+    const first = boundedRawBody(600 * 1024);
+    expect((await chunk(0, first)).status).toBe(200);
+    expect(first.asked).toEqual([MIB]);
+
+    const over = boundedRawBody(MIB);
+    expectTooLarge(await chunk(1, over));
+    expect(over.asked).toEqual([MIB - 600 * 1024]);
+    expect(uploadChunk).toHaveBeenCalledTimes(1);
+    expect((await store.getSession(uploadId))?.uploaded_size).toBe(600 * 1024);
+
+    // CONTROL — exactly what is left is read whole and stored.
+    const rest = boundedRawBody(MIB - 600 * 1024);
+    expect((await chunk(1, rest)).status).toBe(200);
+    expect(uploadChunk).toHaveBeenCalledTimes(2);
+    expect((await store.getSession(uploadId))?.uploaded_size).toBe(MIB);
+  });
+
+  it('CONTROL · with no max_upload_mb the doors state no bound, and read the whole body as before', async () => {
+    const { routes } = await mountDoors(undefined);
+    const presigned = await call(routes, 'POST', `${BASE}/upload/presigned`, {
+      body: { filename: 'n.bin', mimeType: 'application/octet-stream', size: 10 },
+    });
+    const token = String(presigned.body.data.uploadUrl).split('/_local/raw/')[1]!;
+    const read = boundedRawBody(2 * MIB);
+    expect((await call(routes, 'PUT', `${BASE}/_local/raw/:token`, { params: { token }, rawBody: read.rawBody })).status).toBe(200);
+    expect(read.asked).toEqual([undefined]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §2 — the TTLs, and the precedence
 // ---------------------------------------------------------------------------
 

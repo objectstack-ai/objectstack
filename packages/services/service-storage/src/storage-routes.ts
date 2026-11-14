@@ -1923,12 +1923,7 @@ export function registerStorageFamily(
         });
         return;
       }
-      // The link is judged before a byte of the body is read: open, unexpired
-      // and this caller's, the judgement its spend makes first (a read that
-      // writes nothing). A link the caller cannot use answers the one
-      // unusable-link refusal with the body unread.
-      //
-      // Then the declared length: this door refuses a body that declares more
+      // The declared length first: this door refuses a body that declares more
       // than it takes before this door reads it, and a body with no declared
       // length is held to the same bound while it is read. The service judges
       // the bytes read again, before the link is spent, so an oversized upload
@@ -1937,13 +1932,27 @@ export function registerStorageFamily(
       // the link takes several files; that form may declare up to as many
       // files as the link takes, each within the limit, plus the form's
       // framing. Any other body, on any link, is the file itself, whatever its
-      // content type, under the one-file limit.
+      // content type, under the one-file limit, with the checks and order it
+      // had before links took several.
+      //
+      // The link itself is judged (open, unexpired and this caller's: the
+      // judgement its spend makes first, a read that writes nothing) after
+      // the declared length and BEFORE a byte of the body is read, so a link
+      // the caller cannot use is refused with the body unread.
       const token = String(req.params.token ?? '');
-      const link = await door.inspectUploadLink(token, caller.userId as string);
       const { maxUploadBytes } = currentLimits();
       const declaredBody = declaredContentLength(req);
+      let link: UploadLinkView | undefined;
+      let linkRefusal: unknown;
+      try {
+        link = await door.inspectUploadLink(token, caller.userId as string);
+      } catch (err) {
+        linkRefusal = err;
+      }
       const linkFiles =
-        isUploadLinkForm(req.headers?.['content-type'], req.headers?.[UPLOAD_LINK_FORM_HEADER]) && link.files.max > 1
+        link !== undefined &&
+        link.files.max > 1 &&
+        isUploadLinkForm(req.headers?.['content-type'], req.headers?.[UPLOAD_LINK_FORM_HEADER])
           ? link.files
           : undefined;
       const formLimit =
@@ -1963,6 +1972,7 @@ export function registerStorageFamily(
         sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, tooLarge, { userMessage: copy.tooLarge });
         return;
       }
+      if (link === undefined) throw linkRefusal;
       if (linkFiles !== undefined) {
         const form = await uploadLinkFormBody(req, formLimit);
         if (form.refused) {
