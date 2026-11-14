@@ -98,8 +98,8 @@ export function formulaCycleIssues(
  * elsewhere. The build passes the names the authored target declares (the
  * object walk locates those at the object, so a cycle closing through a
  * declared formula keeps that location); the `object_extension` door passes
- * none, since the written entry's fields are served over everything the
- * target served before the write.
+ * none, since it judges the written entry's own definition of every name the
+ * entry adds, over everything the target served before the write.
  */
 export function extensionFormulaLoci(
   target: string,

@@ -4187,13 +4187,18 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // the object walk's, located at the object: a cycle closing through a
     // declared formula keeps that location and is named once. On the door's
     // one pass `base` is the target as served BEFORE the write (other
-    // packages' published extension fields included) and the object walk does
-    // not run, while the written entry, its sole extension, is folded over it,
-    // so every name the entry adds is served from the entry's own record: none
-    // is left out there, a name the target already serves included. A member
-    // the target or a sibling package stored is never a name the entry adds,
-    // so the target's own cycle, a sibling's, and a formula that only reads a
-    // cycle are not this write's to answer for.
+    // packages' published extension fields included, carried as plain fields
+    // with no priority) and the object walk does not run, while the written
+    // entry, its sole extension, is folded over it. So the door judges the
+    // written entry's own definition of every name it adds, a name the target
+    // already serves included, and none is left out there. Where a sibling
+    // package adds the same name at the same priority (a tie, which the build
+    // drops on a declared target) or at a higher one (the build serves the
+    // sibling's), the door can refuse a cycle the build lets through; making
+    // the door read the build's winner is #33494. A member the target or a
+    // sibling package stored is never a name the entry adds, so the target's
+    // own cycle, a sibling's, and a formula that only reads a cycle are not
+    // this write's to answer for.
     const ownNames = new Set(base && !extensionWrite ? fieldEntries(base).map(([n]) => n) : []);
     issues.push(...formulaCycleIssues(target, fieldDefs, extensionFormulaLoci(target, entries, ownNames)));
   }
