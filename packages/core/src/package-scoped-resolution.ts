@@ -138,8 +138,12 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * name by package), then the picklist family (#31700): `picklist`,
  * `mapping` and `dataset`, the `api` and the engine's `function` registry,
  * then `webhook` (#31699 PR 2), and `tool` beside the AI family (#31985),
- * whose one by-name reader (`/meta/tool/NAME`) resolves by package. A type
- * not listed here keeps one package holder per deployment.
+ * whose one by-name reader (`/meta/tool/NAME`) resolves by package, and
+ * last `connector` (#31699 PR 3: the automation engine holds an instance per
+ * `(package, name)`, and a flow, a connector pull and the connection door
+ * address one by package). Every covered type is listed now; a type joining
+ * {@link BARE_NAME_ONE_HOLDER_TYPES} later keeps one package holder per
+ * deployment until its own narrowing lists it here.
  *
  * Every member but {@link ENGINE_FUNCTION_TYPE} is a metadata type ADR-0150
  * addresses by package ({@link PACKAGE_SCOPED_TYPES}). The function registry
@@ -169,6 +173,8 @@ export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] 
   'function',
   // #31699 PR 2
   'webhook',
+  // #31699 PR 3 (the narrowing PR)
+  'connector',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */

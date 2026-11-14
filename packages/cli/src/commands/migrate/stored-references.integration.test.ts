@@ -23,8 +23,9 @@
  * and one tool name, which the one-holder rule no longer calls a clash
  * (#31701, #31697, #31699, #31985; ADR-0150 D2/D9), so the sealed-clash
  * section never lists them; nor the picklist `m31693_tone` they both declare
- * (#31700). The clash the seal still records is the connector `m31693_link`
- * both declare: a connector name is held once per deployment.
+ * (#31700); nor, since the connector narrowed last (#31699 PR 3), the
+ * connector `m31693_link` both declare. Two holders of different namespaces
+ * are no clash for any covered type now, so the section is empty.
  *
  * Over a database an older release left: two managed `sys_sharing_rule` rows
  * naming `m31693_share` (two holders: ambiguous) and `m31693_only_a` (one
@@ -95,7 +96,7 @@ const rule = (name: string) => ({
   accessLevel: 'read', sharedWith: { type: 'user', value: 'u1' }, active: true,
 });
 const list = (name: string) => ({ name, label: name, options: [{ label: 'One', value: 'one' }] });
-/** The connector A and B both declare: a connector name is still held once per deployment, the sealed clash. */
+/** The connector A and B both declare, in their own namespaces: no clash since #31699 PR 3 (it was the sealed clash). */
 const link = (tag: string) => ({ name: 'm31693_link', label: `${tag} link`, type: 'api', description: `${tag} link`, enabled: false });
 /** The agent, the skill (#31701), the object-less action (#31697), the email template (#31699) and the tool (#31985) A and B both declare, in their own namespaces. */
 const ai = (tag: string) => ({
@@ -307,10 +308,11 @@ describe('os migrate stored-references (the report)', () => {
       d8: 'R17', object: 'm31693a_task', field: 'hue', packageId: A, name: 'm31693_hue', reason: 'outside-closure',
       candidates: [{ holder: 'package', packageId: C, address: 'm31693c/m31693_hue' }],
     }]);
-    // [#31701, #31697, #31699, #31700, #31985] Only the connector: never the
-    // agent, the skill, the object-less action, the email template, the
-    // picklist and the tool A and B hold in two namespaces.
-    expect(payload.sealedClashes).toEqual([{ type: 'connector', name: 'm31693_link', candidates: [`package "${A}"`, `package "${B}"`] }]);
+    // [#31701, #31697, #31699, #31700, #31985] Never the agent, the skill, the
+    // object-less action, the email template, the picklist and the tool A and
+    // B hold in two namespaces; [#31699 PR 3] nor the connector (FROM: the
+    // one sealed clash, naming both).
+    expect(payload.sealedClashes).toEqual([]);
     // The served platform carries no automation or approvals table here: named, not silently skipped.
     expect(payload.tablesNotCarried).toEqual(expect.arrayContaining(['sys_automation_run', 'sys_flow_credential', 'sys_approval_request']));
   }, CASE_TIMEOUT_MS);

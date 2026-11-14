@@ -32,12 +32,18 @@
  * ## What these cases pin
  *
  *   - a fresh cloud-fetched install and a cloud-fetched upgrade, each declaring
- *     a connector name another package holds: `422 PLUGIN_REGISTER_FAILED` in
- *     the declared envelope, both holders and the rename named, the registry
- *     and the ledger exactly as before the call, the holder's items still the
- *     holder's. [#31696] These cases declared a flow name until the flow's
- *     one-holder rule narrowed to the namespace (ADR-0150 D9); the connector
- *     keeps one package holder per name, so it carries the refusal now;
+ *     a connector name another package of the SAME namespace holds (a
+ *     co-owner, admitted to the namespace by its dependency on the holder):
+ *     `422 PLUGIN_REGISTER_FAILED` in the declared envelope, both holders and
+ *     the rename named, the registry and the ledger exactly as before the
+ *     call, the holder's items still the holder's. [#31696] These cases
+ *     declared a flow name until the flow's one-holder rule narrowed to the
+ *     namespace (ADR-0150 D9); [#31699] the connector, the last covered type,
+ *     narrowed too, so the refusal is now a co-owner's;
+ *   - [#31699] the same move for a connector (Clause-② yes (narrowing)): a
+ *     cloud-fetched install declaring a connector name another namespace's
+ *     package holds now installs, each package's connector its own, and a
+ *     by-name read that names no package refused naming both;
  *   - [#31696] the answer that moved, FROM → TO (Clause-② yes (narrowing)): a
  *     cloud-fetched install declaring a flow name another namespace's package
  *     holds was refused `422` naming both; it now installs, `200` and
@@ -90,7 +96,7 @@ const CLOUD_URL = 'http://cloud.test';
 const HOLDER_ID = 'com.acme.dispatch';
 /** The package the cloud-fetched install asks for. */
 const INCOMING_ID = 'com.acme.routing';
-/** The connector name both declare: one package holder per name (#30803). */
+/** The connector name both declare: one holder per namespace since #31699 (one per deployment under #30803). */
 const HELD_CONN = 'technician_api';
 /** [#31696] The flow name both declare: scoped to the namespace, so each package holds its own. */
 const SHARED_FLOW = 'assign_technician';
@@ -256,14 +262,23 @@ function expectBareNameRefusal(res: any) {
     expect(res.payload.error.message).toContain(`package "${INCOMING_ID}"`);
     expect(res.payload.error.message).toContain(`package "${HOLDER_ID}"`);
     expect(res.payload.error.message).toContain(`"${HELD_CONN}"`);
-    expect(res.payload.error.message).toContain(`"routing_${HELD_CONN}"`);
+    // [#31699] The co-owner's namespace is the holder's, so the rename carries it.
+    expect(res.payload.error.message).toContain(`"dispatch_${HELD_CONN}"`);
 }
+
+/** [#31699] The holder's namespace, shared through a dependency on the holder: a co-owner. */
+const CO_OWNER: Bag = { namespace: 'dispatch', dependencies: { [HOLDER_ID]: '^1.0.0' } };
 
 describe('install-local cloud branch refuses a package declaring a bare name another package holds, before any write', () => {
     const versions = {
         'v1-free': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW]),
-        'v1-held': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW], { connectors: [connector(HELD_CONN, 'routing')] }),
-        'v2-held': packageVersion(INCOMING_ID, '2.0.0', [FREE_FLOW], { connectors: [connector(HELD_CONN, 'routing')] }),
+        // [#31699] Every covered type has narrowed to the namespace, so the
+        // refusal is a co-owner's: the incoming package shares the holder's
+        // namespace (allowed by its dependency on the holder) and declares the
+        // holder's connector name.
+        'v1-held': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW], { ...CO_OWNER, connectors: [connector(HELD_CONN, 'routing')] }),
+        'v2-held': packageVersion(INCOMING_ID, '2.0.0', [FREE_FLOW], { ...CO_OWNER, connectors: [connector(HELD_CONN, 'routing')] }),
+        'v1-other-ns-conn': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW], { connectors: [connector(HELD_CONN, 'routing')] }),
         'v1-shared-flow': packageVersion(INCOMING_ID, '1.0.0', [SHARED_FLOW]),
     };
 
@@ -357,6 +372,26 @@ describe('install-local cloud branch refuses a package declaring a bare name ano
         expect(String((refusal as Error | undefined)?.message)).toContain(HOLDER_ID);
         expect(String((refusal as Error | undefined)?.message)).toContain(INCOMING_ID);
         expect(ql.registry.getItem<Bag>('connector', HELD_CONN)?.label).toBe('dispatch connector');
+    });
+
+    it('[#31699] a connector name another namespace\'s package holds installs: 200, hot-loaded, each holder\'s connector its own, a bare read refused naming both', async () => {
+        serveVersions(versions);
+        const { ql, installFromCloud, installHolder } = await bootPlugin();
+        await installHolder();
+
+        const res = await installFromCloud('v1-other-ns-conn');
+
+        // FROM `422 PLUGIN_REGISTER_FAILED` naming both holders, TO installed.
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.hotLoaded).toBe(true);
+        expect(res.payload.data.hotLoadError).toBeUndefined();
+        expect(ledger().incoming?.version).toBe('1.0.0');
+        expect(ql.registry.resolveItem<Bag>('connector', HELD_CONN, HOLDER_ID)?.label).toBe('dispatch connector');
+        expect(ql.registry.resolveItem<Bag>('connector', HELD_CONN, INCOMING_ID)?.label).toBe('routing connector');
+        let refusal: unknown;
+        try { ql.registry.resolveItem('connector', HELD_CONN); } catch (e) { refusal = e; }
+        expect(String((refusal as Error | undefined)?.message)).toContain(HOLDER_ID);
+        expect(String((refusal as Error | undefined)?.message)).toContain(INCOMING_ID);
     });
 });
 
