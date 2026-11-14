@@ -133,7 +133,7 @@ describe('RecipientResolver', () => {
             members: { admin: ['a', 'shared'] },
             teams: { sales: ['shared', 's1'] },
         });
-        const out = await resolver(data).resolve(['role:admin', 'team:sales', 'direct']);
+        const out = await resolver(data).resolve(['role:admin', 'team:sales', 'direct'], { organizationId: 'org_1' });
         expect(out).toEqual(['a', 'shared', 's1', 'direct']);
     });
 
@@ -144,7 +144,8 @@ describe('RecipientResolver', () => {
 
     it('is best-effort: a failed membership query resolves to 0, not a throw', async () => {
         const data = fakeData({ throwOn: 'sys_member' });
-        expect(await resolver(data).resolve(['role:admin', 'u_keep'])).toEqual(['u_keep']);
+        expect(await resolver(data).resolve(['role:admin', 'u_keep'], { organizationId: 'org_1' })).toEqual(['u_keep']);
+        expect(data.calls.filter((c) => c.object === 'sys_member')).toHaveLength(1);
     });
 
     it('skips a malformed owner_of string', async () => {
@@ -320,5 +321,35 @@ describe('[#32445] role: and team: page to the end — no silent cap', () => {
             await r.resolve(['team:ops']);
             expect(table.calls.map((c) => c.query.limit)).toEqual([MEMBERSHIP_PAGE_SIZE]);
         }
+    });
+});
+
+describe('role: names the holders of that role in the emitting organization, and nobody without one', () => {
+    it('reaches the holders in the emitting organization and none in another', async () => {
+        const table = membershipTable(MEMBERS);
+        const r = new RecipientResolver({ getData: () => table.engine, logger: silentLogger() });
+        expect(await r.resolve(['role:member'], { organizationId: 'org_a' })).toEqual(['u_member']);
+        expect(await r.resolve(['role:member'], { organizationId: 'org_b' })).toEqual(['u_other_org']);
+        expect(table.calls.map((c) => c.query.where)).toEqual([
+            { role: 'member', organization_id: 'org_a' },
+            { role: 'member', organization_id: 'org_b' },
+        ]);
+    });
+
+    it('with no emitting organization: 0 recipients, a warning, and no sys_member read at all', async () => {
+        const table = membershipTable(MEMBERS);
+        const log = recordingLogger();
+        const r = new RecipientResolver({ getData: () => table.engine, logger: log.logger });
+        expect(await r.resolve(['role:member'])).toEqual([]);
+        expect(await r.resolve(['role:member'], { organizationId: '' })).toEqual([]);
+        expect(table.calls).toHaveLength(0);
+        expect(log.warns.filter((line) => line.includes("role 'member'") && line.includes('names no organization'))).toHaveLength(2);
+    });
+
+    it('CONTROL: the rest of an audience still resolves when role: names nobody', async () => {
+        const table = membershipTable(MEMBERS);
+        const r = new RecipientResolver({ getData: () => table.engine, logger: silentLogger() });
+        expect(await r.resolve(['role:member', 'user:u_direct', 'team:none'])).toEqual(['u_direct']);
+        expect(table.calls.map((c) => c.object)).toEqual(['sys_team_member']);
     });
 });

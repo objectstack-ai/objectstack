@@ -205,6 +205,7 @@ describe('MessagingService', () => {
             const result = await service.emit({
                 topic: 't',
                 audience: ['role:admin', 'team:sales', { ownerOf: { object: 'lead', id: 'l1' } }, 'u_admin1'],
+                organizationId: 'org_1',
                 payload: { title: 'Hi' },
             });
 
@@ -1703,5 +1704,79 @@ describe('[#32512] inbox readers and a deleted organization', () => {
         expect(second.unreadCount).toBe(4);
         expect(warnings).toHaveLength(1);
         expect(warnings[0]).toMatch(/OBJECT_NOT_FOUND: sys_organization/);
+    });
+});
+
+/**
+ * The organization a `role:` audience resolves in is the emitting
+ * organization: the producer's when it names one, else the one stored on the
+ * notification's own event row. With neither, `role:` names nobody.
+ */
+describe('role: resolves in the emitting organization — the producer\'s, else the stored event row\'s', () => {
+    const MEMBERS = [
+        { id: 'm1', organization_id: 'org_a', user_id: 'u_a_admin_1', role: 'admin' },
+        { id: 'm2', organization_id: 'org_a', user_id: 'u_a_admin_2', role: 'admin' },
+        { id: 'm3', organization_id: 'org_b', user_id: 'u_b_admin', role: 'admin' },
+    ];
+
+    /** An engine whose event insert stores `stamp` when the row names no organization, as the engine's system-write rule does. */
+    function membershipEngine(stamp: string | null) {
+        const memberReads: Array<Record<string, unknown>> = [];
+        const engine = {
+            memberReads,
+            async insert(_object: string, row: any) {
+                return { id: 'evt_1', ...row, organization_id: row.organization_id ?? stamp };
+            },
+            async find(object: string, query: any) {
+                if (object !== 'sys_member') return [];
+                memberReads.push(query?.where ?? {});
+                const hits = MEMBERS.filter((r) => Object.entries(query?.where ?? {}).every(([k, v]) => (r as any)[k] === v));
+                return hits.slice(query?.offset ?? 0).slice(0, query?.limit ?? hits.length).map((r) => ({ user_id: r.user_id }));
+            },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                assertEngineFindOnePredicate(object, query);
+                return null;
+            },
+            async update() { return {}; },
+            async delete() { return {}; },
+            async count() { return 0; },
+            async aggregate() { return []; },
+        };
+        return engine;
+    }
+
+    async function emitRoleAdmin(stamp: string | null, organizationId?: string) {
+        const engine = membershipEngine(stamp);
+        const svc = new MessagingService({ logger: silentLogger(), getData: () => engine as any });
+        const inbox = recordingChannel('inbox');
+        svc.registerChannel(inbox.channel);
+        const result = await svc.emit({
+            topic: 't',
+            audience: ['role:admin'],
+            channels: ['inbox'],
+            payload: { title: 'Hi' },
+            ...(organizationId !== undefined ? { organizationId } : {}),
+        });
+        return { result, recipients: inbox.seen.map((d) => d.recipient).sort(), memberReads: engine.memberReads };
+    }
+
+    it('a producer that names no organization reaches the holders of the event row\'s organization, and no other', async () => {
+        const { result, recipients, memberReads } = await emitRoleAdmin('org_a');
+        expect(recipients).toEqual(['u_a_admin_1', 'u_a_admin_2']);
+        expect(result.delivered).toBe(2);
+        expect(memberReads.every((w) => w.organization_id === 'org_a')).toBe(true);
+    });
+
+    it('with no organization from the producer or the event row: 0 recipients and no membership read', async () => {
+        const { result, recipients, memberReads } = await emitRoleAdmin(null);
+        expect(recipients).toEqual([]);
+        expect(result.delivered).toBe(0);
+        expect(memberReads).toEqual([]);
+    });
+
+    it('CONTROL: a producer-named organization is the one used', async () => {
+        const { recipients, memberReads } = await emitRoleAdmin(null, 'org_b');
+        expect(recipients).toEqual(['u_b_admin']);
+        expect(memberReads.every((w) => w.organization_id === 'org_b')).toBe(true);
     });
 });

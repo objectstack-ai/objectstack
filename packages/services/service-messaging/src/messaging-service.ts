@@ -1415,9 +1415,12 @@ export class MessagingService {
 
         // 3) Resolve the audience to recipient user ids (RecipientResolver owns
         //    role:/org:members/team:/owner_of:/email→id expansion). The
-        //    organization is the producer's, as role: has always read it.
+        //    organization is the emitting one, the same `owned` organization
+        //    every row below the event carries: the producer's, else the one
+        //    stored on the event row (step 2). With neither, role: and
+        //    org:members name nobody.
         const recipients = await this.resolver.resolve(input.audience, {
-            organizationId: input.organizationId,
+            organizationId: owned.organizationId,
         });
         if (recipients.length === 0) {
             this.ctx.logger.warn(`[messaging] emit: topic '${input.topic}' resolved to 0 recipients`);

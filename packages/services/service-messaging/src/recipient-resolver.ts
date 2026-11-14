@@ -82,9 +82,8 @@ export interface RecipientResolverOptions {
 
 export interface ResolveContext {
     /**
-     * The emitting organization: the tenant scope applied to `role:`
-     * expansion, and the organization whose members `org:members` names —
-     * which resolves to nobody without it.
+     * The emitting organization: the one organization `role:` and
+     * `org:members` resolve in — both resolve to nobody without it.
      */
     organizationId?: string;
 }
@@ -104,7 +103,7 @@ export interface ResolveContext {
  *   - `'<userId>'`            → the id verbatim
  *   - `'user:<id>'`           → the id (prefix stripped)
  *   - `'<email>'`             → `sys_user` lookup by email → id (verbatim on miss)
- *   - `'role:<name>'`         → `sys_member` where `role = name` (tenant-scoped)
+ *   - `'role:<name>'`         → `sys_member` where `role = name` in the emitting organization (nobody without one)
  *   - `'org:members'`         → every `sys_member` of the emitting organization
  *   - `'team:<id>'`           → `sys_team_member` where `team_id = id`
  *   - `'owner_of:<obj>:<id>'` → the owner field of that record
@@ -190,13 +189,28 @@ export class RecipientResolver {
         return [value];
     }
 
-    /** `role:` → `sys_member` rows with that role in the tenant. */
+    /**
+     * `role:` → the `sys_member` rows holding that role in the emitting
+     * organization, and in no other.
+     *
+     * The posture `org:members` carries (see FAN_OUT_SYSTEM_CONTEXT): the
+     * organization filter is this read's tenant boundary, so with no emitting
+     * organization `role:` names nobody — 0 recipients, a warning, and no
+     * `sys_member` read at all. ⛔ Never a role read without the organization.
+     */
     private async resolveRole(role: string, data: IDataEngine | undefined, ctx: ResolveContext): Promise<string[]> {
-        if (!role || !data) return [];
-        const where: Record<string, unknown> = { role };
-        if (ctx.organizationId) where.organization_id = ctx.organizationId;
+        if (!role) return [];
+        const organizationId = ctx.organizationId;
+        if (!organizationId) {
+            this.opts.logger.warn(
+                `[recipients] role '${role}' names the holders of that role in the emitting organization, and this `
+                + 'emit names no organization; 0 recipients — pass organizationId to emit()',
+            );
+            return [];
+        }
+        if (!data) return [];
         try {
-            return await this.memberUserIds(data, this.memberObject, where);
+            return await this.memberUserIds(data, this.memberObject, { role, organization_id: organizationId });
         } catch (err) {
             this.opts.logger.warn(`[recipients] role '${role}' lookup failed (${msg(err)}); 0 recipients`);
             return [];
