@@ -19,6 +19,8 @@
 
 export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_approval_action.fields.action.label": "a36bba313a7aa9ab",
+  "objects.sys_approval_delegation._validations.delegate_not_delegator.message": "e4924bc4008bd3b5",
+  "objects.sys_approval_delegation._validations.validity_window_order.message": "e6a6433d70cb122d",
   "objects.sys_approval_request._actions.approval_remind.params.comment.label": "f78f61778f71bf68",
   "objects.sys_approval_request.fields.process_name.label": "8fe786e8e29c8cec",
   "objects.sys_approval_request.fields.process_package.help": "2c4cfa5880a99e24",
