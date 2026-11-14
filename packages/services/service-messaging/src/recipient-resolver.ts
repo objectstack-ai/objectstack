@@ -43,6 +43,19 @@ export const ORGANIZATION_MEMBERS_AUDIENCE = 'org:members';
 /** The selector namespace {@link ORGANIZATION_MEMBERS_AUDIENCE} lives in; reserved whole. */
 export const ORGANIZATION_AUDIENCE_PREFIX = 'org:';
 
+/** The prefix of a `role:NAME` audience — the holders of that role in the emitting organization. */
+export const ROLE_AUDIENCE_PREFIX = 'role:';
+
+/**
+ * Whether `spec` is a `role:NAME` audience, read exactly as
+ * {@link RecipientResolver} reads it (trimmed, then the prefix). The one
+ * spelling of that test, so a caller that treats `role:` apart from the other
+ * selectors cannot disagree with the resolver about which spec is one.
+ */
+export function isRoleAudience(spec: AudienceSpec): boolean {
+    return typeof spec === 'string' && spec.trim().startsWith(ROLE_AUDIENCE_PREFIX);
+}
+
 /**
  * Rows read per page by a membership expansion (`org:members`, `role:`,
  * `team:`). Each expansion pages to the end — there is no cap, so a large
@@ -165,7 +178,7 @@ export class RecipientResolver {
         if (!value) return [];
 
         if (value.startsWith('user:')) return [value.slice(5)].filter(Boolean);
-        if (value.startsWith('role:')) return this.resolveRole(value.slice(5), data, ctx);
+        if (isRoleAudience(value)) return this.resolveRole(value.slice(ROLE_AUDIENCE_PREFIX.length), data, ctx);
         if (value.startsWith('team:')) return this.resolveTeam(value.slice(5), data);
         if (value.startsWith(ORGANIZATION_AUDIENCE_PREFIX)) {
             if (value === ORGANIZATION_MEMBERS_AUDIENCE) return this.resolveOrganizationMembers(data, ctx);

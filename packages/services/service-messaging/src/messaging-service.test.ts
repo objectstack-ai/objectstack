@@ -1717,6 +1717,7 @@ describe('role: resolves in the emitting organization — the producer\'s, else 
         { id: 'm1', organization_id: 'org_a', user_id: 'u_a_admin_1', role: 'admin' },
         { id: 'm2', organization_id: 'org_a', user_id: 'u_a_admin_2', role: 'admin' },
         { id: 'm3', organization_id: 'org_b', user_id: 'u_b_admin', role: 'admin' },
+        { id: 'm4', organization_id: 'org_a', user_id: 'u_a_member', role: 'member' },
     ];
 
     /**
@@ -1748,14 +1749,14 @@ describe('role: resolves in the emitting organization — the producer\'s, else 
         return { engine, memberReads };
     }
 
-    async function emitRoleAdmin(stamp: string | null, organizationId?: string) {
+    async function emitRoleAdmin(stamp: string | null, organizationId?: string, audience: string[] = ['role:admin']) {
         const { engine, memberReads } = membershipEngine(stamp);
         const svc = new MessagingService({ logger: silentLogger(), getData: () => engine });
         const inbox = recordingChannel('inbox');
         svc.registerChannel(inbox.channel);
         const result = await svc.emit({
             topic: 't',
-            audience: ['role:admin'],
+            audience,
             channels: ['inbox'],
             payload: { title: 'Hi' },
             ...(organizationId !== undefined ? { organizationId } : {}),
@@ -1775,6 +1776,18 @@ describe('role: resolves in the emitting organization — the producer\'s, else 
         expect(recipients).toEqual([]);
         expect(result.delivered).toBe(0);
         expect(memberReads).toEqual([]);
+    });
+
+    it('org:members keeps the producer\'s organization: none named, nobody reached, while role: resolves in the stored one', async () => {
+        const { recipients, memberReads } = await emitRoleAdmin('org_a', undefined, ['org:members', 'role:admin']);
+        expect(recipients).toEqual(['u_a_admin_1', 'u_a_admin_2']);
+        expect(memberReads).toEqual([{ role: 'admin', organization_id: 'org_a' }]);
+    });
+
+    it('CONTROL: a producer-named organization is used by org:members and role: alike', async () => {
+        const { recipients, memberReads } = await emitRoleAdmin('org_b', 'org_a', ['org:members', 'role:admin']);
+        expect(recipients).toEqual(['u_a_admin_1', 'u_a_admin_2', 'u_a_member']);
+        expect(memberReads.every((w) => w.organization_id === 'org_a')).toBe(true);
     });
 
     it('CONTROL: a producer-named organization is the one used', async () => {
