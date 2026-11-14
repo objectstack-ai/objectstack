@@ -333,7 +333,8 @@ Leave and overtime requests share one rule: two live records of the same owner
 may not cover the same time (a room or shift booking is the same rule grouped by
 the room or the shift). There is no declarative key for it, and a validation
 rule cannot see the other records, so write it as a `before*` hook on **both**
-insert and update. This is the vetted form; rename its fields:
+insert and update. This is the vetted form; rename its `name` (the refusal's
+translation key follows it), its `object` and its fields:
 
 ```ts
 import { defineHook } from '@objectstack/spec/data';
@@ -348,15 +349,16 @@ export default defineHook({
     language: 'js',
     capabilities: ['api.read'],
     source: `
+      const DATE_ONLY = false; // true when start_at / end_at are date fields: the end day is booked too
       const r = Object.assign({}, ctx.previous, ctx.input); // update: stored row under the patch
       const off = ['rejected', 'cancelled'];
       if (!r.owner_id || !r.start_at || !r.end_at || off.includes(r.status)) return;
-      const day = String(r.end_at).length === 10; // a date field: its end day is inclusive
+      const day = (v) => String(v).slice(0, 10); // the day a date field stores, however it was written
       const where = {
         owner_id: r.owner_id,
         status: { $nin: off },  // fail closed: a new status counts until listed here
-        start_at: day ? { $lte: r.end_at } : { $lt: r.end_at },  // datetime is half-open:
-        end_at: day ? { $gte: r.start_at } : { $gt: r.start_at }, // 18:00 end, 18:00 start is no overlap
+        start_at: DATE_ONLY ? { $lte: day(r.end_at) } : { $lt: r.end_at },  // datetime is half-open:
+        end_at: DATE_ONLY ? { $gte: day(r.start_at) } : { $gt: r.start_at }, // 18:00 end, 18:00 start is no overlap
       };
       if (ctx.previous) where.id = { $ne: ctx.previous.id }; // not the record itself
       if (await ctx.api.object(ctx.object).count({ where }) > 0)
@@ -379,16 +381,19 @@ Each line is there for a reason:
   status is not checked; reviving it into an overlap is refused.
 - **Half-open ranges for `datetime`.** `start < other.end && end > other.start`:
   a booking ending at 18:00 and one starting at 18:00 do not overlap.
-- **Inclusive end days for `date`.** A `date` value is `YYYY-MM-DD`, ten
-  characters, and a one-day leave has `start == end`; the half-open test would
-  let the same day be booked twice, so date ranges compare with `<=` / `>=`.
+- **Inclusive end days for `date` — set `DATE_ONLY`.** A one-day leave has
+  `start == end`, so the half-open test would let the same day be booked twice.
+  With `DATE_ONLY = true` the template compares with `<=` / `>=`, and first cuts
+  each value to its leading `YYYY-MM-DD`: a `date` field also accepts a full ISO
+  instant or a `Date` and stores only that day, but a `before*` hook sees the
+  value as it was written.
 - **`runAs: 'system'`.** The count must see rows the saver cannot read: a
   delegate filing for someone under private sharing, or a room booked by
   others. Without it the hook's `ctx.api` reads as the saver (see
   [Elevation](#elevation--runas)) and misses them. The hook only counts; the
   write itself still runs as the saver.
 - **`ctx.api.object(ctx.object)`** counts in the object the hook fired on, so
-  only the field names need renaming.
+  the body names no object.
 - **A declared refusal.** The body throws the code alone; the saver gets the
   catalogue's fixed sentence (translated through the key
   `hooks.leave_request_no_overlap.refusals.OVERLAP.message`) and the caller a

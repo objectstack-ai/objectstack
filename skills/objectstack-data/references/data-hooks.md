@@ -621,11 +621,6 @@ result: {
 }
 ```
 
-### Cross-Object API
-
-Access other objects within the same transaction. `ctx.api.object(name)` is the
-same repository in both forms; the canonical query key is **`where`**.
-
 ---
 
 ## Common Patterns
@@ -758,8 +753,8 @@ const maskSensitiveData = defineHook({
 
 ### 5. No two of mine overlap (sandboxed `body`)
 
-No declarative key refuses two overlapping leave requests of one person; use
-this hook, renaming its fields.
+No declarative key refuses two overlapping leave requests of one person; copy
+this hook, renaming its `name`, `object` and fields (`date` fields: set `DATE_ONLY`).
 
 <!-- os:check -->
 ```typescript
@@ -775,15 +770,16 @@ export default defineHook({
     language: 'js',
     capabilities: ['api.read'],
     source: `
+      const DATE_ONLY = false; // true when start_at / end_at are date fields: the end day is booked too
       const r = Object.assign({}, ctx.previous, ctx.input); // update: stored row under the patch
       const off = ['rejected', 'cancelled'];
       if (!r.owner_id || !r.start_at || !r.end_at || off.includes(r.status)) return;
-      const day = String(r.end_at).length === 10; // a date field: its end day is inclusive
+      const day = (v) => String(v).slice(0, 10); // the day a date field stores, however it was written
       const where = {
         owner_id: r.owner_id,
         status: { $nin: off },  // fail closed: a new status counts until listed here
-        start_at: day ? { $lte: r.end_at } : { $lt: r.end_at },  // datetime is half-open:
-        end_at: day ? { $gte: r.start_at } : { $gt: r.start_at }, // 18:00 end, 18:00 start is no overlap
+        start_at: DATE_ONLY ? { $lte: day(r.end_at) } : { $lt: r.end_at },  // datetime is half-open:
+        end_at: DATE_ONLY ? { $gte: day(r.start_at) } : { $gt: r.start_at }, // 18:00 end, 18:00 start is no overlap
       };
       if (ctx.previous) where.id = { $ne: ctx.previous.id }; // not the record itself
       if (await ctx.api.object(ctx.object).count({ where }) > 0)
