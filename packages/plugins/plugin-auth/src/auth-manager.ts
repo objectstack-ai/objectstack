@@ -985,7 +985,9 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * error's `cause`.
    *
    * Read per call, so a value set by an `auth:configure` handler or
-   * `updateConfig` is the one asked. Unset = no host check.
+   * `updateConfig` is the one asked. Unset = no host check. Asked only where
+   * the delete admission runs: a manager with no data engine (an in-memory
+   * composition) runs no admission, so the check is not asked there either.
    */
   organizationDeleteGate?: (
     request: OrganizationDeleteGateRequest,
