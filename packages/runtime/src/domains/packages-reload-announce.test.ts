@@ -158,11 +158,11 @@ afterAll(async () => {
 const registry = () => (ql as any).registry;
 
 async function seed(rows: Array<Record<string, unknown>>): Promise<void> {
-    for (const row of rows) await ql.insert('sys_user_position', row, { context: SYSTEM_CTX } as any);
+    for (const row of rows) await ql.insert('sys_user_position', row, { context: SYSTEM_CTX });
 }
 
 async function positionsOf(ids: readonly string[]): Promise<Record<string, unknown>> {
-    const rows = (await ql.find('sys_user_position', { where: {}, context: SYSTEM_CTX } as any)) as Array<Record<string, unknown>>;
+    const rows = (await ql.find('sys_user_position', { where: {}, context: SYSTEM_CTX })) as Array<Record<string, unknown>>;
     return Object.fromEntries(rows.filter((r) => ids.includes(String(r.id))).map((r) => [String(r.id), r.position]));
 }
 
