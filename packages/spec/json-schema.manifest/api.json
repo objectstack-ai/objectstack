@@ -413,6 +413,7 @@
     "api/ResumeFailureDetails",
     "api/RetryStrategy",
     "api/RevertPackageCommitResponse",
+    "api/RollbackMetaItemRequest",
     "api/RollbackMetaItemResponse",
     "api/RollbackToPackageCommitResponse",
     "api/RouteCategory",
