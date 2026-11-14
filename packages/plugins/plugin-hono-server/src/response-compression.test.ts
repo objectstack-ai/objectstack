@@ -229,6 +229,41 @@ describe('HonoHttpServer response compression', () => {
         expect(head.headers['vary']).toMatch(/accept-encoding/i);
     });
 
+    // A `304` is never encoded, and it carries `Vary: Accept-Encoding` exactly
+    // when it carries a compressible `Content-Type`: the middleware judges the
+    // answer it is handed and cannot see the `200` the `304` stands for.
+    it('gives a 304 Vary: Accept-Encoding only when it carries a compressible Content-Type, and never encodes it', async () => {
+        const etag = '"v1"';
+        const port = await boot((s) => {
+            // The Console's stable-file shape: `ETag` and `Cache-Control`, no `Content-Type`.
+            s.getRawApp().get('/bare-304', () => new Response(null, {
+                status: 304,
+                headers: { etag, 'cache-control': 'no-cache' },
+            }));
+            // The dispatcher's shape (the translation bundle): `res.json()` of no body.
+            s.get('/json-304', (_req, res) => {
+                res.status(304).header('ETag', etag);
+                res.json(undefined);
+            });
+        });
+
+        const bare = await get(port, '/bare-304', { 'accept-encoding': 'gzip, br', 'if-none-match': etag });
+        expect(bare.status).toBe(304);
+        expect(bare.headers['content-type']).toBeUndefined();
+        expect(bare.headers['vary']).toBeUndefined();
+        expect(bare.headers['content-encoding']).toBeUndefined();
+        expect(bare.headers['etag']).toBe(etag);
+        expect(bare.body.byteLength).toBe(0);
+
+        const typed = await get(port, '/json-304', { 'accept-encoding': 'gzip, br', 'if-none-match': etag });
+        expect(typed.status).toBe(304);
+        expect(typed.headers['content-type']).toMatch(/^application\/json/);
+        expect(typed.headers['vary']).toMatch(/accept-encoding/i);
+        expect(typed.headers['content-encoding']).toBeUndefined();
+        expect(typed.headers['etag']).toBe(etag);
+        expect(typed.body.byteLength).toBe(0);
+    });
+
     it('survives a client that leaves in the middle of an encoded answer', async () => {
         // Text that compresses, but not to nothing: the encoder still has
         // output pending when the client goes away.
