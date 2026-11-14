@@ -252,8 +252,8 @@ export class AuditSealer {
     for (const [key, { fault, from }] of skipped) {
       this.report(`chain:${object}:${key}:${fault}`, () =>
         `AuditSealer: '${object}' chain '${key}' is skipped (${fault}) — its rows from the window of ${iso(from)} on are ` +
-        'NOT being sealed, and no checkpoint\'s sealed_through passes that window, so `os audit verify` reads them ' +
-        'unsealed; every other chain is sealed. Each pass retries the chain from that window. Fix the fault named here.');
+        'NOT being sealed, and no checkpoint\'s sealed_through passes that window; every other chain is sealed. ' +
+        'Each pass retries the chain from that window. Fix the fault named here.');
     }
   }
 
