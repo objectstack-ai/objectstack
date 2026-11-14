@@ -57,6 +57,7 @@ const Deal = {
     country: { type: 'lookup', label: 'Country', reference: 'crm_country' },
     home_org: { type: 'lookup', label: 'Home organization', reference: 'sys_organization' },
     ledger_kind: { type: 'lookup', label: 'Ledger kind', reference: 'crm_ledger_kind' },
+    tag: { type: 'lookup', label: 'Tag', reference: 'crm_workspace_tag' },
   },
 };
 /** A tenant-carrying app object: its rows belong to one organization each. */
@@ -77,7 +78,25 @@ const LedgerKind = {
   fields: { name: { type: 'text', label: 'Name' } },
 };
 
-const OBJECTS = [SysUser, SysMember, SysOrganization, Deal, Account, Country, LedgerKind] as const;
+/**
+ * An author's object with no `organization_id` column that is STILL walled per
+ * organization, by another tenant column: not a global object.
+ */
+const WorkspaceTag = {
+  name: 'crm_workspace_tag',
+  label: 'Workspace tag',
+  tenancy: { enabled: true, tenantField: 'workspace_id' },
+  systemFields: { tenant: false },
+  fields: { name: { type: 'text', label: 'Name' }, workspace_id: { type: 'text', label: 'Workspace' } },
+};
+/** A self-referencing tenant-carrying object: a forward reference to it defers to pass 2. */
+const Task = {
+  name: 'crm_task',
+  label: 'Task',
+  fields: { name: { type: 'text', label: 'Name' }, parent: { type: 'lookup', label: 'Parent', reference: 'crm_task' } },
+};
+
+const OBJECTS = [SysUser, SysMember, SysOrganization, Deal, Account, Country, LedgerKind, WorkspaceTag, Task] as const;
 
 type Row = Record<string, unknown> & { id: string; name: string };
 type Replayer = (organizationId: string, options?: { reseed?: boolean }) => Promise<{
@@ -216,6 +235,26 @@ describe('#33207 an organization-scoped load resolves a person through membershi
     expect(south.errors[0].message).toContain(`not a member of organization ${ORG_SOUTH}`);
   });
 
+  it('a member among more same-named people than one read holds is found; "not a member" is said only after all were asked', async () => {
+    const { engine, replayer, dealsOf } = await boot({ posture: 'isolated', data: [deals([{ name: 'Deal 1', rep: 'Li Na' }])] });
+    const sys = { context: { isSystem: true } } as any;
+    // Sixty people named Li Na; only the one with the highest id is a member of
+    // North, so a probe that weighed a single page of candidates misses her.
+    for (let n = 0; n < 60; n++) {
+      await engine.insert('sys_user', { id: `usr_li_${String(n).padStart(2, '0')}`, name: 'Li Na', email: `li.${n}@example.com` }, sys);
+    }
+    await engine.insert('sys_member', { id: 'mem_li_n', user_id: 'usr_li_59', organization_id: ORG_NORTH, role: 'member' }, sys);
+
+    const north = await replayer!(ORG_NORTH);
+    const south = await replayer!(ORG_SOUTH);
+
+    expect(north.errors).toEqual([]);
+    expect((await dealsOf(ORG_NORTH))[0].rep).toBe('usr_li_59');
+    expect((await dealsOf(ORG_SOUTH))[0].rep ?? null).toBeNull();
+    expect(south.errors).toHaveLength(1);
+    expect(south.errors[0].message).toContain(`not a member of organization ${ORG_SOUTH}`);
+  });
+
   it('a refused probe is reported with its code, not swallowed as "not found"', async () => {
     const { replayer, logger } = await boot({ posture: 'isolated', data: [deals([{ name: 'Deal 1', ledger_kind: 'Standard' }])] });
 
@@ -236,6 +275,16 @@ describe('#33207 an organization-scoped load resolves a person through membershi
     const { replayer, dealsOf } = await boot({ posture: 'isolated', data: [deals([{ name: 'Deal 1', country: 'China' }])] });
     expect((await replayer!(ORG_NORTH)).errors).toEqual([]);
     expect((await dealsOf(ORG_NORTH))[0].country).toBe('cty_cn');
+  });
+
+  it('an object walled by another tenant column is not taken for a global one: another organization’s row is not borrowed', async () => {
+    const { engine, replayer, dealsOf } = await boot({ posture: 'isolated', data: [deals([{ name: 'Deal 1', tag: 'Gold' }])] });
+    await engine.insert('crm_workspace_tag', { id: 'tag_gold_s', name: 'Gold', workspace_id: ORG_SOUTH }, { context: { isSystem: true } } as any);
+
+    const north = await replayer!(ORG_NORTH);
+
+    expect((await dealsOf(ORG_NORTH))[0].tag ?? null).toBeNull();
+    expect(north.errors).toHaveLength(1);
   });
 
   it('the organization table answers only for the load organization', async () => {
@@ -296,14 +345,41 @@ describe('#33206 a seed write carries the organization its rows are stamped with
     expect(seen.map((s) => s.session?.organizationId)).toEqual([ORG_SOUTH]);
   });
 
+  it('a row that supplies its own organization is written as that organization, its pass-2 back-fill included', async () => {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    const { engine, metadata, logger, seen } = await boot({ posture: 'isolated', data: [] });
+    // An id the loader keeps as written (UUID-shaped; an `org_` id names no
+    // organization but the load's own on a pinned load, so it never lands).
+    const ORG_EAST = '5f0c2d9e-7b1a-4c3e-9a8d-2e6f1b0c4a77';
+    await engine.insert('sys_organization', { id: ORG_EAST, name: 'East', slug: 'east' }, { context: { isSystem: true } } as any);
+    const loader = new SeedLoaderService(engine as any, metadata as any, logger as any);
+
+    const result = await loader.load({
+      seeds: [
+        deals([{ name: 'Theirs', organization_id: ORG_EAST }]),
+        // `Child` names `Parent` before it exists, so its link is back-filled in
+        // pass 2 by id; the row lives in East, the load is pinned to North.
+        { object: 'crm_task', mode: 'upsert', externalId: 'name', records: [{ name: 'Child', parent: 'Parent', organization_id: ORG_EAST }, { name: 'Parent' }] },
+      ],
+      config: { multiPass: true, organizationId: ORG_NORTH },
+    } as any);
+
+    expect(result.errors).toEqual([]);
+    expect(seen.map((s) => [s.session?.organizationId, s.rowOrganization])).toEqual([[ORG_EAST, ORG_EAST]]);
+    const tasks = (await engine.find('crm_task', { where: {}, context: { isSystem: true } } satisfies EngineQueryOptions)) as Row[];
+    const byName = Object.fromEntries(tasks.map((t) => [t.name, t]));
+    expect(byName.Child.organization_id).toBe(ORG_EAST);
+    expect(byName.Child.parent).toBe(byName.Parent.id);
+  });
+
   it('CONTROL — a load with no organization, pinned or derived, writes with the seed posture unchanged', async () => {
     const { seen } = await boot({ posture: 'single', organizations: false, data: [deals([{ name: 'Deal 1' }])] });
     expect(seen).toHaveLength(1);
     expect(seen[0].session).toEqual({ isSystem: true, skipTriggers: true });
   });
 
-  it('under a walled posture a hook reads through ctx.api within the load organization (the declared narrowing)', async () => {
-    process.env.OS_TENANCY_POSTURE = 'isolated';
+  it.each(['isolated', 'group'] as const)('under the walled posture %s a hook reads through ctx.api within the load organization (the declared narrowing)', async (posture) => {
+    process.env.OS_TENANCY_POSTURE = posture;
     const { engine, replayer } = await boot({ posture: 'isolated', data: [deals([{ name: 'Seeded' }])] });
     await engine.insert('crm_deal', { name: 'South deal', organization_id: ORG_SOUTH }, { context: { isSystem: true } } as any);
     const reads: string[][] = [];
