@@ -53,6 +53,9 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   RecordContextProvider: ({ children }: { children: any }) => <>{children}</>,
 }));
 
+// The source loads this lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 // "Convert to full page" on a grouped object loads every catalogue for the
 // ungrouped heading (objectstack#33377): resident at import, not in a clock.
 import { builtInLocales, registerBuiltInLocales } from '@object-ui/i18n/locales';
