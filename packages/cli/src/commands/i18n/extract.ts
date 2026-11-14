@@ -30,6 +30,7 @@ import {
   countTranslationLeaves,
   type FillStrategy,
   type TranslationModuleKind,
+  resolveSourceLocale,
 } from '../../utils/i18n-bundle-extract.js';
 import { authoringRuleUnionStack } from '../../utils/stack-collections.js';
 
@@ -191,7 +192,7 @@ export default class I18nExtract extends Command {
   static override flags = {
     json: Flags.boolean({ description: 'Output JSON instead of writing files' }),
     'default-locale': Flags.string({
-      description: "Locale filled from schema labels. Defaults to the config's i18n.defaultLocale, else 'en'.",
+      description: "Source locale, filled from schema labels (the language they are written in). Overrides the config's i18n.sourceLocale, else its i18n.defaultLocale, else 'en'.",
     }),
     locales: Flags.string({
       description:
@@ -257,7 +258,7 @@ export default class I18nExtract extends Command {
       const filter = flags.filter ? new RegExp(flags.filter) : undefined;
       // The stack's own `i18n` block already names the languages it ships, so
       // scaffolding those by default saves repeating them on every invocation.
-      const declared = (normalized as { i18n?: { defaultLocale?: unknown; supportedLocales?: unknown } }).i18n;
+      const declared = (normalized as { i18n?: { sourceLocale?: unknown; defaultLocale?: unknown; supportedLocales?: unknown } }).i18n;
       const declaredLocales = Array.isArray(declared?.supportedLocales)
         ? declared.supportedLocales.filter((l): l is string => typeof l === 'string' && l.length > 0)
         : [];
@@ -266,11 +267,10 @@ export default class I18nExtract extends Command {
         : declaredLocales.length > 0
           ? declaredLocales
           : undefined;
-      const defaultLocale =
-        flags['default-locale'] ??
-        (typeof declared?.defaultLocale === 'string' && declared.defaultLocale.length > 0
-          ? declared.defaultLocale
-          : 'en');
+      // The locale the inline text IS — filled from it, and rewritten from it on
+      // every merge. `i18n.sourceLocale` outranks the users' `defaultLocale`,
+      // through the one reading `os lint` and `os i18n check` share.
+      const defaultLocale = flags['default-locale'] ?? resolveSourceLocale(declared);
 
       // Resolved before the extract because the previously committed provenance
       // records are an INPUT to it: they are the mechanism's only memory, and a

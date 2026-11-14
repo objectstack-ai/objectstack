@@ -938,7 +938,7 @@ export default class Lint extends Command {
     }),
     'default-locale': Flags.string({
       description:
-        "Default locale for i18n coverage (must be 100% translated). Defaults to the config's i18n.defaultLocale, else 'en'.",
+        "Source locale for i18n coverage: the language inline labels are written in, which they satisfy and errors are raised against. Overrides the config's i18n.sourceLocale, else its i18n.defaultLocale, else 'en'.",
     }),
   };
 

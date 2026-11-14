@@ -5,6 +5,7 @@ import {
   collectExpectedEntries,
   extractTranslations,
   renderTranslationModule,
+  resolveSourceLocale,
   stackAuthoredSubtree,
 } from '../src/utils/i18n-bundle-extract.js';
 
@@ -590,5 +591,40 @@ describe('stackAuthoredSubtree', () => {
   it('is a no-op on data that never had a baseline', () => {
     const input = { objects: { a: { label: 'A' } } } as any;
     expect(stackAuthoredSubtree(input)).toEqual(input);
+  });
+});
+
+// The locale `os i18n extract` fills from the inline text: `--default-locale`,
+// else `resolveSourceLocale(config.i18n)` — `i18n.sourceLocale`, else
+// `i18n.defaultLocale`, else 'en'. Shared with `os lint` / `os i18n check`.
+describe('resolveSourceLocale — the inline text\'s language', () => {
+  it('reads sourceLocale ahead of the users\' defaultLocale', () => {
+    expect(resolveSourceLocale({ defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['zh-CN'] })).toBe('en');
+  });
+
+  it('falls back to defaultLocale, then to en', () => {
+    expect(resolveSourceLocale({ defaultLocale: 'zh-CN', supportedLocales: ['zh-CN'] })).toBe('zh-CN');
+    expect(resolveSourceLocale({ defaultLocale: '', sourceLocale: '' })).toBe('en');
+    expect(resolveSourceLocale(undefined)).toBe('en');
+  });
+
+  it('an English-authored stack defaulting users to zh-CN fills en from the source and merges zh-CN', () => {
+    const cfg: any = {
+      i18n: { defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
+      objects: [{ name: 'crm_account', label: 'Account', fields: { name: { label: 'Account Name' } } }],
+      translations: [{ 'zh-CN': { objects: { crm_account: { label: '客户' } } } }],
+    };
+    const { bundles } = extractTranslations(cfg, {
+      defaultLocale: resolveSourceLocale(cfg.i18n),
+      locales: cfg.i18n.supportedLocales,
+      mergeExisting: true,
+    });
+    // en is the source: filled from the inline text.
+    expect(bundles.en.objects?.crm_account?.label).toBe('Account');
+    expect(bundles.en.objects?.crm_account?.fields?.name?.label).toBe('Account Name');
+    // zh-CN is a translated locale: its row is kept, its gap is left empty —
+    // never overwritten with the English source.
+    expect(bundles['zh-CN'].objects?.crm_account?.label).toBe('客户');
+    expect(bundles['zh-CN'].objects?.crm_account?.fields?.name?.label).toBe('');
   });
 });
