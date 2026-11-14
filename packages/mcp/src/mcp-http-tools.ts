@@ -2639,7 +2639,7 @@ export function registerObjectTools(
           // include it. Left in, it is listed in `inScope.fields` and a read
           // of it answers ok here while the gate refuses it. The name is the
           // engine's own constant, loaded on the first call like `@objectstack/lint`.
-          const { SEARCH_COMPANION_FIELD } = await import('@objectstack/objectql');
+          const { SEARCH_COMPANION_FIELD } = await import('@objectstack/objectql/core');
           for (const f of fieldDefs) {
             if (typeof f?.name !== 'string') continue;
             if (f.name === SEARCH_COMPANION_FIELD) continue;

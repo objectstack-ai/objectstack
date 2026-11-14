@@ -16,7 +16,7 @@ import {
 } from '@objectstack/lint';
 
 import { applyInjectedSystemColumns } from '@objectstack/metadata-core';
-import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from '@objectstack/objectql';
+import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from '@objectstack/objectql/core';
 
 import { MCPServerRuntime, describeServedObject } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';

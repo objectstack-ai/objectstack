@@ -58,17 +58,19 @@ export default defineConfig({
     // table is a VALUE import too, and judging this transport against a stale
     // build of it would be the same silent wrong-tree verdict.
     //
-    // The `@objectstack/objectql` entry is for `mcp-validate-expression.test.ts`,
-    // which provisions the search companion with the engine's own
-    // `provisionSearchCompanion` and reads its name from `SEARCH_COMPANION_FIELD`,
-    // the constant `validate_expression` leaves out of scope: both VALUE imports,
-    // judged against the source in the checkout, not a build of it. Anchored
-    // because `@objectstack/objectql` exports a `./core` subpath.
+    // The `@objectstack/objectql/core` entry (the lean engine entry, ADR-0076)
+    // serves `validate_expression`, which loads `SEARCH_COMPANION_FIELD` from it
+    // on the first call, and `mcp-validate-expression.test.ts`, which provisions
+    // the search companion with the engine's own `provisionSearchCompanion`:
+    // both VALUE imports, judged against the source in the checkout, not a
+    // build of it. The lean entry, not the barrel: transforming the barrel's
+    // `@objectstack/metadata-protocol` graph on that first call outran a test's
+    // 5 s budget.
     alias: [
       { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../metadata-core/src/index.ts') },
       { find: /^@objectstack\/metadata-core\/testing$/, replacement: path.resolve(__dirname, '../metadata-core/src/testing.ts') },
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../lint/src/index.ts') },
-      { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../objectql/src/index.ts') },
+      { find: /^@objectstack\/objectql\/core$/, replacement: path.resolve(__dirname, '../objectql/src/core.ts') },
     ],
   },
 });
