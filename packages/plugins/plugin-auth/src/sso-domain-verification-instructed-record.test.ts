@@ -197,13 +197,13 @@ async function bridge(door: 'request-domain-verification' | 'verify-domain', bod
 }
 
 /** An org-less provider the admin registered (`checkProviderAccess` grants the registrar), unverified. */
-async function seedProvider(providerId: string): Promise<void> {
+async function seedProvider(providerId: string, domain: string = DOMAIN): Promise<void> {
   const now = new Date().toISOString();
   await driver.create('sys_sso_provider', {
     id: `ssop_${providerId}`,
     provider_id: providerId,
     issuer: `https://idp.${DOMAIN}`,
-    domain: DOMAIN,
+    domain,
     user_id: adminId,
     organization_id: null,
     domain_verified: false,
@@ -326,6 +326,65 @@ describe('[#25111] the vendor’s second form, unchanged by this card', () => {
     publish(record.name, record.token);
     const res = await verify('vendor', providerId);
     expect(res.status, JSON.stringify(res.body)).toBe(204);
+    expect(await domainVerified(providerId)).toBe(true);
+  });
+});
+
+describe('the record is placed on the provider\'s registered domain, which the answer carries', () => {
+  const label = (providerId: string) => `_better-auth-token-${providerId}`;
+
+  it('a request naming only the provider answers its registered domain and the record under it', async () => {
+    const providerId = 'p33197-registered';
+    await seedProvider(providerId);
+    const { status, json } = await bridge('request-domain-verification', { providerId });
+    expect(status, JSON.stringify(json)).toBe(200);
+    expect(json.data.domain).toBe(DOMAIN);
+    expect(json.data.dnsRecordName).toBe(`${label(providerId)}.${DOMAIN}`);
+    expect(json.data.dnsRecords).toEqual([
+      { domain: DOMAIN, type: 'TXT', name: `${label(providerId)}.${DOMAIN}`, value: json.data.dnsRecordValue },
+    ]);
+    // ...and that is where verify-domain looks: the answered record verifies.
+    publish(json.data.dnsRecordName, json.data.dnsRecordValue);
+    queried.length = 0;
+    const res = await verify('bridge', providerId);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(queried).toEqual([json.data.dnsRecordName]);
+  });
+
+  it('CONTROL: a domain in the request body does not move the record off the registered domain', async () => {
+    const providerId = 'p33197-body-domain';
+    await seedProvider(providerId);
+    const { status, json } = await bridge('request-domain-verification', { providerId, domain: 'elsewhere.example' });
+    expect(status, JSON.stringify(json)).toBe(200);
+    expect(json.data.domain).toBe(DOMAIN);
+    expect(json.data.dnsRecordName).toBe(`${label(providerId)}.${DOMAIN}`);
+  });
+
+  it('a provider listing several domains answers one record per domain, and verifies only with every one published', async () => {
+    const providerId = 'p33197-list';
+    const second = 'Second-33197.example.org';
+    await seedProvider(providerId, `${DOMAIN}, ${second}`);
+    const { status, json } = await bridge('request-domain-verification', { providerId });
+    expect(status, JSON.stringify(json)).toBe(200);
+    expect(json.data.domain).toBe(`${DOMAIN}, ${second}`);
+    const names = [`${label(providerId)}.${DOMAIN}`, `${label(providerId)}.${second.toLowerCase()}`];
+    expect(json.data.dnsRecords.map((r: { name: string }) => r.name)).toEqual(names);
+    expect(new Set(json.data.dnsRecords.map((r: { value: string }) => r.value))).toEqual(new Set([json.data.dnsRecordValue]));
+    expect(json.data.dnsRecordName).toBe(names.join(', '));
+
+    // CONTROL: the record under the first domain alone is not enough.
+    publish(names[0]!, json.data.dnsRecordValue);
+    const partial = await verify('bridge', providerId);
+    expect(partial.status, JSON.stringify(partial.body)).toBe(502);
+    expect(partial.code).toBe('DOMAIN_VERIFICATION_FAILED');
+    expect(await domainVerified(providerId)).toBe(false);
+
+    published.clear();
+    for (const name of names) published.set(name, [[json.data.dnsRecordValue]]);
+    queried.length = 0;
+    const res = await verify('bridge', providerId);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(queried).toEqual(names);
     expect(await domainVerified(providerId)).toBe(true);
   });
 });
