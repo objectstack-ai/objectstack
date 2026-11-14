@@ -346,7 +346,7 @@ describe('role: names the holders of that role in the emitting organization, and
         expect(log.warns.filter((line) => line.includes("role 'member'") && line.includes('names no organization'))).toHaveLength(2);
     });
 
-    it('CONTROL: the rest of an audience still resolves when role: names nobody', async () => {
+    it('the rest of an audience still resolves when role: names nobody', async () => {
         const table = membershipTable(MEMBERS);
         const r = new RecipientResolver({ getData: () => table.engine, logger: silentLogger() });
         expect(await r.resolve(['role:member', 'user:u_direct', 'team:none'])).toEqual(['u_direct']);
