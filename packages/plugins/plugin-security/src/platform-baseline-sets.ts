@@ -75,8 +75,9 @@
  *
  * An override only ever narrows: the contribution is first held to every rule
  * above as the contributor wrote it, and the host can then take bits away,
- * never add one. A set left granting nothing is not registered and joins no
- * baseline (`joined: false`, as for a deployment with no baseline). An
+ * never add one. A set left granting nothing is not registered, so it holds
+ * no registry name (another package may then register that name), and it
+ * joins no baseline (`joined: false`, as for a deployment with no baseline). An
  * override that matched no admitted contribution by the time the boot window
  * closes is reported at `warn` ({@link PlatformBaselineSets.unmatchedOverrides}),
  * so a renamed set or object is said rather than silently left in force.
