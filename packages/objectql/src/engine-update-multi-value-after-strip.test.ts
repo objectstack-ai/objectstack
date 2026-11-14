@@ -148,6 +148,13 @@ describe('the update door judges and stores the payload left after the fields th
     expect(rows.get('o1')).toMatchObject({ tags: ['a'] });
   });
 
+  it('by id: a value the lock removes is not judged — the update stores what is left', async () => {
+    const { events, options } = drops();
+    await engine.update('claim', { id: 'c1', tags: { a: 1 }, note: 'changed' }, { context: ctx, ...options } as any);
+    expect(rows.get('c1')).toMatchObject({ tags: ['a'], note: 'changed' });
+    expect(events).toEqual([{ fields: ['tags'], reason: 'readonly_when' }]);
+  });
+
   it('by id, CONTROL: a lock reading a multi-valued field reads it in its stored list form', async () => {
     const { events, options } = drops();
     await engine.update('claim_view', { id: 'v1', tags: 'b', note: 'changed' }, { context: ctx, ...options } as any);
