@@ -405,8 +405,6 @@
     "HookParsed (type)",
     "HookQuery (type)",
     "HookRefusal (type)",
-    "HookRefusalReason (type)",
-    "HookRefusalReasonSchema (const)",
     "HookRefusalSchema (const)",
     "HookSchema (const)",
     "HookUpdateDoc (type)",

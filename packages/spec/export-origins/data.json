@@ -395,8 +395,6 @@
     "HookParsed": "src/data/hook.zod.ts#HookParsed (type)",
     "HookQuery": "src/data/hook-api.ts#HookQuery (type)",
     "HookRefusal": "src/data/hook.zod.ts#HookRefusal (type)",
-    "HookRefusalReason": "src/data/hook.zod.ts#HookRefusalReason (type)",
-    "HookRefusalReasonSchema": "src/data/hook.zod.ts#HookRefusalReasonSchema (const)",
     "HookRefusalSchema": "src/data/hook.zod.ts#HookRefusalSchema (const)",
     "HookSchema": "src/data/hook.zod.ts#HookSchema (const)",
     "HookUpdateDoc": "src/data/hook-api.ts#HookUpdateDoc (type)",

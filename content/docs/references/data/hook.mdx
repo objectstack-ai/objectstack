@@ -1,7 +1,7 @@
 ---
 title: Hook schema — Data Protocol property reference
 navTitle: Hook
-description: "Hook schemas of the ObjectStack Data Protocol: Hook, HookContext, HookEvent and 2 more — each property with its type, default and a TypeScript example."
+description: "Hook schemas of the ObjectStack Data Protocol: Hook, HookContext, HookEvent, HookRefusal — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Hook schemas of the ObjectStack Data Protocol: Hook, HookContext, 
 ## TypeScript Usage
 
 ```typescript
-import { HookSchema, HookContextSchema, HookEvent, HookRefusalSchema, HookRefusalReasonSchema } from '@objectstack/spec/data';
-import type { Hook, HookContext, HookRefusal, HookRefusalReason } from '@objectstack/spec/data';
+import { HookSchema, HookContextSchema, HookEvent, HookRefusalSchema } from '@objectstack/spec/data';
+import type { Hook, HookContext, HookRefusal } from '@objectstack/spec/data';
 
 // Validate data
 const result = HookSchema.parse(data);
@@ -190,17 +190,6 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **params** | `string[]` | optional | The names this entry's sentences may fill: a `{{ NAME }}` hole renders the value the hook throws in `params` (`{ code, params: { NAME: value } }`). A hole over any other name is refused. Absent: the sentences are plain text and a `{{ }}` hole is refused |
 
 ### Nested Shape: `HookRefusal.reasons[string]`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **message** | `string` | ✅ | The sentence the user reads when the hook throws this reason under its code — in the source locale, translated through hooks.`<hook>`.refusals.`<CODE>`.reasons.`<REASON>`.message in the caller's locale; a `{{ }}` hole names one of the entry's params |
-
-
----
-
-## HookRefusalReason
-
-### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
