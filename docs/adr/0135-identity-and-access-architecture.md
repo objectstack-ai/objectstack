@@ -282,6 +282,19 @@ register-then-login flow. The surface is
 > as a URL or with a port proves nothing). That ruling, not this file, is its authority; #32669
 > implements it. Cloud ADR-0024's own text is not amended here.
 
+> **Note (2026-11-14, objectstack) — the same rule for a link and for an address change.** The
+> proven-domain account rule above also decides the two other ways an SSO sign-in reaches an
+> account, so "accounts that already exist are not re-checked" now holds only for a sign-in that
+> neither links nor changes the stored address. With domain verification on: an implicit link to
+> an account that already exists is made only when the asserted address is at a domain the
+> provider has proven, compared exactly as for creation; and a sign-in that would change a linked
+> account's stored address is admitted only when the new address is at such a domain. A sign-in
+> that would not change the stored address is not judged. Both fail closed and answer
+> `EMAIL_DOMAIN_NOT_ALLOWED`, the code creation answers. The authority is the security lane seat's
+> order of 2026-11-14 extending the 2026-11-13 ruling to these two paths, and the contract
+> review's reading on record 6880992920; #33307 implements it, in plugin-auth's rule at the same
+> `user.validateUserInfo` gate (`packages/plugins/plugin-auth/src/implicit-account-linking.ts`).
+
 ⚠️ **The SCIM half of "SSO + SCIM per production environment" is not restated here.** Its
 mechanism record is `cloud ADR-0071`, mirrored into this repository by its own card; this file
 records only that the same environment-side posture applies to it — the SCIM models are bridged
@@ -331,8 +344,8 @@ spelling. The re-pointing is per-site and semantic.
 
 ## What this record does NOT settle
 
-- **Anything cloud ADR-0024 did not decide.** This file adds no clause, except the one the D6
-  note on the proven-domain account rule names as this repository's own. Where the mechanism in
+- **Anything cloud ADR-0024 did not decide.** This file adds no clause, except the proven-domain
+  account rule the D6 notes name as this repository's own. Where the mechanism in
   this tree is richer than the decision (the ADR-0092 write guard, the ADR-0095 tenant wall, the
   ADR-0091 validity window), that richness belongs to those records, and is cited here only as the
   thing D4 and D5 lean on.
