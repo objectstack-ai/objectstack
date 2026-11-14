@@ -434,8 +434,15 @@ posture, the platform operator. This has three author-visible consequences:
   Studio, or the clone door below) and edit the copy: a copy of a set an
   installed package ships lands in that package's paired `<package>.custom`,
   and package upgrades keep reaching the original. A set is never overridden
-  under its own name, not even from `.custom`: permission sets, positions and
-  capabilities hold one name per deployment (ADR-0146 D6). Every other set
+  under its own name, not even from `.custom`: a permission set takes no
+  override (ADR-0146 D6), and a set of the shipped set's name saved into the
+  pair is refused like an edit of the set itself (`403 NOT_OVERRIDABLE`). A
+  permission set is identified by its package and name (ADR-0150 D2), so a name
+  has one holder per namespace: packages of two namespaces may each ship a set
+  of one name, each granted by its own package and name, while two packages of
+  one namespace, a package with no namespace, a platform package (`base`,
+  `system`, `sys`) and the platform-requested `guest_portal` keep one holder.
+  Positions and capabilities keep one name per deployment. Every other set
   (one authored in this system, a clone, or one saved into a writable runtime package) is edited in place: the edit
   lands on its one stored definition.
 - **The API name is immutable after creation.** It is the definition's metadata

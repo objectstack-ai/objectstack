@@ -174,9 +174,13 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     priority: BASE_PRIORITY,
     items: [
       // Audit Logs (sys_audit_log) is contributed by @objectstack/plugin-audit
-      // which now owns it (ADR-0029 K2).
-      { id: 'nav_sessions', type: 'object', label: 'Sessions', objectName: 'sys_session', viewName: 'all_sessions', icon: 'monitor' },
-      { id: 'nav_notifications', type: 'object', label: 'Notification Events', objectName: 'sys_notification', viewName: 'recent', icon: 'bell', requiresObject: 'sys_notification' },
+      // which now owns it (ADR-0029 K2), gated on its own read capability.
+      //
+      // `group_diagnostics` carries no gate of its own, so each entry here
+      // carries the `manage_platform_settings` gate the group used to: the
+      // two entries are served to exactly the members they were before.
+      { id: 'nav_sessions', type: 'object', label: 'Sessions', objectName: 'sys_session', viewName: 'all_sessions', icon: 'monitor', requiredPermissions: ['manage_platform_settings'] },
+      { id: 'nav_notifications', type: 'object', label: 'Notification Events', objectName: 'sys_notification', viewName: 'recent', icon: 'bell', requiresObject: 'sys_notification', requiredPermissions: ['manage_platform_settings'] },
     ],
   },
   {

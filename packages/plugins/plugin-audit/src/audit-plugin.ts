@@ -66,7 +66,7 @@ import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction } from './activity-field-redaction.js';
 import { installActivitySummaryLocale } from './activity-summary-message.js';
 import { installAuditLogFieldRedaction } from './audit-log-field-redaction.js';
-import { installAuditLogReadVisibility } from './audit-log-read-visibility.js';
+import { installAuditLogReadVisibility, LEDGER_AUDIT_CAPABILITY } from './audit-log-read-visibility.js';
 import type { FieldVisibilitySource } from './served-fields.js';
 import { installParentFieldQueryGuards } from './parent-field-query-guard.js';
 import type { ParentObjectReadAdmission } from './parent-record-read-gate.js';
@@ -350,7 +350,15 @@ export class AuditPlugin implements Plugin {
       pages: [SysAuditLogDetailPage],
       // ADR-0029 D7 — contribute the one Audit Log entry into the Setup app's
       // `group_diagnostics` slot. The plugin owns sys_audit_log (K2), so the
-      // entry lives and dies with this plugin and needs no item gate.
+      // entry lives and dies with this plugin.
+      //
+      // The entry is gated on `view_all_audit_log`, the ledger's own read
+      // capability (`LEDGER_AUDIT_CAPABILITY`), not on the slot's: the slot
+      // carries no gate, because a group gate prunes every child before the
+      // child is judged, and `manage_platform_settings` there hid the entry
+      // from an auditor who holds the read capability and no platform-settings
+      // power (separation of duties). Platform administrators hold both by
+      // default (`ADMIN_FULL_ACCESS_CAPABILITIES`), so they still see it.
       //
       // #23890 — ONE entry, and it opens the console's audit browser (the
       // `audit:log` registry key, objectui `registerSystemComponents.tsx`):
@@ -372,7 +380,7 @@ export class AuditPlugin implements Plugin {
           group: 'group_diagnostics',
           priority: 100,
           items: [
-            { id: 'nav_audit_logs', type: 'component', label: 'Audit Log', componentRef: 'audit:log', icon: 'scroll-text' },
+            { id: 'nav_audit_logs', type: 'component', label: 'Audit Log', componentRef: 'audit:log', icon: 'scroll-text', requiredPermissions: [LEDGER_AUDIT_CAPABILITY] },
           ],
         },
       ],
