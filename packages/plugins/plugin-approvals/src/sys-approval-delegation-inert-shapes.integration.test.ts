@@ -28,6 +28,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { bindDelegationWriteGuard } from './lifecycle-hooks.js';
@@ -103,7 +104,7 @@ const expectWindowRefusal = (err: unknown) => expectRefusal(err, 'valid_until', 
 const expectSelfRefusal = (err: unknown) => expectRefusal(err, 'delegate_id', 'delegate_not_delegator');
 
 async function rowsOf(h: Harness, id: string): Promise<any[]> {
-  const rows = await h.engine.find(DELEGATIONS, { where: { id }, context: SYS } as any);
+  const rows = await h.engine.find(DELEGATIONS, { where: { id }, context: SYS as any } satisfies EngineQueryOptions);
   return Array.isArray(rows) ? rows : [];
 }
 
