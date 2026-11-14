@@ -522,9 +522,9 @@ export class UpdateFacet {
        // values out of the HOOKS' view only, and the confluence below hands
        // them straight back before anything engine-owned reads the payload.
        //
-       // What that buys: the post-hook declared-field door,
-       // `normalizeMultiValueFields`, `validateRecord`, the `readonlyWhen`
-       // strip, the static strip and therefore `onFieldsDropped`, the WARN and
+       // What that buys: the post-hook declared-field door, the `readonlyWhen`
+       // strip, the static strip, `normalizeMultiValueFields`, `validateRecord`
+       // and therefore `onFieldsDropped`, the WARN and
        // `strictReadonlyWrites` all see the payload they see today, and say the
        // identical thing about it. ⛔ Feeding those channels from HERE instead
        // is the shape to avoid: it would report — and under strict REFUSE — a
@@ -1143,6 +1143,34 @@ export class UpdateFacet {
            // [#4769] See the insert path — an update admits values on the same
            // terms, so it owes the same counterexample.
            const onAdmittedValueShapeViolation = this.admittedViolationSink(object);
+           // The update door judges and stores the payload LEFT once the fields
+           // the caller may not write are removed — the insert door's order:
+           // strip, then the multi-value wrap, then the first value judgement.
+           // Both branches call this right after their two read-only strips, so
+           // the strips meet the caller's payload as the caller sent it (the
+           // `suppliedValues` snapshot), and only what survives them is put
+           // into its stored shape and judged.
+           //
+           // [#21663] Scope `'skip'` — the public `validateRecord` IS that scope:
+           // a readonly value left here is a system writer's, a hook's or a
+           // stamp, and is judged by the second pass (`validateRecordInScope(…,
+           // 'only')`, below), not by this one.
+           // [#22183] `keptOptionValues`: the option values an import kept for
+           // this write.
+           const judgeStrippedPayload = (payload: Record<string, unknown>): void => {
+               normalizeMultiValueFields(updateSchema, payload, 'skip');
+               validateRecord(updateSchema, payload, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+           };
+           // [#19887] A `readonlyWhen` predicate's `record` is the payload the
+           // write STORES, so it reads each multi-valued field in its stored
+           // list form, as it did when the wrap ran ahead of the strips. On a
+           // COPY: the payload itself keeps the caller's spelling until the
+           // strips have judged it.
+           const inStoredMultiValueShape = (view: Record<string, unknown>): Record<string, unknown> => {
+               const copy = { ...view };
+               normalizeMultiValueFields(updateSchema, copy, 'skip');
+               return copy;
+           };
            // [#5574] Branch on the LADDER, not on `hookContext.input.id`. The
            // two used to be the same question asked twice, which is exactly
            // what made the id slot a reroute lever; the ladder was resolved
@@ -1235,15 +1263,8 @@ export class UpdateFacet {
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
                // [#27582] This record's own stored row is the pre-image read above.
                sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, driverOptions, async () => [priorRecord]);
-               // [#21663] Scope `'skip'` — the public `validateRecord` IS that
-               // scope: the readonly strip has NOT run yet, so a readonly value
-               // here may be a caller's the strip is about to drop — judged, a
-               // whole-record write-back echoing a legacy stored value would
-               // become a refusal. Readonly values are judged after the strip
-               // (`validateRecordInScope(…, 'only')`, below).
-               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
-               // [#22183] `keptOptionValues`: the option values an import kept for this write.
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+               // The multi-value wrap and the first value judgement wait for
+               // both read-only strips (`judgeStrippedPayload`, below them).
                // [#5284] Demand-driven, and the demand is asked PER OBJECT.
                //
                // This gate used to ask `this.hooks.get('afterUpdate').length > 0`
@@ -1349,7 +1370,7 @@ export class UpdateFacet {
                        schema: updateSchema, data: preRoWhen, supplied: suppliedValues,
                        staticStrip,
                        resolve: (view) => this.resolveMasterDetailParent(updateSchema, view, priorRecord, opCtx.context),
-                       judgeFkLock: (named, fk) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: suppliedValues, only: fk, stored: staticReadonlyStoredView(updateSchema, preRoWhen, suppliedValues, staticStrip) }) as Record<string, unknown>,
+                       judgeFkLock: (named, fk) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: suppliedValues, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhen, suppliedValues, staticStrip)) }) as Record<string, unknown>,
                      })
                    : undefined;
                const roWhenParent = landing?.header;
@@ -1401,7 +1422,7 @@ export class UpdateFacet {
                // so a value forged for a static `readonly` field (stripped
                // below) cannot unlock a field whose predicate reads it.
                const roWhenSubject = landing?.subject ?? preRoWhen;
-               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, roWhenSubject, priorRecord, this.logger, roWhenParent, { supplied: landing?.supplied ?? suppliedValues, stored: staticReadonlyStoredView(updateSchema, roWhenSubject, suppliedValues, staticStrip) }) as any;
+               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, roWhenSubject, priorRecord, this.logger, roWhenParent, { supplied: landing?.supplied ?? suppliedValues, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubject, suppliedValues, staticStrip)) }) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
@@ -1445,6 +1466,8 @@ export class UpdateFacet {
                    hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
+               // Both strips are done: wrap and judge what is left.
+               judgeStrippedPayload(hookContext.input.data as Record<string, unknown>);
                // [#5126] Both strip passes are done; refuse now if the caller
                // asked for loud. Before `evaluateValidationRules` deliberately:
                // strict is about the payload the caller SENT, and reporting
@@ -1701,15 +1724,8 @@ export class UpdateFacet {
                // [#27582] The rows this write lands on are the matched rows: the
                // D7 memo, read here only when a non-system payload carries a ref.
                sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, driverOptions, readPriorRows);
-               // [#21663] Scope `'skip'` — the public `validateRecord` IS that
-               // scope: the readonly strip has NOT run yet, so a readonly value
-               // here may be a caller's the strip is about to drop — judged, a
-               // whole-record write-back echoing a legacy stored value would
-               // become a refusal. Readonly values are judged after the strip
-               // (`validateRecordInScope(…, 'only')`, below).
-               normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>, 'skip');
-               // [#22183] `keptOptionValues`: the option values an import kept for this write.
-               validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+               // The multi-value wrap and the first value judgement wait for
+               // both read-only strips (`judgeStrippedPayload`, below them).
                // [#2982] The middleware-composed AST — asserted present and
                // bound to the memoized row read in the pre-phase above, so the
                // injected row-scoping (RLS write filter, sharing's
@@ -1778,7 +1794,7 @@ export class UpdateFacet {
                            schema: updateSchema, data: preRoWhenMulti, supplied: suppliedValues,
                            staticStrip: staticStripMulti,
                            resolve: (view) => this.resolveMasterDetailParents(updateSchema, view, priorRows, opCtx.context),
-                           judgeFkLock: (named, fk) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: suppliedValues, only: fk, stored: staticReadonlyStoredView(updateSchema, preRoWhenMulti, suppliedValues, staticStripMulti) }) as Record<string, unknown>,
+                           judgeFkLock: (named, fk) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: suppliedValues, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhenMulti, suppliedValues, staticStripMulti)) }) as Record<string, unknown>,
                          })
                        : undefined;
                const parentForRow = landingMulti?.header;
@@ -1811,7 +1827,7 @@ export class UpdateFacet {
                    // [#19887] Nor read a different payload: each matched row's
                    // `record` is the payload the write stores, over that row.
                    const roWhenSubjectMulti = landingMulti?.subject ?? preRoWhenMulti;
-                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, roWhenSubjectMulti, priorRows, this.logger, parentForRow, { supplied: landingMulti?.supplied ?? suppliedValues, stored: staticReadonlyStoredView(updateSchema, roWhenSubjectMulti, suppliedValues, staticStripMulti) }) as any;
+                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, roWhenSubjectMulti, priorRows, this.logger, parentForRow, { supplied: landingMulti?.supplied ?? suppliedValues, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubjectMulti, suppliedValues, staticStripMulti)) }) as any;
                    reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
                // [#2948] Same static-`readonly` write guard on the bulk path —
@@ -1838,6 +1854,9 @@ export class UpdateFacet {
                    hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
+               // Both strips are done: wrap and judge what is left, as on the
+               // by-id branch.
+               judgeStrippedPayload(hookContext.input.data as Record<string, unknown>);
                // [#5126] Same refusal on the predicate path. A bulk strip is
                // "locked in ≥1 matched row ⇒ dropped for ALL", so a strict bulk
                // caller is told before N rows are written with a column missing
