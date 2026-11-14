@@ -217,9 +217,11 @@ function bundleAddressOf(scoped: PackageScopedRegistry, name: string, callerPack
  *  - the caller's own holding is the disabled one, or no served holder
  *    answers it: no template. Its own items are withheld, and no other
  *    holder's are its own;
- *  - the caller holds an addition only: resolved again from its closure over
- *    the served holders, so a dependent of a disabled base never gets a
- *    template from outside its closure.
+ *  - the caller holds an addition only, or the name resolves to the
+ *    built-ins: resolved again from the caller's closure over the served
+ *    holders, so a dependent of a disabled base never gets a template from
+ *    outside its closure; the built-ins are read at their own address, where
+ *    no disabled package's member is listed either.
  */
 function servedBundleAddressOf(
   scoped: PackageScopedRegistry,
@@ -233,7 +235,7 @@ function servedBundleAddressOf(
   if (resolved.status !== 'resolved') return NO_BUNDLE;
   if (resolved.holder.kind !== 'package') return undefined;
   const holder = resolved.holder.packageId;
-  if (holder === BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID || served.includes(holder)) return holder;
+  if (served.includes(holder)) return holder;
   if (holders.includes(holder)) return NO_BUNDLE;
   const base = resolvePackageScopedName(withoutCallerHolding(scoped), { type: EMAIL_TEMPLATE_TYPE, name, callerPackageId });
   if (base.status === 'refused') throw new EmailTemplateAmbiguousError(base);
