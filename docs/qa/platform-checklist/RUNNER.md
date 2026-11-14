@@ -346,7 +346,8 @@ contradicts it, and correct it here when it does.
   in use, `os dev` takes the next free one before it compiles and says so twice:
   `⚠ Port <port> is in use — serving on <next> instead.` at the top of its log, and
   `↪ server bound to port <next> (requested <port>)` once it listens
-  (`formatDevPortShiftNotice()` in `packages/cli/src/commands/serve.ts`). The compile
+  (`formatDevPortShiftNotice()` in `packages/cli/src/commands/serve.ts`, then
+  `packages/cli/src/commands/dev.ts`'s listening handler). The compile
   follows the shifted port, so the connectors still reach the boot (41783 held: served on
   41784, metadata `41784`, ping completed, at `e0ce1b52`), but the runner's shell keeps
   the `OS_PORT` it exported, and that port answers whatever holds it. **So:** read the
