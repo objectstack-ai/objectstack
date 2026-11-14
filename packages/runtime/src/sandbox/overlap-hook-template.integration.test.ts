@@ -23,6 +23,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { mapDataError } from '@objectstack/types';
 import { ObjectQL, bindHooksToEngine } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -207,10 +208,10 @@ describe('overlap-check hook template (data-hooks.md pattern 5)', () => {
   it('runs elevated: a saver who cannot read the overlapping row is still refused', async () => {
     const e = await boot();
     await e.insert('leave_request', day('18:30', '21:30', { filed_by: 'u1' }));
-    const delegate = { userId: 'd1', tenantId: 'org_1', isSystem: false, positions: [], permissions: [] } as any;
+    const delegate: ExecutionContext = { userId: 'd1', tenantId: 'org_1', isSystem: false, positions: [], permissions: [] };
     // The delegate's own read does not see u1's row…
-    expect(await e.count('leave_request', {}, { context: delegate } as any)).toBe(0);
+    expect(await e.count('leave_request', {}, { context: delegate })).toBe(0);
     // …and the template's count, declared `runAs: 'system'`, does.
-    expectOverlapRefusal(await refusal(e.insert('leave_request', day('19:00', '20:00', { filed_by: 'd1' }), { context: delegate } as any)));
+    expectOverlapRefusal(await refusal(e.insert('leave_request', day('19:00', '20:00', { filed_by: 'd1' }), { context: delegate })));
   }, 30_000);
 });
