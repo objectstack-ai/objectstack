@@ -26,10 +26,13 @@
  *
  * ## Why NODE_ENV is production here
  *
- * Outside production `handleRequest` synthesizes a same-origin `Origin` for a
- * request that has none (the dev-DX block), which would let every case below
- * pass with or without the fix. Each case runs with `NODE_ENV=production`
- * stubbed, and the first assertion of each case reads it back.
+ * Two things would let every case below pass with or without the fix, and the
+ * harness turns both off. Outside production `handleRequest` synthesizes a
+ * same-origin `Origin` for a request that has none (the dev-DX block): each
+ * case runs with `NODE_ENV=production` stubbed, and its first assertion reads
+ * it back. And better-auth skips the origin check outright under a test
+ * NODE_ENV: `boot()` puts the production value on the live context (the note
+ * there says why it cannot come from the stub).
  *
  * Harness: a real `AuthManager` over a real `ObjectQL` on better-sqlite3 with
  * SCIM on and a minted connection credential — the shape of
@@ -102,6 +105,20 @@ async function boot(): Promise<Harness> {
     getTenancy: () => createTenancyService({ requested: 'isolated', probeIsolation: () => true }),
     plugins: { scim: true, organization: true },
   } as never);
+
+  // better-auth reads NODE_ENV ONCE, when `@better-auth/core/env` loads, and
+  // under vitest that read is `test`, for which it defaults the context's
+  // `skipOriginCheck` to `true` (`create-context.mjs`: `disableOriginCheck`
+  // unset ⇒ `isTest()`). A deployment runs with `false`. The stub above comes
+  // too late for that module-load read, so the production value is put on the
+  // live context here — and read back, so a harness that never reached the
+  // origin check fails instead of passing every case below vacuously.
+  const context = (await (await manager.getAuthInstance()).$context) as {
+    skipOriginCheck: unknown;
+    skipCSRFCheck: unknown;
+  };
+  context.skipOriginCheck = false;
+  expect(context.skipCSRFCheck, 'the CSRF check is on, as in a deployment').toBe(false);
 
   const { token } = await mintScimConnectionCredential(engine as never, SECRET, {
     connectionId: 'okta-33237',
