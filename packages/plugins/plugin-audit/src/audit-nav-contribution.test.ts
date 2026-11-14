@@ -16,13 +16,16 @@
 //
 // Why here and not in `@objectstack/platform-objects`: the page reads
 // `sys_audit_log`, which this plugin owns (ADR-0029 K2), so its entry lives and
-// dies with this plugin — and needs no item gate for the same reason.
+// dies with this plugin. Its one gate is the ledger's own read capability
+// (`view_all_audit_log`); who it is served to, read over the wire per caller,
+// is pinned in `packages/cli/test/setup-diagnostics-audience.pin.test.ts`.
 
 import { describe, it, expect } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { SETUP_APP, SETUP_NAV_CONTRIBUTIONS } from '@objectstack/platform-objects/apps';
 import { NavigationContributionSchema } from '@objectstack/spec/ui';
 import { AuditPlugin } from './audit-plugin.js';
+import { LEDGER_AUDIT_CAPABILITY } from './audit-log-read-visibility.js';
 
 type NavItem = {
   id?: string;
@@ -33,6 +36,7 @@ type NavItem = {
   url?: string;
   requiresService?: string;
   requiresObject?: string;
+  requiredPermissions?: string[];
   children?: NavItem[];
 };
 
@@ -111,10 +115,16 @@ describe('AuditPlugin — one Setup audit entry (#23890)', () => {
     // The list is reached from the page's "Open as list" link, so the entry
     // names no object. A component item has no object route to gate, and a
     // contribution exists only while this plugin is installed — which is
-    // exactly when the page's `sys_audit_log` reads can answer. No gate.
+    // exactly when the page's `sys_audit_log` reads can answer. No
+    // runtime-capability gate (`requiresObject` / `requiresService`).
     expect(entry.objectName).toBeUndefined();
     expect(entry.requiresObject).toBeUndefined();
     expect(entry.requiresService).toBeUndefined();
+    // Its audience is the ledger's own read capability, never the Setup
+    // slot's admin power: `view_all_audit_log` alone, so an auditor who holds
+    // no `manage_platform_settings` is served the entry.
+    expect(entry.requiredPermissions).toEqual([LEDGER_AUDIT_CAPABILITY]);
+    expect(LEDGER_AUDIT_CAPABILITY).toBe('view_all_audit_log');
   });
 
   it('the rendered Setup nav has exactly one entry whose target is an audit surface', async () => {
