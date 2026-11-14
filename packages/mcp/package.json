@@ -32,6 +32,7 @@
     "@objectstack/formula": "workspace:*",
     "@objectstack/lint": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "unpdf": "1.9.1",

@@ -16,8 +16,9 @@ import {
 } from '@objectstack/lint';
 
 import { applyInjectedSystemColumns } from '@objectstack/metadata-core';
+import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from '@objectstack/objectql';
 
-import { MCPServerRuntime } from './mcp-server-runtime.js';
+import { MCPServerRuntime, describeServedObject } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 
 /**
@@ -917,5 +918,63 @@ describe('validate_expression judges the field being authored at the formula sit
       bridge(),
     );
     expect((json as { result: { isError?: boolean } }).result.isError).toBe(true);
+  });
+});
+
+describe('validate_expression keeps the hidden search companion out of scope', () => {
+  // A field-scoped search object as the registry serves it with pinyin search
+  // on: the companion stamped beside the declared fields, then projected the
+  // way the transports project it.
+  const authored = {
+    name: 'sc_contact',
+    label: 'Contact',
+    fields: {
+      name: { type: 'text', label: 'Name', required: true },
+      email: { type: 'email', label: 'Email' },
+    },
+  };
+  const served = provisionSearchCompanion(applyInjectedSystemColumns(authored));
+  const bridge = (): McpDataBridge => ({
+    ...makeBridge(),
+    async listObjects() {
+      return [{ name: 'sc_contact', label: 'Contact', fieldCount: Object.keys(served.fields).length }];
+    },
+    async describeObject(name: string) {
+      return name === 'sc_contact' ? describeServedObject(served as never) : null;
+    },
+  });
+
+  let runtime: MCPServerRuntime;
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
+  });
+
+  it('the served object really carries the companion (precondition)', () => {
+    expect(Object.keys(served.fields)).toContain(SEARCH_COMPANION_FIELD);
+  });
+
+  it('inScope.fields lists the ordinary fields and no companion', async () => {
+    const r = await validate(runtime, bridge(), { objectName: 'sc_contact', expression: "record.name != ''", site: 'validation' });
+    expect(r.ok).toBe(true);
+    expect(r.inScope.fields).toContain('name');
+    expect(r.inScope.fields).toContain('email');
+    expect(r.inScope.fields).toContain('created_at');
+    expect(r.inScope.fields).not.toContain(SEARCH_COMPANION_FIELD);
+  });
+
+  it('a read of the companion is refused as a field the object does not have, as os validate refuses it', async () => {
+    const expression = `record.${SEARCH_COMPANION_FIELD} != ''`;
+    const gate = validateStackExpressions({
+      objects: [{ ...authored, validations: [{ name: AUTHORED_RULE_NAME, type: 'script', condition: expression, message: 'm' }] }],
+    }).filter((i) => i.where.includes(`'${AUTHORED_RULE_NAME}'`));
+    expect(gate.map((i) => i.severity ?? 'error')).toEqual(['error']);
+    expect(gate[0]!.message).toContain(SEARCH_COMPANION_FIELD);
+
+    for (const site of ['validation', 'formula', 'flow_condition'] as const) {
+      const r = await validate(runtime, bridge(), { objectName: 'sc_contact', expression, site });
+      expect(r.ok, site).toBe(false);
+      const refused = r.errors.filter((e: { code?: string }) => e.code === 'unknown-field');
+      expect(refused.map((e: { params?: { field?: string } }) => e.params?.field), site).toEqual([SEARCH_COMPANION_FIELD]);
+    }
   });
 });
