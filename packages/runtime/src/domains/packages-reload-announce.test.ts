@@ -185,11 +185,12 @@ describe('[#33302] the enable door announces a package it puts back into service
 
         expect(result.response?.status).toBe(200);
         expect(registry().isPackageDisabled(CRM)).toBe(false);
+        // ⭐ What it is for: plugin-security's carry heard the announcement and
+        // moved the holder, with no restart.
+        expect(await positionsOf(['e1', 'e2'])).toEqual({ e1: 'crm_sales_rep', e2: 'crm_auditor' });
         // ⭐ The announcement, in the install-local door's spelling, with the
         // package already registered (and enabled) when the subscribers hear it.
         expect(during).toEqual([{ changed: [`app/${CRM}`], held: { [`app/${CRM}`]: true } }]);
-        // ⭐ What it is for: plugin-security's carry heard it and moved the holder.
-        expect(await positionsOf(['e1', 'e2'])).toEqual({ e1: 'crm_sales_rep', e2: 'crm_auditor' });
     }, 60_000);
 
     it('an enable of a package that is already enabled changes nothing served, and announces nothing', async () => {
@@ -224,8 +225,8 @@ describe('[#33302] the install door announces the package it installs', () => {
 
         expect(result.response?.status).toBe(201);
         expect(result.response?.body?.data?.enabled).toBe(true);
-        expect(during).toEqual([{ changed: [`app/${AUTHORED}`], held: { [`app/${AUTHORED}`]: true } }]);
         expect(await positionsOf(['i1'])).toEqual({ i1: 'authored_sales_rep' });
+        expect(during).toEqual([{ changed: [`app/${AUTHORED}`], held: { [`app/${AUTHORED}`]: true } }]);
     }, 60_000);
 });
 
