@@ -172,8 +172,12 @@ import { DecisionConfigSchema } from '@objectstack/spec/automation';
 // driver-sql, driver-mongodb and driver-memory execute. This linter asks it
 // rather than hand-writing a fourth copy; see {@link filterCarriesNoCondition}.
 import { reduceFilterVerdict } from '@objectstack/spec/data';
+// The platform's one member reader — the reader the engine's own stored-expression
+// pass names a row's inputs with (`storedExpressionReads`, objectql), so this
+// rule and the engine cannot disagree about which spellings read a field.
+import { analyzeRelationshipTraversals } from '@objectstack/formula';
 import { stripRegions, ownRegionKeys, REGION_SLOTS, MAX_REGION_DEPTH } from './flow-walk.js';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, recordsOf } from './object-graph.js';
 
 export interface FlowLintFinding {
   where: string;
@@ -288,6 +292,21 @@ export const FLOW_DECISION_INCLUSIVE_OVERLAP = 'flow-decision-inclusive-overlap'
  * how it divides labour with the #3810 run-time guard.
  */
 export const FLOW_MULTI_WRITE_UNFILTERED = 'flow-multi-write-unfiltered';
+/**
+ * An `update_record` node that declares `multi: true` and whose `fields` set an
+ * input of a STORED computed field on the target object (a field that is not a
+ * `formula` and declares an `expression`). One predicate update writes ONE
+ * patch to every matched row, so the engine stores the computed value only
+ * when it is the same on every row and otherwise refuses the whole update
+ * (`VALIDATION_FAILED`, nothing written) — ADR-0058 Addendum II D3: a predicate
+ * write is never split into single-row writes. See
+ * {@link scanBulkUpdatesMovingStoredInputs}.
+ *
+ * Named descriptor-first like {@link FLOW_MULTI_WRITE_UNFILTERED}: the
+ * descriptor is the `multi` update, the verdict is that it moves a stored
+ * expression's input.
+ */
+export const FLOW_MULTI_UPDATE_MOVES_STORED_INPUT = 'flow-multi-update-moves-stored-input';
 /**
  * commit 8ed9c54b4 / #14394 — a `loop` body that runs a node which can fail, with no
  * `try_catch` between the loop and that node. The first failing item kills the
@@ -1587,6 +1606,147 @@ function scanUnboundedBulkWrites(
   }
 }
 
+/**
+ * Per object name, each field whose value moves a STORED computed field, with
+ * the stored fields it moves (sorted). See {@link storedInputsByObject}.
+ */
+type StoredInputIndex = ReadonlyMap<string, ReadonlyMap<string, readonly string[]>>;
+
+/** The CEL source of a field's `expression` (shorthand string or envelope), or `undefined` for another dialect. */
+function storedExpressionSource(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object') {
+    const rec = raw as AnyRec;
+    if (typeof rec.dialect === 'string' && rec.dialect !== 'cel') return undefined;
+    if (typeof rec.source === 'string') return rec.source;
+  }
+  return undefined;
+}
+
+/**
+ * Index the stack's objects, as the registry SERVES them (`objectsAsServed`:
+ * an extension's field counts like a declared one), by the fields that are
+ * inputs of a stored computed field.
+ *
+ * A stored computed field is the engine's own test (`planStoredExpressions`):
+ * not a `formula`, and declares an `expression`. Its inputs are the
+ * `record.<field>` names its source reads — `bareFields` plus the first hop of
+ * each traversal, exactly `storedExpressionReads` in objectql — followed
+ * through another stored field it reads (the engine computes the plan in
+ * order, so moving that field's input moves this one too). A stored field
+ * itself is never an input here: a caller value for it is replaced, not
+ * stored, so setting it moves nothing.
+ *
+ * Silent by construction where the reader cannot name the reads — a source
+ * in another dialect, or one that does not parse (the expression pass owns
+ * that verdict): this is an advisory whose message asserts that the patch
+ * moves an input, so it says nothing it cannot back.
+ */
+function storedInputsByObject(stack: AnyRec): StoredInputIndex {
+  const index = new Map<string, Map<string, string[]>>();
+  for (const obj of objectsAsServed(stack).objects) {
+    const objectName = typeof obj.name === 'string' ? obj.name : '';
+    if (!objectName) continue;
+    const defs = new Map<string, AnyRec>();
+    for (const f of recordsOf(obj.fields)) {
+      if (typeof f.name === 'string' && f.name) defs.set(f.name, f);
+    }
+    const isStored = (def: AnyRec | undefined): boolean => !!def && def.type !== 'formula' && !!def.expression;
+    const directReads = (name: string): readonly string[] => {
+      const source = storedExpressionSource(defs.get(name)?.expression);
+      if (source === undefined) return [];
+      const analysis = analyzeRelationshipTraversals(source);
+      return analysis ? [...analysis.bareFields, ...analysis.traversals.keys()] : [];
+    };
+    const byInput = new Map<string, string[]>();
+    for (const [storedName, def] of defs) {
+      if (!isStored(def)) continue;
+      const inputs = new Set<string>();
+      const seen = new Set<string>([storedName]);
+      const queue = [...directReads(storedName)];
+      while (queue.length > 0) {
+        const read = queue.shift()!;
+        if (isStored(defs.get(read))) {
+          if (seen.has(read)) continue;
+          seen.add(read);
+          queue.push(...directReads(read));
+          continue;
+        }
+        inputs.add(read);
+      }
+      for (const input of inputs) {
+        const moved = byInput.get(input) ?? [];
+        moved.push(storedName);
+        byInput.set(input, moved);
+      }
+    }
+    if (byInput.size === 0) continue;
+    for (const moved of byInput.values()) moved.sort();
+    index.set(objectName, byInput);
+  }
+  return index;
+}
+
+/**
+ * An `update_record` that DECLARES `multi: true` and whose `fields` set an input
+ * of a stored computed field on its target object.
+ *
+ * The engine keeps its refusal on purpose (ADR-0058 Addendum II D3: a predicate
+ * write is one `updateMany`, never split into single-row writes; the
+ * `expression` describe in `packages/spec/src/data/field.zod.ts`): one patch
+ * reaches every matched row, so a computed value is stored only when it is the
+ * same on every row, and a patch that computes different values on different
+ * rows is refused (`VALIDATION_FAILED`) before anything is written. Which of the
+ * two a run meets depends on the rows, so this cannot be proven at authoring
+ * and WARNS (the severity policy at the top of this file): a patch that sets
+ * every input of the expression to a literal computes one value and is stored.
+ * What the author gets is the refusal named before the first run, with the
+ * shape that always works — read the rows, loop, update each by id, where each
+ * row is computed from its own stored row.
+ *
+ * Judged only against an object the stack carries; a target it does not carry
+ * is not judged (the runtime publish door's snapshot carries `objects`, a CLI
+ * stack its own). Independent of {@link FLOW_MULTI_WRITE_UNFILTERED}: an
+ * unbounded `multi` update that moves an input is both, and gets both.
+ */
+function scanBulkUpdatesMovingStoredInputs(
+  at: string,
+  nodes: AnyRec[],
+  storedInputs: StoredInputIndex,
+  findings: FlowLintFinding[],
+): void {
+  if (storedInputs.size === 0) return;
+  for (const node of nodes) {
+    if (node.type !== 'update_record') continue;
+    const cfg = (node.config ?? {}) as AnyRec;
+    // The executor's own test, as in {@link scanUnboundedBulkWrites}.
+    if (cfg.multi !== true) continue;
+    const objectName = typeof cfg.objectName === 'string' ? cfg.objectName : '';
+    const byInput = objectName ? storedInputs.get(objectName) : undefined;
+    if (!byInput) continue;
+    const fields = cfg.fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) continue;
+    const moving = Object.keys(fields).filter((key) => byInput.has(key)).sort();
+    if (moving.length === 0) continue;
+    const stored = [...new Set(moving.flatMap((key) => byInput.get(key) ?? []))].sort();
+    const quote = (names: readonly string[]): string => names.map((n) => `\`${n}\``).join(', ');
+    findings.push({
+      where: `${at} · node '${String(node.id)}' (update_record)`,
+      message:
+        `declares \`multi: true\` and sets ${quote(moving)}, an input of the stored computed ` +
+        `${stored.length === 1 ? 'field' : 'fields'} ${quote(stored)} on '${objectName}'. One predicate update ` +
+        `writes one patch to every matched row, so the engine stores the computed value only when it is the ` +
+        `same on every row; when it differs between rows the whole update is refused (\`VALIDATION_FAILED\`) ` +
+        `and nothing is written.`,
+      hint: 'Read the rows with `get_record` (same filter, `limit` above 1), `loop` over them, and `update_record` ' +
+        'each with `filter: { id: item.id }` and no `multi`.',
+      // Warning, not `error`: a patch whose computed value is the same on every
+      // matched row is stored, so the shape is not provably refused.
+      rule: FLOW_MULTI_UPDATE_MOVES_STORED_INPUT,
+    });
+  }
+}
+
 function scanApprovalReviseLoops(
   at: string,
   nodes: AnyRec[],
@@ -2103,6 +2263,8 @@ function scanAfterSaveInlineRetry(flowName: string, flow: AnyRec, nodes: AnyRec[
 
 export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
   const findings: FlowLintFinding[] = [];
+  // Built once per stack, read by (f') below for every `multi` update.
+  const storedInputs = storedInputsByObject(stack);
   for (const flow of recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
     // `Array.isArray` proves the LIST, never its MEMBERS. A YAML `nodes:` item
@@ -2399,6 +2561,12 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       //     what puts the loop-body sweep — the standard shape for a scheduled
       //     purge, and this rule's main habitat — in range (#5383/#5635).
       scanUnboundedBulkWrites(at, graphNodes, findings);
+
+      // (f') A `multi: true` update whose `fields` set an input of a stored
+      //      computed field on its target: refused by the engine whenever the
+      //      computed value differs between matched rows (ADR-0058 Addendum II
+      //      D3). Per graph, so the loop-body habitat is in range as for (f).
+      scanBulkUpdatesMovingStoredInputs(at, graphNodes, storedInputs, findings);
 
       // (g) commit 8ed9c54b4 / #14394 — a `loop` body running a fallible node with no
       //     `try_catch` between the loop and it. Per graph like the rest, and

@@ -4,6 +4,8 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import '@objectstack/metadata';
 import { offerClusterDriverConnection } from '@objectstack/service-cluster';
 import { HttpDispatcher, type HttpDispatcherResult } from './http-dispatcher.js';
+import { declareSeedSource } from './seed-settlement.js';
+import { recordSeedOutcome, type SeedSourceOutcome } from './seed-summary.js';
 
 function kernel(state: string, dataService?: unknown): any {
   return {
@@ -511,5 +513,120 @@ describe('HttpDispatcher — GET /health liveness probe', () => {
     expect(responseOf(res).status).toBe(200);
     expect(responseOf(res).body.data.status).toBe('ok');
     expect(e.checkDriversHealth).not.toHaveBeenCalled();
+  });
+});
+
+describe('HttpDispatcher — GET /ready reports the boot seed (#33233)', () => {
+  /**
+   * A host kernel with a real service registry: `getService` THROWS on an
+   * unregistered name, as `ObjectKernel`'s does, so the reading meets the same
+   * failure mode it meets in production. The seed services are written by
+   * their real producers (`declareSeedSource`, `recordSeedOutcome`), never
+   * hand-built.
+   */
+  function seedingKernel(state = 'running', dataService?: unknown) {
+    const services = new Map<string, unknown>();
+    if (dataService) services.set('data', dataService);
+    return {
+      getState: () => state,
+      getService: (name: string) => {
+        if (!services.has(name)) throw new Error(`Service '${name}' not found`);
+        return services.get(name);
+      },
+      registerService: (name: string, svc: unknown) => {
+        if (services.has(name)) throw new Error(`Service '${name}' already registered`);
+        services.set(name, svc);
+      },
+      getServiceAsync: async () => undefined,
+    };
+  }
+  const ready = (d: HttpDispatcher) => d.dispatch('GET', '/ready', undefined, undefined, ctx);
+  const outcome = (over: Partial<SeedSourceOutcome> = {}): SeedSourceOutcome => ({
+    source: 'crm', inserted: 12, updated: 0, skipped: 0, rejected: 0, ...over,
+  });
+
+  it('no seed pipeline on the kernel: the body is the old one, with no seed key', async () => {
+    const res = await ready(new HttpDispatcher(seedingKernel() as any));
+    expect(responseOf(res).status).toBe(200);
+    expect(responseOf(res).body.data).toEqual({ status: 'ready', state: 'running' });
+  });
+
+  it('a source still writing: 200 with seed pending, then settled once it lands — read per probe, never cached', async () => {
+    const k = seedingKernel();
+    const source = declareSeedSource(k);
+    const d = new HttpDispatcher(k as any);
+
+    const before = await ready(d);
+    expect(responseOf(before).status).toBe(200);
+    expect(responseOf(before).body.data).toEqual({ status: 'ready', state: 'running', seed: 'pending' });
+
+    recordSeedOutcome(k, outcome());
+    source.settle();
+
+    const after = await ready(d);
+    expect(responseOf(after).status).toBe(200);
+    expect(responseOf(after).body.data).toEqual({ status: 'ready', state: 'running', seed: 'settled' });
+  });
+
+  it('stays pending while ANY source writes — one of two config apps finishing is not the seed landing', async () => {
+    const k = seedingKernel();
+    const first = declareSeedSource(k);
+    declareSeedSource(k);
+    recordSeedOutcome(k, outcome());
+    first.settle();
+    expect(responseOf(await ready(new HttpDispatcher(k as any))).body.data.seed).toBe('pending');
+  });
+
+  it.each([
+    ['a rejected record', { rejected: 3 }],
+    ['a reference field dropped from a written row', { droppedRefs: 1 }],
+    ['a marketplace install that came up empty', { marketplace: true, emptyInstall: true, inserted: 0 }],
+  ] as const)('settled with %s: seed failed, still 200', async (_label, over) => {
+    const k = seedingKernel();
+    const source = declareSeedSource(k);
+    recordSeedOutcome(k, outcome(over));
+    source.settle();
+    const res = await ready(new HttpDispatcher(k as any));
+    expect(responseOf(res).status).toBe(200);
+    expect(responseOf(res).body.data).toEqual({ status: 'ready', state: 'running', seed: 'failed' });
+  });
+
+  it('settled without a recorded outcome (the basic-insert fallback records none): settled', async () => {
+    const k = seedingKernel();
+    declareSeedSource(k).settle();
+    expect(responseOf(await ready(new HttpDispatcher(k as any))).body.data.seed).toBe('settled');
+  });
+
+  it.each(['multi-tenant-replay', 'skip-seed-data'] as const)(
+    'a source suppressed for %s reads settled — no boot-time write is coming, so a waiter must not hang',
+    async (reason) => {
+      const k = seedingKernel();
+      declareSeedSource(k).suppress(reason);
+      expect(responseOf(await ready(new HttpDispatcher(k as any))).body.data.seed).toBe('settled');
+    },
+  );
+
+  it('the degraded-secondary 200 body carries the seed too', async () => {
+    const k = seedingKernel('running', engineWithPrimary(
+      [{ driverName: 'pg', healthy: true }, { driverName: 'tenant_mongo', healthy: false }],
+      primary('pg'),
+    ));
+    declareSeedSource(k);
+    const res = await ready(new HttpDispatcher(k as any));
+    expect(responseOf(res).status).toBe(200);
+    expect(responseOf(res).body.data).toEqual({
+      status: 'ready',
+      state: 'running',
+      degraded: { drivers: ['tenant_mongo'], primaryDatasource: 'pg' },
+      seed: 'pending',
+    });
+  });
+
+  it('booting: the 503 envelope is unchanged — no seed key in it', async () => {
+    const k = seedingKernel('initializing');
+    declareSeedSource(k);
+    const res = await ready(new HttpDispatcher(k as any));
+    expect(responseOf(res).status).toBe(503);
+    expect(JSON.stringify(responseOf(res).body)).not.toContain('seed');
   });
 });
