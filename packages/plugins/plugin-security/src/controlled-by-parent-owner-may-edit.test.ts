@@ -536,14 +536,19 @@ describe('[#33250] the opt-in: whoever reads the master inserts, updates and del
     expect(await stored(MILESTONE, pair.row)).toBeNull();
   });
 
+  // A predicate write keeps the platform's ownership floor on the DETAIL (the
+  // floor is handed to the master gate on a by-id write only), so the rows it
+  // writes are the ones the caller created, exactly as for a master editor:
+  // the row here is the caller's creation, and the question pinned is the
+  // master's.
   it('a PREDICATE update (multi: true) is admitted, and the row changed', async () => {
-    const pair = await seed(MILESTONE, { owner: REP });
+    const pair = await seed(MILESTONE, { owner: REP, createdBy: STRANGER });
     expect(await updateByPredicate(MILESTONE, pair, STRANGER_CALLER)).toEqual({ kind: 'admitted' });
     expect((await stored(MILESTONE, pair.row))?.name).toBe('edited by predicate');
   });
 
   it('a PREDICATE delete (multi: true) is admitted, and the row is gone', async () => {
-    const pair = await seed(MILESTONE, { owner: REP });
+    const pair = await seed(MILESTONE, { owner: REP, createdBy: STRANGER });
     const answer = await landed(engine.delete(MILESTONE, { where: { id: { $in: [pair.row] } }, multi: true, context: { ...STRANGER_CALLER } } as never));
     expect(answer).toEqual({ kind: 'admitted' });
     expect(await stored(MILESTONE, pair.row)).toBeNull();
@@ -562,23 +567,37 @@ describe('[#33250] the opt-in: whoever reads the master inserts, updates and del
   });
 });
 
+/** A by-id write of a row the caller cannot read meets the read door first (step 2.7): `404`, as for every hidden row. */
+function expectHiddenRow(answer: Answer): void {
+  expect(answer).toMatchObject({ kind: 'refused', code: 'RECORD_NOT_FOUND', status: 404 });
+}
+
 describe('[#33250] without read on the master, every write of an opted-in detail is refused', () => {
-  it('no read grant on the contract: insert, update and delete are refused, and nothing is written', async () => {
+  // A detail's rows are READ through its master (ADR-0055 §2), so a caller who
+  // cannot read the master cannot read the row either, and a by-id update or
+  // delete of it meets the read door before the master gate: `404`, exactly as
+  // on a detail that has not opted in. An insert addresses no stored row and
+  // meets the master gate: `403`, asking READ. (View All on a detail with a
+  // REQUIRED master does not open its rows without the master, ADR-0055 §2, so
+  // no caller reaches the gate on a stored row it may not read: the served
+  // member below answers the gate's own verdict for those rows, and a body
+  // naming an unreadable master meets it on an update.)
+  it('no read grant on the contract: the insert is refused by the master gate, the update and delete by the read door', async () => {
     const pair = await seed(MILESTONE, { owner: BLIND });
     const before = await rowsUnder(MILESTONE, pair.contract);
     expectMasterReadRefusal(await insertUnder(MILESTONE, pair, BLIND_CALLER), 'insert', MILESTONE);
-    expectMasterReadRefusal(await updateById(MILESTONE, pair, BLIND_CALLER), 'update', MILESTONE);
-    expectMasterReadRefusal(await deleteById(MILESTONE, pair, BLIND_CALLER), 'delete', MILESTONE);
+    expectHiddenRow(await updateById(MILESTONE, pair, BLIND_CALLER));
+    expectHiddenRow(await deleteById(MILESTONE, pair, BLIND_CALLER));
     expect(await rowsUnder(MILESTONE, pair.contract)).toBe(before);
     expect((await stored(MILESTONE, pair.row))?.name).toBe('as seeded');
   });
 
-  it('a read grant on the contract object, but the contract row is hidden: insert, update and delete are refused', async () => {
+  it('a read grant on the contract object, but the contract row is hidden: refused the same way', async () => {
     const pair = await seed(MILESTONE, { owner: HIDDEN, createdBy: HIDDEN });
     const before = await rowsUnder(MILESTONE, pair.contract);
     expectMasterReadRefusal(await insertUnder(MILESTONE, pair, HIDDEN_CALLER), 'insert', MILESTONE);
-    expectMasterReadRefusal(await updateById(MILESTONE, pair, HIDDEN_CALLER), 'update', MILESTONE);
-    expectMasterReadRefusal(await deleteById(MILESTONE, pair, HIDDEN_CALLER), 'delete', MILESTONE);
+    expectHiddenRow(await updateById(MILESTONE, pair, HIDDEN_CALLER));
+    expectHiddenRow(await deleteById(MILESTONE, pair, HIDDEN_CALLER));
     expect(await rowsUnder(MILESTONE, pair.contract)).toBe(before);
     expect((await stored(MILESTONE, pair.row))?.name).toBe('as seeded');
   });
@@ -634,8 +653,15 @@ describe('[#33250] chains: each hop asks what the object written at that hop dec
 
   it('…and the caller who cannot read the contract cannot: the milestone it would write under is not readable', async () => {
     const chain = await seedUnderMilestone(STEP, { owner: BLIND });
-    expectMasterReadRefusal(await updateById(STEP, { contract: chain.contract, row: chain.row }, BLIND_CALLER), 'update', STEP);
+    expectMasterReadRefusal(
+      await landed(engine.insert(STEP, { name: 'inserted', milestone: chain.milestone }, { context: { ...BLIND_CALLER } } as never)),
+      'insert',
+      STEP,
+    );
+    expectHiddenRow(await updateById(STEP, { contract: chain.contract, row: chain.row }, BLIND_CALLER));
     expect((await stored(STEP, chain.row))?.name).toBe('as seeded');
+    expect(await security.checkControlledByParentWrite(STEP, chain.row, { ...BLIND_CALLER }))
+      .toEqual({ outcome: 'deny', leg: 'row_level_security' });
   });
 
   it('a line (NOT opted in) under a milestone (opted in): edit on the milestone, then read on its contract, admits the reader', async () => {
@@ -646,8 +672,12 @@ describe('[#33250] chains: each hop asks what the object written at that hop dec
 
   it('…and refuses the caller who cannot read the contract, on the milestone\'s hop', async () => {
     const chain = await seedUnderMilestone(LINE, { owner: BLIND });
-    const answer = await updateById(LINE, { contract: chain.contract, row: chain.row }, BLIND_CALLER);
+    const answer = await landed(engine.insert(LINE, { name: 'inserted', milestone: chain.milestone }, { context: { ...BLIND_CALLER } } as never));
     expect(answer).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+    // The milestone's own edit legs pass for the blind caller (CRUD on it, and its platform floor handed to the
+    // walk); the contract above it is asked READ, as the milestone declares, and refuses.
+    expect((answer as { message: string }).message).toContain("requires read access to its master record");
+    expectHiddenRow(await updateById(LINE, { contract: chain.contract, row: chain.row }, BLIND_CALLER));
     expect((await stored(LINE, chain.row))?.name).toBe('as seeded');
   });
 });
