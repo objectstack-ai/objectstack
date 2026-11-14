@@ -199,8 +199,9 @@ describe('`object-form` drawer arm — a section’s `description` reaches the d
     const f = await viaDrawerForm({}, GROUPED_OBJECT_SCHEMA);
     expect(
       headings(f),
-      'the live control: the group’s own label reaches the derived divider',
-    ).toEqual(['Money']);
+      'the live control: the group’s own label reaches the derived divider, and the ungrouped ' +
+        '`customer` gets the bucket’s own heading after it (objectstack#33229)',
+    ).toEqual(['Money', 'Other']);
     expect(
       blurbs(f),
       '`deriveFieldGroupSections` carries a declared group’s `description` onto the section, so ' +
