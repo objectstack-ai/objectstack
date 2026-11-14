@@ -137,6 +137,7 @@ function ofOneApp(a: string, b: string, installed: InstalledManifestLookup): boo
  * | row (in `app.custom`) declares | base | installed | ships | answer |
  * |:--|:--|:--|:--|:--|
  * | `app` | `app.service` | both, `app.service` declares `app` | `app.service` only | `true` (flat → composed) |
+ * | `X` (a module), member `fr-FR` | `Z` (a bundle addition of `X`'s name) | both | `Z` ships `fr-FR`, `X` ships `en-US` | `false` — `X` still ships the name (#32606) |
  * | `app.service` | `app` | `app` only | `app` | `true` (composed → flat) |
  * | `app` | `app` | — | — | `false` — `isServedOverrideRowOf`'s own row |
  * | `app` | `app.service` | both | both | `false` — `app` still ships it |
@@ -174,6 +175,7 @@ export function isMovedOverrideRowOf(
  * |:--|:--|:--|:--|
  * | `app` (installed) | `app.service` (declares `app`) | `app.service` only | `true` |
  * | `app` | `app.service` | both | `false` — `app` still ships it |
+ * | `X`, member `fr-FR` | `Z` (ships `fr-FR`; `X` ships `en-US`) | `Z` at the member, both at the name | `false` — `X` still ships the name (#32606) |
  * | `partner.ext` (installed, its own App) | `app.service` | `app.service` | `false` — another App |
  * | `app.old` (not installed) | `app` | `app` | `false` — no install record names its App |
  * | `app.custom` | `app.service` | `app.service` | `false` — a pair's row is {@link isMovedOverrideRowOf}'s |

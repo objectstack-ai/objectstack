@@ -1000,6 +1000,8 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
       expect((atZ as { item?: { _diagnostics?: { valid?: boolean } } })?.item?._diagnostics?.valid, 'Z\'s own item is valid').toBe(true);
       expect(await listed(Z), 'Z\'s list').toEqual(['zeta fr-FR']);
       expect(await forSend(Z), 'Z\'s execution list').toEqual(['zeta fr-FR']);
+      expect((await protocol.listServedOverrides({ packageId: Z })).map((e) => `${e.name}:${e.member}`), 'Z\'s customizations').toEqual([]);
+      expect((await protocol.listServedOverrides({ packageId: X })).map((e) => `${e.name}:${e.member}`), 'X\'s customizations').toEqual(['welcome:fr-FR']);
       // CONTROL: X's address and X's lists serve the row declared for X (UNCHANGED).
       expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
       expect(await listed(X)).toEqual(['pair fr-FR', 'suitex en-US']);
@@ -1018,6 +1020,7 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
       expect(labelOf(await read(Z, 'fr-FR'))).toBe('pair fr-FR');
       expect(await listed(Z)).toEqual(['pair fr-FR']);
       expect(await forSend(Z)).toEqual(['pair fr-FR']);
+      expect((await protocol.listServedOverrides({ packageId: Z })).map((e) => `${e.name}:${e.member}`)).toEqual(['welcome:fr-FR']);
     });
 
     it('NARROWING — an undeclared row while another App\'s pair stores an undeclared row of the name: neither address serves it, as the registry binds neither (residual 2, contract review F6; BASE at 075fb3188: `?package=Y` served es-ES, `?package=P` fr-FR)', async () => {
