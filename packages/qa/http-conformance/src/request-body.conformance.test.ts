@@ -375,7 +375,7 @@ describe.each(ADAPTERS)('IHttpRequest.rawBody({ maxBytes }) holds a body to the 
                     }),
                 duplex: 'half',
             } as RequestInit);
-            return { status: res.status, text: await res.text() };
+            return { status: res.status, text: await res.text(), allow: res.headers.get('allow') };
         };
     }
 
@@ -428,7 +428,7 @@ describe('IHttpRequest.rawBody({ maxBytes }) parity: both adapters answer an esc
                 }),
                 duplex: 'half',
             } as RequestInit);
-            answers.push({ status: res.status, text: await res.text() });
+            answers.push({ status: res.status, text: await res.text(), allow: res.headers.get('allow') });
         }
         expect(answers[0]!.status).toBe(413);
         expect(answers[0]).toEqual(answers[1]);
