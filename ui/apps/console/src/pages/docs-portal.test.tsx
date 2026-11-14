@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 
 // ── Sample metadata the mocked adapter serves (two packages, no books) ──────
@@ -33,7 +33,7 @@ const { ADAPTER, WORLD } = vi.hoisted(() => {
   ];
   const CONTENT: Record<string, string> = {
     crm_intro: 'Welcome to the CRM',
-    crm_guide_lead: 'Managing leads',
+    crm_guide_lead: 'Managing leads {#lead-scoring}',
     ops_setup: 'Operations setup',
   };
   // objectui#11197 — a second world, WITH authored books, switched on only by the
@@ -66,7 +66,7 @@ const { ADAPTER, WORLD } = vi.hoisted(() => {
   ];
   const AUTHORED_CONTENT: Record<string, string> = {
     showcase_index: 'INDEX BODY',
-    showcase_lead_guide: 'LEAD BODY',
+    showcase_lead_guide: 'LEAD BODY {#lead-scoring}',
     alpha_welcome: 'ALPHA BODY',
     beta_start: 'BETA BODY',
     acme_intro: 'ACME BODY',
@@ -94,13 +94,35 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   useAdapter: () => ADAPTER,
 }));
 
-vi.mock('@object-ui/plugin-markdown', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  MarkdownRenderer: ({ schema }: { schema: { content?: string } }) => (
-    <div data-testid="doc-content">{schema.content}</div>
-  ),
-  extractToc: () => [],
-}));
+// A `{#id}` marker in a doc body stands for a heading with that anchor id. Like
+// the real renderer's (behind React.lazy), it mounts AFTER the body's first
+// render, and the marker is not part of the body text.
+vi.mock('@object-ui/plugin-markdown', async (importOriginal) => {
+  const { useEffect, useState } = await import('react');
+  // Explicit closing tags: check:vi-mock-inherit's masker reads a self-closing `/>` after `}` as a regex.
+  function LateHeadings({ ids }: { ids: string[] }) {
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => {
+      const timer = setTimeout(() => setMounted(true), 0);
+      return () => clearTimeout(timer);
+    }, []);
+    return mounted ? <>{ids.map((id) => <h2 key={id} id={id}></h2>)}</> : null;
+  }
+  return {
+    ...(await importOriginal<Record<string, unknown>>()),
+    MarkdownRenderer: ({ schema }: { schema: { content?: string } }) => {
+      const content = schema.content ?? '';
+      const ids = [...content.matchAll(/\{#([\w-]+)\}/g)].map((m) => m[1]);
+      return (
+        <>
+          <div data-testid="doc-content">{content.replace(/\s*\{#[\w-]+\}/g, '')}</div>
+          <LateHeadings ids={ids}></LateHeadings>
+        </>
+      );
+    },
+    extractToc: () => [],
+  };
+});
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -330,5 +352,87 @@ describe('objectui#11197 — a book NAME reaches the book, and nothing that reso
       expect(await screen.findByText('Documentation not found')).toBeInTheDocument();
       expect(screen.getByTestId('where').textContent).toBe('/docs/nothing_here');
     });
+  });
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// objectstack#33055 — a flat permalink keeps its #section through the redirect
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A cross-reference to a section of another doc is written against the doc's
+ * flat permalink (`…/docs/NAME#section`). The portal redirects that permalink
+ * to the canonical in-book URL; the redirect keeps the fragment, and the reader
+ * scrolls the named heading into view once it mounts (behind the markdown
+ * renderer's lazy boundary) — the scroll an in-page anchor click gives. A URL
+ * with no fragment lands at the top.
+ */
+describe('objectstack#33055 — the #section survives the flat → canonical redirect and is scrolled to', () => {
+  function Where() {
+    const { pathname, hash } = useLocation();
+    return <div data-testid="where">{`${pathname}${hash}`}</div>;
+  }
+  function Portal({ entry }: { entry: string }) {
+    return (
+      <MemoryRouter initialEntries={[entry]}>
+        <Where />
+        <Routes>
+          <Route path="/docs" element={<DocsLayout />}>
+            <Route index element={<DocsIndex />} />
+            <Route path=":slug" element={<DocsSlug />} />
+            <Route path=":slug/:name" element={<DocPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    );
+  }
+
+  /** The ids of the elements `scrollIntoView` was called on, in order. */
+  let scrolled: string[];
+  beforeEach(() => {
+    scrolled = [];
+    Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
+      scrolled.push(this.id);
+    });
+  });
+  afterEach(() => {
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    WORLD.authored = false;
+  });
+
+  it('a flat permalink with #section lands on the canonical URL with the fragment, scrolled to that heading', async () => {
+    render(<Portal entry="/docs/crm_guide_lead#lead-scoring" />);
+    expect(await screen.findByTestId('doc-content')).toHaveTextContent('Managing leads');
+    expect(screen.getByTestId('where').textContent).toBe('/docs/crm/crm_guide_lead#lead-scoring');
+    await waitFor(() => expect(scrolled).toEqual(['lead-scoring']));
+  });
+
+  it('CONTROL: the same flat permalink with no fragment lands at the top', async () => {
+    render(<Portal entry="/docs/crm_guide_lead" />);
+    expect(await screen.findByTestId('doc-content')).toHaveTextContent('Managing leads');
+    expect(screen.getByTestId('where').textContent).toBe('/docs/crm/crm_guide_lead');
+    await waitFor(() => expect(document.getElementById('lead-scoring')).not.toBeNull());
+    expect(scrolled).toEqual([]);
+  });
+
+  it('the canonical URL with #section, opened directly, scrolls to that heading', async () => {
+    render(<Portal entry="/docs/crm/crm_guide_lead#lead-scoring" />);
+    expect(await screen.findByTestId('doc-content')).toHaveTextContent('Managing leads');
+    await waitFor(() => expect(scrolled).toEqual(['lead-scoring']));
+  });
+
+  it('the name-prefix fallback redirect keeps the fragment too', async () => {
+    render(<Portal entry="/docs/crm_not_installed#lead-scoring" />);
+    expect(await screen.findByText('Documentation not found')).toBeInTheDocument();
+    expect(screen.getByTestId('where').textContent).toBe('/docs/crm/crm_not_installed#lead-scoring');
+  });
+
+  it('a book NAME reader segment redirects to the slug URL with the fragment, scrolled to that heading', async () => {
+    WORLD.authored = true;
+    render(<Portal entry="/docs/showcase_manual/showcase_lead_guide#lead-scoring" />);
+    expect(await screen.findByTestId('doc-content')).toHaveTextContent('LEAD BODY');
+    expect(screen.getByTestId('where').textContent).toBe('/docs/manual/showcase_lead_guide#lead-scoring');
+    await waitFor(() => expect(scrolled).toEqual(['lead-scoring']));
   });
 });
