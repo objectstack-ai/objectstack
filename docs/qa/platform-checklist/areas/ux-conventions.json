@@ -9,7 +9,7 @@
       "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
       "since": "v17.7",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -62,7 +62,7 @@
         {
           "clause": "success feedback names its subject: a record-level write names the record or item (its title, label or display name) or the count; a singleton page (settings) and a named automation (e.g. Flow \"X\" completed) are their own subject and pass as they are; a bare 'Success' / 'Done' or a machine name never passes",
           "oracle": "screenshot",
-          "verify": "two steps per row. First classify the write: record-level (a record create, edit or delete, the import, the approval decision, a record or param action, a Studio item) or singleton / named automation (the settings save, a named Flow run). Then score it by that class's test. Record-level: PASS when the captured text names the record or item (record title or display name, invitee email, package or item label, e.g. 'Approved \"EXP-2001\"') or the count ('N created · M skipped', '1 row saved'); text that names only the object ('Task created successfully') scores FAIL — the console's record create and edit toasts read that way until #26172 (the dialog paths) and #26461 (the full-page /new and /edit form route) — both closed fixed, so those rows are now expected PASS, and a toast naming only the object is a regression. Singleton / named automation: PASS when the text names that page or automation ('Settings saved', 'Flow \"Reassign Task\" completed'). In either class a generic 'Done' / 'Success' or a raw snake_case name scores FAIL for that row. The Studio top bar's save status ('Saved' / 「已保存」, with or without a time) names no item, so it is not write feedback under this convention: a Studio row (autosave, publish, discard) passes only on a toast or inline text that names the item or package, and a row whose only feedback is that status scores FAIL",
+          "verify": "two steps per row. First classify the write: record-level (a record create, edit or delete, the import, the approval decision, a record or param action, a Studio item) or singleton / named automation (the settings save, a named Flow run). Then score it by that class's test. Record-level: PASS when the captured text names the record or item (record title or display name, invitee email, package or item label, e.g. 'Approved \"EXP-2001\"') or the count ('N created · M skipped', '1 row saved'); text that names only the object ('Task created successfully') scores FAIL — the console's record create and edit toasts read that way until #26172 (the dialog paths) and #26461 (the full-page /new and /edit form route) — both closed fixed, so those rows are now expected PASS, and a toast naming only the object is a regression. Singleton / named automation: PASS when the text names that page or automation ('Settings saved', 'Flow \"Reassign Task\" completed'). In either class a generic 'Done' / 'Success' or a raw snake_case name scores FAIL for that row. The Studio top bar's save status ('Saved' / 「已保存」, with or without a time) names no item, so it is not write feedback under this convention: a Studio row (autosave, publish, discard) passes only on a toast or inline text that names the item or package, or, for publish, the record-level count: its toast names how many items went live ('Published N items in this package', objectui#11807, ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx), the expected PASS knownGaps[1] records, and a row whose only feedback is that status scores FAIL",
           "evidence": "the verbatim feedback strings"
         },
         {
@@ -171,6 +171,12 @@
           "date": "2026-11-04",
           "change": "fixtures.knownGaps[0], variants[5] and [6] and acceptance[2] corrected from QA run #29890 (W5-FAIL, at 589049b0): Invite User shows the declared outcomeMessages copy the answer names (link_only on a deployment without mail, which the run read verbatim; successMessage is the fallback since #27843), and a per_group approval stays pending after one approval, so the decision is read from sys_approval_action. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-14",
+          "change": "acceptance[1].verify re-pointed (stale spec, QA run #33094, comment 6852480973; ledger row 268 of #32908). The Studio publish toast names a count, not the package label (StudioDesignSurface.tsx, objectui#11807), which the record-level class already accepts and knownGaps[1] already lists as expected PASS; the Studio sentence no longer contradicts it. variants[6] is left alone: opening a request navigates to its sys_approval_request record page (ApprovalsInboxPage.tsx requestPagePath), as it says. Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     },
@@ -287,7 +293,7 @@
       "title": "Where a label exists users see the label — machine names, raw ids and spec paths appear only as secondary text",
       "since": "v17.7",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -301,9 +307,9 @@
           "read access to the served metadata of every sampled surface — labels are read from metadata, never assumed"
         ],
         "knownGaps": [
-          "objectui#11862 is FIXED for the rows that still failed at 1fb1ced36243 (QA run #23953 at objectui daeb77fc84dd): the Access permission-set list, the Changes panel and the Lookup inspector's Display-field picker now lead with the label, as do Explain access's principal line (pin AccessExplainPanel.principalPerson-11862.test.tsx) and the nav editor's items — regression rows, expected PASS. Explain's server-built Principal resolution prose names the person too — 'Principal NAME (EMAIL; id USER_ID)' (packages/plugins/plugin-security/src/explain-engine.ts; #23157, closed). Regression rows, expected PASS since QA run #24570 (objectui 4016370a, two fresh loads each): (a) Explain access's principal card draws its position and permission-set chips by label and the result banner names the object by its label; (b) Studio Interfaces' list-view 'Columns' rows draw each field's label, its api name on the row's title (objectstack-ai/objectui#12693, closed by objectui PR #12834, cda4076b, in the console pin 4016370a and on objectui main). ⚠️ Explain's Principal resolution 'Contributed by' chips are a different surface from (a): QA run #24570 found them on machine names at 4016370a and extracted objectstack-ai/objectui#13056 — score them against the console the run serves",
+          "objectui#11862 is FIXED for the rows that still failed at 1fb1ced36243 (QA run #23953 at objectui daeb77fc84dd): the Access permission-set list, the Changes panel and the Lookup inspector's Display-field picker now lead with the label, as do Explain access's principal line (pin AccessExplainPanel.principalPerson-11862.test.tsx) and the nav editor's items — regression rows, expected PASS. Explain's server-built Principal resolution prose names the person too — 'Principal NAME (EMAIL; id USER_ID)' (packages/plugins/plugin-security/src/explain-engine.ts; #23157, closed). Regression rows, expected PASS since QA run #24570 (objectui 4016370a, two fresh loads each): (a) Explain access's principal card draws its position and permission-set chips by label and the result banner names the object by its label; (b) Studio Interfaces' list-view 'Columns' rows draw each field's label, its api name on the row's title (objectstack-ai/objectui#12693, closed by objectui PR #12834, cda4076b, in the console pin 4016370a and on objectui main). ⚠️ Explain's Principal resolution 'Contributed by' chips are a different surface from (a): QA run #24570 found them on machine names at 4016370a and extracted objectstack-ai/objectui#13056, since FIXED: each layer's 'Contributed by' line draws the item's label (ui/packages/app-shell/src/views/metadata-admin/AccessExplainPanel.tsx; pin AccessExplainPanel.contributorLabels-13056.test.tsx), and QA run #33094 did not reproduce it — a regression row, expected PASS",
           "FIXED, regression row, expected PASS (objectui#11866): Profile states the access the console resolves rather than the auth library's raw user.role ('user') (objectui apps/console/src/pages/system/ProfilePage.tsx; pin ProfilePage.access.test.tsx)",
-          "FIXED, regression row, expected PASS (objectui#11778): the flow inspector's Node Type select offers the add-node palette's display names instead of raw snake_case types such as http_request, connector_action and try_catch (pin FlowNodeInspector.nodeTypeOptions-11778.test.tsx); QA run #23163 read the Node Type value as its label",
+          "FIXED, regression row, expected PASS (objectui#11778): the flow inspector's Node Type select offers the add-node palette's display names instead of raw snake_case types such as connector_action and try_catch (http_request, the old example, is a retired callout name the flow schema refuses since spec 18, use 'http': packages/spec/src/automation/flow-reserved-node-types.ts) (pin FlowNodeInspector.nodeTypeOptions-11778.test.tsx); QA run #23163 read the Node Type value as its label",
           "Regression rows, expected PASS: the audit-log actor and composite field values render as people and labels since objectstack-ai/objectui#11697."
         ]
       },
@@ -330,7 +336,7 @@
         {
           "clause": "the primary text of each sampled item is its label, not its machine name",
           "oracle": "dom",
-          "verify": "compare the rendered primary text with the label and name read in step 1; rendered text equal to the name while a distinct label exists scores FAIL for that row",
+          "verify": "compare the rendered primary text with the label and name read in step 1; rendered text equal to the name while a distinct label exists scores FAIL for that row. Ruled exception (#32106 ruling A, recorded 6768568963 on the analysis 6766839259): a security-assignment record title, sys_user_position and sys_user_permission_set, reads 'PERSON → catalog name', and its position or permission-set half stays the catalog machine name by design (no formula reads a catalog label; the row's Position column carries the label), so score only its person half",
           "evidence": "per-row table: surface · label · name · rendered text"
         },
         {
@@ -388,6 +394,12 @@
           "date": "2026-10-19",
           "change": "knownGaps[0]'s expected FAILs (a) and (b) re-pointed to regression rows — checklist-accuracy finding of the 18.0 QA sweep (QA run #24570, ux-conventions.labels-over-machine-names knownGaps[0]; wave anchor #24579 §3): objectstack-ai/objectui#12693 (a) and (b) no longer reproduce at 4016370a. Read on objectui: the issue is closed completed by PR #12834 (merge cda4076b), an ancestor of the console pin 4016370a and of objectui main (merge-base --is-ancestor exit 0). The run's new acceptance[0] rows are the product defect it extracted (objectstack-ai/objectui#13056) and stay out of this ledger edit. No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-14",
+          "change": "acceptance[0].verify, knownGaps[0] and knownGaps[2] re-pointed (ledger rows 11 and 267 of #32908: QA run #32949 card body, and QA run #33094, comment 6852480973). acceptance[0] carves out the position half of a security-assignment title per #32106 ruling A, which keeps the catalog machine name. knownGaps[0]: objectui#13056 is fixed (AccessExplainPanel.tsx and its pin) and did not reproduce. knownGaps[2] no longer cites http_request, which spec 18 retired (flow-reserved-node-types.ts). Read at base 82838e83",
+          "ref": "#33328"
         }
       ]
     }
