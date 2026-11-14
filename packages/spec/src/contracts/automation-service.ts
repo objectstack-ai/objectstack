@@ -768,7 +768,8 @@ export interface AutomationResult {
      */
     userMessage?: string;
     /**
-     * The refusal a node's write met inside the run, structured —
+     * The refusal a node met inside the run (a data node's read or write, or a
+     * `script` node's function resolution), structured —
      * `{ code, message }`, `code` in its WIRE spelling (`UNIQUE_VIOLATION`
      * for a unique refusal), the shape a record save of the same write
      * answers with (ruling B′ on #24914; #24996).
