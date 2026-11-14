@@ -91,6 +91,8 @@ export * from './platform-admin-gate.js';
 // twin of one of these doors (the cloud's per-environment `set-initial-password`,
 // objectstack-ai/cloud#3169) answers with the same status, code and message.
 export * from './cloud-managed.js';
+// Direct sign-in: the `directSignIn` option's shape, for a host that sets it.
+export type { DirectSignInOptions, DirectSignInLocalPath } from './direct-sign-in.js';
 export * from './last-local-credential.js';
 export * from './placeholder-email.js';
 export * from './admin-import-users.js';

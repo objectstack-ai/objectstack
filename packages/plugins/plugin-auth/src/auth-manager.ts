@@ -300,6 +300,16 @@ import {
 } from './sso-sign-out-of-idp.js';
 import { readStoredSamlConfig, runSsoSamlRefusalCauseScope } from './sso-saml-refusal-cause.js';
 import { readThirdPartyLoginProvider, runThirdPartyInitiatedLogin, type ThirdPartyLoginContext } from './sso-third-party-initiated-login.js';
+import {
+  chooseDirectSignInProvider,
+  readSsoProviderIds,
+  resolveDirectSignIn,
+  runDirectSignIn,
+  type DirectSignInOptions,
+  type DirectSignInProvider,
+  type DirectSignInProviderMiss,
+  type ResolvedDirectSignIn,
+} from './direct-sign-in.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
@@ -930,6 +940,15 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * Each entry is passed to better-auth's genericOAuth plugin.
    */
   oidcProviders?: OidcProvidersConfig;
+
+  /**
+   * Direct sign-in (`direct-sign-in.ts`): with it set, a person who opens the
+   * deployment signed out goes straight to the identity provider and comes
+   * back to the page they opened. Absent ⇒ off. The environment wins field by
+   * field: `OS_AUTH_DIRECT_SIGN_IN_ENABLED`, `OS_AUTH_DIRECT_SIGN_IN_PROVIDER`,
+   * `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH` (`hidden` | `off`).
+   */
+  directSignIn?: DirectSignInOptions;
 
   /**
    * `additionalOrgRoles` was REMOVED in ADR-0108 (#3723). The organization-role
@@ -1987,6 +2006,11 @@ export class AuthManager {
     // the merged result, and `buildPluginList()` re-checks for env vars that
     // appear after boot.
     assertScimAdminCoherence(config.plugins);
+
+    // Direct sign-in: an off-vocabulary local sign-in path refuses the boot
+    // loudly (`resolveDirectSignIn` throws) instead of quietly opening or
+    // closing the sign-in page.
+    this.directSignInSetting();
 
     // A completed password reset ends the account's other sessions, always;
     // the retired `emailAndPassword.revokeSessionsOnPasswordReset` is refused
@@ -5659,6 +5683,7 @@ export class AuthManager {
     // suppresses the password form via `features.ssoEnforced` below. A
     // cloud-managed environment forces signup off too (`signUpForcedOff`).
     const ssoOnly = this.resolveSsoOnly();
+    const directSignIn = this.directSignInSetting();
     // [#11739] The audience posture, resolved once for this response: the
     // forced-verification mirror below and `features.audiencePosture` must
     // answer from the same read the enforcement path uses (getAudience —
@@ -5772,6 +5797,11 @@ export class AuthManager {
       // form + self-registration. A break-glass "use a password" link remains
       // for the env owner / local admin. Driven by `ssoOnlyMode` / `OS_AUTH_SSO_ONLY`.
       ssoEnforced: ssoOnly,
+      // Direct sign-in (`direct-sign-in.ts`): the sign-in page navigates
+      // straight to the identity provider. The coarse "setting on" here; the
+      // `/auth/config` route refines it to "able to start" with
+      // `isDirectSignInUsable()`, as it refines `sso`.
+      directSignIn: directSignIn.enabled,
       deviceAuthorization: pluginConfig.deviceAuthorization ?? false,
       // Mirrors `enabled.admin` in buildPluginList() (SCIM forces the admin
       // plugin on, ADR-0134) — previously `?? false`, which advertised the
@@ -5805,6 +5835,10 @@ export class AuthManager {
       // stable), so `false` when the host declares no developer choice. It
       // only advertises the host's own create door; nothing here acts on it.
       developerEditionCreate: organizationEditions?.some((choice) => choice.edition === 'developer') ?? false,
+      // The local sign-in path behind direct sign-in (`hidden` | `off`), a
+      // value served only while direct sign-in is on (registered in
+      // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS).
+      ...(directSignIn.enabled ? { localSignIn: directSignIn.localSignIn } : {}),
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
       // The PUBLIC Turnstile site key, served only when the sign-up challenge
@@ -5894,6 +5928,69 @@ export class AuthManager {
     } catch {
       return true; // provider introspection failed — keep the wired behaviour
     }
+  }
+
+  /**
+   * The direct sign-in setting in force (`direct-sign-in.ts`), read live: the
+   * environment wins over the `directSignIn` option field by field, so a
+   * deployment can turn it on or off whatever the host passed.
+   */
+  public directSignInSetting(): ResolvedDirectSignIn {
+    const env = ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>;
+    return resolveDirectSignIn(this.config.directSignIn, env);
+  }
+
+  /**
+   * The identity provider a signed-out visit goes to: the named one, or the
+   * one candidate across `oidcProviders` and the `sys_sso_provider` rows
+   * (read with system context, only while the SSO plugin is wired).
+   */
+  public async chooseDirectSignInProvider(): Promise<DirectSignInProvider | { miss: DirectSignInProviderMiss }> {
+    const setting = this.directSignInSetting();
+    const provider = setting.enabled ? setting.provider : undefined;
+    const engine = this.getDataEngine();
+    const ssoProviderIds = this.isSsoWired() && engine
+      ? await readSsoProviderIds(withSystemReadContext(engine) as never, provider)
+      : [];
+    return chooseDirectSignInProvider({
+      ...(provider !== undefined ? { provider } : {}),
+      oauthProviderIds: [...this.enterpriseOAuthProviderIds()],
+      ssoProviderIds,
+    });
+  }
+
+  /**
+   * Is direct sign-in on AND able to start: the setting is on and it resolves
+   * to one provider. `/auth/config` serves this as `features.directSignIn`, so
+   * the sign-in page navigates only to a door that starts a sign-in.
+   */
+  public async isDirectSignInUsable(): Promise<boolean> {
+    if (!this.directSignInSetting().enabled) return false;
+    try {
+      return !('miss' in (await this.chooseDirectSignInProvider()));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Answer `GET {basePath}/sign-in/direct` (`direct-sign-in.ts`
+   * `runDirectSignIn`): `302` to the identity provider through the vendor's
+   * own start, returning to a same-origin path only. It mints nothing.
+   */
+  public startDirectSignIn(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+    const origin = this.getCanonicalOrigin();
+    return runDirectSignIn(request, {
+      setting: () => this.directSignInSetting(),
+      chooseProvider: () => this.chooseDirectSignInProvider(),
+      origin: () => origin,
+      consolePageUrl: (path) => this.getConsolePageUrl(path),
+      startUrl: (kind) =>
+        new URL(`${this.getBasePath()}${kind === 'oauth' ? '/sign-in/social' : '/sign-in/sso'}`, request.url).href,
+      // The vendor's own start, so never back through the route table.
+      dispatch: (vendorRequest) => this.handleVendorRequest(vendorRequest, transport),
+      ...(this.config.logger ? { logger: this.config.logger as never } : {}),
+    });
   }
 
   /**

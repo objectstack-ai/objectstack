@@ -2700,6 +2700,10 @@ const ja = {
     },
     login: {
       signingIn: "サインインしています…",
+      directSignIn: {
+        description: "組織のシングルサインオンでサインインします。",
+        retry: "シングルサインオンで続行",
+      },
       ssoHandoff: "{{target}} に進む",
       devAdminHint: {
         title: "ローカル開発インスタンス",
@@ -2723,6 +2727,9 @@ const ja = {
         ssoResponseRejected: "所属組織のサインインサービスから、このシステムが受け付けられない応答が返されました。管理者にシングルサインオンの設定を確認するよう依頼してください。",
         ssoStartFromLoginPage: "サインインはこのシステムのサインインページから開始する必要があります。ここに勤務先のメールアドレスを入力し、「SSO でサインイン」を選んでください。",
         ssoTechnicalDetails: "技術的な詳細",
+        directSignInIncomplete: "サインインが完了しませんでした。シングルサインオンから戻りましたが、サインインされていません。このブラウザーでこのサイトの Cookie が許可されているか確認して、もう一度お試しください。",
+        directSignInUnavailable: "このシステムのシングルサインオンを開始できませんでした。使用しているサインインサービスの確認を管理者に依頼してください。",
+        directSignInRateLimited: "このネットワークから短時間に多くのサインインが開始されました。数秒待ってから、もう一度お試しください。",
         twoFactorInvalidCode: "コードが無効です。認証アプリを確認して、もう一度お試しください。",
         twoFactorInvalidBackupCode: "このバックアップコードは無効か、すでに使用されています。",
         twoFactorTooManyAttempts: "誤ったコードの入力が多すぎます。パスワードでもう一度サインインしてください。",

@@ -15,6 +15,7 @@ import { TWO_FACTOR_CHALLENGE_ENDED_CODES } from './two-factor-codes.js';
 import { AuthCtx, type AuthContextValue } from './AuthContext.js';
 import { createAuthClient, sessionReadWasInconclusive, takePreflightSession, TokenStorage } from './createAuthClient.js';
 import { ActiveOrganizationStorage, SessionUserScope, purgeSignedOutUserClientState } from './ActiveOrganizationStorage.js';
+import { clearSignOutRoundTrip, readSignOutRoundTrip } from './signOutRoundTrip.js';
 
 /**
  * Sign-out leaves none of the signed-out user's client state in this browser
@@ -121,7 +122,16 @@ export function AuthProvider({
   // session exists again (below), whoever it belongs to. A session
   // that ends any other way (expired, revoked, signed out in another tab)
   // leaves it `false`.
-  const [sessionEndedBySignOut, setSessionEndedBySignOut] = useState(false);
+  //
+  // objectstack#33183 — a sign-out that left through the identity provider's
+  // logout comes back to the sign-in page as a full page load, which this
+  // state does not survive: the tab's note (`./signOutRoundTrip`) carries it,
+  // and the first mount after the round trip starts raised. The initializer
+  // only reads; the mount effect below drops the note, so it is read once.
+  const [sessionEndedBySignOut, setSessionEndedBySignOut] = useState(() => readSignOutRoundTrip());
+  useEffect(() => {
+    clearSignOutRoundTrip();
+  }, []);
   const [remediationRequired, setRemediationRequired] = useState<{ code: string; message: string } | null>(null);
   // objectstack#29105 — a password sign-in waiting for its second factor.
   const [twoFactorChallenge, setTwoFactorChallenge] = useState<TwoFactorChallenge | null>(null);

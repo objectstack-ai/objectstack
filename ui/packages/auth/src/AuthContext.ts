@@ -18,9 +18,11 @@ export interface AuthContextValue {
   isAuthenticated: boolean;
   /**
    * objectstack#30125 — `true` when this tab's last session was ended by
-   * `signOut()` and no session has been established since; `false` on load,
-   * while signed in, and after a session that ended any other way (expired,
-   * revoked, signed out in another tab). Lets a sign-in redirect tell "the
+   * `signOut()` and no session has been established since; `false` on load
+   * (unless that sign-out left through the identity provider's logout and
+   * this load is the tab's return from it, objectstack#33183), while signed
+   * in, and after a session that ended any other way (expired, revoked,
+   * signed out in another tab). Lets a sign-in redirect tell "the
    * person left", where whoever signs in next is nobody in particular, from
    * "the session lapsed under the person", who comes back to the same page.
    */
