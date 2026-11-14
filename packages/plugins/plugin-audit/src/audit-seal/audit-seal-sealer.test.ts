@@ -106,6 +106,26 @@ describe('windows: the backlog oldest first, one checkpoint per chain per window
     expect(s.checkpoints().flatMap((c) => c.row_ids)).toEqual(rows.map((r) => r.id));
   });
 
+  it('reads each row of a window once when rows of one created_at straddle the page boundary: the keyset tie arm (S2)', async () => {
+    const s = setup();
+    // 495 rows a second apart, then 15 rows of one instant: the first page of 500 ends inside the tie.
+    const tie = at(8, 30);
+    const rows = Array.from({ length: 510 }, (_, i) =>
+      row(`r${String(i).padStart(3, '0')}`, i < 495 ? new Date(DAY0 + 8 * H + i * 1_000).toISOString() : tie));
+    s.hot.table('ledger_probe').push(...rows);
+    const reads = new Map<string, number>();
+    const find = s.hot.find.bind(s.hot);
+    s.hot.find = async (object, query) => {
+      const page = await find(object, query);
+      if (object === 'ledger_probe' && query.limit === 500) for (const r of page) reads.set(String(r.id), (reads.get(String(r.id)) ?? 0) + 1);
+      return page;
+    };
+    await s.sealer.runPass();
+    expect(s.checkpoints().flatMap((c) => c.row_ids)).toEqual(rows.map((r) => r.id));
+    expect(reads.size).toBe(510);
+    expect([...reads].filter(([, n]) => n !== 1)).toEqual([]);
+  });
+
   it('writes nothing on a second pass with nothing new', async () => {
     const s = setup();
     s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
@@ -157,6 +177,30 @@ describe('late rows: re-counted and sealed as late, before the pass seals its wi
     expect(await s.sealer.runPass()).toBe(1);
     expect(s.checkpoints().map((c) => [c.tenant_id, c.kind, c.row_ids])).toEqual([['org_a', 'window', ['a']], ['org_b', 'window', ['b']]]);
     expect(s.hot.table('sys_secret')).toHaveLength(4); // the key's half, two seeds, and the unstored write's seed kept as an orphan (M1)
+  });
+
+  it("drops from a late checkpoint each row a checkpoint stored since the pass read the window's lists, so no row is sealed twice (N1)", async () => {
+    const cluster = grantingCluster();
+    const s = setup({ cluster });
+    const other = new AuditSealer({ engine: s.engine, crypto: s.crypto, signer: () => s.signer, cluster: () => cluster, logger: s.logger, now: () => s.clock.now });
+    s.hot.table('ledger_probe').push(row('r1', at(10, 5)));
+    await s.sealer.runPass();
+    s.hot.table('ledger_probe').push(row('late', at(10, 30)));
+    const find = s.hot.find.bind(s.hot);
+    let raced = false;
+    s.hot.find = async (object, query) => {
+      const page = await find(object, query);
+      // The pass's one read of the horizon's checkpoints; another sealer seals the late row right after it.
+      if (object === 'sys_audit_checkpoint' && !raced && (query.where as Record<string, unknown>).window_start !== undefined) {
+        raced = true;
+        await other.runPass();
+      }
+      return page;
+    };
+    expect(await s.sealer.runPass()).toBe(0);
+    expect(s.checkpoints().filter((c) => c.row_ids.includes('late')).map((c) => [c.kind, c.sequence])).toEqual([['late', 1]]);
+    expect(s.hot.table('sys_secret').filter((r) => r.namespace === 'ledger_probe').map((r) => r.id).sort())
+      .toEqual(s.checkpoints().map((c) => c.seed_handle).sort()); // nothing was sealed for the rows dropped
   });
 });
 
@@ -298,6 +342,26 @@ describe('what the sealer writes, and where (ruling 3d)', () => {
     expect(s.hot.table('sys_secret').filter((r) => r.namespace === 'ledger_probe').map((r) => r.id)).toEqual([s.checkpoints()[0].seed_handle]);
     expect(s.logger.lines.filter((l) => l.level !== 'info').map((l) => [l.level, l.message])).toEqual([['warn', expect.stringMatching(/afterInsert hook failed.*after its row was stored; it stands/)]]);
     expect(await s.sealer.runPass()).toBe(0);
+  });
+
+  it('drops the seed of a checkpoint whose sequence another checkpoint holds: the unique index proves it can never be stored (N2)', async () => {
+    const cluster = grantingCluster();
+    const s = setup({ cluster });
+    const other = new AuditSealer({ engine: s.engine, crypto: s.crypto, signer: () => s.signer, cluster: () => cluster, logger: s.logger, now: () => s.clock.now });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
+    const insert = s.engine.insert.bind(s.engine);
+    let raced = false;
+    s.engine.insert = async (object, r, o) => {
+      if (object === 'sys_audit_checkpoint' && !raced) {
+        raced = true;
+        await other.runPass(); // stores this sequence first, past this pass's head re-read
+      }
+      return insert(object, r, o);
+    };
+    expect(await s.sealer.runPass()).toBe(0);
+    expect(s.checkpoints().map((c) => c.sequence)).toEqual([0]);
+    expect(s.hot.table('sys_secret').filter((r) => r.namespace === 'ledger_probe').map((r) => r.id)).toEqual([s.checkpoints()[0].seed_handle]);
+    expect(s.logger.lines.filter((l) => l.level === 'error').map((l) => l.message)).toEqual([expect.stringMatching(/UNIQUE constraint failed/)]);
   });
 
   it('refuses an organization id too long for the seed coordinate before anything is sealed (Q6 (a))', async () => {
