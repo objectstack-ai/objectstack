@@ -251,9 +251,10 @@ export interface MetadataHistoryAddress {
   /**
    * The package whose versions are read, or whose row a rollback writes.
    * `null` addresses the environment: the name's package-less row and the
-   * versions recorded of it (never a version attributed to none, F1). `''` and the `sys_metadata` sentinel
-   * name no package either, so they address the environment too (the store's
-   * own rule, `isPackageCaller`). Absent: no address.
+   * versions recorded of it (never a version attributed to none, F1). `''`
+   * and the `sys_metadata` sentinel name no package either, so they address
+   * the environment too (the store's own rule, `isPackageCaller`). Absent: no
+   * address.
    */
   packageId?: string | null;
 }
@@ -293,14 +294,28 @@ function historySnapshotPackage(slot: { packageId?: string } | undefined): strin
  * `package_id` column, else, for a row written before it, the package its
  * stored body names — {@link storedRowPackageId}), `null` for the
  * environment (the column holds {@link ENVIRONMENT_HISTORY_MARK}), or
- * `undefined` when it is attributed to none. An addressed read never answers
- * an unattributed version, and a rollback lands one only on a name a single
- * row slot holds. [#32905] `SysMetadataRepository` (the `/meta` history and
+ * `undefined` when it is attributed to none. An addressed read or rollback
+ * never answers an unattributed version (#32717: "not found" while one row
+ * slot holds the name, refused naming every holder while several do), and a
+ * rollback naming no package lands one only on a name a single row slot
+ * holds. [#32905] `SysMetadataRepository` (the `/meta` history and
  * rollback doors) attributes the rows it reads by this same rule.
  */
 export function historyRowAttribution(row: Record<string, unknown>): string | null | undefined {
   if (row.package_id === ENVIRONMENT_HISTORY_MARK) return null;
   return storedRowPackageId(row);
+}
+
+/**
+ * [#32717] The "not found" of an addressed rollback to a version its address's
+ * history does not hold: the sentence `MetadataManager.rollback` answers after
+ * its addressed read (`historyAddressSuffix` there), so the two doors answer
+ * one request in the same words.
+ */
+function historyVersionNotFound(type: string, name: string, version: number, packageId: string | null): Error {
+  return new Error(
+    `Version ${version} not found in history for ${type}/${name} ${packageId === null ? '(environment)' : `(package ${packageId})`}`,
+  );
 }
 
 /** [#32351] A version's owner in a sentence: `package "p"`, or the environment. */
@@ -1742,7 +1757,9 @@ export class DatabaseLoader implements MetadataLoader {
    * when it holds no row of the name, or, addressing none, the name's one row
    * slot (several are refused naming every holder, before any write). The
    * version restored must be that slot's package's: another package's version
-   * is refused, ⛔ never written into the remaining holder's row (S8a). Every
+   * is refused, ⛔ never written into the remaining holder's row (S8a). An
+   * addressed rollback to a version its address's history does not hold
+   * answers "not found", as `MetadataManager.rollback` does (#32717). Every
    * other type restores its name's row, as before.
    */
   async registerRollback(
@@ -1873,10 +1890,23 @@ export class DatabaseLoader implements MetadataLoader {
    *    row, as before (M1): a package took over the package-less row, or
    *    saved after it was removed;
    *  - a version attributed to none (F1: a row written before the column, or
-   *    by `SysMetadataRepository`) lands in the slot picked only when the
-   *    name has one row slot, as before; with several it is refused naming
-   *    every holder (`refuseSeveralSlots`), addressed or not, since nothing
-   *    says whose it is.
+   *    by `SysMetadataRepository` before #32905) lands in the slot picked only
+   *    when the name has one row slot and the rollback names no package, as
+   *    before; with several it is refused naming every holder
+   *    (`refuseSeveralSlots`), addressed or not, since nothing says whose it
+   *    is;
+   *  - [#32717] addressed, a version the address's history does not hold —
+   *    one attributed to none, or the environment's while a package's row is
+   *    the name's one slot (M1) — answers "not found"
+   *    ({@link historyVersionNotFound}), the words `MetadataManager.rollback`
+   *    answers after its addressed read, before any write. The address names
+   *    whose version is restored; attribution is what says so, and nothing
+   *    is guessed (ADR-0150: one holder or a refusal);
+   *  - the restored body's own package stamp stands in for the version's
+   *    owner only when the version has no history row at all (history not
+   *    tracked, or no row of that version): a history row that exists, even
+   *    one attributed to none, is the version's owner, ⛔ never the stamp of
+   *    the body a caller hands in (#32717).
    */
   private async rollbackSlot(
     type: string,
@@ -1896,14 +1926,24 @@ export class DatabaseLoader implements MetadataLoader {
       key = bySlot.keys().next().value as string;
     }
     const slotPackage = slotPackageOf(key);
-    const recorded = await this.historyVersionAttribution(type, name, targetVersion);
-    const versionOwner = recorded !== undefined ? recorded : storedItemPackageId(restoredData);
-    if (versionOwner === undefined || (versionOwner === null && bySlot.size === 1)) {
-      // Attributed to none, or (M1) the environment's own version of a name
-      // one row slot holds — a package took over the package-less row, or it
-      // was removed and a package saved since: it lands in that one row, as
-      // before. With several row slots it is refused naming every holder.
+    const recorded = await this.historyVersionRow(type, name, targetVersion);
+    // [#32717] Whose version it is: its history row's attribution whenever
+    // the row exists; the restored body's stamp only for a version with no row.
+    const versionOwner = recorded !== undefined ? historyRowAttribution(recorded) : storedItemPackageId(restoredData);
+    if (versionOwner === undefined) {
+      // Attributed to none (or, with no history row, a body naming no
+      // package): with several row slots refused naming every holder. With
+      // one, a rollback naming no package lands it in that row, as before;
+      // an addressed one does not read it, as the manager's addressed read
+      // does not.
       refuseSeveralSlots(bySlot, type, name);
+      if (packageId !== undefined && recorded !== undefined) throw historyVersionNotFound(type, name, targetVersion, packageId);
+    } else if (versionOwner === null && bySlot.size === 1 && slotPackage !== undefined) {
+      // M1: the environment's own version of a name a package's row is the
+      // one slot of (a package took over the package-less row, or saved
+      // after it was removed): a rollback naming no package lands it in that
+      // row, as before; one naming the package does not read it.
+      if (packageId !== undefined) throw historyVersionNotFound(type, name, targetVersion, packageId);
     } else if (versionOwner !== (slotPackage ?? null)) {
       if (bySlot.has(storeRowKey(name, versionOwner))) {
         throw new Error(
@@ -1917,16 +1957,15 @@ export class DatabaseLoader implements MetadataLoader {
   }
 
   /**
-   * [#32351] Whose version the history row of `(type, name, version)` records
-   * ({@link historyRowAttribution}): a package, `null` for the environment;
-   * `undefined` when history is not tracked, the row is absent or it is
-   * attributed to none.
+   * [#32351, #32717] The history row of `(type, name, version)`, whose
+   * attribution ({@link historyRowAttribution}) says whose version it is;
+   * `undefined` when history is not tracked or the row is absent — never
+   * when the row exists and is attributed to none.
    */
-  private async historyVersionAttribution(type: string, name: string, version: number): Promise<string | null | undefined> {
+  private async historyVersionRow(type: string, name: string, version: number): Promise<Record<string, unknown> | undefined> {
     if (!this.trackHistory) return undefined;
     await this.ensureHistorySchema();
-    const row = await this._findOne(this.historyTableName, { where: { type, name, version } });
-    return row ? historyRowAttribution(row) : undefined;
+    return (await this._findOne(this.historyTableName, { where: { type, name, version } })) ?? undefined;
   }
 
   /**
