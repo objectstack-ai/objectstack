@@ -26,6 +26,9 @@
  *   - CONTROL: the same object served with no restriction — the row click
  *     opens the drawer, as every object's does.
  *
+ * The bare data page (`ObjectDataPage`, `/:objectName/data`) routes its own
+ * row clicks, so the row click and the `?recordId=` link are pinned there too.
+ *
  * The record body is not what this file reads, so `RecordDetailView` is a
  * null sink.
  */
@@ -70,6 +73,7 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 }));
 
 import { ObjectView } from './ObjectView';
+import { ObjectDataPage } from './ObjectDataPage';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
 const OBJECT_NAME = 'demo_credential';
@@ -272,6 +276,63 @@ describe('objectstack#33219 — a list-only object\'s rows open no record page',
     fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
     expect(openSpy).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByText('okta-staging'));
+    await waitFor(() => expect(search()).toBe('?recordId=c1'));
+    expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
+  });
+});
+
+async function mountDataPage(apiOperations: string[] | undefined, search = '') {
+  findOne = vi.fn(async () => null);
+  const dataSource = {
+    find: vi.fn(async () => ({ data: ROWS, total: ROWS.length })),
+    findOne,
+    create: vi.fn(async () => ({})),
+    update: vi.fn(async () => ({})),
+    delete: vi.fn(async () => ({})),
+    getObjectSchema: vi.fn(async (name: string) => OBJECTS.find((o) => o.name === name) ?? null),
+  } as never;
+  const dataPath = `/apps/setup/${OBJECT_NAME}/data`;
+  window.history.replaceState(null, '', dataPath);
+  render(
+    <MePermissionsProvider initialPermissions={answer(apiOperations)}>
+      <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })}>
+        <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'admin' }}>
+          <MemoryRouter initialEntries={[`${dataPath}${search}`]}>
+            <Routes>
+              <Route path="/apps/:appName/:objectName/data" element={<ObjectDataPage dataSource={dataSource} objects={OBJECTS} />} />
+              <Route path="*" element={<div data-testid="left-the-list" />} />
+            </Routes>
+            <LocationProbe />
+          </MemoryRouter>
+        </ExpressionProvider>
+      </I18nProvider>
+    </MePermissionsProvider>,
+  );
+  await screen.findByText('azure-prod', undefined, { timeout: 5000 });
+}
+
+describe('objectstack#33219 — the bare data page opens no record of a list-only object', () => {
+  it('a row click and a ⌘-click open nothing', async () => {
+    await mountDataPage(LIST_ONLY_OPERATIONS);
+    fireEvent.click(screen.getByText('scim_ab12'));
+    fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
+    await settle();
+    expect(search()).toBe('');
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByTestId('left-the-list')).toBeNull();
+  });
+
+  it('a `?recordId=` link opens no drawer and reads no record', async () => {
+    await mountDataPage(LIST_ONLY_OPERATIONS, '?recordId=c1');
+    await settle();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL — the same object served with no restriction: the row click opens the drawer', async () => {
+    await mountDataPage(undefined);
+    fireEvent.click(screen.getByText('scim_ab12'));
     await waitFor(() => expect(search()).toBe('?recordId=c1'));
     expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
   });
