@@ -19,14 +19,14 @@ import {
 
 const REPORT_PREFIX = '[sso] SSO provider ';
 
-/** A stored-rows engine double: reads answer copies of `rows`, every write is recorded and refused. */
+/** A stored-rows engine double: reads answer copies of `rows` for `sys_sso_provider`, every write is recorded. */
 function storedProviders(rows: Record<string, unknown>[], options: { registered?: boolean; findThrows?: boolean } = {}) {
   const stored = structuredClone(rows);
   const finds: Array<{ object: string; query: Record<string, unknown> | undefined }> = [];
   const writes: string[] = [];
-  const refuseWrite = (verb: string) => vi.fn(async (object: string) => {
+  const recordWrite = (verb: string) => vi.fn(async (object: string, data?: unknown) => {
     writes.push(`${verb} ${object}`);
-    throw new Error(`write refused by the double: ${verb} ${object}`);
+    return data && typeof data === 'object' ? { id: `${verb}-${writes.length}`, ...data } : {};
   });
   const engine = {
     getSchema: (name: string) => (options.registered === false ? undefined : name === SSO_PROVIDER_OBJECT ? { name } : undefined),
@@ -37,9 +37,9 @@ function storedProviders(rows: Record<string, unknown>[], options: { registered?
     }),
     findOne: vi.fn(async () => null),
     count: vi.fn(async () => 0),
-    insert: refuseWrite('insert'),
-    update: refuseWrite('update'),
-    delete: refuseWrite('delete'),
+    insert: recordWrite('insert'),
+    update: recordWrite('update'),
+    delete: recordWrite('delete'),
   };
   return { engine, stored, finds, writes };
 }
@@ -146,9 +146,11 @@ describe('AuthPlugin.start() — the report runs on kernel:ready', () => {
     const log = logger();
     const ctx = {
       registerService: vi.fn(),
+      // The `AuthPlugin` harness's own shape (`auth-plugin.test.ts`): an
+      // absent service answers `undefined`.
       getService: vi.fn((name: string) => {
-        if (name in services) return services[name];
-        throw new Error(`Service not found: ${name}`);
+        if (name === 'manifest') return { register: vi.fn() };
+        return services[name];
       }),
       getServices: vi.fn(() => new Map()),
       hook: vi.fn((name: string, handler: () => Promise<void>) => {
