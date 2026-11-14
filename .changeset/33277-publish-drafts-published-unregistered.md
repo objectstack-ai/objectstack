@@ -3,6 +3,7 @@
 '@objectstack/metadata-protocol': patch
 '@objectstack/runtime': patch
 '@objectstack/client': patch
+'@object-ui/app-shell': patch
 ---
 
 feat(metadata-protocol, spec): a package publish whose runtime registry refused an object answers `published_unregistered` and names the object, instead of `published`
@@ -17,5 +18,7 @@ Metadata-protocol: none
 - everything else as before: the drafts landed and stay live, so every object is still in `published[]` (the refused one still carries its warning), `failed[]` is empty, and the commit, seeds, probes and receipts are as they were.
 
 **What to do.** Handle the new value wherever you branch on the batch publish answer. Do not treat it as "nothing landed": the metadata is live. Do not seed or read an object `unregistered[]` names until it is registered: publish it again, which re-runs the registration, or restart, which registers every stored object.
+
+**The console.** Studio's publish, the package sheet, Home's *Publish all* and the AI chat card read `published_unregistered` as they read the `published` answer the server gave for this before: the refused object's warning reaches the author through the client, and none of them reports the publish as failed.
 
 **Unchanged on purpose.** The REST door's app visibility flip (ADR-0045 §3) still runs after this outcome, as it ran after the `published` answer this used to be. The single-item doors (`publishMetaItem`, a publish-mode save) still answer success with the warning on their `advisories`.
