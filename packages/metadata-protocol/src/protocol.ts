@@ -11028,6 +11028,14 @@ export class ObjectStackProtocolImplementation implements
      * next read falls through to the artifact-loaded default. Implements the
      * "Reset to factory default" semantic from ADR-0005. Whitelist is shared
      * with {@link saveMetaItem}.
+     *
+     * [#32958] A removal that hands an object back the definition beneath it
+     * (an `object_extension` that re-declared a stored computed field) fills
+     * every stored computed field it made compute something new over the
+     * object's existing rows, as
+     * the save door does (`protocol-stored-expression-fill.ts`), each reported
+     * on `advisories`, omitted when empty. An unfinished fill never fails the
+     * delete.
      */
     async deleteMetaItem(request: DeleteMetaItemRequest): Promise<{
         success: boolean;
@@ -11036,6 +11044,8 @@ export class ObjectStackProtocolImplementation implements
         seq?: number;
         /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
         projectionApplied?: MutationProjectionOutcome;
+        /** [#32958] The stored-expression fill of the object the removal changed; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-diff-delete-load.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolDiffDeleteLoadFacet.deleteMetaItem(protocolHost(this), request);
@@ -11049,6 +11059,8 @@ export class ObjectStackProtocolImplementation implements
         seq?: number;
         /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
         projectionApplied?: MutationProjectionOutcome;
+        /** [#32958] The stored-expression fill of the object the removal changed; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-diff-delete-load.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolDiffDeleteLoadFacet.deleteMetaItemUnaudited(protocolHost(this), request);
