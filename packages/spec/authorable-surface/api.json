@@ -1449,7 +1449,6 @@
     "api/PublishMetaItemResponse:version",
     "api/PublishPackageDraftsRequest:backfill",
     "api/PublishPackageDraftsRequest:message",
-    "api/PublishPackageDraftsRequest:userTextLocales",
     "api/PublishPackageDraftsResponse:backfillApplied",
     "api/PublishPackageDraftsResponse:commitId",
     "api/PublishPackageDraftsResponse:failed",

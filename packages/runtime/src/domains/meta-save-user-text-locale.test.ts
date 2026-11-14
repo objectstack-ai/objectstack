@@ -27,6 +27,8 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
 import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a clocked case (check-test-source-alias).
+import '@objectstack/metadata';
 
 const PREFIX = '/api/v1';
 const META = `${PREFIX}/meta`;

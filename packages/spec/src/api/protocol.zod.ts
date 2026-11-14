@@ -1758,7 +1758,6 @@ export const PublishPackageDraftsRequestSchema = lazySchema(() => z.object({
     + 'is not new in this publish or declares no literal default; '
     + '`backfillApplied` in the response reports the rows written per field.',
   ),
-  userTextLocales: userTextLocalesMember(),
 }));
 
 /**
