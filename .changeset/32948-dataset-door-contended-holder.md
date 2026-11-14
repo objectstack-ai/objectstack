@@ -10,9 +10,9 @@ Metadata-protocol: none
 Moved answers, when the name is refused (bare name, `?callerPackage=`, or `?package=` naming a contended holder) and its holders' own addresses are contended:
 
 - admitted to two or more holders: `503 SERVICE_UNAVAILABLE` → `409 RESOURCE_CONFLICT` naming those holders;
-- admitted to exactly one contended holder: `503` → `409` naming that holder only, nothing run;
+- admitted to exactly one contended holder: `503` → `409` naming that holder only, nothing run; its sentence speaks of that holder and the row alone and neither names nor counts any holder the caller may not query;
 - admitted to none: `503` → `404 NOT_FOUND`, byte-equal to the answer for a name nothing holds;
-- admitted to exactly one holder whose address is not contended, every other holder contended and not admitted: `503` → `200`, that holder's dataset runs (the rule for one admitted holder of an ambiguity, now reached).
+- admitted to exactly one holder whose address is not contended, every other holder contended and not admitted: `503` → `200`, that holder's dataset runs (the rule for one admitted holder of an ambiguity, now reached). At `?package=` or `?callerPackage=` naming a contended module that holder is not among the refused holders, so it never runs there: admitted to it alone is the `404`, admitted beside a module is the `409` naming that module only.
 
 The stored row this arises from today is an App's customization-pair row that names none of the App's modules. A row bound to no package is declined at each holder's address for a dataset, so it moves no answer, before or after.
 

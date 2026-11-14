@@ -318,7 +318,9 @@ if the row were not there. An App's customization-pair row that names none of
 the App's modules makes each module's own address refuse the name until the row
 is saved under one package. Such a module never runs, and it is judged on its
 own dataset: the `409` names it when the caller may query it, and a caller who
-may query none of the holders gets the `404`.
+may query none of the holders gets the `404`. A `409` that names one module
+speaks of that module and the row only: it neither names nor counts a holder
+the caller may not query.
 
 To run several queries in one request, as a dashboard render does, send them
 to `POST {basePath}/analytics/dataset/query/batch` as `{ queries: [...] }`,
