@@ -95,6 +95,7 @@ import {
   controlledByParentPredicateWriteMasters,
   type CbpPredicateWriteSelection,
   type CbpWriteGateHost,
+  type MasterGateDenial,
 } from './security-plugin-cbp-write-gate.js';
 // [#25223 cut 4] The controlled-by-parent read leaf (ADR-0055 §2, ADR-0139 D6)
 // and its chain refusal; the methods of the same names below hand each body
@@ -785,6 +786,25 @@ interface CbpRelation {
    * its master is that master's question).
    */
   ownerMayEdit: boolean;
+  /**
+   * [ADR-0055 §3 as amended for #33250 · ruling A+] The object opted in to READ
+   * on the master being the master question for every write of its rows —
+   * `sharing.controlledByParent.writeRequiresMasterRead: true`, read through
+   * the spec's one reader (`controlledByParentWriteRequiresMasterRead`,
+   * `@objectstack/spec/data`). Unlike {@link ownerMayEdit} it names no column,
+   * so it is the declaration alone.
+   *
+   * Read by the chain walk of
+   * {@link SecurityPlugin.assertControlledByParentWrite} and by nothing else:
+   * on a hop whose relation carries it, the walk asks whether the principal can
+   * READ the master row, asked of the read door under the principal's own
+   * context, instead of the three edit legs, and ends there (the read door
+   * composes whatever chain stands above that master). Every shape of write the
+   * gate judges reaches the master through that walk — an insert single or
+   * batch, a by-id or predicate update or delete, a body that re-points or
+   * empties the reference — so each follows. `false`: the edit legs, as before.
+   */
+  writeRequiresMasterRead: boolean;
   /**
    * [ADR-0055 §1 and §2 as amended · #30905 ruling A] The master is OPTIONAL:
    * the object declares no required `master_detail`, and its only one is
@@ -5544,7 +5564,7 @@ export class SecurityPlugin implements Plugin {
     masterId: unknown,
     context: any,
     opCtx: any,
-    masterEditDenied: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => PermissionDeniedError,
+    masterEditDenied: MasterGateDenial,
     denyMasterEdit: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => never,
   ): Promise<void> {
     // [#25223 cut 3] The body moved to `security-plugin-cbp-write-gate.ts` (see `CbpWriteGateHost`).

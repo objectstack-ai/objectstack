@@ -77,6 +77,15 @@
  * optional master asks edit on the master it leaves, never the owner leg. A
  * required master is answered byte for byte as before. The host hands the
  * gate and the chain walk `permissionEvaluator` for the Modify All question.
+ *
+ * [ADR-0055 §3 as amended for #33250 · ruling A+] A detail that declares
+ * `sharing.controlledByParent.writeRequiresMasterRead: true`
+ * ({@link CbpRelation.writeRequiresMasterRead}) is asked READ on its master
+ * instead of EDIT. The swap is made at ONE place, the hop of the chain walk
+ * ({@link assertControlledByParentChainEditable} → {@link assertMasterRowReadable}),
+ * and every shape the gate judges reaches its masters through that walk, so
+ * each follows by construction. A detail that does not declare it is answered
+ * byte for byte as before.
  */
 
 import type { SecurityPlugin } from './security-plugin.js';
@@ -119,6 +128,36 @@ import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
  * so nothing new can reach a response body or a log line.
  */
 const MASTER_EDIT_DENIAL_LEG = new WeakMap<PermissionDeniedError, ControlledByParentWriteDenialLeg>();
+
+/**
+ * [ADR-0055 §3 as amended for #33250 · ruling A+] The question a master-gate
+ * refusal answered on the master it names: EDIT (the §3 rule, and the default)
+ * or READ (a hop whose detail declares `writeRequiresMasterRead`). A refusal
+ * says which in its sentence, "requires edit access" or "requires read access",
+ * so it never states a requirement the gate did not ask.
+ */
+export type MasterQuestion = 'edit' | 'read';
+
+/**
+ * [ADR-0055 §3 as amended for #33250] Which question a refusal answered, keyed
+ * by the refusal itself, beside {@link MASTER_EDIT_DENIAL_LEG} and for the same
+ * reason: read only by {@link assertControlledByParentWrite}, which rewords a
+ * refusal for a caller who cannot read the master reference and must keep its
+ * question. Absent = `edit`, the default every refusal of the §3 rule carries.
+ */
+const MASTER_DENIAL_QUESTION = new WeakMap<PermissionDeniedError, MasterQuestion>();
+
+/**
+ * The gate's refusal builder, as the chain walk and the legs receive it: the
+ * leg, the reason, the master row it names, and the question that was asked
+ * (`edit` when omitted).
+ */
+export type MasterGateDenial = (
+  leg: ControlledByParentWriteDenialLeg,
+  reason: string,
+  recordId?: unknown,
+  question?: MasterQuestion,
+) => PermissionDeniedError;
 
 /**
  * [ADR-0055 §3 amendment] The stored column the owner leg of
@@ -255,6 +294,13 @@ function bodyEmptiesMasterReference(data: unknown, fk: string): boolean {
 const MASTER_REFERENCE_UNREADABLE_REASON = 'no edit permission on the parent record of this detail';
 
 /**
+ * [ADR-0055 §3 as amended for #33250] {@link MASTER_REFERENCE_UNREADABLE_REASON}
+ * for a refusal whose question was READ: the same rule, naming no master, no
+ * leg and no master id.
+ */
+const MASTER_REFERENCE_UNREADABLE_READ_REASON = 'no read permission on the parent record of this detail';
+
+/**
  * [ADR-0055 §3] May the caller read the master reference `fk` of `object`?
  * Asked of the plugin's own readable projection
  * ({@link SecurityPlugin.getReadableFields}), the field-level security the
@@ -369,12 +415,14 @@ export async function assertControlledByParentWrite(
     const rel = this.resolveCbpRelation(object);
     const readerContext = opCtx?.context ?? context;
     if (rel && (await callerReadsMasterReference(this, object, rel.fk, readerContext))) throw e;
+    const question = MASTER_DENIAL_QUESTION.get(e as PermissionDeniedError) ?? 'edit';
     const withheld = new PermissionDeniedError(
-      `[Security] Access denied: ${operation} on '${object}' requires edit access to its master record ` +
-        `(${MASTER_REFERENCE_UNREADABLE_REASON})`,
+      `[Security] Access denied: ${operation} on '${object}' requires ${question} access to its master record ` +
+        `(${question === 'read' ? MASTER_REFERENCE_UNREADABLE_READ_REASON : MASTER_REFERENCE_UNREADABLE_REASON})`,
       { operation, object },
     );
     MASTER_EDIT_DENIAL_LEG.set(withheld, leg);
+    if (question !== 'edit') MASTER_DENIAL_QUESTION.set(withheld, question);
     throw withheld;
   }
 }
@@ -408,16 +456,17 @@ async function judgeControlledByParentWrite(
   // served member (`checkControlledByParentWrite`) reports. It is recorded
   // beside the error ({@link MASTER_EDIT_DENIAL_LEG}), never on it, so the
   // envelope this path throws is unchanged.
-  const masterEditDenied = (
-    leg: ControlledByParentWriteDenialLeg,
-    reason: string,
-    recordId?: unknown,
-  ): PermissionDeniedError => {
+  //
+  // [ADR-0055 §3 as amended for #33250] And the QUESTION it answered — edit,
+  // the default, or read on a hop whose detail opts in — which the sentence
+  // states ({@link MASTER_DENIAL_QUESTION}).
+  const masterEditDenied: MasterGateDenial = (leg, reason, recordId, question = 'edit') => {
     const denial = new PermissionDeniedError(
-      `[Security] Access denied: ${operation} on '${object}' requires edit access to its master record (${reason})`,
+      `[Security] Access denied: ${operation} on '${object}' requires ${question} access to its master record (${reason})`,
       { operation, object, recordId },
     );
     MASTER_EDIT_DENIAL_LEG.set(denial, leg);
+    if (question !== 'edit') MASTER_DENIAL_QUESTION.set(denial, question);
     return denial;
   };
   const denyMasterEdit = (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown): never => {
@@ -797,7 +846,7 @@ export async function assertControlledByParentChainEditable(
   masterId: unknown,
   context: any,
   opCtx: any,
-  masterEditDenied: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => PermissionDeniedError,
+  masterEditDenied: MasterGateDenial,
   denyMasterEdit: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => never,
 ): Promise<void> {
   // [ADR-0055 amendment] Walk the `controlled_by_parent` chain, one hop at a time, and run
@@ -831,6 +880,22 @@ export async function assertControlledByParentChainEditable(
   const visited = new Set<string>([object]);
   let hops = 0;
   for (;;) {
+    // [ADR-0055 §3 as amended for #33250 · ruling A+] The ONE place the master
+    // question is swapped. A hop whose detail — the caller's own object on the
+    // first hop, a master that is itself a detail above it — declares
+    // `writeRequiresMasterRead` asks READ on its master instead of the three
+    // edit legs, and the walk ends there: the read door answers for the whole
+    // chain above that master (a `controlled_by_parent` master is read through
+    // its own derivation, ADR-0139 D6), so there is nothing above it left to
+    // ask. Every shape of write reaches its masters through this walk, so each
+    // follows: an insert single or batch, a by-id or predicate update or
+    // delete, a body that re-points the reference or empties an optional one.
+    // On an on-behalf-of write the gate runs once per principal, so each is
+    // asked the read under its own context (ADR-0090 D10: both floors kept).
+    if (hopRel.writeRequiresMasterRead) {
+      await assertMasterRowReadable.call(this, hopRel, hopMasterId, context, masterEditDenied);
+      break;
+    }
     await this.assertMasterRowEditable(permissionSets, hopRel, hopMasterId, context, opCtx, denyMasterEdit);
 
     // Does this master govern its own rows? Then the chain ends here — this
@@ -900,6 +965,48 @@ export async function assertControlledByParentChainEditable(
     }
     hopRel = nextRel;
     hopMasterId = nextMasterId;
+  }
+}
+
+/**
+ * [ADR-0055 §3 as amended for #33250 · ruling A+] The master question of a hop
+ * whose detail declares `writeRequiresMasterRead`: can the principal READ the
+ * master row? Asked of the read door itself, under the principal's own context
+ * — the same probe the owner leg of {@link assertControlledByParentWrite} asks
+ * — so the answer is the one a direct by-id read of the master gives: the
+ * master's object-level read grant and required capabilities, its row-level
+ * security and record sharing, and, for a master that is itself
+ * `controlled_by_parent`, the chain the engine composes for the read.
+ *
+ * Two refusals, both on the gate's own envelope (`403 PERMISSION_DENIED`, the
+ * caller's object and verb, the question `read`), each with its leg in the
+ * closed vocabulary the served member reports:
+ *
+ *  - the read is REFUSED (a declared 4xx: no read grant on the master, a
+ *    required capability not held) — `object_permission`;
+ *  - the read returns no row (hidden by the master's row scope, or absent;
+ *    #7505: one answer) — `row_level_security`.
+ *
+ * A store fault is neither and propagates as raised ({@link readUnlessRefused}).
+ */
+async function assertMasterRowReadable(
+  this: Pick<CbpWriteGateHost, 'readRowById'>,
+  rel: CbpRelation,
+  masterId: unknown,
+  context: any,
+  masterDenied: MasterGateDenial,
+): Promise<void> {
+  const read = await readUnlessRefused(() => this.readRowById(rel.master, masterId, context));
+  if (read.refused) {
+    throw masterDenied('object_permission', `no read permission on master '${rel.master}'`, masterId, 'read');
+  }
+  if (read.value == null) {
+    throw masterDenied(
+      'row_level_security',
+      `master '${rel.master}' not readable by this user (row-level security or record sharing)`,
+      masterId,
+      'read',
+    );
   }
 }
 

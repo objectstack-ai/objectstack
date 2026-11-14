@@ -43,7 +43,12 @@
 import type { SecurityPlugin } from './security-plugin.js';
 // [ADR-0055 §1] The parse's own one-master judgement, asked of an object that
 // reached the registry without the parse (see `resolveCbpRelation`).
-import { controlledByParentMasterOf, controlledByParentMasterRefusal, controlledByParentOwnerMayEdit } from '@objectstack/spec/data';
+import {
+  controlledByParentMasterOf,
+  controlledByParentMasterRefusal,
+  controlledByParentOwnerMayEdit,
+  controlledByParentWriteRequiresMasterRead,
+} from '@objectstack/spec/data';
 import { masterGovernsRowWrites, OWD_DELEGATING_ROW_WRITES } from './platform-ownership-policies.js';
 
 /**
@@ -222,6 +227,10 @@ export function resolveCbpRelation(
       // the spec's one reader, and only where the schema carries the column
       // it names — see {@link CbpRelation.ownerMayEdit}.
       ownerMayEdit,
+      // [ADR-0055 §3 as amended for #33250 · ruling A+] The second opt-in,
+      // read through the spec's one reader from the same schema — see
+      // {@link CbpRelation.writeRequiresMasterRead}.
+      writeRequiresMasterRead: controlledByParentWriteRequiresMasterRead(schema),
       // [ADR-0055 §1 and §2 as amended · #30905 ruling A] See
       // {@link CbpRelation.optional} and {@link CbpRelation.ownerColumn}.
       optional: candidates.length === 0,

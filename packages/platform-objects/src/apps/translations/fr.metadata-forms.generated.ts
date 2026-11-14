@@ -377,6 +377,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Le propriétaire peut modifier",
         helpText: "Activé : le propriétaire d’une ligne de détail (son owner_id) peut mettre à jour cette ligne par son id avec un accès en lecture au maître ; toute autre personne, ainsi que toute insertion, suppression, mise à jour multiligne et écriture pour le compte d’autrui, nécessite toujours un accès en modification au maître. Désactivé (par défaut) : toute écriture d’un détail nécessite un accès en modification à son maître."
       },
+      "sharing.controlledByParent.writeRequiresMasterRead": {
+        label: "La lecture du maître suffit pour écrire",
+        helpText: "Activé : toute personne pouvant lire le maître peut insérer, mettre à jour et supprimer des lignes de détail, dans la mesure où les autorisations propres du détail, la sécurité au niveau des lignes et la sécurité au niveau des champs le permettent. Désactivé (par défaut) : toute écriture d’un détail nécessite un accès en modification à son maître. Ne l’activez pas avec « Le propriétaire peut modifier », que cette option couvre déjà."
+      },
       access: {
         label: "Accès",
         helpText: "Position vis-à-vis des octrois génériques (ADR-0066 D2). En l’absence de valeur, public s’applique. Détermine si l’octroi d’objet '*' d’un ensemble d’autorisations couvre cet objet ; la visibilité des enregistrements entre utilisateurs relève de sharingModel."

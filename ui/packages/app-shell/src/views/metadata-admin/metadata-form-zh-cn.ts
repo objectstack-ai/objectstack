@@ -130,6 +130,7 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       sharing: { label: '共享' },
       'sharing.controlledByParent': { label: '随父记录控制' },
       'sharing.controlledByParent.ownerMayEdit': { label: '所有者可编辑' },
+      'sharing.controlledByParent.writeRequiresMasterRead': { label: '可读父记录即可写入' },
       access: { label: '访问策略' },
       'access.default': { label: '默认暴露级别' },
       requiredPermissions: { label: '所需权限' },

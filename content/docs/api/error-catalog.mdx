@@ -210,7 +210,8 @@ On a `master_detail` that is `required: true` and neither `readonly` nor `system
 answers it with the documented `400 VALIDATION_FAILED` and `fields`. On an optional master
 an insert that leaves it out is not refused, and its creator owns the row; an update that
 empties it is judged by the master it leaves, asking edit access on it
-(`403 PERMISSION_DENIED` without it). A master reference marked `readonly` or `system`,
+(`403 PERMISSION_DENIED` without it), or read access on it when the detail declares
+`sharing.controlledByParent.writeRequiresMasterRead: true`. A master reference marked `readonly` or `system`,
 required or optional, is not one an author's write supplies, so it cannot be the master
 (ADR-0055 §1): `ObjectSchema` refuses that declaration at parse (`master-not-writable`), and
 on an object that reaches the runtime without the parse, every write that sets the

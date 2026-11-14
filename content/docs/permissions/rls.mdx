@@ -296,6 +296,12 @@ Layer 1 (business RLS)       ─┘
   optional (`required: false`, ADR-0055 §1 as amended) and empty is read by its
   owner and by View All on the child, and written by its owner and by Modify
   All on the child.
+- A write of such a child asks edit access on its master by default. A child
+  that declares `sharing.controlledByParent.writeRequiresMasterRead: true`
+  asks only read access on the master (on every hop of a chain) for insert,
+  update and delete; the child's own object permissions, RLS and field-level
+  security then decide, so an RLS policy on the child narrows writes as it
+  narrows reads. A principal who cannot read the master still cannot write.
 
 ## The fail-closed contract
 

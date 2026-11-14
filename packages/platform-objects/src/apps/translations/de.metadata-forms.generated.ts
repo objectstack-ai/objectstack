@@ -377,6 +377,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Eigentümer darf bearbeiten",
         helpText: "Ein: Der Eigentümer einer Detailzeile (ihre owner_id) darf diese Zeile per ID mit Lesezugriff auf den Master aktualisieren; alle anderen sowie jedes Einfügen, Löschen, jede Mehrzeilenaktualisierung und jeder Schreibvorgang im Namen anderer benötigen weiterhin Bearbeitungszugriff auf den Master. Aus (Standard): Jeder Schreibvorgang auf einem Detail benötigt Bearbeitungszugriff auf seinen Master."
       },
+      "sharing.controlledByParent.writeRequiresMasterRead": {
+        label: "Lesezugriff auf den Master genügt zum Schreiben",
+        helpText: "Ein: Wer den Master lesen kann, darf Detailzeilen einfügen, aktualisieren und löschen, soweit die eigenen Berechtigungen, die Sicherheit auf Zeilenebene und die Sicherheit auf Feldebene des Details es erlauben. Aus (Standard): Jeder Schreibvorgang auf einem Detail benötigt Bearbeitungszugriff auf seinen Master. Nicht zusammen mit „Eigentümer darf bearbeiten“ einschalten, das hiervon bereits abgedeckt ist."
+      },
       access: {
         label: "Zugriff",
         helpText: "Haltung zu Platzhalterzuweisungen (ADR-0066 D2). Fehlt sie, gilt public. Sie entscheidet, ob die Objektzuweisung '*' eines Berechtigungssatzes dieses Objekt abdeckt; die Sichtbarkeit von Datensätzen zwischen Benutzern regelt sharingModel."

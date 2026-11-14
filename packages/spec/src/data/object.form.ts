@@ -618,6 +618,8 @@ export const objectForm = defineForm({
               helpText: "Read only while sharingModel is 'controlled by parent'; refused on any other sharing model.",
               fields: [
                 { field: 'ownerMayEdit', label: 'Owner may edit', type: 'boolean', helpText: "On: the owner of a detail row (its owner_id) may update that row by id with read access to the master; everyone else, and every insert, delete, multi-row update and on-behalf-of write, still needs edit access to the master. Off (the default): every write of a detail needs edit access to its master." },
+                // [ADR-0055 §3 as amended for #33250 · ruling A+] The second opt-in of the block.
+                { field: 'writeRequiresMasterRead', label: 'Read on master is enough to write', type: 'boolean', helpText: "On: anyone who can read the master may insert, update and delete detail rows, as the detail's own permissions, row-level security and field-level security allow. Off (the default): every write of a detail needs edit access to its master. Do not turn on together with Owner may edit, which this already covers." },
               ],
             },
           ],
