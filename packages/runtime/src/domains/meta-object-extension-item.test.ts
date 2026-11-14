@@ -35,6 +35,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
 import { ObjectExtensionSchema } from '@objectstack/spec/data';
+import { runAuthoringRules } from '@objectstack/lint';
 import { HttpDispatcher } from '../http-dispatcher.js';
 // The [#29594] rehearsal boots the real dispatcher, whose package door reaches
 // `import('@objectstack/metadata')` in standalone-stack.ts; pay that load
@@ -192,7 +193,10 @@ describe('[#28574] a writable pair saves and publishes an extension of the base\
 
     it('the whole parsed body is registered: an extension\'s `validations` reach the object', async () => {
         const rig = await boot();
-        const rule = { name: 'region_required', type: 'script', condition: 'region__c == null', message: 'Region is required', events: ['insert'] };
+        // [#33154] `record.`-scoped, as a rule declared on the account must be:
+        // the door now judges an extension's rules by the object's own rule
+        // pass, which refuses the bare `region__c` this fixture used to carry.
+        const rule = { name: 'region_required', type: 'script', condition: 'record.region__c == null', message: 'Region is required', events: ['insert'] };
         await rig.saveAndPublish(PAIR, regionBody({ validations: [rule] }));
 
         const names = ((rig.engine.registry.getObject(TARGET) as any)?.validations ?? []).map((v: any) => v?.name);
@@ -542,6 +546,88 @@ describe('[#33152] a package-wide publish judges each draft with the batch\'s ow
         expect(JSON.stringify(causal), 'the refusal does not name the missing field').toContain('tier__c');
         expect(await states(rig.engine)).toEqual([`${TYPE}/crm_region:draft`, `${TYPE}/${SITE}:draft`]);
         expect(fieldsOf(rig.engine, 'crm_region')).not.toContain('tir__c');
+    }, 60_000);
+});
+
+describe('[#33154] the publish door judges an extension\'s validation rule as `os build` does', () => {
+    /** Studio's body for an extension adding one validation rule (and fields) to the account. */
+    const ruleBody = (condition: string, fields: Record<string, unknown> = {}) => ({
+        extend: TARGET,
+        fields,
+        validations: [{ name: 'no_blocked__c', type: 'script', condition, message: 'Blocked.' }],
+    });
+    const WHERE = "object 'crm_account' · objectExtensions[0] · validation 'no_blocked__c'";
+    const servedRules = (rig: Awaited<ReturnType<typeof boot>>) =>
+        ((rig.engine.registry.getObject(TARGET) as any)?.validations ?? []).map((r: any) => r?.name);
+
+    it('⭐ LIT — a rule reading a field the account does not serve is refused with the build\'s rule id and location; the rule is not served', async () => {
+        const rig = await boot();
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: ruleBody("record.nmae == 'blocked'"), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+
+        expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue, JSON.stringify(err.issues)).toBeDefined();
+        expect({ where: issue.where, path: issue.path })
+            .toEqual({ where: WHERE, path: 'objectExtensions[0].validations[0].condition' });
+        expect(issue.message).toContain('nmae');
+        expect(servedRules(rig)).not.toContain('no_blocked__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+    }, 60_000);
+
+    it('⭐ CONTROL — a valid rule over the account\'s own field publishes and is served on the account', async () => {
+        const rig = await boot();
+        await rig.saveAndPublish(PAIR, ruleBody("record.name != null && record.name == 'blocked'"));
+
+        expect(servedRules(rig)).toContain('no_blocked__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+    }, 60_000);
+
+    it('⭐ PARITY — an unguarded ordering over the injected `created_at` publishes at the door, as `os build` accepts the same entry; one over a declared nullable field is refused at both', async () => {
+        /** `os build`'s findings at the extension, over the account as authored. */
+        const atBuild = (item: unknown) => {
+            const stack = { objects: baseManifest().objects, objectExtensions: [item] };
+            return runAuthoringRules('build', { normalized: stack, parsed: stack } as any)
+                .filter((f) => f.where.includes('objectExtensions'))
+                .map((f) => ({ rule: f.rule, where: f.where, path: f.path }));
+        };
+        const since = ruleBody("record.created_at > timestamp('2020-01-01T00:00:00Z')");
+        expect(atBuild(since)).toEqual([]);
+
+        const rig = await boot();
+        // Served, the account declares the columns the registry injects.
+        expect((await rig.fieldsOn()).registry).toContain('created_at');
+        await rig.saveAndPublish(PAIR, since);
+        expect(servedRules(rig)).toContain('no_blocked__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+
+        // The null-guard gate still judges a field the account declares nullable.
+        const unguarded = ruleBody('record.bonus__c > 100', { bonus__c: { type: 'number', label: 'Bonus' } });
+        const refusedAtBuild = atBuild(unguarded);
+        expect(refusedAtBuild).toHaveLength(1);
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: unguarded, mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect((err.issues ?? []).map((i: any) => ({ rule: i.rule, where: i.where, path: i.path }))).toEqual(refusedAtBuild);
+    }, 60_000);
+
+    it('⭐ LIT (republish) — dropping a field the extension\'s own rule still reads is refused: the stored self lends it nothing', async () => {
+        const rig = await boot();
+        const BONUS = { bonus__c: { type: 'number', label: 'Bonus' } };
+        const condition = 'record.bonus__c != null && record.bonus__c > 100';
+        await rig.saveAndPublish(PAIR, ruleBody(condition, BONUS));
+        expect(servedRules(rig)).toContain('no_blocked__c');
+
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: ruleBody(condition), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }, 'the stored self still lent bonus__c').toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue?.where, JSON.stringify(err.issues)).toBe(WHERE);
+        expect(issue.message).toContain('bonus__c');
+        // The served extension is the one published before, untouched.
+        expect((await rig.fieldsOn()).registry).toContain('bonus__c');
     }, 60_000);
 });
 
