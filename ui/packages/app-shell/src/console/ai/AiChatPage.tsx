@@ -16,7 +16,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { toast } from 'sonner';
 import { Package as PackageIcon, Sparkles as SparklesIcon } from 'lucide-react';
@@ -25,6 +25,8 @@ import { useMetadata } from '../../providers/MetadataProvider.js';
 import { formatPublishFailures, type PublishFailure } from '../../views/studio-design/metadataError.js';
 import { useMetadataClient } from '../../views/metadata-admin/useMetadata.js';
 import { translateMetadataType } from '../../views/metadata-admin/i18n.js';
+import { useMetadataLocale } from '../../views/metadata-admin/i18n.js';
+import { fieldTypeName } from '../../views/metadata-admin/previews/fieldTypeName.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 import { resolveKeyedI18nLabel } from '../../utils/index.js';
 import { resolvePublicShareBase } from '../organizations/resolveHomeUrl.js';
@@ -1021,8 +1023,19 @@ export function useDeferredFirstSend(opts: {
         // replayed once the id lands, and the host's create is shared, so no
         // second row is made either. (A held handoff seed is still replaced
         // by what the user typed, as before.)
+        // objectstack#32984 — nor may the second one vanish: it used to be
+        // dropped without a word. It joins the held first message, which has
+        // not left the client yet, so both reach the agent as the first turn.
+        // The same text again (a doubled submit event) is not repeated.
         const held = pendingRef.current;
         if (!held || held.targetAgentRoute) pendingRef.current = { content, files };
+        else if (content !== held.content || (files?.length ?? 0) > 0) {
+          const joined = [...(held.files ?? []), ...(files ?? [])];
+          pendingRef.current = {
+            content: [held.content, content].filter((part) => part.trim() !== '').join('\n\n'),
+            files: joined.length > 0 ? joined : undefined,
+          };
+        }
         void ensureConversationRef.current?.();
         return;
       }
@@ -2297,7 +2310,7 @@ export function ChatPane({
   // visible (the Claude-Code-shows-the-repo idiom). The magic flow starts
   // unbound ("New app") and binds the moment its build mints a package.
   const isBuildSurface = activeAgent ? agentRouteName(activeAgent) === 'build' : false;
-  const { apps } = useMetadata();
+  const { apps, objects: metadataObjects } = useMetadata();
   // Narrow the loosely-typed provider apps once (see MetadataAppItem) so the
   // derivations below read fields without per-access casts.
   const metadataApps = apps as MetadataAppItem[] | undefined;
@@ -2346,6 +2359,41 @@ export function ChatPane({
       return app ? appLabel(app) : undefined;
     },
     [metadataApps, appLabel, t],
+  );
+
+  // objectstack#32984 — the change card names objects, fields and field types
+  // by their labels (the producer sends machine names only: 「字段
+  // b6bl_quote_item · line_total · currency」). An object or field the change is
+  // about to create is not in metadata yet and answers undefined: the card
+  // then shows the name as given.
+  const { objectLabel: i18nObjectLabel, fieldLabel: i18nFieldLabel } = useObjectLabel();
+  const metadataLocale = useMetadataLocale();
+  const findMetadataObject = useCallback(
+    (objectName: string) =>
+      ((metadataObjects ?? []) as Array<{ name?: string; label?: string; fields?: Record<string, { label?: string }> }>)
+        .find((o) => o?.name === objectName),
+    [metadataObjects],
+  );
+  const resolveObjectLabel = useCallback(
+    (objectName: string) => {
+      const object = findMetadataObject(objectName);
+      return object ? i18nObjectLabel({ name: objectName, label: object.label ?? objectName }) : undefined;
+    },
+    [findMetadataObject, i18nObjectLabel],
+  );
+  const resolveFieldLabel = useCallback(
+    (objectName: string, fieldName: string) => {
+      const field = findMetadataObject(objectName)?.fields?.[fieldName];
+      return field ? i18nFieldLabel(objectName, fieldName, field.label ?? fieldName) : undefined;
+    },
+    [findMetadataObject, i18nFieldLabel],
+  );
+  const resolveFieldTypeLabel = useCallback(
+    (type: string) => {
+      const name = fieldTypeName(type, metadataLocale);
+      return name === type ? undefined : name;
+    },
+    [metadataLocale],
   );
 
   // Per-surface empty-state branding (Build = authoring, Ask = data Q&A). On the
@@ -3042,6 +3090,9 @@ export function ChatPane({
         nextStepsLabel={t('console.ai.nextSteps', { defaultValue: "What's next" })}
         planTitleLabel={t('console.ai.planTitle', { defaultValue: 'Proposed plan' })}
         resolveAppLabel={resolveAppLabel}
+        resolveObjectLabel={resolveObjectLabel}
+        resolveFieldLabel={resolveFieldLabel}
+        resolveFieldTypeLabel={resolveFieldTypeLabel}
         planQuestionsLabel={t('console.ai.planQuestions', { defaultValue: 'Confirm before building' })}
         planAssumptionsLabel={t('console.ai.planAssumptions', { defaultValue: 'Assumptions' })}
         planDeferredLabel={t('console.ai.planDeferred', { defaultValue: 'Not yet built' })}

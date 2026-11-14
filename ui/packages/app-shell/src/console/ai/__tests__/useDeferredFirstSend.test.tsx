@@ -334,12 +334,28 @@ describe('useDeferredFirstSend — the first send creates the conversation (obje
     await act(async () => {});
 
     fireEvent.click(screen.getByTestId('send-a'));
+    fireEvent.click(screen.getByTestId('send-a'));
+    await waitFor(() => expect(screen.getByTestId('conv').textContent).toBe('conv-1'));
+    expect(createCount()).toBe(1);
+    await flushReplay();
+    // The same text submitted twice is sent once, not repeated.
+    expect(doSend).toHaveBeenCalledTimes(1);
+    expect(doSend).toHaveBeenCalledWith('first message', undefined);
+  });
+
+  // objectstack#32984 — a second message typed while the first send's create
+  // is on the wire used to be dropped without a word. It joins the first.
+  it('a second message sent during the create joins the first instead of vanishing', async () => {
+    const { doSend } = mountSurface();
+    await act(async () => {});
+
+    fireEvent.click(screen.getByTestId('send-a'));
     fireEvent.click(screen.getByTestId('send-b'));
     await waitFor(() => expect(screen.getByTestId('conv').textContent).toBe('conv-1'));
     expect(createCount()).toBe(1);
     await flushReplay();
     expect(doSend).toHaveBeenCalledTimes(1);
-    expect(doSend).toHaveBeenCalledWith('first message', undefined);
+    expect(doSend).toHaveBeenCalledWith('first message\n\nsecond message', undefined);
   });
 
   it('the replayed first send survives the effect teardown StrictMode runs on mount', async () => {

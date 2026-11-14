@@ -3476,6 +3476,11 @@ const zhHant = {
     back: '返回',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: '釋出後這裡會顯示記錄',
+      message: '你正在預覽一個尚未釋出的物件，它在釋出前還沒有任何記錄。釋出後即可開始錄入資料，或載入示例資料。',
+    },
     empty: {
       loadFailedTitle: '草稿預覽載入失敗',
       loadFailedDescription: '無法讀取草稿資料。請重試，或檢查網路連線。',
@@ -4203,6 +4208,11 @@ const zhHant = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: '傳送訊息',
     scrollToBottom: '滾動到最新訊息',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: '當前回覆結束後傳送',
+      queuedCancel: '取消',
+    },
     answer: {
       showFull: '展開全文',
       collapse: '收起',
@@ -4296,6 +4306,9 @@ const zhHant = {
       countSeedData: '示例資料',
       extendTarget: '新增到現有應用：{{app}}',
       awaitingConfirm: '等待確認',
+      // objectstack#32984 — the plan card's build states.
+      confirmed: '已確認',
+      buildFailed: '未搭建成功 · 沒有建立任何內容',
       iterateOrNew: {
         question: '這個方案和你已有的應用「{{app}}」重疊。要在它上面繼續完善，還是另建一個獨立應用？',
         questionUnnamed: '這個方案和你已有的一個應用重疊。要在那個應用上繼續完善，還是另建一個獨立應用？',
@@ -4328,6 +4341,11 @@ const zhHant = {
       verifying: '正在檢查改動…',
       verifyStep: '第 {{n}} 步',
       verified: '已檢查改動',
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: '{{count}} 處待修復',
+      issuesSummary: '這次搭建有部分內容需要修復後才能使用。回覆「修復這些問題」，助手會幫你處理。',
+      warningsSummary: '應用已搭建好，有幾處值得檢查。想進一步完善的話，可以問問助手具體是哪些。',
+      issuesDetails: '技術詳情',
       unknownPhase: '未知的構建階段',
       nextStepsLead: '接下來可以說：{{steps}}',
       nextStepQuote: '「{{step}}」',

@@ -1,0 +1,16 @@
+---
+'@object-ui/plugin-chatbot': patch
+'@object-ui/i18n': patch
+'@object-ui/app-shell': patch
+---
+
+fix(plugin-chatbot, app-shell, i18n): the AI build chat says what really happened — the plan card follows the build, a message typed during a reply waits instead of being lost, the draft preview of an unpublished object is an empty list, build issues read in the customer's words, and the change card names objects and fields by label
+
+Clause-②: yes (widening) — `ChatbotEnhancedProps` (published by `@object-ui/plugin-chatbot`) gains three optional props, `resolveObjectLabel`, `resolveFieldLabel` and `resolveFieldTypeLabel`; the `@object-ui/i18n` packs gain the keys `chatbot.plan.confirmed`, `chatbot.plan.buildFailed`, `chatbot.build.issuesCount`, `chatbot.build.issuesSummary`, `chatbot.build.warningsSummary`, `chatbot.build.issuesDetails`, `chatbot.composer.queued`, `chatbot.composer.queuedCancel`, `preview.unpublishedList.title` and `preview.unpublishedList.message` in all eleven shipped locales. Nothing is removed or narrowed.
+Metadata-protocol: none
+
+- **The plan card follows the build.** It read 「已搭建」 (Built) as soon as any `apply_blueprint` call appeared after it, before anything was built. It now reads Confirmed once "Build it" is clicked, Building while that build call runs, Built only when the call's result says `drafted` or `published`, and "Not built — nothing was created" (with Build it and Adjust offered again) when the call was refused, errored, or ended with the turn and no result. An `awaiting_confirmation` answer still leaves the card pending (objectui#8343), and a build that ran is still never offered a second Build it (#432).
+- **A message typed while a reply runs is kept.** The composer used to be disabled while the assistant answered. It stays usable: a message sent during a reply waits in a strip above the box ("Sends when the current reply finishes") and is sent, oldest first, as soon as the reply ends. Each waiting message can be cancelled, which puts its text back in the box. On a new conversation, a second message sent while the first send is still creating the conversation used to be dropped without a word; it now joins that first message, which has not left the browser yet, so both reach the agent in the first turn.
+- **The draft preview of an unpublished object is an empty list.** In `?preview=draft`, the list read of an object that was only drafted answered `404 OBJECT_NOT_FOUND` and the list printed it. That one answer, on that one object's list read, now draws the empty list with a sentence saying records appear after publish. Any other failure, and every read outside the preview, is shown as before.
+- **Build issues read in the customer's words.** The build card's chip reads "N to fix", and the issues block leads with one sentence saying what to do; the verification messages written for the agent sit in a closed "Technical details" section.
+- **The edit confirmation card names objects and fields by label.** The Console passes resolvers from its metadata; the card shows `Customer · Phone` and the field type's localized name, keeping the machine name in the tooltip. A name not yet in the metadata (a field the change adds) keeps its machine name.

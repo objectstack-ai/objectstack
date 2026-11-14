@@ -3959,6 +3959,11 @@ const ko = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: '메시지 보내기',
     scrollToBottom: '최신 메시지로 스크롤',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "현재 응답이 끝나면 전송됩니다",
+      queuedCancel: "취소",
+    },
     answer: {
       showFull: '전체 답변 보기',
       collapse: '접기',
@@ -4052,6 +4057,9 @@ const ko = {
       countSeedData: "샘플 데이터",
       extendTarget: "기존 앱에 추가: {{app}}",
       awaitingConfirm: "확인 대기 중",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "확인됨",
+      buildFailed: "빌드되지 않음 · 아무것도 생성되지 않았습니다",
       iterateOrNew: {
         question: "이 계획은 이미 있는 앱 “{{app}}”과(와) 겹칩니다. 이 앱을 계속 개선할까요, 아니면 별도의 앱을 만들까요?",
         questionUnnamed: "이 계획은 이미 있는 앱과 겹칩니다. 그 앱을 계속 개선할까요, 아니면 별도의 앱을 만들까요?",
@@ -4084,6 +4092,11 @@ const ko = {
       verifying: "변경 사항 확인 중…",
       verifyStep: "{{n}}단계",
       verified: "변경 사항 확인 완료",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "수정 필요 {{count}}건",
+      issuesSummary: "이번 빌드에는 사용하기 전에 수정해야 할 부분이 있습니다. \"문제를 수정해 줘\"라고 답하면 어시스턴트가 수정합니다.",
+      warningsSummary: "앱이 빌드되었지만 확인해 볼 만한 부분이 몇 가지 있습니다. 개선하고 싶다면 어시스턴트에게 무엇인지 물어보세요.",
+      issuesDetails: "기술 세부 정보",
       unknownPhase: "알 수 없는 빌드 단계",
       nextStepsLead: "다음으로 이렇게 말할 수 있습니다: {{steps}}",
       nextStepQuote: "“{{step}}”",
@@ -4424,6 +4437,11 @@ const ko = {
     daysAgo_other: '{{count}}일 전',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "게시하면 여기에 레코드가 표시됩니다",
+      message: "아직 게시되지 않은 개체를 미리 보고 있으므로 레코드가 없습니다. 게시하면 레코드를 추가하거나 샘플 데이터를 불러올 수 있습니다.",
+    },
     empty: {
       loadFailedTitle: '드래프트 미리보기를 불러오지 못했습니다',
       loadFailedDescription: '드래프트 오버레이를 읽을 수 없습니다. 다시 시도하거나 연결을 확인하세요.',

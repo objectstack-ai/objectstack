@@ -107,7 +107,7 @@ describe('ChatbotEnhanced — onPlanApprovalPendingChange (objectui#11666)', () 
 
     fireEvent.click(screen.getByTestId('proposed-plan-approve'));
 
-    expect(screen.getByTestId('proposed-plan-building')).toBeInTheDocument();
+    expect(screen.getByTestId('proposed-plan-confirmed')).toBeInTheDocument();
     expect(lastReading(spy)).toBe(false);
   });
 

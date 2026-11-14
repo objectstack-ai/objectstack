@@ -927,6 +927,18 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    *  internal name stays on the chip's tooltip. `undefined` (or a resolver that
    *  does not know the app) shows the name as given. */
   resolveAppLabel?: (appName: string) => string | undefined;
+  /**
+   * objectstack#32984 — the display label of an object, by its machine name.
+   * The change card names the objects a change touches with it (the producer
+   * sends machine names only); the machine name stays on the row's tooltip.
+   * `undefined` (or a resolver that does not know the object, e.g. one not
+   * created yet) shows the name as given.
+   */
+  resolveObjectLabel?: (objectName: string) => string | undefined;
+  /** objectstack#32984 — a field's display label, by object and field machine name; as {@link resolveObjectLabel}. */
+  resolveFieldLabel?: (objectName: string, fieldName: string) => string | undefined;
+  /** objectstack#32984 — the display name of a field type (`currency` → 货币); as {@link resolveObjectLabel}. */
+  resolveFieldTypeLabel?: (type: string) => string | undefined;
   /** Heading above the structure-deciding questions in the plan card (default "Confirm before building"). */
   planQuestionsLabel?: string;
   /** Heading above the agent's assumptions in the plan card (default "Assumptions"). */
@@ -1285,7 +1297,7 @@ export function getToolState(
  * of that fact (objectui#7254).
  *
  * The card BODY already renders a terminal badge from four separate memos:
- * `builtPlanIds` (已搭建), `approvedPlanIds` (building), `confirmedChangeIds`
+ * `planBuildStates` (已确认 / 正在搭建 / 已搭建 / 搭建未完成), `confirmedChangeIds`
  * (已确认) and `replayOutcomeByProposalId` (已生效 / 已暂存为草稿 / 未生效).
  * The HEADER badge read none of them: it derived from `isProposalResult(result)`
  * alone, which is a fact about the tool's *own* output and never changes once
@@ -1304,8 +1316,19 @@ export type ProposalCardState = 'pending' | 'in-progress' | 'settled' | 'failed'
 export function resolveProposalCardState(input: {
   /** A replay verdict for this proposal, when one has arrived. */
   replayOutcome?: { kind: 'published' | 'drafted' | 'failed' | 'applying' };
-  /** An `apply_blueprint` ran after this plan card (`builtPlanIds`). */
+  /**
+   * An `apply_blueprint` after this plan card answered a build
+   * (`status: 'drafted' | 'published'`, {@link resolvePlanBuildStates}).
+   */
   built?: boolean;
+  /** objectstack#32984 — an `apply_blueprint` after this plan is still running. */
+  building?: boolean;
+  /**
+   * objectstack#32984 — the newest `apply_blueprint` after this plan answered
+   * no build (a refusal such as `blueprint_not_confirmed`, an error, or a turn
+   * that ended before it returned), and the user has not asked again since.
+   */
+  buildFailed?: boolean;
   /** A later same-tool commit followed this proposal (`confirmedChangeIds`). */
   confirmed?: boolean;
   /** The user approved, but no result has come back yet (`approvedPlanIds`). */
@@ -1316,8 +1339,96 @@ export function resolveProposalCardState(input: {
   if (kind === 'published' || kind === 'drafted') return 'settled';
   if (kind === 'applying') return 'in-progress';
   if (input.built || input.confirmed) return 'settled';
+  if (input.building) return 'in-progress';
+  if (input.buildFailed) return 'failed';
   if (input.approved) return 'in-progress';
   return 'pending';
+}
+
+/**
+ * Where one plan card's build stands (objectstack#32984): the plan card's
+ * badge and its header both read this, through {@link resolvePlanBuildStates}.
+ *
+ * - `pending`   — nothing asked for a build yet: the card offers Build it.
+ * - `confirmed` — the user clicked Build it and no `apply_blueprint` has
+ *                 started since (已确认).
+ * - `building`  — an `apply_blueprint` after the plan is running (正在搭建…).
+ * - `built`     — an `apply_blueprint` after the plan answered a build (已搭建).
+ * - `failed`    — the newest `apply_blueprint` after the plan built nothing
+ *                 (搭建未完成): the card offers Build it again.
+ */
+export type PlanBuildState = 'pending' | 'confirmed' | 'building' | 'built' | 'failed';
+
+/**
+ * objectstack#32984 — what one `apply_blueprint` invocation did. A build is
+ * only what the tool's own envelope says it is: `status: 'drafted'` or
+ * `'published'`, the two statuses every other build reader of this package
+ * reads (`detectAuthoringVerdict`, `detectBuiltAppPackage`). Anything else it
+ * answered (a refusal such as `blueprint_not_confirmed`, an error) built
+ * nothing. A call with no answer yet is running while the turn is live, and
+ * built nothing once the turn has ended without one.
+ *
+ * A confirm-gate preview (`awaiting_confirmation`) is not a build attempt at
+ * all; callers skip it before asking (objectui#8343).
+ */
+function applyBlueprintOutcome(
+  tool: ChatbotEnhancedToolInvocation,
+  turnLive: boolean,
+): 'building' | 'built' | 'failed' {
+  if (getToolState(tool) === 'failed') return 'failed';
+  if (tool.result === undefined) return turnLive ? 'building' : 'failed';
+  const status = parseResultEnvelope(tool.result)?.status;
+  return status === 'drafted' || status === 'published' ? 'built' : 'failed';
+}
+
+/**
+ * objectstack#32984 — every plan card's {@link PlanBuildState}, keyed by its
+ * `toolCallId`. Positional, as the #432 guard always was: a plan is built once
+ * an `apply_blueprint` AFTER it built, so an older plan a later one replaced
+ * still collapses, and a later not-yet-built plan keeps its button. Short of a
+ * build, the newest attempt after the plan speaks (running or failed), unless
+ * the user clicked Build it after that attempt (`approvedAt`, the invocation
+ * count when they clicked), which reads `confirmed` until the next attempt.
+ *
+ * It used to count ANY `apply_blueprint` after the plan as built, running or
+ * refused: a plan confirmed by a typed reply read 已搭建 the moment the build
+ * started, and stayed 已搭建 through six `blueprint_not_confirmed` refusals
+ * with nothing created.
+ */
+export function resolvePlanBuildStates(
+  messages: ReadonlyArray<Pick<ChatbotEnhancedMessage, 'toolInvocations'>>,
+  opts: { turnLive: boolean; approvedAt: ReadonlyMap<string, number> },
+): Map<string, PlanBuildState> {
+  const plans: Array<{ id: string; order: number }> = [];
+  const attempts: Array<{ order: number; outcome: 'building' | 'built' | 'failed' }> = [];
+  let order = 0;
+  for (const message of messages) {
+    for (const tool of message.toolInvocations ?? []) {
+      // Both the structured plan card AND the fallback confirm card (an
+      // unstructured propose_blueprint) own a "Build it" button.
+      if ((tool.proposedPlan || isUnstructuredBuildProposal(tool)) && tool.toolCallId) {
+        plans.push({ id: tool.toolCallId, order });
+      }
+      if (tool.toolName === 'apply_blueprint' && !isProposalResult(tool.result)) {
+        attempts.push({ order, outcome: applyBlueprintOutcome(tool, opts.turnLive) });
+      }
+      order += 1;
+    }
+  }
+  const states = new Map<string, PlanBuildState>();
+  for (const plan of plans) {
+    const after = attempts.filter((a) => a.order > plan.order);
+    const clickedAt = opts.approvedAt.get(plan.id);
+    let state: PlanBuildState = clickedAt !== undefined ? 'confirmed' : 'pending';
+    if (after.some((a) => a.outcome === 'built')) {
+      state = 'built';
+    } else {
+      const newest = after[after.length - 1];
+      if (newest && (clickedAt === undefined || newest.order >= clickedAt)) state = newest.outcome;
+    }
+    states.set(plan.id, state);
+  }
+  return states;
 }
 
 /**
@@ -1352,6 +1463,35 @@ const DEFAULT_CHANGE_VERB_LABELS: Record<string, string> = {
 };
 
 /** Render one granular change descriptor as a readable line for the confirm card. */
+/**
+ * objectstack#32984 — how a change row names what it touches. The producer
+ * sends machine names (`b6bl_quote_item`, `line_total`, `currency`); the host
+ * knows the labels. Each resolver answers `undefined` for a name it does not
+ * know (an object or field the change is about to create), which keeps the
+ * machine name.
+ */
+interface ChangeLabelResolvers {
+  object?: (objectName: string) => string | undefined;
+  field?: (objectName: string, fieldName: string) => string | undefined;
+  fieldType?: (type: string) => string | undefined;
+}
+
+/** A change row's target and type, by label where the host knows one (objectstack#32984). */
+function changeRowNames(
+  c: { object?: string; field?: string; type?: string; name?: string },
+  labels: ChangeLabelResolvers | undefined,
+): { object?: string; field?: string; type?: string; machine: string } {
+  const object = c.object ? labels?.object?.(c.object) || c.object : undefined;
+  const field = c.field
+    ? (c.object ? labels?.field?.(c.object, c.field) : undefined) || c.field
+    : undefined;
+  const type = c.type ? labels?.fieldType?.(c.type) || c.type : undefined;
+  const machine = c.field
+    ? `${c.object ? `${c.object}.` : ''}${c.field}`
+    : (c.object ?? c.name ?? '');
+  return { object, field, type, machine };
+}
+
 function formatChangeRow(
   c: {
     verb: string;
@@ -1362,10 +1502,12 @@ function formatChangeRow(
     details?: string;
   },
   verbLabels: Record<string, string> = DEFAULT_CHANGE_VERB_LABELS,
+  labels?: ChangeLabelResolvers,
 ): string {
   const verb = verbLabels[c.verb] ?? DEFAULT_CHANGE_VERB_LABELS[c.verb] ?? c.verb;
-  const target = c.field ? `${c.object ? `${c.object}.` : ''}${c.field}` : (c.object ?? c.name ?? '');
-  const typePart = c.type ? ` (${c.type})` : '';
+  const n = changeRowNames(c, labels);
+  const target = n.field ? `${n.object ? `${n.object}.` : ''}${n.field}` : (n.object ?? c.name ?? '');
+  const typePart = n.type ? ` (${n.type})` : '';
   return [verb, `${target}${typePart}`, c.details].filter(Boolean).join(' ');
 }
 
@@ -1469,9 +1611,11 @@ function useChangeKindLabel(verbLabels: Record<string, string>): (c: ChangeRow) 
 function ChangePlanBody({
   changes,
   verbLabels,
+  labels,
 }: {
   changes: ProposedChanges;
   verbLabels: Record<string, string>;
+  labels?: ChangeLabelResolvers;
 }) {
   const { t } = useObjectTranslation();
   const kindOf = useChangeKindLabel(verbLabels);
@@ -1488,12 +1632,15 @@ function ChangePlanBody({
       <div className="flex flex-col" data-testid="proposed-changes-rows">
         {changes.changes.map((c, idx) => {
           const face = changeFaceOf(c.verb);
-          const target = c.field
-            ? c.object
-              ? `${c.object} · ${c.field}`
-              : c.field
-            : (c.name ?? c.object ?? '');
-          const params = [c.type, c.details].filter(Boolean).join(' · ');
+          // objectstack#32984 — by label where the host knows one; the
+          // machine names stay on the tooltip.
+          const n = changeRowNames(c, labels);
+          const target = n.field
+            ? n.object
+              ? `${n.object} · ${n.field}`
+              : n.field
+            : (c.name ?? n.object ?? '');
+          const params = [n.type, c.details].filter(Boolean).join(' · ');
           return (
             <div
               key={idx}
@@ -1519,7 +1666,7 @@ function ChangePlanBody({
                   <strong className="font-medium" data-testid="proposed-change-kind">
                     {kindOf(c)}
                   </strong>{' '}
-                  <span className="break-all" data-testid="proposed-change-target">
+                  <span className="break-all" data-testid="proposed-change-target" title={n.machine || undefined}>
                     {target}
                   </span>
                 </span>
@@ -2374,6 +2521,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       onOpenList,
       planExtendLabel,
       resolveAppLabel,
+      resolveObjectLabel,
+      resolveFieldLabel,
+      resolveFieldTypeLabel,
       planQuestionsLabel = 'Confirm before building',
       planAssumptionsLabel = 'Assumptions',
       planDeferredLabel = 'Not yet built',
@@ -2440,6 +2590,17 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     const heldForApprovalLabel = tt('aiApprovals.statusHeld', 'Waiting for approval');
     // objectui#12724 — the plan card's section heads and its 等待确认 chip.
     const planAwaitingLabel = tt('chatbot.plan.awaitingConfirm', 'Awaiting confirmation');
+    // objectstack#32984 — a message typed during a running turn waits here.
+    const queuedLabel = tt('chatbot.composer.queued', 'Sends when the current reply finishes');
+    const queuedCancelLabel = tt('chatbot.composer.queuedCancel', 'Cancel');
+    const changeLabelResolvers = React.useMemo<ChangeLabelResolvers>(
+      () => ({ object: resolveObjectLabel, field: resolveFieldLabel, fieldType: resolveFieldTypeLabel }),
+      [resolveObjectLabel, resolveFieldLabel, resolveFieldTypeLabel],
+    );
+    // objectstack#32984 — the issues chip spoke English in every locale.
+    const { t: tCount } = useObjectTranslation();
+    const buildIssuesCountLabel = (count: number): string =>
+      tCount('chatbot.build.issuesCount', { count, defaultValue: '{{count}} to fix' });
     const planObjectsLabel = tt('chatbot.plan.objectsAndFields', 'Objects and fields');
     const planViewsLabel = tt('chatbot.plan.views', 'Views');
     // objectui#12894 — the change card's primary action when the envelope says
@@ -2857,15 +3018,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       stickToBottomRef.current?.scrollToBottom({ animation: 'smooth' });
     }, []);
 
-    const handleSubmit = React.useCallback(
-      (payload: PromptInputMessage) => {
-        const hasText = Boolean(payload.text?.trim());
-        const files = payload.files
-          ?.map((f) => (f as unknown as { file?: File }).file)
-          .filter(Boolean) as File[] | undefined;
-        const hasFiles = Boolean(files && files.length > 0);
-        if (!(hasText || hasFiles)) return;
-        const text = payload.text?.trim() ?? '';
+    // The send a typed message makes once nothing holds it back.
+    const sendTyped = React.useCallback(
+      (text: string, files: File[] | undefined) => {
         // Remember the text so a rejected send can restore it (the composer's
         // own form.reset clears the box optimistically). A fresh attempt also
         // clears any prior send-failure restore guard.
@@ -2879,6 +3034,62 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         followThreadToBottom();
       },
       [onSendMessage, followThreadToBottom]
+    );
+
+    // objectstack#32984 — a message typed while a turn is running. The
+    // composer used to go dead for the whole turn, and a message the user
+    // pressed Enter on in that window was cleared from the box with nothing
+    // sent and nothing shown. It now QUEUES: the composer stays live, the
+    // message shows above it as waiting, and it is sent the moment the turn
+    // ends (one per turn, in the order typed). 取消 puts it back in the box.
+    const [queuedSends, setQueuedSends] = React.useState<
+      ReadonlyArray<{ id: number; text: string; files?: File[] }>
+    >([]);
+    const queuedSeqRef = React.useRef(0);
+    const handleSubmit = React.useCallback(
+      (payload: PromptInputMessage) => {
+        const hasText = Boolean(payload.text?.trim());
+        const files = payload.files
+          ?.map((f) => (f as unknown as { file?: File }).file)
+          .filter(Boolean) as File[] | undefined;
+        const hasFiles = Boolean(files && files.length > 0);
+        if (!(hasText || hasFiles)) return;
+        const text = payload.text?.trim() ?? '';
+        if (isLoading) {
+          queuedSeqRef.current += 1;
+          const id = queuedSeqRef.current;
+          setQueuedSends((prev) => [...prev, { id, text, ...(hasFiles ? { files } : {}) }]);
+          return;
+        }
+        sendTyped(text, files);
+      },
+      [isLoading, sendTyped]
+    );
+    // The turn ended: send the oldest queued message. Its own turn holds the
+    // rest until it ends too. On the next task, so a StrictMode effect re-run
+    // (or a turn that restarts at once) cannot send it twice.
+    React.useEffect(() => {
+      if (isLoading || queuedSends.length === 0) return;
+      const next = queuedSends[0];
+      const timer = window.setTimeout(() => {
+        setQueuedSends((prev) => (prev[0]?.id === next.id ? prev.slice(1) : prev));
+        sendTyped(next.text, next.files);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }, [isLoading, queuedSends, sendTyped]);
+    const unqueueSend = React.useCallback(
+      (id: number) => {
+        const text = queuedSends.find((q) => q.id === id)?.text ?? '';
+        setQueuedSends((prev) => prev.filter((q) => q.id !== id));
+        // Back into the box, unless the user has typed something new there.
+        const textarea = promptInputWrapRef.current?.querySelector('textarea');
+        if (textarea && text && textarea.value.trim() === '') {
+          textarea.value = text;
+          textarea.dispatchEvent(new Event('input', { bubbles: true }));
+          textarea.focus();
+        }
+      },
+      [queuedSends],
     );
 
     const handleSuggestionClick = React.useCallback(
@@ -2903,12 +3114,20 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     // new user bubble + a streaming turn) lands at the BOTTOM of the thread —
     // outside the viewport when the plan card is scrolled into view — so the
     // card itself looked untouched for the ~10s until apply_blueprint started
-    // and users clicked again. Flip the clicked card to a "Building…" badge
-    // immediately; the durable Built state still derives from the message
-    // stream (builtPlanIds). A send that never left the client (rate limit /
-    // offline) rolls the flip back so the buttons return.
-    const [approvedPlanIds, setApprovedPlanIds] = React.useState<ReadonlySet<string>>(
-      () => new Set<string>(),
+    // and users clicked again. Flip the clicked card to a 「已确认」 badge
+    // immediately; every later state (building / built / failed) derives from
+    // the message stream (`resolvePlanBuildStates`). A send that never left the
+    // client (rate limit / offline) rolls the flip back so the buttons return.
+    //
+    // objectstack#32984 — keyed to the number of tool invocations in the thread
+    // when the user clicked, so a click AFTER a failed attempt reads 已确认
+    // again, and only an attempt that started after the click speaks over it.
+    const [approvedPlanIds, setApprovedPlanIds] = React.useState<ReadonlyMap<string, number>>(
+      () => new Map<string, number>(),
+    );
+    const toolInvocationCount = React.useMemo(
+      () => messages.reduce((n, m) => n + (m.toolInvocations?.length ?? 0), 0),
+      [messages],
     );
     const lastApprovedPlanIdRef = React.useRef<string | null>(null);
     const handlePlanApprove = React.useCallback(
@@ -2918,15 +3137,15 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         if (toolCallId) {
           lastApprovedPlanIdRef.current = toolCallId;
           setApprovedPlanIds((prev) => {
-            const next = new Set(prev);
-            next.add(toolCallId);
+            const next = new Map(prev);
+            next.set(toolCallId, toolInvocationCount);
             return next;
           });
         }
         onSendMessage?.(hasOpenQuestions ? planApproveDefaultsMessage : planApproveMessage);
         followThreadToBottom();
       },
-      [onSendMessage, planApproveMessage, planApproveDefaultsMessage, followThreadToBottom]
+      [onSendMessage, planApproveMessage, planApproveDefaultsMessage, followThreadToBottom, toolInvocationCount]
     );
     // objectui#5695 — same optimistic pattern for the 确认修改 card: flip it to
     // an "Applying…" badge the moment the approval is sent (double-click guard +
@@ -2991,7 +3210,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         lastApprovedPlanIdRef.current = null;
         setApprovedPlanIds((prev) => {
           if (!prev.has(failedId)) return prev;
-          const next = new Set(prev);
+          const next = new Map(prev);
           next.delete(failedId);
           return next;
         });
@@ -3061,30 +3280,70 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     // nothing to click and the only way out was guessing "确认" into the composer.
     // So a build only counts when the invocation is not a confirm-gate preview,
     // the same fact `getToolState` already reads to say "Awaiting Approval".
-    const builtPlanIds = React.useMemo(() => {
-      const ids = new Set<string>();
-      const plans: Array<{ id: string; order: number }> = [];
-      let lastBuildOrder = -1;
-      let order = 0;
-      for (const message of messages) {
-        for (const tool of message.toolInvocations ?? []) {
-          // Both the structured plan card AND the fallback confirm card (an
-          // unstructured propose_blueprint) own a "Build it" button, so both must
-          // collapse to the inert "Built" badge once their build has run.
-          if ((tool.proposedPlan || isUnstructuredBuildProposal(tool)) && tool.toolCallId) {
-            plans.push({ id: tool.toolCallId, order });
-          }
-          // A still-running apply (no result yet) DOES count: the build is in
-          // flight, and a second "Build it" would re-trigger it (#432).
-          if (tool.toolName === 'apply_blueprint' && !isProposalResult(tool.result)) {
-            lastBuildOrder = order;
-          }
-          order += 1;
-        }
+    //
+    // objectstack#32984 — and an invocation that is not a preview is still not
+    // a build until it SAYS it built (`resolvePlanBuildStates`): a running one
+    // reads 正在搭建…, a refused one 搭建未完成. Running and built both keep the
+    // #432 guard (no live Build it); a failed one gives the button back.
+    const planBuildStates = React.useMemo(
+      () => resolvePlanBuildStates(messages, { turnLive: isLoading, approvedAt: approvedPlanIds }),
+      [messages, isLoading, approvedPlanIds],
+    );
+    const planBuildStateOf = (toolCallId: string | undefined): PlanBuildState =>
+      (toolCallId ? planBuildStates.get(toolCallId) : undefined) ?? 'pending';
+    // Built, building and confirmed replace the buttons (the #432 guard: no
+    // second Build it while one is asked for or running); failed shows its
+    // badge BESIDE them, so the user can ask again.
+    const planBuildSettledOrMoving = (state: PlanBuildState): boolean =>
+      state === 'built' || state === 'building' || state === 'confirmed';
+    const planConfirmedLabel = tt('chatbot.plan.confirmed', 'Confirmed');
+    const planBuildFailedLabel = tt('chatbot.plan.buildFailed', 'Not built — nothing was created');
+    const renderPlanBuildBadge = (state: PlanBuildState): React.ReactNode => {
+      switch (state) {
+        case 'built':
+          return (
+            <span
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
+              data-testid="proposed-plan-built"
+            >
+              <CheckCircle2 className="size-3.5" />
+              {planBuiltLabel}
+            </span>
+          );
+        case 'building':
+          return (
+            <span
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border bg-muted/40 px-3 text-xs font-medium text-muted-foreground"
+              data-testid="proposed-plan-building"
+            >
+              <Loader2 className="size-3.5 animate-spin" />
+              {planBuildingLabel}
+            </span>
+          );
+        case 'confirmed':
+          return (
+            <span
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border bg-muted/40 px-3 text-xs font-medium text-muted-foreground"
+              data-testid="proposed-plan-confirmed"
+            >
+              <CheckCircle2 className="size-3.5" />
+              {planConfirmedLabel}
+            </span>
+          );
+        case 'failed':
+          return (
+            <span
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 text-xs font-medium text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300"
+              data-testid="proposed-plan-build-failed"
+            >
+              <XCircle className="size-3.5" />
+              {planBuildFailedLabel}
+            </span>
+          );
+        default:
+          return null;
       }
-      for (const p of plans) if (p.order < lastBuildOrder) ids.add(p.id);
-      return ids;
-    }, [messages]);
+    };
 
     // #2458 UX#5 — only the LATEST "Open in Builder →" handoff card stays
     // actionable; older cards carry a now-stale prompt and go inert, so a thread
@@ -3111,7 +3370,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     // needs ≥1 parseable change row. So a later same-tool call that WAS a preview
     // but produced no card (an empty `changes:[]`, an `awaiting_confirmation`)
     // silently counted as the commit and settled the pending card — the same
-    // defect `builtPlanIds` had above. Read the preview fact directly instead.
+    // defect the plan cards' build reading had above. Read the preview fact directly instead.
     const confirmedChangeIds = React.useMemo(() => {
       const ids = new Set<string>();
       const proposals: Array<{ id: string; toolName: string; order: number }> = [];
@@ -3238,9 +3497,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       !quotaBlockedChanges.has(newestProposalId) &&
       resolveProposalCardState({
         replayOutcome: replayOutcomeByProposalId.get(newestProposalId),
-        built: builtPlanIds.has(newestProposalId),
+        built: planBuildStateOf(newestProposalId) === 'built',
+        building: planBuildStateOf(newestProposalId) === 'building',
+        buildFailed: planBuildStateOf(newestProposalId) === 'failed',
         confirmed: confirmedChangeIds.has(newestProposalId),
-        approved: approvedPlanIds.has(newestProposalId) || confirmPendingIds.has(newestProposalId),
+        approved: planBuildStateOf(newestProposalId) === 'confirmed' || confirmPendingIds.has(newestProposalId),
       }) === 'pending';
     const planApprovalPendingCount = planApprovalPending
       ? (newestProposal?.proposedChanges?.changes.length ?? 1)
@@ -3327,9 +3588,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       // `resolveProposalCardState` is now the one producer both sides read.
       const proposalCardState = resolveProposalCardState({
         replayOutcome: replayOutcomeByProposalId.get(tool.toolCallId),
-        built: builtPlanIds.has(tool.toolCallId),
+        built: planBuildStateOf(tool.toolCallId) === 'built',
+        building: planBuildStateOf(tool.toolCallId) === 'building',
+        buildFailed: planBuildStateOf(tool.toolCallId) === 'failed',
         confirmed: confirmedChangeIds.has(tool.toolCallId),
-        approved: approvedPlanIds.has(tool.toolCallId),
+        approved: planBuildStateOf(tool.toolCallId) === 'confirmed',
       });
       const headerState =
         state === 'output-available' && isProposalResult(tool.result) && !tool.planSuperseded
@@ -3545,7 +3808,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                         data-testid="draft-verification-chip"
                       >
                         <TriangleAlert className="size-3.5" />
-                        {`${tool.draftReview.verification.errors} issue${tool.draftReview.verification.errors === 1 ? '' : 's'}`}
+                        {buildIssuesCountLabel(tool.draftReview.verification.errors)}
                       </span>
                     ) : (
                       <span
@@ -3566,37 +3829,61 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     </span>
                   ) : null}
                 </div>
-                {/* ADR-0038 L1 — the findings behind the issues chip, so the
-                    user sees WHAT is broken (and the fix hint) instead of a
-                    bare "N issues" count with no way to learn more. Mirrors the
-                    L3 health line below. */}
+                {/* ADR-0038 L1 — the findings behind the issues chip.
+                    objectstack#32984 — each finding's `message` / `fix` is
+                    written for the AGENT that repairs the build ('Seed "x"
+                    sets "quote" on none of its 12 row(s) — … Do NOT publish
+                    this seed with the column empty.'), so the card no longer
+                    prints it as its own sentence. It says what the customer
+                    can do, and keeps the findings one click away for whoever
+                    needs them. */}
                 {tool.draftReview.issues && tool.draftReview.issues.length > 0 ? (
                   <div
                     className="flex flex-col gap-1 border-t bg-muted/20 px-3 py-2"
                     data-testid="draft-issues"
                   >
-                    {tool.draftReview.issues
-                      .filter((i) => i.severity === 'error')
-                      .map((iss, idx) => (
+                    {(() => {
+                      const issues = tool.draftReview!.issues!;
+                      const errorCount = issues.filter((i) => i.severity === 'error').length;
+                      return (
                         <div
-                          key={`e${idx}`}
-                          className="flex items-start gap-1.5 text-xs text-red-600"
+                          className={cn(
+                            'flex items-start gap-1.5 text-xs',
+                            errorCount > 0 ? 'text-red-600' : 'text-amber-600',
+                          )}
+                          data-testid="draft-issues-summary"
                         >
-                          <XCircle className="mt-0.5 size-3.5 shrink-0" />
-                          <span>{iss.fix ? `${iss.message} — ${iss.fix}` : iss.message}</span>
+                          {errorCount > 0 ? (
+                            <XCircle className="mt-0.5 size-3.5 shrink-0" />
+                          ) : (
+                            <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+                          )}
+                          <span>
+                            {errorCount > 0
+                              ? tt(
+                                  'chatbot.build.issuesSummary',
+                                  'Some parts of this build need fixing before it is ready. Reply "fix the problems" and the assistant will repair them.',
+                                )
+                              : tt(
+                                  'chatbot.build.warningsSummary',
+                                  'The build is ready, with a few things worth checking. Ask the assistant what they are if you want to improve them.',
+                                )}
+                          </span>
                         </div>
-                      ))}
-                    {tool.draftReview.issues
-                      .filter((i) => i.severity !== 'error')
-                      .map((iss, idx) => (
-                        <div
-                          key={`w${idx}`}
-                          className="flex items-start gap-1.5 text-xs text-amber-600"
-                        >
-                          <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
-                          <span>{iss.message}</span>
-                        </div>
-                      ))}
+                      );
+                    })()}
+                    <details className="text-xs text-muted-foreground" data-testid="draft-issues-details">
+                      <summary className="cursor-pointer select-none text-[11px]">
+                        {tt('chatbot.build.issuesDetails', 'Technical details')}
+                      </summary>
+                      <ul className="mt-1 flex flex-col gap-1 pl-5">
+                        {tool.draftReview.issues.map((iss, idx) => (
+                          <li key={idx} className="list-disc break-words font-mono text-[11px]">
+                            {iss.fix ? `${iss.message} — ${iss.fix}` : iss.message}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
                   </div>
                 ) : null}
                 {/* ADR-0038 L3 — build-health line: what the publish actually
@@ -4000,8 +4287,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     </span>
                   </span>
                   {onSendMessage &&
-                  !builtPlanIds.has(tool.toolCallId) &&
-                  !approvedPlanIds.has(tool.toolCallId) ? (
+                  planBuildStateOf(tool.toolCallId) === 'pending' ? (
                     <span
                       className="ml-auto inline-flex h-5 shrink-0 items-center rounded-md bg-amber-50 px-1.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
                       data-testid="proposed-plan-awaiting"
@@ -4262,7 +4548,12 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     iterateOrNew={tool.proposedPlan.iterateOrNew}
                     resolveAppLabel={resolveAppLabel}
                     mode={
-                      !onSendMessage ? 'reply' : builtPlanIds.has(tool.toolCallId) ? 'settled' : 'choose'
+                      !onSendMessage
+                        ? 'reply'
+                        : planBuildStateOf(tool.toolCallId) === 'built' ||
+                            planBuildStateOf(tool.toolCallId) === 'building'
+                          ? 'settled'
+                          : 'choose'
                     }
                     onChoose={handleSuggestionClick}
                     disabled={planActionsLocked}
@@ -4270,31 +4561,16 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     buildNewMessage={planBuildNewAppMessage}
                   />
                 ) : onSendMessage ? (
-                  builtPlanIds.has(tool.toolCallId) ? (
+                  planBuildSettledOrMoving(planBuildStateOf(tool.toolCallId)) ? (
                     <div className="flex flex-wrap items-center gap-1.5 pt-0.5" data-testid="proposed-plan-actions">
-                      <span
-                        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
-                        data-testid="proposed-plan-built"
-                      >
-                        <CheckCircle2 className="size-3.5" />
-                        {planBuiltLabel}
-                      </span>
-                    </div>
-                  ) : approvedPlanIds.has(tool.toolCallId) ? (
-                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5" data-testid="proposed-plan-actions">
-                      <span
-                        className="inline-flex h-7 items-center gap-1.5 rounded-md border bg-muted/40 px-3 text-xs font-medium text-muted-foreground"
-                        data-testid="proposed-plan-building"
-                      >
-                        <Loader2 className="size-3.5 animate-spin" />
-                        {planBuildingLabel}
-                      </span>
+                      {renderPlanBuildBadge(planBuildStateOf(tool.toolCallId))}
                     </div>
                   ) : (
                   <div
                     className="flex flex-wrap items-center gap-1.5 pt-0.5"
                     data-testid="proposed-plan-actions"
                   >
+                    {renderPlanBuildBadge(planBuildStateOf(tool.toolCallId))}
                     <button
                       type="button"
                       onClick={() =>
@@ -4351,31 +4627,16 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 </span>
                 <p className="text-xs text-muted-foreground">{planReadyLabel}</p>
                 {onSendMessage ? (
-                  builtPlanIds.has(tool.toolCallId) ? (
+                  planBuildSettledOrMoving(planBuildStateOf(tool.toolCallId)) ? (
                     <div className="flex flex-wrap items-center gap-1.5 pt-0.5" data-testid="proposed-plan-actions">
-                      <span
-                        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
-                        data-testid="proposed-plan-built"
-                      >
-                        <CheckCircle2 className="size-3.5" />
-                        {planBuiltLabel}
-                      </span>
-                    </div>
-                  ) : approvedPlanIds.has(tool.toolCallId) ? (
-                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5" data-testid="proposed-plan-actions">
-                      <span
-                        className="inline-flex h-7 items-center gap-1.5 rounded-md border bg-muted/40 px-3 text-xs font-medium text-muted-foreground"
-                        data-testid="proposed-plan-building"
-                      >
-                        <Loader2 className="size-3.5 animate-spin" />
-                        {planBuildingLabel}
-                      </span>
+                      {renderPlanBuildBadge(planBuildStateOf(tool.toolCallId))}
                     </div>
                   ) : (
                     <div
                       className="flex flex-wrap items-center gap-1.5 pt-0.5"
                       data-testid="proposed-plan-actions"
                     >
+                      {renderPlanBuildBadge(planBuildStateOf(tool.toolCallId))}
                       <button
                         type="button"
                         // No structured questions to default through → plain approve.
@@ -4421,7 +4682,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                   // posture: 「修改方案 · N 项」, the posture note, one row per
                   // change. An envelope without it draws the card below, as
                   // before.
-                  <ChangePlanBody changes={tool.proposedChanges} verbLabels={changeVerbLabels} />
+                  <ChangePlanBody
+                    changes={tool.proposedChanges}
+                    verbLabels={changeVerbLabels}
+                    labels={changeLabelResolvers}
+                  />
                 ) : (
                   <>
                     <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
@@ -4438,7 +4703,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                           className="flex items-start gap-1.5 rounded-md border bg-background px-2 py-1 text-[11px] text-foreground/80"
                         >
                           <Table2 className="mt-px size-3 shrink-0 text-foreground/40" />
-                          <span>{formatChangeRow(c, changeVerbLabels)}</span>
+                          <span>{formatChangeRow(c, changeVerbLabels, changeLabelResolvers)}</span>
                         </div>
                       ))}
                     </div>
@@ -5156,6 +5421,32 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
               {promptOverlaySlot}
             </div>
           ) : null}
+          {queuedSends.length > 0 ? (
+            <div className="mb-2 flex flex-col gap-1" data-testid="composer-queued">
+              {queuedSends.map((q) => (
+                <div
+                  key={q.id}
+                  className="flex items-start gap-2 rounded-md border border-dashed bg-muted/30 px-2.5 py-1.5 text-xs"
+                  data-testid="composer-queued-item"
+                  role="status"
+                >
+                  <Clock3 className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-[11px] font-medium text-muted-foreground">{queuedLabel}</span>
+                    <span className="whitespace-pre-wrap break-words text-foreground/90">{q.text}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => unqueueSend(q.id)}
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                    data-testid="composer-queued-cancel"
+                  >
+                    {queuedCancelLabel}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <PromptInput
             accept={acceptedFileTypes}
             fileInputLabel={L.uploadFiles}
@@ -5175,7 +5466,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             ) : null}
             <PromptInputTextarea
               placeholder={placeholder}
-              disabled={disabled || promptStatus === 'streaming'}
+              // objectstack#32984 — live during a turn: Enter queues (see
+              // `queuedSends`) instead of going nowhere.
+              disabled={disabled}
               onChange={
                 onInputChange
                   ? (e) => onInputChange(e.currentTarget.value)

@@ -149,6 +149,9 @@ const COUNT_NEUTRAL = {
     'home.pendingDrafts.publishedVerified',
     'home.pendingDrafts.capabilityWarn',
     'preview.history.items',
+    // objectstack#32984 — the build card's "N to fix" chip: the number stands
+    // before an infinitive or after a label, or takes a counter, in every pack.
+    'chatbot.build.issuesCount',
   ],
   /** A relative time whose unit is abbreviated in every pack (`5m ago`,
    *  `vor 5 Min.`, `5 мин назад`, `منذ 5 د`); an abbreviation does not inflect. */

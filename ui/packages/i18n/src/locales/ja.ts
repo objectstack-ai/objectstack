@@ -3962,6 +3962,11 @@ const ja = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'メッセージを送信',
     scrollToBottom: '最新のメッセージまでスクロール',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "現在の返信が終わると送信されます",
+      queuedCancel: "キャンセル",
+    },
     answer: {
       showFull: '全文を表示',
       collapse: '折りたたむ',
@@ -4055,6 +4060,9 @@ const ja = {
       countSeedData: "サンプルデータ",
       extendTarget: "既存のアプリに追加：{{app}}",
       awaitingConfirm: "確認待ち",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "確認済み",
+      buildFailed: "構築されませんでした · 何も作成されていません",
       iterateOrNew: {
         question: "このプランは既存のアプリ「{{app}}」と重なっています。このアプリを引き続き改善しますか、それとも別のアプリを作成しますか？",
         questionUnnamed: "このプランは既存のアプリと重なっています。そのアプリを引き続き改善しますか、それとも別のアプリを作成しますか？",
@@ -4087,6 +4095,11 @@ const ja = {
       verifying: "変更を確認しています…",
       verifyStep: "ステップ {{n}}",
       verified: "変更を確認しました",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "要修正 {{count}} 件",
+      issuesSummary: "この構築には、使えるようになる前に修正が必要な部分があります。「問題を修正して」と返信すると、アシスタントが修正します。",
+      warningsSummary: "アプリは構築済みですが、確認したほうがよい点がいくつかあります。改善したい場合は、アシスタントに内容を尋ねてください。",
+      issuesDetails: "技術的な詳細",
       unknownPhase: "不明なビルドフェーズ",
       nextStepsLead: "次はこう話しかけられます：{{steps}}",
       nextStepQuote: "「{{step}}」",
@@ -4427,6 +4440,11 @@ const ja = {
     daysAgo_other: '{{count}} 日前',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "公開するとここにレコードが表示されます",
+      message: "まだ公開されていないオブジェクトをプレビューしているため、レコードはありません。公開するとレコードを追加したり、サンプルデータを読み込んだりできます。",
+    },
     empty: {
       loadFailedTitle: 'ドラフトプレビューを読み込めませんでした',
       loadFailedDescription: 'ドラフトオーバーレイを読み取れませんでした。再試行するか、接続を確認してください。',

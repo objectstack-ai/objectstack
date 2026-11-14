@@ -4045,6 +4045,11 @@ const es = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Enviar mensaje',
     scrollToBottom: 'Ir al último mensaje',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "Se enviará cuando termine la respuesta actual",
+      queuedCancel: "Cancelar",
+    },
     answer: {
       showFull: 'Mostrar respuesta completa',
       collapse: 'Contraer',
@@ -4142,6 +4147,9 @@ const es = {
       countSeedData: "datos de ejemplo",
       extendTarget: "Se añade a la app existente: {{app}}",
       awaitingConfirm: "Pendiente de confirmación",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "Confirmado",
+      buildFailed: "No construido: no se creó nada",
       iterateOrNew: {
         question: "Esto se solapa con «{{app}}», una app que ya tiene. ¿Seguir mejorándola o crear una app independiente?",
         questionUnnamed: "Esto se solapa con una app que ya tiene. ¿Seguir mejorando esa app o crear una independiente?",
@@ -4174,6 +4182,11 @@ const es = {
       verifying: "Comprobando el cambio…",
       verifyStep: "paso {{n}}",
       verified: "Cambio comprobado",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "{{count}} por corregir",
+      issuesSummary: "Algunas partes de esta construcción deben corregirse antes de poder usarse. Responde «corrige los problemas» y el asistente las reparará.",
+      warningsSummary: "La aplicación está construida, con algunos puntos que conviene revisar. Pregunta al asistente cuáles son si quieres mejorarla.",
+      issuesDetails: "Detalles técnicos",
       unknownPhase: "Fase de creación desconocida",
       nextStepsLead: "A continuación puede decir: {{steps}}",
       nextStepQuote: "«{{step}}»",
@@ -4529,6 +4542,11 @@ const es = {
     daysAgo_other: 'hace {{count}} días',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "Los registros aparecerán aquí al publicar",
+      message: "Estás previsualizando un objeto que aún no se ha publicado, por lo que no tiene registros. Publícalo para empezar a añadir registros o cargar sus datos de ejemplo.",
+    },
     empty: {
       loadFailedTitle: 'No se pudo cargar la vista previa del borrador',
       loadFailedDescription: 'No se pudo leer la capa de borrador. Reintenta o comprueba tu conexión.',

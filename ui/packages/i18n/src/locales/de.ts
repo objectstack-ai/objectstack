@@ -3960,6 +3960,11 @@ const de = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Nachricht senden',
     scrollToBottom: 'Zur neuesten Nachricht scrollen',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "Wird gesendet, sobald die aktuelle Antwort fertig ist",
+      queuedCancel: "Abbrechen",
+    },
     answer: {
       showFull: 'Ganze Antwort anzeigen',
       collapse: 'Einklappen',
@@ -4053,6 +4058,9 @@ const de = {
       countSeedData: "Beispieldaten",
       extendTarget: "Wird zur bestehenden App hinzugefügt: {{app}}",
       awaitingConfirm: "Wartet auf Bestätigung",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "Bestätigt",
+      buildFailed: "Nicht erstellt — es wurde nichts angelegt",
       iterateOrNew: {
         question: "Das überschneidet sich mit „{{app}}“, einer App, die Sie bereits haben. Diese App weiter verbessern oder eine separate App erstellen?",
         questionUnnamed: "Das überschneidet sich mit einer App, die Sie bereits haben. Diese App weiter verbessern oder eine separate App erstellen?",
@@ -4085,6 +4093,11 @@ const de = {
       verifying: "Änderung wird geprüft…",
       verifyStep: "Schritt {{n}}",
       verified: "Änderung geprüft",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "{{count}} zu beheben",
+      issuesSummary: "Einige Teile dieses Builds müssen noch korrigiert werden. Bitte den Assistenten, die Probleme zu beheben, dann repariert er sie.",
+      warningsSummary: "Der Build ist fertig, einige Punkte sind aber prüfenswert. Frag den Assistenten, welche das sind, wenn du sie verbessern möchtest.",
+      issuesDetails: "Technische Details",
       unknownPhase: "Unbekannte Build-Phase",
       nextStepsLead: "Als Nächstes können Sie sagen: {{steps}}",
       nextStepQuote: "„{{step}}“",
@@ -4425,6 +4438,11 @@ const de = {
     daysAgo_other: 'vor {{count}} Tagen',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "Datensätze erscheinen hier nach dem Veröffentlichen",
+      message: "Du siehst die Vorschau eines Objekts, das noch nicht veröffentlicht ist, daher hat es keine Datensätze. Veröffentliche es, um Datensätze anzulegen oder seine Beispieldaten zu laden.",
+    },
     empty: {
       loadFailedTitle: 'Entwurfsvorschau konnte nicht geladen werden',
       loadFailedDescription: 'Das Entwurfs-Overlay konnte nicht gelesen werden. Erneut versuchen oder Verbindung prüfen.',
