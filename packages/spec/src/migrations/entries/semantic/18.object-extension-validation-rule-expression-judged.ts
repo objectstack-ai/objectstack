@@ -23,12 +23,14 @@ export const entry: SemanticMigration = {
   replacement:
     'A rule the expression rule accepts on a declared rule of the same object: CEL that reads `record.FIELD` for '
     + 'a field the extended object serves (its own fields and every field an extension adds), calls only '
-    + 'registered functions, guards a nullable operand with `!= null`, and reads one hop through a reference '
-    + 'only as a declared rule may.',
+    + 'registered functions, guards a nullable operand with `!= null` (`record.credit != null && record.credit > '
+    + '5000000`, not a bare `record.credit > 5000000` on a field with no `required: true` and no `defaultValue`), '
+    + 'and reads one hop through a reference only as a declared rule may.',
   reason:
     'The registry merges an extension\'s rules onto the target, so every save of the target runs them, but '
     + 'neither `os build` nor the `object_extension` publish door judged them: a misspelt field or an '
-    + 'unregistered function was accepted and failed only when an end user saved a record. Each rule an '
+    + 'unregistered function was accepted and failed only when an end user saved a record, and a rule reading a '
+    + 'nullable field with no guard aborted and refused every save where that field was empty. Each rule an '
     + 'extension adds is now judged by the object\'s own rule pass, against the extended object as served '
     + '(at the door, without the package\'s own stored extension, which the write replaces), and refused with '
     + 'the same rule id (`expression-invalid`; at the door `422 INVALID_METADATA`), located at '
