@@ -46,6 +46,9 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
   return { ...actual, usePermissions: () => permsStub as any };
 });
 
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 import { PagePreview } from './PagePreview';
 import {
   deriveStudioDetailSections,

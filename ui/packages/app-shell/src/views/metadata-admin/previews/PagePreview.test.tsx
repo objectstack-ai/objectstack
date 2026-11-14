@@ -25,6 +25,9 @@ vi.mock('./PageBlockCanvas', () => ({
   PageBlockCanvas: () => <div data-testid="mock-page-canvas" />,
 }));
 
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 import { PagePreview } from './PagePreview';
 import { buildDefaultPageSchema } from '@object-ui/plugin-detail';
 import { deriveRecordDetailSections, MORE_DETAILS_DEFAULT_LABEL, UNGROUPED_SECTION_DEFAULT_LABEL } from '../../recordDetailSections';
