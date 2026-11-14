@@ -462,9 +462,12 @@ create/update payload.
   stops the call and names the record it stopped at. Over OAuth it needs both
   \`data:read\` and \`data:write\`.
 - **list_actions()** — list the business actions available to you (only those
-  the app author exposed to AI and you are permitted to run), with each
+  the app author exposed to AI and your permissions allow), with each
   action's declared parameters, whether it operates on a record, and whether
-  it is flagged destructive.
+  it is flagged destructive. An action that carries \`unavailable\` is listed
+  but \`run_action\` would refuse it for you (your credential, or your role in
+  this organization): \`unavailable.reason\` says why and what would let it
+  run, so tell your human instead of calling it.
 - **run_action({ actionName, objectName?, recordId?, params?, confirm? })** —
   invoke a business action by name. Invocation is permission-gated, but the
   action body executes the app's registered logic as trusted code (it can
