@@ -415,3 +415,70 @@ describe('[SF7] the overlay provenance sentinel is no package', () => {
     expect(await judgeGrantSet(overlayCatalog(), OVERLAID)).toMatchObject({ status: 'resolved', entry: { name: OVERLAID } });
   });
 });
+
+/**
+ * [ADR-0150 D4, #32867] A set the registry holds nowhere, two packages' slots
+ * of it in the metadata service (an environment kernel's stored rows): a
+ * grant naming a package is judged by (package, name), the same answer the
+ * registry path gives, whatever order the service lists its rows in. BASE:
+ * the catalog's list kept the first row of the name only, so the holder named
+ * second was refused `not-held-by-qualifier` naming the first, and the
+ * accepted holder swapped with the row order.
+ */
+describe('[#32867] the metadata-only path judges a named grant by (package, name), in either listed order', () => {
+  const STORED = 'stored_reader';
+  /** A store keeping one slot per package: a read naming no package is refused across two (`409`). */
+  const storeOf = (rows: Array<ReturnType<typeof itemOf>>) => ({
+    async get(_type: string, name: string, packageId?: string) {
+      const of = rows.filter((r) => r.name === name);
+      if (packageId !== undefined) return of.find((r) => r._packageId === packageId);
+      const packages = of.filter((r) => r._packageId);
+      if (packages.length > 1) {
+        throw Object.assign(new Error(`permission set "${name}" is held by more than one package`), {
+          code: 'RESOURCE_CONFLICT', status: 409,
+          refusal: { reason: 'ambiguous-in-environment', candidates: packages.map((r) => ({ kind: 'package', packageId: r._packageId })) },
+        });
+      }
+      return packages[0] ?? of[0];
+    },
+    async list() { return rows; },
+  });
+  /** An environment kernel's registry: package-scoped reads, no permission set held. */
+  const silent = () => ({
+    getItem: () => undefined,
+    listItems: () => [],
+    isPackageDisabled: () => false,
+    packageScopedHoldersOf: () => [],
+    getPackageScopedItem: () => undefined,
+    getEnvironmentScopedItem: () => undefined,
+    getArtifactItem: () => undefined,
+    getPackage: () => undefined,
+    getAllPackages: () => [],
+  });
+  const catalogOf = (rows: Array<ReturnType<typeof itemOf>>) =>
+    createSecurityCatalogReader({ registry: silent() as never, metadata: storeOf(rows) as never });
+  const orders = {
+    'CRM first': [itemOf(STORED, CRM), itemOf(STORED, HR)],
+    'HR first': [itemOf(STORED, HR), itemOf(STORED, CRM)],
+    'package-less row first': [itemOf(STORED), itemOf(STORED, HR), itemOf(STORED, CRM)],
+    'package-less row last': [itemOf(STORED, CRM), itemOf(STORED, HR), itemOf(STORED)],
+  };
+
+  for (const [order, rows] of Object.entries(orders)) {
+    it(`${order}: each holder named resolves its own set; a non-holder is refused naming the same candidates`, async () => {
+      for (const holder of [CRM, HR]) {
+        expect(await judgeGrantSet(catalogOf(rows), STORED, holder)).toMatchObject({ status: 'resolved', entry: { packageId: holder, source: 'metadata' } });
+      }
+      const refused = await judgeGrantSet(catalogOf(rows), STORED, OTHER);
+      const environment = rows.some((r) => !r._packageId) ? [{ kind: 'environment' }] : [];
+      expect(refused).toMatchObject({ status: 'refused', refusal: { reason: 'not-held-by-qualifier', callerPackageId: OTHER } });
+      expect(refused.status === 'refused' ? refused.refusal.candidates : []).toEqual([
+        { kind: 'package', packageId: CRM },
+        { kind: 'package', packageId: HR },
+        ...environment,
+      ]);
+      // CONTROL naming no package: the D3 refusal across both packages, as before.
+      expect(await judgeGrantSet(catalogOf(rows), STORED)).toMatchObject({ status: 'refused', refusal: { reason: 'ambiguous-in-environment' } });
+    });
+  }
+});
