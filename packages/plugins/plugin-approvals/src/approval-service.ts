@@ -74,15 +74,17 @@ import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/dat
 // (`approval_recall_not_submitter`) into it ahead of this consumer half.
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import {
+  describePackageScopedHolder,
   holdsPlatformPermissionSet,
   isGrantActive,
   omitInternalFieldsFromWriteResponse,
+  PackageScopedNameRefusedError,
   resolveReadableParentIds,
   resolveUserAuthzGrants,
   vetOrganizationClaim,
   withoutOperationPrivateKeys,
 } from '@objectstack/core';
-import type { HeldPermissionSets, PackageScopedRefusal } from '@objectstack/core';
+import type { HeldPermissionSets, PackageScopedHolder, PackageScopedRefusal } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { normalizeTenancyPosture, postureEnforcesWall } from '@objectstack/spec/security';
 import {
@@ -1306,6 +1308,43 @@ function packageScopedRefusalOf(err: unknown): PackageScopedRefusal | undefined 
   return refusal?.status === 'refused' && typeof refusal.message === 'string' && typeof refusal.reason === 'string'
     ? refusal as PackageScopedRefusal
     : undefined;
+}
+
+/**
+ * [ADR-0150 D8 row R7, #32647] A request stamped with package
+ * `withdrawnPackageId` whose package the engine holds no slot of the flow
+ * for: uninstalled, or no longer shipping the flow. `holders` are the
+ * packages whose slots DO hold the name (`null`: the package-less slot) —
+ * each another package's flow, so none is the request's.
+ */
+interface WithdrawnRequestFlow {
+  readonly withdrawnPackageId: string;
+  readonly holders: ReadonlyArray<string | null>;
+}
+
+function isWithdrawnRequestFlow(slot: unknown): slot is WithdrawnRequestFlow {
+  return typeof (slot as Partial<WithdrawnRequestFlow> | undefined)?.withdrawnPackageId === 'string';
+}
+
+/**
+ * [ADR-0150 D5, D8 row R7, #32647] The refusal a read of a withdrawn request
+ * flow answers: the stamp is the request's exact qualifier and its package
+ * holds no item of the name (`not-held-by-qualifier`), and every holder is
+ * named. The sentence is the request's own — "address it by its holder", the
+ * qualifier read's remedy, is no move an approver has: the request was
+ * opened on the stamped package's flow, and only that package can answer it.
+ */
+function withdrawnRequestFlowRefusal(name: string, withdrawn: WithdrawnRequestFlow): PackageScopedRefusal {
+  const candidates: PackageScopedHolder[] = withdrawn.holders.map((packageId) =>
+    packageId === null ? { kind: 'environment' } : { kind: 'package', packageId });
+  const stamped = withdrawn.withdrawnPackageId;
+  const message = `The flow "${name}" this approval request was opened on is package "${stamped}"'s, and package `
+    + `"${stamped}" no longer holds it: it is held by ${candidates.map(describePackageScopedHolder).join('; ')}. `
+    + 'A request is answered only from the flow of the package it was opened on (ADR-0150 D8 row R7), never '
+    + `from another package's flow of the same name: install package "${stamped}" again to act on this request.`;
+  return {
+    status: 'refused', reason: 'not-held-by-qualifier', type: 'flow', name, callerPackageId: stamped, candidates, message,
+  };
 }
 
 /**
@@ -3737,17 +3776,28 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * or nothing names exactly one slot: the bare name is all a reader has,
    * and the bare read refuses a name two packages hold, naming every holder.
    * ⛔ Never a pick between holders.
+   *
+   * [ADR-0150 D8 row R7, #32647] A request stamped with a package belongs to
+   * that package's flow and to no other: when the stamped package holds no
+   * slot of `name` (it was uninstalled, or stopped shipping the flow), the
+   * answer is {@link WithdrawnRequestFlow}, naming the slots that DO hold the
+   * name — never the run's key and never the bare name, both of which would
+   * read another package's flow (the run's key is the bare name again once a
+   * second package holds it alone).
    */
   private async requestFlowSlot(
     name: string,
     request: { packageId?: unknown; runId?: unknown; runKey?: string },
-  ): Promise<{ packageId: string | null; key: string } | undefined> {
+  ): Promise<{ packageId: string | null; key: string } | WithdrawnRequestFlow | undefined> {
     const automation = this.automation;
     if (typeof automation?.getFlowSlots !== 'function' || typeof automation.flowSlotKey !== 'function') return undefined;
     const slots = automation.getFlowSlots(name)
       .map(({ packageId }) => ({ packageId, key: automation.flowSlotKey!(packageId, name) ?? '' }));
     const own = slots.find((slot) => slot.packageId !== null && slot.packageId === request.packageId);
     if (own) return own;
+    if (typeof request.packageId === 'string' && request.packageId !== '') {
+      return { withdrawnPackageId: request.packageId, holders: slots.map((slot) => slot.packageId) };
+    }
     let key = request.runKey;
     if (key === undefined && typeof request.runId === 'string' && request.runId !== '') {
       try {
@@ -3763,18 +3813,34 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * to: its own slot's ({@link requestFlowSlot}), else the bare read of
    * `name`, which answers a one-holder name as before and refuses a name two
    * packages hold, naming every holder. The caller has checked `getFlow`.
+   *
+   * [ADR-0150 D8 row R7, #32647] A request whose stamped package holds no
+   * slot of `name` ({@link WithdrawnRequestFlow}): `null` while no slot holds
+   * the name either, the answer the bare read gives a deleted flow; else
+   * refused, `409 RESOURCE_CONFLICT` naming every holder, and nothing read.
    */
   private async requestFlow(raw: any, name: string): Promise<any | null> {
     const slot = await this.requestFlowSlot(name, { packageId: raw?.process_package, runId: raw?.flow_run_id });
+    if (isWithdrawnRequestFlow(slot)) {
+      if (slot.holders.length === 0) return null;
+      throw new PackageScopedNameRefusedError(withdrawnRequestFlowRefusal(name, slot));
+    }
     if (slot && typeof this.automation?.getFlowSlot === 'function') return this.automation.getFlowSlot(slot.packageId, name);
     return this.automation!.getFlow!(name);
   }
 
-  /** [#31696] The key the request `raw`'s flow is filed under ({@link requestFlowSlot}), else its name; `null` for none. */
+  /**
+   * [#31696] The key the request `raw`'s flow is filed under ({@link requestFlowSlot}), else its name; `null` for none.
+   * [#32647] `null` too for a request whose stamped package holds no slot of
+   * the name ({@link WithdrawnRequestFlow}): its flow is gone, and the key
+   * another package's slot is filed under is not its key.
+   */
   private async requestFlowKey(raw: any): Promise<string | null> {
     const name = typeof raw?.process_name === 'string' && raw.process_name.startsWith('flow:') ? raw.process_name.slice('flow:'.length) : '';
     if (!name) return null;
-    return (await this.requestFlowSlot(name, { packageId: raw.process_package, runId: raw.flow_run_id }))?.key ?? name;
+    const slot = await this.requestFlowSlot(name, { packageId: raw.process_package, runId: raw.flow_run_id });
+    if (isWithdrawnRequestFlow(slot)) return null;
+    return slot?.key ?? name;
   }
 
   /**
@@ -4590,7 +4656,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // [ADR-0150 D3] The package this step is declared in — its flow's — which
     // every slate below reads a `queue` approver's name from. [#31696] Read
     // from the run's own slot, whose package the request records (D8 R7).
-    const flowSlot = input.flowName ? await this.requestFlowSlot(input.flowName, { runKey: input.flowKey, runId: input.runId }) : undefined;
+    const runSlot = input.flowName ? await this.requestFlowSlot(input.flowName, { runKey: input.flowKey, runId: input.runId }) : undefined;
+    // No package is asked here, so no stamp can have withdrawn.
+    const flowSlot = isWithdrawnRequestFlow(runSlot) ? undefined : runSlot;
     const callerPackageId = this.flowPackageOf(flowSlot?.key ?? input.flowName);
     const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
     // [#25573] `excludeSubmitter: true` (ruling 6377888641, letter B): the
