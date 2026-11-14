@@ -19,9 +19,10 @@
  *     REST door's scoped path is served from, through the same placement
  *     step, and a failing resolver refuses it at both doors.
  *  1c. On a hosted environment kernel, a same-origin `type: 'api'` action's
- *     forward is placed in the environment the call ran in, through both
- *     doors; an environment's own kernel, handed to `dispatchAction`, has no
- *     socket to forward through and is refused 503.
+ *     forward is placed in the environment the call ran in, through every
+ *     door (REST and MCP placed only by a scoped URL on a shared origin
+ *     included); an environment's own kernel, handed to `dispatchAction`, has
+ *     no socket to forward through and is refused 503.
  *  2. The MCP refusals that change because the bridge now runs the REST
  *     door's sequence (the PR's "Served refusal codes that change"): each
  *     was refused before and stays refused; only the code, or the detail
@@ -567,7 +568,9 @@ describe('a same-origin api action on a hosted environment kernel forwards as th
 
         const answer = await h.viaScoped('/mcp');
 
-        expect({ status: answer.status, body: answer.body }).toEqual({ status: 200, body: { ok: true, result: { echoed: {} } } });
+        // The bridge's own answer wraps the forward's result (`{ ok, action, objectName, result }`).
+        expect({ status: answer.status, ok: answer.body?.ok, result: answer.body?.result?.result })
+            .toEqual({ status: 200, ok: true, result: { echoed: {} } });
         expect(h.forwards.map((f) => ({ url: f.url, placed: f.placed, environment: f.headers['x-environment-id'] })))
             .toEqual([{ url: `http://${SHARED_HOST}${probe.target}`, placed: true, environment: ENV_T }]);
     });

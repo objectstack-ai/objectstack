@@ -1328,6 +1328,15 @@ const API_FORWARD_IDENTITY_HEADERS: ReadonlySet<string> = new Set([
  */
 export const API_FORWARD_MARK_HEADER = 'x-objectstack-action-forward';
 
+/**
+ * [#32658, #32887] The declared environment header (`X-Environment-Id`,
+ * lower-case as the forward's header bag spells it): what a host's
+ * `kernel-resolver` reads to place a request in its environment, written onto
+ * a forward from the environment its request was placed in
+ * ({@link forwardApiAction}'s `routing`).
+ */
+const API_FORWARD_ENVIRONMENT_HEADER = 'x-environment-id';
+
 /** The response headers relayed back to the caller — the credential rotations. */
 const API_FORWARD_RELAYED_RESPONSE_HEADERS: readonly string[] = [
     // better-auth's bearer lane (`bearer()` emits `set-auth-token`; #8243's
@@ -2078,6 +2087,16 @@ export function apiActionForwardLoopError(action: any, mark: string): string {
  * A caller whose credential the target's door cannot read is never
  * forwarded ({@link apiForwardCredentialRefusal}).
  *
+ * [#32658, #32887] `routing.environmentId` is the environment a multi-kernel
+ * host's resolver placed the request in. The forward targets the action's own
+ * path, so a scoped URL's environment does not cross with it, and the host
+ * door's request has no hostname at all: the forward carries the placement as
+ * the declared environment header, which places it in the same environment at
+ * the raw app. It replaces any spelling the caller sent, so the forward cannot
+ * be steered anywhere the request did not run. Absent (a single kernel, no
+ * placement, the control plane), nothing is written and the caller's own
+ * allow-listed headers cross as they always did.
+ *
  * [ADR-0090 D10 rule 5] An AI agent principal is the one caller whose own
  * credential is never carried. At the two cells the table flips
  * ({@link API_FORWARD_AGENT_CREDENTIAL_DOORS}) the forward drops every caller
@@ -2102,6 +2121,7 @@ export async function forwardApiAction(
     requestContext: HttpProtocolContext,
     req: ApiActionRequest,
     mark: { objectName: string; actionName: string; target?: string; recordId?: string },
+    routing?: { environmentId?: string },
 ): Promise<ApiActionForwardAnswer> {
     // A caller whose credential the target's door cannot read (the table,
     // {@link API_FORWARD_DOOR_ACCEPTS}) is refused here, before the target is
@@ -2135,6 +2155,7 @@ export async function forwardApiAction(
         if (agent && API_FORWARD_IDENTITY_HEADERS.has(key)) continue;
         headers[key] = Array.isArray(v) ? v.join(', ') : String(v);
     }
+    if (routing?.environmentId) headers[API_FORWARD_ENVIRONMENT_HEADER] = routing.environmentId;
     headers.accept = 'application/json';
     headers[API_FORWARD_MARK_HEADER] = `${mark.objectName}/${mark.actionName}`;
     const init: RequestInit = { method: req.method, headers };
