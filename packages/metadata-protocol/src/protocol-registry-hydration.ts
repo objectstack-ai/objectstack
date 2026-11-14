@@ -445,7 +445,7 @@ export class ProtocolRegistryHydrationFacet {
         // added unexamined is the call-site count pin in
         // `protocol.object-registry-write-through-spelling.test.ts`, not this
         // guard; the two are a pair.
-        if (request.type !== 'object') return undefined;
+        if (request.type !== 'object') return;
         // `request.type` is provably `'object'` on the line above, so this
         // mints the canonical key rather than whatever spelling arrived.
         host.engine.registry.registerItem(request.type, request.item, 'name');
