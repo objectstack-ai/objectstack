@@ -26,6 +26,13 @@ import {
   // beside the label on both custom-action surfaces below; an unknown name
   // resolves to `null` and the label renders alone (objectui#12772).
   resolveIcon,
+  // The reason a row action greyed out by its DECLARED `disabled` gives, the
+  // same helper the data-table's row item and the `action:*` renderers read:
+  // the menu item's second line and the inline button's tooltip trigger.
+  useDisabledReason,
+  DisabledReasonTrigger,
+  DisabledReasonMenuLabel,
+  menuItemReasonAria,
 } from '@object-ui/components';
 import { Edit, Trash2, MoreVertical } from 'lucide-react';
 import { evalRowPredicate, hasDeclaredPredicate, isActionSwitchedOff, type CrudAffordances } from '@object-ui/core';
@@ -403,6 +410,9 @@ const RowActionMenuItem: React.FC<{
   const disabledGate = (def as any).disabled;
   const disabledVerdict = useRowPredicate(disabledGate, row, { fallback: true, warnOnError: true, label: `${def.name}:disabled`, fields: objectFields });
   const isDisabled = hasDeclaredPredicate(disabledGate) && disabledVerdict;
+  // The record header's reason for the same verdict, as the item's second line
+  // and its accessible description; only the declared `disabled` earns it.
+  const disabledReason = useDisabledReason(isDisabled, def.disabledReason);
   if (!isVisible) return null;
   // The declared `icon`, drawn the way the built-in Edit / Delete items beside
   // it draw theirs; `null` (none declared, or a name no glyph answers) leaves
@@ -413,12 +423,13 @@ const RowActionMenuItem: React.FC<{
       disabled={isDisabled}
       onClick={() => { if (!isDisabled) onActionDef?.(def, row); }}
       data-testid={`row-action-${def.name}`}
+      {...menuItemReasonAria(disabledReason)}
       className={def.variant === 'danger' ? 'text-destructive focus:text-destructive' : undefined}
     >
       {/* Resolved from the shared icon seam, not a component created during render. */}
       {/* eslint-disable-next-line react-hooks/static-components */}
       {ActionIcon && <ActionIcon className="mr-2 h-4 w-4" />}
-      {def.label ?? formatActionLabel(def.name)}
+      <DisabledReasonMenuLabel reason={disabledReason}>{def.label ?? formatActionLabel(def.name)}</DisabledReasonMenuLabel>
     </DropdownMenuItem>
   );
 };
@@ -505,6 +516,12 @@ function toButtonVariant(v: RowActionDef['variant']): 'default' | 'secondary' | 
  * action whose `visible` fails for this row cannot render inline while the same
  * def would be hidden in the menu (objectui#3562, the inline half of the same
  * single-source rule).
+ *
+ * `disabled` is read the way the "⋮" item reads it: the same evaluator, the
+ * same fail-closed direction (a faulting predicate DISABLES the button), and
+ * only where a gate is DECLARED. A disabled button carries the action's reason
+ * the way the record header's button does: `aria-describedby` on the button,
+ * a focusable tooltip trigger around it.
  */
 const RowActionInlineButton: React.FC<{
   def: RowActionDef;
@@ -517,17 +534,23 @@ const RowActionInlineButton: React.FC<{
     () => isCustomRowActionVisible(def, row, scope, objectFields),
     [def, row, scope, objectFields],
   );
+  const disabledGate = def.disabled;
+  const disabledVerdict = useRowPredicate(disabledGate, row, { fallback: true, warnOnError: true, label: `${def.name}:disabled`, fields: objectFields });
+  const isDisabled = hasDeclaredPredicate(disabledGate) && disabledVerdict;
+  const disabledReason = useDisabledReason(isDisabled, def.disabledReason);
   if (!isVisible) return null;
   // Same seam and same posture as the "⋮" item: the icon goes BESIDE the label,
   // never instead of it (objectui#12772).
   const ActionIcon = resolveIcon(def.icon);
-  return (
+  const button = (
     <Button
       variant={toButtonVariant(def.variant)}
       size="sm"
       className="h-8"
       data-testid={`row-action-inline-${def.name}`}
-      onClick={(e) => { e.stopPropagation(); onActionDef?.(def, row); }}
+      disabled={isDisabled}
+      aria-describedby={disabledReason?.id}
+      onClick={(e) => { e.stopPropagation(); if (!isDisabled) onActionDef?.(def, row); }}
     >
       {/* Resolved from the shared icon seam, not a component created during render. */}
       {/* eslint-disable-next-line react-hooks/static-components */}
@@ -535,6 +558,7 @@ const RowActionInlineButton: React.FC<{
       {def.label ?? formatActionLabel(def.name)}
     </Button>
   );
+  return <DisabledReasonTrigger reason={disabledReason}>{button}</DisabledReasonTrigger>;
 };
 
 /**
