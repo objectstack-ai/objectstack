@@ -12,6 +12,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
+import { SchemaRegistry } from '@objectstack/objectql';
+import type { ConnectorProviderFactory } from '@objectstack/spec/integration';
 import { AutomationServicePlugin, findInertDeclaredConnectors } from './plugin.js';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -39,7 +41,7 @@ function declaredConnector(name: string, opts: { actions?: number; enabled?: boo
  */
 async function bootWithConnectors(
     declared: unknown[],
-    opts: { registerLive?: string[] } = {},
+    opts: { registerLive?: string[]; registry?: SchemaRegistry; provider?: ConnectorProviderFactory } = {},
 ) {
     const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
     kernel.use(new AutomationServicePlugin());
@@ -54,10 +56,11 @@ async function bootWithConnectors(
             // so spying here observes the automation plugin's warn calls too.
             warnSpy = vi.spyOn(ctx.logger, 'warn');
             ctx.registerService('objectql', {
-                registry: {
+                registry: opts.registry ?? {
                     listItems: (type: string) => (type === 'connector' ? declared : []),
                 },
             });
+            if (opts.provider) ctx.getService('automation').registerConnectorProvider('fake', opts.provider);
             for (const name of opts.registerLive ?? []) {
                 ctx.getService('automation').registerConnector(
                     {
@@ -148,6 +151,27 @@ describe('kernel:ready audit (wiring)', () => {
             declaredConnector('catalog_entry', { enabled: false }),
         ]);
         expect(auditWarnings(warnSpy)).toHaveLength(0);
+        await kernel.shutdown();
+    });
+
+    it('[#31699 PR 3] a package\'s catalog entry is not silenced by another package\'s live instance of its name', async () => {
+        const A = 'com.acme.catalog_a';
+        const B = 'com.acme.instance_b';
+        const registry = new SchemaRegistry();
+        registry.logLevel = 'silent';
+        for (const id of [A, B]) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() } as never, 'code');
+        }
+        registry.registerItem('connector', declaredConnector('billing') as never, 'name' as never, A);
+        registry.registerItem('connector', { ...declaredConnector('billing'), provider: 'fake', providerConfig: {} } as never, 'name' as never, B);
+        const provider: ConnectorProviderFactory = (ctx) => ({
+            def: { name: ctx.name, label: ctx.label, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'action_0', label: 'A' }] } as never,
+            handlers: { action_0: async () => ({}) },
+        });
+        const { kernel, warnSpy } = await bootWithConnectors([], { registry, provider });
+        const warnings = auditWarnings(warnSpy);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain('billing');
         await kernel.shutdown();
     });
 

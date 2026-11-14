@@ -2703,8 +2703,9 @@ export type FlowNameResolver = (
 /**
  * [#31699] The answer of {@link AutomationEngine.resolveConnectorInstanceFor}:
  * the registered instance a name addresses (its package, `null` for none), a
- * refusal naming every candidate, or `none` (not registered, or two instances
- * and nothing to choose by).
+ * refusal naming every candidate, or `none` (not registered, none registered
+ * under the holder the name resolves to, or two instances and nothing to
+ * choose by).
  */
 export type ConnectorInstanceResolution =
     | { readonly status: 'instance'; readonly packageId: string | null }
@@ -4769,8 +4770,11 @@ export class AutomationEngine implements IAutomationService {
      * Handlers are omitted — they are runtime code, not metadata.
      */
     getConnectorDescriptors(): ConnectorDescriptor[] {
-        return this.connectors.values().map(({ def, origin, state, degradedReason }) => ({
+        return this.connectors.entries().map(({ packageId, registered: { def, origin, state, degradedReason } }) => ({
             name: def.name,
+            // [ADR-0150 D9, #31699] two packages' instances of one name are two
+            // descriptors: the package tells them apart.
+            ...(packageId === null ? {} : { packageId }),
             label: def.label,
             type: def.type,
             description: def.description,
@@ -5887,17 +5891,13 @@ export class AutomationEngine implements IAutomationService {
      * The name is resolved for the package that ships the calling flow
      * ({@link flowCallerPackage}: a packaged flow names it from its package; an
      * environment-authored flow, or a call outside a run, names it with no
-     * package). The engine holds ONE instance per name, materialized for the
-     * answer a caller with no package gets (the declared-connector reconcile,
-     * which already refuses a name two packages hold). So a package caller
-     * whose answer is a refusal — two holders in its closure, or holders only
-     * outside it, an environment-only instance included (ADR-0150 D3 (a)) — is
-     * refused with the resolver's own message, naming every candidate. Any
-     * other answer is the instance the engine serves: an environment item
-     * exists only for a name no package holds, so a package caller that
-     * resolves at all resolves to the one package holder the reconcile
-     * materialized. A name the registry holds nothing under (a connector a
-     * plugin registers in code), or a host with no resolver, dispatches by name
+     * package). A refusal — two holders in the caller's closure, holders only
+     * outside it, an environment-only instance included (ADR-0150 D3 (a)), or,
+     * for a caller with no package, two package holders of different
+     * namespaces (ADR-0150 D9) — is answered with the resolver's own message,
+     * naming every candidate ({@link resolveConnectorInstanceFor}). A name the
+     * registry holds nothing under (a connector a plugin registers in code), or
+     * a host with no resolver, dispatches by name
      * as before. Read-only.
      */
     connectorNameRefusal(connectorId: string, context: AutomationContext | undefined): PackageScopedRefusal | undefined {
@@ -5915,32 +5915,60 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [ADR-0150 D3/D4, #31699] Which registered instance the bare name
-     * `connectorId` means for a caller of package `callerPackageId`:
+     * [ADR-0150 D3/D4/D9, #31699] Which registered instance the bare name
+     * `connectorId` means for a caller of package `callerPackageId` (`null`:
+     * no package), over the served holders (a disabled package holds no name,
+     * #32183):
      *
-     * - a package caller: the resolver's answer. `refused` is said with the
-     *   resolver's own message (every candidate named, {@link connectorNameRefusal});
-     *   `resolved` addresses the holder's instance, when one is registered;
-     * - otherwise (no package, no resolver, a name no registry holds, a
-     *   resolved holder with no instance registered under it): the one
-     *   instance of the name, as a dispatch by name answered before; two are
-     *   `none`, never one of them.
+     * - the resolver's `refused` is said with its own message, every
+     *   candidate named ({@link connectorNameRefusal});
+     * - `resolved` addresses exactly the holder's instance (`null`: the
+     *   environment's). When none is registered under that holder (a catalog
+     *   entry, whose runtime a plugin registers in code; or one the reconcile
+     *   has not reached), the instance a plugin registered in code under the
+     *   name answers, as it did before (ADR-0097 §4: a plugin connector and a
+     *   declarative instance never share a name); otherwise `none`. ⛔ Never
+     *   another package's declarative instance, nor the environment's: two
+     *   packages may each hold the name now (ADR-0150 D9), and the one other
+     *   instance is not the caller's (red line 2; the narrowing removed 3b's
+     *   fallback to the one instance of the name);
+     * - a name only disabled packages hold (served: `not-found`; every
+     *   holder: held) is answered as a resolved holder with no instance: a
+     *   disabled package's instance is not served to a caller outside it,
+     *   even before the reconcile drops it (#31699 notes 6816295828 and
+     *   6820178514). A caller of the disabled package itself is answered its
+     *   own instance, as before: the resolver keeps a caller's own holding in
+     *   its served set;
+     * - a name the registry holds nothing under (a connector a plugin
+     *   registers in code), or a host with no resolver: the one instance of
+     *   the name, as a dispatch by name answered before; two are `none`,
+     *   never one of them.
      *
-     * The second arm is the connection door's rule
-     * (`AutomationServicePlugin.connectionDoorInstance`), so the door and the
-     * dispatch address one instance. Read-only.
+     * Read-only.
      */
     resolveConnectorInstanceFor(connectorId: string, callerPackageId: string | null): ConnectorInstanceResolution {
-        if (callerPackageId !== null) {
-            const meant = this.connectorNameResolver?.(connectorId, callerPackageId);
-            if (meant?.status === 'refused') return { status: 'refused', refusal: meant };
-            if (meant?.status === 'resolved') {
-                const packageId = meant.holder.kind === 'package' ? meant.holder.packageId : null;
-                if (this.connectors.get(connectorId, packageId)) return { status: 'instance', packageId };
-            }
+        const resolver = this.connectorNameResolver;
+        const meant = resolver?.(connectorId, callerPackageId);
+        if (meant?.status === 'refused') return { status: 'refused', refusal: meant };
+        if (meant?.status === 'resolved') {
+            const packageId = meant.holder.kind === 'package' ? meant.holder.packageId : null;
+            return this.connectors.get(connectorId, packageId) ? { status: 'instance', packageId } : this.codeRegisteredInstance(connectorId);
+        }
+        if (meant?.status === 'not-found'
+            && resolver?.(connectorId, callerPackageId, { includeDisabledPackages: true })?.status !== 'not-found') {
+            return this.codeRegisteredInstance(connectorId);
         }
         const sole = this.connectors.sole(connectorId);
         return sole ? { status: 'instance', packageId: sole.packageId } : { status: 'none' };
+    }
+
+    /**
+     * [#31699] The instance a plugin registered in code under `connectorId`
+     * (package `null`, origin `plugin`), or `none`: what a name answers when
+     * the holder it resolves to has no instance of its own.
+     */
+    private codeRegisteredInstance(connectorId: string): ConnectorInstanceResolution {
+        return this.connectors.get(connectorId, null)?.origin === 'plugin' ? { status: 'instance', packageId: null } : { status: 'none' };
     }
 
     /**
