@@ -757,7 +757,10 @@ a rotating refresh token is never spent twice.
   encrypted in `sys_connector_connection`, one row per organization and
   instance, an instance being its package and name (one per organization for
   an instance the environment authored or a plugin registers); it is
-  not a sign-in account, and signing in never touches it. A run dispatches
+  not a sign-in account, and signing in never touches it. A callback
+  completes the instance its connect was begun for, never the name read
+  again, and the connect door refuses with `409` a name two packages hold
+  rather than pick one. A run dispatches
   with its own organization's connection; a run with no organization uses the
   instance's only connection, and is refused when there are several. When the
   grant stops working, the connection is marked **reconnect required** and the
