@@ -239,7 +239,8 @@ describe('a unique refusal names the object and field by label (#24951)', () => 
           'No record was written.',
       );
       const answer = mapDataError(failure, 'crm_account');
-      expect(answer.body.error).toBe('A record with this 客户名称 already exists');
+      // The sentence itself is in the writer's locale too, not only the label in it.
+      expect(answer.body.error).toBe('已存在相同客户名称的记录');
       expect(answer.body.field).toBe('name');
     });
 
@@ -307,7 +308,7 @@ describe('an organization-scoped unique field names the field, by label', () => 
       const failure = await refusalOf(() => write(engine, { context: { locale: 'zh-CN' } }));
 
       expect(failure.fieldLabel).toBe('客户名称');
-      expect(mapDataError(failure, 'crm_account').body.error).toBe('A record with this 客户名称 already exists');
+      expect(mapDataError(failure, 'crm_account').body.error).toBe('已存在相同客户名称的记录');
     });
 
     it('two authored columns beside the organization part: no field, the unnamed sentence', async () => {
@@ -324,5 +325,178 @@ describe('an organization-scoped unique field names the field, by label', () => 
       expect(answer.body).not.toHaveProperty('field');
       expect(answer.body.error).toBe('A record with this value already exists');
     });
+  });
+});
+
+/**
+ * The duplicate refusal's end-user sentence is composed in the writer's
+ * locale from the platform operation catalog (`duplicate_record*`), and a
+ * composite unique index the object DECLARES is named by its fields' labels.
+ * The wire shape does not move: `code` stays `UNIQUE_VIOLATION`, the status
+ * 409, and `field` keeps its single-column contract (absent for a composite).
+ */
+describe('the duplicate refusal speaks the writer\'s locale, and names a declared composite unique index', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const WEEKLY = {
+    name: 'crm_weekly_cost',
+    label: 'Weekly Cost',
+    fields: {
+      plant: { type: 'text', label: 'Plant' },
+      carbon_grade: { type: 'text', label: 'Carbon Grade' },
+      cost_week: { type: 'text', label: 'Cost Week' },
+    },
+    indexes: [{ fields: ['plant', 'carbon_grade', 'cost_week'], unique: 'organization' }],
+  };
+  const WEEKLY_ZH: Record<string, string> = {
+    'objects.crm_weekly_cost.label': '周成本',
+    'objects.crm_weekly_cost.fields.plant.label': '工厂',
+    'objects.crm_weekly_cost.fields.carbon_grade.label': '牌号',
+    'objects.crm_weekly_cost.fields.cost_week.label': '成本周次',
+  };
+  const weeklyI18n = (overrides: Record<string, string> = {}) => ({
+    t: (key: string, locale: string) => overrides[key] ?? ((locale === 'zh-CN' && WEEKLY_ZH[key]) || key),
+    getLocales: () => ['en', 'zh-CN'],
+  });
+
+  /** better-sqlite3 on the `unique: 'organization'` index: the organization part, then the three authored columns. */
+  const sqliteComposite = () =>
+    Object.assign(
+      new Error(
+        'UNIQUE constraint failed: crm_weekly_cost.organization_id, crm_weekly_cost.plant, ' +
+          'crm_weekly_cost.carbon_grade, crm_weekly_cost.cost_week',
+      ),
+      { code: 'SQLITE_CONSTRAINT_UNIQUE' },
+    );
+  /** node-postgres: the columns ride `error.detail`, the message names the constraint. */
+  const postgresComposite = () =>
+    Object.assign(new Error('duplicate key value violates unique constraint "uniq_crm_weekly_cost_plant"'), {
+      code: '23505',
+      detail: 'Key (organization_id, plant, carbon_grade, cost_week)=(org_a, p1, g1, 2026-W45) already exists.',
+    });
+  const mysqlIndexOnly = () =>
+    Object.assign(new Error("Duplicate entry 'p1-g1-2026-W45' for key 'idx_weekly'"), { code: 'ER_DUP_ENTRY', errno: 1062 });
+
+  const WEEKLY_DOORS: Array<[string, (engine: ObjectQL, ctx?: Ctx) => Promise<unknown>]> = [
+    ['insert', (engine, ctx = {}) => engine.insert('crm_weekly_cost', { plant: 'p1' }, ctx as any)],
+    ['update by id', (engine, ctx = {}) => engine.update('crm_weekly_cost', { id: 'r1', plant: 'p1' }, ctx as any)],
+  ];
+
+  const EN_NAMED = 'A record with the same “Plant”, “Carbon Grade”, “Cost Week” already exists';
+  const ZH_NAMED = '已存在「工厂」、「牌号」、「成本周次」均相同的记录';
+
+  describe.each(WEEKLY_DOORS)('on %s', (_door, write) => {
+    it('en: the declared index\'s fields by label; no `field`, the wire code and status unchanged', async () => {
+      const engine = makeRig(WEEKLY, sqliteComposite);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine));
+
+      expect(failure).toBeInstanceOf(DuplicateRecordError);
+      expect(failure.field).toBeUndefined();
+      expect(failure).not.toHaveProperty('fieldLabel');
+      expect(failure.endUserMessage).toBe(EN_NAMED);
+      expect(failure.message).toBe(
+        "Duplicate record refused on 'Weekly Cost': a unique constraint on 'Plant', 'Carbon Grade', 'Cost Week' " +
+          'already holds these values. No record was written.',
+      );
+      expect(failure.developerMessage).toMatch(
+        /^Duplicate record refused on object 'crm_weekly_cost', unique index fields 'plant', 'carbon_grade', 'cost_week'\. /,
+      );
+      const answer = mapDataError(failure, 'crm_weekly_cost');
+      expect(answer.status).toBe(409);
+      expect(answer.body.code).toBe('UNIQUE_VIOLATION');
+      expect(answer.body).not.toHaveProperty('field');
+      expect(answer.body).not.toHaveProperty('userMessage');
+      expect(answer.body.error).toBe(EN_NAMED);
+    });
+
+    it('zh-CN: the sentence and the labels both in the writer\'s locale', async () => {
+      const engine = makeRig(WEEKLY, sqliteComposite);
+      engine.setI18nService(weeklyI18n() as any);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine, { context: { locale: 'zh-CN' } }));
+
+      const answer = mapDataError(failure, 'crm_weekly_cost');
+      expect(answer.status).toBe(409);
+      expect(answer.body.code).toBe('UNIQUE_VIOLATION');
+      expect(answer.body).not.toHaveProperty('field');
+      expect(answer.body.error).toBe(ZH_NAMED);
+    });
+
+    it('the Postgres DETAIL shape matches the same declared index', async () => {
+      const engine = makeRig(WEEKLY, postgresComposite);
+      engine.setI18nService(weeklyI18n() as any);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine, { context: { locale: 'zh-CN' } }));
+
+      expect(mapDataError(failure, 'crm_weekly_cost').body.error).toBe(ZH_NAMED);
+    });
+
+    it('fallback: a locale the catalog does not carry reads the en sentence, with the declared labels', async () => {
+      const engine = makeRig(WEEKLY, sqliteComposite);
+      engine.setI18nService(weeklyI18n() as any);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine, { context: { locale: 'de-DE' } }));
+
+      expect(mapDataError(failure, 'crm_weekly_cost').body.error).toBe(EN_NAMED);
+    });
+
+    it('a deployment\'s `errors.duplicate_record_fields` translation overrides the built-in sentence', async () => {
+      const engine = makeRig(WEEKLY, sqliteComposite);
+      engine.setI18nService(weeklyI18n({ 'errors.duplicate_record_fields': '{{fields}}组合重复。' }) as any);
+      await engine.init();
+
+      const failure = await refusalOf(() => write(engine, { context: { locale: 'zh-CN' } }));
+
+      expect(mapDataError(failure, 'crm_weekly_cost').body.error).toBe('「工厂」、「牌号」、「成本周次」组合重复。');
+    });
+  });
+
+  // Controls: nothing short of a declared unique index with exactly the named
+  // columns, every one of them labelled, names a field — a wrong field name is
+  // worse than none. Each still answers in the writer's locale.
+  const UNTRANSLATED_COST_WEEK = { 'objects.crm_weekly_cost.fields.cost_week.label': 'objects.crm_weekly_cost.fields.cost_week.label' };
+  const CONTROLS: Array<[string, unknown, () => unknown, Record<string, string>]> = [
+    ['no declared index matches the columns', { ...WEEKLY, indexes: [{ fields: ['plant', 'cost_week'], unique: 'organization' }] }, sqliteComposite, {}],
+    ['the matching declared index is not unique', { ...WEEKLY, indexes: [{ fields: ['plant', 'carbon_grade', 'cost_week'], unique: false }] }, sqliteComposite, {}],
+    ['the object declares no index', { ...WEEKLY, indexes: undefined }, sqliteComposite, {}],
+    // The bundle echoes the key for `cost_week`, so no translation rescues the missing label.
+    ['one field of the index has no label', { ...WEEKLY, fields: { ...WEEKLY.fields, cost_week: { type: 'text' } } }, sqliteComposite, UNTRANSLATED_COST_WEEK],
+    ['the store named an index, not columns (MySQL)', WEEKLY, mysqlIndexOnly, {}],
+  ];
+
+  it.each(CONTROLS)('%s: the unnamed sentence, in zh-CN and en', async (_label, schema, refuse, overrides) => {
+    const engine = makeRig(schema, refuse);
+    engine.setI18nService(weeklyI18n(overrides) as any);
+    await engine.init();
+
+    const zh = await refusalOf(() => engine.insert('crm_weekly_cost', { plant: 'p1' }, { context: { locale: 'zh-CN' } } as any));
+    const zhAnswer = mapDataError(zh, 'crm_weekly_cost');
+    expect(zhAnswer.status).toBe(409);
+    expect(zhAnswer.body.code).toBe('UNIQUE_VIOLATION');
+    expect(zhAnswer.body).not.toHaveProperty('field');
+    expect(zhAnswer.body.error).toBe('已存在相同值的记录');
+
+    const en = await refusalOf(() => engine.insert('crm_weekly_cost', { plant: 'p1' }));
+    expect(mapDataError(en, 'crm_weekly_cost').body.error).toBe('A record with this value already exists');
+  });
+
+  it('a single field with no label in zh-CN: the unnamed sentence in Chinese, `field` still the API key', async () => {
+    const engine = makeRig(UNLABELLED, namedColumn);
+    // A bundle that translates nothing: the field has no label in any locale.
+    engine.setI18nService({ t: (key: string) => key, getLocales: () => ['en', 'zh-CN'] } as any);
+    await engine.init();
+
+    const failure = await refusalOf(() => engine.insert('crm_account', { name: 'Acme' }, { context: { locale: 'zh-CN' } } as any));
+
+    const answer = mapDataError(failure, 'crm_account');
+    expect(answer.body.field).toBe('name');
+    expect(answer.body.error).toBe('已存在相同值的记录');
   });
 });
