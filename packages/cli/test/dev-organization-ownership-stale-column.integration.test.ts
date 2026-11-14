@@ -257,7 +257,7 @@ describe('#26615 — `os dev` starts a development database with a stale organiz
     const named = 'os migrate organization-ownership --dev --database-url file:A.db';
     expect(output, output.slice(-6000)).toContain(
       `Run '${named} --out PLAN' to write and review its plan, take a backup, then run ` +
-        `'${named} --apply --plan-file PLAN --backup-taken'`,
+        `'${named} --apply --plan-file PLAN --backup-taken --out REPORT'`,
     );
     // No driver or token flag was given: nothing is set in front of the command.
     expect(output).not.toContain('OS_DATABASE_DRIVER=');

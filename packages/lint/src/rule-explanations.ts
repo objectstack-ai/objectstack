@@ -763,6 +763,12 @@ const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION: RuleExplanation = {
       'keyed only on another user field — `owner == current_user.id`, where `owner` is the detail\'s own ' +
       'accountable-person field — stays a narrowing with or without the opt-in, and the rule says so in ' +
       'both states instead of prescribing an opt-in that would not admit that user.',
+    'The second opt-in, `sharing: { controlledByParent: { writeRequiresMasterRead: true } }`, makes READ ' +
+      'access to the master the gate\'s question for every write of the detail: insert, update and delete, ' +
+      'by anyone the detail\'s own permissions admit. On such a detail a policy keyed on the caller no longer ' +
+      'narrows master editors; it decides among everyone who reads the master, as authored, whichever user ' +
+      'field it keys. So the rule is not reported there. It is refused beside `ownerMayEdit: true`, which ' +
+      'it already covers.',
     'This is a warning, not an error: a narrowing can be meant (only the owner among the master\'s ' +
       'editors may update), and no runtime door refuses the shape. To fix a policy keyed on `owner_id`, ' +
       'declare the opt-in on the detail when the owner is meant to write with read on the master, or ' +
@@ -779,15 +785,15 @@ const SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION: RuleExplanation = {
   covers: 'why a hidden master reference still decides a detail write',
   paragraphs: [
     'A `controlled_by_parent` detail derives its record access from its master (ADR-0055). Creating, ' +
-      'editing or deleting a detail row needs edit access to the master record its master reference names, ' +
-      'and the platform reads that reference from the stored row, whatever the writer may read. So a ' +
+      'editing or deleting a detail row needs edit access to the master record its master reference names ' +
+      '(read access, on a detail that declares `writeRequiresMasterRead`), and the platform reads that reference from the stored row, whatever the writer may read. So a ' +
       'permission set\'s `readable: false` on the master reference hides the field from the set\'s holders ' +
       'and does not take it out of the decision: the master it names still decides whether each holder may ' +
       'write the row.',
     'What the field-level security does change is the refusal. A writer who can read the master reference ' +
       'is told which master\'s edit access the write needs and which check refused it. A writer who cannot ' +
       'read it gets the same `403 PERMISSION_DENIED` with a generic sentence, "no edit permission on the ' +
-      'parent record of this detail", which names no master object, no master record and no check. The ' +
+      'parent record of this detail" ("no read permission" where read is the question), which names no master object, no master record and no check. The ' +
       'writer has no way to tell from the refusal which record to ask for access to.',
     'Reported for each permission set whose own entry for the master reference reads `readable: false` (an ' +
       'omitted `readable` is `true`), on a detail this stack declares with one master. Not reported when the ' +
@@ -4484,14 +4490,21 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       'form `{ account: { status: VALUE } }` instead); a field computed on read, such as a `formula` ' +
       '(denormalise it onto the child as a stored field); and, beneath a relation, a key the related ' +
       'object lacks, a dotted key or a second relation holding a condition of its own.',
-    '`lookupColumns`, `dependsOn` and `indexes[].fields` are read verbatim (a picker column key, a ' +
-      'record key, a physical column), so a dotted name there is one name no field carries; the ' +
+    'Two scalar pointers of the object are judged too: the record title pointer `nameField` (and ' +
+      'its deprecated alias `displayNameField`; a name the two share is reported once, at the alias), ' +
+      'whose miss titles every record by its id, and each `activityMilestones[].field`, whose miss ' +
+      'never transitions, so the milestone never fires. Each reader takes the name as a record key, so ' +
+      'a column the platform injects on the object (`id`, `created_at`, `owner_id` on an owned object) ' +
+      'is a correct name.',
+    '`lookupColumns`, `dependsOn`, `indexes[].fields` and the two scalar pointers are read verbatim (a ' +
+      'picker column key, a record key, a physical column), so a dotted name there is one name no field ' +
+      'carries; the ' +
       'other positions resolve a relationship path. Not judged: an object this stack does not ' +
       'define, an object with no readable field map (`external`, an introspected schema), a ' +
       'registry-injected system column (resolved per object, so `owner_id` resolves on an owned ' +
       'object and misses under `ownership: \'none\'`), and the positions other rules own: ' +
       '`searchableFields` (`searchable-field-unknown`), list views (the list-view rules) and the ' +
-      'scalar role pointers.',
+      '`stageField` role pointer (`semantic-role-field-unknown`).',
     'The verdict names the nearest field of the addressed object when one is close ("Did you mean"), ' +
       'and the fix line names the position\'s remedy only, without listing that object\'s fields.',
   ],

@@ -161,13 +161,16 @@ the endpoint and the registration member that names it explicitly, for example
 trusted only because a discovery document names it. Pass the endpoint as the
 `oidcConfig` member the message names (`authorizationEndpoint`, `tokenEndpoint`,
 `jwksEndpoint` or `userInfoEndpoint`), or as the field of the same name on the
-Register SSO Provider bridge, `POST /api/v1/auth/admin/sso/register` (the
-**Userinfo URL** field of **Setup → SSO Providers → Register SSO Provider** fills
-`userInfoEndpoint`), and the registration trusts it.
+Register SSO Provider bridge, `POST /api/v1/auth/admin/sso/register`, and the
+registration trusts it. **Setup → SSO Providers → Register SSO Provider** offers
+each of them as a field: **Authorization URL** fills `authorizationEndpoint`,
+**Token URL** `tokenEndpoint`, **JWKS URL** `jwksEndpoint` and **Userinfo URL**
+`userInfoEndpoint`.
 
 Google is one such provider: its discovery document names the token endpoint,
 the key set and the userinfo endpoint each on a host of its own, so a Google
-registration names all three:
+registration names all three, either in the **Token URL**, **JWKS URL** and
+**Userinfo URL** fields of the Setup form or through the bridge:
 
 ```typescript
 await fetch('http://localhost:3000/api/v1/auth/admin/sso/register', {
