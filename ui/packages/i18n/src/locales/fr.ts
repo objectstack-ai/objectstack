@@ -4184,6 +4184,7 @@ const fr = {
       warningsSummary: "L’application est construite, avec quelques points à vérifier. Demandez à l’assistant lesquels si vous voulez l’améliorer.",
       issuesDetails: "Détails techniques",
       // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "{{count}} nécessitent une vérification",
       needsAttention_one: "{{count}} nécessite une vérification",
       needsAttention_many: "{{count}} d’éléments nécessitent une vérification",
       needsAttention_other: "{{count}} nécessitent une vérification",

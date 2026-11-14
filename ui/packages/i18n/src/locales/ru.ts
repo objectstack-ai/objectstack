@@ -4286,6 +4286,7 @@ const ru = {
       warningsSummary: "Приложение собрано, но несколько моментов стоит проверить. Спросите ассистента, какие именно, если хотите его улучшить.",
       issuesDetails: "Технические подробности",
       // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "{{count}} требуют внимания",
       needsAttention_one: "{{count}} требует внимания",
       needsAttention_few: "{{count}} требуют внимания",
       needsAttention_many: "{{count}} требуют внимания",

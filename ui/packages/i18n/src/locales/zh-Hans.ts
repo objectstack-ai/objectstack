@@ -4347,6 +4347,7 @@ const zh = {
       warningsSummary: '应用已搭建好，有几处值得检查。想进一步完善的话，可以问问助手具体是哪些。',
       issuesDetails: '技术详情',
       // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: '{{count}} 项需要处理',
       needsAttention_one: '{{count}} 项需要处理',
       needsAttention_other: '{{count}} 项需要处理',
       unknownPhase: '未知的构建阶段',

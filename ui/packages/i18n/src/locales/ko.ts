@@ -4098,6 +4098,7 @@ const ko = {
       warningsSummary: "앱이 빌드되었지만 확인해 볼 만한 부분이 몇 가지 있습니다. 개선하고 싶다면 어시스턴트에게 무엇인지 물어보세요.",
       issuesDetails: "기술 세부 정보",
       // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "확인 필요 {{count}}건",
       needsAttention_one: "확인 필요 {{count}}건",
       needsAttention_other: "확인 필요 {{count}}건",
       unknownPhase: "알 수 없는 빌드 단계",

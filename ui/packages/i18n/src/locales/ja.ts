@@ -4101,6 +4101,7 @@ const ja = {
       warningsSummary: "アプリは構築済みですが、確認したほうがよい点がいくつかあります。改善したい場合は、アシスタントに内容を尋ねてください。",
       issuesDetails: "技術的な詳細",
       // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "要確認 {{count}} 件",
       needsAttention_one: "要確認 {{count}} 件",
       needsAttention_other: "要確認 {{count}} 件",
       unknownPhase: "不明なビルドフェーズ",

@@ -4452,6 +4452,7 @@ const ar = {
       warningsSummary: "تم بناء التطبيق، مع بعض النقاط التي تستحق المراجعة. اسأل المساعد عنها إذا أردت تحسينه.",
       issuesDetails: "تفاصيل تقنية",
       // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "بحاجة إلى مراجعة: {{count}}",
       needsAttention_zero: "بحاجة إلى مراجعة: {{count}}",
       needsAttention_one: "بحاجة إلى مراجعة: {{count}}",
       needsAttention_two: "بحاجة إلى مراجعة: {{count}}",

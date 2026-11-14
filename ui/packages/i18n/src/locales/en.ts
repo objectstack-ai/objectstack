@@ -5012,6 +5012,7 @@ const en = {
       warningsSummary: 'The build is ready, with a few things worth checking. Ask the assistant what they are if you want to improve them.',
       issuesDetails: 'Technical details',
       // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: '{{count}} need attention',
       needsAttention_one: '{{count}} needs attention',
       needsAttention_other: '{{count}} need attention',
       unknownPhase: 'Unknown build phase',

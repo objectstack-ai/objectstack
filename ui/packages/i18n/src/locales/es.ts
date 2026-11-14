@@ -4188,6 +4188,7 @@ const es = {
       warningsSummary: "La aplicación está construida, con algunos puntos que conviene revisar. Pregunta al asistente cuáles son si quieres mejorarla.",
       issuesDetails: "Detalles técnicos",
       // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "{{count}} requieren atención",
       needsAttention_one: "{{count}} requiere atención",
       needsAttention_many: "{{count}} de elementos requieren atención",
       needsAttention_other: "{{count}} requieren atención",

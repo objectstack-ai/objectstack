@@ -4099,6 +4099,7 @@ const de = {
       warningsSummary: "Der Build ist fertig, einige Punkte sind aber prüfenswert. Frag den Assistenten, welche das sind, wenn du sie verbessern möchtest.",
       issuesDetails: "Technische Details",
       // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "{{count}} erfordern Prüfung",
       needsAttention_one: "{{count}} erfordert Prüfung",
       needsAttention_other: "{{count}} erfordern Prüfung",
       unknownPhase: "Unbekannte Build-Phase",
