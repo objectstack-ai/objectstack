@@ -29,6 +29,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
+import { createRegistryEmailTemplateLoader } from '@objectstack/plugin-email';
 import { RestServer } from './rest-server.js';
 
 const META = '/api/v1/meta';
@@ -690,6 +691,95 @@ describe('[#32354] RestServer: a disabled customization pair and a disabled base
         expect([layers.status, layers.body?.effective?.label], JSON.stringify(layers.body)).toEqual(withOther ? [200, 'other row'] : [404, undefined]);
         expect([published.status, published.body?.label], JSON.stringify(published.body)).toEqual(withOther ? [200, 'other row'] : [404, undefined]);
         for (const answer of [read, layers, published]) expect(JSON.stringify(answer.body ?? null)).not.toMatch(/pair override|base code/);
+    }, 60_000);
+});
+
+/**
+ * [#32354, ADR-0150 D3, epic note 6820147040] `GET /meta/:type` beside a
+ * disabled holder, and the send naming no package that reads its execution
+ * face. ALPHA ships `welcome` in `en-US`; its pair stores a `fr-FR` row of it
+ * (or DEP, depending on ALPHA, ships a `fr-FR` addition); ALPHA is disabled.
+ * FROM: the unscoped list, `?package=ALPHA` and `?package=ALPHA.custom` listed
+ * the pair's row, the unscoped list listed DEP's addition, and a send naming
+ * no package sent either. TO: none of them; `?package=DEP` keeps its addition.
+ */
+describe('[#32354] RestServer: the list doors and the send naming no package beside a disabled holder', () => {
+    const ALPHA = 'com.qa.alpha';
+    const PAIR = `${ALPHA}.custom`;
+    const DEP = 'com.qa.dep';
+    const tpl = (host: ReturnType<typeof setup>, packageId: string, locale: string) => host.registry.registerItem('email_template', {
+        name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale, subject: `${packageId} ${locale}`, bodyHtml: '<p>x</p>',
+    } as any, 'name', packageId);
+    const pairRow = (host: ReturnType<typeof setup>) => (host.protocol as any).engine.insert('sys_metadata', {
+        type: 'email_template', name: 'welcome', package_id: PAIR, bundle_member: 'fr-FR', state: 'active', scope: 'platform', strategy: 'merge', version: 1,
+        metadata: JSON.stringify({ name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>' }),
+    });
+    const list = async (host: ReturnType<typeof setup>, query: Record<string, string> = {}) => {
+        const route = host.rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === `${META}/:type`);
+        if (!route) throw new Error('GET /:type is not registered');
+        const res = makeRes();
+        await route.handler({ method: 'GET', path: `${META}/email_template`, params: { type: 'email_template' }, query, body: {}, headers: {} }, res);
+        expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
+        const items: any[] = res.body?.items ?? res.body?.data?.items ?? res.body ?? [];
+        return items.filter((it) => it?.name === 'welcome').map((it) => it.label as string).sort();
+    };
+    const answers = async (host: ReturnType<typeof setup>) => {
+        const loader = createRegistryEmailTemplateLoader({ protocol: host.protocol as any, registry: host.registry as any });
+        return {
+            list: await list(host),
+            atAlpha: await list(host, { package: ALPHA }),
+            atPair: await list(host, { package: PAIR }),
+            atDep: await list(host, { package: DEP }),
+            send: (await loader.load('welcome', 'fr-FR'))?.subject ?? null,
+            sendFromDep: (await loader.load('welcome', 'fr-FR', { callerPackageId: DEP }))?.subject ?? null,
+        };
+    };
+    const CASES = [
+        ['the pair\'s row', 'registered first', 'row stored first'],
+        ['the pair\'s row', 'registered first', 'row stored last'],
+        ['the pair\'s row', 'registered last', 'row stored first'],
+        ['the pair\'s row', 'registered last', 'row stored last'],
+        ['a dependent\'s addition', 'registered first', 'no row'],
+        ['a dependent\'s addition', 'registered last', 'no row'],
+    ] as const;
+
+    it.each(CASES)('%s, ALPHA installed and shipped %s, %s: ALPHA disabled, no list and no send naming no package serves it; re-enabled, as before', async (carried, order, save) => {
+        const host = setup();
+        const installs = [() => host.registry.installPackage({ id: ALPHA, name: ALPHA, version: '1.0.0' } as any, 'code'),
+            () => host.registry.installPackage({ id: DEP, name: DEP, version: '1.0.0', dependencies: { [ALPHA]: '^1' } } as any, 'code')];
+        for (const install of order === 'registered first' ? installs : [...installs].reverse()) install();
+        host.registry.installPackage({ id: PAIR, name: PAIR, version: '1.0.0', dependencies: { [ALPHA]: '^1' } } as any, 'authored');
+        const pair = carried === 'the pair\'s row';
+        if (pair && save === 'row stored first') await pairRow(host);
+        const ships = [() => tpl(host, ALPHA, 'en-US'), ...(pair ? [] : [() => tpl(host, DEP, 'fr-FR')])];
+        for (const ship of order === 'registered first' ? ships : [...ships].reverse()) ship();
+        if (pair && save === 'row stored last') await pairRow(host);
+
+        const carriedLabel = pair ? 'pair fr-FR' : 'dep fr-FR';
+        const carriedSubject = pair ? 'pair fr-FR' : `${DEP} fr-FR`;
+        const enabled = {
+            list: ['alpha en-US', carriedLabel].sort(),
+            atAlpha: pair ? ['alpha en-US', 'pair fr-FR'] : ['alpha en-US'],
+            atPair: pair ? ['pair fr-FR'] : [],
+            atDep: pair ? [] : ['dep fr-FR'],
+            send: carriedSubject,
+            sendFromDep: carriedSubject,
+        };
+        // CONTROL — nothing disabled: as FROM.
+        expect(await answers(host)).toEqual(enabled);
+        host.registry.disablePackage(ALPHA);
+        expect(await answers(host)).toEqual({
+            list: [],
+            atAlpha: [],
+            atPair: [],
+            atDep: pair ? [] : ['dep fr-FR'],
+            send: null,
+            // Declared: a send from DEP reads the list naming no package for this
+            // name until the send door judges the served holders (#32670).
+            sendFromDep: null,
+        });
+        host.registry.enablePackage(ALPHA);
+        expect(await answers(host)).toEqual(enabled);
     }, 60_000);
 });
 

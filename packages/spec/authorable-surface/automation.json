@@ -242,6 +242,7 @@
     "automation/FlowRunNodeSummary:skipped",
     "automation/FlowRunNodeSummary:status",
     "automation/FlowRunNodeSummary:unmeasured",
+    "automation/FlowRunNodeSummary:warnings",
     "automation/FlowRunSummary:acted",
     "automation/FlowRunSummary:detailOmitted",
     "automation/FlowRunSummary:failed",
