@@ -83,7 +83,7 @@ const HOME_AMOUNT_POINTER_LABELS: Record<keyof HomeAmountDraft, string> = {
 };
 
 /** The pointers of `home` not set yet, in the editor's order. */
-export function missingHomeAmountPointers(home: HomeAmountDraft | undefined): Array<keyof HomeAmountDraft> {
+function missingHomeAmountPointers(home: HomeAmountDraft | undefined): Array<keyof HomeAmountDraft> {
   return HOME_AMOUNT_POINTERS.filter((key) => !home?.[key]);
 }
 
