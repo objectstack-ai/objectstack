@@ -58,6 +58,12 @@ const DIRECT_SIGN_IN_RATE_LIMITED: RefusalCopy = {
   defaultValue: 'Too many sign-ins were started from this network just now. Wait a few seconds, then try again.',
 };
 
+const ACCESS_DENIED: RefusalCopy = {
+  key: 'auth.login.errors.ssoAccessDenied',
+  defaultValue:
+    "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
+};
+
 const GENERIC: RefusalCopy = {
   key: 'auth.login.errors.oauthCallbackFailed',
   defaultValue:
@@ -82,7 +88,14 @@ const GENERIC: RefusalCopy = {
  *    because the provider does not allow IdP-initiated sign-in;
  *  - `direct_sign_in_unavailable`: the direct sign-in door found no single
  *    identity provider to start, or the provider's start was refused
- *    (`./directSignIn`).
+ *    (`./directSignIn`);
+ *  - `access_denied` (RFC 6749 §4.1.2.1): the identity provider refused the
+ *    signed-in account for this relying party. The ObjectStack provider sends
+ *    it when its environment-access gate refuses an account that is not a
+ *    member of the environment's organization (plugin-auth
+ *    `oauth-authorize-refusal.ts`), and the callback hands it on unchanged.
+ *    Its sentence says the same as that provider's own refusal page, and the
+ *    page offers the same two ways on ({@link accessDeniedExits}).
  *
  * A code missing here keeps the generic sentence.
  */
@@ -95,6 +108,7 @@ const SSO_CALLBACK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
   state_not_found: START_FROM_LOGIN_PAGE,
   direct_sign_in_unavailable: DIRECT_SIGN_IN_UNAVAILABLE,
   direct_sign_in_rate_limited: DIRECT_SIGN_IN_RATE_LIMITED,
+  access_denied: ACCESS_DENIED,
 };
 
 /**
@@ -113,4 +127,59 @@ export function ssoCallbackRefusalMessage(t: TranslateFn, code: string): string 
 /** The technical cause, for the details toggle: the code, then the server's description when it sent one. */
 export function ssoCallbackTechnicalDetail(error: SsoCallbackError): string {
   return error.description ? `${error.code}: ${error.description}` : error.code;
+}
+
+/** RFC 6749 §4.1.2.1: the identity provider refused the signed-in account. */
+export const ACCESS_DENIED_CODE = 'access_denied';
+
+/**
+ * The control plane's RP-initiated logout (`@better-auth/oauth-provider`'s
+ * `/oauth2/end-session`), under the framework's auth mount. The same door the
+ * provider's own refusal page links as "Switch account".
+ */
+export const CONTROL_PLANE_END_SESSION_PATH = '/api/v1/auth/oauth2/end-session';
+
+/** The two ways on from an `access_denied` return, both on the control plane. */
+export interface AccessDeniedExits {
+  /** Ends the account's session at the identity provider, so the next sign-in asks who you are. */
+  switchAccountUrl: string;
+  /** The control plane's console. */
+  consoleUrl: string;
+}
+
+/**
+ * The ways on from an `access_denied` return, or `null` when this page cannot
+ * name them.
+ *
+ * Signing out of this environment cannot switch the account: the refusal came
+ * before any session here, and the account that was refused is the one still
+ * signed in at the identity provider, which would hand it straight back on the
+ * next sign-in. Switching means ending THAT session, at the provider's
+ * end-session door. The page can name that door only where it knows the
+ * provider: an environment the control plane runs (`features.cloudManaged`
+ * from `/auth/config`), whose people arrive through the control plane's
+ * identity provider, with the control plane's address served as the runtime
+ * config's `cloudUrl`. Anywhere else (a self-hosted deployment, an enterprise
+ * identity provider) the code may come from a provider this page cannot
+ * address, so it offers neither link rather than a wrong one.
+ *
+ * The door is opened without `id_token_hint` or `client_id`: the provider then
+ * asks the person to confirm, ends the session, and stays on its own page, so
+ * the page opens it in a new tab and the person signs in again here.
+ */
+export function accessDeniedExits(input: {
+  code: string;
+  cloudManaged: boolean | undefined;
+  cloudBase: string;
+}): AccessDeniedExits | null {
+  if (input.code !== ACCESS_DENIED_CODE || input.cloudManaged !== true) return null;
+  const base = input.cloudBase.trim().replace(/\/+$/, '');
+  if (!base) return null;
+  try {
+    const { protocol } = new URL(base);
+    if (protocol !== 'https:' && protocol !== 'http:') return null;
+  } catch {
+    return null;
+  }
+  return { switchAccountUrl: `${base}${CONTROL_PLANE_END_SESSION_PATH}`, consoleUrl: base };
 }

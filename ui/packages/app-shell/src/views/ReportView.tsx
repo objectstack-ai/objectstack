@@ -17,6 +17,7 @@ import { useAdapter } from '../providers/AdapterProvider.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { persistRuntimeMetadata } from './runtime-metadata-persistence.js';
 import { formatMetadataError } from '@object-ui/data-objectstack';
+import { servedPackageId } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import type { DataSource } from '@object-ui/types';
@@ -101,9 +102,15 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // `objectFilter` (built from the server's drillRawRows), so we navigate
   // straight away — correct for select/lookup dims, no metadata round-trip.
   //
-  // Fallback (older server with no drill metadata): only dimension NAMES +
-  // DISPLAY-label bucket values arrive, so resolve them through the dataset
-  // definition and reverse-map labels to stored values before filtering:
+  // Fallback: no `objectFilter` arrived, so only dimension NAMES + DISPLAY-label
+  // bucket values are known. Not only an older server's answer: the current
+  // server names the `object` on every dataset answer but sends no drill
+  // metadata for a `type: 'date'` dimension with no `dateGranularity` (neither
+  // an equality field nor a range), so a report grouped by one lands here too.
+  // Resolve the names through the dataset definition, read as the report's
+  // reader (ADR-0150 D3: `callerPackage`, the report's served package, the
+  // same dataset the renderer's queries resolve; a refusal is no drill, never
+  // a bare retry), and reverse-map labels to stored values before filtering:
   //   - select fields  → reverse-map label → option value
   //   - lookup fields  → the label is a record name, not the FK id; skip the
   //     dim (the drill lands on a superset rather than filtering wrongly)
@@ -128,7 +135,12 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
 
         // Fallback (older server with no drill metadata): resolve the dataset's
         // object and reverse-map dimension labels → stored values ourselves.
-        const def = await metadataClient.get<Record<string, any>>('dataset', dataset);
+        const callerPackage = servedPackageId(editSchema || reportData);
+        const def = await metadataClient.get<Record<string, any>>(
+          'dataset',
+          dataset,
+          callerPackage ? { callerPackage } : {},
+        );
         const objectName = typeof def?.object === 'string' ? def.object : undefined;
         if (!objectName) return;
         const dims: Array<Record<string, any>> = Array.isArray(def?.dimensions) ? def.dimensions : [];
@@ -165,7 +177,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
         console.warn('ReportView: drill failed', err);
       }
     },
-    [metadataClient, objects, reportData, language],
+    [metadataClient, objects, reportData, editSchema, language],
   );
 
   // Derive available fields from object schema for filter/sort editors

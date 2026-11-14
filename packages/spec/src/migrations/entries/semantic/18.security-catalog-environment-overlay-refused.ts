@@ -24,9 +24,8 @@ export const entry: SemanticMigration = {
     + 'package. Nothing is adopted: an item the environment needs under its own name is re-created '
     + 'under a name no package holds',
   reason:
-    'Positions, permission sets and capabilities hold one name per deployment, and a package '
-    + 'registering a name the environment catalog already holds was already refused on a hot '
-    + 'install. A cold boot now refuses it too, right after the stored rows load: the stored row '
+    'The environment catalog and a package never hold one name: a package registering a name '
+    + 'the environment catalog already holds was already refused on a hot install. A cold boot now refuses it too, right after the stored rows load: the stored row '
     + 'used to be served in place of the package\'s definition, with only a collision warning. '
     + 'Rows like this exist on deployments that saved over a package-held name before the packaged '
     + 'locks refused such saves, and over the security plugin\'s own sets, which it declares only '

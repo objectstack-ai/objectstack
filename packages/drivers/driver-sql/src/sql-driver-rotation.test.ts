@@ -144,6 +144,31 @@ describe('SqlDriver rotation (ADR-0057 P2)', () => {
     expect(rest.map((r: any) => r.id)).toEqual(['new']);
   });
 
+  it('⭐ schema sync drops no shard: a restored shard past the window stays, in the view, until rotateShards expires it', async () => {
+    // A boot syncs its schema before it is judged (the organization-ownership
+    // guard refuses after the engine's sync), so a sync that dropped expired
+    // shards took a restored one with the boot that refused to serve it.
+    // Expiry is the Rotator's: the lifecycle sweep's `rotateShards`.
+    const restoredKey = new Date(Date.now() - 20 * DAY_MS).toISOString().slice(0, 10).replace(/-/g, '');
+    const restored = `rot_event__r${restoredKey}`;
+    await driver.execute(`CREATE TABLE "${restored}" (id varchar(255) PRIMARY KEY, created_at varchar(255), updated_at varchar(255), payload text)`);
+    await driver.execute(`INSERT INTO "${restored}" (id, payload) VALUES ('r1', 'restored'), ('r2', 'restored')`);
+
+    await driver.initObjects([ROTATED_OBJECT]);
+    const names = await tableNames(driver);
+    expect(names[restored]).toBe('table');
+    expect(await driver.count('rot_event', {})).toBe(2);
+    // Its columns are synced with the rest, so the UNION stays uniform.
+    expect(Object.keys(await (driver as any).knex(restored).columnInfo())).toEqual(
+      expect.arrayContaining(['id', 'payload', 'created_at']),
+    );
+
+    const swept = await driver.rotateShards(ROTATED_OBJECT);
+    expect(swept.dropped).toEqual([restored]);
+    expect((await tableNames(driver))[restored]).toBeUndefined();
+    expect(await driver.count('rot_event', {})).toBe(0);
+  });
+
   it('rotateShards is idempotent within the same period', async () => {
     await driver.initObjects([ROTATED_OBJECT]);
     const first = await driver.rotateShards(ROTATED_OBJECT, T0);
