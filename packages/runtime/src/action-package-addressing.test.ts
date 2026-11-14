@@ -29,6 +29,7 @@ import '@objectstack/metadata';
 import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { PackageScopedNameRefusedError, resolvePackageScopedHolders } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { actionHandlerOwnerRefusal, executeRegisteredAction, resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
 
 const A = 'com.acme.alpha';
@@ -1253,5 +1254,156 @@ describe('[#32365] the bare action read weighs the package-less holder and serve
             expect(err, 'never the stale entry').toBeInstanceOf(PackageScopedNameRefusedError);
             expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
         });
+    });
+});
+
+/**
+ * [#32681; seat ruling A on #32681, ADR-0150 D4] ALPHA binds `approve` to
+ * `account`, BETA to `contact`, and the environment saves a package-less
+ * `approve` on `account` through `DatabaseLoader`. Keyed per
+ * `(object, name)`, that save is ALPHA's customization (ALPHA's `account`
+ * row), and ALPHA's first `account` save takes a package-less `account` row
+ * over. So, over the stored rows and the boot priming pass,
+ * `/actions/account/approve` judges the item ALPHA's slot holds and runs
+ * ALPHA's handler, in both save orders. Beside BETA's `contact` binding
+ * alone, the package-less save on `account` is stored as the environment's
+ * own row, never a row of BETA's.
+ *
+ * BEFORE (main `9f736f2e`, the metadata fix reverted and rebuilt):
+ * A-B-save judged ALPHA's own body (`alpha`) while ALPHA's slot held the
+ * customization (`custom`): a declaration of another item than the one ALPHA
+ * serves. B-save-A wrote the package-less save into a BETA row bound to
+ * `account`, and the `account` route was refused (`ambiguous-in-environment`)
+ * while `/actions/contact/approve` judged no declaration. Beside BETA alone the
+ * save wrote a BETA row bound to `account`.
+ */
+describe('[#32681] /actions/account/approve judges and runs one item over the stored rows, in both save orders', () => {
+    /** A writable `sys_metadata` engine: what `DatabaseLoader`'s save and read paths call. */
+    const writableEngine = () => {
+        const rows: Array<Record<string, unknown>> = [];
+        const matches = (r: Record<string, unknown>, w: Record<string, unknown>) =>
+            Object.entries(w).every(([k, v]) => {
+                if (k.startsWith('$') || (v !== null && typeof v === 'object')) throw new Error(`writableEngine: unsupported WHERE on '${k}'`);
+                return r[k] === v;
+            });
+        const rowEngine = {
+            async find(table: string, q: any) {
+                const hits = table === 'sys_metadata' ? rows.filter((r) => matches(r, q?.where ?? {})) : [];
+                const page = typeof q?.limit === 'number' ? hits.slice(0, q.limit) : hits;
+                return page.map((r) => ({ ...r }));
+            },
+            async findOne(table: string, q: any) {
+                assertEngineFindOnePredicate(table, q);
+                const hit = table === 'sys_metadata' ? rows.find((r) => matches(r, q?.where ?? {})) : undefined;
+                return hit ? { ...hit } : null;
+            },
+            async count(table: string, q: any) {
+                return table === 'sys_metadata' ? rows.filter((r) => matches(r, q?.where ?? {})).length : 0;
+            },
+            async insert(table: string, data: Record<string, unknown>) {
+                if (table === 'sys_metadata') rows.push({ ...data });
+                return { ...data };
+            },
+            async update(table: string, data: Record<string, unknown>, options?: any) {
+                assertEngineUpdateDispatch(data as any, options);
+                const row = table === 'sys_metadata' ? rows.find((r) => r.id === data.id) : undefined;
+                if (!row) return null;
+                Object.assign(row, data);
+                return { ...row };
+            },
+            async delete(_table: string, options?: any) {
+                assertEngineDeleteDispatch(options);
+                throw new Error('writableEngine: no case here deletes a row');
+            },
+            async aggregate() {
+                return [];
+            },
+        };
+        return { rowEngine, rows };
+    };
+    const loaderOver = async (rowEngine: any) => {
+        const { DatabaseLoader } = await import('@objectstack/metadata');
+        return new DatabaseLoader({ engine: rowEngine, trackHistory: false, cache: { enabled: false } } as any) as any;
+    };
+    /** A save through the loader: a package's body carries its stamp, the environment's none. */
+    const save = async (rowEngine: any, packageId: string | undefined, objectName: string, label: string) => {
+        const body = {
+            name: 'approve', label, type: 'script', objectName, target: 'approve',
+            body: { language: 'js', source: 'return 1;', capabilities: [] },
+            ...(packageId ? { _packageId: packageId } : {}),
+        };
+        await (await loaderOver(rowEngine)).save('action', 'approve', body);
+    };
+    /** The boot priming pass over the stored rows, the protocol over its manager. */
+    const boot = async (rowEngine: any, rows: any[]) => {
+        const { MetadataPlugin } = await import('@objectstack/metadata');
+        const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'eager' } } as any);
+        const manager = (plugin as any).manager;
+        manager.loaders.clear();
+        manager.registerLoader(await loaderOver(rowEngine));
+        const quiet = () => {};
+        await (plugin as any)._loadFromFileSystem({ logger: { info: quiet, warn: quiet, error: quiet, debug: quiet } });
+        const services = new Map<string, unknown>([['metadata', manager]]);
+        storedRows = rows;
+        protocol = new ObjectStackProtocolImplementation((protocol as any).engine, () => services as Map<string, any>);
+        deps = { ...deps, resolveService: (async (_ctx: unknown, name: string) => (name === 'protocol' ? protocol : undefined)) as any };
+        return manager;
+    };
+    const routeTo = (objectName: string) =>
+        resolveRouteActionDeclaration(deps, { request: {} } as any, { ql: engine, objectName, actionName: 'approve' });
+    /** The label of the declaration a route judges, and the handler the dispatch runs for it. */
+    const judgedAndRun = async (objectName: string) => {
+        const declaration = await routeTo(objectName);
+        let run: unknown;
+        try {
+            run = (await executeRegisteredAction(deps, engine, objectName, ['approve'], {}, declaration.packageId)).result;
+        } catch (e: any) {
+            run = [e?.code, e?.status];
+        }
+        return { judged: declaration.action?.label, refusal: declaration.refusal?.reason, degraded: declaration.degraded, run };
+    };
+    const storedRowsOf = (rows: Array<Record<string, unknown>>) => rows.map((r) => [r.package_id ?? null, r.bundle_member ?? null]);
+
+    for (const order of ['A, B, then the package-less save', 'B, the package-less save, then A'] as const) {
+        it(`${order}: the account route judges A's item and runs A's handler`, async () => {
+            const { rowEngine, rows } = writableEngine();
+            if (order === 'A, B, then the package-less save') {
+                await save(rowEngine, A, 'account', 'alpha');
+                await save(rowEngine, B, 'contact', 'beta');
+                await save(rowEngine, undefined, 'account', 'custom');
+            } else {
+                await save(rowEngine, B, 'contact', 'beta');
+                await save(rowEngine, undefined, 'account', 'custom');
+                await save(rowEngine, A, 'account', 'alpha');
+            }
+            install(A);
+            install(B);
+            ship(A, 'account');
+            ship(B, 'contact');
+            engine.registerAction('account', 'approve', () => `ran ${A}`, `app:${A}`);
+            engine.registerAction('contact', 'approve', () => `ran ${B}`, `app:${B}`);
+            const manager = await boot(rowEngine, rows);
+            // One row per holder's binding: the package-less save is ALPHA's `account` row.
+            expect(storedRowsOf(rows).sort()).toEqual([[A, 'account'], [B, 'contact']]);
+            // The item ALPHA's slot holds: its customization when that was saved last, else its own body.
+            const alphaItem = order === 'A, B, then the package-less save' ? 'custom' : 'alpha';
+            expect((await manager.get('action', 'approve', A))?.label).toBe(alphaItem);
+            // The route judges that very item and runs ALPHA's handler.
+            expect(await judgedAndRun('account')).toEqual({ judged: alphaItem, refusal: undefined, degraded: undefined, run: `ran ${A}` });
+            expect(await judgedAndRun('contact')).toEqual({ judged: 'beta', refusal: undefined, degraded: undefined, run: `ran ${B}` });
+        });
+    }
+
+    it('single holder on another object: beside BETA\'s `contact` binding alone, the package-less save on `account` is stored as the environment\'s own row', async () => {
+        const { rowEngine, rows } = writableEngine();
+        await save(rowEngine, B, 'contact', 'beta');
+        await save(rowEngine, undefined, 'account', 'custom');
+        expect(storedRowsOf(rows)).toEqual([[B, 'contact'], [null, 'account']]);
+        install(B);
+        ship(B, 'contact');
+        engine.registerAction('contact', 'approve', () => `ran ${B}`, `app:${B}`);
+        await boot(rowEngine, rows);
+        const onAccount = await routeTo('account');
+        expect([onAccount.action?.label, onAccount.packageId, onAccount.refusal, onAccount.degraded]).toEqual(['custom', undefined, undefined, undefined]);
     });
 });
