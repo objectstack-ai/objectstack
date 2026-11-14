@@ -684,7 +684,11 @@ function dateTextIssue(
     ? (scope === 'record' ? `record.${verdict.field}` : verdict.field)
     : undefined;
   const ref = reference !== undefined ? `\`${reference}\`` : null;
-  const shift = `\`daysFromNow(n)\` / \`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`;
+  // A span under a day has no stdlib helper; the Duration of two parsed sides does it.
+  const shift =
+    `\`daysFromNow(n)\` / \`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date. For a span in ` +
+    `hours or minutes, wrap each side in \`datetime(…)\` and read the Duration: ` +
+    `\`(datetime(b) - datetime(a)).getMinutes()\` / \`.getHours()\`.`;
   if (verdict.kind === 'fault') {
     const subject = ref ? `${ref} is a date field` : 'a date field is an operand';
     const params = { operands: verdict.operands, ...(reference !== undefined ? { reference } : {}) };

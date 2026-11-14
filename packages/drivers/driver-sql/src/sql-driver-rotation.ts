@@ -43,7 +43,7 @@ import {
   isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
-import { isPostgresInstantColumnType } from './date-on-instant-column.js';
+import { isInstantColumnType } from './date-on-instant-column.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link RotationFacet} read — every one of
@@ -563,11 +563,11 @@ export class RotationFacet {
 
         // [#32851] Read from the catalog just fetched, before any column below
         // is added: an added `date` column is built `date`, never an instant.
-        if (this.dialectName === 'postgres') {
-          for (const field of this.dateFields[tableName] ?? []) {
-            if (isPostgresInstantColumnType((columnInfo as Record<string, { type?: unknown }>)[field]?.type)) {
-              this.dateFieldsOnInstantColumn[tableName].add(field);
-            }
+        // [#33002] On every dialect that builds an instant column for a
+        // `datetime` field, not only Postgres.
+        for (const field of this.dateFields[tableName] ?? []) {
+          if (isInstantColumnType(this.dialectName, (columnInfo as Record<string, { type?: unknown }>)[field]?.type)) {
+            this.dateFieldsOnInstantColumn[tableName].add(field);
           }
         }
 

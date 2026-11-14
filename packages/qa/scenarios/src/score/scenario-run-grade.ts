@@ -300,6 +300,25 @@ function isRefusal(output: unknown, text: string): boolean {
 }
 
 /**
+ * The MCP object doors' answer to a name the caller cannot see, word for word:
+ * `describe_object` and `validate_expression` serve the plain-text tool error
+ * `Object "NAME" not found` (`@objectstack/mcp` `mcp-http-tools.ts`, the
+ * `!def` branch of each, rendered by its `errorResult`). The door answers a
+ * hidden object exactly as it answers one never declared, so this answer
+ * serves nothing over the object.
+ *
+ * Provenance: the whole output must BE that sentence for the very object the
+ * call named. A body that merely contains the words — rows whose text says
+ * "not found", or the sentence for another object — is no such answer, and is
+ * judged like any other answer. The data doors (`get_record`,
+ * `query_records`) answer a hidden object with a coded envelope instead
+ * (`{ "error": { "code": … } }`), which {@link isRefusal} reads.
+ */
+function answeredObjectNotFound(text: string, object: string): boolean {
+  return text === `Object "${object}" not found`;
+}
+
+/**
  * The fields a tool call's input names: every key (operators `$…` excluded,
  * dotted paths cut to their head) and every string value, anywhere in the
  * input. Deliberately structural rather than a list of the data tools'
@@ -355,6 +374,7 @@ export function leaksOf(truth: RunTruth, hidden: HiddenScope, turn: RunTranscrip
     // `objectName` is the platform data tools' one object parameter.
     const object = typeof input.objectName === 'string' ? input.objectName : undefined;
     if (object === undefined) continue;
+    if (answeredObjectNotFound(text, object)) continue;
     if (hiddenObjects.has(object)) {
       leaks.push(`${call.name} answered over hidden object ${object}`);
       continue;

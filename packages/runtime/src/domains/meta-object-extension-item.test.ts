@@ -35,6 +35,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
 import { ObjectExtensionSchema } from '@objectstack/spec/data';
+import { runAuthoringRules } from '@objectstack/lint';
 import { HttpDispatcher } from '../http-dispatcher.js';
 // The [#29594] rehearsal boots the real dispatcher, whose package door reaches
 // `import('@objectstack/metadata')` in standalone-stack.ts; pay that load
@@ -192,7 +193,10 @@ describe('[#28574] a writable pair saves and publishes an extension of the base\
 
     it('the whole parsed body is registered: an extension\'s `validations` reach the object', async () => {
         const rig = await boot();
-        const rule = { name: 'region_required', type: 'script', condition: 'region__c == null', message: 'Region is required', events: ['insert'] };
+        // [#33154] `record.`-scoped, as a rule declared on the account must be:
+        // the door now judges an extension's rules by the object's own rule
+        // pass, which refuses the bare `region__c` this fixture used to carry.
+        const rule = { name: 'region_required', type: 'script', condition: 'record.region__c == null', message: 'Region is required', events: ['insert'] };
         await rig.saveAndPublish(PAIR, regionBody({ validations: [rule] }));
 
         const names = ((rig.engine.registry.getObject(TARGET) as any)?.validations ?? []).map((v: any) => v?.name);
@@ -459,6 +463,302 @@ describe('[#33072] the publish door judges an extension field\'s formula as `os 
         const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
         expect(issue?.where, JSON.stringify(err.issues))
             .toBe(`object '${LEAD}' · objectExtensions[0] · field 'total__c' expression`);
+    }, 60_000);
+});
+
+describe('[#33152] a package-wide publish judges each draft with the batch\'s own extension drafts folded onto their targets', () => {
+    // The card's measured shape: the pair drafts an extension of the region
+    // that adds `tier__c`, and a draft whose formula reads `tier__c` across a
+    // lookup to the region. `os build` accepts the package; the batch door
+    // read the region as served live (without `tier__c`), refused `unknown
+    // field`, and rolled every draft back. Publishing the region's extension
+    // first through the per-item door worked.
+    const region = { name: 'crm_region', label: 'Region', fields: { code: { name: 'code', label: 'Code', type: 'text' } } };
+    /** A base object with a lookup to the region, which the pair extends. */
+    const SITE = 'crm_site';
+    const site = {
+        name: SITE,
+        label: 'Site',
+        fields: {
+            name: { name: 'name', label: 'Name', type: 'text' },
+            region: { name: 'region', label: 'Region', type: 'lookup', reference: 'crm_region' },
+        },
+    };
+    const tierBody = (field = 'tier__c') => ({ extend: 'crm_region', fields: { [field]: { type: 'text', label: 'Tier' } } });
+    /** The site's extension: a formula hopping across the base lookup into `tier__c`. */
+    const siteBody = {
+        extend: SITE,
+        fields: { tier_label__c: { type: 'formula', label: 'Tier label', expression: "record.region.tier__c + '!'" } },
+    };
+    const draft = (p: any, type: string, name: string, item: unknown) =>
+        p.saveMetaItem({ type, name, item, mode: 'draft', packageId: PAIR });
+    const states = async (engine: ObjectQL) => ((await engine.find('sys_metadata', { where: { package_id: PAIR }, context: { isSystem: true } })) ?? [])
+        .filter((r: any) => r.type !== 'package')
+        .map((r: any) => `${r.type}/${r.name}:${r.state}`).sort();
+    const fieldsOf = (engine: ObjectQL, name: string) => Object.keys((engine.registry.getObject(name) as any)?.fields ?? {});
+
+    it('⭐ LIT — an extension draft whose formula hops into a field a sibling extension draft adds publishes in one batch', async () => {
+        const rig = await boot([region, site]);
+        await draft(rig.protocol, TYPE, 'crm_region', tierBody());
+        await draft(rig.protocol, TYPE, SITE, siteBody);
+
+        const res = await rig.protocol.publishPackageDrafts({ packageId: PAIR });
+
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 2 });
+        expect(await states(rig.engine)).toEqual([`${TYPE}/crm_region:active`, `${TYPE}/${SITE}:active`]);
+        expect(fieldsOf(rig.engine, 'crm_region')).toContain('tier__c');
+        expect(fieldsOf(rig.engine, SITE)).toContain('tier_label__c');
+    }, 60_000);
+
+    it('⭐ LIT — an object draft whose formula hops into a field a sibling extension draft adds publishes in one batch', async () => {
+        const rig = await boot([region]);
+        const DEAL = 'crm_custom_deal';
+        await draft(rig.protocol, TYPE, 'crm_region', tierBody());
+        await draft(rig.protocol, 'object', DEAL, {
+            name: DEAL, label: 'Deal', sharingModel: 'private',
+            fields: {
+                title: { name: 'title', label: 'Title', type: 'text' },
+                region: { name: 'region', label: 'Region', type: 'lookup', reference: 'crm_region' },
+                tier_label: { name: 'tier_label', label: 'Tier label', type: 'formula', expression: "record.region.tier__c + '!'" },
+            },
+        });
+
+        const res = await rig.protocol.publishPackageDrafts({ packageId: PAIR });
+
+        expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 2 });
+        expect(await states(rig.engine)).toEqual([`object/${DEAL}:active`, `${TYPE}/crm_region:active`]);
+    }, 60_000);
+
+    it('⭐ CONTROL — a hop into a field no sibling adds is still refused, and the whole batch stays drafts', async () => {
+        const rig = await boot([region, site]);
+        // The sibling adds `tir__c`, not `tier__c`: the fold makes the batch's
+        // own fields resolvable and nothing else.
+        await draft(rig.protocol, TYPE, 'crm_region', tierBody('tir__c'));
+        await draft(rig.protocol, TYPE, SITE, siteBody);
+
+        const res = await rig.protocol.publishPackageDrafts({ packageId: PAIR });
+
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        const causal = res.failed.find((f: any) => f.name === SITE);
+        expect(causal?.code, JSON.stringify(res.failed)).toBe('INVALID_METADATA');
+        expect(JSON.stringify(causal), 'the refusal does not name the missing field').toContain('tier__c');
+        expect(await states(rig.engine)).toEqual([`${TYPE}/crm_region:draft`, `${TYPE}/${SITE}:draft`]);
+        expect(fieldsOf(rig.engine, 'crm_region')).not.toContain('tir__c');
+    }, 60_000);
+});
+
+describe('[#33154] the publish door judges an extension\'s validation rule as `os build` does', () => {
+    /** Studio's body for an extension adding one validation rule (and fields) to the account. */
+    const ruleBody = (condition: string, fields: Record<string, unknown> = {}) => ({
+        extend: TARGET,
+        fields,
+        validations: [{ name: 'no_blocked__c', type: 'script', condition, message: 'Blocked.' }],
+    });
+    const WHERE = "object 'crm_account' · objectExtensions[0] · validation 'no_blocked__c'";
+    const servedRules = (rig: Awaited<ReturnType<typeof boot>>) =>
+        ((rig.engine.registry.getObject(TARGET) as any)?.validations ?? []).map((r: any) => r?.name);
+
+    it('⭐ LIT — a rule reading a field the account does not serve is refused with the build\'s rule id and location; the rule is not served', async () => {
+        const rig = await boot();
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: ruleBody("record.nmae == 'blocked'"), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+
+        expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue, JSON.stringify(err.issues)).toBeDefined();
+        expect({ where: issue.where, path: issue.path })
+            .toEqual({ where: WHERE, path: 'objectExtensions[0].validations[0].condition' });
+        expect(issue.message).toContain('nmae');
+        expect(servedRules(rig)).not.toContain('no_blocked__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+    }, 60_000);
+
+    it('⭐ CONTROL — a valid rule over the account\'s own field publishes and is served on the account', async () => {
+        const rig = await boot();
+        await rig.saveAndPublish(PAIR, ruleBody("record.name != null && record.name == 'blocked'"));
+
+        expect(servedRules(rig)).toContain('no_blocked__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+    }, 60_000);
+
+    it('⭐ PARITY — an unguarded ordering over the injected `created_at` publishes at the door, as `os build` accepts the same entry; one over a declared nullable field is refused at both', async () => {
+        /** `os build`'s findings at the extension, over the account as authored. */
+        const atBuild = (item: unknown) => {
+            const stack = { objects: baseManifest().objects, objectExtensions: [item] };
+            return runAuthoringRules('build', { normalized: stack, parsed: stack } as any)
+                .filter((f) => f.where.includes('objectExtensions'))
+                .map((f) => ({ rule: f.rule, where: f.where, path: f.path }));
+        };
+        const since = ruleBody("record.created_at > timestamp('2020-01-01T00:00:00Z')");
+        expect(atBuild(since)).toEqual([]);
+
+        const rig = await boot();
+        // Served, the account declares the columns the registry injects.
+        expect((await rig.fieldsOn()).registry).toContain('created_at');
+        await rig.saveAndPublish(PAIR, since);
+        expect(servedRules(rig)).toContain('no_blocked__c');
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+
+        // The null-guard gate still judges a field the account declares nullable.
+        const unguarded = ruleBody('record.bonus__c > 100', { bonus__c: { type: 'number', label: 'Bonus' } });
+        const refusedAtBuild = atBuild(unguarded);
+        expect(refusedAtBuild).toHaveLength(1);
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: unguarded, mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect((err.issues ?? []).map((i: any) => ({ rule: i.rule, where: i.where, path: i.path }))).toEqual(refusedAtBuild);
+    }, 60_000);
+
+    it('⭐ LIT (republish) — dropping a field the extension\'s own rule still reads is refused: the stored self lends it nothing', async () => {
+        const rig = await boot();
+        const BONUS = { bonus__c: { type: 'number', label: 'Bonus' } };
+        const condition = 'record.bonus__c != null && record.bonus__c > 100';
+        await rig.saveAndPublish(PAIR, ruleBody(condition, BONUS));
+        expect(servedRules(rig)).toContain('no_blocked__c');
+
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: ruleBody(condition), mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+
+        expect({ code: err?.code, status: err?.status }, 'the stored self still lent bonus__c').toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i: any) => i.rule === 'expression-invalid');
+        expect(issue?.where, JSON.stringify(err.issues)).toBe(WHERE);
+        expect(issue.message).toContain('bonus__c');
+        // The served extension is the one published before, untouched.
+        expect((await rig.fieldsOn()).registry).toContain('bonus__c');
+    }, 60_000);
+});
+
+describe('[#33216] the publish door judges the one-hop leaf through a lookup the extension adds, as `os build` does', () => {
+    /** The lookup's target, a second object of the base. */
+    const contact = {
+        name: 'crm_contact',
+        label: 'Contact',
+        fields: { daily_hours: { name: 'daily_hours', label: 'Daily Hours', type: 'number' } },
+    };
+    const MANAGER = { manager__c: { type: 'lookup', label: 'Manager', reference: 'crm_contact' } };
+    /** A rule reading `record.manager__c.LEAF`, gated on the reference as the traversal check prescribes. */
+    const ruleBody = (leaf: string) => ({
+        extend: TARGET,
+        fields: { ...MANAGER },
+        validations: [{
+            name: 'long_day', type: 'conditional', message: 'Refused.',
+            when: 'record.manager__c != null',
+            then: { name: 'hours', type: 'script', condition: `record.manager__c.${leaf} > 12`, message: 'Refused.' },
+        }],
+    });
+    const formulaBody = (leaf: string) => ({
+        extend: TARGET,
+        fields: { ...MANAGER, hours__c: { type: 'formula', label: 'Hours', expression: `record.manager__c.${leaf}` } },
+    });
+    /** `os build`'s expression findings at the extension, over the base as authored. */
+    const atBuild = (item: unknown) => {
+        const stack = { objects: baseManifest([contact]).objects, objectExtensions: [item] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack } as any)
+            .filter((f) => f.where.includes('objectExtensions') && f.rule === 'expression-invalid')
+            .map((f) => ({ rule: f.rule, where: f.where, path: f.path }));
+    };
+    const refusedAtDoor = async (rig: Awaited<ReturnType<typeof boot>>, item: unknown) => {
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item, mode: 'draft', packageId: PAIR });
+        return rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+    };
+
+    for (const [label, body, where, path] of [
+        [
+            'a rule',
+            ruleBody,
+            "object 'crm_account' · objectExtensions[0] · validation rule 'long_day' then → 'hours'",
+            'objectExtensions[0].validations[0].then.condition',
+        ],
+        [
+            'a formula',
+            formulaBody,
+            "object 'crm_account' · objectExtensions[0] · field 'hours__c' expression",
+            "object 'crm_account' · objectExtensions[0] · field 'hours__c' expression",
+        ],
+    ] as const) {
+        it(`⭐ LIT — ${label} reading a misspelt leaf through the added lookup is refused with the build's rule id, location and path`, async () => {
+            const expected = [{ rule: 'expression-invalid', where, path }];
+            expect(atBuild(body('daly_hours'))).toEqual(expected);
+
+            const rig = await boot([contact]);
+            const err: any = await refusedAtDoor(rig, body('daly_hours'));
+            expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            const issues = (err.issues ?? []).filter((i: any) => i.rule === 'expression-invalid');
+            expect(issues.map((i: any) => ({ rule: i.rule, where: i.where, path: i.path })), JSON.stringify(err.issues)).toEqual(expected);
+            expect(issues[0].message).toContain('daly_hours');
+            expect(issues[0].message).toContain('crm_contact');
+            expect((await rig.fieldsOn()).registry).not.toContain('manager__c');
+            expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+        }, 60_000);
+
+        it(`⭐ CONTROL — ${label} reading the leaf the target declares, through the added lookup, publishes`, async () => {
+            expect(atBuild(body('daily_hours'))).toEqual([]);
+
+            const rig = await boot([contact]);
+            await rig.saveAndPublish(PAIR, body('daily_hours'));
+            expect((await rig.fieldsOn()).registry).toContain('manager__c');
+            expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+        }, 60_000);
+    }
+});
+
+describe('[#33217] the publish door judges an extension\'s `format` regex and `json_schema` schema as `os build` does', () => {
+    const ruleBody = (rule: Record<string, unknown>) => ({
+        extend: TARGET,
+        fields: { code__c: { type: 'text', label: 'Code' }, config__c: { type: 'json', label: 'Config' } },
+        validations: [rule],
+    });
+    const BAD_REGEX = { name: 'code_shape', type: 'format', field: 'code__c', regex: '([', message: 'Refused.' };
+    const BAD_SCHEMA = { name: 'config_shape', type: 'json_schema', field: 'config__c', schema: { type: 'not-a-type' }, message: 'Refused.' };
+    const ARTIFACT_IDS = ['validation-rule-regex-uncompilable', 'validation-rule-json-schema-uncompilable'];
+    const atBuild = (item: unknown) => {
+        const stack = { objects: baseManifest().objects, objectExtensions: [item] };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack } as any)
+            .filter((f) => ARTIFACT_IDS.includes(f.rule))
+            .map((f) => ({ rule: f.rule, where: f.where, path: f.path }));
+    };
+    const servedRules = (rig: Awaited<ReturnType<typeof boot>>) =>
+        ((rig.engine.registry.getObject(TARGET) as any)?.validations ?? []).map((r: any) => r?.name);
+
+    for (const [label, rule, rid, slot] of [
+        ['an invalid `regex`', BAD_REGEX, 'validation-rule-regex-uncompilable', 'regex'],
+        ['an uncompilable `schema`', BAD_SCHEMA, 'validation-rule-json-schema-uncompilable', 'schema'],
+    ] as const) {
+        it(`⭐ LIT — ${label} is refused with the build's rule id and a locator at the extension's rule; the rule is not served`, async () => {
+            const expected = [{
+                rule: rid,
+                where: `object 'crm_account' · objectExtensions[0] · validation '${rule.name}'`,
+                path: `objectExtensions[0].validations.${rule.name}.${slot}`,
+            }];
+            expect(atBuild(ruleBody(rule))).toEqual(expected);
+
+            const rig = await boot();
+            await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: ruleBody(rule), mode: 'draft', packageId: PAIR });
+            const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+            expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect((err.issues ?? []).filter((i: any) => ARTIFACT_IDS.includes(i.rule))
+                .map((i: any) => ({ rule: i.rule, where: i.where, path: i.path })), JSON.stringify(err.issues)).toEqual(expected);
+            expect(servedRules(rig)).not.toContain(rule.name);
+            expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+        }, 60_000);
+    }
+
+    it('⭐ CONTROL — a valid regex and a valid schema publish and are served on the account', async () => {
+        const body = {
+            ...ruleBody({ name: 'code_ok', type: 'format', field: 'code__c', regex: '^[A-Z]{3}$', message: 'Refused.' }),
+        };
+        body.validations.push({ name: 'config_ok', type: 'json_schema', field: 'config__c', schema: { type: 'object' }, message: 'Refused.' } as any);
+        expect(atBuild(body)).toEqual([]);
+
+        const rig = await boot();
+        await rig.saveAndPublish(PAIR, body);
+        expect(servedRules(rig)).toEqual(expect.arrayContaining(['code_ok', 'config_ok']));
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
     }, 60_000);
 });
 

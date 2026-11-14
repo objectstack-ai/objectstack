@@ -395,7 +395,7 @@ describe('#5520 — what the gate must NOT do', () => {
 
         expect(result.rows).toEqual([{ account_count: 1 }]);
         expect(sqls).toEqual([
-            'SELECT phone AS "phone", COUNT(*) AS "account_count" FROM "crm_account" GROUP BY phone',
+            'SELECT "phone" AS "phone", COUNT(*) AS "account_count" FROM "crm_account" GROUP BY "phone"',
         ]);
     });
 

@@ -24,12 +24,18 @@
  * arm ON ITS OWN, so an arm that stopped emitting the claim would go red here
  * while its siblings stay green. Placement is the spec's and is unchanged: the
  * untitled block TRAILS the groups.
+ *
+ * Since objectstack#33229 the arms head the derived bucket "Other", so it is a
+ * titled section sharing the grid with the groups, and these rows read "not
+ * under the group's heading" off the heading above each field. The untitled
+ * split itself stays pinned by the authored untitled section row below.
  */
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { registerAllFields } from '@object-ui/fields';
+import { I18nProvider } from '@object-ui/i18n';
 import { ObjectForm } from './ObjectForm';
 import { ModalForm } from './ModalForm';
 import { DrawerForm } from './DrawerForm';
@@ -83,6 +89,25 @@ const headingRow = (label: string) =>
     .find((s) => s.textContent === label)
     ?.closest('div.col-span-full') as HTMLElement | null | undefined;
 const headingBlock = (label: string) => headingRow(label)?.parentElement ?? null;
+/**
+ * The drawn heading a field sits under: the last of `labels`' heading rows
+ * that precedes it in document order. Since objectstack#33229 the bucket is a
+ * TITLED section ("Other"), so it shares the grid with the titled groups the
+ * way any two titled sections do, and "not under the group's heading" reads
+ * as "under its own heading".
+ */
+const headingAbove = (name: string, labels: string[] = ['New group', 'Other']): string | null => {
+  const el = item(name);
+  if (!el) return null;
+  let found: string | null = null;
+  for (const label of labels) {
+    const row = headingRow(label);
+    if (row && row.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
+      if (found === null || headingRow(found)!.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING) found = label;
+    }
+  }
+  return found;
+};
 
 describe.each(ARMS)('%s — the ungrouped fields are their own block (objectui#11777)', (_arm, Arm, formType) => {
   const renderArm = (objectSchema: unknown, extra: Record<string, unknown> = {}) =>
@@ -113,13 +138,12 @@ describe.each(ARMS)('%s — the ungrouped fields are their own block (objectui#1
     expect(titled).not.toBeNull();
     expect(blockOf('name')).toBe(titled);
     for (const n of UNGROUPED) {
-      expect(titled!.contains(item(n))).toBe(false);
-      expect(blockOf(n)!.textContent).not.toContain('New group');
+      expect(headingAbove(n)).toBe('Other');
       expect(blockOf(n)).toBe(blockOf('status'));
     }
-    // Still ONE form, and the untitled block trails the group (spec placement).
+    // Still ONE form, and the bucket trails the group (spec placement).
     expect(document.body.querySelectorAll('form').length).toBe(1);
-    expect(titled!.compareDocumentPosition(blockOf('status')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(headingRow('New group')!.compareDocumentPosition(headingRow('Other')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('control: no field opts into a group — the form stays flat, one block', async () => {
@@ -150,13 +174,13 @@ describe.each(ARMS)('%s — the ungrouped fields are their own block (objectui#1
     // Collapsed: the member is out of the DOM, the ungrouped fields are not.
     expect(item('name')).toBeNull();
     for (const n of UNGROUPED) expect(item(n)).not.toBeNull();
-    expect(headingBlock('New group')!.contains(item('status'))).toBe(false);
+    expect(headingAbove('status')).toBe('Other');
 
-    // Opened from its own heading: the member comes back into the group's block.
+    // Opened from its own heading: the member comes back under the group.
     fireEvent.click(headingRow('New group')!);
     await waitFor(() => expect(item('name')).not.toBeNull());
-    expect(blockOf('name')).toBe(headingBlock('New group'));
-    expect(headingBlock('New group')!.contains(item('status'))).toBe(false);
+    expect(headingAbove('name')).toBe('New group');
+    expect(headingAbove('status')).toBe('Other');
   });
 
   it("visibleWhen gates only the group's own member", async () => {
@@ -182,5 +206,88 @@ describe.each(ARMS)('%s — the ungrouped fields are their own block (objectui#1
     expect(blockOf('name')).toBe(titled);
     expect(titled!.contains(item('status'))).toBe(false);
     expect(blockOf('technician')).toBe(blockOf('status'));
+  });
+});
+
+/**
+ * objectstack#33229 — the bucket is not only its own block, it is HEADED: a
+ * divider row with the translated `common.ungroupedSection` ("Other"), drawn
+ * only when declared groups precede it. Under a collapsed last group a
+ * headerless block still read as that group's hidden contents.
+ */
+describe.each(ARMS)('%s — the ungrouped block carries its own "Other" heading (objectstack#33229)', (_arm, Arm, formType) => {
+  const renderArm = (objectSchema: unknown, extra: Record<string, unknown> = {}, language?: string) => {
+    const tree = (
+      <Arm
+        schema={{
+          type: 'object-form',
+          formType,
+          objectName: 'work_order',
+          mode: 'create',
+          open: true,
+          ...extra,
+        }}
+        dataSource={makeDS(objectSchema)}
+      />
+    );
+    return render(
+      language
+        ? <I18nProvider persistLanguage={false} config={{ defaultLanguage: language, detectBrowserLanguage: false }}>{tree}</I18nProvider>
+        : tree,
+    );
+  };
+
+  const settle = () =>
+    waitFor(() => {
+      expect(item('technician')).not.toBeNull();
+    });
+
+  it('under a collapsed group, the ungrouped fields sit under "Other", not under the group', async () => {
+    renderArm(filerObject({ collapse: 'collapsed' }));
+    await settle();
+
+    const group = headingRow('New group');
+    const other = headingRow('Other');
+    expect(group).toBeTruthy();
+    expect(other).toBeTruthy();
+    expect(other).not.toBe(group);
+    // The group's member is collapsed away; the bucket's fields are under "Other".
+    expect(item('name')).toBeNull();
+    for (const n of UNGROUPED) expect(headingAbove(n)).toBe('Other');
+    // The heading follows the group (spec placement) and is no disclosure control.
+    expect(group!.compareDocumentPosition(other!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(other!.querySelector('[aria-expanded]')).toBeNull();
+  });
+
+  it('zh-CN reads the heading 其他', async () => {
+    renderArm(filerObject(), {}, 'zh-CN');
+    await settle();
+
+    expect(headingRow('其他')).toBeTruthy();
+    for (const n of UNGROUPED) expect(headingAbove(n, ['New group', '其他'])).toBe('其他');
+    expect(headingRow('Other')).toBeFalsy();
+  });
+
+  it('CONTROL: no declared group applies — the flat form gets no heading', async () => {
+    const flat = filerObject();
+    (flat.fields.name as Record<string, unknown>).group = undefined;
+    renderArm(flat);
+    await settle();
+
+    expect(headingRow('Other')).toBeFalsy();
+    expect(headingRow('New group')).toBeFalsy();
+  });
+
+  it('CONTROL: an authored untitled section stays headerless', async () => {
+    renderArm(filerObject(), {
+      sections: [
+        { name: 'curated', label: 'Curated', fields: ['name'] },
+        { fields: ['status', 'technician'] },
+      ],
+    });
+    await settle();
+
+    expect(headingRow('Curated')).toBeTruthy();
+    expect(headingRow('Other')).toBeFalsy();
   });
 });

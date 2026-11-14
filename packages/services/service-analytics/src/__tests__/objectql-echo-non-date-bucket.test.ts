@@ -233,7 +233,7 @@ describe('[#28977] the /analytics/sql dry run refuses a date bucket over a colum
         const label = JSON.stringify(query);
         const result = await analytics.query({ ...query } as never);
         expect(result.rows, label).toHaveLength(1);
-        expect(result.sql, label).toContain('COALESCE(SUM(amount), 0)');
+        expect(result.sql, label).toContain('COALESCE(SUM("amount"), 0)');
       }
       expect(aggregate, 'native: no engine aggregate').not.toHaveBeenCalled();
       // A grouped formula declines to the ObjectQL strategy, whose engine refuses it.

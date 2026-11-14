@@ -49,7 +49,7 @@ import { storedEntryRow } from './protocol-stored-overlay-types.js';
 import { viewIdentityPatch } from './protocol-view-normalization.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { declinesPackageLessRowAt, packageLessRowWithheld, pairMemberWithheldAt } from './protocol-exact-qualifier.js';
+import { declinesPackageLessRowAt, holdsNameForExactRead, packageLessRowWithheld, pairMemberWithheldAt } from './protocol-exact-qualifier.js';
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItems`; the method's docblock there is its contract. */
 export async function getMetaItems(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
@@ -194,6 +194,11 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // the list's membership stays the items the package ships. A stand-in
     // no layer seated is recorded here and dropped after the last merge.
     const unseated = packageId ? new WeakSet<object>() : undefined;
+    // [#32606] A moved edit's former owner is asked whether it ships any
+    // member of the name over the registry the list serves, not over the
+    // merge's base items, which a scoped list draws from one package alone.
+    const shipsName = (name: string, shipper: string): boolean =>
+        shippingPackageIds(host.shippedArtifactsOf(request.type, name)).has(shipper);
     try {
         // [#21442] The row set this read consults — the overlay cache
         // included — is {@link readActiveOverlayRows}, and each row is
@@ -294,7 +299,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                 return host.foldObjectExtendersFromRegistry(
                     request.type, (data as { name?: unknown } | null)?.name, data, onlyExtensionsOf,
                 );
-            }, unseated, { servedOverride, installed });
+            }, unseated, { servedOverride, installed, shipsName });
 
             // [#13407] Expand any aggregated `defineView` container this
             // READ just merged in, INLINE into this response's own `items`
@@ -602,7 +607,7 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                 items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                     if (data && typeof data === 'object') (data as any)._draft = true;
                     return data;
-                }, unseated, { servedOverride, installed });
+                }, unseated, { servedOverride, installed, shipsName });
             }
         } catch (error) {
             // [#5532] Same rule as the active-overlay read above. Serving
@@ -717,7 +722,12 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             if (!(it && typeof it === 'object' && unseated.has(it))) continue;
             const bound = boundPackageOf(it._packageId);
             if (bound === undefined || !pairsOfList.includes(bound) || typeof it.name !== 'string') continue;
-            if (host.shipsBundleName(request.type, it.name, packageId, typeShipping)
+            // [#33131 item 5] …or holds it for the exact read: a package
+            // holding the name only through its own stored row (no code
+            // artifact) is the holder its exact read serves the pair's added
+            // member at, so its list and execution list carry that member too.
+            if ((host.shipsBundleName(request.type, it.name, packageId, typeShipping)
+                || holdsNameForExactRead(host, request.type, it.name, packageId))
                 && host.baseServesBundleMember(request.type, it.name, packageId, it, typeShipping)
                 // [#31699 F2] …unless the row could be two holders' member.
                 && !pairMemberWithheldAt(host, request.type, it.name, packageId, bound, it)) {

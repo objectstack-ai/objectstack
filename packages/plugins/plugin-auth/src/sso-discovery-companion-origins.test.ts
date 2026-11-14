@@ -26,6 +26,7 @@ import {
   explainUntrustedDiscoveryEndpoint,
   ssoDiscoveryCompanionOrigins,
 } from './sso-discovery-companion-origins';
+import { runRegisterSsoProviderFromForm } from './register-sso-provider';
 // better-auth's first module load is paid at module load, not inside the first
 // clocked case (AGENTS.md, Build & Test). `AuthManager` reaches these through a
 // lazy `await import()`.
@@ -210,6 +211,80 @@ describe('registering an OIDC provider whose discovery names a userinfo host oth
     expect(fromSelf.status, await fromSelf.clone().text()).toBe(200);
   });
 });
+
+const GOOGLE_ISSUER = 'https://accounts.google.com';
+/** Google's endpoints: authorization on the issuer's host, the other three each on a host of its own. */
+const GOOGLE_ENDPOINTS = {
+  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+  tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  jwksEndpoint: 'https://www.googleapis.com/oauth2/v3/certs',
+  userInfoEndpoint: 'https://openidconnect.googleapis.com/v1/userinfo',
+};
+const GOOGLE_DISCOVERY = {
+  issuer: GOOGLE_ISSUER,
+  authorization_endpoint: GOOGLE_ENDPOINTS.authorizationEndpoint,
+  token_endpoint: GOOGLE_ENDPOINTS.tokenEndpoint,
+  jwks_uri: GOOGLE_ENDPOINTS.jwksEndpoint,
+  userinfo_endpoint: GOOGLE_ENDPOINTS.userInfoEndpoint,
+  response_types_supported: ['code'],
+  subject_types_supported: ['public'],
+  id_token_signing_alg_values_supported: ['RS256'],
+};
+
+/** The Register SSO Provider bridge (`POST /admin/sso/register`), re-dispatching to this manager. */
+function registerThroughBridge(rp: Rp, form: Record<string, unknown>) {
+  return runRegisterSsoProviderFromForm(
+    (request) => rp.manager.handleRequest(request),
+    new Request(`${AUTH}/admin/sso/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE, authorization: `Bearer ${rp.token}` },
+      body: JSON.stringify(form),
+    }),
+  );
+}
+
+const GOOGLE_FORM = { providerId: 'google-oidc', issuer: GOOGLE_ISSUER, domain: 'acme.com', clientId: 'client-id', clientSecret: 'client-secret' };
+
+describe('the Register SSO Provider bridge registers an IdP whose token endpoint is on another host (Google)', () => {
+  let restore: (() => void) | undefined;
+  afterEach(() => {
+    restore?.();
+    restore = undefined;
+    vi.restoreAllMocks();
+  });
+
+  it('naming the token, key and userinfo endpoints on the form registers it, and the provider keeps them', async () => {
+    restore = stubDiscovery({ [GOOGLE_ISSUER]: GOOGLE_DISCOVERY });
+    const rp = await makeRp();
+    const res = await registerThroughBridge(rp, { ...GOOGLE_FORM, ...GOOGLE_ENDPOINTS });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.data?.providerId).toBe('google-oidc');
+    const stored = await storedConfig(rp, 'google-oidc');
+    for (const [member, url] of Object.entries(GOOGLE_ENDPOINTS)) expect(stored[member], member).toBe(url);
+  });
+
+  it('CONTROL: without them the bridge relays the refusal, which names the token endpoint as a field the bridge takes; nothing is stored', async () => {
+    restore = stubDiscovery({ [GOOGLE_ISSUER]: GOOGLE_DISCOVERY });
+    const rp = await makeRp();
+    const res = await registerThroughBridge(rp, GOOGLE_FORM);
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('SSO_REGISTER_FAILED');
+    expect(res.body.error?.message).toContain(`The token_endpoint "${GOOGLE_ENDPOINTS.tokenEndpoint}" is not trusted`);
+    expect(res.body.error?.message).toContain('POST /admin/sso/register, takes it as the field "tokenEndpoint"');
+    expect(rp.engine.tables.get('sys_sso_provider') ?? []).toEqual([]);
+  });
+
+  it('CONTROL: naming the token endpoint alone moves the refusal on to the next foreign endpoint, the key set', async () => {
+    restore = stubDiscovery({ [GOOGLE_ISSUER]: GOOGLE_DISCOVERY });
+    const rp = await makeRp();
+    const res = await registerThroughBridge(rp, { ...GOOGLE_FORM, tokenEndpoint: GOOGLE_ENDPOINTS.tokenEndpoint });
+    expect(res.status).toBe(400);
+    expect(res.body.error?.message).toContain(`The jwks_uri "${GOOGLE_ENDPOINTS.jwksEndpoint}" is not trusted`);
+    expect(res.body.error?.message).toContain('takes it as the field "jwksEndpoint"');
+    expect(rp.engine.tables.get('sys_sso_provider') ?? []).toEqual([]);
+  });
+});
+
 
 describe('the companion-origin table', () => {
   it('names Graph for an https issuer on login.microsoftonline.com only, by exact host', () => {

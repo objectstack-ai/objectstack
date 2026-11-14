@@ -45,8 +45,9 @@
  * with its flow's one holder; and a resume or a credential read of a name two
  * packages hold reads the row's package (a row with none answers only while
  * one package holds the name). A null left by this backfill still reads by
- * name. The connection store (R11) still reads by name, until the connector
- * child moves it. S4's upgrade report reads the columns too. R11's column is a
+ * name. The connection store (R11) reads by package and name (#31699): a row
+ * this backfill leaves null answers a package's instance only where the name's
+ * durable resolution binds it to that package. S4's upgrade report reads the columns too. R11's column is a
  * part of its table's unique key (#31699), so a bind there can meet a unique
  * violation (below); no other reference's key carries its column.
  *

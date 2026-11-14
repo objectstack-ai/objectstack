@@ -309,8 +309,8 @@ for (const cell of CELLS) {
         expect(await statement({ ...query, cube: NO_JOIN })).toBe(await statement(query));
       });
 
-      it('CONTROL a statement that joins nothing keeps its bare columns — on either cube, and when an absorbed `$or` takes its join back', async () => {
-        const bare = `SELECT note AS "note", COUNT(*) AS "count" FROM "${DEAL}" GROUP BY note`;
+      it('CONTROL a statement that joins nothing keeps its columns unqualified — on either cube, and when an absorbed `$or` takes its join back', async () => {
+        const bare = `SELECT "note" AS "note", COUNT(*) AS "count" FROM "${DEAL}" GROUP BY "note"`;
         for (const cube of [NO_JOIN, DECLARED]) {
           const query = { cube, measures: ['count'], dimensions: ['note'] };
           await servedOnBothFaces(query, ['note', 'count'], [['x', 3], ['y', 1]]);
