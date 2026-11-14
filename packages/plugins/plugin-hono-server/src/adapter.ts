@@ -39,6 +39,15 @@ import type { Socket } from 'node:net';
 type OwedResponses = Set<ServerResponse>;
 import { matchesRoutePattern } from './route-pattern';
 import { readRequestBody, type RequestBodyReading, type RequestBodyRefusal } from './request-body';
+import {
+    assertMaxRequestBodyBytes,
+    installRequestBodyLimit,
+    requestBodyGuardOf,
+    requestBodyTooLargeAnswer,
+    requestBodyTooLargeEnvelope,
+    resolveMaxRequestBodyBytes,
+    RequestBodyTooLarge,
+} from './body-limit';
 import { compressResponse } from './response-compression';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
 // is the closed union (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) a registered
@@ -713,6 +722,12 @@ export class HonoHttpServer implements IHttpServer {
      * the default is a REAL logger and not a no-op.
      */
     private logger: Logger = createLogger({ name: 'hono' });
+    /**
+     * The request-body limit (`./body-limit.ts`): the default or
+     * `OS_HTTP_MAX_BODY_BYTES` at construction, replaced by
+     * {@link setMaxRequestBodyBytes}. Read per request.
+     */
+    private maxRequestBodyBytes: number = resolveMaxRequestBodyBytes();
 
     constructor(
         private port: number = 3000,
@@ -736,6 +751,24 @@ export class HonoHttpServer implements IHttpServer {
         this.app = new Hono();
         this.installErrorEnvelopeSeam();
         this.installResponseCompressionSeam();
+        // Inside the compression seam, ahead of every other middleware and
+        // route, so every reader of a request body reads through the limit.
+        installRequestBodyLimit(this.app, () => this.maxRequestBodyBytes);
+    }
+
+    /**
+     * Set the request-body limit, in bytes (`./body-limit.ts`): a body over it
+     * is not read past it and is answered `413 PAYLOAD_TOO_LARGE`. A value that
+     * is not a positive whole number throws. Upload doors that read
+     * `rawBody()` keep their own bound.
+     */
+    setMaxRequestBodyBytes(bytes: number): void {
+        this.maxRequestBodyBytes = assertMaxRequestBodyBytes(bytes, 'maxRequestBodyBytes');
+    }
+
+    /** The request-body limit this server answers under, in bytes. */
+    getMaxRequestBodyBytes(): number {
+        return this.maxRequestBodyBytes;
     }
 
     /**
@@ -827,7 +860,8 @@ export class HonoHttpServer implements IHttpServer {
         // invented `{}`. `readRequestBody` (`./request-body.ts`) says what each
         // media type answers and why the refusal waits for `req.body` to be read.
         let bodyReading: RequestBodyReading = await readRequestBody(c);
-        let refusedBodyRead: RequestBodyRefusal | undefined;
+        let refusedBodyRead: RequestBodyRefusal | RequestBodyTooLarge | undefined;
+        let rawBodyRead: Promise<Buffer> | undefined;
 
         _endParse?.();
 
@@ -866,9 +900,30 @@ export class HonoHttpServer implements IHttpServer {
             headers: rawHeaders,
             method: c.req.method,
             path: c.req.path,
-            rawBody: async () => {
-                const ab = await c.req.arrayBuffer();
-                return Buffer.from(ab);
+            /**
+             * A byte door's read: the ORIGINAL body, unbounded by the
+             * request-body limit, because the door bounds it by its own
+             * (`./body-limit.ts`). Hono's body cache once a pre-read of a body
+             * within the limit went through it.
+             *
+             * A route that read `body`, was refused it for size, and then
+             * reads `rawBody()` is a door taking over the read under its own
+             * bound (an upload door's form larger than the request-body
+             * limit), so that refusal no longer stands as the answer. Every
+             * other refusal still does.
+             */
+            rawBody: () => {
+                if (refusedBodyRead instanceof RequestBodyTooLarge) refusedBodyRead = undefined;
+                // Repeatable: a second call answers the same bytes as the first.
+                rawBodyRead ??= (async () => {
+                    const original = requestBodyGuardOf(c)?.readOriginal();
+                    if (original) {
+                        const bytes = await original;
+                        return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+                    }
+                    return Buffer.from(await c.req.arrayBuffer());
+                })();
+                return rawBodyRead;
             },
             /**
              * The transport's own peer address (`IHttpRequest.remoteAddress`)
@@ -1017,7 +1072,7 @@ export class HonoHttpServer implements IHttpServer {
         // arm's 500, a classification's own dialect, or nothing. The refusal
         // is the answer, and it is not this handler's failure to report.
         if (refusedBodyRead) {
-            const envelope = declaredEnvelopeForThrow(refusedBodyRead);
+            const envelope = requestBodyTooLargeAnswer(refusedBodyRead) ?? declaredEnvelopeForThrow(refusedBodyRead);
             if (envelope) {
                 closeStream();
                 return { response: c.json(envelope.body, envelope.status), failed: false };
@@ -1248,6 +1303,14 @@ export class HonoHttpServer implements IHttpServer {
      */
     private installErrorEnvelopeSeam(): void {
         this.app.onError((err: Error, c: any) => {
+            // A read the request-body limit refused (`./body-limit.ts`) is the
+            // request's answer, and no transport escape to report.
+            const guard = requestBodyGuardOf(c);
+            if (guard?.tripped()) {
+                const tooLarge = requestBodyTooLargeEnvelope(guard.limit);
+                return c.json(tooLarge.body, tooLarge.status);
+            }
+
             // Hono's own precedence, unchanged — see the docblock.
             if (err !== null && typeof err === 'object' && 'getResponse' in err) {
                 const declared = (err as unknown as { getResponse(): Response }).getResponse();

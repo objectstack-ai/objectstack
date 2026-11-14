@@ -403,7 +403,9 @@ describe('an approver\'s agent lists the approvals waiting on them over MCP (#32
     expect(listed.isError, listed.text).toBe(false);
     const names = (listed.payload.objects as any[]).map((o) => o.name);
     expect(names).toContain(REQUEST);
-    expect(names.filter((n) => /^sys_/i.test(n))).toEqual([REQUEST]);
+    // `sys_user` declares the same read opt-in (a member's agent finds a
+    // colleague for a person field); no other system object is listed.
+    expect(names.filter((n) => /^sys_/i.test(n)).sort()).toEqual([REQUEST, 'sys_user'].sort());
 
     const described = await tool({ bearer: approver }, 'describe_object', { objectName: REQUEST });
     expect(described.isError, described.text).toBe(false);

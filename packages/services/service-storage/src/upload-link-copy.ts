@@ -15,14 +15,17 @@
  *
  * Two halves:
  *
- *  - The page's own copy: heading, instructions, the expiry, the picker and
- *    the status lines its script writes.
+ *  - The page's own copy: heading, instructions, the record and field rows
+ *    (ruling B′), the expiry, the picker and the status lines its script
+ *    writes, the expired line included.
  *  - The refusals the link's `PUT` can answer, which the page shows as the
  *    upload's outcome. The door composes them here, by the refusal's `code`,
  *    and sends them as the envelope's `userMessage`; `message` keeps the
  *    diagnostic wording. ⛔ None of them names the record, the object or the
- *    field: the page names none of those (#30892), and the refusal is page
- *    copy. A code with no sentence here is answered with the producer's own
+ *    field: the refusal answers whoever sends the `PUT`, so it names nothing
+ *    (the page's record and field rows, ruling B′, are composed from names
+ *    read as the link's own user when the page opens, never from a refusal).
+ *    A code with no sentence here is answered with the producer's own
  *    text behind a lead-in that says the upload was refused, so the reader
  *    knows what the untranslated part is (the `storage-test-copy.ts` rule).
  */
@@ -94,6 +97,28 @@ export interface UploadLinkCopy extends UploadLinkRefusalCopy {
   unusableHeading: string;
   /** A refusal with no sentence above; `reason` is the producer's own text, verbatim. */
   refused(reason: string): string;
+  /**
+   * [#32712] Ruling B′: the two rows that say where the file goes, shown to
+   * the link's own user with the names read as that user when the page opens
+   * (`UploadLinkNames`). The row headings.
+   */
+  recordRow: string;
+  goesIntoRow: string;
+  /** The record row: the object's label and the record's title. */
+  recordTitled(objectLabel: string, title: string): string;
+  /** The record row when no title can be shown: the object's label only. */
+  recordOfObject(objectLabel: string): string;
+  /** The record row for a link that names no record yet ([#32686]). */
+  recordNotYetCreated(objectLabel: string): string;
+  /** The goes-into row: a file field, by its label. */
+  intoField(fieldLabel: string): string;
+  /** The goes-into row: the record's attachments. */
+  intoAttachments: string;
+  /**
+   * [#32712] The page's own line once the expiry it printed has passed: the
+   * page disables Send rather than send a file into a link it knows is dead.
+   */
+  expired: string;
 }
 
 export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
@@ -134,6 +159,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'Nothing was attached: the record this link was made for no longer exists, or you can no longer reach it.',
     unavailable: 'The upload cannot be taken right now. Try again in a few minutes.',
     refused: (reason) => reason,
+    recordRow: 'Record',
+    goesIntoRow: 'Goes into',
+    recordTitled: (objectLabel, title) => `${objectLabel} "${title}"`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `a new ${objectLabel}, not created yet`,
+    intoField: (fieldLabel) => `the "${fieldLabel}" field`,
+    intoAttachments: 'Attachments',
+    expired: 'This link has expired. Ask for a new link.',
   },
   'zh-CN': {
     lang: 'zh-CN',
@@ -170,6 +203,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: '未添加任何文件：此链接对应的记录已不存在，或你已无法访问它。',
     unavailable: '暂时无法接收上传。请几分钟后重试。',
     refused: (reason) => `上传被拒绝：${reason}`,
+    recordRow: '记录',
+    goesIntoRow: '放入',
+    recordTitled: (objectLabel, title) => `${objectLabel}「${title}」`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `一条新的${objectLabel}（尚未创建）`,
+    intoField: (fieldLabel) => `「${fieldLabel}」字段`,
+    intoAttachments: '附件',
+    expired: '此链接已过期。请索取新的链接。',
   },
   'zh-Hant': {
     lang: 'zh-Hant',
@@ -206,6 +247,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: '未新增任何檔案：此連結對應的記錄已不存在，或你已無法存取它。',
     unavailable: '暫時無法接收上傳。請幾分鐘後重試。',
     refused: (reason) => `上傳遭拒：${reason}`,
+    recordRow: '記錄',
+    goesIntoRow: '放入',
+    recordTitled: (objectLabel, title) => `${objectLabel}「${title}」`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `一筆新的${objectLabel}（尚未建立）`,
+    intoField: (fieldLabel) => `「${fieldLabel}」欄位`,
+    intoAttachments: '附件',
+    expired: '此連結已過期。請索取新的連結。',
   },
   'ja-JP': {
     lang: 'ja-JP',
@@ -245,6 +294,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: '何も追加されませんでした: このリンクのレコードは存在しないか、アクセスできなくなっています。',
     unavailable: '現在アップロードを受け付けられません。数分後にもう一度お試しください。',
     refused: (reason) => `アップロードが拒否されました: ${reason}`,
+    recordRow: 'レコード',
+    goesIntoRow: '保存先',
+    recordTitled: (objectLabel, title) => `${objectLabel}「${title}」`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `新しい${objectLabel}（まだ作成されていません）`,
+    intoField: (fieldLabel) => `「${fieldLabel}」フィールド`,
+    intoAttachments: '添付ファイル',
+    expired: 'このリンクは期限切れです。新しいリンクを依頼してください。',
   },
   ko: {
     lang: 'ko',
@@ -284,6 +341,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: '아무것도 추가되지 않았습니다: 이 링크의 레코드가 더 이상 없거나 더 이상 접근할 수 없습니다.',
     unavailable: '지금은 업로드를 받을 수 없습니다. 몇 분 후에 다시 시도하세요.',
     refused: (reason) => `업로드가 거부되었습니다: ${reason}`,
+    recordRow: '레코드',
+    goesIntoRow: '저장 위치',
+    recordTitled: (objectLabel, title) => `${objectLabel} “${title}”`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `새 ${objectLabel} (아직 생성되지 않음)`,
+    intoField: (fieldLabel) => `"${fieldLabel}" 필드`,
+    intoAttachments: '첨부 파일',
+    expired: '이 링크는 만료되었습니다. 새 링크를 요청하세요.',
   },
   'es-ES': {
     lang: 'es-ES',
@@ -322,6 +387,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'No se ha adjuntado nada: el registro de este enlace ya no existe o ya no tienes acceso a él.',
     unavailable: 'Ahora mismo no se puede recibir la subida. Vuelve a intentarlo dentro de unos minutos.',
     refused: (reason) => `Se ha rechazado la subida: ${reason}`,
+    recordRow: 'Registro',
+    goesIntoRow: 'Se guarda en',
+    recordTitled: (objectLabel, title) => `${objectLabel} «${title}»`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `Un registro nuevo de tipo ${objectLabel}, todavía sin crear`,
+    intoField: (fieldLabel) => `El campo «${fieldLabel}»`,
+    intoAttachments: 'Archivos adjuntos',
+    expired: 'Este enlace ha caducado. Pide un enlace nuevo.',
   },
   ar: {
     lang: 'ar',
@@ -358,6 +431,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'لم يُرفق شيء: سجل هذا الرابط لم يعد موجودًا، أو لم يعد بإمكانك الوصول إليه.',
     unavailable: 'لا يمكن استقبال الرفع الآن. حاول مرة أخرى بعد بضع دقائق.',
     refused: (reason) => `رُفض الرفع: ${reason}`,
+    recordRow: 'السجل',
+    goesIntoRow: 'يُحفظ في',
+    recordTitled: (objectLabel, title) => `${objectLabel} «${title}»`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `سجل جديد من نوع ${objectLabel}، لم يُنشأ بعد`,
+    intoField: (fieldLabel) => `الحقل «${fieldLabel}»`,
+    intoAttachments: 'المرفقات',
+    expired: 'انتهت صلاحية هذا الرابط. اطلب رابطًا جديدًا.',
   },
   fr: {
     lang: 'fr',
@@ -397,6 +478,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'Rien n’a été joint : l’enregistrement de ce lien n’existe plus, ou vous n’y avez plus accès.',
     unavailable: 'L’envoi ne peut pas être reçu pour le moment. Réessayez dans quelques minutes.',
     refused: (reason) => `L’envoi a été refusé : ${reason}`,
+    recordRow: 'Enregistrement',
+    goesIntoRow: 'Destination',
+    recordTitled: (objectLabel, title) => `${objectLabel} « ${title} »`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `Un nouvel enregistrement de type ${objectLabel}, pas encore créé`,
+    intoField: (fieldLabel) => `Le champ « ${fieldLabel} »`,
+    intoAttachments: 'Pièces jointes',
+    expired: 'Ce lien a expiré. Demandez un nouveau lien.',
   },
   'pt-BR': {
     lang: 'pt-BR',
@@ -435,6 +524,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'Nada foi anexado: o registro deste link não existe mais, ou você não tem mais acesso a ele.',
     unavailable: 'O envio não pode ser recebido agora. Tente novamente em alguns minutos.',
     refused: (reason) => `O envio foi recusado: ${reason}`,
+    recordRow: 'Registro',
+    goesIntoRow: 'Vai para',
+    recordTitled: (objectLabel, title) => `${objectLabel} “${title}”`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `Um novo registro de ${objectLabel}, ainda não criado`,
+    intoField: (fieldLabel) => `O campo "${fieldLabel}"`,
+    intoAttachments: 'Anexos',
+    expired: 'Este link expirou. Peça um novo link.',
   },
   ru: {
     lang: 'ru',
@@ -474,6 +571,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'Ничего не прикреплено: записи этой ссылки больше нет, или у вас больше нет к ней доступа.',
     unavailable: 'Сейчас загрузку принять невозможно. Попробуйте ещё раз через несколько минут.',
     refused: (reason) => `Загрузка отклонена: ${reason}`,
+    recordRow: 'Запись',
+    goesIntoRow: 'Куда',
+    recordTitled: (objectLabel, title) => `${objectLabel} «${title}»`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `Новая запись типа «${objectLabel}», ещё не создана`,
+    intoField: (fieldLabel) => `Поле «${fieldLabel}»`,
+    intoAttachments: 'Вложения',
+    expired: 'Срок действия этой ссылки истёк. Попросите новую ссылку.',
   },
   de: {
     lang: 'de',
@@ -513,6 +618,14 @@ export const UPLOAD_LINK_COPY: Record<CopyLocale, UploadLinkCopy> = {
     recordGone: 'Es wurde nichts angehängt: Der Datensatz dieses Links existiert nicht mehr, oder Sie haben keinen Zugriff mehr darauf.',
     unavailable: 'Der Upload kann gerade nicht angenommen werden. Versuchen Sie es in einigen Minuten erneut.',
     refused: (reason) => `Der Upload wurde abgelehnt: ${reason}`,
+    recordRow: 'Datensatz',
+    goesIntoRow: 'Ziel',
+    recordTitled: (objectLabel, title) => `${objectLabel} „${title}“`,
+    recordOfObject: (objectLabel) => objectLabel,
+    recordNotYetCreated: (objectLabel) => `Ein neuer Datensatz vom Typ ${objectLabel}, noch nicht angelegt`,
+    intoField: (fieldLabel) => `Das Feld „${fieldLabel}“`,
+    intoAttachments: 'Anhänge',
+    expired: 'Dieser Link ist abgelaufen. Fordern Sie einen neuen Link an.',
   },
 };
 

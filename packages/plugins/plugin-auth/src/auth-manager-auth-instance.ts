@@ -151,6 +151,7 @@ export interface AuthInstanceHost {
   getAudience: AuthManager['getAudience'];
   getCanonicalOrigin: AuthManager['getCanonicalOrigin'];
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
+  getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
   hasExistingUserFor: AuthManager['hasExistingUserFor'];
   readonly idpLocale: AuthManager['idpLocale'];
@@ -161,6 +162,7 @@ export interface AuthInstanceHost {
   isOperatorProvisioning: AuthManager['isOperatorProvisioning'];
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
   isSsoDomainVerificationEnabled: AuthManager['isSsoDomainVerificationEnabled'];
+  isSsoOnlyMode: AuthManager['isSsoOnlyMode'];
   isSsoWired: AuthManager['isSsoWired'];
   linkingContext: AuthManager['linkingContext'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
@@ -824,12 +826,14 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           assertSsoSignOutOfIdpSupported: (...a) => this.assertSsoSignOutOfIdpSupported(...a),
           get config() { return readConfig(); },
           existingAddressSignUpAnswersSuccess: (...a) => this.existingAddressSignUpAnswersSuccess(...a),
+          getDataEngine: (...a) => this.getDataEngine(...a),
           hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),
           isAuthGateActive: (...a) => this.isAuthGateActive(...a),
           isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
           isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
           isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
           isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
+          isSsoOnlyMode: (...a) => this.isSsoOnlyMode(...a),
           resolveActor: (...a) => this.resolveActor(...a),
           resolvePasswordChangeUserId: (...a) => this.resolvePasswordChangeUserId(...a),
           roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),

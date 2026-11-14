@@ -76,7 +76,7 @@
  */
 // Pays the lint root's first load at collection, never inside a clocked case.
 import './__fixtures__/lint-root-preload.testkit.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
@@ -777,4 +777,240 @@ describe('[#30504] an app\'s packaged base carries its contributed navigation, s
             expect(translate(pair), 'the pair\'s translation').toEqual({ nav_custom: '自定义入口', nav_users: '用户' });
         });
     }
+});
+
+/**
+ * [#33131 items 1–2, ADR-0150 D4, epic #31527 red line 2] Two packages of two
+ * namespaces ship one name of a type a `.custom` pair can override, and ONE of
+ * them declares its override in its own pair. Its address serves its override
+ * and the other holder's address serves the other's shipped item, whichever
+ * package registered first: the by-name read naming each holder, the layered
+ * read's `effective`, the env-wide list, and the boot census
+ * (`metadata_sealed_overlay_unserved`), which names neither holder's declared
+ * override and still names a stranger's stored row of the name.
+ *
+ * FROM (`main`), item 1: the six sealed types (page, app, dataset, doc, book,
+ * mapping) judged a declared override against the name's first-registered
+ * shipper alone (`declinesStoredRow`), so the SECOND holder's override was
+ * declined at its own address (its shipped item served), dropped from the
+ * list, and named by the census for deletion. Item 2 (dashboard, report,
+ * email template) is measured beside them: the list filter judges those rows by
+ * their own envelope, not the first shipper's.
+ */
+describe('[#33131] two namespaces ship one name, one declares its override: each holder\'s address serves its own item', () => {
+    const ALPHA = 'com.probe.alpha';
+    const BETA = 'com.probe.beta';
+    const STRANGER = 'com.probe.stranger';
+    const nsOf = (id: string) => (id === ALPHA ? 'alpha' : 'beta');
+    /** Per type: a body of the shared name in namespace `ns`, and the manifest collection that ships it. */
+    const SHARED = [
+        { type: 'page', collection: 'pages', body: (_ns: string, label: string) => ({ name: 'shared_settings', label, type: 'app', regions: [] }) },
+        { type: 'app', collection: 'apps', body: (_ns: string, label: string) => ({ name: 'shared_app', label }) },
+        {
+            type: 'dataset', collection: 'datasets', body: (ns: string, label: string) => ({
+                name: 'shared_metrics', label, object: `${ns}_task`,
+                dimensions: [{ name: 'status', label: 'Status', field: 'status', type: 'string' }],
+                measures: [{ name: 'task_count', label: 'Tasks', aggregate: 'count' }],
+            }),
+        },
+        { type: 'doc', collection: 'docs', body: (_ns: string, label: string) => ({ name: 'shared_index', label, content: '# Index' }) },
+        {
+            type: 'book', collection: 'books', body: (_ns: string, label: string) => ({
+                name: 'shared_manual', label, groups: [{ key: 'start', label: 'Start', pages: ['shared_index'] }],
+            }),
+        },
+        {
+            type: 'mapping', collection: 'mappings', body: (ns: string, label: string) => ({
+                name: 'shared_feed', label, sourceFormat: 'csv', targetObject: `${ns}_task`,
+                fieldMapping: [{ source: 'Title', target: 'title' }], mode: 'insert',
+            }),
+        },
+        { type: 'dashboard', collection: 'dashboards', body: (_ns: string, label: string) => ({ name: 'shared_board', label, columns: 12, widgets: [] }) },
+        {
+            type: 'report', collection: 'reports', body: (_ns: string, label: string) => ({
+                name: 'shared_report', label, type: 'summary', dataset: 'shared_metrics', rows: ['status'], values: ['task_count'],
+            }),
+        },
+        { type: 'email_template', collection: 'emailTemplates', body: (_ns: string, label: string) => ({ name: 'shared_digest', label, subject: 'Digest', bodyHtml: '<p>Digest</p>' }) },
+    ] as const;
+    const SEALED: ReadonlySet<string> = new Set(['page', 'app', 'dataset', 'doc', 'book', 'mapping']);
+    const holderManifest = (id: string) => {
+        const ns = nsOf(id);
+        const manifest: Record<string, unknown> = {
+            id, name: ns, version: '1.0.0', namespace: ns,
+            objects: [{
+                name: `${ns}_task`, label: 'Task', sharingModel: 'private',
+                fields: { title: { name: 'title', label: 'Title', type: 'text' }, status: { name: 'status', label: 'Status', type: 'text' } },
+            }],
+        };
+        for (const t of SHARED) manifest[t.collection] = [t.body(ns, `${SHIPPED} ${ns}`)];
+        return manifest;
+    };
+
+    /** One boot over `stores`: the holders registered in `order`, the boot hydration, then each holder's pair. */
+    async function bootHolders(stores: Stores, order: readonly string[]) {
+        const engine = new ObjectQL();
+        engine.registerDriver(makeMemoryDriver(stores).driver, true);
+        await engine.init();
+        engine.registry.registerObject(sysMetadataObject, 'test-package');
+        for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+            engine.registry.registerObject(o as any, 'test-package');
+        }
+        for (const id of order) engine.registerApp(holderManifest(id));
+        const protocol: any = new ObjectStackProtocolImplementation(engine, () => new Map());
+        const load = await protocol.loadMetaFromDb();
+        expect(load.errors, 'the boot hydration').toBe(0);
+        for (const id of order) await protocol.ensureCustomizationPackage({ basePackageId: id });
+        return { engine, protocol };
+    }
+    /** `holder`'s declared override of every shared type, published into its own pair. */
+    async function overrideAll(protocol: any, holder: string) {
+        for (const t of SHARED) {
+            const item = { ...t.body(nsOf(holder), `${EDITED} ${nsOf(holder)}`), overrides: { package: holder, basedOn: '1.0.0' } };
+            const name = item.name;
+            const saved = await protocol.saveMetaItem({ type: t.type, name, item, mode: 'draft', packageId: `${holder}.custom` });
+            expect(saved?.success, `the ${t.type} draft save into ${nsOf(holder)}'s pair`).toBe(true);
+            const published = await protocol.publishMetaItem({ type: t.type, name, packageId: `${holder}.custom` });
+            expect(published?.success, `the ${t.type} publish into ${nsOf(holder)}'s pair`).toBe(true);
+        }
+    }
+    /** Per type, every reading at `holder`'s address: the by-name read and the layered read's `effective`. */
+    async function atAddress(protocol: any, holder: string) {
+        const out: Record<string, unknown> = {};
+        for (const t of SHARED) {
+            const name = t.body('x', '').name;
+            out[t.type] = [
+                (await protocol.getMetaItem({ type: t.type, name, packageId: holder }))?.item?.label,
+                (await protocol.getMetaItemLayered({ type: t.type, name, packageId: holder }))?.effective?.label,
+            ];
+        }
+        return out;
+    }
+    const servedAt = (label: string) => Object.fromEntries(SHARED.map((t) => [t.type, [label, label]]));
+    /** Per type, the env-wide list's entries of the shared name, as `label/_packageId`. */
+    async function listed(protocol: any) {
+        const out: Record<string, string[]> = {};
+        for (const t of SHARED) {
+            const name = t.body('x', '').name;
+            out[t.type] = (((await protocol.getMetaItems({ type: t.type }))?.items ?? []) as any[])
+                .filter((i) => i?.name === name).map(reading).sort() as string[];
+        }
+        return out;
+    }
+    /** The names the boot census reports as unserved, per type, on a restart over `stores`. */
+    async function census(stores: Stores, order: readonly string[]) {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            await bootHolders(stores, order);
+            const line = warn.mock.calls.map((c) => String(c[0])).find((l) => l.includes('metadata_sealed_overlay_unserved'));
+            return line === undefined ? [] : [...line.matchAll(/(\w+)×\d+ \(([^)]*)\)/g)].map((m) => `${m[1]}:${m[2]}`).sort();
+        } finally {
+            warn.mockRestore();
+        }
+    }
+
+    for (const order of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+        const first = nsOf(order[0]);
+        for (const [overridden, other] of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+            const edited = `${EDITED} ${nsOf(overridden)}`;
+            const shipped = `${SHIPPED} ${nsOf(other)}`;
+            it(`${first} registered first, only ${nsOf(overridden)} overridden: each address serves its own holder's item, at once and after a restart`, async () => {
+                const stores: Stores = new Map();
+                const booted = await bootHolders(stores, order);
+                await overrideAll(booted.protocol, overridden);
+                const expectedList = Object.fromEntries(SHARED.map((t) => [t.type, [`${edited}/${overridden}`, `${shipped}/${other}`].sort()]));
+                for (const [when, protocol] of [['at once', booted.protocol], ['after a restart', (await bootHolders(stores, order)).protocol]] as const) {
+                    expect(await atAddress(protocol, overridden), `${nsOf(overridden)}'s address, ${when}`).toEqual(servedAt(edited));
+                    expect(await atAddress(protocol, other), `${nsOf(other)}'s address, ${when}`).toEqual(servedAt(shipped));
+                    expect(await listed(protocol), `the env-wide list, ${when}`).toEqual(expectedList);
+                }
+                // The census names no holder's declared override.
+                expect(await census(stores, order)).toEqual([]);
+            });
+
+            it(`${first} registered first, only ${nsOf(overridden)} overridden, each holder disabled in turn: the enabled holder's own item at its address`, async () => {
+                const { engine, protocol } = await bootHolders(new Map(), order);
+                await overrideAll(protocol, overridden);
+                const registry = engine.registry as any;
+                for (const [disabled, enabled, label] of [[other, overridden, edited], [overridden, other, shipped]] as const) {
+                    registry.disablePackage(disabled);
+                    expect(await atAddress(protocol, enabled), `${nsOf(enabled)}, ${nsOf(disabled)} disabled`).toEqual(servedAt(label));
+                    registry.enablePackage(disabled);
+                }
+            });
+        }
+
+        // [#33131 contract review N1] The read naming no package. Two enabled holders: refused 409 (never a
+        // pick). One holder disabled: the enabled holder's own item, its declared override when it has one.
+        // FROM `main`: with the first-registered holder disabled, the second holder's override of a sealed type
+        // was declined there too (its shipped item served). `doc` is left out: its bare read is not a
+        // package-scoped read, and this change does not move it (measured identical on `main`).
+        for (const overriddenSet of [[ALPHA], [BETA], [ALPHA, BETA]] as const) {
+            it(`${first} registered first, ${overriddenSet.map(nsOf).join(' and ')} overridden: the read naming no package refuses 409 with both holders, and serves the enabled holder's own item with the other disabled`, async () => {
+                const { engine, protocol } = await bootHolders(new Map(), order);
+                for (const holder of overriddenSet) await overrideAll(protocol, holder);
+                const BARE = SHARED.filter((t) => t.type !== 'doc');
+                const bare = async () => {
+                    const out: Record<string, unknown> = {};
+                    for (const t of BARE) {
+                        const name = t.body('x', '').name;
+                        try { out[t.type] = (await protocol.getMetaItem({ type: t.type, name }))?.item?.label; } catch (e) { out[t.type] = (e as { status?: number }).status; }
+                    }
+                    return out;
+                };
+                const every = (answer: unknown) => Object.fromEntries(BARE.map((t) => [t.type, answer]));
+                expect(await bare(), 'both holders enabled').toEqual(every(409));
+                const registry = engine.registry as any;
+                for (const [disabled, enabled] of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+                    registry.disablePackage(disabled);
+                    const label = `${(overriddenSet as readonly string[]).includes(enabled) ? EDITED : SHIPPED} ${nsOf(enabled)}`;
+                    expect(await bare(), `${nsOf(disabled)} disabled`).toEqual(every(label));
+                    registry.enablePackage(disabled);
+                }
+            });
+        }
+
+        it(`${first} registered first, both overridden: each address serves its own override, and the census names neither`, async () => {
+            const stores: Stores = new Map();
+            const { protocol } = await bootHolders(stores, order);
+            await overrideAll(protocol, ALPHA);
+            await overrideAll(protocol, BETA);
+            expect(await atAddress(protocol, ALPHA)).toEqual(servedAt(`${EDITED} alpha`));
+            expect(await atAddress(protocol, BETA)).toEqual(servedAt(`${EDITED} beta`));
+            expect(await census(stores, order)).toEqual([]);
+        });
+
+        it(`CONTROL, ${first} registered first: a stranger's row declaring a holder is no override, stays unserved, and the census names it`, async () => {
+            const stores: Stores = new Map();
+            const { protocol } = await bootHolders(stores, order);
+            await protocol.installPackage({
+                manifest: { id: STRANGER, name: 'stranger', version: '0.1.0', type: 'app', dependencies: { [ALPHA]: '*', [BETA]: '*' } },
+            });
+            for (const t of SHARED) {
+                if (!SEALED.has(t.type)) continue;
+                stores.get('sys_metadata')!.set(`stranger_${t.type}`, {
+                    id: `stranger_${t.type}`, type: t.type, name: t.body('x', '').name, organization_id: null, package_id: STRANGER,
+                    state: 'active', version: 1,
+                    metadata: JSON.stringify({ ...t.body('alpha', RESIDUE), overrides: { package: ALPHA, basedOn: '1.0.0' } }),
+                });
+            }
+            const restarted = await bootHolders(stores, order);
+            const atAlpha = await atAddress(restarted.protocol, ALPHA);
+            for (const t of SHARED) {
+                if (SEALED.has(t.type)) expect(atAlpha[t.type], t.type).toEqual([`${SHIPPED} alpha`, `${SHIPPED} alpha`]);
+            }
+            expect(await census(stores, order)).toEqual([...SEALED].map((type) => {
+                const name = SHARED.find((t) => t.type === type)!.body('x', '').name;
+                return `${type}:${name}`;
+            }).sort());
+        });
+    }
+
+    it('CONTROL: one namespace ships the names, with its declared override: its override at its address, and the census names none', async () => {
+        const stores: Stores = new Map();
+        const { protocol } = await bootHolders(stores, [ALPHA]);
+        await overrideAll(protocol, ALPHA);
+        expect(await atAddress(protocol, ALPHA)).toEqual(servedAt(`${EDITED} alpha`));
+        expect(await census(stores, [ALPHA])).toEqual([]);
+    });
 });

@@ -404,21 +404,26 @@ create/update payload.
 
 ## Tools
 
-- **list_objects()** — list available objects (system \`sys_*\` objects are hidden).
+- **list_objects()** — list available objects. System \`sys_*\` objects are hidden,
+  except the few declared readable by agents, such as \`sys_user\` (read only).
 - **describe_object({ objectName })** — an object's fields and features.
-- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject? })** — check a CEL
+- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject?, startCondition?, field? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
   unknown fields/functions; at a \`formula\` or \`validation\` site, every other
   refusal the publish gate gives there: a reference read both through the
   relationship and as a value, more than one hop, a hop to a field the target
   does not declare or into a stored-metadata table, and at a \`validation\` site
-  an unguarded nullable field or a read of \`parent\`) and advisory warnings
+  an unguarded nullable field or a read of \`parent\`; at a \`flow_condition\`
+  of a record-triggered flow, an unguarded nullable \`record.\`/\`previous.\`
+  read) and advisory warnings
   (text/boolean fields misused in arithmetic; an error at a \`validation\` site,
   worded for the rule's \`severity\`, and at a \`flow_condition\` of a
   record-triggered or time-relative flow, where it fails the run; a warning on
-  any other flow; at a \`formula\` or \`validation\` site, a read of an
-  external object's unprovisioned system column), plus the fields and stdlib
+  any other flow; at a \`formula\`, \`validation\` or \`flow_condition\` site,
+  a read of an external object's unprovisioned system column; for a stored
+  (non-formula) \`field\`, a read of another record, the clock, the user or a
+  permission), plus the fields and stdlib
   functions in scope. A hop target follows the same system-object fence as
   \`describe_object\`. \`site\` is \`formula\` | \`validation\` |
   \`flow_condition\` | \`template\` (default \`formula\`). Pass the rule's
@@ -428,6 +433,12 @@ create/update payload.
   as \`objectName\`: its conditions read rows of that object, and a start whose
   \`objectName\` names another object is refused at publish
   (\`flow-time-relative-object-mismatch\`). \`sweepObject\` names that same object.
+  At a \`flow_condition\` the verdict is the runtime publish gate's, the one a
+  flow saved through MCP meets: \`os validate\` also judges bare names and
+  unbound roots over the whole flow, so write \`record.<field>\`, and pass the
+  flow's \`startCondition\` for an edge or \`decision\` condition after it. Pass
+  \`field\` (formula) to be judged as that field: its type, and the formula
+  cycle it would close; a field not yet declared is judged as a new formula.
 - **query_records({ objectName, where?, fields?, limit?, offset?, orderBy? })** —
   read records. \`where\` is a field→value match, e.g. \`{ "status": "open" }\`.
   Results are page-capped; use \`limit\`/\`offset\` to page.
@@ -451,9 +462,12 @@ create/update payload.
   stops the call and names the record it stopped at. Over OAuth it needs both
   \`data:read\` and \`data:write\`.
 - **list_actions()** — list the business actions available to you (only those
-  the app author exposed to AI and you are permitted to run), with each
+  the app author exposed to AI and your permissions allow), with each
   action's declared parameters, whether it operates on a record, and whether
-  it is flagged destructive.
+  it is flagged destructive. An action that carries \`unavailable\` is listed
+  but \`run_action\` would refuse it for you (your credential, or your role in
+  this organization): \`unavailable.reason\` says why and what would let it
+  run, so tell your human instead of calling it.
 - **run_action({ actionName, objectName?, recordId?, params?, confirm? })** —
   invoke a business action by name. Invocation is permission-gated, but the
   action body executes the app's registered logic as trusted code (it can
@@ -487,6 +501,13 @@ ${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.feder
 - **Writes are real and immediate.** There is no implicit dry-run. Confirm
   destructive actions (\`delete_record\`, bulk updates) with the user.
 - **Page large reads.** Use \`limit\`/\`offset\` rather than asking for everything.
+- **People are \`sys_user\` records.** A person field (owner, approver,
+  employee) holds a user id. Find it with \`query_records\` on \`sys_user\`:
+  \`where: { "email": "..." }\` for exactly one person, or
+  \`{ "name": { "$contains": "..." } }\`. Names repeat: when several people
+  share a name, tell them apart by email, and ask your human which one if
+  unsure. You see the colleagues your console's person picker shows you (your
+  organization, directory fields), and \`sys_user\` is read only.
 - **Prefer actions over hand-edits.** When \`list_actions\` offers an action for
   the task (approve, convert, close, …), call it instead of updating the
   records yourself — actions carry the app's validation and side effects.
