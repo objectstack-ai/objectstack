@@ -466,3 +466,95 @@ describe('[#30693] publishPackageDrafts reports a refused object-storage sync on
         expect(JSON.stringify(res.published)).not.toContain('advisories');
     });
 });
+
+// ---------------------------------------------------------------------------
+// [#33005] A registry that refused a promoted object rides that object's element.
+// ---------------------------------------------------------------------------
+// The registry write-through runs after the metadata commit (ADR-0067 D2) and
+// used to keep a refused `registerObject` to a `warn` line: the batch answered
+// `published` with nothing naming the object, and a seed load right after it
+// answered OBJECT_NOT_FOUND. The ruled interim answer (option D): outcome and
+// `success` unchanged, one `error` line for the operator, and one warning under
+// the stable rule `object-registry-refused` on the refused object's element.
+
+const REGISTRY_REFUSED_RULE = 'object-registry-refused';
+
+/** The registry refusing exactly the named objects, with an undeclared (no 4xx `status`) failure. */
+function refuseRegistration(engine: any, refused: ReadonlySet<string>): void {
+    engine.registry.registerObject = (obj: { name?: string }) => {
+        if (obj?.name !== undefined && refused.has(obj.name)) {
+            throw new Error(`object ${obj.name} collides with a registered field index`);
+        }
+    };
+}
+
+/** The operator lines the refusal logged at `error`, by the object they name. */
+const registryRefusedLines = (error: { mock: { calls: unknown[][] } }, name: string) =>
+    error.mock.calls.filter((args) => String(args[0]).includes(`object '${name}' was published but the runtime registry REFUSED it`));
+
+describe('[#33005] publishPackageDrafts reports a registry-refused object on that object\'s element', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('the batch still answers published; exactly the refused element carries the rule, logged at error once', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const { engine } = makeStubEngine();
+        refuseRegistration(engine, new Set(['ticket']));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'ticket');
+        await stageObjectDraft(protocol, 'invoice');
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        // Option D changes neither the outcome nor `success`.
+        expect(res.failed).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 2, failedCount: 0 });
+
+        const byName = new Map(res.published.map((p) => [p.name, p]));
+        const refused = byName.get('ticket')!;
+        expect(refused.advisories).toHaveLength(1);
+        expect(refused.advisories![0]).toMatchObject({
+            rule: REGISTRY_REFUSED_RULE, severity: 'warning', path: '', where: 'object "ticket"',
+        });
+        expect(refused.advisories![0]!.message).toContain("'ticket'");
+        expect(Object.keys(refused.advisories![0]!).sort())
+            .toEqual(['hint', 'message', 'path', 'rule', 'severity', 'where']);
+        // An undeclared registry failure is withheld from the 2xx body…
+        expect(refused.advisories![0]!.message).not.toContain('collides with a registered field index');
+
+        // …and reaches the operator once, at error, with the reason whole.
+        const lines = registryRefusedLines(error, 'ticket');
+        expect(lines).toHaveLength(1);
+        expect(lines[0]![1]).toBe('object ticket collides with a registered field index');
+        expect(registryRefusedLines(error, 'invoice')).toEqual([]);
+
+        const sibling = byName.get('invoice')!;
+        expect('advisories' in sibling).toBe(false);
+        expect(Object.keys(sibling).sort()).toEqual(['name', 'type', 'version']);
+    });
+
+    it('publishMetaItem and a publish-mode save answer the same rule on their advisories', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const { engine } = makeStubEngine();
+        refuseRegistration(engine, new Set(['ticket', 'invoice']));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'ticket');
+
+        const published: any = await protocol.publishMetaItem({ type: 'object', name: 'ticket', packageId: PKG });
+        const saved: any = await (protocol as any).saveMetaItem({
+            type: 'object', name: 'invoice', item: objectBody('invoice'), packageId: PKG, mode: 'publish',
+        });
+
+        expect(published.success).toBe(true);
+        expect(saved.success).toBe(true);
+        expect((published.advisories ?? []).map((a: any) => [a.rule, a.where]))
+            .toEqual([[REGISTRY_REFUSED_RULE, 'object "ticket"']]);
+        expect((saved.advisories ?? []).map((a: any) => [a.rule, a.where]))
+            .toEqual([[REGISTRY_REFUSED_RULE, 'object "invoice"']]);
+        expect(registryRefusedLines(error, 'ticket')).toHaveLength(1);
+        expect(registryRefusedLines(error, 'invoice')).toHaveLength(1);
+    });
+});

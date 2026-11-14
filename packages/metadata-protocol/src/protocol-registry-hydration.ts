@@ -430,7 +430,7 @@ export class ProtocolRegistryHydrationFacet {
      * rather than reading it back from the caller. Same sentence the boot
      * re-hydration already writes for the same rows.
      */
-    static async applyObjectRegistryMutation(host: Pick<ProtocolHost, 'classifyObjectContribution' | 'engine' | 'overlayPackageMismatchError' | 'packagelessAddress'>, request: { type: string; name: string; item?: any; packageId?: string | null }): Promise<void> {
+    static async applyObjectRegistryMutation(host: Pick<ProtocolHost, 'classifyObjectContribution' | 'engine' | 'overlayPackageMismatchError' | 'packagelessAddress'>, request: { type: string; name: string; item?: any; packageId?: string | null }): Promise<ObjectRegistryRefusal | undefined> {
         // [#8862] The `&& request.type !== 'objects'` limb that stood here is
         // GONE. It did not merely admit a plural, it registered under one —
         // `registerItem` below mints the entry under the spelling that arrived
@@ -445,7 +445,7 @@ export class ProtocolRegistryHydrationFacet {
         // added unexamined is the call-site count pin in
         // `protocol.object-registry-write-through-spelling.test.ts`, not this
         // guard; the two are a pair.
-        if (request.type !== 'object') return;
+        if (request.type !== 'object') return undefined;
         // `request.type` is provably `'object'` on the line above, so this
         // mints the canonical key rather than whatever spelling arrived.
         host.engine.registry.registerItem(request.type, request.item, 'name');
@@ -485,7 +485,13 @@ export class ProtocolRegistryHydrationFacet {
             console.warn(
                 `[Protocol] registerObject failed for ${request.name}: ${err?.message ?? err}`,
             );
+            // [#33005] …and handed back, so a door that answers success over
+            // this write can say the object is not served
+            // ({@link reportObjectRegistryRefusal}). Callers that answer no
+            // receipt ignore it and keep the line above as their whole report.
+            return { error: err };
         }
+        return undefined;
     }
 
     /**
@@ -1429,7 +1435,7 @@ export class ProtocolRegistryHydrationFacet {
              * {@link HydrationOptions}.
              */
             reboundFrom?: { readonly packageId: string | null };
-        }): Promise<void> {
+        }): Promise<ObjectRegistryRefusal | undefined> {
         // [#8862] The `|| request.type === 'objects'` limb is GONE — this
         // branch admitted the plural that {@link applyObjectRegistryMutation}
         // then consumed. All four call sites of this method fold at their
@@ -1468,8 +1474,9 @@ export class ProtocolRegistryHydrationFacet {
             // would make a runtime-created object unreachable for data CRUD
             // rather than merely un-listed. This branch has never carried the
             // kernel-scope gate below either, for the same reason.
-            await host.applyObjectRegistryMutation(request);
-            return;
+            // [#33005] The refusal, when the registry refused the object, is
+            // this method's answer; every other branch answers `undefined`.
+            return host.applyObjectRegistryMutation(request);
         }
         // [#28574] An `object_extension` row is its package's `'extend'`
         // contributor of the object it names: not org-gated and not
@@ -1484,10 +1491,10 @@ export class ProtocolRegistryHydrationFacet {
                     `[Protocol] registry write-through failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
                 );
             }
-            return;
+            return undefined;
         }
         // [#23298] Whose registry this is — never `environmentId` alone.
-        if (!host.registryTakesStoredRows()) return;
+        if (!host.registryTakesStoredRows()) return undefined;
         try {
             await host.hydrateOverlayIntoRegistry(request.type, request.item, {
                 packageId: request.packageId ?? undefined,
@@ -1503,6 +1510,7 @@ export class ProtocolRegistryHydrationFacet {
                 `[Protocol] registry write-through failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
             );
         }
+        return undefined;
     }
 
     /**
@@ -2393,5 +2401,60 @@ export function objectStorageSyncRefusedNotice(name: string, err: unknown): Runt
         hint:
             "Resolve the datasource's refusal, then publish the object again (which re-runs the sync), "
             + 'or restart the server, which syncs the storage of every registered object.',
+    };
+}
+
+/**
+ * [#33005] What {@link ProtocolRegistryHydrationFacet.applyObjectRegistryMutation}
+ * answers when the registry refused the object it was asked to register: the
+ * thrown value, whole. The row is already persisted; this is the one fact the
+ * write-through used to keep to a `warn` line.
+ */
+export interface ObjectRegistryRefusal {
+    readonly error: unknown;
+}
+
+/**
+ * [#33005] The rule id of the advisory a publish answers with when the runtime
+ * registry refused an object the publish made live. Stable across releases,
+ * like {@link OBJECT_STORAGE_SYNC_REFUSED}: the key a client groups, suppresses
+ * or acts on the notice by.
+ */
+export const OBJECT_REGISTRY_REFUSED = 'object-registry-refused';
+
+/**
+ * [#33005] A door that answers success over a registry write-through the
+ * registry refused: one `error` line for the operator, then one `warning` for
+ * the caller, on the doors and in the shape of
+ * {@link objectStorageSyncRefusedNotice}. `error` by AGENTS.md "Degradation log
+ * levels": the publish answers success and its definition is stored, while the
+ * object is not served, so a seed load or data read against it answers
+ * `OBJECT_NOT_FOUND` until something registers it. Said once per refused object
+ * of a write; the write is deliberately NOT failed (ADR-0067 D2: the registry
+ * mutation runs after the metadata commit). The thrown text is a separate
+ * argument, and reaches the caller only under {@link clientFacingFailureText}.
+ */
+export function reportObjectRegistryRefusal(name: string, refusal: ObjectRegistryRefusal): RuntimeAuthoringIssue {
+    const err = refusal.error as { message?: unknown } | undefined;
+    console.error(
+        `[Protocol] object '${name}' was published but the runtime registry REFUSED it — its definition is stored `
+        + 'and the publish answered success, so it looks usable while every data read, write and seed load against '
+        + 'it answers OBJECT_NOT_FOUND until it is registered. Fix: resolve the registry\'s refusal (logged after '
+        + 'this line), then publish the object again, which re-runs the registration, or restart, since the boot '
+        + 'registers every stored object.',
+        err?.message ?? refusal.error,
+    );
+    return {
+        rule: OBJECT_REGISTRY_REFUSED,
+        severity: 'warning',
+        where: `object "${name}"`,
+        path: '',
+        message:
+            `object '${name}' was published, but the runtime registry refused it `
+            + `(${clientFacingFailureText(refusal.error, 'the reason is in the server log')}), so it is NOT served: `
+            + 'until it is registered, data reads, writes and seed loads against it answer OBJECT_NOT_FOUND.',
+        hint:
+            "Resolve the registry's refusal, then publish the object again (which re-runs the registration), "
+            + 'or restart the server, which registers every stored object.',
     };
 }

@@ -613,7 +613,7 @@ import { ProtocolWriteGatesFacet } from './protocol-write-gates.js';
 // [#29985 codemod] The static tables of the facet above: the class's fields read them (#30147).
 import { ProtocolWriteGatesTables } from './protocol-write-gates-tables.js';
 // [#29985 codemod] Registry hydration, view expansion, write-through, object storage: the members below delegate to its facet, `ProtocolRegistryHydrationFacet`.
-import { ProtocolRegistryHydrationFacet } from './protocol-registry-hydration.js';
+import { ProtocolRegistryHydrationFacet, type ObjectRegistryRefusal } from './protocol-registry-hydration.js';
 import type { HealPackageBinding } from './protocol-heal-binding.js';
 // [#29985 codemod] Save refusals, saveMetaItem, saveConflict, migrateStoredMetadata: the members below delegate to its facet, `ProtocolSaveFacet`.
 import { ProtocolSaveFacet } from './protocol-save.js';
@@ -8029,7 +8029,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /** Docblock and body: {@link ProtocolRegistryHydrationFacet.applyObjectRegistryMutation} in `protocol-registry-hydration.ts` [#29985 codemod]. */
-    private async applyObjectRegistryMutation(request: { type: string; name: string; item?: any; packageId?: string | null }): Promise<void> {
+    private async applyObjectRegistryMutation(request: { type: string; name: string; item?: any; packageId?: string | null }): Promise<ObjectRegistryRefusal | undefined> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolRegistryHydrationFacet.applyObjectRegistryMutation(protocolHost(this), request);
     }
@@ -8396,7 +8396,7 @@ export class ObjectStackProtocolImplementation implements
          * {@link HydrationOptions}.
          */
         reboundFrom?: { readonly packageId: string | null };
-    }): Promise<void> {
+    }): Promise<ObjectRegistryRefusal | undefined> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolRegistryHydrationFacet.applyRegistryWriteThrough(protocolHost(this), request);
     }
@@ -9757,6 +9757,7 @@ export class ObjectStackProtocolImplementation implements
         materializeApplied?: PublishMaterializeResult;
         projectionApplied?: MutationProjectionOutcome;
         storageRefused?: RuntimeAuthoringIssue;
+        registryRefused?: RuntimeAuthoringIssue;
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.runPublishSideEffects(protocolHost(this), args);
