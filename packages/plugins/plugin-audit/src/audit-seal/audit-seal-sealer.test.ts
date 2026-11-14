@@ -251,6 +251,36 @@ describe('per-chain isolation: only a chain-local fault skips a chain, and only 
     expect(errors(s)).toEqual([expect.stringMatching(/'ledger_probe'.*chain 'org:org_b'.*root.*NOT being sealed/)]);
   });
 
+  it('seals window-major: on a healthy backlog past the per-pass budget, every chain ends each pass at the same window, a sparse one included', async () => {
+    const s = setup();
+    s.clock.now = DAY0 + 40 * H; // windows up to 39:00 are due
+    // org_a writes every hour for 30 hours, more windows than one pass seals; org_b only at hours 0, 11, 23 and 29.
+    for (let h = 0; h < 30; h++) s.hot.table('ledger_probe').push(row(`a${h}`, at(h, 10)));
+    for (const h of [0, 11, 23, 29]) s.hot.table('ledger_probe').push(row(`b${h}`, at(h, 20), 'org_b'));
+    const newest = () => {
+      const by: Record<string, string> = {};
+      for (const c of s.checkpoints()) if (c.kind === 'window' && !(by[String(c.tenant_id)] > c.window_start)) by[String(c.tenant_id)] = c.window_start;
+      return by;
+    };
+    expect(await s.sealer.runPass()).toBe(24 + 3);
+    expect(newest()).toEqual({ org_a: at(23, 0), org_b: at(23, 0) });
+    expect(await s.sealer.runPass()).toBe(6 + 1);
+    expect(newest()).toEqual({ org_a: at(29, 0), org_b: at(29, 0) });
+    expect(s.checkpoints().filter((c) => c.kind === 'late')).toEqual([]);
+  });
+
+  it("never seals a lagging chain's rows as late: skipped where another chain sealed, it recovers into window checkpoints, while that chain's own late row is sealed late", async () => {
+    const s = setup();
+    s.hot.table('ledger_probe').push(row('y1', at(8, 10)), refused('x1', at(8, 20), 'org_x'), row('y2', at(9, 10)), row('x2', at(9, 20), 'org_x'));
+    expect(await s.sealer.runPass()).toBe(2); // org_a seals 08:00 and 09:00; org_x is skipped at 08:00
+    s.hot.table('ledger_probe').find((r) => r.id === 'x1')!.payload = '{"v":"x1"}';
+    s.hot.table('ledger_probe').push(row('y-late', at(8, 40))); // so the late pass reads the 08:00 window
+    expect(await s.sealer.runPass()).toBe(3);
+    expect(s.checkpoints().filter((c) => c.tenant_id === 'org_x').map((c) => [c.kind, c.window_start, c.sequence, c.row_ids]))
+      .toEqual([['window', at(8, 0), 0, ['x1']], ['window', at(9, 0), 1, ['x2']]]);
+    expect(s.checkpoints().filter((c) => c.kind === 'late').map((c) => [c.tenant_id, c.window_start, c.row_ids])).toEqual([['org_a', at(8, 0), ['y-late']]]);
+  });
+
   it('still aborts the whole pass on a storage fault: no chain is skipped past it', async () => {
     const s = setup();
     s.hot.table('ledger_probe').push(row('a1', at(8, 10)), row('b1', at(8, 20), 'org_b'), row('a2', at(9, 10)));
