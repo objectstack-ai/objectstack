@@ -466,7 +466,7 @@ export function refuseTwoStates(target = []) {
  * nobody (`PARKED_RULE`, quoted from `KIND_RULE_PATH`'s state table; header: the stateless write).
  */
 export const PARKED_STATE_LABELS = Object.freeze(['pm:queue', 'pm:blocked', 'pm:on-hold']);
-export const PARKED_RULE = '`pm:queue`/`pm:blocked`/`pm:on-hold` 卡恒无 assignee,有即半态';
+export const PARKED_RULE = '`pm:queue` 卡恒无 assignee,有即半态;`pm:blocked`/`pm:on-hold` 同';
 
 /** Where the stateless-write rule is written, and the phrase this file quotes from it (header: the stateless write). */
 export const STATELESS_RULE_PATH = '.claude/skills/pm-dispatch/references/state-machine.md';
