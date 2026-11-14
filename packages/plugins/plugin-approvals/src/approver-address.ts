@@ -36,11 +36,13 @@
  *
  *   - `resolveActor` — may this caller act under the named address?
  *     ({@link positionAddresses})
- *   - `approverRequestIds` — which requests hold a slot under the addresses the
- *     caller asked about? ({@link equivalentApproverAddresses})
- *   - `visibleRequestIds`, current approver — which requests hold a slot the
- *     caller acts under? ({@link actingAddresses})
- *   - `visibleRequestIds`, already acted — which requests carry a decision or
+ *   - `approverIndexWhere` (read by `approverRequestIds`) — which requests hold
+ *     a slot under the addresses the caller asked about?
+ *     ({@link equivalentApproverAddresses})
+ *   - `participantProbes`, current approver — which requests hold a slot the
+ *     caller acts under? ({@link actingAddresses}) Asked by `visibleRequestIds`
+ *     for the id set and by the schema-read delegate for "any at all"
+ *   - `participantProbes`, already acted — which requests carry a decision or
  *     thread entry recorded under one of those addresses? ({@link actingAddresses})
  *   - the decision methods' slot test — which slot does this actor take?
  *     ({@link heldSlot})

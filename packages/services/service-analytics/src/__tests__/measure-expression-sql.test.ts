@@ -79,7 +79,7 @@ describe('a retired custom-SQL metric type is refused, never emitted', () => {
     const sql = await sqlFor({ cube: 'orders', measures: ['count', 'total'] });
     expect(sql).toContain('COUNT(*) AS "count"');
     // [#25907] A `sum` answers its empty-group identity in the statement.
-    expect(sql).toContain('COALESCE(SUM(amount), 0) AS "total"');
+    expect(sql).toContain('COALESCE(SUM("amount"), 0) AS "total"');
   });
 });
 

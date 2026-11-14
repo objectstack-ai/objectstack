@@ -55,8 +55,10 @@
  *     ADR-0134 D3's V1 single-organization mode); one absent is a refusal.
  *  4. **On that provider's verified domain.** That provider reads
  *     `domain_verified` (ADR-0135 D6), and the account's email domain is
- *     exactly one of its `domain` entries — a comma list, case-folded. No
- *     subdomain match: the ruling names the verified domain itself.
+ *     exactly one of the domains its `domain` list names, each entry and the
+ *     address read in their one spelling by the parse the account rule shares
+ *     (`sso-account-at-proven-domain.ts`, #32975). No subdomain match: the
+ *     ruling names the verified domain itself.
  *
  * ## Why `idp_provisioned` alone proves nothing here
  *
@@ -78,6 +80,7 @@
 import { isMissingTableError } from '@objectstack/types';
 import type { SCIMIdentityResolution, SCIMIdentityResolutionInput } from '@better-auth/scim';
 import { DIRECTORY_MANAGED_SOURCE } from './scim-identity-source.js';
+import { ssoAddressDomain, ssoDomainEntryHosts } from './sso-account-at-proven-domain.js';
 
 /** The engine surface the judge reads with — satisfied by `IDataEngine`. */
 export interface ScimSsoAdoptionEngine {
@@ -118,20 +121,11 @@ const organizationKey = (value: unknown): string => (typeof value === 'string' ?
 /** sqlite answers a boolean as 0/1; anything but true is not verified. */
 const isTrue = (value: unknown): boolean => value === true || value === 1;
 
-/** The domain of an address, case-folded — `undefined` for anything that is not exactly one `@`. */
-function emailDomain(email: string): string | undefined {
-  const parts = email.trim().toLowerCase().split('@');
-  return parts.length === 2 && parts[0] !== '' && parts[1] !== '' ? parts[1] : undefined;
-}
-
-/** A provider's `domain` as the email domains it names: a comma list, trimmed and case-folded. */
-function providerDomains(domain: unknown): string[] {
-  if (typeof domain !== 'string') return [];
-  return domain
-    .split(',')
-    .map((entry) => entry.trim().toLowerCase())
-    .filter((entry) => entry !== '');
-}
+// [#32975] The address's domain and a provider's domain list are read through
+// the ONE parse every rule that judges an address against that list shares
+// (`sso-account-at-proven-domain.ts`): an entry names the same domain here as
+// under the account rule, and an entry that parse does not accept (a URL, a
+// port, a path) names no domain for adoption either.
 
 /**
  * Judge whether the account holding `question.email` is adopted, per the
@@ -144,7 +138,7 @@ export async function judgeScimSsoAdoption(
   question: ScimSsoAdoptionQuestion,
 ): Promise<ScimSsoAdoptionVerdict> {
   const email = question.email.trim().toLowerCase();
-  const domain = emailDomain(email);
+  const domain = ssoAddressDomain(email);
   const users = (await engine.find('sys_user', {
     where: { email },
     fields: ['id', 'email', 'source'],
@@ -200,7 +194,7 @@ export async function judgeScimSsoAdoption(
   // 4. On that provider's verified domain.
   const verified = ofOrganization.filter((p) => isTrue(p.domain_verified));
   if (verified.length === 0) return { adopt: false, reason: 'domain_not_verified' };
-  const vouching = domain === undefined ? undefined : verified.find((p) => providerDomains(p.domain).includes(domain));
+  const vouching = domain === null ? undefined : verified.find((p) => ssoDomainEntryHosts(p.domain).includes(domain));
   if (!vouching) return { adopt: false, reason: 'email_domain_not_verified' };
 
   return { adopt: true, userId, providerId: String(vouching.provider_id) };

@@ -125,19 +125,80 @@ export function ssoAddressDomain(email: unknown): string | null {
 }
 
 /**
- * One stored `domain` entry as the host it proves, or `null` when it proves
- * none: trimmed, one trailing root dot dropped, and then written in its one
+ * One `domain` entry as the host it names, or `null` when it names none:
+ * trimmed, one trailing root dot dropped, and then written in its one
  * spelling ({@link oneSpelling}). An entry written as a URL, with a port, a
- * path, a user part or an escape proves nothing.
+ * path, a user part or an escape names no domain.
+ *
+ * [#32975] This is THE parse of a provider's domain list for every rule that
+ * judges an address against it: the account rule here and the SCIM adoption
+ * rule (`scim-sso-adoption.ts`) read each entry through it, so one stored
+ * entry names the same domain under both. [#32960] Register and edit refuse a
+ * requested entry it does not accept ({@link ssoDomainEntryNotBare}), so every
+ * entry stored since then names its domain here exactly as the one-provider
+ * claim rule (`sso-provider-lifecycle.ts` `providerDomains`) reads it.
  */
-function provenEntryHost(entry: string): string | null {
+export function ssoDomainEntryHost(entry: string): string | null {
   const trimmed = entry.trim();
   return oneSpelling(trimmed.endsWith('.') ? trimmed.slice(0, -1) : trimmed);
 }
 
 /**
+ * A provider's comma-separated `domain` value as the domains it names, each
+ * once: every entry read by {@link ssoDomainEntryHost}; an entry it does not
+ * accept names nothing, and the list's other entries still count.
+ */
+export function ssoDomainEntryHosts(domain: unknown): string[] {
+  if (typeof domain !== 'string') return [];
+  const hosts = new Set<string>();
+  for (const entry of domain.split(',')) {
+    const host = ssoDomainEntryHost(entry);
+    if (host) hosts.add(host);
+  }
+  return [...hosts];
+}
+
+/** The refusal of a requested `domain` entry that is not a bare host name; thrown as better-auth's `APIError`. */
+export interface SsoDomainEntryNotBareRefusal {
+  status: 'BAD_REQUEST';
+  code: 'VALIDATION_FAILED';
+  message: string;
+  field: 'domain';
+  fields: [{ field: 'domain'; code: 'invalid_value'; message: string }];
+}
+
+/**
+ * [#32960] The refusal for a requested `domain` value holding an entry that is
+ * not written as a bare host name ({@link ssoDomainEntryHost} accepts none),
+ * or `undefined`. Blank entries are skipped, as every parse of the list skips
+ * them. A URL, a port, a path or any other shape would be stored and then
+ * prove nothing at sign-in, so it is refused when the provider is registered
+ * or its domain is edited, naming the entry and the accepted shape. Asked
+ * after the length refusal (`sso-provider-lifecycle.ts` `ssoDomainTooLong`),
+ * so an entry named here is at most a host name long.
+ */
+export function ssoDomainEntryNotBare(domain: unknown): SsoDomainEntryNotBareRefusal | undefined {
+  if (typeof domain !== 'string') return undefined;
+  for (const entry of domain.split(',')) {
+    const trimmed = entry.trim();
+    if (!trimmed || ssoDomainEntryHost(trimmed) !== null) continue;
+    const message =
+      `The SSO provider domain entry '${trimmed}' is not a bare host name. Write each email domain as a host name `
+      + "alone, such as 'acme.com': no scheme, port, path or user part, separated by commas. Nothing was saved.";
+    return {
+      status: 'BAD_REQUEST',
+      code: 'VALIDATION_FAILED',
+      message,
+      field: 'domain',
+      fields: [{ field: 'domain', code: 'invalid_value', message }],
+    };
+  }
+  return undefined;
+}
+
+/**
  * The domains a provider row has proven: every entry of its `domain` that
- * names the host the provider proved ({@link provenEntryHost}), when
+ * names the host the provider proved ({@link ssoDomainEntryHost}), when
  * `domain_verified` reads on (`1` / `true`); otherwise none. A row that is not
  * the provider's own (another `provider_id`) has proven nothing.
  */
@@ -146,14 +207,7 @@ export function ssoProviderProvenDomains(row: unknown, providerId: string): stri
   const record = row as Record<string, unknown>;
   if (record.provider_id !== providerId) return [];
   if (!ssoToggleStoredOn(record[SSO_DOMAIN_VERIFIED_FIELD])) return [];
-  const domain = record[SSO_DOMAIN_FIELD];
-  if (typeof domain !== 'string') return [];
-  const proven = new Set<string>();
-  for (const entry of domain.split(',')) {
-    const host = provenEntryHost(entry);
-    if (host) proven.add(host);
-  }
-  return [...proven];
+  return ssoDomainEntryHosts(record[SSO_DOMAIN_FIELD]);
 }
 
 /** Whether `email` is at one of `provenDomains`, compared in one spelling, by equality. */

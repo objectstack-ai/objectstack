@@ -2341,6 +2341,8 @@ const STUDIO_ZH: Record<string, string> = {
     '该流程中的保存提示位于一个可能暂停的子流程之后，所以该流程不会启动。把保存提示移到那一步之前，或改用通知步骤。',
   'engine.studio.auto.unboundCause.suspending_subflow_in_region':
     '循环、并行分支或异常处理里的子流程调用了一个可能暂停的流程，所以该流程不会启动。把这个调用移到流程的主路径上。',
+  'engine.studio.auto.unboundCause.retried_callout_in_subflow':
+    '该流程在记录保存后运行，而它调用的子流程会重试对外部服务的调用，保存可能要等完所有重试，所以该流程不会启动。在那个子流程里改为后台发送请求，或去掉重试。',
   'engine.studio.auto.unboundCause.missing_trigger':
     '此部署不运行由这类触发器启动的流程。开发人员可以在应用中加入相应的触发器包，之后该流程就会运行。',
   'engine.studio.auto.unboundCause.binding_failure':
