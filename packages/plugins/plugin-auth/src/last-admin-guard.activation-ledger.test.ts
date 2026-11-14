@@ -36,6 +36,7 @@ const objects = [
       id: { ...text, name: 'id', primaryKey: true },
       name: { ...text, name: 'name' },
       email: { ...text, name: 'email' },
+      email_verified: { name: 'email_verified', type: 'boolean' as const },
       banned: { name: 'banned', type: 'boolean' as const, readonly: true },
     },
   },
@@ -188,16 +189,83 @@ describe('[ADR-0131 D3] the ledger half — what a ledger write can and cannot t
     for (const row of rows) expect(await readLedger(engine, row.id)).toBeTruthy();
   });
 
-  it('a second administrator left standing permits the switch-off — the flat refusal is gone', async () => {
+  // [#33082] A second GRANT holder is no way back: switching the set off ends
+  // every grant-anchored platform admin at once, theirs included.
+  it('#33082 — a second admin_full_access holder does not make the switch-off safe: both lose it', async () => {
+    const engine = await boot();
+    await seedGrantAdmin(engine);
+    await seedGrantAdmin(engine, 'usr_second');
+
+    await expect(
+      engine.insert('sys_metadata_activation', ledgerRow('act_admin', 'permission', ADMIN_FULL_ACCESS, false), SYSTEM),
+    ).rejects.toThrow(/'usr_admin', 'usr_second', who are the last platform administrators/);
+    expect(await readLedger(engine, 'act_admin')).toBeFalsy();
+  });
+
+  // [#33082] An organization owner is an administrator who can sign in, but not
+  // one who can switch the set back on: the activation door asks for
+  // `manage_metadata`, which an organization's own sets do not carry under
+  // `single`. So the ledger half also judges the platform-admin population.
+  it('#33082 — the last platform admin who is also the organization owner cannot switch the set off', async () => {
+    for (const active of [false, 0]) {
+      const engine = await boot();
+      await seedGrantAdmin(engine);
+      await engine.insert('sys_member', { id: 'mem_admin', user_id: 'usr_admin', organization_id: DEFAULT_ORG, role: 'owner' }, SYSTEM);
+      await expect(
+        engine.insert('sys_metadata_activation', ledgerRow('act_admin', 'permission', ADMIN_FULL_ACCESS, active), SYSTEM),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403, object: 'sys_metadata_activation' });
+      expect(await readLedger(engine, 'act_admin')).toBeFalsy();
+    }
+  });
+
+  it('#33082 — another user who only owns an organization does not make the switch-off safe', async () => {
     const engine = await boot();
     await seedGrantAdmin(engine);
     await engine.insert('sys_user', { id: 'usr_owner', name: 'usr_owner', email: 'o@corp.example', banned: false }, SYSTEM);
     await engine.insert('sys_member', { id: 'mem_owner', user_id: 'usr_owner', organization_id: 'org_1', role: 'owner' }, SYSTEM);
 
+    const refused = engine.insert('sys_metadata_activation', ledgerRow('act_admin', 'permission', ADMIN_FULL_ACCESS, false), SYSTEM);
+    await expect(refused).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    await expect(refused).rejects.toThrow(/last platform administrator.*manage_metadata/s);
+    expect(await readLedger(engine, 'act_admin')).toBeFalsy();
+  });
+
+  it('#33082 — the same refusal on an UPDATE that switches the existing row off', async () => {
+    const engine = await boot();
+    await seedGrantAdmin(engine);
+    await engine.insert('sys_member', { id: 'mem_admin', user_id: 'usr_admin', organization_id: DEFAULT_ORG, role: 'owner' }, SYSTEM);
+    await engine.insert('sys_metadata_activation', ledgerRow('act_admin', 'permission', ADMIN_FULL_ACCESS, true), SYSTEM);
+
+    await expect(engine.update('sys_metadata_activation', { id: 'act_admin', active: false }, SYSTEM))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect((await readLedger(engine, 'act_admin'))?.active).toBeTruthy();
+  });
+
+  it('#33082 — a configured platform owner keeps a platform admin standing, so the switch-off lands', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = 'owner@corp.example';
+    resetPlatformAdminEmailMemo();
+    const engine = await boot();
+    await seedGrantAdmin(engine);
+    await engine.insert('sys_user', { id: 'usr_cfg', name: 'usr_cfg', email: 'owner@corp.example', email_verified: true, banned: false }, SYSTEM);
+
     await expect(
       engine.insert('sys_metadata_activation', ledgerRow('act_admin', 'permission', ADMIN_FULL_ACCESS, false), SYSTEM),
     ).resolves.toBeDefined();
-    expect((await readLedger(engine, 'act_admin'))?.active).toBeFalsy();
+    // …and switching it back on lands too: the restore is never this verdict's case.
+    await expect(engine.update('sys_metadata_activation', { id: 'act_admin', active: true }, SYSTEM)).resolves.toBeDefined();
+    expect((await readLedger(engine, 'act_admin'))?.active).toBeTruthy();
+  });
+
+  it('#33082 — CONTROL: a configured platform owner who is banned is no way back, so the switch-off is refused', async () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = 'owner@corp.example';
+    resetPlatformAdminEmailMemo();
+    const engine = await boot();
+    await seedGrantAdmin(engine);
+    await engine.insert('sys_user', { id: 'usr_cfg', name: 'usr_cfg', email: 'owner@corp.example', email_verified: true, banned: true }, SYSTEM);
+
+    await expect(
+      engine.insert('sys_metadata_activation', ledgerRow('act_admin', 'permission', ADMIN_FULL_ACCESS, false), SYSTEM),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
   });
 
   it('a ledger read that fails refuses the write it was asked about — fail closed', async () => {

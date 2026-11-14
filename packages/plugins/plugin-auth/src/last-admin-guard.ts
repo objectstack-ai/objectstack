@@ -1846,6 +1846,69 @@ export function registerLastAdminGuard(
   };
 
   /**
+   * [#33082] The ledger halves' second verdict: a write that switches
+   * `admin_full_access` off is refused when it would leave this environment
+   * with no unbanned PLATFORM administrator, even though an organization owner
+   * or admin is still standing.
+   *
+   * The `administrators` population {@link enforceStanding} judges counts
+   * organization owners and admins, and for every other standing write that is
+   * the right population: each of them can sign in, and the ADR-0135 D5.2
+   * invariant is about signing in. A ledger switch-off is different in one
+   * respect, and it is the one that matters: the only door that switches the
+   * set back on (`POST /security/_activation`, `catalog-activation.ts`) asks
+   * for `manage_metadata`, which an organization's own sets do not carry under
+   * `single` (`organization_admin_no_bypass`). Let through on an owner's
+   * standing, the write leaves nobody who can undo it; the deployment's way
+   * back is a re-seed or database surgery. So the population read here is the
+   * one that CAN undo it: the `platform-admins` enumeration (the Default
+   * Organization's `admin_full_access` grants and the `OS_PLATFORM_OWNER_EMAIL`
+   * list), before and after the write, with the same ban re-read.
+   *
+   * It only ever ADDS a refusal to the ledger halves. Switching the set off
+   * ends EVERY grant-anchored platform administrator at once, so a second
+   * grant holder is no way back; what keeps the population standing is a
+   * configured, verified, unbanned platform owner (`OS_PLATFORM_OWNER_EMAIL`),
+   * and with one the switch-off lands. Under a walled posture the set anchors
+   * nobody, so the write cannot change this population and is never refused
+   * here. A write that leaves no platform administrator BEFORE it (none, or
+   * every one banned) is not this verdict's case, and the restore exemption
+   * {@link enforceStanding} makes when nobody administers the environment is
+   * unchanged.
+   */
+  const refuseIfPlatformStandingEnds = async (
+    op: GuardedOp,
+    pending: PendingStandingWrite,
+  ): Promise<void> => {
+    const before = await resolveAdminUserIds(op, undefined, 'platform-admins');
+    if (before.size === 0) return;
+    const unbannedBefore = await resolveUnbannedAdmins(op, before);
+    if (unbannedBefore.size === 0) return;
+    const after = await resolveAdminUserIds(op, pending, 'platform-admins');
+    const unbannedAfter: Set<string> =
+      after.size > 0 ? await resolveUnbannedAdmins(op, after) : new Set<string>();
+    if (unbannedAfter.size > 0) return;
+
+    const losing = [...unbannedBefore];
+    const words = OP_WORDS[op];
+    const many = losing.length > 1;
+    logger?.warn(
+      `[LastAdminGuard] refused a ${words.noun} that would have left this system with no ` +
+        `unbanned platform administrator (losing: ${losing.join(', ')})`,
+    );
+    throw refuse(
+      `Refusing this ${words.noun}: switching the '${ADMIN_FULL_ACCESS}' permission set off would ` +
+        `end the platform-administrator standing of ${losing.map((id) => `'${id}'`).join(', ')}, ` +
+        `${many ? 'who are the last platform administrators' : 'who is the last platform administrator'} ` +
+        `this system has that ${many ? 'are' : 'is'} not already banned. Switching it back on needs ` +
+        `'manage_metadata', which an organization owner or admin does not hold, so nobody could ` +
+        `undo it (${BREAK_GLASS_CITATION}). Another '${ADMIN_FULL_ACCESS}' holder would lose it too. ` +
+        `Declare a platform owner in 'OS_PLATFORM_OWNER_EMAIL' (a verified address) first, then retry.`,
+      words.table,
+    );
+  };
+
+  /**
    * [#5978] The verdict for the four STANDING halves — the third write shape,
    * where the `sys_user` row is never touched and what is taken away is the
    * thing that MADE the user an administrator.
@@ -1914,6 +1977,9 @@ export function registerLastAdminGuard(
       // exact for bulk writes rather than being refused wholesale.
       const ids = await targetIds();
       if (ids.size === 0 && !inserted) return;
+
+      // [#33082] The ledger halves also answer to the PLATFORM-admin population.
+      if (table === METADATA_ACTIVATION) await refuseIfPlatformStandingEnds(op, pendingOf(ids));
 
       const after = await resolveAdminUserIds(op, pendingOf(ids));
       // A patch that re-homes standing onto a DIFFERENT user (a `user_id`
@@ -2062,9 +2128,12 @@ export function registerLastAdminGuard(
    * [ADR-0131 D3, ADR-0126 §4] The ledger half: a write that switches
    * `admin_full_access` off — an update of its row, an update moving another
    * row onto that pair, or an insert — un-makes every grant-anchored platform
-   * administrator, so it is judged like every other standing write and refused
-   * only when it would leave nobody who can sign in. A payload touching no
-   * standing key ({@link ACTIVATION_LEDGER_STANDING_KEYS}) costs no reads.
+   * administrator, so it is judged like every other standing write, refused
+   * when it would leave nobody who can sign in, and also refused when it would
+   * leave no platform administrator, the only population that can switch the
+   * set back on ({@link refuseIfPlatformStandingEnds}, #33082). A payload
+   * touching no standing key ({@link ACTIVATION_LEDGER_STANDING_KEYS}) costs no
+   * reads.
    */
   const guardActivationLedgerUpdate = async (rawCtx: unknown): Promise<void> => {
     const ctx = ctxOf(rawCtx);
