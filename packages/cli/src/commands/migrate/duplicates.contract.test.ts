@@ -278,6 +278,9 @@ describe('#8928 os migrate duplicates — the report document', () => {
       // One package-less grant per (user_id, permission_set, organization_id),
       // ADR-0150 D4 (#32164): the grant key gained its package column.
       'ensureUserPermissionSetPackagelessIndex:sys_user_permission_set:uniq_sys_user_permission_set_packageless',
+      // One package-less connection per (organization_id, connector_name),
+      // ADR-0150 D8 row R11 (#31699): the connection key gained its package column.
+      'ensureConnectorConnectionPackagelessIndex:sys_connector_connection:uniq_sys_connector_connection_packageless',
     ]);
   });
 

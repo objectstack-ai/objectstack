@@ -74,8 +74,9 @@ afterEach(async () => {
 });
 
 describe('[#32460] which indexes the plan reads: the ones apply builds', () => {
-  it('lists the grant guard, which schema sync builds, and not the activation ledger guard, which only a serving boot builds', () => {
-    expect(SCHEMA_SYNC_INDEX_MIGRATIONS).toEqual(['ensureUserPermissionSetPackagelessIndex']);
+  it('lists the grant and connection guards, which schema sync builds, and not the activation ledger guard, which only a serving boot builds', () => {
+    // [#31699] The connector connection's package-less guard rides the grant's seam.
+    expect(SCHEMA_SYNC_INDEX_MIGRATIONS).toEqual(['ensureUserPermissionSetPackagelessIndex', 'ensureConnectorConnectionPackagelessIndex']);
     // Each one is described by the preflight, which every other field is read from.
     const described = runtimeIndexProbes().map((p) => p.migration);
     for (const migration of SCHEMA_SYNC_INDEX_MIGRATIONS) expect(described).toContain(migration);
@@ -97,6 +98,21 @@ describe('[#32460] collectSchemaSyncIndexes: a step only where apply would build
       index: GUARD,
       keyParts: ['user_id', 'permission_set', 'organization_id'],
       rowScope: 'permission_set_package IS NULL',
+      status: 'build',
+    }]);
+  });
+
+  it('[#31699] a connection table missing its guard: one build step on it, described from the preflight', async () => {
+    await knex.raw(
+      'CREATE TABLE sys_connector_connection (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, ' +
+        'connector_name TEXT NOT NULL, connector_package TEXT)',
+    );
+    expect(await collectSchemaSyncIndexes(input())).toEqual([{
+      migration: 'ensureConnectorConnectionPackagelessIndex',
+      table: 'sys_connector_connection',
+      index: 'uniq_sys_connector_connection_packageless',
+      keyParts: ['organization_id', 'connector_name'],
+      rowScope: 'connector_package IS NULL',
       status: 'build',
     }]);
   });
@@ -137,8 +153,14 @@ describe('[#32460] collectSchemaSyncIndexes: a step only where apply would build
   it('a seam that answers nothing: unreadable, never read as "already stands"', async () => {
     const dead = { config: { client: 'better-sqlite3' }, execute: async () => { throw new Error('connection reset'); } };
 
+    // Every owner reads through the one dead seam, so each says so (#31699 added the connection table's).
     expect(await collectSchemaSyncIndexes(input({ engine: engineOf(dead) }))).toEqual([
       expect.objectContaining({ index: GUARD, status: 'unreadable', detail: expect.stringContaining('connection reset') }),
+      expect.objectContaining({
+        index: 'uniq_sys_connector_connection_packageless',
+        status: 'unreadable',
+        detail: expect.stringContaining('connection reset'),
+      }),
     ]);
   });
 
