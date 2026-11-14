@@ -327,6 +327,73 @@ would move a handler's own `ctx.api` writes *outside* the transaction the write
 ran in, which is a worse guarantee than the one documented here.
 </Callout>
 
+## Refusing in the user's language — `refusals`
+
+A hook that says "no" to a write throws. A sentence written into the throw
+reaches every caller in the language you wrote it in. To refuse in the
+caller's language, **declare the refusals** on the hook and throw a declared
+code. The runtime answers with the declared sentence, translated in the
+caller's locale, and with the declared status:
+
+```typescript
+export const planGate = {
+  name: 'plan_gate',
+  object: 'production_plan',
+  events: ['beforeUpdate'],
+  refusals: {
+    CREDIT_LIMIT: { message: 'This plan exceeds the credit limit.', status: 409 },
+    VALIDATION_FAILED: {
+      message: 'This plan cannot be submitted.',
+      params: ['state'],
+      reasons: {
+        plan_locked: { message: 'The plan is {{ state }} and can no longer change.' },
+        second_primary: { message: 'This plant already has a primary plan.' },
+      },
+    },
+  },
+  handler: async (ctx) => {
+    if (ctx.previous?.locked) {
+      throw Object.assign(new Error('locked'), {
+        code: 'VALIDATION_FAILED',
+        reason: 'plan_locked',
+        params: { state: ctx.previous.state },
+      });
+    }
+  },
+};
+```
+
+- **The code is the key.** Each entry of `refusals` is keyed by the
+  SCREAMING_SNAKE code the hook throws, and the caller's envelope carries that
+  code. An entry has a `message` and, optionally, a 4xx `status` (400 when
+  absent).
+- **`reasons` — several sentences under one code.** A gate with several
+  refusals of the same class keeps one wire code and declares one snake_case
+  reason per sentence. Throw `{ code, reason }`. The caller reads the reason's
+  sentence, with the code and the status of the entry it sits under.
+- **`params` — names a sentence may fill.** An entry that declares `params`
+  may write `{{ name }}` holes over those names, in its own `message` and in
+  each reason. Throw the values as `params: { name: value }`. A hole over any
+  other name is refused when the hook is saved. An entry that declares no
+  `params` is plain text, and every `{{ }}` hole in it is refused.
+- **It works whichever way the hook is written.** A TypeScript `handler` (run
+  in-process on a source boot such as `bootStack(config)`, and lowered to a
+  `js` body by `os build`) and a sandboxed `js` body answer the same envelope.
+- **Loud on a mistake.** A code, or a reason, the catalogue does not declare is
+  refused when the hook is saved if the hook names it literally in a `throw`.
+  Otherwise it is refused when the hook runs, as a `500` that names the hook
+  and the code. A throw with no code is refused the same way. An error a
+  `ctx.api` call raised and the hook let through unchanged, and a crash, pass
+  through as they always did.
+- **Translated by key.** Each sentence has a key the translation bundle
+  writes, `hooks.<hook>.refusals.<CODE>.message` and
+  `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`; `os i18n extract`
+  scaffolds them and `os i18n check` counts them. A translation keeps the
+  entry's `{{ }}` holes. See [Translations](/docs/ui/translations).
+
+A hook that declares no `refusals` refuses exactly as before: the thrown
+error's own `code`, `status` and message reach the caller.
+
 ## Hook Context
 
 `handler` receives a `HookContext` with these fields:
