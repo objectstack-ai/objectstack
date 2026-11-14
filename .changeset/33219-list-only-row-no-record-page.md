@@ -1,5 +1,6 @@
 ---
 '@object-ui/app-shell': patch
+'@object-ui/console': patch
 ---
 
 fix(app-shell): a list-only object's rows no longer open a record page that always fails
