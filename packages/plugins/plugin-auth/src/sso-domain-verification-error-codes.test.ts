@@ -297,10 +297,64 @@ describe('[#22463] the environment’s own setting tells the two code-less 404s 
   });
 
   it('request-domain-verification: ON, the vendor’s 201 still yields the DNS record', async () => {
-    const res = await runRequestDomainVerification(fakeHandle(201, { domainVerificationToken: 'tok' }), post(REQUEST_URL), ON);
+    const res = await runRequestDomainVerification(challengeThenProvider({ status: 200, body: { domain: 'acme.example' } }), post(REQUEST_URL), ON);
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data?.dnsRecordValue).toBe('_better-auth-token-p1=tok');
+  });
+});
+
+/**
+ * A fake vendor whose challenge route answers a token and whose
+ * `/sso/get-provider` answers `provider`: the two calls the request bridge makes.
+ */
+function challengeThenProvider(provider: { status: number; body: unknown }, seen: Request[] = []): AuthRequestHandler {
+  return async (req) => {
+    seen.push(req);
+    if (new URL(req.url).pathname.endsWith('/sso/get-provider')) {
+      return new Response(JSON.stringify(provider.body), { status: provider.status, headers: { 'content-type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ domainVerificationToken: 'tok' }), { status: 201, headers: { 'content-type': 'application/json' } });
+  };
+}
+
+describe('request-domain-verification: the record goes under the domain the provider is registered with', () => {
+  const ON = { domainVerificationEnabled: true } as const;
+
+  it('reads the registered domain from /sso/get-provider for the same provider, with the caller\'s credential', async () => {
+    const seen: Request[] = [];
+    const req = new Request(REQUEST_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer caller' },
+      body: JSON.stringify({ providerId: 'p1', domain: 'not-the-registered.example' }),
+    });
+    const res = await runRequestDomainVerification(challengeThenProvider({ status: 200, body: { domain: 'Acme.Example' } }, seen), req, ON);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data?.domain).toBe('Acme.Example');
+    expect(res.body.data?.dnsRecordName).toBe('_better-auth-token-p1.acme.example');
+    const read = seen.find((r) => new URL(r.url).pathname.endsWith('/sso/get-provider'));
+    expect(read?.method).toBe('GET');
+    expect(new URL(read!.url).searchParams.get('providerId')).toBe('p1');
+    expect(read?.headers.get('authorization')).toBe('Bearer caller');
+  });
+
+  it('a refused provider read answers DOMAIN_VERIFICATION_FAILED with the read\'s status, and no record', async () => {
+    const res = await runRequestDomainVerification(challengeThenProvider({ status: 403, body: { message: 'denied' } }), post(REQUEST_URL), ON);
+
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error?.code).toBe(OUR_DEFAULT);
+    expect(res.body.data).toBeUndefined();
+  });
+
+  it('a registered domain naming no host name answers 400 DOMAIN_VERIFICATION_FAILED, and no record', async () => {
+    for (const body of [{ domain: '' }, { domain: ' , ' }, {}]) {
+      const res = await runRequestDomainVerification(challengeThenProvider({ status: 200, body }), post(REQUEST_URL), ON);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect(res.body.error?.code, JSON.stringify(body)).toBe(OUR_DEFAULT);
+      expect(res.body.data, JSON.stringify(body)).toBeUndefined();
+    }
   });
 });

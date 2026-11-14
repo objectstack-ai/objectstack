@@ -113,6 +113,13 @@ async function resolveActiveOrganizationId(
 }
 
 /**
+ * The `oidcConfig` endpoint members `/sso/register` takes, which the bridge
+ * takes as flat fields of the same names: every member the untrusted-endpoint
+ * refusal can name (`sso-discovery-companion-origins.ts`).
+ */
+const OIDC_NAMED_ENDPOINTS = ['discoveryEndpoint', 'authorizationEndpoint', 'tokenEndpoint', 'jwksEndpoint', 'userInfoEndpoint'] as const;
+
+/**
  * Reshape a flat SSO-provider registration form body and register it.
  *
  * @param handle  the better-auth universal handler (`AuthManager.handleRequest`
@@ -122,7 +129,8 @@ async function resolveActiveOrganizationId(
  * @param request the raw Web `Request` — its headers carry the caller's session
  *                cookie / bearer + Origin; its body carries the flat form
  *                fields ({ providerId, issuer, domain, clientId, clientSecret,
- *                discoveryEndpoint?, userInfoEndpoint?, scopes?, mapEmail?,
+ *                discoveryEndpoint?, authorizationEndpoint?, tokenEndpoint?,
+ *                jwksEndpoint?, userInfoEndpoint?, scopes?, mapEmail?,
  *                mapName?, mapGroups?, skipUserInfo? }).
  *                `mapId` is NOT among them any more: #8222 removed it from the
  *                `register_sso_provider` action, so the admin form no longer
@@ -145,8 +153,6 @@ export async function runRegisterSsoProviderFromForm(
   const domain = str(body?.domain);
   const clientId = str(body?.clientId);
   const clientSecret = str(body?.clientSecret);
-  const discoveryEndpoint = str(body?.discoveryEndpoint);
-  const userInfoEndpoint = str(body?.userInfoEndpoint);
   const scopesRaw = str(body?.scopes);
 
   const missing = (
@@ -168,12 +174,19 @@ export async function runRegisterSsoProviderFromForm(
   }
 
   const oidcConfig: Record<string, unknown> = { clientId, clientSecret };
-  if (discoveryEndpoint) oidcConfig.discoveryEndpoint = discoveryEndpoint;
-  // An explicit userinfo endpoint: `/sso/register` keeps it over the one the
-  // discovery document names, and trusts its origin for this registration
-  // (`AuthManager.ssoDiscoveryTrustedOrigins`), the remedy the refusal of an
-  // untrusted discovery endpoint names.
-  if (userInfoEndpoint) oidcConfig.userInfoEndpoint = userInfoEndpoint;
+  // The endpoints a registration can name, each sent under the same member
+  // name in `oidcConfig`. `/sso/register` keeps a named endpoint over the one
+  // the discovery document names, and trusts its origin for this registration
+  // (`AuthManager.ssoDiscoveryTrustedOrigins`): the remedy the refusal of an
+  // untrusted discovery endpoint names (`sso-discovery-companion-origins.ts`).
+  // An identity provider whose token, key or userinfo endpoint sits on another
+  // host than its issuer (Google: `oauth2.googleapis.com`,
+  // `www.googleapis.com`, `openidconnect.googleapis.com`) registers only when
+  // each of them is named. The vendor's schema judges each value (a URL).
+  for (const member of OIDC_NAMED_ENDPOINTS) {
+    const value = str(body?.[member]);
+    if (value) oidcConfig[member] = value;
+  }
   oidcConfig.scopes = scopesRaw ? scopesRaw.split(/[\s,]+/).filter(Boolean) : ['openid', 'email', 'profile'];
 
   // `oidcConfig.mapping` is a `z.strictObject`. Measured 2026-08-20 against the
@@ -413,7 +426,9 @@ export async function runRegisterSamlProviderFromForm(
 // The token alone is not actionable — the admin needs the full DNS record
 // (name `_better-auth-token-<providerId>.<domain>`, value
 // `_better-auth-token-<providerId>=<token>`; the prefix is @better-auth/sso's
-// default `tokenPrefix`, which we do not override). These bridges re-dispatch
+// default `tokenPrefix`, which we do not override). `<domain>` is the
+// provider's REGISTERED domain, read back from the vendor: verify-domain looks
+// for the record under each domain the provider lists, and nowhere else. These bridges re-dispatch
 // through the real endpoints (so the per-provider admin gate runs) and reshape
 // the response into the `{ success, data }` envelope the action `resultDialog`
 // reads — request returns the ready-to-paste DNS record; verify returns a
@@ -515,10 +530,56 @@ function forwardAuthHeaders(request: Request, origin: string): Headers {
 }
 
 /**
+ * The host names the vendor's verify-domain checks for a provider's stored
+ * `domain`, in its order: the comma-separated entries, trimmed, each reduced to
+ * its host name and lower-cased, duplicates dropped (`parseProviderDomains` in
+ * `@better-auth/sso`, which reads each entry with `tldts`; {@link bareHostname}
+ * reads the bare host and the URL forms the same way).
+ */
+function providerDomainHosts(domain: string): string[] {
+  const hosts: string[] = [];
+  for (const entry of domain.split(',')) {
+    const host = bareHostname(entry).toLowerCase();
+    if (host && !hosts.includes(host)) hosts.push(host);
+  }
+  return hosts;
+}
+
+/**
+ * The provider's registered `domain`, as `/sso/get-provider` answers it, read
+ * through the same handler and with the same credential as the challenge (the
+ * vendor's `checkProviderAccess` gates both alike).
+ */
+async function readRegisteredDomain(
+  handle: AuthRequestHandler,
+  challengeUrl: string,
+  headers: Headers,
+  providerId: string,
+): Promise<{ ok: true; domain: string } | { ok: false; status: number }> {
+  const url = new URL(challengeUrl.replace(/\/sso\/request-domain-verification$/, '/sso/get-provider'));
+  url.searchParams.set('providerId', providerId);
+  const h = new Headers(headers);
+  h.delete('content-type');
+  const resp = await handle(new Request(inProcessRedispatchUrl(url.href, h), { method: 'GET', headers: h }));
+  const parsed: any = await resp.json().catch(() => null);
+  if (!resp.ok) return { ok: false, status: resp.status };
+  return { ok: true, domain: typeof parsed?.domain === 'string' ? parsed.domain.trim() : '' };
+}
+
+/**
  * Request a DNS-TXT domain-verification challenge for a registered provider and
  * return the ready-to-paste DNS record (for a one-shot `resultDialog`).
  *
- * Body: `{ providerId, domain? }` (domain only shapes the displayed record name).
+ * Body: `{ providerId }`. A `domain` in the body is not read: the record goes
+ * under the provider's registered domain, the one verify-domain checks, and the
+ * answer's `domain` is that registered domain.
+ *
+ * A provider that lists several domains (`a.example,b.example`) is verified
+ * only when the record is published under EACH of them (verify-domain checks
+ * every listed domain and refuses at the first without it), with the same
+ * value. So `dnsRecords` carries one record per listed domain, and
+ * `dnsRecordName` names every one of them, comma-separated, the one field the
+ * Setup dialog shows; for one domain it is that one record's name.
  *
  * @param options `domainVerificationEnabled` — the environment's own setting
  *                (see the block above); omitted keeps the earlier mapping.
@@ -533,7 +594,6 @@ export async function runRequestDomainVerification(
   const body = read.body;
   const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   const providerId = str(body?.providerId);
-  const domain = bareHostname(str(body?.domain));
   if (!providerId) {
     return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Missing required field: providerId' } } };
   }
@@ -560,13 +620,52 @@ export async function runRequestDomainVerification(
 
   const token = str(parsed?.domainVerificationToken);
   const label = `_${SSO_DOMAIN_TOKEN_PREFIX}-${providerId}`;
-  const dnsRecordName = domain ? `${label}.${domain}` : label;
   const dnsRecordValue = `${label}=${token}`;
+
+  // Where the record goes: under the provider's registered domain. A challenge
+  // already issued is answered again on the next request (the vendor keeps it
+  // a week), so a failed read here loses nothing a retry does not recover.
+  const registered = await readRegisteredDomain(handle, rw.innerUrl, headers, providerId);
+  if (!registered.ok) {
+    return {
+      status: registered.status,
+      body: {
+        success: false,
+        error: {
+          code: 'DOMAIN_VERIFICATION_FAILED',
+          message: `The DNS record for SSO provider "${providerId}" could not be shown: its registered domain could not be read (HTTP ${registered.status}). Try again.`,
+        },
+      },
+    };
+  }
+  const hosts = providerDomainHosts(registered.domain);
+  if (hosts.length === 0) {
+    // The vendor's verify-domain refuses such a provider too (`INVALID_DOMAIN`).
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: {
+          code: 'DOMAIN_VERIFICATION_FAILED',
+          message: `SSO provider "${providerId}" has no domain to verify: its registered domain names no host name. Set the provider's domain to a bare host name, such as acme.com.`,
+        },
+      },
+    };
+  }
+  const dnsRecords = hosts.map((host) => ({ domain: host, type: 'TXT' as const, name: `${label}.${host}`, value: dnsRecordValue }));
   return {
     status: 200,
     body: {
       success: true,
-      data: { providerId, domain, token, dnsRecordType: 'TXT', dnsRecordName, dnsRecordValue },
+      data: {
+        providerId,
+        domain: registered.domain,
+        token,
+        dnsRecordType: 'TXT',
+        dnsRecordName: dnsRecords.map((r) => r.name).join(', '),
+        dnsRecordValue,
+        dnsRecords,
+      },
     },
   };
 }
