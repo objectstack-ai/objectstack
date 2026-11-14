@@ -218,10 +218,10 @@ export async function runAuthoringGate(
  * are not being written and stay served. `undefined` (the ordinary fold) for
  * every other write type, and for a write naming no package or no target.
  *
- * A package-wide draft publish (`publishPackageDrafts`) whose drafts depend on
- * a sibling extension draft is refused, because that batch's pending set
- * carries no extension drafts (#33152); publishing the extension first through
- * the per-item door works.
+ * [#33152] A package-wide draft publish (`publishPackageDrafts`) carries its
+ * other extension drafts in its pending set, and the gate folds them onto
+ * their targets (`foldPendingObjectExtensions`), so a draft that depends on a
+ * sibling extension draft is judged against the target as the batch serves it.
  */
 export function objectExtensionWriteFold(
     singularType: string,
