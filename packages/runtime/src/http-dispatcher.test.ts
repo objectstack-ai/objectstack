@@ -2505,7 +2505,7 @@ describe('HttpDispatcher', () => {
 
         // #33277 — a batch whose drafts landed while the registry refused an
         // object answers `published_unregistered`; it used to answer
-        // `published`, and the flip keeps following it until ruled otherwise.
+        // `published`, and the flip keeps following it (contract review of PR #33528).
         it('POST /packages/:id/publish-drafts still runs the visibility flip after published_unregistered', async () => {
             const { getMetaItems, saveMetaItem, trigger } = flipDoubles({
                 success: false, outcome: 'published_unregistered', publishedCount: 1, failedCount: 0,

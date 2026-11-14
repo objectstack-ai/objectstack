@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/metadata-protocol': patch
 '@objectstack/runtime': patch
 '@objectstack/client': patch
@@ -9,7 +9,9 @@
 feat(metadata-protocol, spec): a package publish whose runtime registry refused an object answers `published_unregistered` and names the object, instead of `published`
 
 Clause-②: yes (widening) — `PublishPackageDraftsResponseSchema.outcome` gains the value `published_unregistered`, and the response gains the optional member `unregistered[]`. Every other answer is byte-identical: a publish the registry takes whole still answers `published` with `success: true` and no `unregistered` key.
-Metadata-protocol: none
+Metadata-protocol: semantic
+
+The authorable-surface shard gains `api/PublishPackageDraftsResponse:unregistered`, and the same server event answers `outcome` / `success` differently; ADR-0087 entry `18.publish-drafts-outcome-published-unregistered`.
 
 **What answers differently.** `POST /api/v1/packages/:id/publish-drafts` (and the protocol's `publishPackageDrafts`, and `client.packages.publishDrafts()`) used to answer `outcome: 'published'` and `success: true` when the runtime registry refused one of the objects it had just made live. The object carried the `object-registry-refused` warning on its `published[]` element, but a caller that read `success` or `outcome` saw a clean publish, and a seed load or data read right after it answered `OBJECT_NOT_FOUND`. The same publish now answers:
 

@@ -650,9 +650,10 @@ function packageIsUnknown(registry: unknown, id: string): boolean {
  * - `published` — the drafts landed; the package is live and becomes visible.
  * - `published_unregistered` — the drafts landed exactly as on `published`,
  *   but the runtime registry refused an object among them (#33277), which
- *   `unregistered[]` names. Kept in the list on purpose, pending a ruling: this
- *   answer used to read `published`, so the flip ran on it, and dropping it
- *   would change visibility beyond what the outcome change was asked to do.
+ *   `unregistered[]` names. Kept in the list on purpose (contract review of
+ *   PR #33528): the drafts are live, the flip concerns the package's apps, and
+ *   dropping it would hide the parts that are served while the refused object
+ *   stays unserved either way.
  * - `nothing_to_publish` — kept on purpose: for a materialized (additive)
  *   build there are no drafts, and this flip IS the publish (ADR-0045 §3).
  *
