@@ -142,6 +142,19 @@ const INCOMPLETE_UPLOAD_STATUS = 409;
 const INCOMPLETE_UPLOAD_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
 
 /**
+ * [#33027] The chunk door's answer to a chunk sent to an upload that has
+ * already completed: the file is committed and the backend multipart is gone,
+ * so the chunk would be stored for no file. `409` / `RESOURCE_CONFLICT`, as
+ * for an incomplete upload above: the request conflicts with where the upload
+ * stands. The remedy is a new upload, so the message names it.
+ */
+const COMPLETED_SESSION_STATUS = 409;
+const COMPLETED_SESSION_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
+const COMPLETED_SESSION_CHUNK_MESSAGE =
+  'This chunked upload has already completed and its file is committed, so it takes no more chunks. ' +
+  'To send another file, start a new chunked upload.';
+
+/**
  * [#22470] The answer both upload-starting doors (presigned, chunked) give a
  * request naming a scope outside the upload-scope vocabulary — before the size
  * check, before any row is written and before any URL or backend upload is
@@ -1078,6 +1091,21 @@ export function registerStorageFamily(
     }
   };
 
+  /**
+   * The chunked-completion door's `200` body. One builder for the completion
+   * that assembles the file and for a retry of it after it succeeded
+   * (#33027), so both answer the same file the same way. The key is the one
+   * the file row was committed with: the backend may assemble under another
+   * key than the session started with.
+   */
+  const completedUploadBody = (session: UploadSessionRecord, file: Pick<FileRecord, 'key'> | null) => ({
+    fileId: session.file_id,
+    key: file?.key ?? session.key,
+    size: session.total_size,
+    mimeType: session.mime_type ?? 'application/octet-stream',
+    url: `${basePath}/files/${session.file_id}/url`,
+  });
+
   // ---------------------------------------------------------------------------
   // POST /storage/upload/presigned
   // ---------------------------------------------------------------------------
@@ -1426,6 +1454,16 @@ export function registerStorageFamily(
         return;
       }
 
+      // [#33027] A completed upload takes no more bytes. Its backend multipart
+      // is already assembled and gone, so a chunk stored now belongs to no
+      // file, and recording it would rewrite the parts of a finished upload.
+      // Asked after the resume token, so only the uploader learns the status,
+      // and before a byte is read or stored.
+      if (live.status === 'completed') {
+        sendError(res, COMPLETED_SESSION_STATUS, COMPLETED_SESSION_CODE, COMPLETED_SESSION_CHUNK_MESSAGE);
+        return;
+      }
+
       // [#27412] The index must name a chunk this upload declared: a whole
       // number in [0, total_chunks). Judged here — after the resume token
       // (a caller who cannot prove it owns the session learns nothing of its
@@ -1609,6 +1647,20 @@ export function registerStorageFamily(
         return;
       }
 
+      // [#33027] A completion sent again after one that succeeded (a client
+      // retrying after it lost the `200`, as `resumeUpload` does) answers the
+      // same `200` for the same file. It writes nothing and does not reach the
+      // backend: the multipart was assembled and discarded by the first
+      // completion, so the backend answered "session not found", the catch
+      // below stamped `failed` over `completed`, and the uploader was told a
+      // committed, downloadable file had failed. The request is still judged
+      // above against the parts the upload holds, so a retry naming a chunk
+      // the upload never held is refused as before.
+      if (live.status === 'completed') {
+        sendOk(res, completedUploadBody(session, file));
+        return;
+      }
+
       await store.updateSession(uploadId, { status: 'completing' }, writeContext);
 
       const partsForBackend = verdict.parts.map(p => ({
@@ -1640,13 +1692,7 @@ export function registerStorageFamily(
         throw completionErr;
       }
 
-      sendOk(res, {
-        fileId: session.file_id,
-        key: finalKey,
-        size: session.total_size,
-        mimeType: session.mime_type ?? 'application/octet-stream',
-        url: `${basePath}/files/${session.file_id}/url`,
-      });
+      sendOk(res, completedUploadBody(session, { key: finalKey }));
     } catch (err: any) {
       sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
