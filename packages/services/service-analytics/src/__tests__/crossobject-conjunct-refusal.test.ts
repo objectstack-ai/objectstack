@@ -864,18 +864,23 @@ describe('[#33335] a one-hop cross-object where leaf reaches the engine as its n
     expect(control.calls[0]?.filter).toEqual({ plan_kind: 'recommended' });
   });
 
-  const REFUSED: Array<{ name: string; query: AnalyticsQuery; member: string; param: string }> = [
+  const REFUSED: Array<{ name: string; query: AnalyticsQuery; member: string; param: string; echoCode?: string }> = [
     { name: 'two relationships deep', query: planQuery({ 'cb_order.customer.tier': 'gold' }), member: 'cb_order.customer.tier', param: 'where' },
     { name: 'under $not', query: planQuery({ $not: { 'cb_order.status': 'cancelled' } }), member: 'cb_order.status', param: 'where' },
-    { name: 'a { $field } comparand', query: planQuery({ 'cb_order.status': { $eq: { $field: 'plan_kind' } } }), member: 'cb_order.status', param: 'where' },
+    // The echo declines every `{ $field }` comparand first, in its own
+    // envelope (#7598); the execution face is this card's refusal.
+    { name: 'a { $field } comparand', query: planQuery({ 'cb_order.status': { $eq: { $field: 'plan_kind' } } }), member: 'cb_order.status', param: 'where', echoCode: 'INVALID_FILTER' },
     { name: 'a join onto another object than the field declares', query: planQuery({ 'plant.region': 'EU' }), member: 'plant.region', param: 'where' },
     { name: 'a cross-object MEASURE', query: planQuery({}, { measures: ['order_total'] }), member: 'order_total', param: 'measures' },
   ];
   for (const c of REFUSED) {
     it(`still refused, on both faces and before the engine: ${c.name}`, async () => {
       const { execute, echo, calls } = await planRun(c.query);
-      for (const refusal of [execute, echo]) {
-        expect({ code: refusal?.code, status: refusal?.status, member: refusal?.member, param: refusal?.param })
+      expect({ code: execute?.code, status: execute?.status, member: execute?.member, param: execute?.param })
+        .toEqual({ code: 'INVALID_FIELD', status: 400, member: c.member, param: c.param });
+      if (c.echoCode) expect({ code: echo?.code, status: echo?.status }).toEqual({ code: c.echoCode, status: 400 });
+      else {
+        expect({ code: echo?.code, status: echo?.status, member: echo?.member, param: echo?.param })
           .toEqual({ code: 'INVALID_FIELD', status: 400, member: c.member, param: c.param });
       }
       expect(calls).toEqual([]);
