@@ -86,6 +86,7 @@ import '@objectstack/driver-turso';
 import '@objectstack/driver-sql';
 import '@objectstack/platform-objects/plugin';
 import '@objectstack/plugin-security';
+import '@objectstack/cloud-connection';
 
 /** …/packages/cli/src/commands — seeded from `import.meta.url`. */
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
