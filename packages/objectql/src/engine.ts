@@ -5304,8 +5304,11 @@ export class ObjectQL implements IObjectQLEngine {
    *   from a transport that inherited one it cannot honour (#18063) — the
    *   callback
    *   runs directly with the supplied base context (no rollback). This keeps
-   *   the API safe to call on drivers without ACID support (e.g. the
-   *   in-memory driver in tests). It is DECLARED behaviour (ADR-0119 D1), not
+   *   the API safe to call on drivers that cannot roll back (a test double
+   *   with no `beginTransaction`, remote Turso, OData). The in-memory driver
+   *   is not one: it implements `beginTransaction` / `rollback` over a
+   *   snapshot of its whole store, so the callback runs inside a
+   *   transaction there. It is DECLARED behaviour (ADR-0119 D1), not
    *   a bug to be discovered — but since v17 it is no longer *silent*: the
    *   degrade warns once per driver (#4619, {@link warnTransactionUnsupported}),
    *   and a caller who cannot live with it says so with `opts.require: true`,

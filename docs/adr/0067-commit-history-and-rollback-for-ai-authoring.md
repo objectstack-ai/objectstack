@@ -1,6 +1,6 @@
 # ADR-0067: Commit history and rollback for AI authoring — turns become atomic, revertible commits
 
-**Status**: Accepted (2026-06-24; completed 2026-07-16) · **Amended** (2026-08-06, #5351/#5696 — the D2 join is now distinguishable (`owned`), and Decision-2's atomicity is enforced as a ONE-datasource promise, with audit rows carved out and possibly orphaned; see the Amendment at the end) — fully implemented: commit grouping (`sys_metadata_commit`), `revertCommit`/`rollbackToPackageCommit`/`listCommits`, REST routes; **Decision-2 landed via #3066**: `publishPackageDrafts` runs every promotion + the commit record inside ONE `engine.transaction()` (two-phase — side effects post-commit), so a commit cannot half-land; `engine.transaction()` joins ambient transactions to make nested repository writes participate. Locked by `protocol-publish-package-drafts.test.ts` (all-or-nothing + rollback tracking) and `engine-ambient-transaction.test.ts`. **Letter index** (2026-08-29, #12786): the Decision headings are relabeled `1.`–`6.` → `D1`–`D6` so `Dk` citations verify — recognition of the record's own numbering (this status line and the Amendment already say "D2"); no decision is renumbered, reordered, or rewritten. · **Amended** (2026-11-12, #32396/#32480 — Decision-2's atomicity holds where the engine can roll back (`engineCanRollBack`), which is not the same line as "a SQL driver"; elsewhere a package publish is judged first and undone by compensation, best effort; see the 2026-11-12 Amendment at the end).
+**Status**: Accepted (2026-06-24; completed 2026-07-16) · **Amended** (2026-08-06, #5351/#5696 — the D2 join is now distinguishable (`owned`), and Decision-2's atomicity is enforced as a ONE-datasource promise, with audit rows carved out and possibly orphaned; see the Amendment at the end) — fully implemented: commit grouping (`sys_metadata_commit`), `revertCommit`/`rollbackToPackageCommit`/`listCommits`, REST routes; **Decision-2 landed via #3066**: `publishPackageDrafts` runs every promotion + the commit record inside ONE `engine.transaction()` (two-phase — side effects post-commit), so a commit cannot half-land; `engine.transaction()` joins ambient transactions to make nested repository writes participate. Locked by `protocol-publish-package-drafts.test.ts` (all-or-nothing + rollback tracking) and `engine-ambient-transaction.test.ts`. **Letter index** (2026-08-29, #12786): the Decision headings are relabeled `1.`–`6.` → `D1`–`D6` so `Dk` citations verify — recognition of the record's own numbering (this status line and the Amendment already say "D2"); no decision is renumbered, reordered, or rewritten. · **Amended** (2026-11-12, #32396/#32480 — Decision-2's atomicity holds where the engine can roll back (`engineCanRollBack`), which is not the same line as "a SQL driver"; elsewhere a package publish is judged first and undone by compensation, best effort; see the 2026-11-12 Amendment at the end). · **Amended** (2026-11-14, #32504 — Decision-3's revert doors are not atomic across items: `revertCommit` reverts item by item and reports `reverted[]` and `failed[]`, and `rollbackToPackageCommit` runs one `revertCommit` per commit; neither opens a transaction around the whole; see the 2026-11-14 Amendment at the end).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on / amends**: [ADR-0045](./0045-additive-materialization-and-visibility-gate.md) (**amended**: ADR-0045 keeps a *draft + human-confirm* gate on mutations as the safety mechanism; this ADR replaces *confirm-before* with *revert-after* for everything except irreversible data loss, and unifies the two authoring regimes under one primitive — the commit), [ADR-0027](./0027-metadata-authoring-lifecycle.md) (draft workspace — retained as a *review affordance*, demoted from *safety mechanism*), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) ("AI never publishes — it drafts" → **AI commits; commits are revertible**), [ADR-0034](./0034-transactional-writes-and-ambient-transaction.md) (per-write transaction — **extended to span a whole turn**), [ADR-0038](./0038-build-verification-loop.md) (machine gate — runs per commit, before it lands)
 **Consumers**: `@objectstack/objectql` (commit grouping, atomic turn-apply, `revertCommit`, history query — built on the existing `sys_metadata_history` + `restoreVersion`), `@objectstack/runtime` + `@objectstack/rest` (commit/revert routes), `../cloud/service-ai-studio` (turn = commit; auto-commit policy; data-loss confirmation), `../objectui` (commit timeline + "revert to here")
@@ -15,7 +15,7 @@
 
 1. **A turn is a commit.** Every AI apply (and Studio batch) records its metadata changes as one **commit** — a named group over the existing `sys_metadata_history` event log, tagged with a `commit_id`, actor, message (the user's prompt), and the AI model. The per-item history and full-body snapshots that back rollback already exist; this ADR adds the *grouping* and the *package-scoped HEAD*.
 2. **Commits are atomic.** All metadata writes in a turn land in **one transaction** or none do. This closes ADR-0045's residual seam — `publishPackageDrafts` is per-item best-effort today, so a mid-batch failure leaves a half-live app ("claimed 120 rows, opens empty"). A commit cannot half-land.
-3. **Rollback is first-class.** `revertCommit(id)` / `rollbackToPackageCommit(id)` restores every item in the target commit atomically, reusing the single-item `restoreVersion` primitive. A revert is a **new forward commit** (git-revert, not reset): history is append-only and never loses the record.
+3. **Rollback is first-class.** `revertCommit(id)` / `rollbackToPackageCommit(id)` restores every item in the target commit atomically, reusing the single-item `restoreVersion` primitive. A revert is a **new forward commit** (git-revert, not reset): history is append-only and never loses the record. *(Amended 2026-11-14: neither door is atomic across items — see the Amendment of that date at the end.)*
 4. **The confirm gate narrows from "before publish" to "before irreversible data loss."** With atomic + revertible commits, additive *and* mutation turns auto-commit with no per-change confirmation. The only confirmation that remains is destroying **real user data** (§Decision-5). Governed orgs keep their ADR-0045/0027 approval gate by policy — unchanged.
 5. **Metadata reverts cleanly; data is made reversible by discipline.** Destructive operations (drop field/object) go **soft by default** — data retained, column/table hidden, recoverable in the ADR-0045 trash window — so their revert restores data losslessly. Hard teardown happens only on explicit discard/GC. This is what makes "revert-after" actually safe.
 6. **Substrate: the framework history log is the commit log; package snapshots are named restore points.** `sys_metadata_history` (per-event, lightweight, already carries actor/diff/`operation_type`) is the commit substrate. `sys_package_version` (full-bundle, heavy) is reserved for **named restore points** — the escape hatch cut before a risky revert, and marketplace release — *not* a per-turn snapshot.
@@ -80,8 +80,8 @@ All metadata writes in a turn execute inside **one `engine.transaction()`**; any
 
 ### D3 — Rollback is first-class and append-only
 
-- `revertCommit(commitId)` — restore every item the commit touched to its **pre-commit** body, atomically (reuse `restoreVersion` per item inside one transaction). Recorded as a **new forward commit** (`operation_type='revert'`), so history is never rewritten and a revert is itself revertible.
-- `rollbackToPackageCommit(commitId)` — revert the package's HEAD back through every commit after the target, as one transaction. This is the "一层一层回退" the founder described — **commit-granular, not per-artifact** (§Resolved-1).
+- `revertCommit(commitId)` — restore every item the commit touched to its **pre-commit** body, atomically (reuse `restoreVersion` per item inside one transaction). Recorded as a **new forward commit** (`operation_type='revert'`), so history is never rewritten and a revert is itself revertible. *(Amended 2026-11-14: no transaction spans the items; the revert runs per item and reports `reverted[]` and `failed[]` — see the Amendment of that date at the end.)*
+- `rollbackToPackageCommit(commitId)` — revert the package's HEAD back through every commit after the target, as one transaction. This is the "一层一层回退" the founder described — **commit-granular, not per-artifact** (§Resolved-1). *(Amended 2026-11-14: not one transaction; one `revertCommit` per commit, each step's failures collected — see the Amendment of that date at the end.)*
 - Revert restores **metadata** deterministically. Its effect on **data** is governed by §5.
 
 ### D4 — The confirm gate, relocated
@@ -349,3 +349,63 @@ declared no-rollback degrade, and its D1-R4. **Implemented in**
 the gate is `engineCanRollBack` in
 `packages/core/src/utils/migration-journal.ts`. Pinned by
 `protocol-publish-drafts-all-or-nothing.test.ts`.
+
+---
+
+## Amendment (2026-11-14, #32504) — Decision-3's revert doors are not atomic across items; a revert runs per item and names what it could not do
+
+Decision-3's design — a revert restores every item the commit touched to its
+pre-commit body, reusing `restoreVersion`, and is recorded as a **new forward
+commit** — is **unchanged**. What is amended is the atomicity TL;DR 3 and D3's
+first two bullets attach to it: "atomically", "inside one transaction", "as one
+transaction". The code on `main` never opened that transaction. This record now
+says what the two doors do instead; it records the code and does not decide
+whether a revert should stay this way (below).
+
+### What the doors do
+
+Read from the code on `main` at `ba35dfd7` — a reading of that date, not part
+of the decision:
+
+- **`revertCommit`** walks the commit's items newest first. An item the commit
+  created is soft-removed; an item it modified is restored to its `prevVersion`
+  through `restoreVersion`, as D3 says. Each item's own write — the row and its
+  history event — runs in the repository's per-item `withTxn`, so it rolls back
+  as one where the engine can roll back (the gate of the 2026-11-12 Amendment).
+  **No transaction spans the items**: the function opens none. An item that is
+  refused or throws goes into `failed[]` with its client-facing error (and its
+  code, where it has one), and the walk goes on to the next item. `failed[]` says the item's revert did
+  not complete, not that nothing of it was written: a fault after the item's
+  row write (its registry write-through, say) reports it there too. When the
+  walk ends, the revert commit is recorded from `reverted[]` — what was
+  reverted, not what the commit named — and the answer's `success` is true
+  only when `failed[]` is empty and at least one item was reverted.
+- **`rollbackToPackageCommit`** runs one `revertCommit` per `apply` commit
+  newer than the target, newest first. A step that throws, and every item a
+  step reports in its own `failed[]`, goes into the rollback's `failed[]`;
+  neither stops the rollback, and every step that returns has recorded its own
+  revert commit.
+
+So a revert in which one item fails leaves the package **partly reverted**:
+the item's neighbours are reverted and recorded, the failed item is named in
+the response, and `success` is false. That is the half-land shape D2 exists
+to prevent on publish, here on the revert side — reported, not prevented.
+
+### What this amendment does not decide
+
+- **Whether a revert should be atomic.** Running `revertCommit` (or a whole
+  rollback) inside one `engine.transaction()` would change what a caller sees —
+  a revert with one refused item would then revert nothing — and would hold
+  only where the engine can roll back. That is a maintainer decision, not made
+  here.
+- It changes nothing in Decision-2, the package-publish door, or the
+  2026-08-06 carve-out (audit rows written during reverted work still remain).
+
+**Recorded by**: the triage of #32504 ("stale text only"), dispatched as a text
+correction: this record follows the code; no historical text is rewritten.
+**Implemented in** `packages/metadata-protocol/src/protocol-package-commits.ts`
+(`revertCommit`, `rollbackToPackageCommit`); the per-item answer is the
+contract stated on `ObjectStackProtocolImplementation#revertCommit` and
+`#rollbackToPackageCommit` in `protocol.ts`. Pinned by
+`protocol.revert-stored-type-canonical.test.ts` ("reverts the neighbours of a
+refused item and reports the mix honestly").

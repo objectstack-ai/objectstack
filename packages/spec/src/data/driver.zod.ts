@@ -839,9 +839,10 @@ export type PoolConfigParsed = z.infer<typeof PoolConfigSchema>;
  *
  * Two clauses, and they answer different questions:
  *
- *  1. **The method is there.** A driver with no `beginTransaction` (the
- *     in-memory driver, a test double, a foreign engine) has nothing to open.
- *     This clause is unchanged from the pre-`transactionsUnsupported` gate and
+ *  1. **The method is there.** A driver with no `beginTransaction` (a test
+ *     double, a foreign engine) has nothing to open. The in-memory driver is
+ *     not one: it implements `beginTransaction` / `rollback` by snapshotting
+ *     its whole store and restoring the snapshot. This clause is unchanged from the pre-`transactionsUnsupported` gate and
  *     is why the bit's absence keeps every existing driver exactly as it was.
  *  2. **The transport did not deny it.** `supports.transactionsUnsupported`
  *     is how a subclass that INHERITED the method says its own transport
