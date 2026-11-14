@@ -40,6 +40,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Logger } from '@objectstack/spec/contracts';
 import { AnalyticsService } from '@objectstack/service-analytics';
 import { RestServer } from './rest-server';
+import '@objectstack/objectql';
 
 // ── harness (the shape `analytics-dataset-refusal-envelope.test.ts` uses) ─────
 
