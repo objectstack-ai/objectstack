@@ -1,0 +1,32 @@
+{
+  "number": 33190,
+  "kind": "pull_request",
+  "title": "docs(design): exclusion constraints — key shape, interval semantics, per-driver atomicity, existing data",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T00:44:54Z",
+  "updated_at": "2026-11-14T02:17:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33190",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoVnZAeuLtvYdpt1nhe36z3i)_\n\nPart of #32979 (step 1 of 3: the one-page design the ruling's Execution line asks for; steps 2 and 3 stay open on the card).\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：新增设计文档 `docs/design/exclusion-constraints.md`，定义\"同一人时间段不重叠\"约束的键形、区间语义、各驱动原子性、存量重叠数据与写入拒绝；不含任何代码。\n- 为什么改：裁决 A 要求先出一页设计并过契约复审，再由 spec 落键、data 落各驱动执行。\n- 风险与回滚：纯文档，零运行时影响；回滚即删文件。\n- 先看：文档 §3 原子性（锁序、托管 Turso 一行）与 §8 十一个开放问题，各带推荐。\n- 两分钟验证：打开文档 §2 与 §3，确认 21:30 结束与 21:30 开始判为不重叠，无法原子的数据源在启动/发布/安装时拒绝。\n- 需要你做的：无，席位落地；§8 由席位另行整批请你裁决。\n\n## What changes\n\nOne new file, `docs/design/exclusion-constraints.md` (235 lines at `40ca06df`, after contract review 6869162700 and its delta 6869686158). It quotes ruling record 6844907250 and answers each attached condition:\n\n- **Key shape.** `exclusions: [{ name, groupBy, range: [start, end], where, message }]` sits beside `indexes`. Eligible fields include injected columns such as `owner_id`. Organization scope is implied and NULL-safe. The `where` vocabulary is named, and its shape is open question Q7. The ruling's \"existing conditional-index form\" is absent on `main`: `indexes[].partial` was retired at protocol 17.\n- **Interval semantics.** One half-open overlap definition. A null end is open-ended (Q8). An inverted range is a 400, judged only on writes that touch a range field. `datetime` values compare as UTC instants (ADR-0053 D-B1). How a `date` end is read is Q2.\n- **Atomicity.** Three eligibility legs, two read by the engine and one reported by the driver:\n  - Engine-read: the object is not federated, and the datasource's `schemaMode` is `managed`.\n  - Driver-reported: a bit computed per instance from the driver's family getters.\n\n  On the SQL faces the driver opens a READ COMMITTED transaction, with the autonumber reservation ahead of it. The lock order is the stored row, then the guard keys sorted, and the guard row is bumped, not only locked. Retries are bounded, with backoff and a declared answer when they run out. These faces refuse: MSSQL, Oracle, cockroachdb, redshift, mariadb, external and federated datasources, the Turso embedded replica, MongoDB (v1), OData, and drivers without the bit. Remote Turso, the hosted product's face, is Q11.\n- **Refusal points.** Boot throws `EXCLUSION_CONSTRAINT_UNSUPPORTED`. Publish answers `422 INVALID_METADATA` with the rule id `exclusion-constraint-unsupported`. Install is a hard stop.\n- **Existing data.** Rows are never rewritten. The overlap probe runs in `os migrate plan`, `os doctor`, and as publish advisories; there is no boot warning. What a write meets is Q6: frozen, new pairs only, or inactive until clean per ADR-0120 D4.\n- **Refusal on write.** `409 EXCLUSION_VIOLATION`. The loser of a race, after retries, answers that code. Inside a caller's transaction, or when the bound is spent, the answer is `409 CONCURRENT_UPDATE` (Q4).\n- **Acceptance.** A conformance case set at `packages/spec/src/data/exclusion-conformance.ts`, scored by `check-driver-conformance.mjs`. It adds two-writer rounds, a 16-writer burst, a non-overlapping burst at REPEATABLE READ, and two concurrent updates of one row. The bit is true only where the concurrency cases run on a required lane.\n- **Steps 2 and 3.** The files and seams each touches. Step 2 is likely Tier H, because the skill reference index is regenerated.\n- **Open questions.** Eleven, each with a recommendation, for one maintainer batch.\n\n## Tests\n\nNone owed: docs-only diff, no code, schema, lint or driver change.\n\n## Acceptance notes\n\n- `packages/spec/src/data/validation.zod.ts:42` still points to the retired `partial` \"for a scoped/conditional constraint\". A parse refuses that key loudly, so this is a stale sentence, not a trap. Step 2's file list corrects it.\n- `docs/design/` has no index or README, so no index row is owed.\n- No ADR is touched. Whether the guard table and the ADR-0148 D2 restore reason get a record is Q10; that decision is Tier H and the maintainer's.\n- No changeset: `docs/design/**` ships in no package's `files[]`, so `skip-changeset` is set.\n- The attribution line links the card thread, as the harness session context requires.\n\n## Verification\n\n<details><summary>Derived gates at 40ca06df: 15 of 15 exit 0, reconciled</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `40ca06df` derived 15 commands, each run with stdin from /dev/null and exit code captured before any pipe. All 15 exited 0:\n\n- check-adr-links, with its self-test\n- check-closing-keyword-parity, with its self-test\n- check-comment-mask-corpus\n- plan-test-core-shards self-test\n- check:doc-formula-expressions\n- check:ci-filter-parity\n- check:cross-package-test-inputs\n- check:doc-authoring\n- check:driver-memory-census\n- check:gitlink-declared\n- check:nul-bytes\n- check:refd-timer-probe\n- check:watch-hint-literal\n\nReconciliation with `--ran` and exit codes: `Run reconciliation — 15 derived, 15 run, 0 NOT-MEASURED, 0 UNRUN` (a derived zero). The same 15 also exited 0 at `c35ff03c` and `fa6b7757`.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibwo1JzKTz7boR9JXuG)_\n\n<!-- signed: domain:spec#2 · os-tesla · session_01L9qibvfX5bawZKtfa6u7j9 -->\n"
+}

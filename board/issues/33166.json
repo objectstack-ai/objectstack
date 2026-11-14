@@ -1,0 +1,37 @@
+{
+  "number": 33166,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol)!: a stored row bound to a package that holds none of its name, or a pair row of a two-holder name, is no longer laid into the first-registered holder's registry slot (ADR-0150 D4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T23:32:10Z",
+  "updated_at": "2026-11-14T00:59:21Z",
+  "closed_at": "2026-11-14T00:59:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-14T00:59:19Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33166",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao3aDjoEUznHeGMZJaoMEKa5)_\nPart of #32692\n\nClause-②: no (narrowing)\nMetadata-protocol: none\nSkills-docs: none — `skills/**` and `content/docs/**` teach no stored row bound to a package that holds none of its name, and no pair row of a two-holder name; the prescription ships in the ADR-0087 entry and the changeset's FROM → TO.\n\n> **BREAKING** (narrowing, `patch` on `@objectstack/metadata-protocol` and `@objectstack/objectql`, ADR-0087 entry `stored-row-of-a-non-holder-under-two-holders` registered): with two or more packages holding a name, a holder's registry item stops answering another package's stored row as its own.\n\n## 维护者速读\n\n- 改了什么：两个包 A、B 都发布同名条目（tool、webhook、connector 等 14 类密封类型）。环境里有一条存储行绑定在第三个包 S 上（S 根本不持有这个名字），或者绑定在某个持有者的 `.custom` 结对包上。以前读侧回填按\"先注册的那个持有者\"给它套外壳，于是 A（或者换个注册顺序就是 B）把这条行当成自己的答出来。现在：S 的行一律不进任何持有者的槽位，由启动普查 `metadata_sealed_overlay_unserved` 报出；结对行按 `overlayRowBinding` 判定它定制的那个持有者（停用的也算），判不出归属就不注册。\n- 为什么改：专题 #31527 红线 2（歧义要报，不能猜成某个持有者的）；#32692 的第一半。webhook 派发、执行列表直接读 registry，会用错正文（例如 A 的事件发到 S 行的 URL）。\n- 不变：只有一个持有者的名字；行服务类型（dashboard、report、email_template 等 9 类）；`permission`（存储的权限集分叉另有维护者裁决，这里保持原样，见下方问题）；`flow`。\n- 遗留（不在本 PR）：两条行各绑一个持有者时仍是最后读到的覆盖（registry 每个名字只有一个裸槽位，归 ADR-0150 专题线的按包槽位卡）；第二个持有者安装前已注册的副本不会被收回（S1）。\n- 风险与回滚：仓内第一方组合没有这种形状，答案不变。只动内存 registry 槽位，不改任何键、值或存储形状。回滚即 revert。\n- 先看：`packages/metadata-protocol/src/protocol-registry-hydration.ts`（`judgesRowHolder`、`namesNoHolderAmongMany`、`pairRowEnvelopeHolder`，以及 `hydrateOverlayIntoRegistry` 里的两处调用）；`packages/objectql/src/webhook-stored-row-boot-hydration.test.ts` 的 `#32692` 段。\n- 待维护者回答：两个持有者下，绑定在不持有该名字的包上的 `permission` 存储行，现在仍落在先注册持有者的槽位（与注册顺序有关）。拒绝它会改变部署实际执行的授权，所以本 PR 没碰；是否另开卡处理，请定夺。\n\n## What changes\n\n`hydrateOverlayIntoRegistry` (the boot load, an unscoped list read, the write-through of a save) builds a registry entry from each stored `sys_metadata` row. For a row whose package holds no item of the name, the artifact lookup scoped to that package falls back to the package registered FIRST, so the row wore that holder's envelope and took its slot.\n\nFor the types `judgesRowHolder` names (every package-scoped type except `flow`, `permission` and the row-served types: `action`, `hook`, `job`, `webhook`, `connector`, `sharing_rule`, `queue`, `assignment_rule`, `analytics_cube`, `picklist`, `api`, `tool`, `skill`, `agent`):\n\n- **A row naming a package that holds none of the name, under two or more holders** (`namesNoHolderAmongMany`): declined, as the package-less row of such a name already is (#32568). The row's own package asks as the caller, so a bundle addition's own row is still its own. Every type reached is sealed once a package ships the name, so the boot census names the row; a pin holds the type table to that.\n- **A customization pair's row of a two-holder name** (`pairRowEnvelopeHolder`): wears the envelope of the holder `SchemaRegistry#overlayRowBinding` binds it to, read with the new optional `includeDisabledPackages` so a disable never moves it (ADR-0150 D3). A pair row the rule binds to no holder (a shared App pair's undeclared row, a row declaring a package the pair does not customize) is declined.\n\nA name one package holds keeps every reading.\n\n## Why\n\nADR-0150 D4: a stored row binds to the `(package, name)` it customizes; red line 2: ambiguity is reported, never guessed. Measured on `main` before the change (step 0, #31699 comment 6857806396): the stray row landed in the first-registered holder's slot, a different slot in each order.\n\n## Verification\n\n- `packages/objectql/src/webhook-stored-row-boot-hydration.test.ts`: 32 tests, each order of registration. Ablated from scratch builds, each rule turns its own pins red: the stray decline (4), the pair envelope (5), the null-binding decline (2), the every-holder binding (2), the one-holder guard (1), the permission exemption (2), the row-served exemption (2). BASE (`84c66d36`'s hydrator) fails 9 of the then 25.\n- Full suites: `@objectstack/metadata-protocol` 22803 passed, `@objectstack/objectql` 12908 passed. A local `tsc` is not meaningful in this container (dependencies built without declarations); CI typechecks.\n- Gates: `check:adr-0087-registration`, `check:empty-changeset`, `check:changeset-fixed`, `packages/spec` migrations (198), `packages/cli` `migrate-meta-engine-guidance` (3).\n\n## Red-line read\n\nRun in this thread by a separate review pass (maintainer's instruction: 「你自己有fable，自己审就可以了吧？」). Round 1 FAIL (three must-fix: the null-binding pair arm registered the row, the envelope moved with a disable, the prescribed `.custom` migration is excluded for 13 of the 14 types); round 2 PASS on `7ae13371`, with four notes, all taken in `a63814ee` (the row-served exemption pinned with an `email_template` shape, the sealed-table pin, the permission CONTROL renamed as pending a ruling, the 409 sentence narrowed).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibzKCovWpJoMZD6U3NT\n"
+}

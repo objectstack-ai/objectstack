@@ -1,0 +1,26 @@
+{
+  "number": 33200,
+  "kind": "issue",
+  "title": "plugin-auth: admin/set-user-manager refuses every user who has signed in through SSO as \"directory-owned\", even where no directory exists, so on a hosted environment nobody's manager can be changed after their first sign-in",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T01:55:27Z",
+  "updated_at": "2026-11-14T01:55:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33200",
+  "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\nFiling gate: ① a public door gives a wrong answer, class a. Found during the #33181 measurement. ⛔ Not a claim; triage sets the lane and grade.\n\n## What happens\n\n`POST /api/v1/auth/admin/set-user-manager` refuses a target whose `sys_user.source` is `idp_provisioned` with `403 PERMISSION_DENIED`: \"This identity is provisioned by an external directory (sys_user.source is 'idp_provisioned'), so its manager is maintained by that directory and a value written here would be reverted on the next sync. Set the manager in the directory instead.\" (`admin-set-user-manager.ts` ~L514).\n\n`idp_provisioned` is not a directory mark. ADR-0135 D4 stamps it on any federated link without a local password (`stampIdentitySource`, `auth-manager-database-hooks.ts` ~L597), so the cloud's own platform SSO (`objectstack-cloud`) stamps it on every person's first sign-in to a hosted environment, and a social or enterprise OIDC sign-in stamps it too. On those rows there is no directory, no sync and no place where the manager could be set \"instead\".\n\n## Repro (reach: public door, wrong answer)\n\nMeasured at objectstack-ai/objectstack `origin/main` 88355328, a real `AuthManager` behind `AuthPlugin.registerAuthRoutes` on Hono, caller a platform administrator:\n- target `source: idp_provisioned`, no `sys_scim_subject` row (no SCIM directory), no local credential (what a platform-SSO first sign-in leaves): `403 PERMISSION_DENIED` with the sentence above; `manager_id` not written. Same on a cloud-managed environment and on a self-hosted one.\n- CONTROL: the same call on an `env_native` target answers 200.\n\nConsequence on a hosted Free/Team environment (no SCIM): a manager can be set while a person is not yet signed in, and never again once they have signed in, so approval flows that route by manager cannot follow a reorganisation.\n\n## Seam\n\n`Seam: platform-objects:sys_user.source (idp_provisioned) → runtime: admin-set-user-manager.ts applyUserManagerLink directory-owned refusal`. The ruling that made it (5651634638 row 7, \"directory wins\") is about a SCIM directory; the predicate reads a mark that also covers SSO-only users. A narrower predicate (a `sys_scim_subject` row, the condition `scim-sso-adoption.ts` uses for \"held by a SCIM directory\") is the likely fix; the ruling's scope is the maintainer's to confirm.\n\nDedupe words: `set-user-manager idp_provisioned`, `directory-owned manager`, `manager reverted on the next sync`, `applyUserManagerLink`."
+}

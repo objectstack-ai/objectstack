@@ -1,0 +1,31 @@
+{
+  "number": 33187,
+  "kind": "issue",
+  "title": "Setup → Users on a managed environment: add-person and CSV-import UI with per-row invitation status (reverses objectui#13330 for adding)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T00:33:18Z",
+  "updated_at": "2026-11-14T00:47:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33187",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ④ a child of the topic card objectstack-ai/cloud#4465 (the maintainer's rulings 1-10 of 2026-11-13/14 are recorded there; read it first). \n\n## 维护者速读\n\n「设置 → 用户」的加人界面：可以一个个加，也可以导入 CSV；每一行显示邀请状态（待发送、已发送、已接受、失败及原因，例如开发者版人数已满）；可以重发邀请，删除待激活的人时会同时取消邀请。\n\n## Work (objectstack-ai/cloud#4465 child 1c)\n- The UI for card F2's door, including per-row invitation status from the host seam.\n- Re-send and delete. Deleting a pending row cancels its invitation, which covers the email-typo case.\n- CSV partial failures are shown row by row.\n- Reverses objectui#13330 for adding only. Password actions stay hidden.\n\nRouting: triage (`domain:ui`).\n\nBlocked-by: #33181\n\n`priority:p1` on the maintainer's word, verbatim (seat session `session_01Q4EjjPP1zuWBNq3nBXVei9`, 2026-11-14): 「都是p1，车道自己认领就可以」. Triage routes it to its lane; the lane claims it."
+}

@@ -2,8 +2,8 @@
   "number": 32561,
   "kind": "issue",
   "title": "metadata-protocol: the exact read binds an undeclared App-pair row to X even when an addition package ships the same bundle member, where the registry binds it to no package (ADR-0150 D4, red line 2)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T04:50:39Z",
-  "updated_at": "2026-11-13T19:47:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T22:06:54Z",
+  "closed_at": "2026-11-13T22:06:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 14,
   "locked": false,

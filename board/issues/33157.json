@@ -1,0 +1,30 @@
+{
+  "number": 33157,
+  "kind": "issue",
+  "title": "pm-dispatch: a lane without CONTRACT_REVIEW_TIER (fable) sends its contract review to the review seat, never to triage — write the ruling into contract-review.md / lanes/review.md and refuse a contract-review knock addressed to triage",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T22:28:07Z",
+  "updated_at": "2026-11-13T22:28:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33157",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ the maintainer's direct task. Verbatim, 2026-11-13, in the triage seat's session: 「立 skills 卡，把契约复审的路由直接改成 review 座位」, then 「没有 fable 时，找 review 座位」. That follows 「现在已经有了专用的 review 席位啊」 and the earlier 「契约复审只有在车道没有fable的时候才会找你执行，你也可以考虑是否需要单独设一个车道」.\n\n## Business reason\n\nThe review seat (`review#1`) is now seated so that lanes without fable have a reviewer. Lane sessions still knock **triage** for contract reviews. On 2026-11-13 alone, triage hand-forwarded seven: PRs #33108, #33117, #33121, #33124, #33126, #33129 and hotcrm#2453. Every forward costs a round trip and a triage write, and a p1 fix waits meanwhile. The sessions follow a seat-level ruling from that morning (「fable 不多了。后续契约复审找分诊」, cited by `domain:server#6` on 32828) and not the reference, because the reference never states the newer ruling. `epic:#31527#2`'s dev sub-sessions kept knocking triage even after three mailbox notes, because a sub-session does not read its seat's mailbox.\n\n## What the references say today\n\n- `lanes/review.md` 〈路由〉 already says: a lane knocks any review seat, and if none is seated it knocks a sibling, \"⛔ 非分诊\".\n- `contract-review.md` sends a lane to the review seat only when the tier is **refused** (HTTP 429). It says nothing for a lane whose account lacks fable, or whose fable the maintainer has rationed. Those are exactly the cases the sessions route to triage.\n\n## Do\n\n1. **One routing rule, stated once** (`contract-review.md` 〈复核归属与资格〉, cross-referenced from `lanes/review.md` and `execution-duties.md`). The lane self-reviews when it **has** `CONTRACT_REVIEW_TIER`. When it does **not**, it sends `Request: contract-review` to a seated `review#N`, with no fallback through triage. \"Does not\" covers: the account cannot reach the tier, the tier is refused (429), or the maintainer has rationed it. If no review seat is seated, the lane knocks a sibling lane seat with the tier, or leaves the PR on the owed-review list. Quote the maintainer's lines verbatim.\n2. **The dispatch prompt and the os-dev hand-back carry the route.** A dev sub-session that asks for a review is told the review seat's mailbox, so the seat's mailbox history is not needed.\n3. **Mechanize the refusal** (an item that can be mechanized, so it is not prose): `post-stamped.mjs` refuses a mailbox knock whose `To:` is a triage seat and whose key is `Request: contract-review`, naming the review seat's mailbox in its refusal sentence. Add a self-test row.\n4. Retire the 2026-11-13 morning seat ruling 「fable 不多了。后续契约复审找分诊」 wherever a seat post carries it, by pointing at the new reference line.\n\n## Acceptance\n\n- The reference states the rule once, and the skills gates and governed-prose checks are green.\n- `post-stamped.mjs --self-test` covers the refusal.\n- After it lands, triage receives no contract-review knocks for a week (the triage seat's round records will show it).\n\n## Reader\n\n`domain:skills` (governed references and the `scripts/pm` door), Tier H.\n\n## Dedupe\n\n`contract-review route review seat`: none open. `lanes/review.md`: no open card. Related history: #29242 (the earlier review-seat card)."
+}

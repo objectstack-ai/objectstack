@@ -1,0 +1,33 @@
+{
+  "number": 33158,
+  "kind": "issue",
+  "title": "Studio Access hides SuggestedBindingsPanel on read-only packages, so a marketplace app's pending default permission set (HotCRM crm_user) has no UI door to accept or dismiss",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T22:42:29Z",
+  "updated_at": "2026-11-14T01:41:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33158",
+  "body": "director#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\n\nFiling gate: ① a defect with a named producer, measured on staging while reading cloud#3342's cloud#3560 item (b), on the account owner's approval to run it.\nReader: the `domain:ui` lane (app-shell, Studio Access pillar and `SuggestedBindingsPanel`). Suggested `priority:p1`: for every marketplace app already installed with its default permission set pending, there is no surface anywhere in the product that accepts it, so its invited members stay locked out of its data and the owner has no way out short of calling the REST door. Triage decides.\nDedupe (open and closed, objectstack): `SuggestedBindingsPanel packageReadOnly` 0 hits; `SuggestedBindingsPanel` 7 hits (#30199 dismissed row has no Reopen, #26846 Access polish, #23267 guest anchor, #22801 the ruling, #7677 never surfaced on stock), none is this read-only gate; `suggested bindings marketplace installed Studio` 22 hits, QA runs and sweeps only.\n\n## 维护者速读\n\n从应用市场装的应用（比如 HotCRM），如果装的时候成员权限没开通，之后就再也没有界面能开通。Studio 的「权限」页上本来有「开通 / 暂不」的提示条，但只对可编辑的软件包显示，市场装的应用在 Studio 里是只读的，提示条就不出现。应用市场详情页也有这个提示条，但只在当次安装成功后出现一次，刷新就没了。云端「成员」页的「去开通」正是把业主带到 Studio，所以业主跟着走过去，什么也找不到。\n\n## Measured (staging, environment Release Check 1001 `os-2ph4c1`, HotCRM 6.1.2, cloud main `1b876c1f3`, framework pin `c5758b0d`, 2026-11-13)\n\nStarting state, read as the owner: `sys_audience_binding_suggestion` holds `app.objectstack.hotcrm | crm_user | everyone | pending` (created 2026-11-01). An invited member with no position gets **403** on `crm_lead` and `crm_product`, read and create.\n\n1. The owner clicks the cloud 成员 page's 「去开通」. It lands on the environment's Studio landing (`/_console/studio`), not on any app.\n2. Studio → HotCRM → 「权限」 (`/_console/studio/app.objectstack.hotcrm/access?surface=permission:crm_user`). The page shows the `crm_user` set, badges 「包内置」「新用户默认」「只读」, and the object grid. **No suggestion strip, no 「开通 / 暂不」.** `document.body.innerText` contains none of 建议 / 开通 / 暂不 / 接受 / 忽略. The 「…」 menu holds only 「编辑名称 / 标签」.\n3. Settings → 应用市场 → HotCRM (installed · v6.1.2): no suggestion strip either.\n4. The door itself works. As the owner, from the page: `POST /api/v1/security/suggested-bindings/<id>/dismiss` → 200 `dismissed`, and the member still 403; `…/reopen` → 200 `pending`, then `…/confirm` → 200 `confirmed`, `bindingCreated: true`. The member then reads `crm_lead` 200, `crm_product` 200 (13 rows), and creates a lead 201.\n\n## Why\n\n- `StudioDesignSurface.tsx` (~L10366, origin/main) mounts `<SuggestedBindingsPanel>` under `{!packageReadOnly && (…)}`. The gate came in with #28747 (a read-only base and its customization pair as one surface). A marketplace-installed package is read-only in Studio, and those are exactly the packages that ship an `isDefault` set.\n- `MarketplacePackagePage.tsx` mounts the panel only in an install's own result: after a local install (~L1316) or once `deploy.phase === 'served'` for an install into this runtime (~L2115). Neither applies to an install that happened earlier, or that was done from the cloud console.\n\n## Fix direction\n\n- Draw the panel on the Access pillar regardless of `packageReadOnly`. Accept/dismiss is a deployment decision about the package, not an edit of the package, and the server already enforces who may decide (`manage_metadata`, the anchor gates).\n- Draw it on the installed package's marketplace page whenever the package has a pending, dismissed or confirmed suggestion, not only right after an install.\n- The cloud side, separately: the 成员 page's 「去开通」 (`TEAM_MEMBER_ACCESS_LINK`, cloud `service-tenant/src/pages/team.page.ts`) points at the Studio landing. Once an app-level surface exists, it can point closer. That half is cloud's; the lane files it there if wanted.\n\n## Acceptance\n\n1. On a hosted environment with a marketplace-installed HotCRM whose `crm_user` suggestion is `pending`, Studio → HotCRM → 权限 shows the strip with 「开通」 and 「暂不」 to an owner; 「开通」 makes an invited member with no position read `crm_lead` 200; 「暂不」 leaves the member at 403 and offers Reopen.\n2. A member without `manage_metadata` sees no strip (the list answers 403, as today).\n3. A test pins the strip on a read-only package.\n4. cloud#3342's item (b) re-read on staging through the UI passes."
+}

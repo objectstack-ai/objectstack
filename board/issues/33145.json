@@ -2,7 +2,7 @@
   "number": 33145,
   "kind": "pull_request",
   "title": "fix(lint): connector, permission-set and form-view advisories carry a user sentence in every platform locale",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T18:48:31Z",
-  "updated_at": "2026-11-13T20:09:44Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-13T20:36:08Z",
+  "closed_at": "2026-11-13T20:36:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-13T20:36:05Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/33145",

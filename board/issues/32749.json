@@ -1,7 +1,7 @@
 {
   "number": 32749,
   "kind": "issue",
-  "title": "[Decision] Should the console's own AI chat read an invoice photo and attach that same upload to the record it files, instead of declining non-spreadsheet attachments?",
+  "title": "console AI chat: an uploaded image/PDF goes to the model and the agent puts that same file into the record's file field, as the user — ruled A",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -20,7 +20,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T14:32:29Z",
-  "updated_at": "2026-11-13T07:57:48Z",
+  "updated_at": "2026-11-13T23:07:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

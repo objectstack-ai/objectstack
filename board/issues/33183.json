@@ -1,0 +1,33 @@
+{
+  "number": 33183,
+  "kind": "issue",
+  "title": "Auth: \"redirect straight to the identity provider\" — with SSO configured, skip the sign-in page and return to the original page; the local sign-in path is configurable",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T00:31:38Z",
+  "updated_at": "2026-11-14T02:19:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33183",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ④ a child of the topic card objectstack-ai/cloud#4465 (the maintainer's rulings 1-10 of 2026-11-13/14 are recorded there; read it first). \n\n## 维护者速读\n\n平台统一功能：开了单点登录后，打开环境不再显示登录页，直接跳到身份提供方，登录后回到原来的页面。本地登录入口可以配置：自托管可以保留一个隐藏地址；托管上关闭，按裁决 10，托管没有本地登录。云端会把这个功能默认打开。\n\n## Work (objectstack-ai/cloud#4465 ruling 8, child 4a)\n- Add one setting: when SSO is configured, an unauthenticated visit goes straight to the configured IdP, preserving the return URL.\n- The local sign-in path is configurable: on with a hidden path (for example `/login?local=1`), or off.\n- Self-hosted deployments with their own IdP can enable it. The cloud enables it by default with the local path off (cloud card C6).\n- API keys, MCP and the API are unaffected.\n\nSuggested `priority:p1`. Routing: triage (plugin-auth plus the console login page).\n\n`priority:p1` on the maintainer's word, verbatim (seat session `session_01Q4EjjPP1zuWBNq3nBXVei9`, 2026-11-14): 「都是p1，车道自己认领就可以」. Triage routes it to its lane; the lane claims it."
+}

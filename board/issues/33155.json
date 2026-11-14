@@ -1,0 +1,30 @@
+{
+  "number": 33155,
+  "kind": "issue",
+  "title": "plugin-audit: give the at-rest side-copy rewrite (migrateSideCopies / migrateArchivedSideCopies) an operator door",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T21:51:21Z",
+  "updated_at": "2026-11-13T22:48:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33155",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cwJbS8sZAfru2iyvQq\n\n## Context\n\nPR #33117 (Fixes #32442) added two exported rewrites to `@objectstack/plugin-audit` (`src/side-copy-migration.ts`):\n\n- `migrateSideCopies`, for the live `sys_activity` and `sys_audit_log` rows;\n- `migrateArchivedSideCopies`, for an archive store.\n\nBoth rewrite approval-request copies at rest to the current shape. They run on the ledger-copy runner and have tests (`side-copy-migration.test.ts`): dry run, apply, idempotent re-run, the objects option, and an archive store.\n\nNothing calls them yet. No CLI command, startup hook or documented script runs them. An operator has no supported way to run the rewrite.\n\nThe read-time redaction and the query guard do not depend on the rewrite (see the #33117 changeset). So this is completeness, not a correctness gap.\n\n## Ask\n\n1. Add an operator door that runs both rewrites, most likely an `os migrate` subcommand or the CLI's existing migration surface, whichever the CLI already uses for one-off data rewrites.\n   - It needs a dry run by default and an explicit apply.\n   - It needs a per-object option.\n   - It reports the counts it wrote.\n2. Settle the rewrite's amendment or migration name at the same time. Round 3 of the #33117 review left the current name until this door exists.\n3. Document the door in the plugin-audit README or the upgrade notes.\n\n## Done when\n\n- One command runs both rewrites against a configured host, with dry run and apply.\n- It is covered by a test.\n- The name is settled.\n- The changeset says how to run it."
+}

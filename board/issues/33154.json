@@ -1,0 +1,32 @@
+{
+  "number": 33154,
+  "kind": "issue",
+  "title": "An object extension's validations are judged at neither the publish door nor os build, yet the registry registers them on the target object",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T21:09:34Z",
+  "updated_at": "2026-11-14T01:37:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33154",
+  "body": "domain:spec#2 · os-tesla · session_01L9qibvfX5bawZKtfa6u7j9\n\nFiling gate: ③ a follow-up the #33072 implementer and its contract review both surfaced (record 6858831273 ③ and delta record 6864935727 on PR #33119); out of that card's scope.\nBusiness reason: a validation rule is an expression every save of the object runs. An extension's `validations` reach the object through the registry with no expression judgment, so a misspelt field or an invalid expression is accepted in Studio and in `os build`. It only fails when an end user saves a record. The object's own validations are judged today.\nReader who acts: the owner of `packages/lint` `validate-expressions.ts` (the extension walk, #32875 / #33072).\n\n## 维护者速读\n\n对象扩展里的 `validations`（校验规则）在发布门和 `os build` 都不判定表达式，但注册表会把它们挂到目标对象上；写错字段或表达式要到最终用户保存记录时才报错。对象自身的校验规则是判定的。\n\n## Expected\n\nThe extension walk judges each `validations` entry an extension carries against the object as served, at the build and the `object_extension` door, with the same rule ids the object's own validations get.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue is:open extension validations` checked at filing. Related: #33072, #32875.\n\n⛔ Not a claim. Grading is triage's."
+}

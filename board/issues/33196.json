@@ -1,0 +1,33 @@
+{
+  "number": 33196,
+  "kind": "issue",
+  "title": "plugin-auth: the organization plugin's pending-invitation limit is an explicit, host-configurable setting (a host can turn it off), instead of better-auth's implicit default of 100",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T01:31:27Z",
+  "updated_at": "2026-11-14T02:20:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33196",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ④ a child of the topic card objectstack-ai/cloud#4465, on the maintainer's ruling, verbatim (seat session `session_01Q4EjjPP1zuWBNq3nBXVei9`, 2026-11-14): 「邀请上线也接受你的建议」. The seat's recommendation was: no pending-invitation limit on either door, the console invitation or the environment-originated invitation, set through an explicit framework setting.\n\n## 维护者速读\n\n第三方账号组件默认规定，一个组织最多同时有 100 封没被接受的邀请。托管上要求环境可以批量加人（CSV 导入），所以这个上限要改成框架里一个明确的配置项，宿主可以关掉；托管会把它关掉，控制台和环境两边规则一致。\n\n## Work\n\n- In the framework's organization plugin wiring (`auth-manager-organization-plugin.ts`), pass `invitationLimit` explicitly from configuration. Today it falls back to better-auth's `invitationLimit ?? 100`, which answers 403 `INVITATION_LIMIT_REACHED`.\n- The setting supports \"no limit\". Its default stays as today, so self-hosted behaviour is unchanged unless set.\n- Document the setting.\n\n## Acceptance\n\nWith the setting off, a 101st pending invitation is accepted. With it unset, behaviour is unchanged. Tests pin both.\n\nContext: cloud PR objectstack-ai/cloud#4475's contract review (comment 6869179840, finding 9) found that the new environment route does not apply the limit. The console would then be refused once 100 invitations are pending. The cloud card turns the limit off on the control plane once this lands.\n\n`priority:p1` on the maintainer's word, verbatim: 「都是p1，车道自己认领就可以」. Triage routes it; the lane claims it."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 33163,
+  "kind": "issue",
+  "title": "north-star: the road says data silently wrong or lost is P1 (as Priority rule 2 does), and Priority rule 3 does not hold a p2 pm:blocking card that unblocks the undispatched P0/P1",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T23:10:00Z",
+  "updated_at": "2026-11-13T23:10:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33163",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ the maintainer's direct ruling, relayed by `domain:skills#2` on #32997 (6867138933), answering the 维护者速读 of PR #33080 (merged `9433d4f3`). The maintainer, verbatim:\n\n1. 「「the road」段仍写「跑通但结果错为 P2」，与 Priority 新的「数据静默错或丢为 P1」不一致，要改」\n2. 「Priority 第 3 条「车道有未派 P0/P1 时不派 p2/p3 工具卡」，现在也会挡住替它解锁的 p2 `pm:blocking` 工具卡，要豁免」\n\nThe skills#2 seat signed off and asked triage to file the write-up.\n\n## Business reason\n\n#32997 changed the grading so that silently wrong or lost data is P1. The north star's \"The one measure: the road\" section still says a run that goes wrong is P2, so a reader who opens the road first grades it a level lower. Rule 3's hold also blocks the very tooling card that would unblock a lane's P0/P1, so the P0/P1 waits on its own unblocker.\n\n## Do\n\n1. `docs/NORTH-STAR.md` \"The one measure: the road\": make it agree with 〈Priority〉 rule 2. Data silently wrong or lost is P1, subject to the reach discount; any other run that goes wrong is P2.\n2. `docs/NORTH-STAR.md` 〈Priority〉 rule 3: add the exemption. While a lane has an undispatched P0/P1, a p2 `pm:blocking` card whose dependent (via `Blocked-by:`) is that P0/P1 is **not** held.\n3. Search the dispatch references (`execution-duties.md` 〈取卡全序〉, `dispatch-runbook.md`) for anything that reads rule 3's hold, and carry the exemption there too, stated once with a pointer.\n\nOut of scope: #32997's question 3 (rule 3's \"no evidence cap\" vs the `reach:` admission p3) has no ruling yet. The filer's reading (a), 6850654783, stands until the maintainer rules, and this card does not touch it.\n\n## Acceptance\n\nThe road and 〈Priority〉 agree. The exemption is stated once, and the dispatch reference points at it. The north-star checks and the governed-prose gates are green.\n\n## Reader\n\n`domain:skills`: a Tier H docs PR (`docs/NORTH-STAR.md` plus the dispatch reference), contract tier for the governed text.\n\n## Dedupe\n\n`north star road P2 silently wrong`: none open. `rule 3 hold pm:blocking exemption`: none open. Parent context: #32997 (closed by PR #33080)."
+}

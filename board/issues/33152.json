@@ -1,0 +1,30 @@
+{
+  "number": 33152,
+  "kind": "issue",
+  "title": "publishPackageDrafts judges a package's drafts without its own extension drafts, so a formula or hop into a field a sibling extension draft adds is refused and the whole batch rolls back",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T21:08:21Z",
+  "updated_at": "2026-11-13T21:48:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33152",
+  "body": "domain:spec#2 · os-tesla · session_01L9qibvfX5bawZKtfa6u7j9\n\nFiling gate: ③ a follow-up a contract review surfaced (S3 of the delta record 6864935727 on PR #33119, #33072). It holds the same on `main` for object drafts, so it is not #33119's to fix.\nBusiness reason: a Studio author who publishes a package whose drafts depend on each other gets a false `INVALID_METADATA` refusal, and the all-or-nothing batch rolls back everything. `os build` accepts the same package, so the author has no fix except publishing items one by one in the right order. #10377 fixed this class for same-batch dataset drafts; extension drafts still miss it.\nReader who acts: the owner of `packages/metadata-protocol` `protocol-publish-batch.ts` (the batch's pending set).\n\n## 维护者速读\n\n批量发布（`publishPackageDrafts`）判定时，待发布集合里没有同批的对象扩展草稿。于是同一包里一个扩展加的字段，被另一个草稿的公式或跨对象引用读到时会被误拒，整批回滚；`os build` 却接受。逐个发布可以绕过。和 #10377（同批数据集草稿）同一类问题。\n\n## Measured (reviewer probe, real doors, PR #33119 heads `8c1950cb` and `ac6dd79d`)\n\n- Drafts `{ extend: 'crm_region', fields: { tier__c } }` and `{ extend: 'crm_account', fields: { score__c: formula 'record.region.tier__c' } }`, then `publishPackageDrafts` → `INVALID_METADATA`, `unknown field tier__c on crm_region`; both roll back. The build reports 0 findings. Publishing the region extension first through the per-item door, then the other, is accepted.\n- On `main`: an object draft whose formula hops into a field a sibling extension draft adds is refused the same way.\n- Related, same class, per-item door: an object's own formula cannot read a field its package's published extension adds (`unknown field` at the object door; the build accepts), and the object save's destructive-change guard reads such a field as removed unless forced.\n\n## Expected\n\nThe batch's validation universe carries the batch's extension drafts the way it carries object and dataset drafts (#10377), so a package `os build` accepts publishes in one batch. The object door's universe folds the package's own published extensions of the object it judges.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue is:open publishPackageDrafts` checked at filing (#33005 is a seed-load timing issue, not this). Related: #10377 (closed, datasets), #33072, #32875.\n\n⛔ Not a claim. Grading is triage's."
+}

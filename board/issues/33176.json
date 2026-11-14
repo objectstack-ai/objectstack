@@ -1,0 +1,30 @@
+{
+  "number": 33176,
+  "kind": "issue",
+  "title": "mcp: validate_expression at flow_condition judges a bare name without the flow's variables, so its type verdict and the door's shadowed-read warning can differ from the runtime flow door",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T00:05:42Z",
+  "updated_at": "2026-11-14T00:49:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33176",
+  "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\nFiling gate: ① a named-site behaviour gap, class a. It is carried out of #33147 (PR #33168): the seat's contract review 6868101966 lists it as outside that PR's diff, together with its finding F1. PR #33168 corrects the wording and says the tool cannot give these verdicts. ⛔ Not a claim; triage sets the lane and grade.\nreach: public door, and a verdict that differs from the gate. MCP `validate_expression` (`/api/v1/mcp` `tools/call`, and stdio) at `site: 'flow_condition'`. Read at PR #33168 head `c21d260c`; not measured on a running deployment.\n\n## Business reason\n\nAn agent writes a flow whose variables include one named like a field, for example `amount`, and reads it bare in a condition. The runtime flow door warns about the shadowed read (`warnShadowedFieldReads`), and it types the bare name as the variable. `validate_expression` gets no variables. It types the bare name as the field, and it cannot give the warning. So the agent can be told `ok`, or be given a type verdict for the wrong binding, and then meet a different answer when it saves the flow.\n\n## What is true after PR #33168\n\n- `flow_condition` runs the runtime flow door's passes on a one-flow probe. The probe flow declares no variables, so `warnShadowedFieldReads` has nothing to compare against.\n- The tool's validator half (the shared expression validator) is never handed flow variables, so a bare name resolves against the object's fields only.\n\n## Expected\n\n`validate_expression` at `flow_condition` takes the flow's declared variables, as an optional input or read from a named served flow. With them it binds bare names the way the door does, and it gives the door's shadowed-read warning. When no variables are given, it answers as today, and the description says so. The implementer proposes the input shape.\n\nDedupe: `validate_expression flow variables shadowed field read warnShadowedFieldReads` → #33147 (PR #33168, flow_condition parity, wording only for this point); none open."
+}

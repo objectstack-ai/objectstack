@@ -1,0 +1,31 @@
+{
+  "number": 33184,
+  "kind": "issue",
+  "title": "docs(adr-0135): mirror cloud ADR-0024's 2026-11 hosted identity note (credentials in the cloud, roster in the environment; owners/admins projected; no hosted local break-glass)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-14T00:32:27Z",
+  "updated_at": "2026-11-14T00:46:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33184",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ④ a child of the topic card objectstack-ai/cloud#4465 (the maintainer's rulings 1-10 of 2026-11-13/14 are recorded there; read it first). \n\n## 维护者速读\n\n框架仓库的 ADR-0135 是云端 ADR-0024 的公开镜像，要把这次新加的托管身份注记同步过来。\n\n## Work\nMirror the dated note from cloud ADR-0024 (card objectstack-ai/cloud C1) into `docs/adr/0135-identity-and-access-architecture.md`, at the mirror's granularity and with provenance. The cloud record stays the decision (governed path; maintainer merge).\n\nBlocked-by: objectstack-ai/cloud#4466\n\n`priority:p1` on the maintainer's word, verbatim (seat session `session_01Q4EjjPP1zuWBNq3nBXVei9`, 2026-11-14): 「都是p1，车道自己认领就可以」. Triage routes it to its lane; the lane claims it."
+}

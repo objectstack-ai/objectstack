@@ -1,7 +1,7 @@
 {
   "number": 19287,
   "kind": "issue",
-  "title": "[PM seat] domain:skills · seat 2 — 🟢 os-tesla",
+  "title": "[PM seat] domain:skills · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,18 +14,16 @@
     "domain:skills",
     "pm:seat"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T09:45:20Z",
-  "updated_at": "2026-11-13T14:45:38Z",
+  "updated_at": "2026-11-13T23:08:28Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
   "comments": 50,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19287",
-  "body": "domain:skills#2 · os-tesla · session_01L9qibvXzthnUYrxzphgFgW\n\n⚠️ **Seat-post stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 2**. Seat 1 is #7623 (⏳ vacant), seat 3 is #29747 (🟢 `os-bill`).\n\n<sub>Refreshed 2026-11-13T14:45Z: p2 restored (「spec 和 skills 可以处理 p1 p2 卡」).</sub>\n\n- **Current PM:** 🟢 `os-tesla` · `session_01L9qibvXzthnUYrxzphgFgW` (a Claude Code project thread, \"skills 座位 · 车道调度\"), seated on the maintainer's 「skills 也开一个」. 由 os-tesla 账户的项目负责. Posture, ledger and round reports live in the project. Seat-taken audit 6845268179.\n- **Split:** seat 2 takes only unclaimed `domain:skills` `pm:queue` cards that are `priority:p1`, `priority:p2` or high-severity (`priority:p0`, `security`): the maintainer's 「都只处理 p1 和 高危」, then 2026-11-13 14:07Z 「spec 和 skills 可以处理 p1 p2 卡」 (⛔ no p3, no other lanes, no `pm:epic` subtree), under the claim race with seats 1 and 3: re-read assignee and newest comments before every claim; the earlier claim wins. Claims carry `Seat: domain:skills#2`.\n- **Hot-file serial queue:** seat 2 holds none. ⛔ Re-derive from the live `Claim:` comments of every `domain:skills` seat and each open PR's file list before any dispatch.\n- **Patrol:** `trig_01UnEKLZwGb4963xUMievWZU` · `27 */5 * * *` (self-bound). Idle seat: wakes on mailbox and PR events, with this 5-hourly fallback patrol (fleet token rules, maintainer 2026-11-12); back to hourly while a card is in flight.\n- **Mailbox:** PR #33041.\n- **Standing constraints:** a `skills/**` PR owes an `'@objectstack/skills': patch` changeset, never `skip-changeset`; `.claude/**` is Tier S, `skills/**` and `docs/adr/**` are Tier H (os-zhuang requested as reviewer). Published `skills/**` cards are built and reviewed at the contract tier.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n"
+  "body": "domain:skills#2 · os-tesla · session_01L9qibvXzthnUYrxzphgFgW\n\n⚠️ **Seat-post stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 2**. Seat 1 is #7623 (⏳ vacant), seat 3 is #29747 (🟢 `os-bill`).\n\n<sub>Refreshed 2026-11-13T23:06Z (sign-off: the maintainer ordered 「skills qa security 当前任务处理完下班」; no work was in flight).</sub>\n\n## Current PM\n\n⏳ **vacant.** Previous holder: `os-tesla` · `session_01L9qibvXzthnUYrxzphgFgW` (a Claude Code project thread, \"skills 座位 · 车道调度\"), seated 2026-11-13T05:44Z on 「skills 也开一个」 and signed off at the time of this edit. `check-handover.mjs --session=session_01L9qibvXzthnUYrxzphgFgW --account=os-tesla` exit 0. Successor: `/pm-dispatch 接手`, then read this post first.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#2` + `head:claude/` PRs.\n- **Landed this term (all merged, landed notes posted, `pm:dispatched` removed):** #32673 (PR #33047), #32923 (PR #33045), #32936 (PR #33057), #32991 (PR #33053), #33033 (PR #33078), #32997 (PR #33080).\n- **In flight:** none. No claim of this seat is open; no card thread is running.\n- **Queue snapshot (`domain:skills` + `pm:queue`, open):** p2: #33157 (unclaimed, arrived after the last patrol and left for the lane). p3: #33135, #33044, #32977, #32974, #32961, #32957, #32956, #32703, #32674, #32664, #32559, #32525, #32522, #32504, #32429, #32392, #32379, #31450, #31112, #30598, #29471. On hold: #32571, #32065. Decision inbox (`domain:skills`): empty.\n- **Ruling owed a carrier:** 6867138933 on #32997 holds two maintainer rulings that change `docs/NORTH-STAR.md`: the road paragraph is to agree with Priority rule 2, and Priority rule 3's hold exempts a p2 `pm:blocking` card that unblocks the P0/P1. Triage was notified (6867156457) to file the write-up card.\n- **Follow-up candidates (not filed):** the #32991 timing pin's margin (30 sigils would give about 15×, from the 3.7× it has now); the quadratic cost of a long leading blank run in `check-half-states.mjs` (predates #33053). Both are on #32991 (6849040820). #33067 (`list_actions` `unavailable` marker, server lane) is filed.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** PR #33041 closed at sign-off; the next seat reopens its own. **Patrol:** `trig_01UnEKLZwGb4963xUMievWZU` deleted at sign-off.\n- **Contract review:** review#1 (#33115) is the same account and does not review os-tesla PRs (ruled 2026-11-13, maintainer decision card), so an os-tesla holder of this seat runs its own reviews at `CONTRACT_REVIEW_TIER`.\n- **Standing constraints:** a `skills/**` PR owes an `'@objectstack/skills': patch` changeset, never `skip-changeset`; `.claude/**` is Tier S; `skills/**`, `docs/NORTH-STAR.md`, `docs/adr/**` and a workflow holding a secret are Tier H (os-zhuang requested as reviewer).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n"
 }

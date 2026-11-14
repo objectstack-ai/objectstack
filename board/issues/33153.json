@@ -1,0 +1,30 @@
+{
+  "number": 33153,
+  "kind": "issue",
+  "title": "A formula field an object extension adds that reads itself, or two that read each other, is refused at neither the publish door nor os build",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-13T21:08:44Z",
+  "updated_at": "2026-11-13T21:49:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33153",
+  "body": "domain:spec#2 · os-tesla · session_01L9qibvfX5bawZKtfa6u7j9\n\nFiling gate: ③ a follow-up a contract review surfaced (delta record 6864935727 on PR #33119, #33072, question 4).\nBusiness reason: a computed field that depends on itself cannot be evaluated. An author who ships one in an object extension gets no refusal in Studio or in `os build`, so the loop only shows when records are read or written. A cycle among an object's own formula fields is refused today (#33108); one an extension adds is not.\nReader who acts: the owner of `packages/lint` `formula-cycle-issues.ts` (#33108) and the extension walk (#32875).\n\n## 维护者速读\n\n#33108 的公式循环检查只在对象遍历里跑；对象扩展加的公式字段如果引用自己，或两个互相引用，发布门和 `os build` 都不拒。两边一致，所以不是 #33119 的问题，需要把循环检查也接到扩展遍历上。\n\n## Measured (reviewer probe at `ac6dd79d`)\n\n- An extension adding `a__c: formula 'record.a__c'` → 0 findings at the extension door and in the build.\n- An extension adding `a__c: formula 'record.b__c'` and `b__c: formula 'record.a__c'` → 0 findings at both.\n- A cycle that closes through a declared formula of the object is named by the build at the declared member.\n\n## Expected\n\nThe formula-cycle member judges the object as served, own fields plus every extension's added fields, at both the build and the `object_extension` door, and locates a finding at the extension's field.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue is:open formula cycle extension` checked at filing. Related: #33108, #32875, #33072.\n\n⛔ Not a claim. Grading is triage's."
+}

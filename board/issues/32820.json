@@ -2,8 +2,8 @@
   "number": 32820,
   "kind": "issue",
   "title": "metadata-protocol: re-enabling a package leaves another holder's registry slot answering a package-less overlay row hydrated while it was disabled",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T21:04:11Z",
-  "updated_at": "2026-11-13T20:00:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-13T22:16:35Z",
+  "closed_at": "2026-11-13T22:16:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 9,
   "locked": false,
