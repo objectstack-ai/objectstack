@@ -244,10 +244,13 @@ An environment that has adopted SSO still needs a user-management surface, and t
 
 > **Note (2026-11-14, objectstack, #33203; ruling 10 of objectstack-ai/cloud#4465) — on a
 > cloud-managed environment the break-glass bullet above does not apply.** A hosted environment
-> (`OS_CLOUD_MANAGED=1`) keeps no local password for anyone and has no local break-glass
-> administrator: `admin/set-user-password` refuses every target, an `env_native` row included, and
-> `set-initial-password` refuses every signed-in caller, a platform administrator included
-> (`packages/plugins/plugin-auth/src/cloud-managed.ts`). Everyone signs in through the hosting
+> (`OS_CLOUD_MANAGED=1`) sets no local password for anyone and has no local break-glass
+> administrator: `admin/set-user-password` refuses every target, an `env_native` row included,
+> `set-initial-password` refuses every signed-in caller, a platform administrator included, and the
+> self-service reset doors (`reset-password`, `phone-number/reset-password` and the two
+> `request-password-reset` doors) refuse every request
+> (`packages/plugins/plugin-auth/src/cloud-managed.ts`). A password set before is not removed by
+> this rule; invalidating it is the hosting cloud's (objectstack-ai/cloud#4471). Everyone signs in through the hosting
 > cloud's identity provider, and recovery is the cloud's, not a local credential's. Self-hosted
 > deployments are unchanged: the split by population above, break-glass included, holds there.
 > Cloud ADR-0024's own text is not amended here.
