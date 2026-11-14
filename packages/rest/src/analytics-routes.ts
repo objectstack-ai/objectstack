@@ -83,6 +83,8 @@ import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { mayReadPendingDrafts, metaItemPackageBinding, type RestServer } from './rest-server.js';
 import { metaCallerPackageQuery, metaItemCallerPackageRefusalMessage } from './meta-item-read-gate.js';
 import { admitRefusedDatasetHolders } from './analytics-dataset-admission-order.js';
+// The ledger's `dataset_query` row: one per saved-dataset query that reached the read.
+import { runAuditedDatasetQuery } from './analytics-dataset-query-audit.js';
 
 /**
  * The `RestServer` members {@link registerAnalyticsEndpoints} reads — every
@@ -100,6 +102,8 @@ export interface AnalyticsRouteHost {
     enforceAuth: RestServer['enforceAuth'];
     resolveProtocol: RestServer['resolveProtocol'];
     translateMetaItem: RestServer['translateMetaItem'];
+    /** The `audit` slot, for the ledger's `dataset_query` row ({@link runAuditedDatasetQuery}). */
+    resolveAuditService: RestServer['resolveAuditService'];
 }
 
 /**
@@ -768,12 +772,16 @@ async function answerDatasetQuery(
             };
         }
 
-        const result = await svc.queryDataset(
+        // The read. A saved dataset's query hands the ledger one
+        // `dataset_query` event here, answered or failed; every refusal above
+        // returned before it and hands none ({@link runAuditedDatasetQuery}).
+        const queried = { req, environmentId, context, dataset, selection, datasetName: body.dataset ? undefined : body.datasetName };
+        const result = await runAuditedDatasetQuery(this, queried, () => svc.queryDataset(
             dataset,
             selection,
             context ?? undefined,
             previewDrafts ? { previewDrafts: true } : undefined,
-        );
+        ));
         return { status: 200, body: result };
     } catch (error: any) {
         return datasetQueryFaultAnswer(error);

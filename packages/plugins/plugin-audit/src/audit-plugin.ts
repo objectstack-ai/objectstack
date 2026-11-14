@@ -47,6 +47,7 @@ import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { createActionInvocationAuditWriter } from './action-invocation-audit.js';
 import { createDataExportAuditWriter } from './data-export-audit.js';
+import { createDatasetQueryAuditWriter, type DatasetQueryAuditWriter } from './dataset-query-audit.js';
 import { createPackageLifecycleAuditWriter } from './package-lifecycle-audit.js';
 import {
   createCredentialUseAuditWriter,
@@ -99,10 +100,32 @@ export interface AuditPluginReadAuditOptions {
   flushIntervalMs?: number;
 }
 
+/**
+ * Dataset-query auditing configuration — the per-dataset opt-in, closed, with
+ * the record-view writer's shape and for its reasons
+ * ({@link AuditPluginReadAuditOptions}).
+ */
+export interface AuditPluginDatasetQueryAuditOptions {
+  /**
+   * Saved datasets whose queries through the analytics dataset door are
+   * recorded as `dataset_query` rows in `sys_audit_log`: who, which dataset,
+   * the dimensions and measures selected, the filtered field names (never the
+   * values), the row count and the outcome. Absent or empty records nothing
+   * and buffers nothing.
+   */
+  datasets?: readonly string[];
+  /** Flush once this many rows are buffered. Default 50. */
+  maxBatchSize?: number;
+  /** Flush this long after the first row of a batch. Default 2000ms. */
+  flushIntervalMs?: number;
+}
+
 /** Constructor options for {@link AuditPlugin}. */
 export interface AuditPluginOptions {
   /** [#8992] Record-view auditing. Off unless objects are named. */
   readAudit?: AuditPluginReadAuditOptions;
+  /** Dataset-query auditing (`dataset_query` rows). Off unless datasets are named. */
+  datasetQueryAudit?: AuditPluginDatasetQueryAuditOptions;
   /**
    * Host locale resolver: the language this plugin writes the title of the
    * @mention notification it emits in. Called with the write's organization
@@ -311,6 +334,7 @@ export class AuditPlugin implements Plugin {
    * succeeded.
    */
   private readAuditWriter: ReadAuditWriterHandle | null = null;
+  private datasetQueryWriter: DatasetQueryAuditWriter | null = null;
   /** [ADR-0154 D3] The sealer, started at `kernel:ready` and stopped by `destroy()`. */
   private sealer: AuditSealer | null = null;
 
@@ -435,6 +459,27 @@ export class AuditPlugin implements Plugin {
     // this slot, from plugin-auth's OAuth stamp point
     // (`credential-use-audit.ts`).
     this.credentialUseWriter = createCredentialUseAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger });
+    //
+    // And the dataset-query writer (`recordDatasetQuery`): the analytics
+    // dataset door hands it one event per saved-dataset query that reached
+    // the read; it records only the datasets named in
+    // `datasetQueryAudit.datasets`, batched off the request path
+    // (`dataset-query-audit.ts`). Named nothing, it records nothing.
+    const datasetQueryAudit = this.options.datasetQueryAudit;
+    const datasetQueryWriter = createDatasetQueryAuditWriter({
+      getEngine: getLedgerEngine,
+      logger: ctx.logger,
+      datasets: datasetQueryAudit?.datasets ?? [],
+      ...(datasetQueryAudit?.maxBatchSize !== undefined ? { maxBatchSize: datasetQueryAudit.maxBatchSize } : {}),
+      ...(datasetQueryAudit?.flushIntervalMs !== undefined ? { flushIntervalMs: datasetQueryAudit.flushIntervalMs } : {}),
+    });
+    this.datasetQueryWriter = datasetQueryWriter;
+    if (datasetQueryWriter.auditedDatasets.length > 0) {
+      ctx.logger.info(
+        `AuditPlugin: dataset-query auditing on ${datasetQueryWriter.auditedDatasets.length} dataset(s) — `
+          + `${datasetQueryWriter.auditedDatasets.join(', ')}`,
+      );
+    }
     ctx.registerService('audit', {
       ...createAuthEventAuditSink({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...createActionInvocationAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
@@ -442,6 +487,7 @@ export class AuditPlugin implements Plugin {
       ...createPackageLifecycleAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...this.credentialUseWriter,
       ...createScimRefusalAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      recordDatasetQuery: datasetQueryWriter.recordDatasetQuery,
       // The activity door's writer: one timeline entry an app adds through
       // `ctx.activity.append` (`app-activity-door.ts`).
       ...createAppActivityWriter({ getEngine: getLedgerEngine, getActorSnapshot: () => this.actorSnapshotOf }),
@@ -1009,6 +1055,9 @@ export class AuditPlugin implements Plugin {
     const writer = this.readAuditWriter;
     this.readAuditWriter = null;
     if (writer) await writer.stop();
+    const datasetQueryWriter = this.datasetQueryWriter;
+    this.datasetQueryWriter = null;
+    if (datasetQueryWriter) await datasetQueryWriter.stop();
   }
 }
 
