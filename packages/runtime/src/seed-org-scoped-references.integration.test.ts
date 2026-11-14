@@ -31,10 +31,14 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+// AppPlugin loads `@objectstack/metadata` lazily; pay that load during collection,
+// never inside a clocked case.
+import '@objectstack/metadata';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysUser, SysMember, SysOrganization } from '@objectstack/platform-objects/identity';
 import type { PluginContext } from '@objectstack/core';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { AppPlugin } from './app-plugin';
 import { SeedLoaderService } from './seed-loader';
 
@@ -181,7 +185,7 @@ async function boot(options: BootOptions) {
     (await engine.find('crm_deal', {
       where: organizationId ? { organization_id: organizationId } : {},
       context: { isSystem: true },
-    } as any)) as Row[];
+    } satisfies EngineQueryOptions)) as Row[];
   return { engine, metadata, logger, replayer, dealsOf, seen };
 }
 

@@ -2856,20 +2856,22 @@ export class SeedLoaderService implements ISeedLoaderService {
     value: unknown,
     organizationId: string,
   ): Promise<{ id: string | null; nonMemberMatched: boolean }> {
-    const users = (await this.engine.find(SystemObjectName.USER, {
+    const userProbe: EngineQueryOptions = {
       where: { [probeField]: value },
       fields: ['id'],
       limit: SeedLoaderService.MEMBER_PROBE_CANDIDATES,
       context: { isSystem: true },
-    } as any)) as Array<Record<string, unknown>> | undefined;
+    };
+    const users = (await this.engine.find(SystemObjectName.USER, userProbe)) as Array<Record<string, unknown>> | undefined;
     const candidates = (users ?? []).map((u) => String(u.id ?? u._id)).filter((id) => id !== 'undefined');
     if (candidates.length === 0) return { id: null, nonMemberMatched: false };
-    const members = (await this.engine.find(SystemObjectName.MEMBER, {
+    const memberProbe: EngineQueryOptions = {
       where: { user_id: candidates.length === 1 ? candidates[0] : { $in: candidates }, organization_id: organizationId },
       fields: ['user_id'],
       limit: candidates.length,
       context: { isSystem: true },
-    } as any)) as Array<Record<string, unknown>> | undefined;
+    };
+    const members = (await this.engine.find(SystemObjectName.MEMBER, memberProbe)) as Array<Record<string, unknown>> | undefined;
     const memberIds = new Set((members ?? []).map((m) => String(m.user_id)));
     const member = candidates.find((id) => memberIds.has(id));
     return member ? { id: member, nonMemberMatched: false } : { id: null, nonMemberMatched: true };
