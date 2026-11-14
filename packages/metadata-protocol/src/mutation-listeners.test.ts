@@ -149,6 +149,16 @@ describe('ObjectStackProtocolImplementation.registerAuthoringGate (#3050)', () =
     });
   });
 
+  it('[#32656] hands the gate the caller\'s user-text locales, empty entries dropped; none stated, no key', async () => {
+    const p = makeProtocol();
+    const seen: any[] = [];
+    p.registerAuthoringGate('object', (ctx) => { seen.push(ctx); });
+    await (p as any).runAuthoringGate(save({ userTextLocales: ['zh-CN', undefined, '', 'de'] }));
+    await (p as any).runAuthoringGate(save());
+    expect(seen[0].userTextLocales).toEqual(['zh-CN', 'de']);
+    expect('userTextLocales' in seen[1]).toBe(false);
+  });
+
   it('normalizes plural registrations to the singular type', async () => {
     const p = makeProtocol();
     const gate = vi.fn();

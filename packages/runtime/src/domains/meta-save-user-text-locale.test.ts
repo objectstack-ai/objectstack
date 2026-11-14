@@ -87,18 +87,24 @@ async function bootStore() {
     const protocol = new ObjectStackProtocolImplementation(engine as any);
     // What each save handed the protocol, read where the protocol receives it.
     const stated: unknown[] = [];
+    // …and what the type's authoring gate was handed (plugin-security's
+    // packaged permission-set lock registers here; its refusal's
+    // `userMessage` is composed from these).
+    const gated: unknown[] = [];
+    protocol.registerAuthoringGate('permission', (ctx) => { gated.push(ctx.userTextLocales); });
     const save = protocol.saveMetaItem.bind(protocol);
     (protocol as any).saveMetaItem = (request: any) => {
         stated.push(request.userTextLocales);
         return save(request);
     };
-    return { protocol, stated };
+    return { protocol, stated, gated };
 }
 
 interface Saved { status: number; body: any }
 interface Door {
     save(who: Caller, name: string): Promise<Saved>;
     stated: unknown[];
+    gated: unknown[];
 }
 
 function makeRes() {
@@ -114,12 +120,13 @@ function makeRes() {
 }
 
 async function bootDispatcher(): Promise<Door> {
-    const { protocol, stated } = await bootStore();
+    const { protocol, stated, gated } = await bootStore();
     const get = (n: string) => (n === 'protocol' ? protocol : null);
     const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (n: string) => get(n) };
     const dispatcher = new HttpDispatcher(kernel);
     return {
         stated,
+        gated,
         save: async (who, name) => {
             (dispatcher as any).timedResolveExecutionContext = async () => clone(who);
             const body = permissionSet(name);
@@ -136,7 +143,7 @@ async function bootDispatcher(): Promise<Door> {
 }
 
 async function bootRestServer(): Promise<Door> {
-    const { protocol, stated } = await bootStore();
+    const { protocol, stated, gated } = await bootStore();
     const noop = () => {};
     const server = { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
     const rest: any = new RestServer(server as any, protocol as any, { api: { requireAuth: false } } as any);
@@ -145,6 +152,7 @@ async function bootRestServer(): Promise<Door> {
     if (!route) throw new Error(`PUT ${META}/:type/:name is not registered`);
     return {
         stated,
+        gated,
         save: async (who, name) => {
             rest.resolveExecCtx = async () => clone(who);
             const res = makeRes();
@@ -176,6 +184,13 @@ for (const [doorName, boot] of DOORS) {
             await door.save(caller('zh-CN', 'de'), 'finance_user');
             await door.save(caller(), 'finance_user');
             expect(door.stated).toEqual([['zh-CN', 'de'], []]);
+        }, 60_000);
+
+        it('the type\'s authoring gate receives the same locales, for its refusal\'s userMessage', async () => {
+            const door = await boot();
+            await door.save(caller('zh-CN', 'de'), 'finance_user');
+            await door.save(caller(), 'finance_user');
+            expect(door.gated).toEqual([['zh-CN', 'de'], []]);
         }, 60_000);
 
         it('a zh-CN request reads the advisory in Simplified Chinese; rule, message and hint are unchanged', async () => {
