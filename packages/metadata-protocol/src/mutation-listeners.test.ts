@@ -13,6 +13,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a clocked case (check-test-source-alias).
+import '@objectstack/lint';
 import type { MetadataMutationEvent } from './protocol.js';
 
 function makeProtocol() {
