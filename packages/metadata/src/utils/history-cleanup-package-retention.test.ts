@@ -41,7 +41,7 @@ const A = 'com.acme.alpha';
 const B = 'com.acme.beta';
 const MAX_VERSIONS = 2;
 
-const PINNED = new Set(DEFAULT_METADATA_TYPE_REGISTRY.filter((entry) => entry.executionPinned).map((entry) => entry.type));
+const PINNED: ReadonlySet<string> = new Set(DEFAULT_METADATA_TYPE_REGISTRY.filter((entry) => entry.executionPinned).map((entry) => entry.type));
 const RETAINED_SLOTTED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !PINNED.has(type));
 const PINNED_SLOTTED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => PINNED.has(type));
 
@@ -137,8 +137,10 @@ describe('history retention of a type stored per package keeps the latest N per 
     await saveTimes(type, 2);
     // Planted: a non-slotted type's rows never carry a package, so this column
     // can only prove that retention does not read it for such a type.
-    await driver.update(HISTORY, (await driver.find(HISTORY, { where: { type, version: 1 } } as never))[0].id, { package_id: B });
-    await driver.update(HISTORY, (await driver.find(HISTORY, { where: { type, version: 2 } } as never))[0].id, { package_id: B });
+    for (const version of [1, 2]) {
+      const [row] = (await driver.find(HISTORY, { where: { type, version } } as never)) as Array<{ id: string }>;
+      await driver.update(HISTORY, row.id, { package_id: B });
+    }
     await saveTimes(type, 2);
     expect(await historyOf(type)).toEqual([[1, B], [2, B], [3, null], [4, null]]);
 
