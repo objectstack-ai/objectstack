@@ -65,9 +65,10 @@ export interface PackageTableStatements {
   /**
    * Insert-or-update of one `(id, version)` row; bindings: id, version,
    * manifest, metadata, hash, created_at, updated_at. [#31530] Both stamps are
-   * bound ({@link packageRowStamp}), so the writer knows the `created_at` it
-   * inserted. An update keeps the row's `created_at` and takes the bound
-   * `updated_at`.
+   * bound — `created_at` as {@link packageRowStamp}, `updated_at` as
+   * {@link packageWriteStamp} of the same instant — so the writer knows the
+   * `created_at` it inserted. An update keeps the row's `created_at` and takes
+   * the bound `updated_at`, the stamp the `latest` reads order by.
    */
   readonly upsert: string;
 }
@@ -131,6 +132,35 @@ export interface PackageTableStatements {
  * `publish` first reads the `(id, version)` row's `created_at`
  * ({@link PACKAGE_ROW_CREATED_AT_SQL}) and answers that when the row exists.
  * The table DDL, its defaults and the table's shape are untouched.
+ *
+ * ## Which row is "latest": the last WRITTEN, by `updated_at`
+ *
+ * `get(id, 'latest')` and `list()` — and through `list()` the boot's
+ * hydration, which is what a restart serves — pick the row with the greatest
+ * `updated_at`, never the greatest `created_at`. `created_at` says when the
+ * `(id, version)` row was first inserted, and the update arm keeps it, so a
+ * re-install of a version the package already had (a rollback 2.0.0 → 1.0.0)
+ * left 1.0.0 older than 2.0.0 for ever: the live process served 1.0.0 and a
+ * restart served 2.0.0. `updated_at` is set by every write, insert or update.
+ *
+ * Its stamp is {@link packageWriteStamp}: the same UTC text with milliseconds,
+ * strictly increasing within a process ({@link nextPackageWriteInstant}), so
+ * several writes within one second — or one millisecond — still order.
+ * `created_at` keeps its whole-second form: the unmanaged-copy record ties to
+ * it by string equality, and it says nothing about order any more.
+ *
+ * Rows written before this kept the whole-second `updated_at` the database or
+ * an earlier publish wrote, which an update has always refreshed, so a stored
+ * rollback at least a second after the write it rolls back is picked right
+ * with no migration. A whole-second stamp sorts before any millisecond stamp
+ * of the same second (it is a prefix of it), so a new write beats an old row
+ * of the same second. What stays open: stored rows that already tie on their
+ * whole second, and writes from two processes whose clocks disagree — the
+ * monotonic step is per process.
+ *
+ * `idx_packages_latest` keeps its `(id, created_at DESC)` DDL byte-for-byte,
+ * for the fresh-versus-adopted reason above; the `latest` reads no longer
+ * order by it, over a table that holds one row per installed version.
  */
 export const PACKAGE_TABLE_STATEMENTS: Readonly<Record<PackageTableDialect, PackageTableStatements>> = {
   standard: {
@@ -204,6 +234,33 @@ export const PACKAGE_TABLE_STATEMENTS: Readonly<Record<PackageTableDialect, Pack
  */
 export function packageRowStamp(at: Date): string {
   return at.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+/**
+ * The `updated_at` text a publish binds: `at` in UTC, `YYYY-MM-DD HH:MM:SS.mmm`
+ * — {@link packageRowStamp}'s text with the milliseconds after it. The `latest`
+ * reads order by this column, so it needs the precision `created_at` lacks; a
+ * whole-second stamp an older write left is a prefix of every millisecond
+ * stamp of its second, and sorts before all of them.
+ */
+export function packageWriteStamp(at: Date): string {
+  return at.toISOString().slice(0, 23).replace('T', ' ');
+}
+
+/** The last instant {@link nextPackageWriteInstant} handed out in this process, in epoch milliseconds. */
+let lastPackageWriteMs = Number.NEGATIVE_INFINITY;
+
+/**
+ * The instant a publish stamps its row with: `now`, or one millisecond after
+ * the instant the previous publish in this process took when `now` is not
+ * later than it — the clock standing still within a millisecond, or stepping
+ * back. So two writes in one process never carry the same `updated_at`, and
+ * the later write is always the `latest` one.
+ */
+export function nextPackageWriteInstant(now: Date = new Date()): Date {
+  const ms = Math.max(now.getTime(), lastPackageWriteMs + 1);
+  lastPackageWriteMs = ms;
+  return new Date(ms);
 }
 
 /**

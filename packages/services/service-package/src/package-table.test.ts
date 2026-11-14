@@ -31,7 +31,9 @@ import {
   ensurePackageTable,
   PACKAGE_ROW_CREATED_AT_SQL,
   PACKAGE_TABLE_STATEMENTS,
+  nextPackageWriteInstant,
   packageRowStamp,
+  packageWriteStamp,
   resolvePackageTableDialect,
 } from './package-table.js';
 
@@ -263,6 +265,7 @@ describe('[#21243] CONTROL — the standard set on a real SQLite database', () =
 
 describe('[#31530] publish answers the row\'s version and created_at, from the write itself', () => {
   const STAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+  const WRITE_STAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/;
 
   it('SQLite: a new row\'s answer is what `get` then reads, by latest and by version; a re-publish keeps the row\'s created_at', async () => {
     const db = new DatabaseSync(':memory:');
@@ -286,8 +289,12 @@ describe('[#31530] publish answers the row\'s version and created_at, from the w
     expect({ version: latest?.version, createdAt: latest?.created_at }).toEqual({ version: first.version, createdAt: first.createdAt });
     const byVersion = await svc.get('com.acme.crm-copy', '1.0.0');
     expect(byVersion?.created_at).toBe(first.createdAt);
-    // The stored column holds the bound text, in the form the database used to write.
-    expect(db.prepare('SELECT created_at, updated_at FROM sys_packages').all()).toEqual([{ created_at: first.createdAt, updated_at: first.createdAt }]);
+    // The stored created_at holds the bound text, in the form the database used to write;
+    // updated_at holds the same instant to the millisecond (what `latest` orders by).
+    const [inserted] = db.prepare('SELECT created_at, updated_at FROM sys_packages').all() as Array<{ created_at: string; updated_at: string }>;
+    expect(inserted!.created_at).toBe(first.createdAt);
+    expect(inserted!.updated_at).toMatch(WRITE_STAMP);
+    expect(inserted!.updated_at.slice(0, 19)).toBe(first.createdAt);
 
     // An update of the same (id, version) keeps the row's created_at, takes the new updated_at,
     // and ANSWERS the created_at the row keeps — never the stamp it bound for the update.
@@ -296,8 +303,8 @@ describe('[#31530] publish answers the row\'s version and created_at, from the w
     expect(again).toEqual({ success: true, version: '1.0.0', createdAt: '2026-01-01 00:00:00' });
     const [kept] = db.prepare('SELECT created_at, updated_at FROM sys_packages').all() as Array<{ created_at: string; updated_at: string }>;
     expect(kept!.created_at).toBe('2026-01-01 00:00:00');
-    expect(kept!.updated_at).toMatch(STAMP);
-    expect(kept!.updated_at).not.toBe('2026-01-01 00:00:00');
+    expect(kept!.updated_at).toMatch(WRITE_STAMP);
+    expect(kept!.updated_at > '2026-01-01 00:00:00', 'the update takes a newer write stamp').toBe(true);
     expect((await svc.get('com.acme.crm-copy', '1.0.0'))?.created_at).toBe(again.createdAt);
   });
 
@@ -326,7 +333,7 @@ describe('[#31530] publish answers the row\'s version and created_at, from the w
     }
   });
 
-  it.each(['mysql', 'sqlite'] as const)('%s: the created_at and updated_at bindings are the stamp the answer names', async (dialectName) => {
+  it.each(['mysql', 'sqlite'] as const)('%s: the created_at binding is the stamp the answer names; updated_at is that instant to the millisecond', async (dialectName) => {
     const calls: Array<{ sql: string; args?: unknown[] }> = [];
     const engine: any = {
       getDefaultDriverName: () => 'default',
@@ -345,11 +352,32 @@ describe('[#31530] publish answers the row\'s version and created_at, from the w
     expect(upsert.sql).toBe(PACKAGE_TABLE_STATEMENTS[dialectName === 'mysql' ? 'mysql' : 'standard'].upsert);
     expect(upsert.args).toHaveLength(7);
     expect(upsert.args!.slice(1, 2)).toEqual(['2.0.0']);
-    expect(upsert.args!.slice(5)).toEqual([out.createdAt, out.createdAt]);
+    const [createdAt, updatedAt] = upsert.args!.slice(5) as [string, string];
+    expect(createdAt).toBe(out.createdAt);
+    expect(updatedAt).toMatch(WRITE_STAMP);
+    expect(updatedAt.slice(0, 19)).toBe(out.createdAt);
     expect(out).toEqual({ success: true, version: '2.0.0', createdAt: expect.stringMatching(STAMP) });
   });
 
   it('packageRowStamp is UTC `YYYY-MM-DD HH:MM:SS`', () => {
     expect(packageRowStamp(new Date('2026-11-08T14:40:07.912Z'))).toBe('2026-11-08 14:40:07');
+  });
+
+  it('packageWriteStamp is UTC `YYYY-MM-DD HH:MM:SS.mmm`, and an older whole-second stamp sorts before it', () => {
+    const stamp = packageWriteStamp(new Date('2026-11-08T14:40:07.000Z'));
+    expect(stamp).toBe('2026-11-08 14:40:07.000');
+    expect('2026-11-08 14:40:07' < stamp).toBe(true);
+  });
+
+  it('nextPackageWriteInstant never hands out the same instant twice, nor an earlier one', () => {
+    const still = new Date('2030-01-01T00:00:00.000Z');
+    const a = nextPackageWriteInstant(still);
+    const b = nextPackageWriteInstant(still);
+    const c = nextPackageWriteInstant(new Date('2029-12-31T23:59:59.000Z'));
+    expect([a, b, c].map((d) => d.toISOString())).toEqual([
+      '2030-01-01T00:00:00.000Z',
+      '2030-01-01T00:00:00.001Z',
+      '2030-01-01T00:00:00.002Z',
+    ]);
   });
 });
