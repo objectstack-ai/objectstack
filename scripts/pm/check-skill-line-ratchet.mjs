@@ -1716,7 +1716,7 @@ export const CEILINGS = new Map([
   // file). Measured delta +3 (17 → 20 lines); landed count, headroom 0.
   // 20 → 24 (#33226): words the maintainer said to one seat are not spread —
   // the one-line rule first, then the card body's three bullets (bind that
-  // seat's account only; fleet-wide or triage-directed orders only from
+  // seat's account only; relayed fleet-wide or triage-directed orders only from
   // triage's own session or seat post; record a relayed order's effect, never
   // extend it). Ruling of record: the maintainer in the triage#1 session,
   // 2026-11-14, 「所有座位当前任务处理完就下班，我说的都是针对某个具体 agent 账户」,
