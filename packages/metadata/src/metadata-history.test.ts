@@ -494,17 +494,11 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         expect(await rowsOf(type)).toEqual(rows);
       });
 
-      it('a version attributed to none is attributed by its history row, never by the restored body\'s package stamp', async () => {
+      it('two row slots: a version attributed to none is refused naming both holders at both doors, whatever package the restored body is stamped with — never landed in that package\'s row', async () => {
         const legacy = await legacyHistory();
         await legacy(1, body('custom'));
         await loader.save(type, 'x', body('A2', A));
-        // One row slot: the stamp names B, the history row nobody; naming no
-        // package it lands in the one row, as the unstamped body does.
-        await loader.registerRollback(type, 'x', body('custom', B), 1);
-        expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'custom']]);
-        // Two row slots: refused naming both holders at both doors, whatever
-        // package the restored body is stamped with — ⛔ never landed in B's row.
-        await loader.save(type, 'x', body('B4', B));
+        await loader.save(type, 'x', body('B3', B));
         const rows = await rowsOf(type);
         const both = {
           code: 'RESOURCE_CONFLICT',
@@ -518,6 +512,15 @@ describe('history and rollback of a type stored per package (#32351)', () => {
           expect(await refusal(loader.registerRollback(type, 'x', body('custom', B), 1, undefined, undefined, { packageId }))).toEqual(both);
         }
         expect(await rowsOf(type)).toEqual(rows);
+      });
+
+      it('one row slot: a version attributed to none, restored naming no package with a body stamped for another package, lands in the one row as the unstamped body does', async () => {
+        const legacy = await legacyHistory();
+        await legacy(1, body('custom'));
+        await loader.save(type, 'x', body('A2', A));
+        // The history row exists and names nobody; the stamp is the caller's, not the version's owner.
+        await loader.registerRollback(type, 'x', body('custom', B), 1);
+        expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'custom']]);
       });
 
       it('an environment version is not written into a package\'s row', async () => {
