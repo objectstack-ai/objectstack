@@ -434,6 +434,29 @@ describe('FlowRunSummarySchema', () => {
     expect(() => FlowRunSummarySchema.parse({ ...brokenSweep, acted: -1 })).toThrow();
   });
 
+  describe('a node row\'s warnings', () => {
+    const refusedNotify = {
+      nodeId: 'nudge', nodeType: 'notify', status: 'success' as const, runs: 1, failures: 0, skipped: 0,
+      selected: 1, acted: 0, warnings: ["notify delivered nothing: channel 'push' (1 delivery): not registered."],
+    };
+
+    it('keeps them through a parse, so a client validating the response still reads them', () => {
+      const summary = FlowRunSummarySchema.parse({ selected: 1, acted: 0, skipped: 0, gates: [], nodes: [refusedNotify] });
+      expect(summary.nodes[0].warnings).toEqual(refusedNotify.warnings);
+    });
+
+    it('stays absent on a row that carries none, never defaulted to []', () => {
+      const row = FlowRunNodeSummarySchema.parse({ nodeId: 'gate', nodeType: 'decision', status: 'success', runs: 1, failures: 0, skipped: 0 });
+      expect('warnings' in row).toBe(false);
+    });
+
+    it('refuses a non-string entry at its path', () => {
+      const res = FlowRunNodeSummarySchema.safeParse({ ...refusedNotify, warnings: [{ message: 'w' }] });
+      expect(res.success).toBe(false);
+      expect(res.error?.issues[0].path).toEqual(['warnings', 0]);
+    });
+  });
+
   it('carries an uncountable-effect tally distinct from acted', () => {
     // A connector-driven run: `acted: 0` is INCOMPLETE, not zero. The third
     // clause of the broken-sweep FIRST FILTER
