@@ -741,13 +741,35 @@ describe('with SSO domain verification on, an SSO sign-in reaches an existing ac
     logger: { info: vi.fn(), warn: vi.fn() },
     ...over,
   });
-  /** An auth context holding one verified account, not linked and never unlinked. */
-  const ctxHolding = (email: string) => ({
-    context: {
-      adapter: { findOne: vi.fn(async () => null), create: vi.fn(), deleteMany: vi.fn() },
-      internalAdapter: { findUserById: vi.fn(async (id: string) => ({ id, email, emailVerified: true })) },
-    },
-  });
+  interface Held {
+    /** The stored provider's update flag (`oidcConfig.overrideUserInfo`); default on. */
+    updates?: boolean;
+    /** The composed `sso` plugin's options; `null` composes no plugin list at all. */
+    ssoOptions?: Record<string, unknown> | null;
+    /** The provider-row read: a row, `null` for none, or a throw. */
+    providerRow?: unknown | 'throws';
+  }
+  /** An auth context holding one verified account, never unlinked, behind the composed `sso` plugin. */
+  const ctxHolding = (email: string, held: Held = {}) => {
+    const row = 'providerRow' in held
+      ? held.providerRow
+      : { providerId: PROVIDER, oidcConfig: JSON.stringify({ issuer: 'https://idp.example.test', overrideUserInfo: held.updates ?? true }) };
+    return {
+      context: {
+        options: held.ssoOptions === null ? {} : { plugins: [{ id: 'other' }, { id: 'sso', options: held.ssoOptions ?? {} }] },
+        adapter: {
+          findOne: vi.fn(async (q: { model: string }) => {
+            if (q.model !== 'ssoProvider') return null;
+            if (row === 'throws') throw new Error('store down');
+            return row;
+          }),
+          create: vi.fn(),
+          deleteMany: vi.fn(),
+        },
+        internalAdapter: { findUserById: vi.fn(async (id: string) => ({ id, email, emailVerified: true })) },
+      },
+    };
+  };
   const sourceOf = (action: string, method: string) =>
     method === 'oauth'
       ? { action, method, oauth: { providerId: PROVIDER } }
@@ -758,8 +780,8 @@ describe('with SSO domain verification on, an SSO sign-in reaches an existing ac
       requireLocalEmailVerified: true,
       provenDomain,
     });
-  const signIn = (asserted: string, stored: string, method = 'sso-oidc', provenDomain = ruleDeps()) =>
-    refuseSsoAddressChangeOutsideProvenDomain(call('sign-in', asserted, method), ctxHolding(stored), { provenDomain });
+  const signIn = (asserted: string, stored: string, method = 'sso-oidc', provenDomain = ruleDeps(), held: Held = {}) =>
+    refuseSsoAddressChangeOutsideProvenDomain(call('sign-in', asserted, method), ctxHolding(stored, held), { provenDomain });
   const LINK_REFUSED = { error: EMAIL_DOMAIN_NOT_ALLOWED, errorDescription: SSO_LINK_DOMAIN_REFUSAL_DESCRIPTION };
   const CHANGE_REFUSED = { error: EMAIL_DOMAIN_NOT_ALLOWED, errorDescription: SSO_ADDRESS_CHANGE_DOMAIN_REFUSAL_DESCRIPTION };
 
@@ -790,12 +812,41 @@ describe('with SSO domain verification on, an SSO sign-in reaches an existing ac
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it('a sign-in asserting an address outside the proven domains, other than the account\'s own, is refused', async () => {
-    for (const method of ['sso-oidc', 'sso-saml']) {
-      expect(await signIn('bob@other.example', 'bob@acme.com', method), method).toEqual(CHANGE_REFUSED);
-      expect(await signIn('bob@eng.acme.com', 'bob@acme.com', method), method).toEqual(CHANGE_REFUSED);
-    }
+  it('a sign-in that would change the stored address to one outside the proven domains is refused', async () => {
+    expect(await signIn('bob@other.example', 'bob@acme.com')).toEqual(CHANGE_REFUSED);
+    expect(await signIn('bob@eng.acme.com', 'bob@acme.com')).toEqual(CHANGE_REFUSED);
     expect(SSO_ADDRESS_CHANGE_DOMAIN_REFUSAL_DESCRIPTION).not.toMatch(/acme|other\.example/);
+  });
+
+  it('a sign-in that changes nothing is not judged: a provider that does not update the account, and every SAML sign-in', async () => {
+    const provenDomain = ruleDeps({ reader: readerOf([]) });
+    expect(await signIn('bob@other.example', 'bob@acme.com', 'sso-oidc', provenDomain, { updates: false })).toBeUndefined();
+    expect(await signIn('bob@other.example', 'bob@acme.com', 'sso-saml', provenDomain)).toBeUndefined();
+    expect((provenDomain.reader as { find: ReturnType<typeof vi.fn> }).find).not.toHaveBeenCalled();
+  });
+
+  it("whether the sign-in writes the address is read as the vendor reads it: a defaultSSO entry by id first, else the stored provider's flag", async () => {
+    const preset = (overrideUserInfo: boolean) => ({ defaultSSO: [{ providerId: PROVIDER, oidcConfig: { overrideUserInfo } }] });
+    expect(await signIn('bob@other.example', 'bob@acme.com', 'sso-oidc', ruleDeps(), { updates: false, ssoOptions: preset(true) })).toEqual(CHANGE_REFUSED);
+    expect(await signIn('bob@other.example', 'bob@acme.com', 'sso-oidc', ruleDeps(), { updates: true, ssoOptions: preset(false) })).toBeUndefined();
+    // A stored config the adapter hands back as an object reads the same as its JSON string.
+    expect(await signIn('bob@other.example', 'bob@acme.com', 'sso-oidc', ruleDeps(), { providerRow: { providerId: PROVIDER, oidcConfig: { overrideUserInfo: true } } })).toEqual(CHANGE_REFUSED);
+  });
+
+  it('fails closed, judging the sign-in as a write: a resolveUser selection, no readable plugin list, no provider row, a failed read, a config that does not parse', async () => {
+    const either: Held[] = [
+      { updates: false, ssoOptions: { resolveUser: () => undefined } },
+      { updates: false, ssoOptions: null },
+    ];
+    for (const held of either) {
+      for (const method of ['sso-oidc', 'sso-saml']) {
+        expect(await signIn('bob@other.example', 'bob@acme.com', method, ruleDeps(), held), `${method} ${JSON.stringify(held)}`).toEqual(CHANGE_REFUSED);
+      }
+    }
+    const oidcRow: Held[] = [{ providerRow: null }, { providerRow: 'throws' }, { providerRow: { providerId: PROVIDER, oidcConfig: '{not json' } }];
+    for (const held of oidcRow) {
+      expect(await signIn('bob@other.example', 'bob@acme.com', 'sso-oidc', ruleDeps(), held), JSON.stringify(held)).toEqual(CHANGE_REFUSED);
+    }
   });
 
   it('a sign-in asserting another address at a proven domain is admitted', async () => {

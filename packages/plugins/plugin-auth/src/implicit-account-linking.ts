@@ -47,12 +47,16 @@
  *       is refused unless the asserted address is at a domain the provider
  *       has proven, by equality: a subdomain counts only when it is itself
  *       listed and verified ({@link refuseImplicitAccountLink});
- *     - a sign-in through an SSO provider into an account it is already
- *       linked to, asserting an address other than the account's own, is
- *       refused unless the asserted address is at a proven domain
- *       ({@link refuseSsoAddressChangeOutsideProvenDomain}). A sign-in that
- *       asserts the account's own address is not re-judged.
- *     Both fail closed: a provider row that cannot be read refuses. Verification
+ *     - a sign-in through an SSO provider that would change the stored
+ *       address of an account it is already linked to is refused unless the
+ *       new address is at a proven domain
+ *       ({@link refuseSsoAddressChangeOutsideProvenDomain}). Whether the
+ *       sign-in writes the address is the vendor's own decision, read the way
+ *       the vendor reads it ({@link ssoSignInWritesAddress}). A sign-in that
+ *       asserts the account's own address, or whose provider does not update
+ *       the account, changes nothing and is not judged.
+ *     Both fail closed: a provider row that cannot be read refuses, and a
+ *     write decision that cannot be read is judged as a write. Verification
  *     off, a non-SSO source and an explicit link are not judged.
  *
  * ## Why the enforcement point is `user.validateUserInfo`
@@ -228,6 +232,8 @@ export interface LinkingDbAdapter {
 export interface LinkingAuthContext {
   adapter: LinkingDbAdapter;
   internalAdapter: { findUserById(id: string): Promise<{ email?: unknown; emailVerified?: boolean } | null> };
+  /** The better-auth options the instance was built with (its `plugins` list), when the context carries them. */
+  options?: { plugins?: unknown };
 }
 
 /**
@@ -370,6 +376,69 @@ export async function refuseImplicitAccountLink(
 const sameAddress = (a: unknown, b: unknown): boolean =>
   typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 
+/** The `@better-auth/sso` options this module reads to know whether a sign-in writes the address. */
+interface SsoVendorOptions {
+  resolveUser?: unknown;
+  defaultSSO?: Array<{ providerId?: unknown; oidcConfig?: { overrideUserInfo?: unknown } }>;
+}
+
+/** The composed `sso` plugin's options, `undefined` when the context carries no readable plugin list. */
+function ssoVendorOptions(auth: LinkingAuthContext): SsoVendorOptions | null | undefined {
+  const plugins = auth.options?.plugins;
+  if (!Array.isArray(plugins)) return undefined;
+  const sso = plugins.find((p) => (p as { id?: unknown } | null)?.id === 'sso') as { options?: unknown } | undefined;
+  if (!sso) return undefined;
+  return (sso.options ?? null) as SsoVendorOptions | null;
+}
+
+/** The vendor's JSON read of a stored `oidcConfig` (`safeJsonParse`): an object as is, a string parsed. Throws on bad JSON. */
+function parseOidcConfig(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+  if (typeof value === 'object') return value as Record<string, unknown>;
+  if (typeof value === 'string') return JSON.parse(value) as Record<string, unknown>;
+  return null;
+}
+
+/**
+ * Whether this sign-in through an SSO provider writes the asserted address
+ * onto the account it is linked to: the vendor's own decision, read from the
+ * same inputs it reads. Measured against `@better-auth/sso` 1.7.12 and
+ * better-auth 1.7.12 (`handleOAuthUserInfo`, linked-account branch): the
+ * address is written when a `resolveUser` selection asks for a profile
+ * update, otherwise when the callback hands over the provider's update flag
+ * — the OIDC callback passes `oidcConfig.overrideUserInfo` of the provider it
+ * resolved (a `defaultSSO` entry by id first, else the stored `ssoProvider`
+ * row, parsed as above), and the SAML callback passes none. The plugin-level
+ * `defaultOverrideUserInfo` is folded into that stored flag when the provider
+ * is registered or updated, and is not read at sign-in.
+ *
+ * Fails closed, answering "writes": a `resolveUser` (its selection is made
+ * after this gate), plugin options or a provider row that cannot be read, or
+ * a stored config that does not parse.
+ */
+export async function ssoSignInWritesAddress(source: unknown, auth: LinkingAuthContext): Promise<boolean> {
+  const method = (source as { method?: unknown } | undefined)?.method;
+  const options = ssoVendorOptions(auth);
+  if (options === undefined) return true;
+  if (options?.resolveUser) return true;
+  if (method === 'sso-saml') return false;
+  if (method !== 'sso-oidc') return true;
+  const providerId = ssoProviderIdOfSource(source);
+  if (!providerId) return true;
+  const preset = options?.defaultSSO?.find((p) => p?.providerId === providerId);
+  if (preset) return Boolean(preset.oidcConfig?.overrideUserInfo);
+  try {
+    const row = (await auth.adapter.findOne({
+      model: 'ssoProvider',
+      where: [{ field: 'providerId', value: providerId }],
+    })) as { oidcConfig?: unknown } | null;
+    if (!row) return true;
+    return Boolean(parseOidcConfig(row.oidcConfig)?.overrideUserInfo);
+  } catch {
+    return true;
+  }
+}
+
 export interface SsoAddressChangeGateOptions {
   provenDomain: SsoAccountDomainRuleDeps;
   resolveContext?: LinkingContextResolver;
@@ -378,11 +447,12 @@ export interface SsoAddressChangeGateOptions {
 /**
  * The `validateUserInfo` half of rule 4 for a sign-in (`action: 'sign-in'`)
  * through an SSO provider into an account it is already linked to: answers
- * the refusal when the asserted address is not the account's own and is not
- * at a domain the provider has proven, `undefined` otherwise (verification
- * off, a non-SSO source, any other action, the account's own address).
- * Throws, which better-auth turns into a FORBIDDEN refusal, when the account
- * cannot be read.
+ * the refusal when the sign-in would change the account's stored address
+ * ({@link ssoSignInWritesAddress}) to one that is not at a domain the
+ * provider has proven, `undefined` otherwise (verification off, a non-SSO
+ * source, any other action, the account's own address, a provider that does
+ * not update the account). Throws, which better-auth turns into a FORBIDDEN
+ * refusal, when the account cannot be read.
  */
 export async function refuseSsoAddressChangeOutsideProvenDomain(
   data: { user?: Record<string, unknown>; source?: { action?: string; method?: string } } | undefined,
@@ -397,6 +467,7 @@ export async function refuseSsoAddressChangeOutsideProvenDomain(
   const stored = await auth.internalAdapter.findUserById(userId);
   if (!stored) throw new Error('sso sign-in: account not found — refusing');
   if (sameAddress(stored.email, data.user?.email)) return undefined;
+  if (!(await ssoSignInWritesAddress(data.source, auth))) return undefined;
   return refuseOutsideProvenDomain(data.user?.email, data.source, options.provenDomain, 'address-change');
 }
 

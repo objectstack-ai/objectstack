@@ -1424,7 +1424,7 @@ describe('with SSO domain verification on, an OIDC provider creates an account o
 // `sso-account-at-proven-domain.ts`. Every case runs with verification on, the
 // provider's `domain_verified` on for `acme.com`, and one human already present.
 
-describe('with SSO domain verification on, an OIDC sign-in reaches an existing account only with an address at a domain the provider has proven', () => {
+describe('with SSO domain verification on, an OIDC sign-in links to an existing account, or changes its address, only at a domain the provider has proven', () => {
   afterEach(() => vi.restoreAllMocks());
   const VERIFICATION_ON = { plugins: { sso: true, ssoDomainVerification: true } };
   const verifiedRp = async (domain = 'acme.com') => {
@@ -1481,7 +1481,7 @@ describe('with SSO domain verification on, an OIDC sign-in reaches an existing a
     });
   });
 
-  describe('an address change asserted by a later sign-in', () => {
+  describe('a later sign-in that would change the stored address', () => {
     it('to an address outside the proven domains is refused, and the stored email is unchanged', async () => {
       const rp = await verifiedRp();
       overrideUserInfo(rp);
@@ -1510,6 +1510,14 @@ describe('with SSO domain verification on, an OIDC sign-in reaches an existing a
       const bob = (rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'bob@acme.com');
       expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.co.uk' })));
       expect(storedEmail(rp, bob.id)).toBe('bob@acme.co.uk');
+    });
+
+    it('with a provider that does not update the account, an outside address asserted later signs in and changes nothing', async () => {
+      const rp = await verifiedRp();
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' })));
+      const bob = (rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'bob@acme.com');
+      expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@other.example' })));
+      expect(storedEmail(rp, bob.id)).toBe('bob@acme.com');
     });
 
     it('CONTROL: with verification off, the change applies as today', async () => {

@@ -938,6 +938,32 @@ describe('with SSO domain verification on, a SAML implicit link reaches an exist
   });
 });
 
+describe('with SSO domain verification on, a later SAML sign-in changes a linked account\'s address only at a domain the provider has proven', () => {
+  const VERIFICATION_ON = { plugins: { sso: true, ssoDomainVerification: true } };
+  // The email comes from an attribute and the NameID is stable, so a later
+  // sign-in reaches the same linked account with another address.
+  const NAME_ID = 'saml-subject-7f3a';
+  const as = (email: string) => ({ nameID: NAME_ID, attributes: { email } });
+
+  it('a SAML provider does not update the account: an outside address asserted later signs in and the stored address is unchanged', async () => {
+    const rp = await makeRp({
+      config: VERIFICATION_ON,
+      provider: { domain: 'acme.com', domainVerified: true, allowJit: true },
+      samlConfig: { mapping: { email: 'email' } },
+    });
+    await seedAdmin(rp);
+    const first = await signInThroughIdp(rp, 'bob@acme.com', undefined, undefined, as('bob@acme.com'));
+    expect(first.headers.get('location'), first.headers.get('location') ?? '').toBe(AFTER);
+    const bob = (rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.email === 'bob@acme.com');
+    expect(bob, 'the on-domain account').toBeTruthy();
+    const later = await signInThroughIdp(rp, 'bob@other.example', undefined, undefined, as('bob@other.example'));
+    expect(later.headers.get('location'), later.headers.get('location') ?? '').toBe(AFTER);
+    expect(cookiesOf(later)).toMatch(/session_token=[^;]/);
+    expect((rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.id === bob.id)?.email).toBe('bob@acme.com');
+    expect((rp.engine.tables.get('sys_account') ?? []).filter((a: any) => a.provider_id === PROVIDER_ID)).toHaveLength(1);
+  });
+});
+
 // ── Sign out of the company sign-in too: SAML single logout ─────────────────
 //
 // Ruling record 6866334319 (`sso-sign-out-of-idp.ts`). The IdP side of single
