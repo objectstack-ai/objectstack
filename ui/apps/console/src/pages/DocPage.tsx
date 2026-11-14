@@ -6,8 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Navigate, useHref, useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Navigate, useHref, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle, ChevronDown, FileQuestion, Loader2, Menu } from 'lucide-react';
 import { useAdapter } from '@object-ui/app-shell';
 import { MarkdownRenderer, extractToc } from '@object-ui/plugin-markdown';
@@ -23,6 +23,13 @@ interface DocItem {
   name: string;
   label?: string;
   content: string;
+}
+
+/** Scroll the heading `id` names into view, the way an in-page anchor click does; false when it is not mounted. */
+function scrollHeadingIntoView(id: string): boolean {
+  const target = document.getElementById(id);
+  target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return target !== null;
 }
 
 /**
@@ -47,6 +54,11 @@ export default function DocPage() {
   // the parent route's package-id segment under `/apps/:appName/docs/:slug/:name`.
   const { slug, name, appName } = useParams<{ slug?: string; name: string; appName?: string }>();
   const navigate = useNavigate();
+  // The section the URL names (`…#section`), whether typed, followed from a
+  // cross-reference, or carried through a redirect (DocsSlug, the book-name
+  // redirect below).
+  const { hash } = useLocation();
+  const articleRef = useRef<HTMLElement>(null);
   // The docs route this page is read under: the app's own docs tree inside an
   // app (ADR-0048), else the portal. Body cross-references resolve under it, so
   // a link followed from an app's doc keeps the app shell (top bar, app nav),
@@ -116,9 +128,32 @@ export default function DocPage() {
   // ("home") rather than scrolling. Reflect the section in the URL via an
   // absolute path that ignores <base>.
   const scrollToHeading = useCallback((id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    scrollHeadingIntoView(id);
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${id}`);
   }, []);
+
+  // Landing on a URL that names a section scrolls to it once the doc renders.
+  // The body mounts after the doc loads and behind the markdown renderer's lazy
+  // boundary, so the heading may not exist yet: watch the article until it does.
+  // A new `:slug` is a new landing (the book-name redirect below keeps this page
+  // mounted and the doc loaded, but draws a new article).
+  useEffect(() => {
+    if (state !== 'ready' || doc?.name !== name || !hash) return;
+    let id: string;
+    try {
+      id = decodeURIComponent(hash.slice(1));
+    } catch {
+      return; // a malformed escape names no heading
+    }
+    if (!id || scrollHeadingIntoView(id)) return;
+    const article = articleRef.current;
+    if (!article) return;
+    const observer = new MutationObserver(() => {
+      if (scrollHeadingIntoView(id)) observer.disconnect();
+    });
+    observer.observe(article, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [state, doc, name, slug, hash]);
 
   // SPA navigation for rewritten doc-to-doc links: anchors render as plain
   // <a href="{docsHref}/...">; intercept same-app clicks so following a
@@ -184,7 +219,7 @@ export default function DocPage() {
   const namedBook = useMemo(() => (slug && !resolvedBook ? bookNamedBy(slug, books) : null), [slug, resolvedBook, books]);
 
   if (namedBook && name) {
-    return <Navigate to={`${base}/${bookSlug(namedBook)}/${name}`} replace />;
+    return <Navigate to={{ pathname: `${base}/${bookSlug(namedBook)}/${name}`, hash }} replace />;
   }
 
   if (state === 'loading') {
@@ -251,6 +286,7 @@ export default function DocPage() {
           </aside>
         ) : null}
         <article
+          ref={articleRef}
           className="min-w-0 max-w-3xl flex-1 [&_h1]:scroll-mt-24 [&_h2]:scroll-mt-24 [&_h3]:scroll-mt-24"
           onClick={onContentClick}
         >
