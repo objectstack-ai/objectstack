@@ -758,6 +758,40 @@ export function resolveOrgMembershipLimit(): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/** The `OS_ORG_INVITATION_LIMIT` spellings that turn the pending-invitation limit off. */
+export const ORG_INVITATION_LIMIT_OFF_VALUES: readonly string[] = ['off', 'unlimited', 'none'];
+
+/**
+ * How many PENDING invitations one organization may hold at once, from
+ * `OS_ORG_INVITATION_LIMIT`. A third question beside {@link resolveOrgLimit}
+ * (organizations a user may create) and {@link resolveOrgMembershipLimit}
+ * (members an organization may hold).
+ *
+ * better-auth's organization plugin refuses a new invitation with
+ * `403 INVITATION_LIMIT_REACHED` once the organization's pending invitations
+ * reach its `invitationLimit`, and substitutes **100** when none is passed.
+ * Unlike the membership limit, that default is KEPT when this is unset: an
+ * unconfigured deployment behaves exactly as it always has. A host that
+ * invites in bulk (the cloud control plane's CSV import) turns it off.
+ *
+ * Answers:
+ *  - `undefined` — unset, blank, unparsable, `0` or negative. The auth plugin
+ *    passes nothing and the vendor's 100 applies. Unusable values read as unset
+ *    rather than as a cap: a typo must not refuse every invitation.
+ *  - `'off'` — one of {@link ORG_INVITATION_LIMIT_OFF_VALUES}, any case: no
+ *    limit.
+ *  - a positive integer N — at most N pending invitations per organization.
+ */
+export function resolveOrgInvitationLimit(): number | 'off' | undefined {
+  const raw = readEnvWithDeprecation('OS_ORG_INVITATION_LIMIT', [], { silent: true });
+  if (raw == null) return undefined;
+  const value = String(raw).trim();
+  if (value === '') return undefined;
+  if (ORG_INVITATION_LIMIT_OFF_VALUES.includes(value.toLowerCase())) return 'off';
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 /**
  * SINGLE decision point for "is pinyin search recall on?" (#2486).
  *

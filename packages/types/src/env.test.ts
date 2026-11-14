@@ -18,6 +18,8 @@ import {
   resolveSearchPinyinEnabled,
   resolveSandboxTimeoutMs,
   resolveOrgMembershipLimit,
+  resolveOrgInvitationLimit,
+  ORG_INVITATION_LIMIT_OFF_VALUES,
   isMcpServerEnabled,
   resolveMcpStdioAutoStart,
   stampSearchPinyinEnabled,
@@ -429,6 +431,53 @@ describe('resolveOrgMembershipLimit (OS_ORG_MEMBERSHIP_LIMIT)', () => {
     delete process.env[KEY];
     expect(resolveOrgMembershipLimit()).toBeUndefined();
     delete process.env.OS_ORG_LIMIT;
+  });
+});
+
+/**
+ * The pending-invitation limit a host may set or turn off. Unset must stay
+ * UNSET (the auth plugin then leaves better-auth's own 100 in place), so an
+ * unconfigured deployment refuses the 101st pending invitation exactly as before.
+ */
+describe('resolveOrgInvitationLimit (OS_ORG_INVITATION_LIMIT)', () => {
+  const KEY = 'OS_ORG_INVITATION_LIMIT';
+  const original = process.env[KEY];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it('is undefined when unset — the vendor default stays in force', () => {
+    delete process.env[KEY];
+    expect(resolveOrgInvitationLimit()).toBeUndefined();
+  });
+
+  it('reads a positive integer as the limit a deployment asked for', () => {
+    process.env[KEY] = '250';
+    expect(resolveOrgInvitationLimit()).toBe(250);
+  });
+
+  it('reads off / unlimited / none, in any case and padding, as no limit', () => {
+    for (const off of ['off', 'OFF', ' unlimited ', 'None']) {
+      process.env[KEY] = off;
+      expect(resolveOrgInvitationLimit(), `value=${JSON.stringify(off)}`).toBe('off');
+    }
+    expect(ORG_INVITATION_LIMIT_OFF_VALUES).toEqual(['off', 'unlimited', 'none']);
+  });
+
+  it('reads unusable values, 0 included, as UNSET — never as a limit that refuses every invitation', () => {
+    for (const bad of ['', '   ', 'abc', '0', '-5', 'NaN', 'false', 'infinity']) {
+      process.env[KEY] = bad;
+      expect(resolveOrgInvitationLimit(), `value=${JSON.stringify(bad)}`).toBeUndefined();
+    }
+  });
+
+  it('is independent of OS_ORG_MEMBERSHIP_LIMIT, which limits a different thing', () => {
+    process.env.OS_ORG_MEMBERSHIP_LIMIT = '7';
+    delete process.env[KEY];
+    expect(resolveOrgInvitationLimit()).toBeUndefined();
+    delete process.env.OS_ORG_MEMBERSHIP_LIMIT;
   });
 });
 
