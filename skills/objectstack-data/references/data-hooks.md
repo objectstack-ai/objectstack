@@ -621,26 +621,6 @@ result: {
 }
 ```
 
-### `previous` — Previous State
-
-Available in update/delete hooks:
-
-```typescript
-// beforeUpdate, afterUpdate
-ctx.previous: {
-  id: '123',
-  status: 'pending',  // Old value
-  updated_at: '2026-04-01T00:00:00Z',
-}
-
-// beforeDelete, afterDelete
-ctx.previous: {
-  id: '123',
-  name: 'Old Account',
-  // ... full record state
-}
-```
-
 ### Cross-Object API
 
 Access other objects within the same transaction. `ctx.api.object(name)` is the
@@ -779,7 +759,7 @@ const maskSensitiveData = defineHook({
 ### 5. No two of mine overlap (sandboxed `body`)
 
 No declarative key refuses two overlapping leave requests of one person; use
-this hook, renaming object and fields.
+this hook, renaming its fields.
 
 <!-- os:check -->
 ```typescript
@@ -789,6 +769,7 @@ export default defineHook({
   name: 'leave_request_no_overlap',
   object: 'leave_request',
   events: ['beforeInsert', 'beforeUpdate'],
+  runAs: 'system', // count the rows the saver cannot read too
   refusals: { OVERLAP: { message: 'This overlaps another request of yours.', status: 409 } },
   body: {
     language: 'js',
@@ -797,14 +778,15 @@ export default defineHook({
       const r = Object.assign({}, ctx.previous, ctx.input); // update: stored row under the patch
       const off = ['rejected', 'cancelled'];
       if (!r.owner_id || !r.start_at || !r.end_at || off.includes(r.status)) return;
+      const day = String(r.end_at).length === 10; // a date field: its end day is inclusive
       const where = {
         owner_id: r.owner_id,
-        status: { $nin: off },        // fail closed: a new status counts until listed here
-        start_at: { $lt: r.end_at },  // half-open: one ending 18:00 and
-        end_at: { $gt: r.start_at },  // one starting 18:00 do not overlap
+        status: { $nin: off },  // fail closed: a new status counts until listed here
+        start_at: day ? { $lte: r.end_at } : { $lt: r.end_at },  // datetime is half-open:
+        end_at: day ? { $gte: r.start_at } : { $gt: r.start_at }, // 18:00 end, 18:00 start is no overlap
       };
       if (ctx.previous) where.id = { $ne: ctx.previous.id }; // not the record itself
-      if (await ctx.api.object('leave_request').count({ where }) > 0)
+      if (await ctx.api.object(ctx.object).count({ where }) > 0)
         throw Object.assign(new Error(), { code: 'OVERLAP' });
     `,
   },
@@ -813,7 +795,8 @@ export default defineHook({
 
 Known limits: it is a read-then-write check, so two concurrent saves can both
 pass; a recycle-bin restore runs no insert hook; an import with automations off
-skips hooks; and rows of one bulk insert do not see each other.
+skips hooks; rows of one bulk insert or update do not see each other; and a row
+with no start or end is neither checked nor counted.
 
 ---
 

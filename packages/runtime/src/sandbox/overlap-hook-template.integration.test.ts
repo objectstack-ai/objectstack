@@ -9,9 +9,11 @@
  * pattern 5) and the docs (`content/docs/automation/hooks.mdx`). This file is
  * the vetting: {@link TEMPLATE} is that template's hook, byte for byte, and
  * it runs here in composition — a real `ObjectQL`, a real SQLite driver, the
- * real `QuickJSScriptRunner` and hook binder — for the five cases the order
- * names, read off `mapDataError`, the ADR-0112 table every data door answers
- * with.
+ * real `QuickJSScriptRunner` and hook binder — for the cases the order and
+ * its contract review name (overlap on insert and update, adjacency, self
+ * update, ignored statuses, inclusive `date` end days, a saver who cannot read
+ * the overlapping row), read off `mapDataError`, the ADR-0112 table every data
+ * door answers with.
  *
  * The copy is held here, not read from `skills/`: this package's suites do
  * not read outside it. When you edit the template there, edit it here.
@@ -32,6 +34,7 @@ const TEMPLATE = {
   name: 'leave_request_no_overlap',
   object: 'leave_request',
   events: ['beforeInsert', 'beforeUpdate'],
+  runAs: 'system', // count the rows the saver cannot read too
   refusals: { OVERLAP: { message: 'This overlaps another request of yours.', status: 409 } },
   body: {
     language: 'js',
@@ -40,14 +43,15 @@ const TEMPLATE = {
       const r = Object.assign({}, ctx.previous, ctx.input); // update: stored row under the patch
       const off = ['rejected', 'cancelled'];
       if (!r.owner_id || !r.start_at || !r.end_at || off.includes(r.status)) return;
+      const day = String(r.end_at).length === 10; // a date field: its end day is inclusive
       const where = {
         owner_id: r.owner_id,
-        status: { $nin: off },        // fail closed: a new status counts until listed here
-        start_at: { $lt: r.end_at },  // half-open: one ending 18:00 and
-        end_at: { $gt: r.start_at },  // one starting 18:00 do not overlap
+        status: { $nin: off },  // fail closed: a new status counts until listed here
+        start_at: day ? { $lte: r.end_at } : { $lt: r.end_at },  // datetime is half-open:
+        end_at: day ? { $gte: r.start_at } : { $gt: r.start_at }, // 18:00 end, 18:00 start is no overlap
       };
       if (ctx.previous) where.id = { $ne: ctx.previous.id }; // not the record itself
-      if (await ctx.api.object('leave_request').count({ where }) > 0)
+      if (await ctx.api.object(ctx.object).count({ where }) > 0)
         throw Object.assign(new Error(), { code: 'OVERLAP' });
     `,
   },
@@ -61,8 +65,34 @@ const LEAVE = {
     end_at: { type: 'datetime', name: 'end_at' },
     status: { type: 'text', name: 'status' },
     note: { type: 'text', name: 'note' },
+    filed_by: { type: 'text', name: 'filed_by' },
   },
 };
+
+/** The same template on `date` fields, where the end day is inclusive. */
+const LEAVE_DAY = {
+  name: 'leave_day',
+  fields: {
+    owner_id: { type: 'text', name: 'owner_id' },
+    start_at: { type: 'date', name: 'start_at' },
+    end_at: { type: 'date', name: 'end_at' },
+    status: { type: 'text', name: 'status' },
+  },
+};
+
+/**
+ * A stand-in for private sharing: an unelevated read of `leave_request` sees
+ * only the rows its user filed. `runAs: 'system'` is what lets the template's
+ * count see past it.
+ */
+function filedByOnly(opCtx: any, next: () => Promise<unknown>) {
+  if (opCtx.object === 'leave_request' && (opCtx.operation === 'count' || opCtx.operation === 'find')
+    && opCtx.context && !opCtx.context.isSystem && opCtx.ast) {
+    const mine = { filed_by: opCtx.context.userId ?? null };
+    opCtx.ast = { ...opCtx.ast, where: opCtx.ast.where ? { $and: [opCtx.ast.where, mine] } : mine };
+  }
+  return next();
+}
 
 describe('overlap-check hook template (data-hooks.md pattern 5)', () => {
   let engine: ObjectQL | null = null;
@@ -77,13 +107,15 @@ describe('overlap-check hook template (data-hooks.md pattern 5)', () => {
   async function boot(): Promise<ObjectQL> {
     dir = mkdtempSync(join(tmpdir(), 'os-overlap-template-'));
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'data.sqlite') }, useNullAsDefault: true });
-    await driver.initObjects([LEAVE]);
+    await driver.initObjects([LEAVE, LEAVE_DAY]);
     engine = new ObjectQL();
     engine.registerDriver(driver as any, true);
     await engine.init();
-    engine.registry.registerObject(LEAVE as any);
+    for (const o of [LEAVE, LEAVE_DAY]) engine.registry.registerObject(o as any);
+    engine.registerMiddleware(filedByOnly as any);
     const bodyRunner = hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql: engine, appId: 'overlap' });
-    bindHooksToEngine(engine, [TEMPLATE as any], { packageId: 'overlap', bodyRunner });
+    // The template as written, and the same hook bound to the `date` object (only `object` differs).
+    bindHooksToEngine(engine, [TEMPLATE as any, { ...TEMPLATE, name: 'leave_day_no_overlap', object: 'leave_day' } as any], { packageId: 'overlap', bodyRunner });
     return engine;
   }
 
@@ -98,7 +130,7 @@ describe('overlap-check hook template (data-hooks.md pattern 5)', () => {
   async function refusal(p: Promise<unknown>) {
     const err = await p.then(() => null, (x) => x);
     expect(err, 'the write must be refused').not.toBeNull();
-    return mapDataError(err, 'leave_request');
+    return mapDataError(err);
   }
 
   function expectOverlapRefusal(r: ReturnType<typeof mapDataError>) {
@@ -154,5 +186,31 @@ describe('overlap-check hook template (data-hooks.md pattern 5)', () => {
     await e.update('leave_request', { id: row.id, start_at: '2026-11-10T18:00:00.000Z' });
     const got = await e.findOne('leave_request', { where: { id: row.id } }) as any;
     expect(got.note).toBe('renamed');
+  }, 30_000);
+
+  it('date fields: the end day is inclusive, so the same day twice is refused and the next day is not', async () => {
+    const e = await boot();
+    const d = (from: string, to: string, extra: Record<string, unknown> = {}) =>
+      ({ owner_id: 'u1', start_at: from, end_at: to, status: 'approved', ...extra });
+    await e.insert('leave_day', d('2026-11-10', '2026-11-10'));
+    expectOverlapRefusal(await refusal(e.insert('leave_day', d('2026-11-10', '2026-11-10'))));
+    expectOverlapRefusal(await refusal(e.insert('leave_day', d('2026-11-09', '2026-11-10'))));
+    await e.insert('leave_day', d('2026-11-11', '2026-11-12'));
+    await e.insert('leave_day', d('2026-11-09', '2026-11-09'));
+    // An update that keeps the stored (date) end and moves the start into another row's days.
+    const later = await e.insert('leave_day', d('2026-11-14', '2026-11-14')) as any;
+    expectOverlapRefusal(await refusal(e.update('leave_day', { id: later.id, start_at: '2026-11-12' })));
+    await e.update('leave_day', { id: later.id, start_at: '2026-11-13' });
+    expect(await e.count('leave_day', {})).toBe(4);
+  }, 30_000);
+
+  it('runs elevated: a saver who cannot read the overlapping row is still refused', async () => {
+    const e = await boot();
+    await e.insert('leave_request', day('18:30', '21:30', { filed_by: 'u1' }));
+    const delegate = { userId: 'd1', tenantId: 'org_1', isSystem: false, positions: [], permissions: [] } as any;
+    // The delegate's own read does not see u1's row…
+    expect(await e.count('leave_request', {}, { context: delegate } as any)).toBe(0);
+    // …and the template's count, declared `runAs: 'system'`, does.
+    expectOverlapRefusal(await refusal(e.insert('leave_request', day('19:00', '20:00', { filed_by: 'd1' }), { context: delegate } as any)));
   }, 30_000);
 });
