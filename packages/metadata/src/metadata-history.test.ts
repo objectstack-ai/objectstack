@@ -440,11 +440,17 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'env1']]);
       });
 
-      // [#32717] One answer per rollback door: `MetadataManager.rollback` and
-      // `DatabaseLoader.registerRollback`, asked the same question, answer it in
-      // the same words. An address names whose versions are restored; a
-      // version its history does not hold answers "not found" at both.
-      const failure = (promise: Promise<unknown>) => promise.then(() => undefined, (error: any) => error);
+      // [#32717, seat ruling 6885958183 (amended B)] One answer per rollback
+      // door: `MetadataManager.rollback`, `DatabaseLoader.registerRollback` and
+      // `/meta` (`SysMetadataRepository.restoreVersion`'s `isVersionOf`). On a
+      // name one row slot holds, a version attributed to none and the
+      // environment's own version are that slot's (ADR-0150 D4: a package-less
+      // row at a held name is its one holder's customization), so they land,
+      // addressed or not, and an addressed history read lists exactly what an
+      // addressed rollback restores. On a name several row slots hold such a
+      // version is refused 409 naming every holder. A history row that exists
+      // says whose version it is, and the body the slot stores is stamped for
+      // that slot's owner, never for the package the restored body names.
       const legacyHistory = async () => {
         // The table as the release before #32351 created it: no `package_id`.
         const { package_id: _added, ...before } = SysMetadataHistoryObject.fields as Record<string, unknown>;
@@ -455,46 +461,54 @@ describe('history and rollback of a type stored per package (#32351)', () => {
           source: 'database-loader',
         });
       };
+      const slotsOf = async () => (await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)]);
+      const storedStampOf = (row: Record<string, unknown> | undefined) => JSON.parse(String(row?.metadata))._packageId;
 
-      for (const [holder, suffix] of [[A, `(package ${A})`], [null, '(environment)']] as const) {
-        it(`one row slot (${holder ?? 'the environment'}): a rollback addressing it to a version attributed to none answers "not found" at both doors, and writes nothing`, async () => {
+      for (const holder of [A, null]) {
+        const save = (label: string) => loader.save(type, 'x', holder === null ? body(label) : body(label, holder));
+        it(`one row slot (${holder ?? 'the environment'}): a version attributed to none is in the slot's addressed history and rolls back into the slot at both doors, addressed or not`, async () => {
           const legacy = await legacyHistory();
           await legacy(1, body('custom'));
-          await loader.save(type, 'x', holder === null ? body('env2') : body('A2', holder));
-          const rows = await rowsOf(type);
-          expect(rows.map((row) => row.package_id ?? null)).toEqual([holder]);
-          for (const attempt of [
-            manager.rollback(type, 'x', 1, { packageId: holder }),
-            loader.registerRollback(type, 'x', body('custom'), 1, undefined, undefined, { packageId: holder }),
-          ]) {
-            const error = await failure(attempt);
-            expect(error?.message).toBe(`Version 1 not found in history for ${type}/x ${suffix}`);
-            expect(error?.status).toBeUndefined();
-          }
-          expect(await rowsOf(type)).toEqual(rows);
-          // CONTROL: naming no package, it lands in the one row, as before.
+          await save('own2');
+          expect((await rowsOf(type)).map((row) => row.package_id ?? null)).toEqual([holder]);
+          // The addressed history lists it, as the bare one does.
+          expect(await versions(type, { packageId: holder })).toEqual([2, 1]);
+          expect(await versions(type)).toEqual([2, 1]);
+          expect((await loader.getHistoryRecord(type, 'x', 1, { packageId: holder }))?.metadata).toEqual(body('custom'));
+          expect((await manager.diff(type, 'x', 1, 2, { packageId: holder })).identical).toBe(false);
+          // The manager's door, addressed.
+          await manager.rollback(type, 'x', 1, { packageId: holder });
+          expect(await slotsOf()).toEqual([[holder, 'custom']]);
+          // The loader's door, addressed.
+          await save('own4');
+          await loader.registerRollback(type, 'x', body('custom'), 1, undefined, undefined, { packageId: holder });
+          expect(await slotsOf()).toEqual([[holder, 'custom']]);
+          // CONTROL: naming no package, both doors land it in the one row, as before.
+          await save('own6');
+          await manager.rollback(type, 'x', 1);
+          expect(await slotsOf()).toEqual([[holder, 'custom']]);
+          await save('own8');
           await loader.registerRollback(type, 'x', body('custom'), 1);
-          expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[holder, 'custom']]);
+          expect(await slotsOf()).toEqual([[holder, 'custom']]);
         });
       }
 
-      it('M1: one row slot a package took over: a rollback addressing that package to the environment\'s version answers "not found" at both doors, and writes nothing', async () => {
+      it('M1: one row slot a package took over: the environment\'s version is in that package\'s addressed history and rolls back addressing it at both doors', async () => {
         await loader.save(type, 'x', body('env1'));
         await loader.save(type, 'x', body('A2', A));
-        const rows = await rowsOf(type);
-        expect(rows.map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'A2']]);
-        for (const attempt of [
-          manager.rollback(type, 'x', 1, { packageId: A }),
-          loader.registerRollback(type, 'x', body('env1'), 1, undefined, undefined, { packageId: A }),
-        ]) {
-          const error = await failure(attempt);
-          expect(error?.message).toBe(`Version 1 not found in history for ${type}/x (package ${A})`);
-          expect(error?.status).toBeUndefined();
-        }
-        expect(await rowsOf(type)).toEqual(rows);
+        expect(await slotsOf()).toEqual([[A, 'A2']]);
+        expect(await versions(type, { packageId: A })).toEqual([2, 1]);
+        expect((await loader.getHistoryRecord(type, 'x', 1, { packageId: A }))?.metadata).toEqual(body('env1'));
+        await manager.rollback(type, 'x', 1, { packageId: A });
+        expect(await slotsOf()).toEqual([[A, 'env1']]);
+        await loader.save(type, 'x', body('A4', A));
+        await loader.registerRollback(type, 'x', body('env1'), 1, undefined, undefined, { packageId: A });
+        expect(await slotsOf()).toEqual([[A, 'env1']]);
+        // The environment holds no row of the name: addressing it is refused, as before.
+        expect((await refusal(manager.rollback(type, 'x', 1, { packageId: null })))?.reason).toBe('not-held-by-qualifier');
       });
 
-      it('two row slots: a version attributed to none is refused naming both holders at both doors, whatever package the restored body is stamped with — never landed in that package\'s row', async () => {
+      it('two row slots: a version attributed to none is in no addressed history and is refused naming both holders at both doors, whatever package the restored body is stamped with — never landed in that package\'s row', async () => {
         const legacy = await legacyHistory();
         await legacy(1, body('custom'));
         await loader.save(type, 'x', body('A2', A));
@@ -508,19 +522,79 @@ describe('history and rollback of a type stored per package (#32351)', () => {
           candidates: [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }],
         };
         for (const packageId of [A, B]) {
+          expect(await loader.getHistoryRecord(type, 'x', 1, { packageId })).toBeNull();
           expect(await refusal(manager.rollback(type, 'x', 1, { packageId }))).toEqual(both);
           expect(await refusal(loader.registerRollback(type, 'x', body('custom', B), 1, undefined, undefined, { packageId }))).toEqual(both);
         }
         expect(await rowsOf(type)).toEqual(rows);
       });
 
-      it('one row slot: a version attributed to none, restored naming no package with a body stamped for another package, lands in the one row as the unstamped body does', async () => {
+      it('one row slot, the environment\'s: a version restored with a body stamped for a package that holds no row is written unstamped, and the row stays the environment\'s', async () => {
+        const legacy = await legacyHistory();
+        await legacy(1, body('custom'));
+        await loader.save(type, 'x', body('env2'));
+        await loader.save(type, 'x', body('env3'));
+        // An unattributed version (1) and the environment's own (2), restored naming no package or addressing the environment.
+        for (const version of [1, 2]) {
+          for (const options of [undefined, { packageId: null }]) {
+            await loader.registerRollback(type, 'x', body(`v${version}`, B), version, undefined, undefined, options);
+            const rows = await rowsOf(type);
+            expect(rows.map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[null, `v${version}`]]);
+            expect(storedStampOf(rows[0])).toBeUndefined();
+            expect(((await loader.load(type, 'x')).data as Record<string, unknown> | undefined)?._packageId).toBeUndefined();
+            // Still the environment's slot: B holds no row of the name, and the environment's address reads its newest version.
+            expect(await refusal(loader.registerRollback(type, 'x', body('env3'), 3, undefined, undefined, { packageId: B }))).toMatchObject({
+              status: 409, reason: 'not-held-by-qualifier', callerPackageId: B, candidates: [{ kind: 'environment' }],
+            });
+            expect((await versions(type, { packageId: null }))[0]).toBe(Number(rows[0]!.version));
+          }
+        }
+      });
+
+      it('one row slot, A\'s: a version restored with a body stamped for B is written stamped A, and served as A\'s', async () => {
         const legacy = await legacyHistory();
         await legacy(1, body('custom'));
         await loader.save(type, 'x', body('A2', A));
-        // The history row exists and names nobody; the stamp is the caller's, not the version's owner.
-        await loader.registerRollback(type, 'x', body('custom', B), 1);
-        expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'custom']]);
+        // An unattributed version (1) and A's own (2), restored naming no package or addressing A.
+        for (const version of [1, 2]) {
+          for (const options of [undefined, { packageId: A }]) {
+            await loader.registerRollback(type, 'x', body(`v${version}`, B), version, undefined, undefined, options);
+            const rows = await rowsOf(type);
+            expect(rows.map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, `v${version}`]]);
+            expect(storedStampOf(rows[0])).toBe(A);
+            expect(((await loader.load(type, 'x')).data as Record<string, unknown> | undefined)?._packageId).toBe(A);
+            // Its history snapshot is the body written.
+            const snapshot = await loader.getHistoryRecord(type, 'x', Number(rows[0]!.version), { packageId: A });
+            expect((snapshot?.metadata as Record<string, unknown> | undefined)?._packageId).toBe(A);
+          }
+        }
+      });
+
+      it('N1: two row slots: A\'s version restored into A\'s row with a body stamped for B is written stamped A, and B\'s row is byte-identical', async () => {
+        await twoHolders();
+        const before = await rowOf(type, B);
+        await loader.registerRollback(type, 'x', body('A1', B), 1, undefined, undefined, { packageId: A });
+        expect(labelOf(await rowOf(type, A))).toBe('A1');
+        expect(storedStampOf(await rowOf(type, A))).toBe(A);
+        expect(await rowOf(type, B)).toEqual(before);
+      });
+
+      it('N1 at the manager\'s door: a recorded A version whose snapshot is stamped for B lands in A\'s row stamped A, and the registry files it as A\'s', async () => {
+        await driver.syncSchema('sys_metadata_history', SysMetadataHistoryObject as never);
+        // A snapshot recorded of A's row with B's stamp (a direct rollback before #32717 wrote one).
+        await driver.create('sys_metadata_history', {
+          id: 'residue_1', event_seq: 1, type, name: 'x', version: 1, operation_type: 'revert', package_id: A,
+          metadata: JSON.stringify(body('A1', B)), checksum: 'c1', recorded_at: '2026-01-01T00:00:00.000Z', source: 'database-loader',
+        });
+        await loader.save(type, 'x', body('A2', A));
+        for (const options of [undefined, { packageId: A }]) {
+          await loader.save(type, 'x', body('A9', A));
+          expect(await manager.rollback(type, 'x', 1, options)).toEqual(body('A1', A));
+          expect(await slotsOf()).toEqual([[A, 'A1']]);
+          expect(storedStampOf(await rowOf(type, A))).toBe(A);
+          expect(await manager.get(type, 'x', A)).toEqual(body('A1', A));
+          expect(await manager.get(type, 'x', B)).toBeUndefined();
+        }
       });
 
       it('an environment version is not written into a package\'s row', async () => {
