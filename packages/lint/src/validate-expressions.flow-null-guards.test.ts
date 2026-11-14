@@ -348,16 +348,44 @@ describe('the publish door judges a flow or hook condition over an injected syst
     }
   });
 
-  it('⭐ CONTROL — `created_at` stays judged where no stamp is behind it: an author\'s own declaration, an `external` object', () => {
+  it('⭐ LIT — arithmetic over `created_at` / `updated_at` in a flow\'s `record.` spelling is still refused: the skip covers an ordering comparison only', () => {
+    // A record-triggered flow type-checks the bare spelling, not `record.`;
+    // for these two shapes the null-guard verdict is the door's only refusal.
+    for (const [condition, column] of [
+      ['record.created_at + 1 > 0', 'created_at'],
+      ["record.updated_at - record.created_at > duration('1h')", 'updated_at'],
+    ] as const) {
+      const write: Write = { type: 'flow', item: flowAt('start', condition), collection: 'flows' };
+      const door = atDoor(write);
+      expect(door.filter(nullGuardOn(column)), label(write, condition)).toHaveLength(1);
+    }
+  });
+
+  it('⭐ LIT — a hook whose events include `beforeInsert` is still judged on `created_at` / `updated_at`: it can run before the stamp', () => {
     const condition = "record.created_at > timestamp('2025-01-01T00:00:00Z')";
-    // The author's own column (its own label): judged as any declared field, at both doors.
+    for (const events of [['beforeInsert'], ['beforeInsert', 'beforeUpdate']]) {
+      for (const object of ['crm_account', ['crm_account']]) {
+        const write: Write = { type: 'hook', item: { ...hookOn(object, condition), events }, collection: 'hooks' };
+        expect(atDoor(write).filter(nullGuardOn('created_at')), `${events.join(',')}: ${condition}`).toHaveLength(1);
+      }
+    }
+    // The same condition on an `afterInsert` hook: the row is stamped by then.
+    const after: Write = { type: 'hook', item: { ...hookOn('crm_account', condition), events: ['afterInsert'] }, collection: 'hooks' };
+    expect(atDoor(after)).toEqual([]);
+  });
+
+  it('⭐ CONTROL — `created_at` stays judged where it is not the platform\'s own definition on platform-provisioned storage: an author\'s own declaration, an `external` object', () => {
+    const condition = "record.created_at > timestamp('2025-01-01T00:00:00Z')";
+    // The author's own column (its own label): the stamp still writes it by
+    // name, but the build judges a declared field, and the door gives the
+    // build's verdict on it.
     const declared = { ...account, fields: { ...account.fields, created_at: { type: 'datetime', label: 'Opened' } } };
     for (const write of writes(condition)) {
       const door = atDoor(write, [applyInjectedSystemColumns(declared)]);
       expect(door.filter(nullGuardOn('created_at')), label(write, condition)).toHaveLength(1);
       expect(door, label(write, condition)).toEqual(atBuild(write, [declared]));
     }
-    // An `external` object: the remote owns the schema and nothing stamps the column.
+    // An `external` object: the remote system owns the stored row, so the platform's stamp is no warrant.
     const remote = { ...account, name: 'crm_remote', external: { connector: 'erp', remoteName: 'accounts' } };
     for (const write of writes(condition, 'crm_remote')) {
       expect(atDoor(write, [applyInjectedSystemColumns(remote)]).filter(nullGuardOn('created_at')), label(write, condition)).toHaveLength(1);

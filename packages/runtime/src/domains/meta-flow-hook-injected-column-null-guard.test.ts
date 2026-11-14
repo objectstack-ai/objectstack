@@ -11,8 +11,10 @@
  * with the system columns it injects declared as `required: false` fields, so
  * the door's null-guard gate refused both, while `os build` of the same items
  * accepts them. The platform stamps `created_at` and `updated_at` on every
- * stored row; the door now leaves those two unjudged. The injected columns a
- * stored row can hold `null` in (`owner_id`, `created_by`, …) stay judged.
+ * stored row; the door now leaves those two unjudged under an ordering
+ * comparison, except on a `beforeInsert` hook, which can run before the stamp.
+ * The injected columns a stored row can hold `null` in (`owner_id`,
+ * `created_by`, …) stay judged.
  *
  * ## The rig
  *
@@ -171,4 +173,16 @@ describe('[#33246] the flow and hook publish doors judge an injected column by w
             expect(await rig.state(type, item.name)).toEqual(['draft']);
         }, 60_000);
     }
+
+    it('⭐ LIT — a `beforeInsert` hook whose condition orders `created_at` with no guard is still refused: it can run before the stamp', async () => {
+        const rig = await boot();
+        const item = { ...hookOn('hook_before_insert', SINCE), events: ['beforeInsert'] };
+        const err: any = await rig.publish('hook', item);
+        expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = (err.issues ?? []).filter((i: any) => i.rule === 'expression-invalid');
+        expect(issues, JSON.stringify(err.issues)).toHaveLength(1);
+        expect(issues[0].message).toContain('`record.created_at`');
+        expect(await rig.state('hook', item.name)).toEqual(['draft']);
+    }, 60_000);
 });

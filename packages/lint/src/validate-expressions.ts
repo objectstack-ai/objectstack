@@ -164,7 +164,7 @@ import {
 import type { FlowCelEntrance } from './flow-cel-root-scope.js';
 import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } from './validate-null-guards.js';
-import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
+import type { NullGuardFinding, NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
 import { stripInjectedSystemColumns } from '@objectstack/metadata-core';
 import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
@@ -604,24 +604,50 @@ function isPlatformStampedColumn(obj: AnyRec, fname: string, def: AnyRec): boole
   return injected !== undefined && isInjectedColumnDefinition(def, injected);
 }
 
-function buildNullableFieldIndex(
-  objects: AnyRec[],
-  // [#33246] Set at a runtime publish door, whose objects are SERVED: the
-  // registry injects its system columns as declared `required: false` fields
-  // with no default, so the two it stamps on every row would read as nullable
-  // and a flow or hook condition ordering `record.created_at` with no guard
-  // was refused where `os build` (declared fields only) accepts it. The other
-  // injected columns stay nullable here: they can hold `null`. The build reads
-  // authored objects and passes nothing, so its index is unchanged.
-  { platformStamped = false }: { platformStamped?: boolean } = {},
-): Map<string, Set<string>> {
+/**
+ * [#33246] object name → the platform-stamped columns
+ * ({@link isPlatformStampedColumn}) it serves. Read only at a runtime publish
+ * door, whose objects are SERVED: the registry injects its system columns as
+ * declared `required: false` fields with no default, so the null-guard gate
+ * reads `created_at` / `updated_at` as nullable there, while `os build`
+ * (declared fields only) never judges them. The nullable index keeps them;
+ * {@link isStampedComparisonFinding} says which of its findings the door
+ * leaves out.
+ */
+function buildPlatformStampedIndex(objects: AnyRec[]): Map<string, Set<string>> {
+  const idx = new Map<string, Set<string>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const stamped = new Set<string>();
+    for (const [fname, def] of fieldEntries(obj)) {
+      if (isPlatformStampedColumn(obj, fname, def)) stamped.add(fname);
+    }
+    if (stamped.size > 0) idx.set(name, stamped);
+  }
+  return idx;
+}
+
+/**
+ * [#33246] The null-guard verdicts the door leaves out: an ORDERING comparison
+ * (`<`, `<=`, `>`, `>=`) whose operand is a platform-stamped column, which a
+ * stored row never holds `null` in. An arithmetic operand (`+`, `-`, `*`,
+ * `/`, `%`) keeps its verdict: at a record-triggered flow's `record.` read the
+ * null guard is the only refusal date arithmetic on the column meets (the
+ * flattened site type-checks only the bare spelling).
+ */
+const STAMPED_COMPARISON_OPERATORS: ReadonlySet<string> = new Set(['<', '<=', '>', '>=']);
+function isStampedComparisonFinding(stamped: ReadonlySet<string> | undefined, finding: NullGuardFinding): boolean {
+  return !!stamped && stamped.has(finding.field) && STAMPED_COMPARISON_OPERATORS.has(finding.operator);
+}
+
+function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
   const idx = new Map<string, Set<string>>();
   for (const obj of objects) {
     const name = typeof obj.name === 'string' ? obj.name : undefined;
     if (!name) continue;
     const nullable = new Set<string>();
     for (const [fname, def] of fieldEntries(obj)) {
-      if (platformStamped && isPlatformStampedColumn(obj, fname, def)) continue;
       if (isNullableField(def)) nullable.add(fname);
     }
     idx.set(name, nullable);
@@ -2423,9 +2449,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // write path's own strip of exactly those, as `authored-site-expression.ts`
   // reads the served objects), and the indexes re-derive the injected columns
   // themselves, as they do at the build. Every other runtime door keeps the
-  // served objects, so its type verdicts on an injected column stand; only its
-  // null-guard reading of the two platform-stamped timestamps changes
-  // (#33246, {@link buildNullableFieldIndex}).
+  // served objects, so its type verdicts on an injected column stand; only an
+  // ordering comparison over the two platform-stamped timestamps leaves the
+  // null-guard verdicts (#33246, {@link buildPlatformStampedIndex}).
   if (extensionWrite) stack = { ...stack, objects: recordsOf(stack.objects).map((o) => stripInjectedSystemColumns(o)) };
   const objects = recordsOf(stack.objects);
   // [#30471] The field indexes read the objects as the registry SERVES them,
@@ -2444,7 +2470,12 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const fieldIndex = buildFieldIndex(servedObjects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
-  const nullableIndex = buildNullableFieldIndex(typedObjects, { platformStamped: options.runtimeWriteType !== undefined });
+  const nullableIndex = buildNullableFieldIndex(typedObjects);
+  // [#33246] Read at a runtime publish door only: the build passes no write
+  // type, so its null-guard verdicts are what they were.
+  const platformStampedIndex = options.runtimeWriteType !== undefined
+    ? buildPlatformStampedIndex(typedObjects)
+    : new Map<string, Set<string>>();
   // [#24316] object name → its references into a stored-metadata-body table,
   // read the first time a site of that object serves a hop, or (#24677) when
   // the walk reaches the object's fields, whichever comes first — never before
@@ -2655,13 +2686,19 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     outcome: NullGuardOutcome = 'fail-closed',
     // [#29026] A flow's flattened bare names and its start condition's proofs.
     scope: Pick<NullGuardOptions, 'bareFields' | 'presumed'> = {},
+    // [#33246] At a runtime door, leave out an ordering comparison over a
+    // platform-stamped column ({@link isStampedComparisonFinding}). A caller
+    // whose predicate can run before the stamp passes `false`.
+    { stampedComparisons = true }: { stampedComparisons?: boolean } = {},
   ): void => {
     if (!objectName) return;
     const nullableFields = nullableIndex.get(objectName);
     if (!nullableFields || nullableFields.size === 0) return;
     const source = celSourceOf(raw);
     if (!source) return;
+    const stamped = stampedComparisons ? platformStampedIndex.get(objectName) : undefined;
     for (const finding of findUnguardedNullableOperands(source, { nullableFields, ...scope })) {
+      if (isStampedComparisonFinding(stamped, finding)) continue;
       issues.push({
         where,
         message: nullGuardMessage(subject, objectName, finding, outcome),
@@ -4344,6 +4381,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // run on every record (or never) instead of the intended subset.
   for (const hook of objectWrite ? [] : recordsOf(stack.hooks)) {
     const hookName = (hook.name as string) ?? '?';
+    // [#33246] The platform stamps `created_at` / `updated_at` in its own
+    // `beforeInsert` hook (`sys_stamp_audit_insert`, priority 10), so a
+    // `beforeInsert` hook ordered ahead of it reads both as `null`. On such a
+    // hook (any priority) the stamped columns keep their null-guard verdict.
+    const stampedComparisons = !(Array.isArray(hook.events) && hook.events.includes('beforeInsert'));
     if (typeof hook.object === 'string') {
       check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'hook condition' }));
       // #4763 — the third instance the issue found lived on exactly this path.
@@ -4352,6 +4394,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         `hook '${hookName}' condition`,
         hook.condition,
         hook.object,
+        undefined,
+        undefined,
+        { stampedComparisons },
       );
       continue;
     }
@@ -4384,6 +4429,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         `hook '${hookName}' condition`,
         hook.condition,
         target,
+        undefined,
+        undefined,
+        { stampedComparisons },
       );
       for (let i = mark; i < issues.length; i++) {
         const issue = issues[i];
