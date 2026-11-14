@@ -134,7 +134,7 @@ describe('resolveInvitationLimitOption — what the organization plugin is hande
   });
 
   it('passes nothing for 0 or a typo, never a limit that refuses every invitation', () => {
-    for (const bad of ['0', 'abc', '-1']) {
+    for (const bad of ['0', 'abc', '-1', '1e3', '2.5']) {
       process.env[KEY] = bad;
       expect(resolveInvitationLimitOption(), `value=${JSON.stringify(bad)}`).toBeUndefined();
     }

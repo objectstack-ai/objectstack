@@ -5,9 +5,10 @@ import { resolveOrgInvitationLimit } from '@objectstack/types';
 /**
  * "No limit" as a finite number, for the same reason as
  * `MEMBERSHIP_LIMIT_UNBOUNDED`: better-auth compares the option
- * (`pending >= invitationLimit`), and its type is a plain `number` with no
- * "off" spelling, so `false` or `null` would fall back to the vendor's 100 and
- * `0` would refuse every invitation. Nine quadrillion pending invitations is
+ * (`pending >= invitationLimit`) after `invitationLimit ?? 100`, and its type is
+ * a plain `number` with no "off" spelling: `null` would fall back to the
+ * vendor's 100, while `false` (kept by `??`, compared as 0) and `0` would refuse
+ * every invitation. Nine quadrillion pending invitations is
  * unlimited by any measure that reaches a real deployment.
  */
 export const INVITATION_LIMIT_UNBOUNDED = Number.MAX_SAFE_INTEGER;

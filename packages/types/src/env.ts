@@ -775,7 +775,8 @@ export const ORG_INVITATION_LIMIT_OFF_VALUES: readonly string[] = ['off', 'unlim
  * invites in bulk (the cloud control plane's CSV import) turns it off.
  *
  * Answers:
- *  - `undefined` — unset, blank, unparsable, `0` or negative. The auth plugin
+ *  - `undefined` — unset, blank, `0`, or anything but digits (`-5`, `2.5`,
+ *    `1e3`, `1_000`, `10abc`). The auth plugin
  *    passes nothing and the vendor's 100 applies. Unusable values read as unset
  *    rather than as a cap: a typo must not refuse every invitation.
  *  - `'off'` — one of {@link ORG_INVITATION_LIMIT_OFF_VALUES}, any case: no
@@ -788,6 +789,9 @@ export function resolveOrgInvitationLimit(): number | 'off' | undefined {
   const value = String(raw).trim();
   if (value === '') return undefined;
   if (ORG_INVITATION_LIMIT_OFF_VALUES.includes(value.toLowerCase())) return 'off';
+  // Digits only. `parseInt` alone would read `1e3` and `1_000` as 1 and `2.5`
+  // as 2: a typo that caps invitations at 1 instead of reading as unset.
+  if (!/^\d+$/.test(value)) return undefined;
   const n = Number.parseInt(value, 10);
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }

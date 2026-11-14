@@ -467,17 +467,22 @@ describe('resolveOrgInvitationLimit (OS_ORG_INVITATION_LIMIT)', () => {
   });
 
   it('reads unusable values, 0 included, as UNSET — never as a limit that refuses every invitation', () => {
-    for (const bad of ['', '   ', 'abc', '0', '-5', 'NaN', 'false', 'infinity']) {
+    for (const bad of ['', '   ', 'abc', '0', '-5', 'NaN', 'false', 'infinity', '1e3', '2.5', '1_000', '10abc']) {
       process.env[KEY] = bad;
       expect(resolveOrgInvitationLimit(), `value=${JSON.stringify(bad)}`).toBeUndefined();
     }
   });
 
   it('is independent of OS_ORG_MEMBERSHIP_LIMIT, which limits a different thing', () => {
-    process.env.OS_ORG_MEMBERSHIP_LIMIT = '7';
-    delete process.env[KEY];
-    expect(resolveOrgInvitationLimit()).toBeUndefined();
-    delete process.env.OS_ORG_MEMBERSHIP_LIMIT;
+    const savedMembership = process.env.OS_ORG_MEMBERSHIP_LIMIT;
+    try {
+      process.env.OS_ORG_MEMBERSHIP_LIMIT = '7';
+      delete process.env[KEY];
+      expect(resolveOrgInvitationLimit()).toBeUndefined();
+    } finally {
+      if (savedMembership === undefined) delete process.env.OS_ORG_MEMBERSHIP_LIMIT;
+      else process.env.OS_ORG_MEMBERSHIP_LIMIT = savedMembership;
+    }
   });
 });
 
