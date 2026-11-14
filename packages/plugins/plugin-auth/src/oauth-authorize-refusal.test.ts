@@ -155,6 +155,7 @@ beforeEach(() => {
   }
   process.env.OS_MCP_SERVER_ENABLED = 'true';
   vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -247,7 +248,6 @@ describe('a refused /oauth2/authorize — a browser navigation with no registere
   ];
 
   for (const c of cases) {
-    // eslint-disable-next-line vitest/valid-title
     it(c.name, async () => {
       const rig = await arrange();
       const { clientId, params } = await c.redirect(rig);
@@ -292,7 +292,6 @@ describe('a refused /oauth2/authorize — every other caller keeps the 403 envel
   ];
 
   for (const [name, headers] of callers) {
-    // eslint-disable-next-line vitest/valid-title
     it(name, async () => {
       const rig = await arrange();
       const clientId = await rig.register(ENV_CALLBACK, 'web');
