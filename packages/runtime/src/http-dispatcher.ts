@@ -411,6 +411,34 @@ type ClassifiedServiceLookup =
     | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
 
 /**
+ * [#32887] The environment a host's {@link KernelResolver} placed each request
+ * in, kept beside the request and readable only through
+ * {@link resolverPlacedEnvironmentOf}.
+ *
+ * A same-origin `type: 'api'` action forwards into the host's raw app, which
+ * places the forwarded request as it places any request it receives. The
+ * forward needs the placement's answer, not the signal that produced it: a
+ * request placed by its bound hostname or its `X-Environment-Id` carries that
+ * signal across, but one placed only by its scoped URL
+ * (`/environments/:id/…`) does not — the forward targets the action's own
+ * path — so on a shared origin it was placed in no environment. Kept off
+ * {@link HttpProtocolContext} on purpose: a caller builds that object, and the
+ * forward's routing identity must be the resolver's answer, never a field a
+ * caller could pre-write.
+ */
+const resolverPlacements = new WeakMap<HttpProtocolContext, string>();
+
+/**
+ * The environment the host's {@link KernelResolver} placed this request in, as
+ * the placement step left it: `undefined` when no resolver is wired (a single
+ * kernel), when it placed the request in no environment, or in `platform` (the
+ * control plane, not an environment).
+ */
+export function resolverPlacedEnvironmentOf(context: HttpProtocolContext | undefined): string | undefined {
+    return context ? resolverPlacements.get(context) : undefined;
+}
+
+/**
  * The HTTP dispatch engine — translates an inbound (method, path, body, ctx)
  * request into a kernel response. Used directly by the framework's HTTP adapters
  * (express / fastify / nextjs / nestjs / nuxt / sveltekit / hono) and plugin-msw,
@@ -784,6 +812,13 @@ export class HttpDispatcher {
         // request onto the second one's environment.
         if (this.kernelResolver) {
             context.kernel = (await this.kernelResolver.resolveKernel(context, this.defaultKernel)) ?? this.defaultKernel;
+            // [#32887] What the resolver answered, kept for the api forward
+            // ({@link resolverPlacedEnvironmentOf}). Read here, before any door
+            // writes a fallback environment, so a request nothing placed
+            // routes nothing.
+            const placed = context.environmentId;
+            if (typeof placed === 'string' && placed !== '' && placed !== 'platform') resolverPlacements.set(context, placed);
+            else resolverPlacements.delete(context);
         } else {
             context.kernel = this.defaultKernel;
         }
