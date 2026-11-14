@@ -39,6 +39,13 @@
  * real ones. That is what lets a request that falls through reach
  * better-auth's writes, which the engine hooks below record whether or not the
  * request's transaction later rolls them back.
+ *
+ * [#32925] The same harness pins the host's own check
+ * (`AuthManagerOptions.organizationDeleteGate`) in its own `describe` at the
+ * end: called once with the id better-auth parsed, its refusal answered
+ * unchanged, fail-closed on a throw or a malformed answer, and never reached by
+ * a request the IP allow-list refuses at the mount (`AuthPlugin`'s real mount
+ * chain on a Hono app) or by a delete the platform refuses itself.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';

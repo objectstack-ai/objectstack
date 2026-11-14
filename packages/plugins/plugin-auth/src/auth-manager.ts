@@ -964,9 +964,9 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * It is called once per delete, from the delete admission in better-auth's
    * `hooks.before` (`assertOrganizationDeletable`), so it runs:
    *
-   *  - only for a request the auth mount admitted: the IP allow-list, the
-   *    organization's IP list and the one-account refusal answer first, and
-   *    a request they refuse never reaches it;
+   *  - only for a request the auth mount admitted: the IP allow-list and the
+   *    one-account refusal answer first, and a request they refuse never
+   *    reaches it;
    *  - only for a delete the platform itself would let through: a caller who
    *    is signed in and a member whose role holds `organization: ['delete']`,
    *    an organization that exists, and none of the platform's own refusals
