@@ -4467,36 +4467,36 @@
     },
     {
       "id": "platform-core.bare-name-one-holder-refusal",
-      "title": "A covered bare name has one package holder: installing a second package that holds a webhook, connector or tool name is refused 422 naming both, the narrowed types (picklist, mapping, dataset, api, object-less action, function, flow, email template, agent and skill) are held per namespace, and a clash an earlier deployment already holds boots with a warning",
+      "title": "A covered bare name has one package holder: installing a second package that holds a connector name (the covered types NAMESPACE_SCOPED_BARE_NAME_TYPES does not list: connector alone at revision 4) is refused 422 naming both, the narrowed types (picklist, mapping, dataset, api, object-less action, function, flow, webhook, email template, agent, skill and tool) are held per namespace, and a clash an earlier deployment already holds boots with a warning",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (the seeded admin): every install"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Both hold a webhook qa_hook (declared inactive, isActive: false, so nothing is ever posted), a flow qa_sync and an agent qa_helper; qa_a also holds an email template auth.password_reset (a name the platform's email service ships as an overridable baseline)",
-          "for the cold-boot leg: a scratch app that registers two code packages which both hold the webhook qa_hook (the doors judge nothing during a boot, so both register), booted on its own port and file DB"
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Both hold a connector qa_conn (a catalog descriptor: name, label and type 'api', no provider and enabled: false, so nothing is materialized or dispatched), a webhook qa_hook (declared inactive, isActive: false, so nothing is ever posted; a package that declares a webhook also declares requires: ['webhooks', 'realtime'], which the stack schema refuses it without), a flow qa_sync and an agent qa_helper; qa_a also holds an email template auth.password_reset (a name the platform's email service ships as an overridable baseline)",
+          "for the cold-boot leg: a scratch app that registers two code packages which both hold the connector qa_conn (the doors judge nothing during a boot, so both register), booted on its own port and file DB"
         ]
       },
       "steps": [
         "install qa_a, then qa_b; record each answer and GET /api/v1/packages",
-        "rebuild qa_b without the webhook qa_hook (keep the flow qa_sync and the agent qa_helper) and install it again; record the answer",
+        "rebuild qa_b without the connector qa_conn (keep the webhook qa_hook, the flow qa_sync and the agent qa_helper) and install it again; record the answer",
         "boot the cold-boot app and read the boot log"
       ],
       "acceptance": [
         {
           "clause": "the second package holding a covered name is refused 422 naming both packages and a rename, and leaves nothing installed",
           "oracle": "api",
-          "verify": "installing qa_b answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming webhook qa_hook, com.qa.addr-a, com.qa.addr-b and a rename (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is packages/objectql/src/registry.ts#BareNameConflictError, 422 NAMESPACE_CONFLICT; packages/objectql/src/bare-name-one-holder.ts#suggestedBareNameRename). webhook is not in packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, so two namespaces do not lift it; qa_b is absent from the package list",
+          "verify": "installing qa_b answers 422 PLUGIN_REGISTER_FAILED whose message carries the registry's refusal naming connector qa_conn, com.qa.addr-a, com.qa.addr-b and a rename (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry's own error is packages/objectql/src/registry.ts#BareNameConflictError, 422 NAMESPACE_CONFLICT; packages/objectql/src/bare-name-one-holder.ts#suggestedBareNameRename). connector is the one covered type (packages/core/src/package-scoped-resolution.ts#BARE_NAME_ONE_HOLDER_TYPES) that packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES does not list at this revision, so two namespaces do not lift it. Re-read that complement before the run: a covered type still outside the list is the type this clause and acceptance[3] drive, and a type the list has gained is now acceptance[1]'s; qa_b is absent from the package list",
           "evidence": "the 422 body and the package list"
         },
         {
-          "clause": "the narrowed types are held per namespace: two packages in two namespaces may each hold the flow qa_sync and the agent qa_helper",
+          "clause": "the narrowed types are held per namespace: two packages in two namespaces may each hold the webhook qa_hook, the flow qa_sync and the agent qa_helper",
           "oracle": "api",
-          "verify": "the rebuilt qa_b installs 200 while both hold qa_sync and qa_helper (packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, re-exported by packages/objectql/src/bare-name-one-holder.ts: agent and skill #31973, flow #31696); webhook, connector and tool are still one holder per deployment",
+          "verify": "the rebuilt qa_b installs 200 while both hold qa_hook, qa_sync and qa_helper (packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, re-exported by packages/objectql/src/bare-name-one-holder.ts: agent and skill #31973, flow #31696, webhook #32577, tool #33124); the covered types that list lacks, connector alone at this revision, are still one holder per deployment",
           "evidence": "the 200 answer"
         },
         {
@@ -4508,17 +4508,17 @@
         {
           "clause": "a clash the deployment already holds does not stop the boot: it boots and warns once naming both holders and the rename, changing nothing about which holder each caller is served",
           "oracle": "log",
-          "verify": "the boot log carries one 'Bare-name conflict at boot' warning naming the webhook qa_hook, both packages and the rename (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE is 'warn'; packages/objectql/src/registry.ts#sealBareNameHoldersAtColdBoot and #bareNameColdBootWarning)",
+          "verify": "the boot log carries one 'Bare-name conflict at boot' warning naming the connector qa_conn, both packages and the rename (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_COLD_BOOT_MODE is 'warn'; packages/objectql/src/registry.ts#sealBareNameHoldersAtColdBoot and #bareNameColdBootWarning)",
           "evidence": "the warning line"
         }
       ],
       "negative": [
-        "the second install answering 200 and the webhook name then serving one of the two is a FAIL",
+        "the second install answering 200 and the connector name then serving one of the two is a FAIL",
         "a cold boot refused because of a pre-existing clash is a FAIL while the mode is warn",
         "reading the rebuilt qa_b's 200 beside qa_a's flow qa_sync as a defect is wrong: flow is held per namespace since #31696, and the bare flow address answers 409 naming both"
       ],
       "variants": [
-        "the covered types (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_REGISTRY_TYPES); a run drives webhook (one holder per deployment) and flow and agent (per namespace), and names the types it did not drive"
+        "the covered types (packages/objectql/src/bare-name-one-holder.ts#BARE_NAME_REGISTRY_TYPES); a run drives connector (one holder per deployment: the covered types NAMESPACE_SCOPED_BARE_NAME_TYPES does not list) and webhook, flow and agent (per namespace), and names the types it did not drive"
       ],
       "automated": {
         "kind": "unit",
@@ -4529,7 +4529,7 @@
         "packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES (the types narrowed per namespace; objectql's bare-name-one-holder.ts re-exports it)",
         "packages/objectql/src/registry.ts#BareNameConflictError (422 NAMESPACE_CONFLICT)",
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D9 (phase 1 stands until each child B narrows it)",
-        "#30836, #31006, #31093, #31375, #31661 (phase 1, all after 18.3.0), #31973 (agent and skill per namespace), #31696 (flow per namespace)"
+        "#30836, #31006, #31093, #31375, #31661 (phase 1, all after 18.3.0), #31973 (agent and skill per namespace), #31696 (flow per namespace), #32577 (webhook per namespace), #33124 (tool per namespace)"
       ],
       "history": [
         {
@@ -4549,6 +4549,12 @@
           "date": "2026-11-13",
           "change": "stale-spec re-point of acceptance[0] and acceptance[3] (with the title, fixtures, steps, acceptance[1], negative[0], variants and source that carried the same type). flow joined the namespace-scoped bare-name types (#31696; packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES), so two namespaces may each hold flow qa_sync and the cold boot has no flow clash to warn about. Both clauses now drive the webhook qa_hook, a covered type still one holder per deployment (absent from that list; the flow-family pin's control cases in packages/objectql/src/registry-bare-name-one-holder-flow-family.test.ts hold it so); acceptance[1] gains flow beside agent; acceptance[3] drops the trigger leg, since the warn mode changes nothing about which holder a caller is served. Found by the 18.4.0 acceptance run #32940 (F-10, R5; wave anchor #32908): qa_b installed 200 holding flow qa_sync, 2 reproductions. Re-read at main 25ee5076. Card #32946",
           "ref": "#32946"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-14",
+          "change": "stale-spec re-point of acceptance[0] and acceptance[3] from `webhook` to `connector` (with the title, fixtures, steps[1], acceptance[1], negative[0], variants and source[4]), QA run #33089, card #33091. e55347d2 (#32577) put webhook in packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES about an hour after r3 re-pointed this item to it, so QA installed both qa_hook holders 200 and the cold boot warned about nothing. The card's proposed replacement, `tool`, is held per namespace too since c747cf05 (#33124), which landed after QA's control at 8e3d4a54; at base e540baf8 the one covered type (BARE_NAME_ONE_HOLDER_TYPES) outside that list is connector, whose one-holder refusal and cold-boot warning the flow-family pin's connector control cases hold (packages/objectql/src/registry-bare-name-one-holder-flow-family.test.ts). The fixtures now give each package a connector qa_conn as an inert catalog descriptor; webhook moves to the per-namespace leg beside flow and agent, with qa#3's note that a webhook-declaring package needs requires: ['webhooks', 'realtime']. Since the item has now gone stale three times as ADR-0150 child B narrows family by family, acceptance[0] names the driven type as that list's complement and tells the runner to re-read it before the run. The connector legs are read from source and pin, not driven live by this edit",
+          "ref": "#33091"
         }
       ]
     },
