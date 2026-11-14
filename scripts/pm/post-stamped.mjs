@@ -971,7 +971,8 @@ import { readClause2Line } from './clause2-line.mjs';
 import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT, TIER_FLOOR, ceilingTierSpellings, containerModelRefusal } from './dispatch-gates.mjs';
 // The record's `Local-runs:` line is read by the file that owns the record's
 // every other line — judged when present, an absent line not re-judged.
-import { localRunsStand, readLocalRuns } from './record-recognisers.mjs';
+// The mailbox doorbell is read by the same file: a knock's `To:` seat and its key come from `readMailboxLine`.
+import { localRunsStand, readLocalRuns, readMailboxLine } from './record-recognisers.mjs';
 // The fleet's repository roster — the one place a repository joins the fleet —
 // is what a read-back may collapse a reference expansion against (header).
 import { GOVERNED_REPOS } from './check-governed-merges.mjs';
@@ -2511,6 +2512,36 @@ export function decisionFacetRefusalText(rows) {
 }
 
 /**
+ * A contract-review knock addressed to triage — the route the rule text closes (`references/contract-review.md`
+ * 〈复核归属与资格〉): a lane that cannot take `CONTRACT_REVIEW_TIER` sends `Request: contract-review` to a seated
+ * review seat, then to a sibling seat that can take the tier, else leaves the PR on the owed-review list — ⛔ never
+ * to triage. This is the write tool's input check on its own act, the same class as the signature and the keyed
+ * lines above it: no landing, check, workflow or queue reads it, and a knock it refuses was never on the board.
+ * The doorbell is read by its owner (`readMailboxLine`), never restated here. A knock it reads AND one it finds
+ * unreadable (no reason, a bare PR number, a second line) are both judged: an unreadable reading still carries the
+ * `id` and `to` parsed before the template failed, and a malformed knock to triage is still a knock to triage. A
+ * comment the reader refuses outright (no `To:` seat, a key outside the table) names no contract-review knock at
+ * all and passes, as it does today. Comments only. Answers the reading, or null. Pure.
+ */
+export function triageContractReviewKnock(body) {
+  const knock = readMailboxLine(String(body ?? ''));
+  if ((knock.state !== 'read' && knock.state !== 'unreadable') || knock.id !== 'request:contract-review') return null;
+  return /^triage#/u.test(knock.to) ? knock : null;
+}
+
+/** The refusal a caller reads, from `triageContractReviewKnock`'s reading. */
+export function triageContractReviewKnockText(knock) {
+  return (
+    `post-stamped: REFUSED — a \`Request: contract-review\` knock addressed to triage (\`To: ${knock.to}\`). Nothing was written.\n` +
+    '  A lane that cannot take CONTRACT_REVIEW_TIER (the account cannot reach it, a 429 refusal, or the maintainer\n' +
+    '  rationed it) knocks a seated review seat\'s mailbox — `To: review#N`, the PR its seat post\'s `Mailbox:` line\n' +
+    '  names — and, while no review seat is seated, a sibling lane seat that can take the tier; with neither, the PR\n' +
+    '  waits on the owed-review list (`scripts/pm/check-owed-reviews.mjs`). ⛔ Never triage. The route is\n' +
+    '  `references/contract-review.md` 〈复核归属与资格〉. ⛔ No flag turns it off.'
+  );
+}
+
+/**
  * The block the platform appends to an artefact whose sent body does not
  * already carry one: a blank line, a rule, the bare attribution line — 58
  * bytes, measured on every comment this seat's tooling posted through the REST
@@ -3844,6 +3875,9 @@ export function judgeBody(input, options = {}, nowMs = Date.now(), tool = 'post-
   // ⛔ Comments only: a decision analysis is anchored on its card AS A COMMENT, and the handover check reads comments.
   const facets = options.mode === 'comment' ? decisionFacetRefusals(rendered.body) : [];
   if (facets.length > 0) return { ok: false, rendered, text: decisionFacetRefusalText(facets) };
+  // ⛔ Comments only: a mailbox knock IS a comment on the seat's mailbox PR.
+  const triageKnock = options.mode === 'comment' ? triageContractReviewKnock(rendered.body) : null;
+  if (triageKnock !== null) return { ok: false, rendered, text: triageContractReviewKnockText(triageKnock) };
   // ⛔ Bodies only: a VACANT seat post's ledger holds pointers, never obligations (#23396).
   const vacant = options.mode === 'body' ? vacantLedgerRefusals(rendered.body) : [];
   if (vacant.length > 0) return { ok: false, rendered, text: vacantLedgerRefusalText(vacant) };
@@ -3886,6 +3920,9 @@ const USAGE = [
   '  A comment that is a decision analysis — a decision frame, an options table or lettered options, and a',
   `  recommendation naming one — is REFUSED when it carries no \`${DECISION_FACET_MARKER}\` marker outside code; the`,
   '  refusal prints the four-facet block it owes. Card bodies and every other route are untouched.',
+  '  A mailbox comment whose `To:` is a triage seat and whose key is `Request: contract-review` is REFUSED, whether',
+  '  or not the key line spells its template: a lane without the review tier knocks a review seat, then a sibling',
+  '  seat with the tier — never triage.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
   '',
   `  Exit: 0 written and stored · ${EXIT_USAGE} usage · ${EXIT_REFUSED} refused, nothing written ·`,
@@ -4117,6 +4154,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
   'the signature: every body opens with LANE#N · ACCOUNT · SESSION or is refused, beside the stamp contract; one leading signature changes no reading': 11,
   'the one judge: every body refusal on ONE path — `main` and `label-write.mjs --comment-file` call `judgeBody`, never a copy': 8,
+  'the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes': 10,
 });
 const SELF_TEST_BATTERY_FLOOR = 18;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -5654,6 +5692,26 @@ export function selfTest() {
     let lw = '';
     try { lw = readFileSync(new URL('./label-write.mjs', import.meta.url), 'utf8'); } catch { lw = ''; }
     t('↔ structural: label-write imports judgeBody and judges its folded comment with it, ⛔ no reader of its own', /\bjudgeBody\b[^;]*from '\.\/post-stamped\.mjs'/u.test(lw) && /judgeBody\(text, \{ mode: 'comment' \}/u.test(lw) && !/function\s+(signatureRefusal|claimKeyedLineRefusals|decisionFacetRefusals)\b/u.test(lw));
+  }
+
+  battery('the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes');
+  {
+    const SIG = 'domain:server#3 · os-bill · session_01QSeKYmhU5KEj1nukYhp1Tg';
+    const HEAD = '1b03a9c3d4e5f60718293a4b5c6d7e8f90a1b2c3';
+    const KNOCK = (to, key = `Request: contract-review · PR #26766 · head ${HEAD} · CONTRACT_REVIEW_TIER rationed`) => `${SIG}\nTo: ${to}\n${key}`;
+    const judged = (to, key) => judgeBody(KNOCK(to, key), { mode: 'comment' }, NOW_MS);
+    const refused = judged('triage#1');
+    t('⭐ a contract-review knock addressed to `triage#1` is refused, and the refusal names the seat it was addressed to', !refused.ok && refused.text.startsWith('post-stamped: REFUSED') && refused.text.includes('`To: triage#1`'));
+    t('⭐ …and the refusal names the review seat\'s mailbox, the sibling fallback, the owed-review list and the rule\'s home', refused.text.includes('`To: review#N`') && refused.text.includes('`Mailbox:`') && refused.text.includes('sibling lane seat') && refused.text.includes('check-owed-reviews.mjs') && refused.text.includes('references/contract-review.md') && refused.text.includes('Nothing was written'));
+    t('⭐ a MALFORMED knock to triage is refused too — no reason, a bare PR number, a second line: the reader\'s unreadable reading still names the key and the seat', [`Request: contract-review · PR #26766 · head ${HEAD}`, 'Request: contract-review · 26766 · rationed', `Request: contract-review · PR #26766 · head ${HEAD} · rationed\nbecause fable is short today`].every((key) => { const r = judged('triage#1', key); return !r.ok && r.text.includes('`To: triage#1`'); }) && judged('review#1', `Request: contract-review · PR #26766 · head ${HEAD}`).ok);
+    t('a bare `To: triage` reads as `triage#1` (the doorbell reader\'s seat spelling) and is refused the same way', !judged('triage').ok && !judged('Triage#2').ok);
+    t('⭐ the same knock addressed to a review seat passes', judged('review#1').ok && judged('review#2').ok);
+    t('…and to a sibling lane seat, the fallback while no review seat is seated', judged('domain:server#2').ok);
+    t('⛔ every other key to triage is untouched: `Request: urgent-triage` and `Request: triage` pass', judged('triage#1', 'Request: urgent-triage · #26766 · main red on Test Core').ok && judged('triage#1', 'Request: triage · #26766 · which lane takes it').ok);
+    t('⛔ a card BODY is untouched — the check is a comment\'s, as a knock is a comment on a mailbox PR', judgeBody(KNOCK('triage#1'), { mode: 'body' }, NOW_MS).ok);
+    t('⛔ the refusal\'s own words (the seat it echoes aside) carry no tracker number and no HTML comment — a runtime string an author is shown', /#\d/u.test(triageContractReviewKnockText({ to: 'SEAT' })) === false && triageContractReviewKnockText({ to: 'SEAT' }).includes('<!--') === false);
+    const own = readFileSync(SELF_PATH, 'utf8');
+    t('structural: the doorbell reader is imported from the file that owns it, ⛔ never restated, and the check runs inside judgeBody on comments only', /import \{[^}]*\breadMailboxLine\b[^}]*\} from '\.\/record-recognisers\.mjs';/u.test(own) && !/function\s+readMailboxLine\b/u.test(own) && /const triageKnock = options\.mode === 'comment' \? triageContractReviewKnock\(rendered\.body\) : null;/u.test(own));
   }
 
   // The floor, evaluated last: a battery that stops running names itself here.

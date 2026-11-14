@@ -7,6 +7,7 @@
 import type { RelatedRecordActionsValue, RelatedRecordHandlers } from '@object-ui/react';
 import { appRecordPath, routableObjectNames } from './RelatedRecordActionsBridge.js';
 import { documentHref } from './documentHref.js';
+import { servesRecordRead, type RecordReadPrincipal } from '../utils/recordReadServed.js';
 
 /**
  * THE record-detail URL this list surface builds — one route shape, one place.
@@ -70,6 +71,11 @@ const NO_RELATED_HANDLERS: RelatedRecordHandlers = Object.freeze({});
  * navigation (which carries the list as the record's origin). Without
  * `routes`, only that object is addressable, as before.
  *
+ * **Only an object the server reads one record of.** With `routes.perms`, an
+ * object whose served operations leave `get` out (`servesRecordRead`) has no
+ * record page, the listed object included: its records answer `null` and
+ * open nothing, so its link column draws the plain value.
+ *
  * `pathname` is read at CALL time (not captured) so a view switch or a drill-in
  * cannot leave a stale base behind — the same freshness rule the bridge's
  * builder documents for its `?from=` trail.
@@ -83,7 +89,8 @@ export function listRecordActionsValue(
     routes?: ListRecordRoutes,
 ): RelatedRecordActionsValue {
     const hasId = (recordId: string | number) => recordId != null && recordId !== '';
-    const routable = routes ? routableObjectNames(routes.objects) : null;
+    const routable = routes ? routableObjectNames(routes.objects, routes.perms) : null;
+    const ownServed = servesRecordRead(objectName, routes?.perms);
     /** The router path of another object's record, or `null` when unroutable. */
     const otherRecordPath = (targetObjectName: string, recordId: string | number): string | null =>
         routes && routable && targetObjectName !== objectName && hasId(recordId)
@@ -93,14 +100,14 @@ export function listRecordActionsValue(
         resolve: () => NO_RELATED_HANDLERS,
         recordHref: (targetObjectName, recordId) => {
             if (targetObjectName === objectName) {
-                return hasId(recordId) ? listRecordDetailUrl(getPathname(), recordId) : null;
+                return ownServed && hasId(recordId) ? listRecordDetailUrl(getPathname(), recordId) : null;
             }
             const path = otherRecordPath(targetObjectName, recordId);
             return routes && path !== null ? documentHref(routes.routerRootHref, path) : null;
         },
         openRecord: (targetObjectName, recordId) => {
             if (targetObjectName === objectName) {
-                if (hasId(recordId)) openRecordPage(recordId);
+                if (ownServed && hasId(recordId)) openRecordPage(recordId);
                 return;
             }
             const path = otherRecordPath(targetObjectName, recordId);
@@ -122,4 +129,6 @@ export interface ListRecordRoutes {
     navigate: (to: string) => void;
     /** `useHref('/')`: the router's root href, basename included. */
     routerRootHref: string;
+    /** The caller's permissions: which objects the server reads one record of (`servesRecordRead`). */
+    perms?: RecordReadPrincipal | null;
 }
