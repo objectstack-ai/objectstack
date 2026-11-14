@@ -19,14 +19,19 @@ const STAMP = { _packageId: HOST, _provenance: 'package' };
 
 type Row = Record<string, unknown>;
 
-/** Two tables, `find` only: equality per field. */
+/** Equality per field; an operator or a combinator is refused, never matched loosely. */
+const matches = (row: Row, where: Record<string, unknown> = {}) =>
+  Object.entries(where).every(([key, value]) => {
+    if (key.startsWith('$') || (value !== null && typeof value === 'object')) throw new Error(`readStore: ${key} is not implemented`);
+    return row[key] === value;
+  });
+
+/** Two tables, `find` only. */
 function readStore(tables: { rows: Row[]; history?: Row[] | 'missing' }) {
   const find = vi.fn(async (table: string, query: { where?: Record<string, unknown> }) => {
     const source = table === 'sys_metadata' ? tables.rows : tables.history;
     if (source === 'missing') throw new Error(`SQLITE_ERROR: no such table: ${table}`);
-    return (source ?? [])
-      .filter((row) => Object.entries(query?.where ?? {}).every(([key, value]) => row[key] === value))
-      .map((row) => ({ ...row }));
+    return (source ?? []).filter((row) => matches(row, query?.where)).map((row) => ({ ...row }));
   });
   return { find };
 }
