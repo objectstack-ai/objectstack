@@ -43,6 +43,9 @@ import { ObjectQLPlugin } from '@objectstack/objectql';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { ORGANIZATION_OWNERSHIP_SHAPE_GENERATION } from '@objectstack/spec/system';
 import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
+// The real plugin chain loads `@objectstack/metadata` lazily (AppPlugin); paid
+// here, at collection, so no case's clocked window pays the first load.
+import '@objectstack/metadata';
 import { AppPlugin } from './app-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
 import {
