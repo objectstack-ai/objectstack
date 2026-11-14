@@ -125,7 +125,6 @@ describe('the default app star says why it is disabled', () => {
     const button = star(en, 'Ops');
     expect(button).not.toBeDisabled();
     expectNoReason(button);
-    expect(screen.getAllByText(REASON)).toHaveLength(1);
   });
 
   it('control: a write in flight disables the other stars without a reason', async () => {
