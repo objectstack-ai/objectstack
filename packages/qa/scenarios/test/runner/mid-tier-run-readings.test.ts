@@ -679,7 +679,7 @@ describe("R3 a write the reply withholds in the card's own verb is a decline", (
   };
 
   it("every card operation's prompt verb, withheld in the first person, reads as a decline", () => {
-    const operations = LIBRARY.cards.flatMap(({ card }) => card.run.operations.map((op) => ({ key: `${card.id}/${op.id}`, ask: op.ask.en })));
+    const operations = LIBRARY.cards.flatMap(({ card }) => card.run.operations.map((op) => ({ key: `${card.id}/${op.id}`, ask: op.ask.en ?? '' })));
     expect(LIBRARY.cards.length).toBeGreaterThanOrEqual(9);
     expect(operations.map((o) => o.key).sort()).toEqual(Object.keys(ACTING).sort());
     const missed: string[] = [];
