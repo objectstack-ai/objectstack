@@ -135,7 +135,7 @@ const FIELDS = {
 };
 const ROWS = [1, 2, 3].map((i) => ({
   id: 'p' + i, name: 'Allocation ' + i, plan_date: '2026-11-0' + i, quantity: 10 * i, amount: 1250.5 * i,
-  warehouse: 'Main warehouse', owner: 'Dana Smith', note: 'Ship with the next batch',
+  warehouse: 'Main warehouse east', owner: 'Dana Smith', note: 'Ship with the next batch',
   status: i === 1 ? 'confirmed' : 'draft',
 }));
 const dataSource = {
@@ -349,12 +349,12 @@ test.describe('enlarged related list in a record drawer — the pinned Actions c
       await mount(page, c, 'th[data-column-key="status"]');
       const r = await readAtRest(page);
       report(testInfo, c, r);
-      expect(r.folded, 'the inline button was not folded although the table overflows with it').toBe(true);
-      expect(r.inlineButtons).toBe(0);
-      expect(r.box.scrollWidth - r.box.clientWidth, 'the table still overflows the drawer').toBeLessThanOrEqual(1);
+      expect(r.statusRight, 'the pinned Actions column covers part of Status at rest').toBeLessThanOrEqual(r.actions.left);
       expect(r.statusCellHit, `the Status cell is covered at rest by ${r.statusHitBy}`).toBe(true);
       expect(r.statusHeaderHit, 'the Status header is covered at rest').toBe(true);
-      expect(r.statusRight).toBeLessThanOrEqual(r.actions.left);
+      expect(r.box.scrollWidth - r.box.clientWidth, 'the table still overflows the drawer').toBeLessThanOrEqual(1);
+      expect(r.folded, 'the inline button was not folded although the table overflows with it').toBe(true);
+      expect(r.inlineButtons).toBe(0);
       await allocateFromMenu(page);
     });
   }
