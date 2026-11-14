@@ -613,7 +613,7 @@ import { ProtocolWriteGatesFacet } from './protocol-write-gates.js';
 // [#29985 codemod] The static tables of the facet above: the class's fields read them (#30147).
 import { ProtocolWriteGatesTables } from './protocol-write-gates-tables.js';
 // [#29985 codemod] Registry hydration, view expansion, write-through, object storage: the members below delegate to its facet, `ProtocolRegistryHydrationFacet`.
-import { ProtocolRegistryHydrationFacet } from './protocol-registry-hydration.js';
+import { ProtocolRegistryHydrationFacet, type ObjectRegistryRefusal } from './protocol-registry-hydration.js';
 import type { HealPackageBinding } from './protocol-heal-binding.js';
 // [#29985 codemod] Save refusals, saveMetaItem, saveConflict, migrateStoredMetadata: the members below delegate to its facet, `ProtocolSaveFacet`.
 import { ProtocolSaveFacet } from './protocol-save.js';
@@ -8029,7 +8029,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /** Docblock and body: {@link ProtocolRegistryHydrationFacet.applyObjectRegistryMutation} in `protocol-registry-hydration.ts` [#29985 codemod]. */
-    private async applyObjectRegistryMutation(request: { type: string; name: string; item?: any; packageId?: string | null }): Promise<void> {
+    private async applyObjectRegistryMutation(request: { type: string; name: string; item?: any; packageId?: string | null }): Promise<ObjectRegistryRefusal | undefined> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolRegistryHydrationFacet.applyObjectRegistryMutation(protocolHost(this), request);
     }
@@ -8396,7 +8396,7 @@ export class ObjectStackProtocolImplementation implements
          * {@link HydrationOptions}.
          */
         reboundFrom?: { readonly packageId: string | null };
-    }): Promise<void> {
+    }): Promise<ObjectRegistryRefusal | undefined> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolRegistryHydrationFacet.applyRegistryWriteThrough(protocolHost(this), request);
     }
@@ -9757,6 +9757,7 @@ export class ObjectStackProtocolImplementation implements
         materializeApplied?: PublishMaterializeResult;
         projectionApplied?: MutationProjectionOutcome;
         storageRefused?: RuntimeAuthoringIssue;
+        registryRefused?: RuntimeAuthoringIssue;
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.runPublishSideEffects(protocolHost(this), args);
@@ -11028,6 +11029,14 @@ export class ObjectStackProtocolImplementation implements
      * next read falls through to the artifact-loaded default. Implements the
      * "Reset to factory default" semantic from ADR-0005. Whitelist is shared
      * with {@link saveMetaItem}.
+     *
+     * [#32958] A removal that hands an object back the definition beneath it
+     * (an `object_extension` that re-declared a stored computed field) fills
+     * every stored computed field it made compute something new over the
+     * object's existing rows, as
+     * the save door does (`protocol-stored-expression-fill.ts`), each reported
+     * on `advisories`, omitted when empty. An unfinished fill never fails the
+     * delete.
      */
     async deleteMetaItem(request: DeleteMetaItemRequest): Promise<{
         success: boolean;
@@ -11036,6 +11045,8 @@ export class ObjectStackProtocolImplementation implements
         seq?: number;
         /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
         projectionApplied?: MutationProjectionOutcome;
+        /** [#32958] The stored-expression fill of the object the removal changed; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-diff-delete-load.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolDiffDeleteLoadFacet.deleteMetaItem(protocolHost(this), request);
@@ -11049,6 +11060,8 @@ export class ObjectStackProtocolImplementation implements
         seq?: number;
         /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
         projectionApplied?: MutationProjectionOutcome;
+        /** [#32958] The stored-expression fill of the object the removal changed; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-diff-delete-load.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolDiffDeleteLoadFacet.deleteMetaItemUnaudited(protocolHost(this), request);

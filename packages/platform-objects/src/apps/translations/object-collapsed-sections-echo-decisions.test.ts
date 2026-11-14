@@ -948,10 +948,14 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // and a help text each, three rows and six leaves, all eighteen translated
     // leaves authored by the same card. `advanced` reads 96 → 102;
     // `capabilities` is untouched.
-    expect(PANEL_LEAVES.length).toBe(113);
+    // 115 since the `controlledByParent` sub-block offers the
+    // `writeRequiresMasterRead` toggle (ADR-0055 §3 as amended) — a label and
+    // a help text, two leaves, all six translated leaves authored by the same
+    // card. `advanced` reads 102 → 104; `capabilities` is untouched.
+    expect(PANEL_LEAVES.length).toBe(115);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(11);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(102);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(104);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {

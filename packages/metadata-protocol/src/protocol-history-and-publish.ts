@@ -63,6 +63,7 @@ import { isBatchObjectType, judgeBatchObjectRegistrations, registerAdmittedBatch
 import { engineCanRollBack } from '@objectstack/core';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
+import { reportObjectRegistryRefusal } from './protocol-registry-hydration.js';
 
 /**
  * [#32396] A promotion a package publish wrote: what {@link undoLandedPromotions}
@@ -581,6 +582,9 @@ export class ProtocolHistoryAndPublishFacet {
         if (effects.projectionApplied) response.projectionApplied = effects.projectionApplied;
         // [#30635] A refused storage sync rides the same omitted-when-empty
         // `advisories`, after the gate's findings; the publish is not failed.
+        // [#33005] …and so does a registry that refused the object, ahead of
+        // the storage notice: the object is published, not served.
+        if (effects.registryRefused) response.advisories = [...(response.advisories ?? []), effects.registryRefused];
         if (effects.storageRefused) response.advisories = [...(response.advisories ?? []), effects.storageRefused];
         // [#10219] LAST, and awaited: tell the host that ONE item went live, so
         // it can announce `metadata:reloaded` and boot-cached consumers re-sync
@@ -1335,19 +1339,21 @@ export class ProtocolHistoryAndPublishFacet {
             materializeApplied?: PublishMaterializeResult;
             projectionApplied?: MutationProjectionOutcome;
             storageRefused?: RuntimeAuthoringIssue;
+            registryRefused?: RuntimeAuthoringIssue;
         }> {
         const out: {
             seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
             materializeApplied?: PublishMaterializeResult;
             projectionApplied?: MutationProjectionOutcome;
             storageRefused?: RuntimeAuthoringIssue;
+            registryRefused?: RuntimeAuthoringIssue;
         } = {};
         // Drafts skipped the registry mutation; on publish we now refresh the
         // runtime registry so live behaviour catches up immediately (matches
         // saveMetaItem's post-persistence registry update path — #4521 makes
         // that path cover every overlay type, so promoting a drafted action
         // makes it dispatchable at once instead of at the next listing).
-        await host.applyRegistryWriteThrough({
+        const registryRefusal = await host.applyRegistryWriteThrough({
             type: args.singularType,
             name: args.name,
             item: args.body,
@@ -1355,6 +1361,12 @@ export class ProtocolHistoryAndPublishFacet {
             // [#6602] The promoted draft is environment-wide (ADR-0131 D6).
             organizationId: null,
         });
+        // [#33005] A registry that refused the promoted object is reported
+        // once, at `error`, and handed back as the advisory each door puts on
+        // the success it answers: the definition is live and the publish is
+        // not failed (ADR-0067 D2), but the object is not served until
+        // something registers it.
+        if (registryRefusal) out.registryRefused = reportObjectRegistryRefusal(args.name, registryRefusal);
         // Create the object's table now so it's CRUD-able without a restart.
         //
         // [#8820] Reads the FOLDED `singularType`, like every other consumer in
@@ -2493,6 +2505,12 @@ export class ProtocolHistoryAndPublishFacet {
                 // this, only the server log said the table was not created or
                 // altered. Appended after the gate's findings, still
                 // omitted-when-empty: a clean sync adds no key.
+                // [#33005] A registry that refused the object rides the same
+                // element, ahead of the storage notice, under the stable rule
+                // `object-registry-refused`: the batch still answers
+                // `published` (outcome and `success` unchanged), and this is
+                // the element a caller reads to learn the object is not served.
+                if (eff.registryRefused) element.advisories = [...(element.advisories ?? []), eff.registryRefused];
                 if (eff.storageRefused) {
                     element.advisories = [...(element.advisories ?? []), eff.storageRefused];
                     storageRefusedObjects.add(p.d.name);

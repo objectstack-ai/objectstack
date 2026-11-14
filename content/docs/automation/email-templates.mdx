@@ -101,6 +101,18 @@ exported from `@objectstack/formula`). A template stored before this rule fails 
 `TEMPLATE_INVALID` and sends nothing, rather than print the raw value (`1234.5`)
 where a formatted one was meant; republish it with the name corrected.
 
+**A default is literal text; to read another variable, compute it in the flow.**
+`{{ person_name | default:'Customer' }}` prints `Customer` when the send's
+`person_name` is empty. The argument is never read as a path:
+`{{ person_name | default:first_name }}` prints the word `first_name`, not the
+send's `first_name`. There is no syntax that falls back to another variable —
+decide the value in the flow that sends the template and pass it under the
+hole's own name. An unquoted `default` argument that reads like a variable path
+(a dotted or `@`-marked path, a snake_case name, or a name the template uses as
+a variable) draws the `email-template-default-reads-as-path` warning from
+`os validate`, `os build`, `os lint` and the metadata publish door; quote the
+argument (`default:'first_name'`) when the text itself is meant.
+
 **One formatter per hole.** `{{ amount | default:0 | number:2 }}` is refused by
 `os validate`, `os build`, `os lint` and the metadata publish door
 (`email-template-hole-grammar`): a hole takes one formatter, and there is no
@@ -200,7 +212,9 @@ time it is published.
 Three properties of the renderer to author around:
 
 - **A missing placeholder renders as an empty string.** Declare a variable
-  `required` (below) if absence should be an error instead.
+  `required` (below) if absence should be an error instead, or give the hole a
+  literal default (`{{ name | default:'there' }}`). A default is literal text;
+  to read another variable, compute it in the flow.
 - **A hole the authoring rules refuse is refused at render too.** A template
   stored before a rule existed is judged at its next publish; until then
   `sendTemplate` and `renderTemplate` fail with `TEMPLATE_INVALID`, naming the
@@ -250,6 +264,16 @@ authoring hint in Studio, and `required` (default `false`).
 from `data`, the send fails with `MISSING_VARIABLES` instead of mailing a
 sentence with a hole in it. The other fields are authoring metadata — the
 renderer does not coerce by `type`.
+
+`required` is also read at authoring time. A flow's `notify` node that names
+a template the app declares, and whose `templateData` provably does not supply
+one of the variables a locale member of it declares `required`, draws the
+`notify-template-variable-missing` warning from `os validate`, `os build` and
+`os lint`. A value computed per run (a CEL value envelope) counts as supplied,
+and so do `appName`, `baseUrl` and the keys of the stack's own
+`email.defaultTemplateContext`. A variable a host supplies through a default
+template context set in code is outside what the check can see, which is why
+it warns rather than refuses.
 
 ## Locale resolution
 
@@ -332,7 +356,7 @@ the localizable path:
   config: {
     recipients: { dialect: 'cel', source: 'record.owner_id' },
     template: 'crm.task_done',
-    templateData: { 'task.title': { dialect: 'cel', source: 'record.title' } },
+    templateData: { task: { dialect: 'cel', source: 'record' } },
   },
 }
 ```
@@ -354,6 +378,11 @@ the localizable path:
   to every recipient verbatim. The two paths cannot be combined on one node —
   the schema refuses the ambiguous shape rather than letting a runtime
   precedence rule silently drop one.
+- `templateData` **keys** are the root names the template's holes read, never
+  paths: `{{task.title}}` reads `title` under the key `task`, so the example
+  passes the triggering record as `task`. A key written `'task.title'` is one
+  name that no hole reads, and a template that requires `task.title` refuses
+  the send with `MISSING_VARIABLES`.
 - `templateData` **values** are value slots: a CEL value envelope —
   `{ dialect: 'cel', source: 'record.title' }` — is evaluated per run and its
   value handed to the template, and any other value is handed on as written. A

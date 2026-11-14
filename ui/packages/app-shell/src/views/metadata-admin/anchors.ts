@@ -249,10 +249,17 @@ export function registerBuiltinAnchors(): void {
         // seeded a bare `record:details`. Written in the persisted shape (field
         // NAMES); the heading is the English default, since a seed has no
         // translator and the section's `name` keeps the per-object i18n anchor.
-        const { deriveStudioDetailSections, toAuthoredDetailSections, MORE_DETAILS_DEFAULT_LABEL } =
-          await import('../recordDetailSections.js');
+        const {
+          deriveStudioDetailSections,
+          toAuthoredDetailSections,
+          MORE_DETAILS_DEFAULT_LABEL,
+          UNGROUPED_SECTION_DEFAULT_LABEL,
+        } = await import('../recordDetailSections.js');
         const sections = toAuthoredDetailSections(
-          deriveStudioDetailSections(objectDef as any, { moreDetails: MORE_DETAILS_DEFAULT_LABEL }),
+          deriveStudioDetailSections(objectDef as any, {
+            moreDetails: MORE_DETAILS_DEFAULT_LABEL,
+            ungrouped: UNGROUPED_SECTION_DEFAULT_LABEL,
+          }),
         );
         const synth = buildDefaultPageSchema(objectDef as any, sections ? { sections: sections as any } : undefined) as Record<string, any>;
         if (!fullRecordPagePlacesComponent(object, synth?.regions)) return slotted;

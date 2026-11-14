@@ -26,14 +26,25 @@
  * `engine.applyPublishedColumnChanges(name)`), and that the save still refuses
  * the change the table does not promise (`number` → `text`, the representative
  * `field_type_change`).
+ *
+ * The last describe owns the other half of the answer: a change the
+ * datasource cannot perform. On the Turso REMOTE face (`libsql://`) the relax
+ * needs the SQLite table rebuild that transport does not run, so the driver
+ * reports it `skipped`, and the publish must say so on its answer as the
+ * `object-column-changes-not-applied` advisory while the table keeps its
+ * NOT NULL. The remote transport talks to a SQLite file through
+ * `@libsql/client`, the double the driver's own remote-face pins use.
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { createClient, type Client } from '@libsql/client';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { TursoDriver } from '@objectstack/driver-turso';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
 
@@ -89,20 +100,26 @@ const v3 = () => ({
 });
 
 const liveEngines: ObjectQL[] = [];
+const liveClients: Client[] = [];
 afterEach(async () => {
     while (liveEngines.length) {
         try { await liveEngines.pop()?.destroy(); } catch { /* noop */ }
     }
+    while (liveClients.length) {
+        try { liveClients.pop()?.close(); } catch { /* noop */ }
+    }
 });
 
-async function boot() {
+const localDriver = () => new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+});
+
+async function boot(makeDriver: () => SqlDriver = localDriver) {
     const engine = new ObjectQL();
     liveEngines.push(engine);
-    const driver = new SqlDriver({
-        client: 'better-sqlite3',
-        connection: { filename: ':memory:' },
-        useNullAsDefault: true,
-    });
+    const driver = makeDriver();
     engine.registerDriver(driver, true);
     await engine.init();
     engine.registry.registerObject(SysMetadata as any, TEST_PACKAGE_ID);
@@ -180,5 +197,37 @@ describe('[#32590] publishing a field change on a live object — the table foll
         expect(err.issues[0].message).toContain("type changed from 'number' to 'text'");
         expect(await rig.column('days')).toEqual(columnBefore);
         expect((rig.engine.registry.getObject(OBJECT) as any)?.fields?.days?.type).toBe('number');
+    }, 60_000);
+});
+
+describe('[#32590] publishing a column change the datasource cannot perform — the answer says so', () => {
+    it('Turso REMOTE: the relax needs a table rebuild, so the publish succeeds with the not-applied advisory and the column keeps NOT NULL', async () => {
+        const file = join(home, `turso-remote-${Date.now()}.db`);
+        const client = createClient({ url: `file:${file}` });
+        liveClients.push(client);
+        const rig = await boot(() => new TursoDriver({ url: 'libsql://publish-column-changes.example.turso.io', client }));
+        /** `notnull` of the column as the remote database file reports it. */
+        const notNull = (name: string) => {
+            const db = new DatabaseSync(file, { readOnly: true });
+            try {
+                const rows = db.prepare(`PRAGMA table_info("${OBJECT}")`).all() as Array<{ name: string; notnull: number }>;
+                return rows.find((r) => r.name === name)?.notnull;
+            } finally {
+                db.close();
+            }
+        };
+
+        const first = await rig.saveAndPublish(v1());
+        expect(first.published?.success, JSON.stringify(first.published)).toBe(true);
+        await rig.engine.insert(OBJECT, { title: 'before', start_date: '2026-11-12', organization_id: ORG }, { context: SYSTEM });
+        expect(notNull('title')).toBe(1);
+
+        const second = await rig.saveAndPublish(v2());
+
+        expect(second.published?.success, JSON.stringify(second.published)).toBe(true);
+        const notApplied = (second.published?.advisories ?? []).filter((a: any) => a?.rule === COLUMN_CHANGES_NOT_APPLIED);
+        expect(notApplied.map((a: any) => a.severity), JSON.stringify(second.published)).toEqual(['warning']);
+        expect(notApplied[0].message).toContain("'title' (relax_not_null)");
+        expect(notNull('title')).toBe(1);
     }, 60_000);
 });
