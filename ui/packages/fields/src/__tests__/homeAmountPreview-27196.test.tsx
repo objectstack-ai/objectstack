@@ -190,6 +190,6 @@ describe('the read-only face of a record-mode amount carries the same preview (o
     await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryAllByTestId('home-amount-preview')).toHaveLength(0);
     expect(ds.calls).toHaveLength(0);
-    expect(document.body.textContent?.replace(/ /g, ' ')).toContain('€450.00€450.00');
+    expect(document.body.textContent?.replace(/\u00a0/g, ' ')).toContain('€450.00€450.00');
   });
 });

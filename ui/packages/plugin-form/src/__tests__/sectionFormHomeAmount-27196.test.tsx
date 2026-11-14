@@ -131,17 +131,30 @@ describe('an expression-computed record-mode amount keeps the live preview on it
   const amountRow = () => document.querySelector('[data-field="amount"]');
   const preview = () => amountRow()?.querySelector('[data-testid="home-amount-preview"]');
 
-  it('edit form: the amount draws read-only (no input) with the converted line, and follows a changed currency', async () => {
+  it('edit form: the amount draws read-only (no input) with the converted line, and follows a changed document date and currency', async () => {
     open('edit');
     await waitFor(() => {
-      expect(preview()?.textContent?.replace(/ /g, ' ')).toBe('≈ $500.00 at 0.9 on Nov 12, 2026');
+      expect(preview()?.textContent?.replace(/\u00a0/g, ' ')).toBe('≈ $500.00 at 0.9 on Nov 12, 2026');
     }, { timeout: 5000 });
     expect(preview()).toHaveAttribute('data-state', 'converted');
     expect(amountRow()!.querySelector('input')).toBeNull();
-    const code = document.querySelector('[data-field="currency_code"] input') as HTMLInputElement;
-    fireEvent.change(code, { target: { value: 'JPY' } });
+    // The document date, typed into the form's own date box and committed.
+    const date = document.querySelector('[data-field="invoice_date"] input') as HTMLInputElement;
+    fireEvent.change(date, { target: { value: '01/15/2026' } });
+    fireEvent.blur(date);
     await waitFor(() => {
-      expect(preview()?.textContent?.replace(/ /g, ' ')).toBe('≈ $2.97 at 151.5 on Nov 12, 2026');
+      expect(preview()?.textContent?.replace(/\u00a0/g, ' ')).toBe('≈ $489.13 at 0.92 on Jan 15, 2026');
+    }, { timeout: 5000 });
+    // The currency, picked in the form's own currency select.
+    fireEvent.click(document.querySelector('[data-field="currency_code"] [role="combobox"]')!);
+    const jpy = await waitFor(() => {
+      const option = Array.from(document.querySelectorAll('[role="option"]')).find((o) => o.textContent?.startsWith('JPY'));
+      if (!option) throw new Error('no JPY option');
+      return option as HTMLElement;
+    }, { timeout: 5000 });
+    fireEvent.click(jpy);
+    await waitFor(() => {
+      expect(preview()?.textContent?.replace(/\u00a0/g, ' ')).toBe('≈ $2.97 at 151.5 on Jan 15, 2026');
     }, { timeout: 5000 });
   });
 
@@ -150,7 +163,7 @@ describe('an expression-computed record-mode amount keeps the live preview on it
     await waitFor(() => {
       expect(document.querySelector('[data-field="amount_home"] [data-testid="home-amount-hint"]')?.textContent).toBe('Converted at 0.9 on Nov 12, 2026');
     }, { timeout: 5000 });
-    expect(amountRow()?.textContent?.replace(/ /g, ' ')).toContain('€450.00');
+    expect(amountRow()?.textContent?.replace(/\u00a0/g, ' ')).toContain('€450.00');
     await new Promise((r) => setTimeout(r, 20));
     expect(preview()).toBeFalsy();
   });
