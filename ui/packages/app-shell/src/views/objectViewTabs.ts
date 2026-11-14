@@ -478,6 +478,11 @@ export function buildViewTabs({
  * writes; the only way to observe no write at all is to be refused before it,
  * by the `isSavedViewId` guard in the handler (and, upstream of that, by the
  * menu entry the same predicate hides).
+ *
+ * The ORDER is load-bearing: every clear comes first and the set comes last,
+ * because the handler applies the list one write at a time and stops at the
+ * first refusal. A refused clear (a shipped default the server would not
+ * write) therefore never leaves the set applied beside it.
  */
 export function setDefaultViewPatches(
     savedViews: readonly any[],
