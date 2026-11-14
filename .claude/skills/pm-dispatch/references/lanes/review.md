@@ -9,7 +9,7 @@
 
 ## 路由
 
-- 车道 `Request: contract-review` 敲任一复核席信箱,空闲者接;无复核席在座敲兄弟席,⛔ 非分诊
+- 车道何时送审、敲谁只住 contract-review.md 送审路由行;敲任一复核席信箱,空闲者接
 - 互斥 = 既有 `Contract-review-claim:` 行:同 head 先贴者持有,复核席之间同此;后者撤回弃产出。
 - 欠审表 `check-owed-reviews.mjs` 先给复核席;车道只在无复核席在座或 (b) 后再一轮无认领才接
 - delta 复审归原复核者;复核席下班留下旧记录 ⇒ 下一复核席接 delta,交接行点名它。

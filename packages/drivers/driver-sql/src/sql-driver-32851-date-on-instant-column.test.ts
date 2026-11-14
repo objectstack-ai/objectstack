@@ -51,8 +51,11 @@ const DATETIME_ERA = '2026-11-12T20:00:00.000Z';
 const DAY = '2026-11-12';
 const SEEN = '2026-11-12T23:30:00.000Z';
 
+/** Unwrap a raw result across knex's three dialect shapes: mysql2 answers `[rows, fields]`. */
 const rowsOf = (res: unknown): Record<string, unknown>[] =>
-  (Array.isArray(res) ? res : ((res as { rows?: unknown[] })?.rows ?? [])) as Record<string, unknown>[];
+  (Array.isArray(res)
+    ? Array.isArray(res[0]) ? res[0] : res
+    : ((res as { rows?: unknown[] })?.rows ?? [])) as Record<string, unknown>[];
 
 function measure(cell: DialectCell): void {
   describe(`a \`datetime\` field published as \`date\` — ${cell.label} (#32851)`, () => {

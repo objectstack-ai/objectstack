@@ -446,7 +446,14 @@ export const CEILINGS = new Map([
   // may not change, and the `Premise:` claim line. Measured delta +4; the section
   // heading was renamed in place. Not a CROSS_FILE_MOVES destination, so no
   // `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 245],
+  // Raised 245 → 246 by the contract-review route (maintainer, 2026-11-13, in the
+  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」
+  // and 「没有 fable 时，找 review 座位」; quoted in the body of card #33157, claim
+  // comment 6879512661): one line in the dispatch-prompt section — the order
+  // carries the route, the dev names the owed review in its hand-back and never
+  // knocks, the seat sends it to a review seat, never triage. Measured delta +1.
+  // Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 246],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
@@ -575,7 +582,16 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 60],
+  // Raised 60 → 63 by the contract-review route (maintainer, 2026-11-13, in the
+  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」
+  // and 「没有 fable 时，找 review 座位」; quoted in the body of card #33157, claim
+  // comment 6879512661): the one routing rule — a lane self-reviews only when it
+  // reaches the tier; otherwise (unreachable, 429, rationed) it knocks a seated
+  // review seat, never triage, then a sibling seat with the tier, else the
+  // owed-review list — replaces the 429-only line (+2), and its one-line verbatim
+  // provenance carrying those two operative quotes (+1). Measured delta +3.
+  // Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 63],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
@@ -1714,7 +1730,16 @@ export const CEILINGS = new Map([
   // the escalation) and amendment 6595840476 (maintainer 「同意：下班席位的卡交给
   // 兄弟席」, the idle reading and the sibling hand-over, which names this
   // file). Measured delta +3 (17 → 20 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 20],
+  // 20 → 24 (#33226): words the maintainer said to one seat are not spread —
+  // the one-line rule first, then the card body's three bullets (bind that
+  // seat's account only; relayed fleet-wide or triage-directed orders only from
+  // triage's own session or seat post; record a relayed order's effect, never
+  // extend it). Ruling of record: the maintainer in the triage#1 session,
+  // 2026-11-14, 「所有座位当前任务处理完就下班，我说的都是针对某个具体 agent 账户」,
+  // 「转述指令要写明对谁说, 其实问题的关键你是分诊你才会关心别人的座位帖」 (card
+  // body) and 「也就是说，对某个座位说的话不要扩散就行」 (comment 6872810212).
+  // Measured delta +4 (20 → 24 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 24],
   // Review seat charter (`review#N`): the seat whose only job is the contract
   // review, held on any account that reaches CONTRACT_REVIEW_TIER — its seat
   // word, mailbox, review-seat-first routing of `Request: contract-review`
