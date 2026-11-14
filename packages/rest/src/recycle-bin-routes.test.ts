@@ -307,6 +307,21 @@ describe('[#30237] POST {data}/:object/recycle-bin/:entryId/restore', () => {
     });
   });
 
+  it('answers a unique-value refusal with the field and its label, so the caller can name what is taken', async () => {
+    const engine = mockEngine();
+    engine.restore.mockRejectedValueOnce(Object.assign(new Error("This record cannot be restored: another record now holds a value it must keep unique ('Invoice Number')."), {
+      code: 'RESTORE_UNIQUE_VALUE_TAKEN', status: 409, httpStatus: 409,
+      entryId: 'e1', object: 'invoice', recordId: 'inv1', field: 'invoice_no', fieldLabel: 'Invoice Number',
+    }));
+    const { restore } = buildServer(engine);
+    const res = await call(restore, { params: { object: 'invoice', entryId: 'e1' } });
+    expect(res.statusCode).toBe(409);
+    expect(res.body.error).toMatchObject({
+      code: 'RESTORE_UNIQUE_VALUE_TAKEN',
+      details: { entryId: 'e1', object: 'invoice', recordId: 'inv1', field: 'invoice_no', fieldLabel: 'Invoice Number' },
+    });
+  });
+
   it("answers the engine's 403 for another member's entry", async () => {
     const engine = mockEngine();
     engine.restore.mockRejectedValueOnce(Object.assign(new Error('You can restore only the records you deleted.'), {
