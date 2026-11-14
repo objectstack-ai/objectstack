@@ -2807,7 +2807,7 @@ os lint --eval --eval-min 80   # Score the bundled generation corpus instead
 | `--skip-i18n` | Skip translation coverage checks |
 | `--include-platform` | Also report i18n coverage for the platform built-in metadata forms — hidden by default because the platform packages ship those translations. This is the flag the `N i18n issue(s) hidden — rerun with --include-platform` hint names |
 | `--i18n-strict` | Treat missing translations in non-default locales as errors |
-| `--default-locale <code>` | Default locale for i18n coverage (the one that must be 100% translated). Defaults to the config's `i18n.defaultLocale`, else `en` |
+| `--default-locale <code>` | Source locale for i18n coverage — the language the inline labels are written in, which they satisfy and errors are raised against. Overrides the config's `i18n.sourceLocale`, else its `i18n.defaultLocale`, else `en` |
 | `--eval` | Run the metadata-generation eval over the bundled golden corpus and report scores — a different run, see below |
 | `--eval-min <n>` | Minimum passing score per eval case (default `75`) |
 | `--generator <path>` | Path to a module that default-exports `(prompt, id) => stack`; enables live eval, scoring generated output instead of fixtures. Requires `--eval` |

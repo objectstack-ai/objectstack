@@ -360,9 +360,11 @@ same two numbers as `platformMetadataForms`.
 
 Your project decides, and the tooling never assumes. `os lint`, `os i18n check`
 and `os i18n extract` read the `i18n` block above — `supportedLocales` is the
-set they gate, `defaultLocale` the one that must be complete. Without that
-block they fall back to whatever locales your bundles already cover, and
-finally to `en`.
+set they gate, the **source locale** the one that must be complete. The source
+locale is the language your inline labels are written in: `sourceLocale` when
+you declare it, else `defaultLocale`. Without that block they fall back to
+whatever locales your bundles already cover, and finally to `en`. Each
+command's `--default-locale` flag overrides the source locale for one run.
 
 The consequence worth stating plainly: **a project that does not do i18n
 reports nothing.** No `i18n` block and no bundles means one active locale, the
@@ -373,6 +375,35 @@ tooling stops asking for English you never promised. The runtime reads the
 declaration the same way (#15711): a request for the default locale answers
 with the authored label, so what the gate counts as covered is what gets
 served.
+
+#### When users default to a language you did not author in
+
+`defaultLocale` is the language a user who has not picked one gets.
+`sourceLocale` is the language your inline text is written in. Most projects
+author in the language their users get and declare only `defaultLocale`. An
+app written in English and sold into the Chinese market declares both:
+
+```ts
+i18n: {
+  defaultLocale: 'zh-CN',          // users without a personal locale get Chinese
+  sourceLocale: 'en',              // the inline labels are English
+  supportedLocales: ['en', 'zh-CN', 'es-ES'],
+},
+```
+
+The tooling then counts the inline text as the `en` translation, asks for no
+`en` bundle, and reports every missing `zh-CN` and `es-ES` row; `os i18n
+extract` fills the `en` bundle from the inline text and leaves `zh-CN` rows to
+translators. Declare `defaultLocale: 'zh-CN'` alone instead and the tooling
+reads your English labels as Chinese: it reports every key missing in `en` and
+never reports a `zh-CN` gap.
+
+`sourceLocale` is read by the authoring tools only. The runtime's
+authored-label rule above still keys on `defaultLocale`, so in this setup it is
+the `zh-CN` request that skips the fallback chain, and an `en` request walks
+the declared fallback (`fallbackLocale`, else `defaultLocale`) before it
+reaches the English inline label. Declare `fallbackLocale: 'en'` to keep an
+`en` request on the authored text.
 
 Translating is therefore opt-in, but once you opt in it covers the **whole**
 declared surface — every row of the table above, including action labels

@@ -539,6 +539,7 @@ Internationalization configuration
 | **defaultLocale** | `string` | ✅ | Default locale (e.g., "en") |
 | **supportedLocales** | `string[]` | ✅ | Supported BCP-47 locale codes |
 | **fallbackLocale** | `string` | optional | Fallback locale code |
+| **sourceLocale** | `string` | optional | Language the inline metadata text (a plain-string label) is written in, when it differs from defaultLocale (e.g. "en" for an English-authored app whose users default to "zh-CN"). Absent, it is defaultLocale. Read by os lint, os i18n check and os i18n extract as the source language; their --default-locale flag overrides it. |
 
 
 ---
