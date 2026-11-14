@@ -33,7 +33,11 @@
  *    administrator at the keyboard of an impersonation session), the user's
  *    own `/change-password` clear names the user, both still as the system;
  *    the stamp is never credited to another session's holder, and the
- *    sign-in stamp and the emailed-link reset are unchanged.
+ *    sign-in stamp and the emailed-link reset are unchanged;
+ *  - [#33203] on a cloud-managed environment both reset doors and both
+ *    request doors refuse every request with the managed 409, a platform
+ *    administrator included: no credential is created, a password held does
+ *    not move and still signs in, and no link or code is sent.
  */
 
 import { describe, it, expect, afterAll, afterEach, beforeEach, vi } from 'vitest';
@@ -46,6 +50,8 @@ import { REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED } from '@objectstack/spec/sys
 import { assertPasswordResetEndsSessions } from './password-reset-ends-sessions.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import { SSO_ONLY_REFUSAL_MESSAGES, SSO_ONLY_RESET_UNREADABLE_MESSAGE } from './sso-only-local-password.js';
+import { CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
+import { resetCloudManagedForTesting } from '@objectstack/core';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import { sqliteEnginePool } from './__tests__/sqlite-engine-pool.testkit';
 // better-auth's first module load is paid here, at module load, not inside the
@@ -966,4 +972,137 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
       expect(await credentialOf(a.engine)).toBeDefined();
     }, 60_000);
   });
+});
+
+describe('[#33203] a cloud-managed environment sets no local password at the reset doors', () => {
+  const MANAGED_ENV = 'OS_CLOUD_MANAGED';
+  const PHONE = '+15550188';
+  let savedManaged: string | undefined;
+
+  beforeEach(() => {
+    savedManaged = process.env[MANAGED_ENV];
+    delete process.env[MANAGED_ENV];
+    resetCloudManagedForTesting();
+  });
+  afterEach(() => {
+    if (savedManaged === undefined) delete process.env[MANAGED_ENV];
+    else process.env[MANAGED_ENV] = savedManaged;
+    resetCloudManagedForTesting();
+  });
+
+  /** Turned on after the account is staged and its reset is requested, as the cloud's containers set it. */
+  const managed = () => {
+    process.env[MANAGED_ENV] = '1';
+    resetCloudManagedForTesting();
+  };
+
+  /** The managed refusal, in the vendor's flat `{ code, message }` body these doors answer in. */
+  async function expectManagedRefusal(res: Response, door: 'resetPassword' | 'requestPasswordReset'): Promise<void> {
+    const text = await res.clone().text();
+    const body = JSON.parse(text) as { code?: unknown; message?: unknown };
+    expect({ status: res.status, code: body.code, message: body.message }, text).toEqual({
+      status: 409,
+      code: 'RESOURCE_CONFLICT',
+      message: CLOUD_MANAGED_REFUSAL_MESSAGES[door],
+    });
+  }
+
+  async function credentialsOf(engine: ObjectQL): Promise<Array<{ id: string; password?: unknown }>> {
+    const [user] = (await engine.find('sys_user', { where: { email: EMAIL }, limit: 1 }, SYS)) as Array<{ id: string }>;
+    return (await engine.find('sys_account', { where: { user_id: user.id, provider_id: 'credential' } }, SYS)) as Array<{
+      id: string;
+      password?: unknown;
+    }>;
+  }
+
+  it('the emailed link refuses a user with no local password and creates none', async () => {
+    const a = await signedInAccount();
+    const token = await requestResetToken(a);
+    const [credential] = await credentialsOf(a.engine);
+    await a.engine.delete('sys_account', { where: { id: credential.id }, context: { isSystem: true } } as never);
+    expect(await credentialsOf(a.engine), 'fixture invariant: no local credential').toEqual([]);
+    managed();
+
+    await expectManagedRefusal(await post(a.manager, '/reset-password', { token, newPassword: SECOND }), 'resetPassword');
+    expect(await credentialsOf(a.engine)).toEqual([]);
+  }, 60_000);
+
+  it('the emailed link refuses a platform administrator holding a password; the password held still signs in', async () => {
+    const a = await signedInAccount();
+    vi.spyOn(AuthManager.prototype as unknown as { isPlatformAdminUserId(id: string): Promise<boolean> }, 'isPlatformAdminUserId')
+      .mockResolvedValue(true);
+    const token = await requestResetToken(a);
+    const [before] = await credentialsOf(a.engine);
+    managed();
+
+    await expectManagedRefusal(await post(a.manager, '/reset-password', { token, newPassword: SECOND }), 'resetPassword');
+    expect((await credentialsOf(a.engine))[0]?.password).toBe(before.password);
+    const signIn = await post(a.manager, '/sign-in/email', { email: EMAIL, password: FIRST });
+    expect(signIn.status, await signIn.clone().text()).toBe(200);
+  }, 60_000);
+
+  it('every request is refused alike: a token that matches nothing gets the same answer, so nothing is told', async () => {
+    const a = await signedInAccount();
+    await requestResetToken(a);
+    managed();
+
+    await expectManagedRefusal(
+      await post(a.manager, '/reset-password', { token: 'not-the-issued-token', newPassword: SECOND }),
+      'resetPassword',
+    );
+  }, 60_000);
+
+  it('the link request sends no mail', async () => {
+    const a = await signedInAccount();
+    managed();
+
+    const requested = await post(a.manager, '/request-password-reset', { email: EMAIL, redirectTo: `${BASE}/reset` });
+    await expectManagedRefusal(requested, 'requestPasswordReset');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(a.sent.filter((m) => m.template === 'auth.password_reset')).toEqual([]);
+  }, 60_000);
+
+  it('the texted code: the right code is refused and the password does not move; the code request sends no text', async () => {
+    const a = await signedInAccount({ plugins: { phoneNumber: true } });
+    const texts: Array<{ templateParams?: { code?: string } }> = [];
+    a.manager.setSmsService({
+      async send(input: { templateParams?: { code?: string } }) {
+        texts.push(input);
+        return { id: `sms${texts.length}`, status: 'sent' };
+      },
+      isConfigured: () => true,
+    } as never);
+    const [user] = (await a.engine.find('sys_user', { where: { email: EMAIL }, limit: 1 }, SYS)) as Array<{ id: string }>;
+    await a.engine.update('sys_user', { id: user.id, phone_number: PHONE, phone_number_verified: true }, SYS);
+    const requested = await post(a.manager, '/phone-number/request-password-reset', { phoneNumber: PHONE });
+    expect(requested.status, await requested.clone().text()).toBe(200);
+    await vi.waitFor(() => expect(texts.length).toBe(1));
+    const otp = String(texts[0].templateParams?.code ?? '');
+    expect(otp, 'the reset text carries its code').not.toBe('');
+    const [before] = await credentialsOf(a.engine);
+    managed();
+
+    await expectManagedRefusal(
+      await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND }),
+      'resetPassword',
+    );
+    expect((await credentialsOf(a.engine))[0]?.password).toBe(before.password);
+
+    await expectManagedRefusal(
+      await post(a.manager, '/phone-number/request-password-reset', { phoneNumber: PHONE }),
+      'requestPasswordReset',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(texts.length).toBe(1);
+  }, 60_000);
+
+  it('no reset refusal sentence promises a local or break-glass password', () => {
+    for (const door of ['resetPassword', 'requestPasswordReset'] as const) {
+      expect(CLOUD_MANAGED_REFUSAL_MESSAGES[door]).not.toMatch(/break-glass/i);
+    }
+  });
+
+  // CONTROL, unmanaged: both doors set the password with the same staging —
+  // "a completed password reset ends the account's other sessions" and "a
+  // completed phone OTP reset ..." above.
 });
