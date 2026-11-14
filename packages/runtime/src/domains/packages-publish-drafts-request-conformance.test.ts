@@ -37,6 +37,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PublishPackageDraftsRequestSchema } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a clocked case (check-test-source-alias).
+import '@objectstack/metadata';
 import { ROUTE_LEDGER } from '../route-ledger.js';
 
 const PKG = 'com.workspace';
@@ -95,10 +97,13 @@ async function publishWith(body: unknown, apps?: Array<Record<string, unknown>>)
 
 /** The request members of what the protocol received: everything but the path id and the caller's context. */
 function bodyMembersSent(sent: Record<string, unknown>) {
-    const { packageId, context, actor, ...rest } = sent;
+    const { packageId, context, actor, userTextLocales, ...rest } = sent;
     expect(packageId).toBe(PKG);
     expect(actor).toBe(USER);
     expect(context).toMatchObject({ userId: USER });
+    // [#32656] Stated by the door off the caller's execution context (which
+    // names no locale here), never read from the body.
+    expect(userTextLocales).toEqual([]);
     return rest;
 }
 
@@ -146,7 +151,7 @@ describe('publish-drafts request body conforms to PublishPackageDraftsRequestSch
     });
 
     it('members the protocol method takes but the schema does not declare are not read from the body', async () => {
-        const { sent } = await publishWith({ aiModel: 'some-model', context: { userId: 'u_other' }, packageId: 'com.other' });
+        const { sent } = await publishWith({ aiModel: 'some-model', context: { userId: 'u_other' }, packageId: 'com.other', userTextLocales: ['ja'] });
         expect(sent.aiModel).toBeUndefined();
         expect(bodyMembersSent(sent)).toEqual({});
     });
