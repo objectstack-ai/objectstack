@@ -15,14 +15,14 @@ import type { SemanticMigration } from '../../types.js';
 export const entry: SemanticMigration = {
   id: 'disabled-holder-pair-row-bare-read-withheld',
   surface:
-    'The read of a metadata item that names no package (GET /api/v1/meta/TYPE/NAME, '
-    + 'GET /api/v1/meta/TYPE/NAME/published, and the execution read of the same name), at a member only a '
+    'The read of a metadata item that names no package (GET /api/v1/meta/TYPE/NAME?member=MEMBER, '
+    + 'GET /api/v1/meta/TYPE/NAME/layers?member=MEMBER, and the execution read of the same name), at a member only a '
     + 'customization pair (an App\'s PACKAGE.custom) stores, for a name every installed package holding it has '
     + 'disabled, of a type the registry reads by package',
   replacement:
     'Re-enable a package that holds the name: the read naming no package then serves the pair\'s row again. '
     + 'While every holder stays disabled, the read answers what it answers with no row stored: the holder\'s '
-    + 'withheld item (404 RESOURCE_NOT_FOUND on both transports).',
+    + 'withheld item (404 RESOURCE_NOT_FOUND).',
   reason:
     'A disabled package\'s items are withheld from the served reads, and so is its customization pair\'s row at '
     + 'the pair\'s own address (?package=PACKAGE.custom). The read naming no package still served that row when '
