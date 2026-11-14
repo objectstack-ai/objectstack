@@ -251,13 +251,16 @@ describe('[#22578] handleActionPage — the ADR-0043 action page from a Request'
 
   it('a link whose slot moved on — decided, or handed to someone else — is told WITH the request summary, and moves nothing', async () => {
     const { svc, objectql, openRequest, statusOf, decisionsOf } = await bootStack({ rawApp: false });
-    // The reassign target must be a user of the request's organization.
+    // The reassign target must be a user of the request's organization; once a
+    // user table exists, the slate resolves its approver against it too.
     objectql.registry.registerObject(
       { name: 'sys_user', label: 'User', fields: { name: { name: 'name', label: 'Name', type: 'text' } } } as any,
       'approvals-test', 'approvals-test',
     );
     await (objectql as any).syncSchemas();
-    await objectql.insert('sys_user', { id: 'u_delegate', name: 'Delegate' }, { context: SYSTEM } as any);
+    for (const id of [APPROVER, 'u_delegate']) {
+      await objectql.insert('sys_user', { id, name: id }, { context: SYSTEM } as any);
+    }
 
     // not_pending: the approve link decided the request; its reject twin is still unconsumed.
     const decidedOn = await openRequest();
