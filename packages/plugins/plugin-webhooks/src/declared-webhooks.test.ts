@@ -784,11 +784,61 @@ describe('declared webhooks — one declaration per (package, name) slot (ADR-01
         expect(await switches(own)).toEqual([[A, true], [B, false]]);
     });
 
-    it('[D8] one holder: a row naming no package, or a package that no longer declares the name, is its switch, as before', async () => {
+    it('[D8] one holder: a row naming no package is its switch, as before; its own row wins', async () => {
         const one = (rows: any[]) => new DeclaredWebhookSource(engineOver(registryShipping([[A, ALPHA]]), { rows: { [LEDGER]: rows } }), undefined);
         expect(await switches(one([slotRow(null, false)]))).toEqual([[A, false]]);
-        expect(await switches(one([slotRow('com.acme.gone', false)]))).toEqual([[A, false]]);
-        expect(await switches(one([slotRow('com.acme.gone', false), slotRow(A, true)]))).toEqual([[A, true]]);
+        expect(await switches(one([slotRow(null, false), slotRow(A, true)]))).toEqual([[A, true]]);
+    });
+
+    /**
+     * [ADR-0150 D8, #32695] A row naming a package that no longer declares
+     * the name was that package's switch: it switches no remaining holder, in
+     * either direction, at any holder count, and is said once per name.
+     * BASE: under one holder it was read as that holder's switch (off turned
+     * a shipped-on holder off, on turned a shipped-off holder on); under two,
+     * off kept both off.
+     */
+    describe('[#32695] a departed package\'s row switches no remaining holder', () => {
+        const GONE = 'com.acme.gone';
+        const SHIPPED_OFF = declaredWebhook({ url: 'https://hooks.example/alpha', isActive: false });
+        const sourceOver = (packages: Array<[string, any]>, rows: any[], warn = vi.fn()) =>
+            new DeclaredWebhookSource(engineOver(registryShipping(packages), { rows: { [LEDGER]: rows } }), undefined, loggerWith(warn));
+
+        it('one holder: the departed row switched off leaves a shipped-on holder on; switched on leaves a shipped-off holder off', async () => {
+            expect(await switches(sourceOver([[A, ALPHA]], [slotRow(GONE, false)]))).toEqual([[A, true]]);
+            expect(await switches(sourceOver([[A, SHIPPED_OFF]], [slotRow(GONE, true)]))).toEqual([[A, false]]);
+        });
+
+        it('two holders, in both registration orders: a departed row switched off keeps neither off', async () => {
+            expect(await switches(sourceOver([[A, ALPHA], [B, BETA]], [slotRow(GONE, false)]))).toEqual([[A, true], [B, true]]);
+            expect(await switches(sourceOver([[B, BETA], [A, ALPHA]], [slotRow(GONE, false)]))).toEqual([[B, true], [A, true]]);
+        });
+
+        it('said once per name, naming the departed package and the holders, with the per-holder address', async () => {
+            const warn = vi.fn();
+            const source = sourceOver([[A, ALPHA]], [slotRow(GONE, false)], warn);
+            await source.list();
+            await source.list();
+            const said = warn.mock.calls.filter(([msg]) => String(msg).includes('no longer declares it'));
+            expect(said).toHaveLength(1);
+            expect(said[0][0]).toContain(`package "${GONE}"`);
+            expect(said[0][0]).toContain(`"${A}"`);
+            expect(said[0][0]).toContain('?package=PACKAGE');
+        });
+
+        it('two holders, a departed row and a row naming no package: each is told once (review N1)', async () => {
+            const warn = vi.fn();
+            const source = sourceOver([[A, ALPHA], [B, BETA]], [slotRow(GONE, false), slotRow(null, false)], warn);
+            await source.list();
+            await source.list();
+            expect(warn.mock.calls.filter(([msg]) => String(msg).includes('no longer declares it'))).toHaveLength(1);
+            expect(warn.mock.calls.filter(([msg]) => String(msg).includes('no holder\'s own (naming no package)'))).toHaveLength(1);
+        });
+
+        it('CONTROL beside the departed row, a row naming no package is still the one holder\'s switch, and its own row wins over both', async () => {
+            expect(await switches(sourceOver([[A, ALPHA]], [slotRow(GONE, true), slotRow(null, false)]))).toEqual([[A, false]]);
+            expect(await switches(sourceOver([[A, ALPHA]], [slotRow(GONE, false), slotRow(null, false), slotRow(A, true)]))).toEqual([[A, true]]);
+        });
     });
 
     it('[Q4] a delivery naming no package (`declared:NAME`, the CLI ceremony\'s shape): one holder judges it as before; two refuse it naming both, sent to neither', async () => {
