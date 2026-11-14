@@ -205,8 +205,9 @@ function isMysqlClient(client?: string): boolean {
 }
 
 /**
- * Every index these migrations build — SIX, from five migrations (the grant's
- * at schema sync, the rest at `kernel:ready`), because
+ * Every index these migrations build — SEVEN, from six migrations (the
+ * grant's and the connector connection's at schema sync, the rest at
+ * `kernel:ready`), because
  * `ensureMetadataOverlayIndexes` builds one index per overlay state and either
  * can be blocked independently.
  *
