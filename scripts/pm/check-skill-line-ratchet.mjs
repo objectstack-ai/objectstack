@@ -446,7 +446,14 @@ export const CEILINGS = new Map([
   // may not change, and the `Premise:` claim line. Measured delta +4; the section
   // heading was renamed in place. Not a CROSS_FILE_MOVES destination, so no
   // `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 245],
+  // Raised 245 → 246 by the contract-review route (maintainer, 2026-11-13, in the
+  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」
+  // and 「没有 fable 时，找 review 座位」; quoted in the body of card #33157, claim
+  // comment 6879512661): one line in the dispatch-prompt section — the order
+  // carries the route, the dev names the owed review in its hand-back and never
+  // knocks, the seat sends it to a review seat, never triage. Measured delta +1.
+  // Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 246],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
@@ -575,7 +582,17 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 60],
+  // Raised 60 → 65 by the contract-review route (maintainer, 2026-11-13, in the
+  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」,
+  // 「没有 fable 时，找 review 座位」, after 「现在已经有了专用的 review 席位啊」 and
+  // 「契约复审只有在车道没有fable的时候才会找你执行，你也可以考虑是否需要单独设一个车道」;
+  // quoted in the body of card #33157, claim comment 6879512661): the one
+  // routing rule — a lane self-reviews only when it reaches the tier; otherwise
+  // (unreachable, 429, rationed) it knocks a seated review seat, never triage,
+  // then a sibling seat with the tier, else the owed-review list — replaces the
+  // 429-only line (+2), and its verbatim provenance (+3). Measured delta +5.
+  // Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 65],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
