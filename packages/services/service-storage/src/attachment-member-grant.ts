@@ -32,8 +32,14 @@ import type { AttachmentLifecycleLogger } from './attachment-lifecycle.js';
  * What the set is, and is not:
  *  - READ and CREATE on `sys_attachment`, nothing else. No edit and no delete:
  *    a set every member holds through the `everyone` anchor carries no delete
- *    bit (ADR-0090 D5). Managing attachments (detaching, re-pointing) stays an
- *    explicit grant.
+ *    bit (ADR-0090 D5). Managing attachments (detaching another user's,
+ *    re-pointing) stays an explicit grant.
+ *  - The one removal a member makes without that grant is of an attachment
+ *    they uploaded themselves (maintainer ruling 6879388034), and it is no bit
+ *    of this set: the removal door (`DELETE /api/v1/attachments/:id`,
+ *    `attachment-removal-routes.ts`) admits a row whose `uploaded_by` names
+ *    the caller, and that row only. The data door's delete stays refused to a
+ *    member holding this set alone.
  *  - It reaches the members of a deployment that declares a member baseline,
  *    and no one else: an external member resolves its own baseline instead, an
  *    agent principal's own leg resolves none, and a deployment that declares

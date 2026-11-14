@@ -75,6 +75,12 @@ import { findReferenceableFile, unreadableFileMessage, type FileReferenceReadAut
  *    reaches this handler through the `dispatchUnscopedMultiWrite`
  *    whole-operation dispatch its registration declares (#9719) — the
  *    per-row dispatch alone can never deliver the shape it refuses.
+ *    The uploader limb is also served without the object's delete grant, by
+ *    the removal door (`attachment-removal-routes.ts`, maintainer ruling
+ *    6879388034): it reads the row as the caller, admits it only when
+ *    `uploaded_by` names the caller, and removes it under a system context
+ *    attributed to the caller, which this gate does not judge again. The
+ *    parent-editor limb has no such door.
  *
  * ## Parent EDIT — one question, four limbs
  *
