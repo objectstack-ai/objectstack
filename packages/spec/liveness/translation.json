@@ -260,6 +260,22 @@
               "evidenceScope": "in-repo",
               "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#declaredRefusalMessage (reads `hooks.<hook>.refusals.<CODE>.message` through the `i18n` service, spelled by `hookRefusalMessageKey`, in the caller's `HookContext.session.locale` negotiated by `resolveBundleLocale`; a miss echoes the key and the declared message is served); packages/runtime/src/sandbox/hook-refusal-catalogue.ts#resolveHookRefusal (serves the picked sentence as the refusal's caller-facing message and `userMessage`)",
               "producer": "packages/runtime/src/app-plugin.ts#loadTranslations (hands each bundle's locale data to the i18n service whole, `hooks` included); packages/objectql/src/engine-execution-plumbing.ts#buildSession (copies the write's `ExecutionContext.locale` onto the hook session the body runner reads)"
+            },
+            "reasons": {
+              "status": "live",
+              "verifiedAt": "2026-11-14",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#pickTranslatedSentence (reads `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message` through the `i18n` service, spelled by `hookRefusalMessageKey`, in the caller's locale; a miss echoes the key and the declared reason sentence is served)",
+              "producer": "packages/runtime/src/app-plugin.ts#loadTranslations (hands each bundle's locale data to the i18n service whole, `hooks` included)",
+              "note": "[#33214, ruling 6879477573 S1] Seeded `live` with its reader. `objectstack validate` refuses a key over a reason the code does not declare; the i18n walk counts each declared reason.",
+              "children": {
+                "message": {
+                  "status": "live",
+                  "verifiedAt": "2026-11-14",
+                  "evidenceScope": "in-repo",
+                  "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#pickTranslatedSentence (reads `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message` through the `i18n` service in the caller's locale)"
+                }
+              }
             }
           }
         }
