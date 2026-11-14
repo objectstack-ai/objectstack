@@ -37,6 +37,10 @@ import '@testing-library/jest-dom/vitest';
 // The report body sits behind `ReportView`'s `React.lazy` boundary: import it
 // at module scope (same specifier) so the lazy factory resolves at once.
 import '@object-ui/plugin-report';
+// `ReportView` reaches a dynamic `import('@objectstack/lint')` (through
+// `ReportConfigPanel`, statically): pay its load at collection, never inside a
+// case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
