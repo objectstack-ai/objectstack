@@ -35,10 +35,9 @@ const renderPlan = (envelope: unknown, lang: 'zh' | 'en' = 'zh') =>
   );
 
 type Plan = ReturnType<typeof planEnvelope>;
-type CardObject = Plan['planCard']['objects'][number];
 
-/** The plan with its card's objects replaced. */
-const withObjects = (plan: Plan, objects: CardObject[]) => ({ ...plan, planCard: { ...plan.planCard, objects } });
+/** The plan with its card's objects replaced (the envelope is raw tool output, typed `unknown` by the mapper). */
+const withObjects = (plan: Plan, objects: readonly unknown[]) => ({ ...plan, planCard: { ...plan.planCard, objects } });
 
 /** One object, one field the user named and one the AI suggested. */
 const oneNamedOneSuggested = (lang: 'zh' | 'en') => {
@@ -63,7 +62,7 @@ const noneSuggested = (lang: 'zh' | 'en') => {
         const { suggested: _s, ...rest } = f;
         return rest;
       }),
-    })) as CardObject[],
+    })),
   );
 };
 
@@ -97,7 +96,7 @@ describe('#33419 — the plan card explains its suggested-field mark', () => {
       o.name === 'reader'
         ? { ...o, fields: o.fields.map((f) => (f.name === 'phone' ? { ...f, suggested: true } : f)) }
         : o,
-    ) as CardObject[];
+    );
     renderPlan(withObjects(plan, objects));
     expect(document.querySelectorAll('[data-suggested="true"]')).toHaveLength(2);
     expect(legends()).toHaveLength(1);
