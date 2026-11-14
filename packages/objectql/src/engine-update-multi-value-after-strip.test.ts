@@ -125,7 +125,7 @@ describe('the update door judges and stores the payload left after the fields th
   it.each([
     ['a single value', 'b'],
     ['a list', ['b']],
-  ])('by id: a locked multi-valued field keeps its stored value, whatever form the caller writes it in (%s)', async (_label, sent) => {
+  ])('by id: a locked multi-valued field keeps its stored value, whatever form the caller writes it in (form %#)', async (_label, sent) => {
     const { events, options } = drops();
     await engine.update('claim', { id: 'c1', tags: sent, picks: sent, note: 'changed' }, { context: ctx, ...options } as any);
     expect(rows.get('c1')).toMatchObject({ tags: ['a'], picks: ['a'], note: 'changed' });
@@ -177,7 +177,7 @@ describe('the update door judges and stores the payload left after the fields th
   it.each([
     ['a single value', 'b'],
     ['a list', ['b']],
-  ])('bulk: a locked multi-valued field keeps its stored value on every row, whatever form the caller writes it in (%s)', async (_label, sent) => {
+  ])('bulk: a locked multi-valued field keeps its stored value on every row, whatever form the caller writes it in (form %#)', async (_label, sent) => {
     const { events, options } = drops();
     await engine.update('claim', { tags: sent, picks: sent, note: 'changed' }, {
       where: { id: { $in: ['c1', 'c2'] } }, multi: true, context: ctx, ...options,
