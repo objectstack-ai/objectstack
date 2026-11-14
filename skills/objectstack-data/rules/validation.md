@@ -243,8 +243,9 @@ With an `otherwise` branch:
 
 Hitting another object or running arbitrary code is **not** a validation type.
 Implement it as a `beforeInsert` / `beforeUpdate` lifecycle hook whose `body`
-throws a [declared code](../references/data-hooks.md#declared-refusals-refusals). A `body` has no outbound HTTP: an external-API check goes
-through a Connector recipe ([data-hooks.md](../references/data-hooks.md#capabilities--the-complete-list)).
+throws a [declared code](../references/data-hooks.md#declared-refusals-refusals).
+A `body` has no outbound HTTP: an external-API check goes through a Connector
+recipe ([data-hooks.md](../references/data-hooks.md#capabilities--the-complete-list)).
 
 <!-- os:check -->
 ```typescript

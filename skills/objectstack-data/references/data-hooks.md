@@ -847,9 +847,10 @@ A throw aborts the operation and rolls back its transaction; `onError: 'log'`
 ### Declared refusals (`refusals`)
 
 A hook that enforces a business rule declares a `refusals` catalogue, one
-SCREAMING_SNAKE code per rule, and its body throws the code. A throw with no code
-is answered `HOOK_ABORTED`, the platform's: keep that for failures you did not
-plan. A cross-object guard a validation rule cannot read:
+SCREAMING_SNAKE code per rule, and its body throws the code. Without one, a throw
+is answered `HOOK_ABORTED`, the platform's code: fine for a failure you did not
+plan, not for a rule the user can act on. A cross-object guard a validation rule
+cannot read:
 
 <!-- os:check -->
 ```typescript
