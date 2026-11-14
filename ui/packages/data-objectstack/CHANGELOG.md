@@ -1,5 +1,45 @@
 # @object-ui/data-objectstack
 
+## 18.5.0
+
+### Patch Changes
+
+- 1169d64: fix(console): Set as Default over a view a package ships leaves one default view
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Set as Default.** When the previous default list view was one a read-only package ships (the showcase's All Tasks, an installed app's view), Set as Default on another view left the object with two default views. Clearing the shipped view's default was refused by the server, since a write naming no package is closed on an item a read-only package ships, but the new default was written beside it in the same click. The clear now lands, and Manage views writes one view at a time, clearing the previous defaults first and setting the new one last: a refused clear stops the click, says the server's reason, and leaves the new view not made the default.
+  
+  **Editing a shipped view's row state.** `updateView` on `@object-ui/data-objectstack` now writes a view a read-only package ships into that package's customization pair (`BASE.custom`, `?package=`), declaring `overrides: { package, basedOn }`, as the server's refusal prescribes. The pair is the one `POST /packages/BASE/ensure-customization` answers, which creates it on first use, and `basedOn` is the version the view's customization already declares, else the package's own version. This covers every row-state write the console sends through `updateView`: the default flag, a pin and a rename. A view no package ships, and a view a writable package ships, are written exactly as before. When the pair cannot be had (the ensure door refuses the caller, or the package records no version), nothing is written and the refusal reaches the caller.
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [d4fbb4d]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/client@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

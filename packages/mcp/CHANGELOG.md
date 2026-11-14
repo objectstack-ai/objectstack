@@ -1,5 +1,218 @@
 # @objectstack/plugin-mcp-server
 
+## 18.5.0
+
+### Patch Changes
+
+- 66919b6: fix(runtime): MCP `list_actions` marks an organization action the caller's membership role does not reach `unavailable`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A plain organization member's agent was listed identity actions such as inviting a user, removing a member, editing the organization or managing its teams, and `run_action` then answered `403 PERMISSION_DENIED` from the organization endpoint each time. The actions stay listed, and for a caller whose membership role in the organization does not reach the endpoint the row now carries `unavailable: { code: 'PERMISSION_DENIED', reason }`, where the reason names the roles that do reach it (for example "needs an organization owner, admin or delegated admin"). The reach is read from the action's `target` against the `MEMBERSHIP_REACH` table in `@objectstack/spec/identity`. Owners, admins and (for invitations) delegated admins see the rows unmarked. Nothing is hidden and neither run door reads the mark, so who can run each action is unchanged. Actions judged on record ownership or on the deployment's tenancy posture (deleting an SSO provider or an OAuth application, creating an organization) are not marked. The `list_actions` tool description, the `McpActionSummary.unavailable` documentation and the served skill (with its Console mirror) now say a listed action can carry `unavailable` for the caller's role, not only for its credential.
+- 28a2f0f: fix(mcp,runtime): `describe_object` serves `readonly: true` where a write never sets the value
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `describe_object` and the `objectstack://objects/{name}` resource served each field's `readonly` from the declared flag alone, so an agent was told it could write fields whose sent value the engine drops or replaces. Both transports now also answer `readonly: true` for a runtime-owned type (`autonumber`, including a hand-written field literal with no flag), for a `formula` field, and for a stored field that declares an `expression`. On every transport, the resource included, `readonly` is judged on the field as declared, so a stored expression the caller is not shown (it names a field they cannot read) still answers `true`, and the expression itself stays hidden. An ordinary field still answers `readonly: false`, and a declared `readonly` still answers `true`.
+  
+  `readonly` is the schema's answer, not the caller's field edit permission: a field the caller may read but not edit still answers `readonly: false`, and a write naming it is refused as before. The tool description now says so, and it also says that a `defaultValue` may be a token the server resolves (`NOW()`, `current_user`) or an expression object, so an agent omits the field instead of copying the value.
+- 6a36b79: feat(platform-objects,mcp): a member's agent finds a colleague by name or email over MCP, to fill a person field
+  
+  Clause-②: yes (widening) — the MCP read tools (`list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_records`) now admit one more system object, `sys_user`, which they refused before with `Object "sys_user" is a system object and is not exposed via MCP`. No write tool opens it.
+  Metadata-protocol: none
+  
+  - **`sys_user` declares `enable.aiReadable: true`.** An agent reads users with the existing record tools, under every gate a console read runs, and is served exactly what the caller's console person picker is served: their own row and the members of their active organization (the `sys_user_self` and `sys_user_org_members` row scopes of `member_default`), never another organization's users; and every field except the `Admin` group (sign-in trail, lockout, ban reason and expiry, sign-in phone, legacy role, AI seat), which the non-admin permission sets withhold on results and refuse on filters. For a plain member that is: `id`, `name`, `email`, `email_verified`, `two_factor_enabled`, `banned`, `image`, `locale`, `manager_id`, `primary_business_unit_id`, `principal_kind`, `accountable_user_id`, `source`, `created_at`, `updated_at`. An administrator's agent reads what the administrator reads.
+  - **Read only.** `create_record`, `update_record`, `delete_record` and `delete_records` keep refusing every `sys_*` object, so the self-service profile edit stays a console and data-API affordance; account changes an agent may make go through actions that declare their own `ai.exposed`.
+  - **What an agent is told.** `query_records`' description and the served `SKILL.md` (and its Console "Download skill" copy) say how to find a colleague's id for a person field: `where: { "email": "..." }` for exactly one person, or `{ "name": { "$contains": "..." } }`; names repeat, so people who share a name are told apart by email. The `list_objects` line no longer says every system object is hidden.
+- 6718884: feat(storage,mcp): an upload link for a file field of a record not yet created, so an agent can create a record whose file field is required
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `create_upload_link` takes no `recordId` when it names a `field`: the link names the object and the file field only, and its answer carries `fileIds`, the id the upload is stored under. The user opens the link signed in and uploads; the agent then calls `create_record` with the field set to `fileIds[0]`. An expense line with a required e-invoice is created in two agent calls and one upload, and the field's `required` rule is unchanged.
+  
+  Minting such a link asks the object's create permission for the user, and the field must be writable for them and not read-only; an attachments link still needs its record. The upload is checked against the field's `accept` and `maxSize` before the link is spent. The stored file is bound to the uploading user, the object and the field for one hour: until a record holds it, only that user's own write, into that field of that object, may use it, and within the hour no second record may take it while the first holds it. The uploader's write into another field or object, or after the hour, is refused at the field with the reason; another user's or a system write is refused as a file they cannot open. Once the hour has passed with a record holding it, or once a record lets it go, it is judged as any other record's file. Before the upload, the id takes no write but the uploader's, which is refused as an upload that never completed. Until a record has held the file, only its uploader may download it. The page the link opens says the file was received, and tells the user to go back to the assistant.
+  
+  `fileIds` is an array so that a link for several files can answer several ids without a new key. Hosts whose storage service predates this keep `recordId` required on the tool, and the agent skill teaches the no-record form only where the host serves it.
+- 5e250a6: feat(storage,mcp): one upload link takes several files on a multi-file field
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A link `create_upload_link` makes for a file field declared `multiple: true` now takes several files in its one use: the user picks up to 10 on the link's page and sends them together, and each file gets its own file id. "Here are my three invoices" is one link and one pick instead of three. A single-file field link and an attachments link take one file, as before.
+  
+  On a multi-file field's link, one send spends the link once, and every file in it, however many the send carries, is checked before that: the workspace's maximum upload size, and the field's own `accept` and `maxSize`. One file the field cannot take, or more than 10 files (`400` `VALIDATION_ERROR`), refuses the whole send, stores nothing and leaves the link usable. After that the field gains all the files in one write, or none: a failure storing any of them, or the record's write refusing (a pending approval's lock, say), discards every file of the send, so the record shows what it held before and no file of the send is left.
+  
+  For a record not yet created, `create_upload_link` takes `count` (how many files, up to 10) with a multi-file field, and answers that many `fileIds` at once; the user picks exactly that many, and the agent creates the record with the field set to `fileIds`. Each id keeps the rules a single upload's id has: only that user's own write, into that field of that object, in one record, within an hour of the upload. Before the upload, every write naming one of the ids is refused, the uploader's own included, and nothing serves it.
+  
+  The link's page takes several files where the link does, in every language it is served in. The send is one form (`multipart/form-data`, marked by the header `x-upload-link-form: several`) carrying `count` and `file0` … `fileN-1`, and only a link that takes several files reads it. Any other body, on any link (a multipart one without that header included), is the file itself, whatever its content type, under the same limit and with the same checks as before. Every successful answer now also carries `fileIds`.
+- 5430b4a: fix(service-storage)!: an upload link is refused at issue for a file field whose `readonlyWhen` holds now (#32768)
+  
+  Clause-②: yes (narrowing) — `create_upload_link` (`createUploadLinkAs`) issues no link for a file field whose `readonlyWhen` holds on the record as it stands, where it issued one and the upload was refused when it arrived. The engine gains one write-free judgement, `ObjectQL#judgeFieldWriteLock` (widening).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored shape changes. The refusal is the existing FIELD_NOT_ACCESSIBLE 403 the link door already answers for a static readonly field, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller that minted an upload link onto a file field while its `readonlyWhen` held.
+  
+  FROM: `create_upload_link` answered a link, and the upload through it was refused when it arrived (`403 FIELD_NOT_ACCESSIBLE`, "Nothing was attached: …", since #32734), after the person had picked and sent the file.
+  TO: the call itself is refused, `403 FIELD_NOT_ACCESSIBLE`, `You cannot attach a file to OBJECT.FIELD: the field is read-only in the target record's current state (a TRUE \`readonlyWhen\` predicate).`, and no link is written. The fix for a caller: mint the link once the record's state unlocks the field, or use the record's attachments, which carry no field lock and are unchanged.
+  
+  The verdict is the engine's own: `ObjectQL#judgeFieldWriteLock(object, id, field, { context })` runs the update's `readonlyWhen` strip over the update's stored-row read and master-detail header, without writing, and answers the reason the update reports the field under (`readonly_when`) with the words its strict refusal uses. A field with no `readonlyWhen` costs no read. A static `readonly` field and a record a pending approval locks are refused at issue as before.
+- 932eab5: Clause-②: no
+  Metadata-protocol: none
+  
+  `create_upload_link`'s description now says which link each refusal applies to: a field link gets no link for a read-only field (`readonly`, or a `readonlyWhen` that holds on the record now) or for a record a pending approval locks, while an attachments link asks only what attaching asks, so a locked record still takes attachments. The upload-link page and upload doors now answer a refusal's `error.code` from the closed ADR-0112 vocabulary: a producer's unregistered spelling is answered as the code its status derives, with the spelling beside it as `declaredCode`, as the upload commit door already answers it.
+- b22be27: fix(mcp): `validate_expression` gives the publish gate's own verdict at a `validation` or `formula` site, every pass the gate runs there included
+  
+  Clause-②: no (narrowing) — the MCP `validate_expression` tool now answers `ok: false` (or a warning) for a validation rule or formula field the publish gate already refuses (or warns on). The gate's acceptance set does not change, and no existing exported type or signature changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is in an advisory tool's verdict, never in what an author may write: every expression it now refuses, the publish gate already refused, so no stored metadata and no consumer code has anything to rewrite -->
+  
+  **BREAKING** verdict narrowing of the MCP `validate_expression` tool (`@objectstack/mcp`), at `site: 'validation'` and `site: 'formula'`.
+  
+  The tool promises the verdict the publish gate gives the rule, but it ran the shared expression validator and nothing else, so it answered `ok: true` for rules the gate then refused at publish, and the refusal first met a person there. It now also runs the gate's own passes at those two sites, through `judgeAuthoredSiteExpression` (`@objectstack/lint`), which runs the gate's walk itself over the object definitions the caller is served:
+  
+  - at both sites: a read through a reference to a field the target object does not declare (`record.balance.nope`), and a read through a reference into a stored-metadata table;
+  - at a `validation` site: a nullable field used without a null guard (`record.days > 3` with `days` neither required nor defaulted), and a read of `parent`, which a `validations[]` rule never binds;
+  - a warning at both sites: a read of an injected system column an external object has no storage behind (`record.owner_id` on an ADR-0015 `external` object).
+  
+  Each finding is the gate's sentence, at the gate's severity. A rule the gate accepts answers exactly as before. A hop target follows the same system-object fence as `describe_object`. A `flow_condition` and a `template` are not judged by this change: the tool's verdict there is unchanged. A sentence that names the rule names it `this rule`, since the tool is handed the condition and not the rule it will sit on.
+  
+  - `@objectstack/mcp`: `McpDataBridge` gains the optional `servedObjectDefinitionOf(name)`, the object definition as the caller is served it (the read `describeObject` projects), handed to the gate and rendered to nobody. A bridge without it answers the shared validator's verdict alone, as before. The served `SKILL.md` line and the tool description name what the tool now refuses. `@objectstack/lint` moves from a development dependency to a dependency, loaded on the first call that judges a rule or formula field, never at module load.
+  - `@objectstack/lint`: exports `judgeAuthoredSiteExpression` and `authoredExpressionHopTargets`. The gate's verdicts are unchanged: its walk gains one internal option, off its package entries, that only this entry passes.
+  - `@objectstack/runtime`: the HTTP MCP bridge serves `servedObjectDefinitionOf`, the same caller's object `describeObject` reads (ADR-0106 D1).
+  - `@object-ui/console`: the downloadable `SKILL.md` mirror carries the same line.
+- 6c5d31f: docs(spec,skills): `SkillSchema.tools` is described as what it now does on an MCP server, not as inert in the open framework
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Since 18.4.0 the prompt surface `registerSkillPrompts` (`@objectstack/mcp`) installs offers a skill on `prompts/list` and `prompts/get` only when the server it is installed on lists every tool the skill binds. The published texts still said the binding was authored for the cloud runtime and inert in the open framework, or that every skill with instructions is served to any connected client. They now state the rule; no schema, accept set or behaviour changes.
+  
+  - **`@objectstack/spec`**: the `SkillSchema` class JSDoc, the `tools` JSDoc and its describe text (so the generated JSON Schema description and the skill reference page), plus one clause on the `instructions` JSDoc. `tools` is bound by the cloud agent runtime and read by MCP: a plain name is served by a tool of that name, a trailing wildcard by any listed tool it matches, and an `action_<name>` entry (or `action_*`) also by `run_action`. A skill that binds no tool is offered as before, and `prompts/get` answers a withheld skill as it answers a prompt name no skill derives. The rule reaches every server `registerSkillPrompts` is installed on, `MCPServerRuntime`'s HTTP door and a host's own `McpServer` alike, stdio included; `MCPServerRuntime.bridgePrompts`, which projects skills onto the long-lived server without it, applies no such filter. `surface` and `triggerConditions` stay cloud-runtime-only.
+  - **`@objectstack/skills`** (`objectstack-ai`): the built-in-skills note says the same, and the `instructions` row calls it the one field the open edition serves, since the open edition now reads `tools` as well.
+  - **`@objectstack/spec`**, liveness ledger (`liveness/skill.json`): the `tools` entry cites its in-repo reader, `skillBindingServed` in `packages/mcp/src/skill-prompts.ts`, beside the cloud readers, and its note no longer calls the key cloud-runtime-only.
+  - **`@objectstack/mcp`**: the README's Prompts section says which servers apply the rule. `bridgePrompts` lists every skill that carries instructions on the long-lived server; the HTTP door and any server a host installs `registerSkillPrompts` on offer a skill only when that server lists every tool it binds.
+  - The agents guide (`content/docs/ai/agents.mdx`) carries the rule under its two-halves table and advises binding a skill only to tools its intended connections serve. The MCP connection guide (`content/docs/ai/connect-mcp.mdx`) says a skill is offered only where its tools are: its example skill, bound to `query_records` and `action_resolve_case`, is not offered to a token without the `actions:execute` scope, which lists no `run_action`.
+- 5844346: fix(cli): with the stdio MCP transport on, what a host plugin writes to the console while serving a call reaches stderr
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An MCP client that spawns `os serve` or `os start` over stdio writes `initialize` at once and its first `tools/call` as soon as that is answered, so those calls are served while the server is still finishing its boot. `serve` holds back boot output during that time so the startup banner stays readable, and it held back the calls' output with it: a host plugin's `console.log`, `console.info` and `console.debug` from a tool-call interceptor or a hook reached neither stdout nor stderr. `console.warn` and `console.error` were not affected.
+  
+  The stdio transport now marks stdout when it claims it, and from that moment `serve` stops holding back console output: it goes to stderr, never to stdout, which still carries only JSON-RPC frames. Under stdio, the part of the boot that runs after the transport starts now prints its own console lines to stderr too, instead of dropping them. A boot without the stdio transport is unchanged.
+- f45c012: fix(mcp): stdio `get_record` answers a missing or hidden id with the coded `RECORD_NOT_FOUND`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Over the stdio transport, `get_record` on an id that names no row, or a row the caller may not read, answered the bare sentence `Record "<id>" not found in "<object>"` with no code. It now answers the coded envelope the HTTP `/mcp` door answers for the same call, `{ "error": { "code": "RECORD_NOT_FOUND", "message": "Record <id> not found in <object>", "status": 404 } }`, so a stdio client can branch on the code. A missing id and a hidden id answer the same envelope. `update_record` and `delete_record` already answered it and are unchanged.
+- 1bed853: fix(runtime): MCP `list_actions` marks a confirmation-gated action `unavailable` for an AI service account
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An AI service account (an agent principal acting for itself, with no person it acts for) never confirms an action for itself, so `run_action` refuses it `428 ACTION_CONFIRMATION_REQUIRED` on every action declaring `ai.requiresConfirmation: true`, whatever the call sends. `list_actions` used to show that action to the account with no `unavailable` marker, so a headless agent planned a call that could never run. The row now carries `unavailable` with the refusal's own code and sentence ("a person runs this action"). The marker follows the declared flag only, not the listing's destructive heuristic. Where the forward-credential refusal also applies, the row carries the confirmation refusal, the one `run_action` answers first. A person, a delegated agent and the system context see the listing unchanged. The `McpActionSummary.unavailable` documentation in `@objectstack/mcp` names the new case and its code.
+- 8835532: fix(mcp): `validate_expression` gives the runtime publish gate's verdict at a `flow_condition`, and judges a formula-site expression as the field it is authored on
+  
+  Clause-②: yes (narrowing) — the MCP `validate_expression` tool now answers `ok: false` (or a warning) at a `flow_condition`, and for a named stored or formula field at a `formula` site, where the publish gate already refuses (or warns); and it accepts two new optional inputs, `startCondition` and `field`. The gate's acceptance set does not change.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is in an advisory tool's verdict, never in what an author may write: every expression it now refuses, the publish gate already refused, so no stored metadata and no consumer code has anything to rewrite; the two inputs are optional and an existing call answers as before wherever the gate accepts -->
+  
+  **BREAKING** verdict narrowing of the MCP `validate_expression` tool (`@objectstack/mcp`), at `site: 'flow_condition'` and, given the new `field`, at `site: 'formula'`.
+  
+  At a flow condition the tool ran the shared expression validator and nothing else, so it answered `ok: true` for conditions the publish gate then refused when the flow was saved. It now also runs the gate's own passes there, through `judgeAuthoredSiteExpression` (`@objectstack/lint`), as the runtime publish gate judges a flow write, the door a flow saved through MCP or Studio meets:
+  
+  - an error on a record-triggered flow: a nullable field read as `record.FIELD` or `previous.FIELD` without a null guard (`record.days > 3` with `days` neither required nor defaulted), the run failing at the condition;
+  - a warning on any flow bound to an object: a read of an injected system column an external object has no storage behind (`record.owner_id` on an ADR-0015 `external` object).
+  
+  At a flow condition the verdict is that door's, not `os validate`'s: `os validate` also judges a bare name's null guard (`days > 3`) and a root the run does not bind, over the whole flow's variables, node ids and entrances, which the tool is not handed. The door itself also warns when a field is read bare under a name a flow variable shares; the tool is never handed the flow's variables, so it cannot give that warning. Write `record.FIELD` to be judged here.
+  
+  Two new optional inputs:
+  
+  - `startCondition` (`site: 'flow_condition'` only): the flow's start condition, for an edge or `decision` branch condition after it. What it proves non-null holds downstream, as at the gate, so `record.days > 3` after a start condition `record.days != null` is accepted. Omitted, the condition is judged as the start condition itself.
+  - `field` (`site: 'formula'` only, a snake_case field name): the field the expression is authored on. A field the caller is served keeps its definition with the expression in place: a stored field (any type but `formula`) gets the gate's stored-expression warnings (a read of another record, the clock, the acting user or a permission), and a formula field is refused when it would close a formula cycle. Any other name, a field masked from the caller included, is judged as a new formula field, so the answer never says whether a hidden field exists. A stored field that is not declared yet gets its stored-expression warnings once it is declared.
+  
+  Each finding is the gate's sentence, at the gate's severity. An expression the gate accepts answers exactly as before. A sentence that names the condition names it `flow 'this flow' · edge 'this condition' (start→end) condition`, since the tool is handed the condition and not the flow it will sit in.
+  
+  - `@objectstack/mcp`: the two inputs, the flow-condition judgment (it reads the subject's served definition alone there; nothing hydrates a hop at a flow condition), the tool description and the served `SKILL.md` line.
+  - `@objectstack/lint`: `judgeAuthoredSiteExpression` takes `site: 'flow_condition'` with `triggerKind`, `sweepObject` and `startCondition`, and `field` at `site: 'formula'`; exports `AUTHORED_FLOW_NAME`, `AUTHORED_CONDITION_ID` and the `AuthoredFlowTrigger` type. The gate's verdicts are unchanged.
+  - `@object-ui/console`: the downloadable `SKILL.md` mirror carries the same line.
+- f45c012: fix(mcp): stdio `describe_object` and the objects resource judge `readonly` on the declared field
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Over stdio and on the `objectstack://objects/{name}` resource, a stored field that declares an `expression` the caller is not shown (it names a field they cannot read) was described `readonly: false`, so an agent could send a value the engine then replaced. `readonly` is now judged on the field as declared, as the HTTP `/mcp` door judges it, so that field answers `readonly: true` on every transport. The expression itself, and the field it names, are still not served: only the `readonly` answer is read from the declaration.
+- 9f736f2: fix(mcp): `validate_expression` takes the flow's declared `variables` at a `flow_condition`, so a bare name binds as the flow binds it and the shadowed-read warning comes back
+  
+  Clause-②: yes (widening) — the MCP `validate_expression` tool accepts a new optional input, `variables`, at `site: 'flow_condition'`, a call its closed input refused before; without it every answer is unchanged.
+  Metadata-protocol: none
+  
+  A flow run binds its declared variables before it flattens the trigger record's fields, so a bare name a variable shares with a field reads the variable, and the runtime flow publish door warns about it (a bare read of a name that is both a declared flow variable and a field). `validate_expression` was never handed the flow's variables: it typed such a bare name as the field, and it could not give that warning.
+  
+  - `variables` (`site: 'flow_condition'` only): the flow's declared `variables`, in the flow's own shape (`FlowVariableSchema`: a `name` and a `type` at least), so a flow's `variables` array can be handed over as it stands; a malformed one is refused with the spec's own sentence. Given them, a bare read of a declared variable is not typed as the field (the shared validator's `flowVariables`, as the gate hands it on the same flow), and a variable named like a field of `objectName` read bare gets the gate's own shadowed-read warning. `record.FIELD` still reads the field and is judged as before. On another site the input is refused, like `startCondition`.
+  - Without `variables`, the answer is byte for byte what it was, and the tool description says the shadowed-read warning needs them.
+  - `@objectstack/lint`: `judgeAuthoredSiteExpression` takes an optional `variables` (a new optional key on the exported `AuthoredSiteExpression` type), which its one-flow probe declares. The gate's verdicts are unchanged.
+- 3eac63a: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The MCP read tools (`list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_records`) now admit a system object whose author declared `enable.aiReadable: true`, asked through a new optional bridge member `aiReadExposed` that both bridges answer with `isAiReadExposed`. Every gate after admission is unchanged (the caller's permissions, row-level security, the object's own read gates, field masking), and every write tool still refuses every `sys_*` object. `sys_approval_request` declares the key; `query_records` names the "waiting on you" filter shape.
+  
+  The member baseline `member_default` now names `sys_approval_request` read-only, so every signed-in member holds a data-door read on it; which rows is still the approvals request read gate (the submitter, a current approver, a past actor), and no write opens. That gate now answers a conjunctive `pending_approvers` `$contains` of the caller's own id with the approvals service's acting-address fold, so the console's My Pending view and an agent's "waiting on me" query find a slot addressed by email or an unstaffed position, not only one holding the user id. A `pending_approvers` predicate naming another id, or under `$or`, is read as written.
+  
+  `@objectstack/plugin-audit`: the activity and audit copies of an approval request are hardened: a ledger copy holds no value that its owner narrows per reader. New copies no longer carry the request's subject snapshot, and `migrateSideCopies` / `migrateArchivedSideCopies` rewrite the copies at rest. Both ledgers' read redactions drop it from an older copy whether or not the rewrite has run.
+  
+  **Who can query those copies narrows.** A non-system query on `sys_activity` or `sys_audit_log` that names `sys_approval_request` by equality on `object_name` and names a column holding the copy (`metadata`; `old_value`, `new_value`), as a free-text search does, is now judged against every registered object, as a query naming no object already is. A reader withheld any field of any object, an organization administrator included, is refused it (`403`) where they were answered before. The same query pinned to another object, or naming only other columns, is judged as before. This does not depend on the rewrite having run.
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a83c366]
+- Updated dependencies [5c005e0]
+- Updated dependencies [dd4ce50]
+- Updated dependencies [6e4a203]
+- Updated dependencies [796e9d4]
+- Updated dependencies [c09320d]
+- Updated dependencies [a1604ce]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [4c15268]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [8835532]
+- Updated dependencies [27d042f]
+- Updated dependencies [9f736f2]
+- Updated dependencies [633d8c4]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/core@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/lint@18.5.0
+  - @objectstack/formula@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/metadata-core@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

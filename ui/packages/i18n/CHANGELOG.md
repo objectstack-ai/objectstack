@@ -1,5 +1,40 @@
 # @object-ui/i18n
 
+## 18.5.0
+
+### Patch Changes
+
+- f5121e8: fix(i18n): the Connect page says an AI assistant connected with an API key works with records and actions only and cannot build apps
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The API-keys section of the Connect page (`connectAgent.apiKey.body`) and the four client hints that fall back to an API key when a client offers no browser sign-in (`connectAgent.codex.hint`, `connectAgent.workbuddy.hint`, `connectAgent.doubao.hint`, `connectAgent.qwenwork.hint`) now say, in all eleven platform locales, that an assistant connected with a key works with records and actions only and cannot build apps. That is what the server does: an API key's grant never admits the authoring tools, on every deployment. The copy promises building nowhere, so it stays true on a deployment that mounts no build door. Only values of existing keys change; zh-Hant is regenerated from zh-Hans.
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @object-ui/core@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

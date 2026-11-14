@@ -1,5 +1,38 @@
 # @objectstack/skills
 
+## 18.5.0
+
+### Patch Changes
+
+- 6c5d31f: docs(spec,skills): `SkillSchema.tools` is described as what it now does on an MCP server, not as inert in the open framework
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Since 18.4.0 the prompt surface `registerSkillPrompts` (`@objectstack/mcp`) installs offers a skill on `prompts/list` and `prompts/get` only when the server it is installed on lists every tool the skill binds. The published texts still said the binding was authored for the cloud runtime and inert in the open framework, or that every skill with instructions is served to any connected client. They now state the rule; no schema, accept set or behaviour changes.
+  
+  - **`@objectstack/spec`**: the `SkillSchema` class JSDoc, the `tools` JSDoc and its describe text (so the generated JSON Schema description and the skill reference page), plus one clause on the `instructions` JSDoc. `tools` is bound by the cloud agent runtime and read by MCP: a plain name is served by a tool of that name, a trailing wildcard by any listed tool it matches, and an `action_<name>` entry (or `action_*`) also by `run_action`. A skill that binds no tool is offered as before, and `prompts/get` answers a withheld skill as it answers a prompt name no skill derives. The rule reaches every server `registerSkillPrompts` is installed on, `MCPServerRuntime`'s HTTP door and a host's own `McpServer` alike, stdio included; `MCPServerRuntime.bridgePrompts`, which projects skills onto the long-lived server without it, applies no such filter. `surface` and `triggerConditions` stay cloud-runtime-only.
+  - **`@objectstack/skills`** (`objectstack-ai`): the built-in-skills note says the same, and the `instructions` row calls it the one field the open edition serves, since the open edition now reads `tools` as well.
+  - **`@objectstack/spec`**, liveness ledger (`liveness/skill.json`): the `tools` entry cites its in-repo reader, `skillBindingServed` in `packages/mcp/src/skill-prompts.ts`, beside the cloud readers, and its note no longer calls the key cloud-runtime-only.
+  - **`@objectstack/mcp`**: the README's Prompts section says which servers apply the rule. `bridgePrompts` lists every skill that carries instructions on the long-lived server; the HTTP door and any server a host installs `registerSkillPrompts` on offer a skill only when that server lists every tool it binds.
+  - The agents guide (`content/docs/ai/agents.mdx`) carries the rule under its two-halves table and advises binding a skill only to tools its intended connections serve. The MCP connection guide (`content/docs/ai/connect-mcp.mdx`) says a skill is offered only where its tools are: its example skill, bound to `query_records` and `action_resolve_case`, is not offered to a token without the `actions:execute` scope, which lists no `run_action`.
+- f588614: docs(skills): the formula skill's Want/Write table names the hours-between form
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-formula/SKILL.md` gains one row, "Hours between" → `double((datetime(record.end_at) - datetime(record.start_at)).getMinutes()) / 60.0`, beside `daysBetween` (whole days), and the date-arithmetic note names that form as the hours exception. It is the same form the date-subtraction refusals now name (#32980's fix); no authorable surface changes.
+- 6a28a27: docs(skills): the navigation rule teaches the approvals inbox entry the way the platform's Account app writes it, gated on the approvals service
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack-ui`'s navigation rule taught the approvals entry as a `type: 'object'` item on `sys_approval_request` gated by `requiresObject: 'sys_approval_request'`. An app that copied it hid the entry from every non-administrator approver until some approval request already involved them: the object metadata read answers 404 to them until then, and the console prunes a `requiresObject` entry against the objects it is served. The rule now teaches the inbox component, `{ type: 'component', componentRef: 'approvals:inbox', requiresService: 'approvals' }` (the shape of `nav_account_approvals` in `@objectstack/platform-objects`), which the server keeps in the served navigation whenever plugin-approvals registers its `approvals` service, and says in one line why `requiresObject` is wrong here. The matching eval expects the same shape. No schema or runtime change.
+- b440ffb: The data-hooks reference names the two body doors, `ctx.email.send` (`email.send`) and `ctx.activity.append` (`activity.append`), in its sandbox `ctx` table and capability list. A hook body cannot send mail; mail on a record change goes through an action, a job or a flow. An activity entry's `type` is the app's own value, never a platform type, and the call stays outside `ctx.api.transaction`.
+  
+  Clause-②: no
+  Metadata-protocol: none
+
 ## 18.4.0
 
 ### Minor Changes

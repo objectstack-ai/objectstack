@@ -1,5 +1,55 @@
 # @objectstack/example-showcase
 
+## 0.3.27
+
+### Patch Changes
+
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [66919b6]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [28a2f0f]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [d635599]
+- Updated dependencies [6718884]
+- Updated dependencies [16e3486]
+- Updated dependencies [5e250a6]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [01d206d]
+- Updated dependencies [01d206d]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [a752057]
+- Updated dependencies [1bed853]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [e997113]
+- Updated dependencies [3eac63a]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/runtime@18.5.0
+  - @objectstack/driver-sql@18.5.0
+  - @objectstack/cloud-connection@18.5.0
+  - @objectstack/connector-mcp@18.5.0
+  - @objectstack/connector-openapi@18.5.0
+  - @objectstack/connector-rest@18.5.0
+  - @objectstack/connector-slack@18.5.0
+  - @objectstack/service-datasource@18.5.0
+  - @objectstack/organizations@18.5.0
+  - @objectstack/service-i18n@18.5.0
+  - @objectstack/service-print@18.5.0
+
 ## 0.3.26
 
 ### Patch Changes

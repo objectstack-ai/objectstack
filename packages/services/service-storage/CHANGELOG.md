@@ -1,5 +1,124 @@
 # @objectstack/service-storage
 
+## 18.5.0
+
+### Patch Changes
+
+- 6718884: feat(storage,mcp): an upload link for a file field of a record not yet created, so an agent can create a record whose file field is required
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `create_upload_link` takes no `recordId` when it names a `field`: the link names the object and the file field only, and its answer carries `fileIds`, the id the upload is stored under. The user opens the link signed in and uploads; the agent then calls `create_record` with the field set to `fileIds[0]`. An expense line with a required e-invoice is created in two agent calls and one upload, and the field's `required` rule is unchanged.
+  
+  Minting such a link asks the object's create permission for the user, and the field must be writable for them and not read-only; an attachments link still needs its record. The upload is checked against the field's `accept` and `maxSize` before the link is spent. The stored file is bound to the uploading user, the object and the field for one hour: until a record holds it, only that user's own write, into that field of that object, may use it, and within the hour no second record may take it while the first holds it. The uploader's write into another field or object, or after the hour, is refused at the field with the reason; another user's or a system write is refused as a file they cannot open. Once the hour has passed with a record holding it, or once a record lets it go, it is judged as any other record's file. Before the upload, the id takes no write but the uploader's, which is refused as an upload that never completed. Until a record has held the file, only its uploader may download it. The page the link opens says the file was received, and tells the user to go back to the assistant.
+  
+  `fileIds` is an array so that a link for several files can answer several ids without a new key. Hosts whose storage service predates this keep `recordId` required on the tool, and the agent skill teaches the no-record form only where the host serves it.
+- de31809: feat(service-storage): the upload-link page names the record and the field for the link's own user, and shows the expiry in the reader's time zone
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The page an upload link opens (`GET /api/v1/storage/upload-links/:token`, handed out by MCP `create_upload_link`) now shows two rows for the signed-in user the link was made for: `Record` (the object's label and the record's title, for example `Expense "Taxi 11-12"`) and `Goes into` (the field's label, or `Attachments`). A link for a record not yet created shows the object's label and the field. Every name is read as that user when the page opens, through the same record read and the same field-level answers their own read gets, and in the page's language. A title the user is served masked or cannot read, or a display field that is not text (a lookup, user or select field, which serves an id or a machine value), is left out and the row shows the object's label only; a field they cannot read loses its row. The page never shows an id, an API name, a user or an organization, and the browser tab title stays generic. A record the user can no longer read, or a user no longer in the organization, gets the same 404 page a used, expired or someone else's link gets.
+  
+  The expiry is rewritten in the reader's own time zone, and once it has passed the page says the link has expired and disables Send, judged on the server's clock; once Send is pressed the page's line belongs to the upload, so a file that landed is never followed by "expired". The server's single refusal for an unusable link is unchanged.
+- 5e250a6: feat(storage,mcp): one upload link takes several files on a multi-file field
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A link `create_upload_link` makes for a file field declared `multiple: true` now takes several files in its one use: the user picks up to 10 on the link's page and sends them together, and each file gets its own file id. "Here are my three invoices" is one link and one pick instead of three. A single-file field link and an attachments link take one file, as before.
+  
+  On a multi-file field's link, one send spends the link once, and every file in it, however many the send carries, is checked before that: the workspace's maximum upload size, and the field's own `accept` and `maxSize`. One file the field cannot take, or more than 10 files (`400` `VALIDATION_ERROR`), refuses the whole send, stores nothing and leaves the link usable. After that the field gains all the files in one write, or none: a failure storing any of them, or the record's write refusing (a pending approval's lock, say), discards every file of the send, so the record shows what it held before and no file of the send is left.
+  
+  For a record not yet created, `create_upload_link` takes `count` (how many files, up to 10) with a multi-file field, and answers that many `fileIds` at once; the user picks exactly that many, and the agent creates the record with the field set to `fileIds`. Each id keeps the rules a single upload's id has: only that user's own write, into that field of that object, in one record, within an hour of the upload. Before the upload, every write naming one of the ids is refused, the uploader's own included, and nothing serves it.
+  
+  The link's page takes several files where the link does, in every language it is served in. The send is one form (`multipart/form-data`, marked by the header `x-upload-link-form: several`) carrying `count` and `file0` … `fileN-1`, and only a link that takes several files reads it. Any other body, on any link (a multipart one without that header included), is the file itself, whatever its content type, under the same limit and with the same checks as before. Every successful answer now also carries `fileIds`.
+- 5430b4a: fix(service-storage)!: an upload link is refused at issue for a file field whose `readonlyWhen` holds now (#32768)
+  
+  Clause-②: yes (narrowing) — `create_upload_link` (`createUploadLinkAs`) issues no link for a file field whose `readonlyWhen` holds on the record as it stands, where it issued one and the upload was refused when it arrived. The engine gains one write-free judgement, `ObjectQL#judgeFieldWriteLock` (widening).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored shape changes. The refusal is the existing FIELD_NOT_ACCESSIBLE 403 the link door already answers for a static readonly field, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller that minted an upload link onto a file field while its `readonlyWhen` held.
+  
+  FROM: `create_upload_link` answered a link, and the upload through it was refused when it arrived (`403 FIELD_NOT_ACCESSIBLE`, "Nothing was attached: …", since #32734), after the person had picked and sent the file.
+  TO: the call itself is refused, `403 FIELD_NOT_ACCESSIBLE`, `You cannot attach a file to OBJECT.FIELD: the field is read-only in the target record's current state (a TRUE \`readonlyWhen\` predicate).`, and no link is written. The fix for a caller: mint the link once the record's state unlocks the field, or use the record's attachments, which carry no field lock and are unchanged.
+  
+  The verdict is the engine's own: `ObjectQL#judgeFieldWriteLock(object, id, field, { context })` runs the update's `readonlyWhen` strip over the update's stored-row read and master-detail header, without writing, and answers the reason the update reports the field under (`readonly_when`) with the words its strict refusal uses. A field with no `readonlyWhen` costs no read. A static `readonly` field and a record a pending approval locks are refused at issue as before.
+- 932eab5: Clause-②: no
+  Metadata-protocol: none
+  
+  `create_upload_link`'s description now says which link each refusal applies to: a field link gets no link for a read-only field (`readonly`, or a `readonlyWhen` that holds on the record now) or for a record a pending approval locks, while an attachments link asks only what attaching asks, so a locked record still takes attachments. The upload-link page and upload doors now answer a refusal's `error.code` from the closed ADR-0112 vocabulary: a producer's unregistered spelling is answered as the code its status derives, with the spelling beside it as `declaredCode`, as the upload commit door already answers it.
+- fd7b378: fix(service-storage): a chunked-upload completion retried after it succeeded answers the same 200, and a completed upload takes no more chunks
+  
+  Clause-②: yes (narrowing) — widened: `POST /api/v1/storage/upload/chunked/:uploadId/complete` on an upload that has already completed answers `200` with the same body the first completion answered (file id, key, size, MIME type, URL), where it answered `500 INTERNAL` and stamped the session `failed`. Narrowed: `PUT /api/v1/storage/upload/chunked/:uploadId/chunk/:chunkIndex` on a completed upload answers `409 RESOURCE_CONFLICT`, where it stored the chunk for no file and answered `200`. A session in flight, `failed` or `expired` answers both doors as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or export is added, removed or re-shaped. The moved answers are two storage doors' answers about a completed upload session, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  A client that lost the `200` of a completion and sent it again (the SDK's `resumeUpload` retries this way) was told the upload failed, and the upload's progress read `failed`, while the file stayed committed and downloadable. The retry now writes nothing and does not reach the storage backend; it is still judged against the parts the upload holds, so a retry naming a chunk the upload does not hold is refused `409` as before. To send another file after a completed upload, start a new chunked upload.
+- a3a3cea: fix(service-storage): a file uploaded through an upload link that named no record, and that no record took, is now reclaimed
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An upload link can name an object and a file field with no record: the user uploads, and the agent then creates the record naming the file id. When the agent or the user stopped after the upload, the file stayed in storage for good, because the `sys_file` sweep only reclaims tombstoned rows and never-completed uploads. Such a file now lands `committed` with `deleted_at` set to the upload time, which puts it on the `sys_file` lifecycle's existing 30-day ttl. The write that names the file clears it. At the sweep, the `sys_file` reap guard reclaims the row and its bytes only when no record or attachment holds the file, no record ever held it, and its one-hour claim window has passed, and only on a deployment whose file-as-reference migration is verified. Right before the bytes go, the guard reads the row again and judges it over, and a record of the bound object whose bound field holds the id also keeps the file, even when no claim recorded it. A file a record names is kept, and its `deleted_at` is cleared. No sweeper or setting is added. Files uploaded before this release carry no `deleted_at` and are not touched. Uploads made through the console are not touched either.
+- 67274ac: fix(plugin-hono-server, hono)!: a request body over the server's limit is answered 413 PAYLOAD_TOO_LARGE and is not read past the limit
+  
+  Clause-②: yes (narrowing) — a JSON, form or other body over 10 MiB that both HTTP doors read today is answered `413 PAYLOAD_TOO_LARGE`, unread past the limit, unless an operator raises the limit. The published surface also widens: `HonoPluginOptions.maxRequestBodyBytes`, `createHonoApp`'s `maxRequestBodyBytes` option, `HonoHttpServer.setMaxRequestBodyBytes()` / `getMaxRequestBodyBytes()`, the `OS_HTTP_MAX_BODY_BYTES` environment variable, and the `body-limit` exports of `@objectstack/plugin-hono-server`.
+  Metadata-protocol: none
+  Skills-docs: follow-up owed — content/docs/api/error-catalog.mdx (the `VALIDATION_ERROR` callout) and content/docs/protocol/kernel/error-handling.mdx (the 413 row) list the causes of `413 PAYLOAD_TOO_LARGE` and do not yet name a request body over the server's limit, nor `maxRequestBodyBytes` / `OS_HTTP_MAX_BODY_BYTES`; no file under `skills/**` teaches a request-body limit.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata an author writes changes and no stored row is rewritten: the limit bounds what the HTTP doors read from a request, and an operator raises it with an option or an environment variable -->
+  
+  **BREAKING** for a client that sends a JSON, form or other request body over 10 MiB to a data, API or auth route: that request is now answered `413 PAYLOAD_TOO_LARGE` instead of being read.
+  
+  - **Who moves.** The operator of a deployment whose clients send bodies that large. Raise the limit: `maxRequestBodyBytes` (in bytes) on `HonoServerPlugin` or `createHonoApp`, `HonoHttpServer.setMaxRequestBodyBytes()` on an embedded adapter, or the `OS_HTTP_MAX_BODY_BYTES` environment variable. Or send the content as a file through a storage upload door, which keeps its own limit.
+  - **File uploads** through the storage doors (the presigned raw PUT, the chunk PUT and the upload link, one file or several) see no change: they stay bounded by `max_upload_mb`.
+  
+  Both HTTP doors, the self-hosted server (`@objectstack/plugin-hono-server`) and `createHonoApp` (`@objectstack/hono`), now hold one request-body limit, 10 MiB by default. A request that declares a `Content-Length` over the limit is not read at all. A body with no declared length is counted while it is read, and reading stops once it passes the limit. In both cases the request is answered `413` with the registered code `PAYLOAD_TOO_LARGE`. A body of exactly the limit is read as before. The limit covers every reader of the body, not only the doors' own JSON and form parsing: routes mounted on the raw Hono app, and requests the doors forward whole to the auth service or to a domain, read through it as well. A route that never reads the body still reads nothing.
+  
+  To change the limit, set `maxRequestBodyBytes` (in bytes) on `HonoServerPlugin`, call `HonoHttpServer.setMaxRequestBodyBytes()` on an embedded adapter, or pass `maxRequestBodyBytes` to `createHonoApp`. Without an option, the `OS_HTTP_MAX_BODY_BYTES` environment variable sets it. A value that is not a positive whole number of bytes fails the boot instead of serving with no limit or the wrong one.
+  
+  Upload doors keep their own limit. The storage byte doors (the presigned raw PUT, the chunk PUT and the upload-link PUT) read the raw bytes through `IHttpRequest.rawBody()`, which still serves the whole body, so a file is bounded by the storage `max_upload_mb` setting exactly as before, even when that is larger than the request-body limit.
+  
+  The upload link's several-file form is bounded by that door's own form limit (each file within `max_upload_mb`, times the files the link takes, plus the form's framing), not by the request-body limit. A route that is refused `req.body` for size and then reads `rawBody()` takes the read over under its own bound, and its own answer stands.
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [6a36b79]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [633d8c4]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/core@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/service-cluster@18.5.0
+  - @objectstack/observability@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

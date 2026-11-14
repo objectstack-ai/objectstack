@@ -1,5 +1,52 @@
 # @objectstack/scenarios
 
+## 18.5.0
+
+### Patch Changes
+
+- 4c9104e: fix(scenarios): the run grader reads a not-found answer over a hidden object as a refusal, not a leak
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A persona whose permissions hide an object gets, from `describe_object` (and `validate_expression`), the plain tool error `Object "NAME" not found`: the same answer a name nobody declared gets, so nothing about the object is served. The run grader's leak reading did not recognise that sentence, so a call that got it was counted as "answered over hidden object NAME", and a correct decline failed its leak axis (`gallery-refresh` then refused to export the run).
+  
+  The grader now reads that answer as a refusal when the whole tool output is exactly that sentence for the object the call named. A body that only contains the words (rows whose text says "not found", or the sentence for another object) is still judged as an answer, and a call that answered a schema, fields or rows over a hidden object is still a leak. The data tools' not-found answers (`get_record`, `query_records`: a coded `{ "error": { "code": … } }` envelope) were already read as refusals and are unchanged.
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/objectql@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/formula@18.5.0
+  - @objectstack/plugin-sharing@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

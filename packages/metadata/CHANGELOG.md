@@ -1,5 +1,125 @@
 # @objectstack/metadata
 
+## 18.5.0
+
+### Minor Changes
+
+- c747cf0: feat(objectql)!: two packages of two namespaces may each ship a tool of the same name, and the metadata service keeps each package's tool under its own (package, name) slot (ADR-0150 child B)
+  
+  Clause-②: yes (narrowing) — widened: the engine's package door (`SchemaRegistry.installPackage`), its item seam (`SchemaRegistry.registerItem`) and the cold boot's holder seal (`SchemaRegistry.sealBareNameHolders`) accept, for a tool, a second package holder they refused before: one that declares a namespace other than the holder's. Narrowed: `tool` joins `PACKAGE_SLOTTED_STORE_TYPES` (`@objectstack/metadata`) in the same change, as that set's rule requires, so the metadata service's in-process answers for a tool move the way they moved for the other types stored per package: (1) `MetadataManager.get('tool', NAME)` and `getDiagnosed` naming no package, of a name two packages hold, are refused `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming both) where they answered the item registered (or saved) last; (2) `get('tool', NAME, PKG)` and `getDiagnosed`, where `PKG` holds no slot of the name and another package does, answer `undefined` where they answered the stored item (the one holder's, or the survivor of two); (3) `unregister('tool', NAME)` naming no package, of a name two packages hold, is refused the same way before anything is deleted or announced, and so is a rollback of a name whose rows are two packages', or one package's beside the name's package-less row; (4) `DatabaseLoader.delete` naming no package of a name two packages hold is refused, where it deleted the first row; (5) `MetadataManager.getHistory`, `diff` and `rollback` of a tool name two packages saved through `DatabaseLoader`, naming no package, are refused `409 RESOURCE_CONFLICT` naming both, where they answered every version of the one row both saves wrote, and a rollback to a version a removed package wrote is refused where it wrote that version into the remaining holder's row. First-party callers of these in-process reads and writes for a tool in this repo: 0 (no production source calls `get`, `getDiagnosed`, `unregister`, `getHistory`, `diff` or `rollback` with the literal type `tool`; first-party tool records in `examples/`: 0). On a booted stack no HTTP or MCP door moves from served to refused: `/meta/tool/NAME` reads through the registry's `resolveItem`, which already resolved a tool by `(package, name)` (ADR-0150 child E8), and on both HTTP transports `/meta/tool/NAME/layers` asks that plain read before it serves a layer, so a bare layered read of a two-holder name is refused `409` naming both whether or not the metadata service keeps both copies (measured with `tool` taken back out of `PACKAGE_SLOTTED_STORE_TYPES`: still `409`). The cloud's calls on the metadata service for type `tool` (a fixed-name existence probe, and AI Studio's register and retract of its built-in tool mirror, cloud reading 6837767385) are outside this count and carried to the cloud with the resolver obligation below.
+  Metadata-protocol: added
+  
+  <!-- adr-0087: registered tool-names-per-namespace -->
+  
+  **BREAKING** for five in-process answers of the metadata service for a tool (first-party count in this repo: 0), listed above under the declaration line. The fix for each:
+  
+  - FROM `get('tool', NAME)` of a two-holder name TO `get('tool', NAME, PKG)`, a package the refusal names.
+  - FROM `get('tool', NAME, PKG)` for a package that does not hold the name TO `get('tool', NAME, HOLDER)`, the holding package (the bare read's refusal, or `list`, names it).
+  - FROM `unregister('tool', NAME)` of a two-holder name TO `unregister('tool', NAME, { packageId })`, or `unregisterPackage(PKG)`.
+  - FROM a rollback or a `DatabaseLoader.delete` by name of a two-holder name TO the same call naming the package, or removing the extra row first.
+  - FROM `getHistory('tool', NAME)` / `diff('tool', NAME, …)` of a name two packages saved TO the same call with `{ packageId }`, once per package.
+  
+  The bare-name one-holder rule (`bare-name-one-holder.ts`) has narrowed for `tool` from one package holder per deployment to one per namespace (ADR-0150 D2, D9), as it did for `agent`, `skill`, the object-less `action`, `email_template`, `flow`, the picklist family and `webhook`. The switch, `NAMESPACE_SCOPED_BARE_NAME_TYPES`, lives in `@objectstack/core` (`package-scoped-resolution.ts`) and `@objectstack/objectql` re-exports it under the same name. A package's `tool` record has one by-name reader, `GET /meta/tool/NAME`, which already answers by `(package, name)`: it refuses `409 RESOURCE_CONFLICT` naming every served holder when two packages hold the name, and `?package=ID` and `/meta/tool/NAMESPACE/NAME` serve that package's own. A disabled package holds no name for that read (ADR-0150 D3): of two namespaces' holders, one disabled, the bare read serves the enabled one, and refuses naming both again once it is re-enabled. The install door still counts every installed holder, disabled or not. So a package no longer has to rename a tool because a package of another namespace already ships one of that name.
+  
+  The metadata service stores a tool per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`, now `api`, `agent`, `skill`, `action`, `email_template`, `permission`, `flow`, `picklist`, `mapping`, `dataset`, `webhook` and `tool`), by the rules `package-slotted-store.ts` already applies to the others:
+  
+  - The in-memory store keeps both packages' tools of one name; `list('tool')`, `loadMany('tool')` and `loadManyKeyed('tool')` answer both, where they answered the survivor. `GET /meta/tool` listed both packages' tools before this change and still does.
+  - `DatabaseLoader.save` of a tool: FROM one `sys_metadata` row per name with `package_id` empty TO one row per `(package, name)` with `package_id` filled; versions are numbered per name across the packages' rows, and each history row records the package whose row it snapshots. A legacy tool row the loader wrote before this release binds on its package's next save, or through `migrateDatabaseLoaderRowPackages(driver)` (`@objectstack/metadata/migrations`), which now covers `tool` rows too and can be re-run any number of times; the semantic entry `tool-names-per-namespace` registers it in the upgrade guide (ADR-0087).
+  - Unchanged, and now pinned for a tool on an artifact boot (`os dev`, `os start`): `GET /meta/tool/NAME/layers?package=PKG`, for a name two packages hold, serves that package's own code and effective layer. The layered read already judged the code layer at the exact address on the base, and the pin stays green with `tool` taken back out of `PACKAGE_SLOTTED_STORE_TYPES`.
+  - A composition whose metadata engine reads a tool through `getItem` (its registry's `readsByPackage('tool')` answers `false`) now refuses a bare `/meta/tool/NAME` read `501 NOT_IMPLEMENTED`, as it refuses every narrowed type it cannot judge. `SchemaRegistry` answers `true` for `tool` (ADR-0150 child E8), so no in-repo composition moves.
+  
+  Also moved, by the same rules `package-slotted-store.ts` and the replica lane already apply to every type in `PACKAGE_SLOTTED_STORE_TYPES`:
+  
+  - Replica convergence on a cluster signal for a tool: a signal naming a package FROM the first row the store returned by name TO that package's row; an unstamped signal (a writer that predates `packageId`) of a name whose active rows are bound to two or more packages FROM the first row TO a logged stop that keeps the ledger entry for the next resync (#32451).
+  - The boot priming pass (`@objectstack/metadata` plugin): a package-less stored tool row FROM stamped with the host's package TO left unstamped (#32812's rule for every type stored per `(package, name)`), so it is filed as its one holder's customization or the environment's own item, and under a name two packages hold as no holder's own (ADR-0150 D4).
+  - The protocol's in-process layered read (`getMetaItemLayered`) with a bare tool name on an artifact boot (`os dev`, `os start`), where the metadata service keeps both packages' copies: FROM the holder registered last TO `409` naming both, with the metadata service's bare read.
+  
+  Not moved by this change, and carried (both already reach every narrowed type):
+  
+  - The boot hydration of stored rows: two stored tool rows of one name, each naming its holder, leave only the one loaded last in the registry (the second case #32692 names for a webhook; #33127 carries it for every type stored per `(package, name)`, `tool` included). A package-less stored tool row is no longer grafted onto any holder's slot: a tool is a sealed type (no environment overlay), so since #32741 that row is declined at each holder's exact address, plain and layered, before and after the read-side hydrator, in both registration orders, and each address serves its own (pinned for a tool by name, unit and booted).
+  - The protocol's in-process layered read (`getMetaItemLayered`, called with a bare name and no package) runs no two-holder judgement of its own: where the metadata service gives it no copy of the tool, it falls back to the registry's by-name artifact lookup and answers the first-registered holder (#32914). Both HTTP transports refuse that read `409` before serving it (above); an in-process caller, or a host with no door chain, is not refused. Not pinned here for a boot with no service copy.
+  
+  Unchanged, and still refused with the same `422 NAMESPACE_CONFLICT` envelope and sentence:
+  
+  - a second package of the SAME namespace (a co-owner) holding the name: for a tool that is the namespace co-owner rule's `NamespaceNameConflictError` (child N), which judges a tool ahead of this rule at every install, boot included, exactly as before;
+  - a package that declares no namespace, beside any other holder of the name (a disabled one included), and any holder beside it;
+  - two packages of one shareable namespace (`base`, `system`, `sys`) holding the name;
+  - a built-in name (none for a tool: the platform requests no tool record by name).
+  
+  Every covered type not yet narrowed (connector) keeps one package holder per deployment.
+  
+  `os migrate stored-references` no longer lists two namespaces' holders of one tool name among the sealed clashes: they are not a clash.
+  
+  Carried to the cloud: the first cloud change that reads package `tool` records (today none does: the cloud reading of 2026-11-12 on cloud `main@9b50c62e` finds the cloud's tool registry and a skill's `tools` resolving against the AI service's live registry of code-defined tools, never a `tool` record) must resolve a name from the referring item's own package (ADR-0150 D3), refuse a name two packages hold naming every candidate, and never take the first one registered; `packages/spec/liveness/tool.json` records that precondition. The cloud's three bare-name calls on the metadata service for type `tool` (cloud reading 6837767385) are carried with it: a bare removal of a name two packages hold is now refused `409`, so the built-in mirror's retract can be refused where two namespaces each ship a tool named after a built-in. That refusal fails closed and picks no holder.
+
+### Patch Changes
+
+- 4e4b587: fix(metadata): history retention keeps the latest N versions per package for a type stored per `(package, name)`, so one package's saves no longer evict another package's rollback targets
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `HistoryCleanupManager`'s `maxVersions` retention counted a name's history versions per `(type, name)`. For a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`), two packages and the environment each keep their own row of one name, and their snapshots share one version sequence, so a package saved often pushed every other holder's versions past the limit and `runCleanup()` deleted them: the other package had nothing left to roll back to. Retention for those types now keeps the latest `maxVersions` per `(type, name, package_id)`: each package's versions, the environment's versions (the `sys_metadata` marker) and versions recorded under no package (rows written before the `package_id` column existed) are each counted on their own. `getCleanupStats()` counts the same way. Every other type, a name only one package holds, the age-based retention and the `executionPinned` exemption (`flow`, `agent`) are unchanged. A row is only ever deleted now if the old rule would also have deleted it.
+- dd966fc: fix(metadata)!: `MetadataManager.loadMany` takes a by-package name's bodies and packages off the loader's keyed entries, so a boot no longer turns a name two packages hold into one body when another row's body says that name; `loadManyKeyed` entries carry their package (#32680)
+  
+  Clause-②: yes (narrowing) — narrowed: on a host that wires a `DatabaseLoader` (none in the workspace), after the boot priming pass a read naming no package (`MetadataManager.get`, `getDiagnosed`) of an `api`, `agent`, `skill`, `action`, `permission`, `flow`, `picklist`, `mapping`, `dataset` or `tool` name two packages' rows hold, beside another row whose body says that name, is refused `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming both packages), where it served one of those bodies; the same read without the pass already refused. Widened: `MetadataManager.loadManyKeyed` entries carry `packageId` (the package the loader holds the entry for), where they carried the key and the body only.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row changes: what moves is which package a plural read stamps on a body it hands on, which the boot pass then registers, and a field a keyed entry carries beside its body, none of which a stored row records, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for one kind of host: a host that wires a `DatabaseLoader` and, after the boot, reads with no package a name two packages' rows hold while a third row's body also says that name, now gets `409` naming both packages instead of one body. Name the package that holds it, or rename one of the two.
+  
+  What moves, for every unbundled type in `PACKAGE_SLOTTED_STORE_TYPES`, on a loader that holds items per package (`loadManySlots`: `DatabaseLoader`, the artifact door's `MemoryLoader`):
+  
+  - `MetadataManager.loadMany` hands on each of the loader's keyed entries' own bodies, stamped (`_packageId`) with the package the loader holds that entry for when the body carries the entry's key as its `name`, FROM `loader.loadMany`'s bodies paired to the keyed entries by their serialisation. A body the keyed read cannot name (a row whose `name` column is empty) is still handed on after them, unstamped.
+    - A name two packages hold, beside another row whose body says that name: each holder is handed on stamped with its own row's package and the other row's body unstamped, FROM all of them unstamped and the first one alone handed on. The boot pass then fills each package's slot and files the other row's body in the name's bare slot, FROM filing the one body in the bare slot. After the pass a bare read is refused `409` naming both packages, FROM serving that body; for `action` the refusal also names `platform`, as an action name's package-less registry slot no loader stores under that name is counted (the other row is stored under its own key). A read naming either package answers that package's own body, as without the pass.
+    - A name one package holds, beside another row whose body says that name: the holder is handed on stamped with its row's package, FROM unstamped. The boot pass fills the holder's slot, FROM the bare slot, so after the pass a read naming a package that holds no row of the name answers nothing, as without the pass, FROM the holder's body.
+    - A loader whose `loadMany` and `loadManyKeyed` serialise a body differently (key order): both holders of a two-holder name are stamped, FROM neither.
+  - `MetadataManager.loadManyKeyed` entries carry `packageId` where the loader's entry carries one (every type stored per `(package, name)`, `email_template` included), FROM `{ name, data }` alone. objectql's action audit, which reads it, can now tell two packages' entries of one name apart.
+  
+  Not changed: a name one package holds with no other row's body saying it, a name no package holds, and a loader that does not hold items per package (its bodies are handed on as its `loadMany` answers them). `loadMany` and `loadManyKeyed` hand on as many entries as before for every shape above but the two-holder one, where the other row's body is now kept beside both holders.
+- 46a2ecf: fix(metadata): the in-memory store declares a view where it is made, and a refusal of a slot it does not hold names each holder once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Loose ends of the per-member registry keys. No served answer changes.
+  
+  - **Views are declared, not inferred.** A read the registry cannot answer judges a view assembled from the registry's and the loaders' items. A bundled type's slot (`email_template`, one member per `locale`) answers that view's first member, the member its sources wrote last. The store used to infer "this is a view" from "no write was ever recorded on it". It now marks the view where it builds it, so a store that is not a view answers by its write order, as every other read of "written last" does. Every view the manager builds is marked, so each read answers as before.
+  - **One holder, one candidate.** The refusal of a write addressed to a package that holds no slot of the name (`not-held-by-qualifier`, `409`) lists each holder once. One package's two locales, or one package's action bound to two objects, is one candidate, as the other refusals already count it. Its one caller, `DatabaseLoader`'s rollback, keys one row per slot, so its refusals read the same.
+  
+  Pinned with them, unchanged: a second locale of a bundled item is announced `added` and a rewrite of a held locale `changed`, because an email template's identity is `(name, locale)`. A package's first item of a name whose bundle the environment holds takes over that member only, and leaves the environment's other locales the environment's, in the registry, the `MemoryLoader` and `DatabaseLoader` alike. On a host whose `protocol` serves no merged action listing, two packages' same-named action bound to one object is refused: the execution door answers `409` naming both packages and runs nothing, and the activation door writes no ledger row. MCP `list_actions` lists one row per package, and the bare `run_action` is refused naming both.
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [633d8c4]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/core@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/metadata-fs@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

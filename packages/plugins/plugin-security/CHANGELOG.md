@@ -1,5 +1,97 @@
 # @objectstack/plugin-security
 
+## 18.5.0
+
+### Patch Changes
+
+- 1f8ce6e: fix(runtime,plugin-security): the declared-webhook activation door switches one of two holders the namespace address cannot tell apart, and the upgrade report names every withheld holder
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two holders of one declared webhook name that the namespace address cannot tell apart, two packages co-owning one namespace or a package that declares no namespace beside another holder, are both dispatched, but neither could be switched: `POST /api/v1/security/_activation/webhook/NAME` and `.../webhook/NS/NAME` both answered `409` naming both. The bare address now takes `?package=PKG`, the exact qualifier `/meta` reads, and switches exactly PKG's declaration, writing PKG's own activation row and no other.
+  
+  - FROM `400 VALIDATION_ERROR` (unknown query parameter) TO `200` writing PKG's row, `data.packageId` = PKG, for `POST /security/_activation/webhook/NAME?package=PKG` when PKG declares NAME and is enabled.
+  - A PKG that does not serve NAME (a disabled package included) answers `409 RESOURCE_CONFLICT` naming the holders that do, or `404` when no enabled package declares it. Nothing is written.
+  - `package` is the only query parameter of the bare webhook address; the namespace address takes none, and an empty or repeated `package` is `400`, as on the permission-set door.
+  
+  The upgrade-impact report's withheld-webhook finding now reports each holder of the name, a disabled second holder included: FROM one finding (the holder the bare artifact lookup answered) TO one finding per holder. Its log lines name each finding's switch, `POST /api/v1/security/_activation/webhook/NAME?package=PKG`, where they named the namespace address. A withheld-webhook finding whose package is disabled is marked `packageDisabled: true` (an added optional field), and the line says to enable that package first: its address answers `409` until then.
+  
+  The `webhook` liveness ledger's `name` evidence (`@objectstack/spec`, text only) names one slot per served `(package, name)` holder and its `declared:PKG/NAME` reference.
+- 6e1ab9b: fix(plugin-security): an OAuth MCP client's `list_objects` resolves the person it acts for once per request, not once per object
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An MCP client signed in with OAuth acts on behalf of a person (ADR-0090 D10). Every object-schema read such a caller makes is the intersection of the client's grants and that person's. `list_objects` asks two questions of every object in the environment: may this caller read the object, and which of its fields. Each question re-read the person's user row, memberships, grants and positions, so one listing cost about 22 database statements per object. Measured on a real kernel, 150 objects took 4620 statements. An environment owner with about 170 objects on a remote database waited tens of seconds, close to a client's 60-second timeout.
+  
+  The security service now resolves that person once per request and reuses the answer for every object, so the same listing costs 11 statements whatever the object count. `describe_object` drops from 22 statements to 11. The answers are byte for byte the same for every caller: the same objects, field counts and order. Signed-in sessions and API keys act for nobody and were not affected.
+  
+  The reuse lasts only as long as the request's context and only until the next write. Revoking a grant or removing a membership retires it at once, inside the same request too. One request now judges the person's time-limited grants at one instant, its first resolution, instead of at each object, so one listing is coherent. No answer moves except one whose grant window closes inside that request.
+- 4a0c480: fix(plugin-security): a declared position rename carries its holders after a hot install too, not only at boot (#33238)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A position that declares `renamedFrom` moves the holders of each old name (`sys_user_position.position`) to the new one, as the system, in every organization. That carry ran only at `kernel:bootstrapped`. It now also runs on `metadata:reloaded` after the boot run, but a reload run judges only the renames declared by what the announcement names as registered at that moment, so the rule that a package never claims an old name it did not own holds on both paths. Within that scope the judgement is the boot's own, over the whole catalog: every refusal (claimed twice, still declared, held or owned by another package, switched off, a disabled claimant) applies the same way. Being idempotent, a run with nothing new moves nothing and writes nothing.
+  
+  Carried at once, without a restart:
+  
+  - a hot install through the marketplace install-local door (`/marketplace/install-local`), for the positions of the package it names (`app/ID`), when the old name is no position the running kernel still serves (for example, an install after the earlier version was uninstalled);
+  - a per-item publish of a position, and a package publish of drafts, for each position they publish (`position/NAME`).
+  
+  Still carried at the next restart, by the boot run:
+  
+  - a hot upgrade over a version the running kernel still serves: its old position keeps serving until the restart, so its holders keep it until then;
+  - the runtime's package install and enable routes, which do not announce `metadata:reloaded`;
+  - an artifact reload, which announces a file path and names no package or position.
+  
+  An uninstall's announcement names a package no longer registered, so a withdrawal carries nothing. A reload heard before the boot run is ignored. Runs never overlap, and a run never fails the door that announced it. A reload run that moves no row does not read the other references it would leave behind, and a warning the run before already gave is not repeated; a move is always reported.
+- 3eac63a: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The MCP read tools (`list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_records`) now admit a system object whose author declared `enable.aiReadable: true`, asked through a new optional bridge member `aiReadExposed` that both bridges answer with `isAiReadExposed`. Every gate after admission is unchanged (the caller's permissions, row-level security, the object's own read gates, field masking), and every write tool still refuses every `sys_*` object. `sys_approval_request` declares the key; `query_records` names the "waiting on you" filter shape.
+  
+  The member baseline `member_default` now names `sys_approval_request` read-only, so every signed-in member holds a data-door read on it; which rows is still the approvals request read gate (the submitter, a current approver, a past actor), and no write opens. That gate now answers a conjunctive `pending_approvers` `$contains` of the caller's own id with the approvals service's acting-address fold, so the console's My Pending view and an agent's "waiting on me" query find a slot addressed by email or an unstaffed position, not only one holding the user id. A `pending_approvers` predicate naming another id, or under `$or`, is read as written.
+  
+  `@objectstack/plugin-audit`: the activity and audit copies of an approval request are hardened: a ledger copy holds no value that its owner narrows per reader. New copies no longer carry the request's subject snapshot, and `migrateSideCopies` / `migrateArchivedSideCopies` rewrite the copies at rest. Both ledgers' read redactions drop it from an older copy whether or not the rewrite has run.
+  
+  **Who can query those copies narrows.** A non-system query on `sys_activity` or `sys_audit_log` that names `sys_approval_request` by equality on `object_name` and names a column holding the copy (`metadata`; `old_value`, `new_value`), as a free-text search does, is now judged against every registered object, as a query naming no object already is. A reader withheld any field of any object, an organization administrator included, is refused it (`403`) where they were answered before. The same query pinned to another object, or naming only other columns, is judged as before. This does not depend on the rewrite having run.
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [6a36b79]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [633d8c4]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/core@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/formula@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/metadata-core@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

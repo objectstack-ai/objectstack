@@ -1,5 +1,19 @@
 # @object-ui/plugin-report
 
+## 18.5.0
+
+### Patch Changes
+
+- Updated dependencies [f5121e8]
+- Updated dependencies [82838e8]
+  - @object-ui/i18n@18.5.0
+  - @object-ui/fields@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

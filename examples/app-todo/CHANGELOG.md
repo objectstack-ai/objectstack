@@ -1,5 +1,67 @@
 # @objectstack/example-todo
 
+## 4.0.105
+
+### Patch Changes
+
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [66919b6]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [28a2f0f]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [d635599]
+- Updated dependencies [4e4b587]
+- Updated dependencies [6a36b79]
+- Updated dependencies [dd966fc]
+- Updated dependencies [6718884]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [46a2ecf]
+- Updated dependencies [5e250a6]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [932eab5]
+- Updated dependencies [84c66d3]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [5844346]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [a752057]
+- Updated dependencies [f45c012]
+- Updated dependencies [1bed853]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [8835532]
+- Updated dependencies [27d042f]
+- Updated dependencies [f45c012]
+- Updated dependencies [9f736f2]
+- Updated dependencies [d4fbb4d]
+- Updated dependencies [e997113]
+- Updated dependencies [3eac63a]
+- Updated dependencies [67274ac]
+  - @objectstack/objectql@18.5.0
+  - @objectstack/metadata@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/runtime@18.5.0
+  - @objectstack/mcp@18.5.0
+  - @objectstack/client@18.5.0
+  - @objectstack/service-knowledge@18.5.0
+  - @objectstack/driver-sqlite-wasm@18.5.0
+  - @objectstack/knowledge-memory@18.5.0
+  - @objectstack/service-i18n@18.5.0
+
 ## 4.0.104
 
 ### Patch Changes

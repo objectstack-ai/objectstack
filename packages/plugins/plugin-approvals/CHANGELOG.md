@@ -1,5 +1,98 @@
 # @objectstack/plugin-approvals
 
+## 18.5.0
+
+### Patch Changes
+
+- b96dd30: fix(approvals)!: an approval request whose flow package was uninstalled never reads another package's flow of the same name (ADR-0150 D8 row R7)
+  
+  Clause-②: yes (narrowing) — an approval request stamped with the package it was opened on (`process_package`), whose package no longer holds a flow of the request's name while another package does, moves FROM reading that other package's flow TO reading none, at four doors: (1) send-back (`POST /approvals/requests/ID/revise`) FROM checking the other package's revise edge (then returning the request on that graph where the run carries the bare name, or refused `409 RESUME_TARGET_LOST` by the run pre-flight where it carries its package's key) TO `409 RESOURCE_CONFLICT` (reason `not-held-by-qualifier`, the stamped package as the qualifier, every holder named) with nothing written; (2) the request read (`GET /approvals/requests/ID`) FROM serving the other package's `flow_route` and `flow_steps` TO serving neither; (3) the stranded-resubmit continuation's revise window FROM the other package's window TO the same `409`; (4) the queue package a re-resolved slate reads a `queue` approver's name from FROM the other package TO none (the environment-wide read a request with no flow takes). The other package is read today through the bare name (the stamped package withdrew from a name two packages held) or through the run's key (the stamped package was the name's one holder, and the other package installed the name after it left). First-party callers in that position: 0 (no first-party package uninstalls a flow that another first-party package ships under the same name). Unchanged: a request whose stamped package still holds the name, beside a second holder or alone, and a request naming no package; with no holder of the name left, every door answers as for a deleted flow, as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row changes shape: what moves is which flow body four approval doors read for a request whose package was uninstalled, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an approval request opened on a package's flow after that package is uninstalled while another package ships a flow of the same name. FROM the request answered from the other package's flow TO refused `409 RESOURCE_CONFLICT`, naming every package that holds the name. The fix: install the request's package again (the refusal names it) to act on the request; nothing else answers it from a flow it was not opened on.
+- 87330e8: fix(plugin-approvals): the schema-read delegate answers "is this member party to any approval request?" with bounded reads, and `sys_approval_action` indexes the columns it filters on (#33046)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `authorizeSchemaRead`, which the object-schema posture asks whenever a member who cannot read `sys_approval_request` / `sys_approval_action` lists or reads object definitions, ran the approvals door's id-collecting participant probe: up to three 10000-row id windows, one of them a scan of `sys_approval_action` on `actor_id` / `acted_as`, which no index covered, then one `$in`. Every metadata list read by such a member paid a cost that grew with the approval history.
+  
+  - The participant rule's reads now live once, as data (`participantProbes`): current approver (the `sys_approval_approver` index), submitter, already acted (`actor_id` is the caller, or `acted_as` is a slot the caller acts under). The approvals door still collects each in its window, with the same reads as before. The schema-read delegate asks each for at most one row and confirms a hit with one row read of its request in the caller's organization.
+  - On the delegate, the already-acted probe is scoped on the action row's own `organization_id`, which every writer stamps from its request and the organization backfill moves with it.
+  - `sys_approval_action` declares two indexes, `(actor_id, organization_id)` and `(acted_as, organization_id)`. Schema sync builds them as it builds the object's other declared indexes.
+  
+  The answer is unchanged: the same members are admitted (the pending approver, the submitter, a past actor, the holder of a slot a decision was taken under, the override holder) and the same members are refused. Two edge cases differ. A member whose participation lay past one of the old 10000-row windows is now admitted, where before the window could hide it. A decision row whose `organization_id` disagrees with its request's is now judged by its own column, which is the state the organization backfill repairs.
+- 0bd902c: fix(plugin-approvals): an out-of-office delegation with an inverted window or the delegator as their own delegate is refused at the write, naming the field
+  
+  Clause-②: yes (narrowing) — narrowed: a `sys_approval_delegation` insert, or an update that moves the compared columns, answers `400 VALIDATION_FAILED` where it was stored, when `valid_until` is at or before `valid_from` (field `valid_until`, rule `validity_window_order`) or when `delegate_id` equals `delegator_id` (field `delegate_id`, rule `delegate_not_delegator`). Both shapes were stored and never rerouted an approval. Nothing widens.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches out-of-office delegation; `content/docs/automation/approvals.mdx` gains the rule in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: the change is two declared validation rules on a platform object's data rows. A row stored with either shape before them was already inert and stays inert, so there is nothing for a migration to rewrite. -->
+  
+  An out-of-office delegation whose window ends at or before it starts, or whose delegate is the delegator, could never reroute an approval, yet the write answered `201` and the delegator believed their approvals were covered. Both are now refused with `400 VALIDATION_FAILED` and a message on the field to correct.
+  
+  Unchanged: a valid window with a different delegate; an open-ended window (either bound empty, or both); and an update that moves neither compared column, so a row stored with either shape before this release still takes unrelated edits.
+  
+  What to do: nothing for a valid delegation. A row stored with an inverted window or a self-delegate stays inert as before: correct its dates or its delegate, or delete it.
+- d4fbb4d: fix(deps)!: hono moves to ^4.13.16 and @hono/node-server to ^2.1.6, the releases that fix seven public advisories; a request path holding a backslash is answered 400
+  
+  Clause-②: yes (narrowing) — `@hono/node-server` 2.1.6 answers `400 Bad Request` to a request whose path (the part before `?`) holds a backslash, before any route runs. Up to 2.1.5 the backslash was rewritten to `/` and the request reached the route that path names. A backslash after `?` is query data and answers as before. One more edge moves in the same transport: a streamed response whose body stream errors within its first two reads used to be sent as a truncated `200`, and is now a `500` (`text/plain`) with the socket closed. Of ours, only a raw stream passthrough (the AI and MCP stream results) can meet it; the SSE path and the adapter's stream writer never error their stream. No other status, header, body or error text of ours moves; the request-body limit (`413 PAYLOAD_TOO_LARGE`) answers as before.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` and no page under `content/docs/**` teaches request-path spelling at the HTTP door; the moved answer is the transport refusing a malformed request line.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type, stored row or export is added, removed, renamed or re-shaped. What moves is the Node transport refusing a request line whose path holds a backslash, so there is nothing for an author or an operator to migrate. -->
+  
+  **BREAKING** for a client that sends a backslash inside a URL path, such as `GET /api/v1/data\account`: the Node server now answers `400 Bad Request` where it used to route the request as `/api/v1/data/account`. Browsers and WHATWG-URL clients (`fetch`, undici) already turn a backslash into `/` before sending; other clients, `curl` among them, send it as written and meet this. Send the path with `/`.
+  
+  The fixed advisories: `hono` GHSA-3gg2-335m-rxc6, GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-4m76-xfj5-7975 and GHSA-h7mg-cq63-vhpq (fixed in 4.13.16); `@hono/node-server` GHSA-jpvv-r467-5p4w and GHSA-qv5m-9pm6-hqp3 (fixed in 2.1.6). The declared ranges move so that a downstream install, which never sees this workspace's overrides, lands on the fixed releases too. The `@objectstack/hono` peer range on `hono` stays `^4.12.8`.
+- 3eac63a: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The MCP read tools (`list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_records`) now admit a system object whose author declared `enable.aiReadable: true`, asked through a new optional bridge member `aiReadExposed` that both bridges answer with `isAiReadExposed`. Every gate after admission is unchanged (the caller's permissions, row-level security, the object's own read gates, field masking), and every write tool still refuses every `sys_*` object. `sys_approval_request` declares the key; `query_records` names the "waiting on you" filter shape.
+  
+  The member baseline `member_default` now names `sys_approval_request` read-only, so every signed-in member holds a data-door read on it; which rows is still the approvals request read gate (the submitter, a current approver, a past actor), and no write opens. That gate now answers a conjunctive `pending_approvers` `$contains` of the caller's own id with the approvals service's acting-address fold, so the console's My Pending view and an agent's "waiting on me" query find a slot addressed by email or an unstaffed position, not only one holding the user id. A `pending_approvers` predicate naming another id, or under `$or`, is read as written.
+  
+  `@objectstack/plugin-audit`: the activity and audit copies of an approval request are hardened: a ledger copy holds no value that its owner narrows per reader. New copies no longer carry the request's subject snapshot, and `migrateSideCopies` / `migrateArchivedSideCopies` rewrite the copies at rest. Both ledgers' read redactions drop it from an older copy whether or not the rewrite has run.
+  
+  **Who can query those copies narrows.** A non-system query on `sys_activity` or `sys_audit_log` that names `sys_approval_request` by equality on `object_name` and names a column holding the copy (`metadata`; `old_value`, `new_value`), as a free-text search does, is now judged against every registered object, as a query naming no object already is. A reader withheld any field of any object, an organization administrator included, is refused it (`403`) where they were answered before. The same query pinned to another object, or naming only other columns, is judged as before. This does not depend on the rewrite having run.
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [6a36b79]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [633d8c4]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/core@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/formula@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/metadata-core@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

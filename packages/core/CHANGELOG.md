@@ -1,5 +1,120 @@
 # @objectstack/core
 
+## 18.5.0
+
+### Minor Changes
+
+- c747cf0: feat(objectql)!: two packages of two namespaces may each ship a tool of the same name, and the metadata service keeps each package's tool under its own (package, name) slot (ADR-0150 child B)
+  
+  Clause-②: yes (narrowing) — widened: the engine's package door (`SchemaRegistry.installPackage`), its item seam (`SchemaRegistry.registerItem`) and the cold boot's holder seal (`SchemaRegistry.sealBareNameHolders`) accept, for a tool, a second package holder they refused before: one that declares a namespace other than the holder's. Narrowed: `tool` joins `PACKAGE_SLOTTED_STORE_TYPES` (`@objectstack/metadata`) in the same change, as that set's rule requires, so the metadata service's in-process answers for a tool move the way they moved for the other types stored per package: (1) `MetadataManager.get('tool', NAME)` and `getDiagnosed` naming no package, of a name two packages hold, are refused `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming both) where they answered the item registered (or saved) last; (2) `get('tool', NAME, PKG)` and `getDiagnosed`, where `PKG` holds no slot of the name and another package does, answer `undefined` where they answered the stored item (the one holder's, or the survivor of two); (3) `unregister('tool', NAME)` naming no package, of a name two packages hold, is refused the same way before anything is deleted or announced, and so is a rollback of a name whose rows are two packages', or one package's beside the name's package-less row; (4) `DatabaseLoader.delete` naming no package of a name two packages hold is refused, where it deleted the first row; (5) `MetadataManager.getHistory`, `diff` and `rollback` of a tool name two packages saved through `DatabaseLoader`, naming no package, are refused `409 RESOURCE_CONFLICT` naming both, where they answered every version of the one row both saves wrote, and a rollback to a version a removed package wrote is refused where it wrote that version into the remaining holder's row. First-party callers of these in-process reads and writes for a tool in this repo: 0 (no production source calls `get`, `getDiagnosed`, `unregister`, `getHistory`, `diff` or `rollback` with the literal type `tool`; first-party tool records in `examples/`: 0). On a booted stack no HTTP or MCP door moves from served to refused: `/meta/tool/NAME` reads through the registry's `resolveItem`, which already resolved a tool by `(package, name)` (ADR-0150 child E8), and on both HTTP transports `/meta/tool/NAME/layers` asks that plain read before it serves a layer, so a bare layered read of a two-holder name is refused `409` naming both whether or not the metadata service keeps both copies (measured with `tool` taken back out of `PACKAGE_SLOTTED_STORE_TYPES`: still `409`). The cloud's calls on the metadata service for type `tool` (a fixed-name existence probe, and AI Studio's register and retract of its built-in tool mirror, cloud reading 6837767385) are outside this count and carried to the cloud with the resolver obligation below.
+  Metadata-protocol: added
+  
+  <!-- adr-0087: registered tool-names-per-namespace -->
+  
+  **BREAKING** for five in-process answers of the metadata service for a tool (first-party count in this repo: 0), listed above under the declaration line. The fix for each:
+  
+  - FROM `get('tool', NAME)` of a two-holder name TO `get('tool', NAME, PKG)`, a package the refusal names.
+  - FROM `get('tool', NAME, PKG)` for a package that does not hold the name TO `get('tool', NAME, HOLDER)`, the holding package (the bare read's refusal, or `list`, names it).
+  - FROM `unregister('tool', NAME)` of a two-holder name TO `unregister('tool', NAME, { packageId })`, or `unregisterPackage(PKG)`.
+  - FROM a rollback or a `DatabaseLoader.delete` by name of a two-holder name TO the same call naming the package, or removing the extra row first.
+  - FROM `getHistory('tool', NAME)` / `diff('tool', NAME, …)` of a name two packages saved TO the same call with `{ packageId }`, once per package.
+  
+  The bare-name one-holder rule (`bare-name-one-holder.ts`) has narrowed for `tool` from one package holder per deployment to one per namespace (ADR-0150 D2, D9), as it did for `agent`, `skill`, the object-less `action`, `email_template`, `flow`, the picklist family and `webhook`. The switch, `NAMESPACE_SCOPED_BARE_NAME_TYPES`, lives in `@objectstack/core` (`package-scoped-resolution.ts`) and `@objectstack/objectql` re-exports it under the same name. A package's `tool` record has one by-name reader, `GET /meta/tool/NAME`, which already answers by `(package, name)`: it refuses `409 RESOURCE_CONFLICT` naming every served holder when two packages hold the name, and `?package=ID` and `/meta/tool/NAMESPACE/NAME` serve that package's own. A disabled package holds no name for that read (ADR-0150 D3): of two namespaces' holders, one disabled, the bare read serves the enabled one, and refuses naming both again once it is re-enabled. The install door still counts every installed holder, disabled or not. So a package no longer has to rename a tool because a package of another namespace already ships one of that name.
+  
+  The metadata service stores a tool per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`, now `api`, `agent`, `skill`, `action`, `email_template`, `permission`, `flow`, `picklist`, `mapping`, `dataset`, `webhook` and `tool`), by the rules `package-slotted-store.ts` already applies to the others:
+  
+  - The in-memory store keeps both packages' tools of one name; `list('tool')`, `loadMany('tool')` and `loadManyKeyed('tool')` answer both, where they answered the survivor. `GET /meta/tool` listed both packages' tools before this change and still does.
+  - `DatabaseLoader.save` of a tool: FROM one `sys_metadata` row per name with `package_id` empty TO one row per `(package, name)` with `package_id` filled; versions are numbered per name across the packages' rows, and each history row records the package whose row it snapshots. A legacy tool row the loader wrote before this release binds on its package's next save, or through `migrateDatabaseLoaderRowPackages(driver)` (`@objectstack/metadata/migrations`), which now covers `tool` rows too and can be re-run any number of times; the semantic entry `tool-names-per-namespace` registers it in the upgrade guide (ADR-0087).
+  - Unchanged, and now pinned for a tool on an artifact boot (`os dev`, `os start`): `GET /meta/tool/NAME/layers?package=PKG`, for a name two packages hold, serves that package's own code and effective layer. The layered read already judged the code layer at the exact address on the base, and the pin stays green with `tool` taken back out of `PACKAGE_SLOTTED_STORE_TYPES`.
+  - A composition whose metadata engine reads a tool through `getItem` (its registry's `readsByPackage('tool')` answers `false`) now refuses a bare `/meta/tool/NAME` read `501 NOT_IMPLEMENTED`, as it refuses every narrowed type it cannot judge. `SchemaRegistry` answers `true` for `tool` (ADR-0150 child E8), so no in-repo composition moves.
+  
+  Also moved, by the same rules `package-slotted-store.ts` and the replica lane already apply to every type in `PACKAGE_SLOTTED_STORE_TYPES`:
+  
+  - Replica convergence on a cluster signal for a tool: a signal naming a package FROM the first row the store returned by name TO that package's row; an unstamped signal (a writer that predates `packageId`) of a name whose active rows are bound to two or more packages FROM the first row TO a logged stop that keeps the ledger entry for the next resync (#32451).
+  - The boot priming pass (`@objectstack/metadata` plugin): a package-less stored tool row FROM stamped with the host's package TO left unstamped (#32812's rule for every type stored per `(package, name)`), so it is filed as its one holder's customization or the environment's own item, and under a name two packages hold as no holder's own (ADR-0150 D4).
+  - The protocol's in-process layered read (`getMetaItemLayered`) with a bare tool name on an artifact boot (`os dev`, `os start`), where the metadata service keeps both packages' copies: FROM the holder registered last TO `409` naming both, with the metadata service's bare read.
+  
+  Not moved by this change, and carried (both already reach every narrowed type):
+  
+  - The boot hydration of stored rows: two stored tool rows of one name, each naming its holder, leave only the one loaded last in the registry (the second case #32692 names for a webhook; #33127 carries it for every type stored per `(package, name)`, `tool` included). A package-less stored tool row is no longer grafted onto any holder's slot: a tool is a sealed type (no environment overlay), so since #32741 that row is declined at each holder's exact address, plain and layered, before and after the read-side hydrator, in both registration orders, and each address serves its own (pinned for a tool by name, unit and booted).
+  - The protocol's in-process layered read (`getMetaItemLayered`, called with a bare name and no package) runs no two-holder judgement of its own: where the metadata service gives it no copy of the tool, it falls back to the registry's by-name artifact lookup and answers the first-registered holder (#32914). Both HTTP transports refuse that read `409` before serving it (above); an in-process caller, or a host with no door chain, is not refused. Not pinned here for a boot with no service copy.
+  
+  Unchanged, and still refused with the same `422 NAMESPACE_CONFLICT` envelope and sentence:
+  
+  - a second package of the SAME namespace (a co-owner) holding the name: for a tool that is the namespace co-owner rule's `NamespaceNameConflictError` (child N), which judges a tool ahead of this rule at every install, boot included, exactly as before;
+  - a package that declares no namespace, beside any other holder of the name (a disabled one included), and any holder beside it;
+  - two packages of one shareable namespace (`base`, `system`, `sys`) holding the name;
+  - a built-in name (none for a tool: the platform requests no tool record by name).
+  
+  Every covered type not yet narrowed (connector) keeps one package holder per deployment.
+  
+  `os migrate stored-references` no longer lists two namespaces' holders of one tool name among the sealed clashes: they are not a clash.
+  
+  Carried to the cloud: the first cloud change that reads package `tool` records (today none does: the cloud reading of 2026-11-12 on cloud `main@9b50c62e` finds the cloud's tool registry and a skill's `tools` resolving against the AI service's live registry of code-defined tools, never a `tool` record) must resolve a name from the referring item's own package (ADR-0150 D3), refuse a name two packages hold naming every candidate, and never take the first one registered; `packages/spec/liveness/tool.json` records that precondition. The cloud's three bare-name calls on the metadata service for type `tool` (cloud reading 6837767385) are carried with it: a bare removal of a name two packages hold is now refused `409`, so the built-in mirror's retract can be refused where two namespaces each ship a tool named after a built-in. That refusal fails closed and picks no holder.
+
+### Patch Changes
+
+- a1604ce: fix(core): the security catalog's list keeps every holder of a permission set name the metadata service holds, so a grant naming a package is judged by (package, name) whatever order the stored rows are listed in (ADR-0150 D4)
+  
+  Clause-②: yes (widening; narrowing on the agent-account ceiling) — on the metadata-only path (a permission set name the engine registry holds nowhere, read from the metadata service, as an environment kernel reads its stored sets), a grant whose `permission_set_package` names the holder listed second moves FROM `409 RESOURCE_CONFLICT` `not-held-by-qualifier` naming only the first-listed holder TO stored with that package, the answer the registry path already gives. A refusal on that path (a package that holds no set of the name) now names every holder of the name, packages in id order and the environment's own row last, where it named the first row listed. Nothing refused on the registry path is admitted here. The narrowing: an agent-account grant (or a position binding the name) of a set name two packages hold on that path, read with no package, is judged against every holder's body (#32164); it moves FROM admitted, when only the holder listed second breaches the agent ceiling, TO the agent-ceiling validation refusal (`invalid_value` at `permission_set`, or at `position`) naming that breach, the answer the registry path already gives.
+  Metadata-protocol: none
+  
+  `createSecurityCatalogReader(...).list('permission')` answered, for a name only the metadata service holds, one entry: the first row of the name the service listed. Every reader that judges a named holder from that list (the grant name hook's `judgeGrantSet`, the activation door's `?package=` read, the activation ledger's holder count) therefore saw one holder, and which one followed the service's row order. The list now carries one entry per (package, name) holder on that path too — the shape the registry path gives — ordered by package id with the environment's own row (no package, or the `sys_metadata` provenance) last. A disabled package's row is still not listed, as on the registry path. A bare-name read is unchanged: the store still refuses a name two packages' slots hold, naming both.
+- 40c73a8: Clause-②: no (narrowing) — `os validate`, `os build` and `os lint` refuse (`widget-dataset-unknown`, error) a dashboard widget in a package of a multi-package artifact whose `dataset` only a package outside that package's declared dependency closure holds, or two packages inside it hold, where they accepted it. The runtime already refused both reads (`409 RESOURCE_CONFLICT`) since 18.4.0; no runtime answer changes.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` teaches neither cross-package dataset resolution nor `widget-dataset-unknown`.
+  
+  <!-- adr-0087: registered dashboard-dataset-outside-reader-closure-refused -->
+  
+  fix(lint)!: `os validate` and `os build` resolve a dashboard's dataset through the reading package's declared dependency closure, as the runtime does
+  
+  **BREAKING** accept-set narrowing in the authoring doors (`os validate`, `os build`, `os lint`; `@objectstack/lint`'s `widget-dataset-unknown`), for a package of a multi-package artifact (`packages[]`, the `composeStacks(stacks, { manifest: 'preserve' })` shape).
+  
+  - **Before.** The per-package pass resolved a dashboard widget's `dataset` against every package of the artifact, so a widget bound to a dataset another package holds was accepted whether or not the reading package declares it.
+  - **Now.** The name resolves in the reading package, then to the one holder in its declared dependency closure (`manifest.dependencies`, transitively, plus `sys`). A name held only outside that closure, or by two packages inside it, is refused with `widget-dataset-unknown` (error), naming the dataset, the holders and the open fix. When the reading package declares a dependency the artifact does not carry, an outside-closure name is reported (`widget-dataset-unknown`, warning, suppressible with `suppressWarnings`) instead, since that package may hold it once installed; two holders inside the closure are refused even then.
+  - **Unchanged.** A stack without `packages[]`, the union run over the whole artifact, a package's own dataset, a dataset of a declared dependency, and a name no package holds (refused as before). Every runtime answer.
+  - **Fix.** Declare the holding package in the reading package's `dependencies`; where the holder already depends on the reader (a module of the app), move the dashboard into the holder, or move the dataset into the reader. Upgrade-guide entry `dashboard-dataset-outside-reader-closure-refused`.
+  
+  Since 18.2.0 (#25514) the per-package authoring pass resolved a widget's `dataset` against every package of the artifact. The runtime does not: since 18.4.0 a package's dashboard resolves a dataset name in its own package, then in the packages its manifest declares in `dependencies` (transitively) plus `sys`, and refuses the rest (ADR-0150 D3, the maintainer's ruling on #32929). So `os validate` passed a dashboard that answered `409 RESOURCE_CONFLICT` once installed. HotCRM is the first-party app built this way: its app package's CRM Overview read `product_metrics`, which its revenue module holds. Repository examples affected: 0. Other first-party apps outside this repository: not measured.
+  
+  The authoring pass now asks the same question. Who moves: an app whose package dashboard binds a dataset that another package of the same artifact holds, without declaring that package. The finding names the dataset, the holders and the open fix, read off the artifact:
+  
+  - the holder does not depend on the reading package: declare it in the reader's `dependencies`, or move the dataset into the reader;
+  - the holder already depends on the reading package (a module of the app): declaring it back is a dependency cycle the kernel refuses at boot, so move the dashboard into the holder, or move the dataset into the reader;
+  - two holders inside the closure: nothing picks one; keep one, or depend on one.
+  
+  A report's (or a joined block's) `runtimeFilter` reads the same index: on the per-package pass its keys are no longer judged against a dataset the report cannot resolve. No verdict is lost: `chart-dataset-unknown` already refuses that report there, and the union run still judges the filter.
+  
+  The refusal sentences that name a fix for `outside-closure` now name the open one too: the core sentence (`409` at every package-scoped by-name door) says "move the TYPE into P" alone when only the environment holds the item, and asks for a dependency on ONE package when two or more hold it; `os migrate stored-references` (the report and `bind`), the CLI's picklist-reference hint and the publish probe's `widget_not_probed` fix name the move beside the dependency. Which item a read answers, its status, code and `details.candidates` do not change.
+  
+  The remedy (correcting the 18.4.0 note of #32310, which named only the dependency and the `?package=` qualifier): declare the holder in the reading package's `dependencies`; where the holder already depends on the reader, move the reading item into the holder, or move the read item into the reader.
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [633d8c4]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/metadata-core@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

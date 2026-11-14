@@ -1,5 +1,269 @@
 # @objectstack/lint
 
+## 18.5.0
+
+### Minor Changes
+
+- 7ffbb1a: feat(automation)!: a flow that runs after a record change is not armed while a subflow it calls retries an inline outbound call, and a durable `http` node with no outbox does not hold the save
+  
+  Clause-②: yes (narrowing) — a record-triggered flow the engine armed before is now registered but not armed when a `subflow` / `map` child retries an inline call; `@objectstack/spec/contracts` gains the `FLOW_UNBOUND_CAUSES` value `retried_callout_in_subflow`.
+  Metadata-protocol: semantic
+  Skills-docs: none — taught in content/docs/automation/flows.mdx (Try / catch / retry) and in `os explain flow-after-save-inline-retry`; no skill under `skills/**` teaches the subflow or the no-outbox case.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and every flow that registered before still registers. One flow is no longer armed, and one durable request on a host with no outbox is sent in the background; no rewrite of a stored flow keeps what its author meant, so the author chooses the fix. -->
+  
+  **BREAKING** for two shapes of a flow whose start node runs it after a record change (`record-after-create`, `-update`, `-delete`, `-insert`, `-write`). Ruling D on the after-save retry card: the record save never waits on an external system.
+  
+  - **A retried inline call in a subflow.** Before, the after-save rule (`flow-after-save-inline-retry`) judged only the flow's own nodes, so a flow whose `subflow` or `map` node called a child holding a retried `http` (without `durable: true`) or `connector_action` node armed, and while the outside system was down the save waited through every attempt and backoff delay. The retry counts wherever it sits on the call chain: the child's own `try_catch` retry or `errorHandling: { strategy: 'retry' }`, a deeper child's, or a retry around the call in the caller. Now the arming gate declines such a flow, after its disabled-subflow, save-notice and region halves: it still registers, is not armed, and warns once, naming the call node, the retried node, the flow that holds it and what retries it. `GET /automation/_status` reports it `bound: false` with that reason and the new `unboundCause` value `retried_callout_in_subflow`, and the Studio's run note says it in plain words. Whenever a flow is registered, every flow whose calls reach it is judged again, so the decline does not depend on load order, and a child republished with the call durable (or unretried) arms the caller again.
+  - **A durable `http` node on a host with no messaging HTTP outbox.** Before, such a node fell back to the inline call on every path, so on the save path a retry around it held the save through the whole ladder. Now, on the save path (an after-record-change run, or a `subflow` / `map` child of one), the request is sent once in the background and the run does not wait for it or see its outcome, as with the outbox: the node answers `{ enqueued: false, background: true }`, and a failed send is logged at `error` and is not retried. Off the save path the fallback is the inline call, as before.
+  - **Not changed.** Registration, the save door and `objectstack validate` accept the same flows as before. A flow that does not run after a record change, an inline call nothing retries, and a durable `http` node with an outbox wired behave as before.
+  
+  **What an author does.** For a declined flow: in the child the warning names, set `durable: true` on the `http` node, or remove the retry around it (a `connector_action` has no background path: remove the retry, or run that work on demand or on a schedule). For a host with no outbox: wire the messaging service with reliable delivery so a durable request is queued and retried, rather than sent once.
+- 40c73a8: Clause-②: no (narrowing) — `os validate`, `os build` and `os lint` refuse (`widget-dataset-unknown`, error) a dashboard widget in a package of a multi-package artifact whose `dataset` only a package outside that package's declared dependency closure holds, or two packages inside it hold, where they accepted it. The runtime already refused both reads (`409 RESOURCE_CONFLICT`) since 18.4.0; no runtime answer changes.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` teaches neither cross-package dataset resolution nor `widget-dataset-unknown`.
+  
+  <!-- adr-0087: registered dashboard-dataset-outside-reader-closure-refused -->
+  
+  fix(lint)!: `os validate` and `os build` resolve a dashboard's dataset through the reading package's declared dependency closure, as the runtime does
+  
+  **BREAKING** accept-set narrowing in the authoring doors (`os validate`, `os build`, `os lint`; `@objectstack/lint`'s `widget-dataset-unknown`), for a package of a multi-package artifact (`packages[]`, the `composeStacks(stacks, { manifest: 'preserve' })` shape).
+  
+  - **Before.** The per-package pass resolved a dashboard widget's `dataset` against every package of the artifact, so a widget bound to a dataset another package holds was accepted whether or not the reading package declares it.
+  - **Now.** The name resolves in the reading package, then to the one holder in its declared dependency closure (`manifest.dependencies`, transitively, plus `sys`). A name held only outside that closure, or by two packages inside it, is refused with `widget-dataset-unknown` (error), naming the dataset, the holders and the open fix. When the reading package declares a dependency the artifact does not carry, an outside-closure name is reported (`widget-dataset-unknown`, warning, suppressible with `suppressWarnings`) instead, since that package may hold it once installed; two holders inside the closure are refused even then.
+  - **Unchanged.** A stack without `packages[]`, the union run over the whole artifact, a package's own dataset, a dataset of a declared dependency, and a name no package holds (refused as before). Every runtime answer.
+  - **Fix.** Declare the holding package in the reading package's `dependencies`; where the holder already depends on the reader (a module of the app), move the dashboard into the holder, or move the dataset into the reader. Upgrade-guide entry `dashboard-dataset-outside-reader-closure-refused`.
+  
+  Since 18.2.0 (#25514) the per-package authoring pass resolved a widget's `dataset` against every package of the artifact. The runtime does not: since 18.4.0 a package's dashboard resolves a dataset name in its own package, then in the packages its manifest declares in `dependencies` (transitively) plus `sys`, and refuses the rest (ADR-0150 D3, the maintainer's ruling on #32929). So `os validate` passed a dashboard that answered `409 RESOURCE_CONFLICT` once installed. HotCRM is the first-party app built this way: its app package's CRM Overview read `product_metrics`, which its revenue module holds. Repository examples affected: 0. Other first-party apps outside this repository: not measured.
+  
+  The authoring pass now asks the same question. Who moves: an app whose package dashboard binds a dataset that another package of the same artifact holds, without declaring that package. The finding names the dataset, the holders and the open fix, read off the artifact:
+  
+  - the holder does not depend on the reading package: declare it in the reader's `dependencies`, or move the dataset into the reader;
+  - the holder already depends on the reading package (a module of the app): declaring it back is a dependency cycle the kernel refuses at boot, so move the dashboard into the holder, or move the dataset into the reader;
+  - two holders inside the closure: nothing picks one; keep one, or depend on one.
+  
+  A report's (or a joined block's) `runtimeFilter` reads the same index: on the per-package pass its keys are no longer judged against a dataset the report cannot resolve. No verdict is lost: `chart-dataset-unknown` already refuses that report there, and the union run still judges the filter.
+  
+  The refusal sentences that name a fix for `outside-closure` now name the open one too: the core sentence (`409` at every package-scoped by-name door) says "move the TYPE into P" alone when only the environment holds the item, and asks for a dependency on ONE package when two or more hold it; `os migrate stored-references` (the report and `bind`), the CLI's picklist-reference hint and the publish probe's `widget_not_probed` fix name the move beside the dependency. Which item a read answers, its status, code and `details.candidates` do not change.
+  
+  The remedy (correcting the 18.4.0 note of #32310, which named only the dependency and the `?package=` qualifier): declare the holder in the reading package's `dependencies`; where the holder already depends on the reader, move the reading item into the holder, or move the read item into the reader.
+- 3e19223: fix(lint): the runtime `object_extension` publish door judges a computed field an extension adds by the build's field-formula pass, against the extended object as served
+  
+  Clause-②: no (narrowing) — the `object_extension` publish door (Studio's add-field on a `.custom` pair, `PUT /api/v1/meta/object_extension/TARGET`, the MCP and AI authoring doors) now refuses an extension whose computed field carries an `expression` `os build` refuses. No exported type or signature changes. Measured first-party: 0 extension entries with a computed field (`examples/app-showcase` one entry, three plain fields; `packages/plugins/plugin-auth` one, a `secret` field; HotCRM none), so nothing first-party is newly refused.
+  Metadata-protocol: narrowed
+  Skills-docs: none owed — this PR edits `content/docs/deployment/validating-metadata.mdx` (the CEL row's runtime column gains `ᵒˣ`, and the object extension door paragraph names the formula pass); `skills/objectstack-data` teaches `defineObjectExtension({ extend, fields })` and the computed-field rules without saying the runtime door is exempt, so the door now gives the verdict the build already gives.
+  
+  <!-- adr-0087: registered object-extension-door-computed-field-expression-judged -->
+  
+  **BREAKING** accept-set narrowing of the runtime `object_extension` publish door (`validateStackExpressions` joins its `runtimeTypes`).
+  
+  `os build` and `os validate` judge each field an `objectExtensions` entry adds with the field-formula pass, but the publish door that writes an extension at runtime ran only the vocabulary freeze, so a computed field the build refuses published with a 200 and then read null, or failed, on every row.
+  
+  - On an `object_extension` write the expression rule runs exactly one pass: the extension walk over each field the written entry adds, against the door's live objects with the entry folded in (the build's own fold), located as the build locates it for a package with one extension entry: `object 'crm_account' · objectExtensions[0] · field 'score__c' expression` (the door judges the written entry alone, so its index is always `[0]`; a build of a package with several entries names the entry's own index). A refusal is the gate's `422 INVALID_METADATA` with issue rule `expression-invalid`; a stored field that reads another record, the clock or the acting user is an advisory (`stored-expression-cross-record-input`, `stored-expression-volatile-input`), never a refusal.
+  - A republish is judged against the target without the package's own stored extension, which the write replaces, as the build sees the package's one entry: dropping a field the extension's own formula still reads is refused, and a formula over a lookup the same write re-targets is judged over the new target.
+  - An extension of an object the door does not carry is judged on what does not depend on that object's fields (grammar, registered functions, bare and unbound references).
+  - A package-wide draft publish (`publishPackageDrafts`) whose drafts depend on a sibling extension draft is refused, because that batch's pending set carries no extension drafts (#33152); publishing the extension first through the per-item door works.
+  - Unchanged: the object save door, `os build`, `os validate`, a draft save (never gated), and a stored row, which is judged only when it is published again.
+  
+  Migration: before publishing an extension again, fix each refused `expression` the way you would on a declared field of the same object: read `record.FIELD` for a field the object serves, call only registered functions, and make a stored field that reads another record, the clock or the acting user a `formula` field.
+- 6482c08: fix(objectql): a formula that reads another formula field reads its computed value; a cycle of formulas is refused where it is authored (#33100)
+  
+  Clause-②: no (narrowing) — `os build`, `os validate` and the object save and publish door refuse a `formula` field that reads its own value, itself or through the formulas it reads, where they accepted it. First-party: a source scan of `examples/**`, `packages/**` and HotCRM finds no formula reading another formula, so no first-party stack moves.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/objectstack-formula` teaches no rule about one formula reading another; `content/docs/data-modeling/formulas.mdx` already said not to create circular references and now says they are refused.
+  
+  <!-- adr-0087: registered formula-cycle-refused -->
+  
+  **BREAKING** accept-set narrowing of `os build` / `os validate` / the object door (`validateStackExpressions`), and one read answer: a formula on a cycle whose read of the cycle is guarded (`has(record.f_self) ? record.f_self : 1`, or an optional spelling such as `record.?f_self.orValue(1)`) could evaluate before, to a value that depended on the order its formulas were computed in; it now reads null with the cycle fault, like every other member.
+  
+  The engine computed an object's formula fields in the order they were declared, or the order a projection named them, over the same row. A formula reading another formula (`f_total = record.f_sibling * 2`) therefore read null with "No such key: f_sibling" whenever it came first: when it was declared before the formula it reads, and on every projection naming it without that formula. The authoring doors accepted the expression.
+  
+  - The read plan now carries every formula a planned formula reads, transitively, and computes each formula after the formulas it reads (`formulaReadOrder` in `@objectstack/formula`). It holds on `find`, `findOne`, a projection (a formula computed only because another reads it is cut back off the answer), the write response, `evaluateFormulaField` and `serveFormulaField`. A field that is not a formula reads exactly as before.
+  - A formula on a cycle (`f_total = record.f_total * 2`, or `f_x` and `f_y` reading each other) has no order to be computed in. The engine never evaluates it: it reads null, and its fault names the cycle instead of "No such key". An unguarded member read null before too; a guarded one is the read answer named above. Every formula of a strongly connected component of more than one formula, or reading itself, is a member, whatever order the formulas are declared or requested in. A formula that reads a cycle member without being read back is computed over that null.
+  - A read that admits a formula by what the formula reads judges the whole plan the read will run, the formulas it reads included, and answers what it answered before.
+  - The build and the object door refuse each declared formula on a cycle with the same sentence, located on its `expression` (`object 'x_job' · field 'f_total' expression`).
+  
+  Migration: break the cycle. Have one of the formulas read the stored fields the other formula reads, instead of the other formula.
+- 27d042f: fix(lint): `os build` and the runtime `object_extension` publish door judge each validation rule an object extension adds by the object's own rule pass, against the extended object as served
+  
+  Clause-②: no (narrowing) — `os build`, `os validate`, `os lint` and the `object_extension` publish door (Studio, `PUT /api/v1/meta/object_extension/TARGET`, the MCP and AI authoring doors) now refuse an extension whose validation rule carries a `condition` or `when` the same rule on the object itself is refused for. No exported type or signature changes. Measured first-party: 0 extension entries carry a validation rule (`examples/app-showcase` one entry, three plain fields; `packages/plugins/plugin-auth` one, a `secret` field; HotCRM none), so nothing first-party is newly refused.
+  Metadata-protocol: narrowed
+  Skills-docs: none owed — this PR edits `content/docs/deployment/validating-metadata.mdx` (the object extension door paragraph names the rule pass); `skills/objectstack-data` teaches validation rules on the object and `defineObjectExtension({ extend, fields })` without saying an extension's rules are exempt, so the build and the door now give the verdict the object's own rules already get.
+  
+  <!-- adr-0087: registered object-extension-validation-rule-expression-judged -->
+  
+  **BREAKING** accept-set narrowing of `os build`, `os validate`, `os lint` and the runtime `object_extension` publish door.
+  
+  **Before:** the registry merges an extension's `validations` onto its target object by name, so every save of the target runs them, but the expression rule judged only the rules an object declares. A rule an extension added with a misspelt field (`record.nmae`), an unregistered function (`sqrt(…)`) or an unguarded nullable operand was accepted by `os build`, `os validate` and `os lint` and published with a 200, and failed only when an end user saved a record.
+  
+  **Now:** each rule an `objectExtensions` entry adds is judged by the object's own rule pass (its `condition` and `when`, every nested `then` / `otherwise` branch, the `parent` root verdict and the null-guard gate), with the same rule id `expression-invalid`, in `os build`, `os validate` and `os lint` as at the door. A `record.FIELD` read resolves against the extended object as served (its own fields and every field an extension adds). The door reads the objects without the system columns the registry injects, as the build does, so a column such as `created_at` is a known field and is not judged nullable at either. A finding is located at the entry: `object 'crm_account' · objectExtensions[0] · validation 'no_blocked__c'`, key path `objectExtensions[0].validations[0].condition`. At the door the refusal is `422 INVALID_METADATA`, the door still runs one pass (the extension walk), and a republish is judged without the package's own stored extension, which the write replaces.
+  
+  The null-guard gate is part of that pass, and it is the narrowing most likely to meet a working tenant: an extension rule that applies an ordering or arithmetic operator (`>`, `<`, `+`, …) to a nullable field with no guard, such as `record.credit > 5000000` on a declared `number` field with no `required: true` and no `defaultValue`, is now refused. An equality such as `record.credit == null` is not. At runtime that predicate aborts on every save where the field is empty, and the save is refused fail-closed. The repository's own suite carried one such rule and now guards it.
+  
+  **Unchanged:** the object save door, an object's own rules, a draft save (never gated), a stored row (judged only when it is published again), and the regex and JSON-schema checks of a `format` / `json_schema` rule, which still judge an object's own rules only. The leaf of a one-hop read through a reference an extension adds (`record.manager__c.nmae`) is still not judged, at the build or the door: the hop checks read the declared objects. A hop through a reference the target declares is judged.
+  
+  **Fix:** before building or publishing again, repair each refused rule the way you would on a rule declared on the same object: read `record.FIELD` for a field the object serves, call only registered functions, guard a nullable operand of an ordering or arithmetic operator with `!= null` (`record.credit != null && record.credit > 5000000`), and read through a reference only in the shape a declared rule may.
+
+### Patch Changes
+
+- a83c366: fix(lint): the approval and flow advisories a flow save returns carry a user sentence in every platform locale
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Nineteen advisory rule ids that the save door returns on a flow write now carry `userTextParams` (the flow, node, object, field and input names their user sentence interpolates) and have a sentence in all eleven platform locales, each in a `*.user-text.ts` catalog beside its rule and merged into the one catalog `findingUserMessage` renders from:
+  
+  - approval approvers: `approval-approver-type-unknown`, `approval-expression-invalid` (its `info` arm, `resolveAs` on a non-expression approver), `approval-approver-not-membership-tier`, `approval-approver-type-deprecated`, `approval-approver-type-unsupported`, `approval-approvers-may-resolve-empty`, `approval-expression-no-empty-policy`, `approval-escalation-reassign-no-target`;
+  - flow trigger readiness: `flow-trigger-unknown-object` and `flow-input-unknown-object` (as advisories, with no package closure stated), `flow-input-object-less`, `flow-input-record-read-as-list`, `flow-draft-status-ambiguous`;
+  - flow template paths: `flow-template-unknown-field`, `flow-template-lookup-traversal`, `flow-template-field-unprovisioned`;
+  - `flow-node-write-unprovisioned-anchor`, `flow-update-readonly-when-field` and `flow-credential-literal`, whose sentence names where the credential sits and never its value.
+  
+  Rule ids, `message` and `hint` are unchanged, and the refusals that share an id with one of these advisories carry no params, so they render no user sentence. The `lintFlowCredentialLiterals` registry entry now keeps `userTextParams` when it re-maps its findings, so the publish gate's advisory carries them. Because the finding objects now carry `userTextParams`, `os validate --json` and `os build --json` show that key on these findings in `warnings`.
+- 5c005e0: Clause-②: no
+  Metadata-protocol: none
+  
+  The dashboard and report advisories now carry a user-facing sentence in all 11 platform locales, for the save door's `userMessage` (the pattern the security-posture advisories already follow). Nine advisory rule ids gain one: the widget-binding rule's `widget-legacy-analytics-shape`, `dashboard-filter-field-unprovisioned`, `chart-field-unknown`, `chart-measures-missing`, `widget-measures-missing`, `chart-dimensions-missing` and `table-count-only`, and the chart-binding rule's `chart-measure-unknown` and `chart-axis-not-selected` on a report chart's `series[]` entry. Their findings carry the names the sentence interpolates as `userTextParams`, and `findingUserMessage` renders the sentence in the request's locale, else the workspace default, else English.
+  
+  Rule ids, `message` and `hint` are unchanged, so `os validate`, `os lint` and every save response read exactly as before. `measure-aggregate-incoherent` and `page/visualization-without-binding` have no sentence: the publish door never returns them (the first is judged on a dataset that a dashboard write carries as context, the second on pages no per-write snapshot carries), so they stay on the English `message`.
+- dd4ce50: Clause-②: no
+  Metadata-protocol: none
+  
+  The data-model advisories the save door returns now carry a user-facing sentence in all 11 platform locales, for the save door's `userMessage` (the pattern the security-posture advisories already follow). Five advisory rule ids gain one: the autonumber-format rule's `autonumber-unrecognized-token` and `autonumber-references-optional-field` (object writes), `sort-field-unprovisioned` and `searchable-field-unprovisioned` on an external object's list view or searchable fields (object and view writes), and `object-reference-unregistered-platform` on a dataset's base object (dataset writes). Their findings carry the names the sentence interpolates as `userTextParams`, and `findingUserMessage` renders the sentence in the request's locale, else the workspace default, else English.
+  
+  Rule ids, `message` and `hint` are unchanged, so `os validate`, `os lint` and every save response read exactly as before. The other data-model advisories have no sentence because the publish door never returns them: `unique/double-declaration`, `unique/legacy-organization-composite` and `title-unresolvable` run only on the CLI, and `field/select-missing-options`, `relationship/master-detail-required` and `relationship/association-inline-edit` belong to the `os lint` best-practice sweep. They stay on the English `message`.
+- 6e4a203: Clause-②: no
+  Metadata-protocol: none
+  
+  The form layout, visibility and page-sort advisories now carry a user-facing sentence in all 11 platform locales, for the save door's `userMessage` (the pattern the security-posture and dashboard advisories already follow). Four advisory rule ids gain one: the form-layout rule's `form-field-unknown` and `form-section-group-unknown` on a view write, `visibility-root-mislayered` on a view or page write, and `page-field-unprovisioned` where a page's sort names an injected column an external object does not store. Their findings carry the names the sentence interpolates as `userTextParams`, and `findingUserMessage` renders the sentence in the request's locale, else the workspace default, else English.
+  
+  Rule ids, `message` and `hint` are unchanged, so `os validate`, `os lint` and every save response read exactly as before. The page, navigation and translation advisories of the same rules (`react-page-source-unparseable`, `react-prop-deprecated`, `react-prop-typo`, `react-chart-aggregate-invalid`, `react-chart-field-unprovisioned`, `nav-object-ungranted`, `nav-target-unresolved`, `page-field-unknown` and `page-section-group-unknown` at their advisory grade, `page-field-unprovisioned` on a page component's field binding, `translation-option-key-unknown`, `translation-section-name-missing`) have no sentence: the publish door never returns them, because those rules run there only on a flow write, whose snapshot carries no pages, apps or translations. They stay on the English `message`.
+- 796e9d4: fix(lint): the connector, permission-set and form-view advisories a save returns carry a user sentence in every platform locale
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three advisory rule ids that the save door returns now carry `userTextParams` (the connector, permission set, object, view and entry names their user sentence interpolates) and have a sentence in all eleven platform locales, each in a `*.user-text.ts` catalog beside its rule and merged into the one catalog `findingUserMessage` renders from:
+  
+  - `connector-credential-literal` (connector write), in four arms: a credential in a header, in an MCP server's environment variable, in `credentialEnv`, and a stdio MCP server whose credential reaches nothing. The sentence names the connector and the header or variable the credential sits under, and never the credential itself.
+  - `permission-retired-lifecycle-residue` (permission write): names the permission set, the object and the retired key.
+  - `predicate-rhs-path-shaped`, its advisory bare-word arm (view write): names the form view, the word and the operator, and gives both readings with the supported spelling of each (the quoted word, or the field on the left compared with a quoted value).
+  
+  Rule ids, `message` and `hint` are unchanged, and the refusal arm of `predicate-rhs-path-shaped` (a dotted path on the right) carries no params, so it renders no user sentence. The `lintConnectorCredentialLiterals` and `validateRetiredPermissionResidue` registry entries now keep `userTextParams` when they re-map their findings, so the publish gate's advisories carry them. Because the finding objects now carry `userTextParams`, `os validate --json` and `os build --json` show that key on these findings in `warnings`.
+  
+  The other seven advisory ids in these rule files get no sentence, because the save door never returns them:
+  
+  - `agent-authoring-withdrawn`, `default-agent-outside-roster`, `default-agent-legacy-alias` and `mapping-connector-source-unknown`: reference-integrity suite members on its default `flow` write type. An agent, app or mapping write dispatches none of them, and a flow write's snapshot carries no agents, apps or mappings.
+  - `ai-skill-tool-unresolved`: the same, and kept off the door on purpose by ruling 5791822697 (ADR-0109 Decision §3): a per-write snapshot cannot resolve a skill's tools truthfully.
+  - `security-external-owner-unmapped` and `sharing-rule-object-not-shareable`: their registry entries run on the command line only.
+- c09320d: fix(lint): the security-posture advisory sentences name each setting the way the console shows it, in every locale
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The seven security-posture advisory sentences (`validate-security-posture.user-text.ts`) were checked term by term against the console's own packs, and their values corrected where a locale named a setting differently from the screen the admin fixes it on:
+  
+  - View All Records and Modify All Records, read scope, write scope and the policy's CHECK live in the Studio permission editor, whose strings ship in English and Chinese only. The `ar`, `de`, `es`, `fr`, `ja`, `ko`, `pt-BR` and `ru` sentences now quote the English label that screen shows (`View All Records`, `Read scope`, `Write scope`, `CHECK`); `zh-Hans` names `CHECK`, and `zh-Hant` uses the Chinese label that screen shows.
+  - The owner opt-in remedy names its switch by the object form's own label in every locale ("Owner may edit" in that locale's words).
+  - Master and detail follow each locale's console words: child object, parent object, parent record (the `zh` packs keep the Studio's 主记录 for the master record).
+  - `ko` names a permission set 권한 세트, as the permission-set form does; `de` names the record owner Eigentümer, as the "Owner may edit" switch does; `ja` reads 読み取り for read, where the console does.
+  
+  Rule ids, params, the English sentences and the catalog's keys are unchanged.
+- b22be27: fix(mcp): `validate_expression` gives the publish gate's own verdict at a `validation` or `formula` site, every pass the gate runs there included
+  
+  Clause-②: no (narrowing) — the MCP `validate_expression` tool now answers `ok: false` (or a warning) for a validation rule or formula field the publish gate already refuses (or warns on). The gate's acceptance set does not change, and no existing exported type or signature changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is in an advisory tool's verdict, never in what an author may write: every expression it now refuses, the publish gate already refused, so no stored metadata and no consumer code has anything to rewrite -->
+  
+  **BREAKING** verdict narrowing of the MCP `validate_expression` tool (`@objectstack/mcp`), at `site: 'validation'` and `site: 'formula'`.
+  
+  The tool promises the verdict the publish gate gives the rule, but it ran the shared expression validator and nothing else, so it answered `ok: true` for rules the gate then refused at publish, and the refusal first met a person there. It now also runs the gate's own passes at those two sites, through `judgeAuthoredSiteExpression` (`@objectstack/lint`), which runs the gate's walk itself over the object definitions the caller is served:
+  
+  - at both sites: a read through a reference to a field the target object does not declare (`record.balance.nope`), and a read through a reference into a stored-metadata table;
+  - at a `validation` site: a nullable field used without a null guard (`record.days > 3` with `days` neither required nor defaulted), and a read of `parent`, which a `validations[]` rule never binds;
+  - a warning at both sites: a read of an injected system column an external object has no storage behind (`record.owner_id` on an ADR-0015 `external` object).
+  
+  Each finding is the gate's sentence, at the gate's severity. A rule the gate accepts answers exactly as before. A hop target follows the same system-object fence as `describe_object`. A `flow_condition` and a `template` are not judged by this change: the tool's verdict there is unchanged. A sentence that names the rule names it `this rule`, since the tool is handed the condition and not the rule it will sit on.
+  
+  - `@objectstack/mcp`: `McpDataBridge` gains the optional `servedObjectDefinitionOf(name)`, the object definition as the caller is served it (the read `describeObject` projects), handed to the gate and rendered to nobody. A bridge without it answers the shared validator's verdict alone, as before. The served `SKILL.md` line and the tool description name what the tool now refuses. `@objectstack/lint` moves from a development dependency to a dependency, loaded on the first call that judges a rule or formula field, never at module load.
+  - `@objectstack/lint`: exports `judgeAuthoredSiteExpression` and `authoredExpressionHopTargets`. The gate's verdicts are unchanged: its walk gains one internal option, off its package entries, that only this entry passes.
+  - `@objectstack/runtime`: the HTTP MCP bridge serves `servedObjectDefinitionOf`, the same caller's object `describeObject` reads (ADR-0106 D1).
+  - `@object-ui/console`: the downloadable `SKILL.md` mirror carries the same line.
+- 4c15268: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(lint): `os validate` and `os build` resolve a report's dataset through the reading package's declared dependency closure, as the runtime does
+  
+  `chart-dataset-unknown` (`@objectstack/lint`) read the judged stack's own `datasets` alone. On the per-package pass of a multi-package artifact (`packages[]`, the `composeStacks(stacks, { manifest: 'preserve' })` shape), a report, a joined report block, a list-view chart or a dataset-bound page chart bound to a dataset that a package it declares in `dependencies` holds was refused ("resolves to no declared dataset"), although the runtime serves it: every one of those readers sends its own package as `callerPackage`, and the dataset doors resolve the name from that package by ADR-0150 D3.
+  
+  - **Now.** The binding resolves the way the dashboard rule (`widget-dataset-unknown`) already resolves it: the reading package's own dataset, then the one holder in its declared dependency closure (transitively, plus `sys`). A dataset of a declared dependency is accepted, and the report's rows, values and chart axes are judged against it.
+  - **Still refused**, now with the reason and the open fix: a dataset held only by a package outside that closure (the finding names the holder, and asks for the dependency, or for a move when the holder already depends on the reader), and a dataset two packages inside the closure hold (the finding names both; nothing picks one). When the reading package declares a dependency the artifact does not carry, an outside-closure name is reported as a warning instead, since that package may hold it once installed, as the dashboard rule reports it.
+  - **The union run** reads every package body of the artifact, as the dashboard rule has since it learnt `packages[]`: a module's report on the module's own dataset is no longer refused there when a top-level `datasets` sits beside the composition.
+  - **Unchanged:** a dataset no package of the artifact declares, any stack without `packages[]`, and the publish door. No runtime answer changes.
+- 8835532: fix(mcp): `validate_expression` gives the runtime publish gate's verdict at a `flow_condition`, and judges a formula-site expression as the field it is authored on
+  
+  Clause-②: yes (narrowing) — the MCP `validate_expression` tool now answers `ok: false` (or a warning) at a `flow_condition`, and for a named stored or formula field at a `formula` site, where the publish gate already refuses (or warns); and it accepts two new optional inputs, `startCondition` and `field`. The gate's acceptance set does not change.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is in an advisory tool's verdict, never in what an author may write: every expression it now refuses, the publish gate already refused, so no stored metadata and no consumer code has anything to rewrite; the two inputs are optional and an existing call answers as before wherever the gate accepts -->
+  
+  **BREAKING** verdict narrowing of the MCP `validate_expression` tool (`@objectstack/mcp`), at `site: 'flow_condition'` and, given the new `field`, at `site: 'formula'`.
+  
+  At a flow condition the tool ran the shared expression validator and nothing else, so it answered `ok: true` for conditions the publish gate then refused when the flow was saved. It now also runs the gate's own passes there, through `judgeAuthoredSiteExpression` (`@objectstack/lint`), as the runtime publish gate judges a flow write, the door a flow saved through MCP or Studio meets:
+  
+  - an error on a record-triggered flow: a nullable field read as `record.FIELD` or `previous.FIELD` without a null guard (`record.days > 3` with `days` neither required nor defaulted), the run failing at the condition;
+  - a warning on any flow bound to an object: a read of an injected system column an external object has no storage behind (`record.owner_id` on an ADR-0015 `external` object).
+  
+  At a flow condition the verdict is that door's, not `os validate`'s: `os validate` also judges a bare name's null guard (`days > 3`) and a root the run does not bind, over the whole flow's variables, node ids and entrances, which the tool is not handed. The door itself also warns when a field is read bare under a name a flow variable shares; the tool is never handed the flow's variables, so it cannot give that warning. Write `record.FIELD` to be judged here.
+  
+  Two new optional inputs:
+  
+  - `startCondition` (`site: 'flow_condition'` only): the flow's start condition, for an edge or `decision` branch condition after it. What it proves non-null holds downstream, as at the gate, so `record.days > 3` after a start condition `record.days != null` is accepted. Omitted, the condition is judged as the start condition itself.
+  - `field` (`site: 'formula'` only, a snake_case field name): the field the expression is authored on. A field the caller is served keeps its definition with the expression in place: a stored field (any type but `formula`) gets the gate's stored-expression warnings (a read of another record, the clock, the acting user or a permission), and a formula field is refused when it would close a formula cycle. Any other name, a field masked from the caller included, is judged as a new formula field, so the answer never says whether a hidden field exists. A stored field that is not declared yet gets its stored-expression warnings once it is declared.
+  
+  Each finding is the gate's sentence, at the gate's severity. An expression the gate accepts answers exactly as before. A sentence that names the condition names it `flow 'this flow' · edge 'this condition' (start→end) condition`, since the tool is handed the condition and not the flow it will sit in.
+  
+  - `@objectstack/mcp`: the two inputs, the flow-condition judgment (it reads the subject's served definition alone there; nothing hydrates a hop at a flow condition), the tool description and the served `SKILL.md` line.
+  - `@objectstack/lint`: `judgeAuthoredSiteExpression` takes `site: 'flow_condition'` with `triggerKind`, `sweepObject` and `startCondition`, and `field` at `site: 'formula'`; exports `AUTHORED_FLOW_NAME`, `AUTHORED_CONDITION_ID` and the `AuthoredFlowTrigger` type. The gate's verdicts are unchanged.
+  - `@object-ui/console`: the downloadable `SKILL.md` mirror carries the same line.
+- 9f736f2: fix(mcp): `validate_expression` takes the flow's declared `variables` at a `flow_condition`, so a bare name binds as the flow binds it and the shadowed-read warning comes back
+  
+  Clause-②: yes (widening) — the MCP `validate_expression` tool accepts a new optional input, `variables`, at `site: 'flow_condition'`, a call its closed input refused before; without it every answer is unchanged.
+  Metadata-protocol: none
+  
+  A flow run binds its declared variables before it flattens the trigger record's fields, so a bare name a variable shares with a field reads the variable, and the runtime flow publish door warns about it (a bare read of a name that is both a declared flow variable and a field). `validate_expression` was never handed the flow's variables: it typed such a bare name as the field, and it could not give that warning.
+  
+  - `variables` (`site: 'flow_condition'` only): the flow's declared `variables`, in the flow's own shape (`FlowVariableSchema`: a `name` and a `type` at least), so a flow's `variables` array can be handed over as it stands; a malformed one is refused with the spec's own sentence. Given them, a bare read of a declared variable is not typed as the field (the shared validator's `flowVariables`, as the gate hands it on the same flow), and a variable named like a field of `objectName` read bare gets the gate's own shadowed-read warning. `record.FIELD` still reads the field and is judged as before. On another site the input is refused, like `startCondition`.
+  - Without `variables`, the answer is byte for byte what it was, and the tool description says the shadowed-read warning needs them.
+  - `@objectstack/lint`: `judgeAuthoredSiteExpression` takes an optional `variables` (a new optional key on the exported `AuthoredSiteExpression` type), which its one-flow probe declares. The gate's verdicts are unchanged.
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/formula@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/sdui-parser@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

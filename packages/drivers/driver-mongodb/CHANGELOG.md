@@ -1,5 +1,71 @@
 # @objectstack/driver-mongodb
 
+## 18.5.0
+
+### Patch Changes
+
+- 0b89b33: feat(service-automation, metadata-protocol, driver-mongodb, cli): a connector connection is unique per organization and instance, the instance being its package and name, and the connections that name no package keep one per organization through a runtime guard (ADR-0150 D4, D8 row R11, #31699)
+  
+  Clause-②: yes (widening) — additive CLI and in-process surfaces: `os migrate plan` lists a second runtime-owned index (and `--json` `schemaSyncIndexes` an entry for it), `os migrate duplicates` probes it, `os migrate stored-references bind` answers the refusal `duplicate` where it threw, and the exports and types listed under In-process APIs grow. The connector doors (the connect door, the OAuth callback, revoke, the connection list) and every automation request answer as before: the store still reads and writes by organization and name, and the one-holder backstop keeps every connector name to one package until #31699's last PR, so no second package's connection is written yet.
+  Metadata-protocol: none
+  Skills-docs: `content/docs/automation/connectors.mdx` says a connection is one per organization and instance; `content/docs/deployment/cli.mdx` lists the guard among the runtime-owned indexes and the bind's `duplicate` refusal. `skills/**` teaches "connect once per organization", which still holds per instance.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. `sys_connector_connection` is a platform object and its `indexes[]` is not authored metadata; the key change is a schema face the drift plan applies, the guard is a runtime-managed physical index, and no stored row is rewritten, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  Part of #31699 (ADR-0150 child B, PR 3a: the storage half). The maintainer's ruling on #31699: a connection is unique by package and name. The store, the connect door and the OAuth callback carry the package in the next PR; this one widens the key, stands the guard that keeps the package-less rows to one, and teaches the two writers of the package column what the wider key can refuse.
+  
+  **The key: `sys_connector_connection`.**
+  
+  - FROM one connection per `(organization_id, connector_name)` (`uniq_sys_connector_connection_organization_id_connector_name`) TO one per `(organization_id, connector_package, connector_name)`. On SQL the drift plan replaces the old key with one `replace_unique_index`, categorized `safe`, create-before-drop, and only once the guard below stands; until then `driver-sql`'s widening arm keeps the old key, so the table is never without a unique rule over its rows. The guard is built at schema sync after the table's drift is read, so on an upgraded database the old key retires on the NEXT sync that runs safe drift (a dev `autoMigrate: 'safe'` boot, or `os migrate apply`, which lists it). Measured on SQLite and PostgreSQL 16: with the guard, the plan is that one safe op and a re-plan is empty; two packages' connections of one name in one organization are admitted, a second connection of one package's instance is refused, and a second package-less connection is refused. On MariaDB the retirement is read from `driver-sql`'s source, not measured: its carrier column is read as a partial unique on the two columns, and on an upgraded MySQL-family database `connector_package` is a TEXT column, so the wide key is built over the driver's hash shadow.
+  
+  **The guard: `uniq_sys_connector_connection_packageless`.**
+  
+  - `connector_package` is NULL on every connection of an instance the environment authored or a plugin registers in code, and of a name the boot backfill could not bind. A SQL UNIQUE treats NULLs as distinct, so for exactly those connections the wider key constrains nothing. The guard keeps them to one per `(organization_id, connector_name)`, as the old key did: two of them would keep two refresh tokens for one instance, and a revoke would leave the other stored.
+  - Built as the permission-set grant's guard is (#32164), at `objectql:schema-synced`, on every kernel that runs the table's DDL; a pass that holds its DDL back builds nothing, a standing guard costs one catalog read, a refusal is reported once per boot. SQLite and PostgreSQL: a partial unique index `WHERE connector_package IS NULL`. MySQL 8.0.13+: a functional key part over the hash-shadow digest. MariaDB 10.3+: a UNIQUE key over an INVISIBLE generated column `uniq_sys_connector_connection_packageless__hash`. MongoDB: `driver-mongodb` builds it at collection sync (`RUNTIME_OWNED_UNIQUES`, `connector_package: null`), keyed `(connector_name)`, because Mongo materialized the earlier declaration's one column, so the widening arm there retires the old index once the guard stands.
+  - Refuse, never keep-one: a database already holding two package-less connections of one key keeps both; the build fails and logs, at `error`, the keys, the consequence and the query that lists them. `os migrate duplicates` lists this index too. It admits nothing the old key refused.
+  
+  **The writers of the table.**
+  
+  - The connection store's first connect (`ConnectorConnectionStore#connect`): the old key refused a second row of one instance in one organization; the wide key admits one when the boot backfill stamped the first connect's row with its package between a second connect's read and its insert. A connect that counts a second row after its insert now deletes its own row and is refused ("its connection changed while this connect was completing … begin the connect again"), nothing kept, as the old key refused it; when both racing connects count two rows, both can be refused and no row stands. Where the engine answers no id for the inserted row, or the delete fails, the connect is refused saying the instance was connected twice and to revoke until it reads as not connected. A first connect with no race is unchanged.
+  - The boot backfill (`stored-reference-package-backfill.ts`, row R11) binds a package-less connection to the one package that holds its name. Under the wider key that row can be a second row of one key, when a connection bound to that package already stands for the same organization and name (a database where a guard build was refused, `driver-memory`, a server with no form, or a pair a racing first connect left when its process died before taking its row back). The wider key makes that unique violation possible, and it would end R11's pass; it is now reported per row: the row is left as it is and listed in the report's new `duplicated` list, once a read confirms the row of that key that already names the holder, named in one `warn` line per pass. A dry run lists the same rows, counting the keys it has already bound in the pass. Any other failed write, a violation no such row confirms, and any violation on R8 or R9 (whose keys do not carry the package) still end the pass.
+  - `os migrate stored-references bind`: FROM a unique violation thrown as an error TO the refusal `duplicate`, naming the row, the package and the key, nothing written.
+  
+  **Declared limits.**
+  
+  - MySQL 8, upgraded databases: `driver-sql` reads the guard's functional key part as an expression, not as a partial guard, so the widening arm keeps the old key there. The old key keeps refusing what it refused, so an organization cannot connect a second package's instance of one name on such a database until `driver-sql` recognises the form. A database created fresh on MySQL 8 has the wide key and the guard and no old key. The permission-set grant's guard (#32164) shares this limit. MySQL before 8.0.13 and MariaDB before 10.3 build no form, keep the old key (or build it under the driver's generated name where it is missing) and say so at `error` each boot.
+  - `driver-memory` builds no guard (no raw-SQL seam), as for the grant: a pin measures that its unique check treats a NULL package as distinct, so two package-less connections of one instance are admitted there.
+  - The MySQL, MariaDB and real-mongod pins run in suites that run on `main` only, so they first run after this lands.
+  
+  **In-process APIs.** `@objectstack/metadata-protocol` exports `ensureConnectorConnectionPackagelessIndex`, `createConnectorConnectionGuardAtSchemaSync`, `buildConnectorConnectionPackagelessIndexSql`, `buildConnectorConnectionPackagelessIndexPresenceSql`, `buildConnectorConnectionPackagelessDuplicateProbeSql`, `buildConnectorConnectionOldKeySql`, `resolveConnectorConnectionIndexSeam`, `CONNECTOR_CONNECTION_PACKAGELESS_INDEX_NAME`, `CONNECTOR_CONNECTION_PACKAGELESS_INDEX_COLUMNS`, `CONNECTOR_CONNECTION_OLD_KEY_INDEX_NAME` and the result, status and pass-outcome types. `@objectstack/service-automation`'s `StoredReferenceBackfillReport` gains `duplicated`. `@objectstack/cli`'s `BindRefusal` gains `'duplicate'`. All additive.
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [16e3486]
+- Updated dependencies [6538ba4]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [633d8c4]
+- Updated dependencies [e997113]
+- Updated dependencies [67274ac]
+  - @objectstack/core@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/types@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

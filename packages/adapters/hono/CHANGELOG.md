@@ -1,5 +1,68 @@
 # @objectstack/hono
 
+## 18.5.0
+
+### Patch Changes
+
+- d4fbb4d: fix(deps)!: hono moves to ^4.13.16 and @hono/node-server to ^2.1.6, the releases that fix seven public advisories; a request path holding a backslash is answered 400
+  
+  Clause-②: yes (narrowing) — `@hono/node-server` 2.1.6 answers `400 Bad Request` to a request whose path (the part before `?`) holds a backslash, before any route runs. Up to 2.1.5 the backslash was rewritten to `/` and the request reached the route that path names. A backslash after `?` is query data and answers as before. One more edge moves in the same transport: a streamed response whose body stream errors within its first two reads used to be sent as a truncated `200`, and is now a `500` (`text/plain`) with the socket closed. Of ours, only a raw stream passthrough (the AI and MCP stream results) can meet it; the SSE path and the adapter's stream writer never error their stream. No other status, header, body or error text of ours moves; the request-body limit (`413 PAYLOAD_TOO_LARGE`) answers as before.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` and no page under `content/docs/**` teaches request-path spelling at the HTTP door; the moved answer is the transport refusing a malformed request line.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type, stored row or export is added, removed, renamed or re-shaped. What moves is the Node transport refusing a request line whose path holds a backslash, so there is nothing for an author or an operator to migrate. -->
+  
+  **BREAKING** for a client that sends a backslash inside a URL path, such as `GET /api/v1/data\account`: the Node server now answers `400 Bad Request` where it used to route the request as `/api/v1/data/account`. Browsers and WHATWG-URL clients (`fetch`, undici) already turn a backslash into `/` before sending; other clients, `curl` among them, send it as written and meet this. Send the path with `/`.
+  
+  The fixed advisories: `hono` GHSA-3gg2-335m-rxc6, GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-4m76-xfj5-7975 and GHSA-h7mg-cq63-vhpq (fixed in 4.13.16); `@hono/node-server` GHSA-jpvv-r467-5p4w and GHSA-qv5m-9pm6-hqp3 (fixed in 2.1.6). The declared ranges move so that a downstream install, which never sees this workspace's overrides, lands on the fixed releases too. The `@objectstack/hono` peer range on `hono` stays `^4.12.8`.
+- 67274ac: fix(plugin-hono-server, hono)!: a request body over the server's limit is answered 413 PAYLOAD_TOO_LARGE and is not read past the limit
+  
+  Clause-②: yes (narrowing) — a JSON, form or other body over 10 MiB that both HTTP doors read today is answered `413 PAYLOAD_TOO_LARGE`, unread past the limit, unless an operator raises the limit. The published surface also widens: `HonoPluginOptions.maxRequestBodyBytes`, `createHonoApp`'s `maxRequestBodyBytes` option, `HonoHttpServer.setMaxRequestBodyBytes()` / `getMaxRequestBodyBytes()`, the `OS_HTTP_MAX_BODY_BYTES` environment variable, and the `body-limit` exports of `@objectstack/plugin-hono-server`.
+  Metadata-protocol: none
+  Skills-docs: follow-up owed — content/docs/api/error-catalog.mdx (the `VALIDATION_ERROR` callout) and content/docs/protocol/kernel/error-handling.mdx (the 413 row) list the causes of `413 PAYLOAD_TOO_LARGE` and do not yet name a request body over the server's limit, nor `maxRequestBodyBytes` / `OS_HTTP_MAX_BODY_BYTES`; no file under `skills/**` teaches a request-body limit.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata an author writes changes and no stored row is rewritten: the limit bounds what the HTTP doors read from a request, and an operator raises it with an option or an environment variable -->
+  
+  **BREAKING** for a client that sends a JSON, form or other request body over 10 MiB to a data, API or auth route: that request is now answered `413 PAYLOAD_TOO_LARGE` instead of being read.
+  
+  - **Who moves.** The operator of a deployment whose clients send bodies that large. Raise the limit: `maxRequestBodyBytes` (in bytes) on `HonoServerPlugin` or `createHonoApp`, `HonoHttpServer.setMaxRequestBodyBytes()` on an embedded adapter, or the `OS_HTTP_MAX_BODY_BYTES` environment variable. Or send the content as a file through a storage upload door, which keeps its own limit.
+  - **File uploads** through the storage doors (the presigned raw PUT, the chunk PUT and the upload link, one file or several) see no change: they stay bounded by `max_upload_mb`.
+  
+  Both HTTP doors, the self-hosted server (`@objectstack/plugin-hono-server`) and `createHonoApp` (`@objectstack/hono`), now hold one request-body limit, 10 MiB by default. A request that declares a `Content-Length` over the limit is not read at all. A body with no declared length is counted while it is read, and reading stops once it passes the limit. In both cases the request is answered `413` with the registered code `PAYLOAD_TOO_LARGE`. A body of exactly the limit is read as before. The limit covers every reader of the body, not only the doors' own JSON and form parsing: routes mounted on the raw Hono app, and requests the doors forward whole to the auth service or to a domain, read through it as well. A route that never reads the body still reads nothing.
+  
+  To change the limit, set `maxRequestBodyBytes` (in bytes) on `HonoServerPlugin`, call `HonoHttpServer.setMaxRequestBodyBytes()` on an embedded adapter, or pass `maxRequestBodyBytes` to `createHonoApp`. Without an option, the `OS_HTTP_MAX_BODY_BYTES` environment variable sets it. A value that is not a positive whole number of bytes fails the boot instead of serving with no limit or the wrong one.
+  
+  Upload doors keep their own limit. The storage byte doors (the presigned raw PUT, the chunk PUT and the upload-link PUT) read the raw bytes through `IHttpRequest.rawBody()`, which still serves the whole body, so a file is bounded by the storage `max_upload_mb` setting exactly as before, even when that is larger than the request-body limit.
+  
+  The upload link's several-file form is bounded by that door's own form limit (each file within `max_upload_mb`, times the files the link takes, plus the form's framing), not by the request-body limit. A route that is refused `req.body` for size and then reads `rawBody()` takes the read over under its own bound, and its own answer stands.
+- e540baf: fix: a deployed runtime tells search engines not to index its API and Console
+  
+  Clause-②: yes (widening) — new export `installApiNoindex` from `@objectstack/plugin-hono-server`, which `createHonoApp` (`@objectstack/hono`) now installs; every answer under `/api/` and `/_console/` gains an `X-Robots-Tag: noindex, nofollow` header (the public form page `/_console/f/<slug>` excepted), Console documents gain a `<meta name="robots" content="noindex, nofollow">` tag, and `GET /robots.txt`, which answered 404 on a Console-serving runtime that defines none, now answers a default file. Nothing that was served before is refused.
+  Metadata-protocol: none
+  
+  Search engines were crawling runtime surfaces of deployed ObjectStack instances: Console sign-in pages, the anonymous `GET /api/v1/runtime/config` door, auth routes. They are app and API surfaces, not content, and every self-hosted deployment had the same exposure.
+  
+  - **API.** `HonoHttpServer` (`@objectstack/plugin-hono-server`) adds `X-Robots-Tag: noindex, nofollow` to every answer under `/api` — data, metadata, auth, error envelopes and the unmatched-request 404. A route that sets its own `X-Robots-Tag` keeps it. `createHonoApp` (`@objectstack/hono`) installs the same lane, exported as `installApiNoindex`, so both HTTP doors answer the same headers.
+  - **Console.** The Console static plugin (`os serve`, `os start`, `os dev`) adds the same header to every answer under `/_console/` and writes the robots meta tag into each Console document, except on the public form page `/_console/f/<slug>`, which stays indexable. A Console build that already ships a robots meta tag keeps its own.
+  - **robots.txt.** With the Console mounted, `GET /robots.txt` answers a default that disallows `/api/` and `/_console/` and allows the public form surface (`/forms/`, `/_console/f/`, `/_console/assets/` and the anonymous form door `/api/v1/forms/`). It answers only when nothing else serves the path, so an app's own `robots.txt` route, static mount or fallback wins whichever registered first.
+- Updated dependencies [66919b6]
+- Updated dependencies [28a2f0f]
+- Updated dependencies [d635599]
+- Updated dependencies [6718884]
+- Updated dependencies [5e250a6]
+- Updated dependencies [b22be27]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [a752057]
+- Updated dependencies [1bed853]
+- Updated dependencies [633d8c4]
+- Updated dependencies [d4fbb4d]
+- Updated dependencies [3eac63a]
+- Updated dependencies [67274ac]
+- Updated dependencies [e540baf]
+  - @objectstack/runtime@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/plugin-hono-server@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

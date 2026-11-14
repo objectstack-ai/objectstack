@@ -1,5 +1,67 @@
 # @objectstack/cloud-connection
 
+## 18.5.0
+
+### Patch Changes
+
+- Updated dependencies [0b89b33]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [66919b6]
+- Updated dependencies [02f55c5]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [28a2f0f]
+- Updated dependencies [128b657]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [d635599]
+- Updated dependencies [8403725]
+- Updated dependencies [6718884]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [5e250a6]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [84c66d3]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [a752057]
+- Updated dependencies [1bed853]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [26b5994]
+- Updated dependencies [27d042f]
+- Updated dependencies [633d8c4]
+- Updated dependencies [47a3b95]
+- Updated dependencies [e997113]
+- Updated dependencies [3eac63a]
+- Updated dependencies [67274ac]
+  - @objectstack/metadata-protocol@18.5.0
+  - @objectstack/objectql@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/spec@18.5.0
+  - @objectstack/runtime@18.5.0
+  - @objectstack/rest@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/service-cluster@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/observability@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes
