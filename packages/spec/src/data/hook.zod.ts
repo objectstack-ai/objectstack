@@ -336,9 +336,9 @@ function refuseUndeclaredLiteralRefusalCode(
  * S1): the sentence the user reads when the hook throws the code with this
  * reason. Translated through `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`.
  * Its `{{ }}` holes are judged against the entry's `params`, like the entry's
- * own message.
+ * own message. Not exported: it is published as part of {@link HookRefusalSchema}.
  */
-export const HookRefusalReasonSchema = lazySchema(() => strictObject(
+const HookRefusalReasonSchema = lazySchema(() => strictObject(
   {
     surface: 'this hook refusal reason',
     history: 'Closed from the day it was declared — a key this reason does not declare would be served nowhere.',
@@ -360,8 +360,6 @@ export const HookRefusalReasonSchema = lazySchema(() => strictObject(
     ),
   },
 ));
-
-export type HookRefusalReason = z.input<typeof HookRefusalReasonSchema>;
 
 /** The slot a refusal message's `{{ }}` holes are judged in, as a sentence names it. */
 const HOOK_REFUSAL_MESSAGE_SLOT = 'A hook refusal `message`';

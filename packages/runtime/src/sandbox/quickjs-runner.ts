@@ -366,8 +366,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
               } catch (_) { flat = undefined; }
               globalThis.__error = (typeof flat === 'string' && flat !== '') ? flat : ${JSON.stringify(`Error: ${UNREADABLE_REJECTION_SENTENCE}`)};
               try {
+                var __refusalParams;
+                try { __refusalParams = (e && e.params !== undefined) ? JSON.parse(JSON.stringify(e.params)) : undefined; } catch (_) { __refusalParams = undefined; }
                 globalThis.__errorInfo = (e && (e.code || e.fields || e.status || e.userMessage || e['${SANDBOX_FAULT_PROP}']))
-                  ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, userMessage: e.userMessage, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true })
+                  ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, userMessage: e.userMessage, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true, reason: typeof e.reason === 'string' ? e.reason : undefined, params: __refusalParams })
                   : undefined;
               } catch (_) { globalThis.__errorInfo = undefined; }
               try {
@@ -539,6 +541,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
           // unchanged is remembered as such, so a hook's refusal catalogue
           // answers only the body's own throws (`isHostRelayedSandboxError`).
           if (readErrorFromHost(vm)) hostRelayedErrors.add(thrown);
+          // [#33214] …and the refusal address the body's throw named beside its
+          // code (`reason`, `params`), for a hook's refusal catalogue.
+          const address = readRefusalAddress(vm);
+          if (address !== undefined) refusalAddresses.set(thrown, address);
           throw thrown;
         }
 
@@ -2292,6 +2298,52 @@ const hostRelayedErrors = new WeakSet<object>();
  */
 export function isHostRelayedSandboxError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && hostRelayedErrors.has(err);
+}
+
+/**
+ * [#33214] What a body's throw named beside its `code` for a hook's refusal
+ * catalogue: a `reason` (one of the code's declared sentences) and the
+ * `params` its holes name. Carried across the VM on the `__errorInfo` channel,
+ * and kept off {@link SandboxErrorInfo} and the error's own fields for the
+ * reason {@link relayedRefusals} gives: it is a fact about the hop, read only
+ * by `resolveHookRefusal`, and it never reaches the wire.
+ */
+export interface SandboxRefusalAddress {
+  reason?: string;
+  params?: Record<string, unknown>;
+}
+
+/** [#33214] The errors this runner built from a body throw that named a refusal address. */
+const refusalAddresses = new WeakMap<object, SandboxRefusalAddress>();
+
+/** [#33214] The refusal address a body's throw named ({@link SandboxRefusalAddress}), or `undefined`. */
+export function sandboxRefusalAddressOf(err: unknown): SandboxRefusalAddress | undefined {
+  return typeof err === 'object' && err !== null ? refusalAddresses.get(err) : undefined;
+}
+
+/** [#33214] Read the `reason` / `params` the wrapper's reject handler wrote onto `__errorInfo`. */
+function readRefusalAddress(vm: QuickJSContext): SandboxRefusalAddress | undefined {
+  let raw: unknown;
+  try {
+    const h = vm.getProp(vm.global, '__errorInfo');
+    raw = vm.dump(h);
+    h.dispose();
+  } catch {
+    return undefined;
+  }
+  if (typeof raw !== 'string' || !raw) return undefined;
+  let parsed: { reason?: unknown; params?: unknown };
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  const address: SandboxRefusalAddress = {};
+  if (typeof parsed?.reason === 'string' && parsed.reason.length > 0) address.reason = parsed.reason;
+  if (parsed?.params !== null && typeof parsed?.params === 'object' && !Array.isArray(parsed.params)) {
+    address.params = parsed.params as Record<string, unknown>;
+  }
+  return address.reason !== undefined || address.params !== undefined ? address : undefined;
 }
 
 /** [#26170] Read the `__errorFromHost` channel the wrapper's reject handler writes. */

@@ -75,7 +75,12 @@ import {
   storedMetadataFamilyTableList,
 } from '../stored-metadata-body-boundary.js';
 import { mapDataError } from '@objectstack/types';
-import { resolveHookRefusal, type HookRefusalI18nSource } from './hook-refusal-catalogue.js';
+import {
+  inProcessHostSurface,
+  resolveHookRefusal,
+  resolveInProcessHookRefusal,
+  type HookRefusalI18nSource,
+} from './hook-refusal-catalogue.js';
 import { isRelayedSandboxRefusal } from './quickjs-runner.js';
 import { buildBodyDoors, callerScopeOf, type BodyDoorCaller } from './body-doors.js';
 import { deriveHookApi, openTransactionKind, seedHookUnreadMembership, seedHookUserGrants } from '@objectstack/objectql';
@@ -364,19 +369,43 @@ function buildTitleSurface(
 export function withInProcessHookTitle(
   handler: (ctx: any) => unknown,
   ql: unknown,
-  hookName: string,
+  hook: string | Pick<Hook, 'name' | 'refusals'>,
+  opts: InProcessHookOptions = {},
 ): (ctx: any) => Promise<unknown> {
+  const hookName = typeof hook === 'string' ? hook : String(hook.name);
+  // [#33214] Only a hook that declares a refusal catalogue is answered here;
+  // every other handler runs exactly as before.
+  const catalogued = typeof hook !== 'string' && hook.refusals !== undefined && hook.refusals !== null;
   return async function inProcessHookHandler(engineCtx: any): Promise<unknown> {
     if (engineCtx === null || typeof engineCtx !== 'object') return handler(engineCtx);
     const surface = buildTitleSurface(engineCtx, ql, { kind: 'hook', name: hookName });
-    const title = async (field?: unknown): Promise<string | null> =>
+    const readTitle = async (field?: unknown): Promise<string | null> =>
       (await surface(field === undefined || field === null ? undefined : String(field), undefined)) ?? null;
+    const title = catalogued ? inProcessHostSurface(readTitle) : readTitle;
     const view = new Proxy(engineCtx, {
-      get: (target, prop) => (prop === 'title' ? title : Reflect.get(target, prop)),
+      get: (target, prop) => {
+        if (prop === 'title') return title;
+        const value = Reflect.get(target, prop);
+        // [#33214] The host surfaces a handler calls: what they raise is the
+        // platform's, never the handler's refusal.
+        return catalogued && (prop === 'api' || prop === 'ql') ? inProcessHostSurface(value) : value;
+      },
       has: (target, prop) => prop === 'title' || Reflect.has(target, prop),
     });
-    return handler(view);
+    if (!catalogued) return handler(view);
+    try {
+      return await handler(view);
+    } catch (err: unknown) {
+      throw resolveInProcessHookRefusal(hook as Pick<Hook, 'name' | 'refusals'>, err, engineCtx, opts);
+    }
   };
+}
+
+/** [#33214] What the in-process seam answers a hook's refusal catalogue with. */
+export interface InProcessHookOptions {
+  /** The `i18n` service a declared refusal is translated through, read at refusal time. */
+  i18n?: HookRefusalI18nSource;
+  logger?: { warn?: (...args: any[]) => void };
 }
 
 /**

@@ -1,7 +1,7 @@
 ---
 title: Hook schema — Data Protocol property reference
 navTitle: Hook
-description: "Hook schemas of the ObjectStack Data Protocol: Hook, HookContext, HookEvent, HookRefusal — each property with its type, default and a TypeScript example."
+description: "Hook schemas of the ObjectStack Data Protocol: Hook, HookContext, HookEvent and 2 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Hook schemas of the ObjectStack Data Protocol: Hook, HookContext, 
 ## TypeScript Usage
 
 ```typescript
-import { HookSchema, HookContextSchema, HookEvent, HookRefusalSchema } from '@objectstack/spec/data';
-import type { Hook, HookContext, HookRefusal } from '@objectstack/spec/data';
+import { HookSchema, HookContextSchema, HookEvent, HookRefusalSchema, HookRefusalReasonSchema } from '@objectstack/spec/data';
+import type { Hook, HookContext, HookRefusal, HookRefusalReason } from '@objectstack/spec/data';
 
 // Validate data
 const result = HookSchema.parse(data);
@@ -42,7 +42,7 @@ const result = HookSchema.parse(data);
 | **timeoutMs** | `number` | optional | Maximum execution time in milliseconds before the hook is aborted |
 | **timeout** | `never` | optional | [REMOVED] `hook.timeout` was removed in @objectstack/spec 17 — its unit (milliseconds) lived only in the description, beside a body-level `timeoutMs` and a `retryPolicy.backoffMs` that spell theirs, so the same number read as two conventions on one surface. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **onError** | `Enum<'abort' \| 'log'>` | optional (default: `"abort"`) | Error handling strategy. abort: refuse the operation; a blocking hook's abort rolls the write back inside a unit of work, which the write door opens for an after* hook on an object on the default datasource whose driver declares transactions (elsewhere the caller is refused and the row stays stored). log: log the error and continue |
-| **refusals** | `Record<string, { message: string; status?: integer }>` | optional | Refusal catalogue keyed by the SCREAMING_SNAKE code the body throws: `{ message, status? }`. The body refuses by code only; the runtime answers with the declared message (translated through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale) and status. A code not declared here is refused loudly — at save when the body throws it literally, otherwise at run time |
+| **refusals** | `Record<string, { message: string; status?: integer; reasons?: Record<string, object>; params?: string[] }>` | optional | Refusal catalogue keyed by the SCREAMING_SNAKE code the hook throws: `{ message, status?, reasons?, params? }`. The hook (a js body or a handler) refuses by code only, optionally with a declared reason and params; the runtime answers with the declared message (translated through hooks.`<hook>`.refusals.`<CODE>`.message, or ….`<CODE>`.reasons.`<REASON>`.message, in the caller's locale, holes filled from params) and status. A code or reason not declared here is refused loudly — at save when the hook throws it literally, otherwise at run time |
 | **runAs** | `Enum<'system' \| 'user' \| 'inherit'>` | optional (default: `"inherit"`) | Execution identity for the hook's ctx.api data operations: system = elevated (bypasses RLS), user = the triggering user (RLS-respecting), inherit = the context of the write that fired the hook (the pre-runAs behaviour; the default). A hook with no trigger user has no identity to scope to, so under user its ctx.api data operations are REFUSED — declare system to make the elevation explicit. This covers any hook fired by a write that carried no user (an isSystem plugin/service write; a system-elevated flow node). Elevation does not reach identity assignment: a system hook's governed writes (insert, update, delete, transfer, restore, purge) to sys_user_position, sys_user_permission_set, sys_invitation and sys_member are refused with PERMISSION_DENIED, and a system hook whose body names such a write is refused at save; declare user for position holdings and permission-set grants (the ADR-0090 D12 delegated-administration gate then judges the user the hook acts for), and change invitations and memberships through the organization endpoints. Nor does it reach a ledger: a system hook body's update, transfer, delete, purge or restore of an object declared managedBy: 'append-only' is refused with PERMISSION_DENIED; an insert is not judged by this rule. Scope: ctx.api only — condition evaluation, the readonly strip on ctx.input, ctx.session and async are unchanged. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -84,8 +84,10 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **message** | `string` | ✅ | The sentence the user reads when the body throws this code — plain text in the source locale, translated whole through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale; a `{{ }}` hole is refused |
+| **message** | `string` | ✅ | The sentence the user reads when the hook throws this code — in the source locale, translated whole through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale; a `{{ }}` hole is refused unless it names one of the entry's params |
 | **status** | `integer` | optional | HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the body itself sets on the throw is not read — the catalogue decides |
+| **reasons** | `Record<string, { message: string }>` | optional | Further sentences under this same code, keyed by the snake_case reason the hook throws beside the code (`{ code, reason }`): `{ message }`. The wire code and status stay this entry's. A reason not declared here is refused loudly. Absent: the code has the one sentence |
+| **params** | `string[]` | optional | The names this entry's sentences may fill: a `{{ NAME }}` hole renders the value the hook throws in `params` (`{ code, params: { NAME: value } }`). A hole over any other name is refused. Absent: the sentences are plain text and a `{{ }}` hole is refused |
 
 
 ---
@@ -182,8 +184,27 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **message** | `string` | ✅ | The sentence the user reads when the body throws this code — plain text in the source locale, translated whole through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale; a `{{ }}` hole is refused |
+| **message** | `string` | ✅ | The sentence the user reads when the hook throws this code — in the source locale, translated whole through hooks.`<hook>`.refusals.`<CODE>`.message in the caller's locale; a `{{ }}` hole is refused unless it names one of the entry's params |
 | **status** | `integer` | optional | HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the body itself sets on the throw is not read — the catalogue decides |
+| **reasons** | `Record<string, { message: string }>` | optional | Further sentences under this same code, keyed by the snake_case reason the hook throws beside the code (`{ code, reason }`): `{ message }`. The wire code and status stay this entry's. A reason not declared here is refused loudly. Absent: the code has the one sentence |
+| **params** | `string[]` | optional | The names this entry's sentences may fill: a `{{ NAME }}` hole renders the value the hook throws in `params` (`{ code, params: { NAME: value } }`). A hole over any other name is refused. Absent: the sentences are plain text and a `{{ }}` hole is refused |
+
+### Nested Shape: `HookRefusal.reasons[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **message** | `string` | ✅ | The sentence the user reads when the hook throws this reason under its code — in the source locale, translated through hooks.`<hook>`.refusals.`<CODE>`.reasons.`<REASON>`.message in the caller's locale; a `{{ }}` hole names one of the entry's params |
+
+
+---
+
+## HookRefusalReason
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **message** | `string` | ✅ | The sentence the user reads when the hook throws this reason under its code — in the source locale, translated through hooks.`<hook>`.refusals.`<CODE>`.reasons.`<REASON>`.message in the caller's locale; a `{{ }}` hole names one of the entry's params |
 
 
 ---

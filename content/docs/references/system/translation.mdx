@@ -297,7 +297,7 @@ Translation data for a single object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
+| **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
 
 ### Nested Shape: `PlatformTranslationData.positions[string]`
 
@@ -475,7 +475,7 @@ Translation data for a single object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
+| **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
 
 ### Nested Shape: `ServedTranslationData.positions[string]`
 
@@ -715,7 +715,7 @@ Translation data for a single object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
+| **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
 
 ### Nested Shape: `TranslationData.positions[string]`
 
@@ -925,7 +925,7 @@ Translation data for a single object
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
+| **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
 
 ### Nested Shape: `TranslationItem.positions[string]`
 
