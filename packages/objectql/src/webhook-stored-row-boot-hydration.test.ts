@@ -456,9 +456,10 @@ describe('[#32900] a module\'s locale member beside a package-less row of the sa
             ? { id: `r${i}`, type: 'email_template', name: 'welcome', bundle_member: 'de-DE', organization_id: null, package_id: PAIR, state: 'active', metadata: JSON.stringify(tpl('pair', 'de-DE', { overrides: { package: X } })) }
             : { id: `r${i}`, type: 'email_template', name: 'welcome', bundle_member: 'de-DE', organization_id: null, package_id: null, state: 'active', metadata: JSON.stringify(tpl('env', 'de-DE')) });
         const engine: any = {
-            async find(table: string, opts?: { where?: Record<string, unknown> }) {
+            async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
                 if (table !== 'sys_metadata') return [];
-                return rows.filter((r) => Object.entries(opts?.where ?? {}).every(([k, v]) => v === undefined || typeof v === 'object' || (r[k] ?? null) === v));
+                const found = rows.filter((r) => Object.entries(opts?.where ?? {}).every(([k, v]) => v === undefined || typeof v === 'object' || (r[k] ?? null) === v));
+                return typeof opts?.limit === 'number' ? found.slice(0, opts.limit) : found;
             },
             async findOne(object: string, query?: EngineFindOneQueryInput) {
                 assertEngineFindOnePredicate(object, query);
