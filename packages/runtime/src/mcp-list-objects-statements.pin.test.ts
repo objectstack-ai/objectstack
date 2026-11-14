@@ -52,6 +52,8 @@ import { AppPlugin } from './app-plugin.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { HttpDispatcher } from './http-dispatcher.js';
+// Paid at collection, not inside the boot's clock: the app plugin's reach loads it lazily.
+import '@objectstack/metadata';
 
 const BOOT_TIMEOUT = 180_000;
 const ORIGIN = 'http://localhost:3000';
