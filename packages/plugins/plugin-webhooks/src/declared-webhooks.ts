@@ -374,11 +374,13 @@ function listedRefusal(
     ].join('; and ');
     return {
         ...refusal,
-        message: `The webhook "${name}" is declared, as the metadata service lists it, by ${holders.length} holders that no ` +
-            `single declaration answers: ${refusal.candidates.map(describePackageScopedHolder).join('; ')}. ` +
-            `${why.charAt(0).toUpperCase()}${why.slice(1)} (ADR-0150 D3). None of them is dispatched, and no address ` +
-            'switches one: the bare address and each holder\'s own (?package=PACKAGE) answer this refusal. Remove or ' +
-            'rename declarations until each holder lists the name once, and the environment only where no package does.',
+        message: `The webhook "${name}" is declared, as the metadata service lists it, by ` +
+            `${holders.length === 1 ? 'one holder' : `${holders.length} holders`}, and no single declaration answers it: ` +
+            `${refusal.candidates.map(describePackageScopedHolder).join('; ')}. ` +
+            `${why.charAt(0).toUpperCase()}${why.slice(1)} (ADR-0150 D3). No declaration of it is dispatched, and no ` +
+            'address switches one: the bare address and each holder\'s own (?package=PACKAGE) answer this refusal. ' +
+            'Remove or rename declarations until each holder lists the name once, and the environment only where no ' +
+            'package does.',
     };
 }
 
@@ -844,7 +846,7 @@ export function bindDeclaredWebhookNameGuard(
         // its package's exact address (#33263), which two co-owners of one
         // namespace each have. A name refused WHOLE has no served slot and no
         // address to name: the refusal says why instead.
-        const conflict = await declared.declaredWebhookNamed(data.name).then(
+        const conflict: { switches: readonly string[]; refusal?: PackageScopedRefusal } | undefined = await declared.declaredWebhookNamed(data.name).then(
             (d) => (d ? { switches: [declaredWebhookActivationPath(d.webhook.name, d.packageId)] } : undefined),
             async (err: unknown) => {
                 if (!(err instanceof DeclaredWebhookAmbiguousError)) throw err;

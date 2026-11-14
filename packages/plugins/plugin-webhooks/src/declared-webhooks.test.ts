@@ -1145,7 +1145,7 @@ describe('declared webhooks — a name the metadata service lists for the enviro
         expect(refusal.candidates).toEqual([{ kind: 'environment' }, { kind: 'package', packageId: PKG }]);
         expect(refusal.message).toContain('the environment (an item authored in this environment, bound to no package)');
         expect(refusal.message).toContain(`package "${PKG}"`);
-        expect(refusal.message).toContain('None of them is dispatched, and no address switches one');
+        expect(refusal.message).toContain('No declaration of it is dispatched, and no address switches one');
         expect(refusal.message).not.toContain('address it by its package');
         expect(await wholeNameRefusal(source, T)).toEqual(refusal);
     });
@@ -1163,7 +1163,7 @@ describe('declared webhooks — a name the metadata service lists for the enviro
     it('CONTROL — one holder listing the name twice is refused whole, saying so', async () => {
         const source = new DeclaredWebhookSource(newEngine(), listing({ ...declaredWebhook(), _packageId: PKG }, { ...declaredWebhook(), _packageId: PKG }));
         const refusal = await refusalOf(source);
-        expect(refusal.message).toContain('a holder that lists the name twice holds two declarations for one slot');
+        expect(refusal.message).toContain('A holder that lists the name twice holds two declarations for one slot');
         expect(refusal.message).not.toContain("the environment's own declaration");
     });
 
@@ -1186,7 +1186,7 @@ describe('declared webhooks — a name the metadata service lists for the enviro
         const guard = createWebhookRedeliverGuard(engine as any, 'sys_webhook', source);
         const verdict = await guard({ source: 'webhook', refId: declaredWebhookRefId(T, PKG) });
         expect(verdict).toContain(`declared webhook '${T}' is not served, so this delivery is refused`);
-        expect(verdict).toContain('None of them is dispatched');
+        expect(verdict).toContain('No declaration of it is dispatched');
         expect(verdict).not.toMatch(/disabled/);
         // The environment's own reference names no package: the ambiguity, naming both.
         const bare = await guard({ source: 'webhook', refId: declaredWebhookRefId(T) });
