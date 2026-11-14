@@ -124,14 +124,16 @@ describe('FILTER_STRING_STORED_COMPARAND_CASES — the cross-driver table', () =
     }
   });
 
-  it('covers both families, both comparand types, and $eq / $ne / $in / $nin with mixed scalars', () => {
+  it('covers both families, both comparand types, $eq / $ne / $in / $nin with mixed scalars, and the ranges', () => {
     const written = FILTER_STRING_STORED_COMPARAND_CASES.map((c) => JSON.stringify(c.filter()));
     for (const field of ['code', 'stage']) {
       expect(written.some((w) => w.includes(`"${field}"`) && /[:\[,](-?\d|true|false)/.test(w)), field).toBe(true);
-      for (const op of ['$eq', '$ne', '$in', '$nin']) {
+      for (const op of ['$eq', '$ne', '$in', '$nin', '$between']) {
         expect(written.some((w) => w.includes(`"${field}"`) && w.includes(`"${op}"`)), `${field} ${op}`).toBe(true);
       }
     }
+    // A range bound is narrowed too: the table pins the STRING range on a digits-only `$gt`.
+    expect(written.some((w) => w.includes('"code"') && w.includes('"$gt"'))).toBe(true);
   });
 
   it('every stored filter passes the shared door, and every expected id is a fixture row', () => {

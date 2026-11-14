@@ -386,6 +386,10 @@ export interface StringStoredComparandCase {
  * The cases: a number and a boolean comparand on the text field and on the
  * option field, at the implicit slot, under `$eq` / `$ne`, and as members of
  * `$in` / `$nin` mixed with other scalars (a string member passes as written).
+ * Then the ranges: a range bound is narrowed too, so a range on a string-stored
+ * field is a STRING range (`"42"` lies between `"4"` and `"5"`). Every bound is a
+ * single digit, which every collation orders before the fixture's letters and
+ * the same way among digits, so each answer is one on every driver.
  */
 export const FILTER_STRING_STORED_COMPARAND_CASES: readonly StringStoredComparandCase[] = [
   {
@@ -456,5 +460,25 @@ export const FILTER_STRING_STORED_COMPARAND_CASES: readonly StringStoredComparan
     filter: () => ({ stage: { $nin: [3, false] } }),
     stored: () => ({ stage: { $nin: ['3', 'false'] } }),
     expected: ['2', '4'],
+  },
+  {
+    name: 'a range of numbers on a text field is a STRING range — $gt 4 and $lt 5 hold "42"',
+    filter: () => ({ code: { $gt: 4, $lt: 5 } }),
+    stored: () => ({ code: { $gt: '4', $lt: '5' } }),
+    expected: ['1'],
+    note: 'Read as strings, "4" < "42" < "5"; the number 42 lies outside 4..5. Every range bound is narrowed, '
+      + 'so { code: { $gt: 9 } } does not match "10" either ("10" < "9").',
+  },
+  {
+    name: 'a $between of numbers on a text field is a STRING range — [1, 5] holds "42"',
+    filter: () => ({ code: { $between: [1, 5] } }),
+    stored: () => ({ code: { $between: ['1', '5'] } }),
+    expected: ['1'],
+  },
+  {
+    name: 'a $between of numbers on an option field — [1, 4] holds the code "3"',
+    filter: () => ({ stage: { $between: [1, 4] } }),
+    stored: () => ({ stage: { $between: ['1', '4'] } }),
+    expected: ['1'],
   },
 ] as const;

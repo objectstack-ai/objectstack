@@ -36,6 +36,20 @@
  * | `{ title: { $ne: 42 } }` | all three | all three | the row written `true` |
  *
  * Every answer a 200, no error; `{ title: "42" }` matched both `42` rows.
+ *
+ * The ranges, a `text` field holding `"10"`, `"5"`, `"42"`, `"alpha"`, measured
+ * at the driver on the filter each received before the door (as written) and
+ * after it (narrowed). A range bound is narrowed like any comparand, so a range
+ * on a string-stored field is a STRING range, ordered as the column's strings:
+ *
+ * | filter | InMemoryDriver before | SQLite before | every driver after |
+ * |:--|:--|:--|:--|
+ * | `{ title: { $gt: 9 } }` | no row | `"alpha"` | `"alpha"` — `"10"` < `"9"` as strings |
+ * | `{ title: { $between: [1, 10] } }` | no row | `"10"` | `"10"` — `"5"` > `"10"` as strings |
+ * | `{ title: { $gt: 4, $lt: 5 } }` | no row | `"5"`, `"42"` | `"42"` |
+ *
+ * MongoDB orders a number and a string in different type brackets, so, like the
+ * memory matcher, it matched no row for a number bound.
  * A multi-value option field (`multiselect`, …) is unchanged: both drivers
  * refuse a scalar comparison against one (`INVALID_FILTER`, "use $contains"),
  * whatever the comparand, before and after.
