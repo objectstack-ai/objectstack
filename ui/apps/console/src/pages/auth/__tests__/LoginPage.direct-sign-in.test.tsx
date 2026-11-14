@@ -22,7 +22,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import { AuthProvider, useAuth } from '@object-ui/auth';
+import { AuthProvider, useAuth, createAuthClient } from '@object-ui/auth';
 import type { AuthClient } from '@object-ui/auth';
 import { LoginPage } from '../LoginPage';
 import { decideDirectSignIn, directSignInStartUrl } from '../directSignIn';
@@ -256,5 +256,39 @@ describe('LoginPage — direct sign-in after an explicit sign-out', () => {
     expect(window.location.replace).not.toHaveBeenCalled();
     fireEvent.click(retry);
     expect(window.location.replace).toHaveBeenCalledWith(doorFor('/login?direct=returned'));
+  });
+
+  it('holds once the identity provider\'s logout brings the tab back, and a reload starts again', async () => {
+    const endSession = 'https://idp.example.com/end-session?post_logout_redirect_uri=https%3A%2F%2Fenv.example.com%2Flogin';
+    // The real client's sign-out, answered with a provider-logout URL: the
+    // browser leaves for the provider, which sends it back to this page.
+    const signOutClient = createAuthClient({
+      baseURL: '/api/v1/auth',
+      fetchFn: vi.fn(async () =>
+        new Response(JSON.stringify({ success: true, url: endSession, redirect: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    });
+    try {
+      await signOutClient.signOut();
+      expect(window.location.assign).toHaveBeenCalledWith(endSession);
+
+      // The return: a full page load of the sign-in page, signed out.
+      const back = renderLogin('', ON);
+      const retry = await screen.findByTestId('direct-sign-in-retry-button');
+      expect(screen.queryByLabelText('Email')).toBeNull();
+      expect(window.location.replace).not.toHaveBeenCalled();
+      back.unmount();
+
+      // A reload of that page is a fresh visit: it starts on its own.
+      renderLogin('', ON);
+      await waitFor(() => expect(window.location.replace).toHaveBeenCalledTimes(1));
+      expect(window.location.replace).toHaveBeenCalledWith(doorFor('/login?direct=returned'));
+      expect(retry).toBeTruthy();
+    } finally {
+      sessionStorage.clear();
+    }
   });
 });

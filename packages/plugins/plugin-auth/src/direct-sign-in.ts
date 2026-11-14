@@ -319,9 +319,14 @@ function redirect(location: string, cookies: readonly string[] = []): Response {
   return new Response(null, { status: 302, headers });
 }
 
-/** The query a request carries, each name with every value it was sent. */
+/**
+ * The query a request carries, each name with every value it was sent.
+ * Collected into an object with no prototype: a name like `constructor`,
+ * `toString` or `__proto__` is a parameter like any other here, refused 400 as
+ * unknown, never an inherited member.
+ */
 function queryOf(url: URL): Record<string, string[]> {
-  const query: Record<string, string[]> = {};
+  const query: Record<string, string[]> = Object.create(null);
   for (const [name, value] of url.searchParams) (query[name] ??= []).push(value);
   return query;
 }

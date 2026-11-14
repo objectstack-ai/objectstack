@@ -247,6 +247,19 @@ describe('runDirectSignIn: the start door', () => {
     }
   });
 
+  it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'])(
+    'refuses a parameter named like an object member (%s) with 400, starting nothing',
+    async (name) => {
+      const { host, dispatched } = fakeHost();
+      const res = await runDirectSignIn(door(`?${name}=1`), host);
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe('VALIDATION_ERROR');
+      expect(body.error.message).toContain(name);
+      expect(dispatched).toHaveLength(0);
+    },
+  );
+
   it('answers the two refusals with the shared sentences every route uses', async () => {
     const unknown = await (await runDirectSignIn(door('?returnTo=%2F'), fakeHost().host)).json();
     expect(unknown.error.message).toBe(unknownQueryParamRefusalMessage({ returnTo: ['/'] }, DIRECT_SIGN_IN_QUERY_PARAMS));

@@ -285,15 +285,15 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   ssoEnforced: z.boolean().optional().describe(
     'SSO-only login enforced: the UI hides the local password form + self-registration (a break-glass "use a password" link remains)',
   ),
-  // Served by plugin-auth (`getPublicConfig()`, refined by
-  // `isDirectSignInUsable()` in the `/config` route); read by the console
-  // sign-in page.
+  // Served by plugin-auth (`getPublicConfig()`, refined in the `/config`
+  // route to "this server mounted the door AND `isDirectSignInUsable()`");
+  // read by the console sign-in page.
   directSignIn: z.boolean().optional().describe(
     'Direct sign-in on and able to start: a signed-out visitor to the sign-in page is sent straight to the identity provider through GET /auth/sign-in/direct and returns to the page they opened. '
-    + 'The served value is refined to "one provider resolves" before answering; absent or false means the sign-in page is shown as usual',
+    + 'The served value is refined twice before answering: true only when this server mounted the start door at start-up and one provider resolves; absent or false means the sign-in page is shown as usual',
   ),
   localSignIn: z.enum(['hidden', 'off']).optional().describe(
-    'The local sign-in path behind direct sign-in, served while the direct sign-in setting is on, whatever directSignIn reads (it can read false when no provider can start): '
+    'The local sign-in path behind direct sign-in, served while the direct sign-in setting is on, whatever directSignIn reads (it can read false when no provider can start, or when the setting was turned on after start-up and the door is not mounted): '
     + 'hidden keeps the sign-in form at /login?local=1, off means the sign-in form offers no local way in. '
     + 'It changes no server door: password sign-in answers the same either way',
   ),

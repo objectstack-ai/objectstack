@@ -314,14 +314,16 @@ export interface AuthPublicConfig {
      * `@objectstack/spec`): `true` when a signed-out visitor to the sign-in
      * page goes straight to the identity provider, through the server's
      * `GET {authUrl}/sign-in/direct`, and comes back to the page they opened.
-     * The server serves `true` only when it can start that sign-in. Absent or
+     * The server serves `true` only when it mounted that door at start-up and
+     * can start that sign-in. Absent or
      * `false` ⇒ the sign-in page is shown as usual.
      */
     directSignIn?: boolean;
     /**
      * The local sign-in path behind direct sign-in, served while the server's
      * direct sign-in setting is on, whatever `directSignIn` reads (it can read
-     * `false` when no provider can start): `hidden` keeps the sign-in form at
+     * `false` when no provider can start, or when the setting was turned on
+     * after start-up): `hidden` keeps the sign-in form at
      * `/login?local=1`, `off` means the sign-in form offers no local way in.
      */
     localSignIn?: 'hidden' | 'off';

@@ -666,9 +666,15 @@ button (and the reason, where there is one), instead of starting again when:
   starts from one address in a few seconds). It redirects to
   `/login?error=direct_sign_in_rate_limited`, the page asks the visitor to
   wait a few seconds and try again, and the `warn` line names `rate_limited`;
-- the person just signed out in that tab. The identity provider's session
-  usually outlives the platform's, so starting again would sign them straight
-  back in.
+- the person just signed out in that tab. Often the identity provider's
+  session outlives the platform's, so starting again would sign them straight
+  back in. When the provider ends its own session too (an OIDC provider whose
+  discovery document names an `end_session_endpoint`, or an SSO provider with
+  sign-out turned on), the sign-out goes through the provider's logout and
+  comes back to the sign-in page; the page still holds there. The tab keeps a
+  short note of the sign-out for that round trip (at most ten minutes) and
+  reads it once, so a reload of the held page, or another tab, starts the
+  sign-in as for a fresh visit.
 
 An OAuth client's authorization hand-off (`client_id` or `redirect_uri` on the
 sign-in URL) keeps today's sign-in page. API keys, bearer tokens, `/api/*` and

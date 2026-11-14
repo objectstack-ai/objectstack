@@ -400,7 +400,8 @@ export const PUBLIC_AUTH_FEATURE_NAMES = Object.keys(PUBLIC_AUTH_FEATURES) as [
  * (the sign-in form stays at `/login?local=1`) or `off` (the sign-in form
  * offers no local way in). Served while the direct sign-in setting is on,
  * whatever `directSignIn` reads (it can read `false` when no provider can
- * start). It gates no spec input and changes no server door: the server's
+ * start, or when the setting was turned on after start-up and the door is not
+ * mounted). It gates no spec input and changes no server door: the server's
  * password sign-in is the same either way.
  */
 export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture', 'audiencePosture', 'turnstileSiteKey', 'organizationEditions', 'localSignIn'] as const;
