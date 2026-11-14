@@ -25,8 +25,9 @@ import { runWithSamlProviderScope, type SamlAccountKeyReading } from './sso-sign
 
 const ENTRA = 'https://sts.windows.net/72f988bf-86f1-41af-91ab-2d7cd011db47/';
 const reading: SamlAccountKeyReading = { attribute: ENTRA_OBJECT_ID_CLAIM, nameId: 'opaque-id', value: 'oid-1' };
-const inScope = <T>(run: () => T, providerId = 'acme', accountKey: SamlAccountKeyReading | undefined = reading): Promise<T> =>
-  runWithSamlProviderScope({ providerId, accountKey }, async () => run());
+/** `run` inside an ACS scope for `providerId`; `null` puts no reading in it. */
+const inScope = <T>(run: () => T, providerId = 'acme', accountKey: SamlAccountKeyReading | null = reading): Promise<T> =>
+  runWithSamlProviderScope({ providerId, accountKey: accountKey ?? undefined }, async () => run());
 
 describe('which attribute a SAML provider keys its accounts on', () => {
   it('Entra issuers by host, and nothing else', () => {
@@ -123,7 +124,7 @@ describe('the adapter halves rewrite only this provider and this NameID, inside 
     }
     const asked = lookup('acme', 'opaque-id');
     expect(samlAccountKeyWhere('sys_account', asked)).toBe(asked); // no scope
-    expect(await inScope(() => samlAccountKeyWhere('sys_account', asked), 'acme', undefined)).toBe(asked); // no reading
+    expect(await inScope(() => samlAccountKeyWhere('sys_account', asked), 'acme', null)).toBe(asked); // no reading
   });
 
   it('the account write of this provider and NameID is made with the key value', async () => {
@@ -163,7 +164,7 @@ describe('the read value is confirmed against the verified attributes', () => {
     const contradicting = { [ENTRA_OBJECT_ID_CLAIM]: 'oid-2' };
     expect(await inScope(() => refuseSamlAccountKeyContradiction(data(contradicting, 'other')))).toBeUndefined();
     expect(await inScope(() => refuseSamlAccountKeyContradiction(data(contradicting, 'acme', 'sso-oidc')))).toBeUndefined();
-    expect(await inScope(() => refuseSamlAccountKeyContradiction(data(contradicting)), 'acme', undefined)).toBeUndefined();
+    expect(await inScope(() => refuseSamlAccountKeyContradiction(data(contradicting)), 'acme', null)).toBeUndefined();
     expect(refuseSamlAccountKeyContradiction(data(contradicting))).toBeUndefined();
   });
 });

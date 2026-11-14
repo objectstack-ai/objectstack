@@ -456,6 +456,7 @@ Fill in the IdP details collected by the **Register SAML Provider** action:
 | `mapLastName` | — | Assertion attribute the user's last name is read from. Left blank: the standard `…/claims/surname` claim when present, else `surname`. |
 | `mapName` | — | Assertion attribute the user's full name is read from when the first and last name are absent. Left blank: the standard `…/claims/name` claim when present, else `displayName`, else the NameID. |
 | `mapGroups` | — | Assertion attribute that carries the user's groups (see [Grant permission sets from IdP groups](#grant-permission-sets-from-idp-groups)). |
+| `mapAccountKey` | — | Assertion attribute with one stable value per person, used as the account key instead of the NameID (see [Key accounts on a stable attribute](#key-accounts-on-a-stable-attribute)). Left blank: Entra ID's object id claim for an Entra ID provider, else the NameID. |
 
 On success the response returns the two **Service Provider (SP)** URLs you
 configure on the IdP side:
@@ -507,14 +508,11 @@ Entra ID and AD FS send by default, when the assertion carries it:
 
 Without that claim, the email is the `email` attribute (else the NameID) and the
 name is `givenName` + `surname`, else `displayName`, else the NameID. So an Entra
-ID provider with nothing mapped keys its users on the address in the
-`emailaddress` claim, whether the person enters from your sign-in page (an
-email-format NameID) or from the IdP's app portal (Entra's default persistent
-NameID, an opaque id), so the two entries resolve to one address and never make a
-second account. Each entry is still its own sign-in identity: whichever entry
-comes second finds the account the first one made and is refused with
-`error=account_not_linked`, creating nothing, until that account is linked to it.
-When the assertion carries both an `email` attribute and the `emailaddress`
+ID provider with nothing mapped reads the address in the `emailaddress` claim,
+whether the person enters from your sign-in page (an email-format NameID) or from
+the IdP's app portal (Entra's default persistent NameID, an opaque id), so the two
+entries resolve to one address and never make a second account. Which account
+each entry signs in to is decided by the account key, below. When the assertion carries both an `email` attribute and the `emailaddress`
 claim, the claim is read. A member you map is always read as mapped. Two limits:
 
 - The claims are recognised by the attribute names in the assertion as posted.
@@ -522,6 +520,44 @@ claim, the claim is read. A member you map is always read as mapped. Two limits:
   provider that encrypts assertions reads only what it maps: map its members.
 - The stored mapping does not change: **Show Attribute Mapping** still shows an
   unmapped member as empty.
+
+#### Key accounts on a stable attribute
+
+A SAML account is keyed on the provider and one value of the person. By default
+that value is the NameID, which is not the same on every entry: Entra ID sends
+the user principal name when the sign-in starts from your sign-in page and an
+opaque id when it starts from its app portal. So a provider can key its accounts
+on a stable attribute instead:
+
+1. the attribute named in **Map: Account key attribute** (`mapAccountKey`) when
+   the provider is registered, for any IdP (an employee id, an immutable user
+   id);
+2. with none named, for an Entra ID provider (its IdP Entity ID is on
+   `sts.windows.net` or `login.microsoftonline.com`), Entra's object id claim
+   `http://schemas.microsoft.com/identity/claims/objectidentifier`, which Entra
+   ID sends by default;
+3. otherwise, the NameID.
+
+For a provider keyed on a stable attribute, **both entries reach one account
+and both sign in**: from your sign-in page and then from the IdP's portal, or
+portal first, the same person ends on the same account. An email change at the
+IdP keeps the account too. When an assertion does not carry the attribute, that
+sign-in is keyed on its NameID, as before.
+
+- The key is the provider's own. A sign-in through another provider never
+  reaches the account by it, and an existing account at the same address (a
+  password account, or another provider's) is still judged by the linking rule
+  ([Linking to an existing account](#linking-to-an-existing-account)).
+- The value is read from the assertion as posted and confirmed against the
+  verified assertion before anything is written; a sign-in whose verified
+  assertion does not carry it is refused with `error=INVALID_REQUEST`. A value
+  written with a comment, CDATA, an entity reference or markup is not read, and
+  the NameID keys that sign-in. An encrypted assertion's value cannot be read
+  before it is decrypted, so a provider that encrypts assertions keys on the
+  NameID.
+- Accounts made before an account key applied keep the NameID they were made
+  with; they are not rewritten. Name the attribute when the provider is
+  registered.
 
 Okta uses other attribute names, so its users are named after their NameID until
 the provider maps them:
