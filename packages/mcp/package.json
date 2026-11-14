@@ -32,13 +32,13 @@
     "@objectstack/formula": "workspace:*",
     "@objectstack/lint": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
-    "@objectstack/objectql": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "unpdf": "1.9.1",
     "zod": "^4.6.6"
   },
   "devDependencies": {
+    "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.6.5",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

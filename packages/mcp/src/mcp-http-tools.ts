@@ -48,7 +48,7 @@ import type { EngineAggregateOptions } from '@objectstack/spec/data';
 // entry IS this node, so this door and the REST query door (which parses
 // `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape
 // with one refusal.
-import { AggregationNodeSchema } from '@objectstack/spec/data';
+import { AggregationNodeSchema, SEARCH_COMPANION_FIELD } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
 import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
@@ -2638,8 +2638,7 @@ export function registerObjectTools(
           // judges against the declared and injected columns, which never
           // include it. Left in, it is listed in `inScope.fields` and a read
           // of it answers ok here while the gate refuses it. The name is the
-          // engine's own constant, loaded on the first call like `@objectstack/lint`.
-          const { SEARCH_COMPANION_FIELD } = await import('@objectstack/objectql/core');
+          // protocol's one constant, the same one the engine provisions under.
           for (const f of fieldDefs) {
             if (typeof f?.name !== 'string') continue;
             if (f.name === SEARCH_COMPANION_FIELD) continue;

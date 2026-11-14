@@ -59,13 +59,11 @@ export default defineConfig({
     // build of it would be the same silent wrong-tree verdict.
     //
     // The `@objectstack/objectql/core` entry (the lean engine entry, ADR-0076)
-    // serves `validate_expression`, which loads `SEARCH_COMPANION_FIELD` from it
-    // on the first call, and `mcp-validate-expression.test.ts`, which provisions
-    // the search companion with the engine's own `provisionSearchCompanion`:
-    // both VALUE imports, judged against the source in the checkout, not a
-    // build of it. The lean entry, not the barrel: transforming the barrel's
-    // `@objectstack/metadata-protocol` graph on that first call outran a test's
-    // 5 s budget.
+    // is for `mcp-validate-expression.test.ts`, which provisions the search
+    // companion with the engine's own `provisionSearchCompanion` and reads its
+    // name from `SEARCH_COMPANION_FIELD`: VALUE imports, judged against the
+    // source in the checkout, not a build of it. Only the test loads the
+    // engine; the tool reads the name from `@objectstack/spec/data`.
     alias: [
       { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../metadata-core/src/index.ts') },
       { find: /^@objectstack\/metadata-core\/testing$/, replacement: path.resolve(__dirname, '../metadata-core/src/testing.ts') },
