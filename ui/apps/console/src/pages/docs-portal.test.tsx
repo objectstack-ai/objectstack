@@ -99,13 +99,14 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
 // render, and the marker is not part of the body text.
 vi.mock('@object-ui/plugin-markdown', async (importOriginal) => {
   const { useEffect, useState } = await import('react');
+  // Explicit closing tags: check:vi-mock-inherit's masker reads a self-closing `/>` after `}` as a regex.
   function LateHeadings({ ids }: { ids: string[] }) {
     const [mounted, setMounted] = useState(false);
     useEffect(() => {
       const timer = setTimeout(() => setMounted(true), 0);
       return () => clearTimeout(timer);
     }, []);
-    return mounted ? <>{ids.map((id) => <h2 key={id} id={id} />)}</> : null;
+    return mounted ? <>{ids.map((id) => <h2 key={id} id={id}></h2>)}</> : null;
   }
   return {
     ...(await importOriginal<Record<string, unknown>>()),
@@ -115,7 +116,7 @@ vi.mock('@object-ui/plugin-markdown', async (importOriginal) => {
       return (
         <>
           <div data-testid="doc-content">{content.replace(/\s*\{#[\w-]+\}/g, '')}</div>
-          <LateHeadings ids={ids} />
+          <LateHeadings ids={ids}></LateHeadings>
         </>
       );
     },
