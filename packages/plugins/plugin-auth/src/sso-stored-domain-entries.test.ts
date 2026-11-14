@@ -15,6 +15,7 @@ import { SSO_PROVIDER_OBJECT } from './sso-client-secret.js';
 import {
   findSsoProvidersWithNonBareDomainEntries,
   reportSsoProvidersWithNonBareDomainEntries,
+  ssoStoredDomainEntryForLog,
 } from './sso-stored-domain-entries.js';
 
 const REPORT_PREFIX = '[sso] SSO provider ';
@@ -59,6 +60,27 @@ describe('reportSsoProvidersWithNonBareDomainEntries — one warning per stored 
     expect(message).toContain("'https://acme.com'");
     expect(message).toContain('POST /api/v1/auth/sso/update-provider');
     expect(meta).toEqual({ providerId: 'acme-okta', entries: ['https://acme.com'] });
+  });
+
+  it('an entry carrying a user part is logged with that part masked, in the message and the meta', async () => {
+    const rows = [{ id: 'p1', provider_id: 'acme-okta', domain: 'user:secret@acme.com, https://admin:pw@acme.org/x' }];
+    const { engine } = storedProviders(rows);
+    const log = logger();
+
+    const findings = await reportSsoProvidersWithNonBareDomainEntries(engine as never, log);
+
+    expect(findings).toEqual([{ providerId: 'acme-okta', entries: ['user:secret@acme.com', 'https://admin:pw@acme.org/x'] }]);
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    const [message, meta] = log.warn.mock.calls[0]!;
+    expect(message).toContain("'***@acme.com'");
+    expect(message).toContain("'https://***@acme.org/x'");
+    expect(meta).toEqual({ providerId: 'acme-okta', entries: ['***@acme.com', 'https://***@acme.org/x'] });
+    expect(`${message} ${JSON.stringify(meta)}`).not.toMatch(/secret|admin:pw/);
+  });
+
+  it('an entry without a user part is logged as stored (CONTROL for the mask)', () => {
+    expect(['https://acme.com', 'acme.com:8443', 'acme.com/path?q=a@b'].map(ssoStoredDomainEntryForLog))
+      .toEqual(['https://acme.com', 'acme.com:8443', 'acme.com/path?q=a@b']);
   });
 
   it('a provider with only bare entries produces none (CONTROL)', async () => {

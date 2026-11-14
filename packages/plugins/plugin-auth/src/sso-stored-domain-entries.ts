@@ -67,9 +67,19 @@ export async function findSsoProvidersWithNonBareDomainEntries(
   return findings;
 }
 
+/**
+ * An entry as the log may show it: a user part (`user:secret@acme.com`,
+ * `https://user:secret@acme.com`) becomes `***`, so a credential an operator
+ * once typed into the domain field never reaches the server log. The host and
+ * every other character are kept, so the operator can still find the entry.
+ */
+export function ssoStoredDomainEntryForLog(entry: string): string {
+  return entry.replace(/^([a-z][a-z0-9+.-]*:\/\/)?[^@/?#]*@/i, (_match, scheme: string | undefined) => `${scheme ?? ''}***@`);
+}
+
 /** The warning for one finding: the provider, its entries, and the fix. */
 export function ssoStoredDomainEntryWarning(finding: SsoStoredDomainEntryFinding): string {
-  const entries = finding.entries.map((entry) => `'${entry}'`).join(', ');
+  const entries = finding.entries.map((entry) => `'${ssoStoredDomainEntryForLog(entry)}'`).join(', ');
   const plural = finding.entries.length > 1;
   return (
     `[sso] SSO provider '${finding.providerId}' stores the domain ${plural ? 'entries' : 'entry'} ${entries}, `
@@ -104,7 +114,7 @@ export async function reportSsoProvidersWithNonBareDomainEntries(
   for (const finding of findings) {
     logger.warn(ssoStoredDomainEntryWarning(finding), {
       providerId: finding.providerId,
-      entries: finding.entries,
+      entries: finding.entries.map(ssoStoredDomainEntryForLog),
     });
   }
   return findings;
