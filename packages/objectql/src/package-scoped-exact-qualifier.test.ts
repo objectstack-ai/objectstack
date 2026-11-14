@@ -2410,3 +2410,95 @@ describe('[#32183] an App\'s pair two modules share, one of them disabled', () =
     expect(JSON.stringify(neither ?? null)).not.toMatch(/(suitex|suitey) dashboard/);
   });
 });
+
+/**
+ * [#32814] The read naming no package, at the member only a holder's
+ * customization pair stores, where every package holding the name is
+ * disabled. FROM (`main` e540baf88, measured): 200 with the pair's row
+ * (stamped with the pair), in every save and hydration order below, on the
+ * served and the execution face; with no row stored, the same read answered
+ * the holder's withheld item. TO: that withheld item, the no-row answer: a pair
+ * row is bound over the holders it is a pair of, never a holder of its own, so
+ * it is withheld with them, as `?package=PAIR` already is (R4-C above).
+ * Re-enabled, and beside an enabled holder of the same pair, as FROM.
+ */
+describe('[#32814] the read naming no package withholds a pair row of a name only disabled packages hold', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const PAIR = `${APP}.custom`;
+  const moduleOf = (id: string) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!, dependencies: { [APP]: '^1.0.0' },
+  }) as never;
+  const tpl = (packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} en-US`, locale: 'en-US', subject: 'en', bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const storePairRow = () => rows.push({
+    id: 'row_fr', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'fr-FR',
+    metadata: JSON.stringify({ name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>' }),
+  });
+  /** The boot's hydration: the list read lays the stored row into the registry's slot. */
+  const hydrate = () => protocol.getMetaItems({ type: 'email_template' } as never);
+  const bare = () => protocol.getMetaItem({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never);
+  const bareForExecution = () => protocol.getMetaItemForExecution({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never);
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(moduleOf(X), 'code');
+    registry.installPackage(moduleOf(Y), 'code');
+    registry.installPackage(manifest(PAIR), 'code');
+  });
+
+  const HOLDERS = [['a module of the App', X], ['the App itself', APP]] as const;
+  const ORDERS = [
+    ['the row saved, then the holder disabled', false, false],
+    ['the holder disabled, then the row saved', true, false],
+    ['the row saved and hydrated, then the holder disabled', false, true],
+    ['the holder disabled, then the row saved and hydrated', true, true],
+  ] as const;
+  const CASES = HOLDERS.flatMap(([holderLabel, holder]) => ORDERS.map(([order, disableFirst, hydrated]) =>
+    [holderLabel, order, holder, disableFirst, hydrated] as const));
+
+  it.each(CASES)('%s holds the name, %s: the bare read at the member answers the holder\'s withheld item (BASE: the pair\'s row); re-enabled, the pair\'s row', async (_holder, _order, holder, disableFirst, hydrated) => {
+    tpl(holder);
+    if (disableFirst) registry.disablePackage(holder);
+    storePairRow();
+    if (hydrated) await hydrate();
+    if (!disableFirst) registry.disablePackage(holder);
+    const answer = await bare();
+    expect(answer?.item).toBeUndefined();
+    expect((answer as { packageId?: string } | undefined)?.packageId).toBe(holder);
+    expect(JSON.stringify(answer ?? null)).not.toContain('pair fr-FR');
+    expect((await bareForExecution())?.item).toBeUndefined();
+    // CONTROL — the holder enabled again: the pair's row, as on BASE.
+    registry.enablePackage(holder);
+    expect(labelOf(await bare())).toBe('pair fr-FR');
+    expect(labelOf(await bareForExecution())).toBe('pair fr-FR');
+  });
+
+  // `version` is left out of the comparison: the withheld envelope keeps the
+  // version of what the read reached, on every withheld arm (a disabled
+  // holder's own stored row keeps its row's too), and no door serves it.
+  it.each(HOLDERS)('%s holds the name, disabled: the answer with the pair\'s row stored is the answer with none', async (_holder, holder) => {
+    tpl(holder);
+    registry.disablePackage(holder);
+    const { version: _noRowVersion, ...withoutRow } = (await bare()) as Record<string, unknown>;
+    storePairRow();
+    const { version: _rowVersion, ...withRow } = (await bare()) as Record<string, unknown>;
+    expect(withRow).toEqual(withoutRow);
+  });
+
+  it.each([['the disabled holder registered first', [X, Y]], ['the enabled holder registered first', [Y, X]]] as const)(
+    'CONTROL — two modules of the App hold the name, %s, X disabled: the bare read serves the pair\'s row (Y\'s customization), as on BASE; both disabled, withheld',
+    async (_order, order) => {
+      for (const id of order) tpl(id);
+      storePairRow();
+      registry.disablePackage(X);
+      expect(labelOf(await bare())).toBe('pair fr-FR');
+      registry.disablePackage(Y);
+      const neither = await bare();
+      expect(neither?.item).toBeUndefined();
+      expect(JSON.stringify(neither ?? null)).not.toContain('pair fr-FR');
+    },
+  );
+});
