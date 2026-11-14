@@ -2777,6 +2777,10 @@ const zh = {
       noAccountText: '还没有账户？',
       signUpText: '注册',
       signingIn: '正在登录…',
+      directSignIn: {
+        description: "使用你所在组织的单点登录。",
+        retry: "继续单点登录",
+      },
       ssoHandoff: '继续前往 {{target}}',
       devAdminHint: {
         title: '本地开发实例',
@@ -2793,6 +2797,8 @@ const zh = {
         ssoResponseRejected: "你所在组织的登录服务返回了本系统无法接受的响应。请联系管理员检查单点登录配置。",
         ssoStartFromLoginPage: "登录需要从本系统的登录页发起。请在此输入你的工作邮箱，然后选择“使用 SSO 登录”。",
         ssoTechnicalDetails: "技术详情",
+        directSignInIncomplete: "登录没有完成：你从单点登录返回时仍未登录。请确认浏览器允许本站点的 Cookie，然后重试。",
+        directSignInUnavailable: "无法为本系统发起单点登录。请联系管理员检查本系统使用的登录服务。",
         twoFactorInvalidCode: '验证码无效，请检查身份验证器应用后重试。',
         twoFactorInvalidBackupCode: '该备用码无效或已被使用。',
         twoFactorTooManyAttempts: '错误次数过多，请重新使用密码登录。',

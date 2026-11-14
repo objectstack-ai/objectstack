@@ -127,6 +127,7 @@ import type { CounterStore } from './rate-limit-storage.js';
 import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
+import { DIRECT_SIGN_IN_PATH, type DirectSignInOptions } from './direct-sign-in.js';
 import {
   devSeedAdminEmail,
   devSeedAdminPassword,
@@ -375,6 +376,20 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * @default false
    */
   hostSignInHandoff?: boolean;
+
+  /**
+   * Direct sign-in (`direct-sign-in.ts`): a person who opens the deployment
+   * signed out goes straight to the identity provider and returns to the page
+   * they opened. `provider` names it (an `oidcProviders` id, the platform
+   * identity provider `objectstack-cloud` included, or a `sys_sso_provider`
+   * id); unset, the one provider configured. `localSignIn` is `hidden`
+   * (default: the sign-in page stays at `/login?local=1`) or `off` (the page
+   * does not offer it); the server's password sign-in is unchanged either way.
+   * Absent ⇒ off. Self-host sets `OS_AUTH_DIRECT_SIGN_IN_ENABLED`,
+   * `OS_AUTH_DIRECT_SIGN_IN_PROVIDER` and `OS_AUTH_LOCAL_SIGN_IN`, which win
+   * over this option field by field.
+   */
+  directSignIn?: DirectSignInOptions;
 
   /**
    * Whether this plugin registers the platform's default record page for
@@ -3944,6 +3959,11 @@ export class AuthPlugin implements Plugin {
         if (config.features?.sso) {
           config.features.sso = await this.authManager!.isSsoUsable();
         }
+        // Refine "direct sign-in on" to "able to start" (one provider resolves),
+        // so the sign-in page navigates only to a door that starts a sign-in.
+        if (config.features?.directSignIn) {
+          config.features.directSignIn = await this.authManager!.isDirectSignInUsable();
+        }
         return c.json({ success: true, data: config });
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
@@ -3951,6 +3971,16 @@ export class AuthPlugin implements Plugin {
         return c.json({ success: false, error: { code: 'AUTH_CONFIG_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
+
+    // Direct sign-in's start door (`direct-sign-in.ts`): mounted only while the
+    // setting is on, so with it off this path is better-auth's 404 as before.
+    // Registered before the wildcard so it takes precedence; the IP allow-list
+    // above applies to it like every sign-in door.
+    if (this.authManager!.directSignInSetting().enabled) {
+      rawApp.get(`${basePath}${DIRECT_SIGN_IN_PATH}`, (c: any) =>
+        this.authManager!.startDirectSignIn(c.req.raw, transportOf(c)),
+      );
+    }
 
     // Bootstrap status — does an owner exist yet? Used by the Account SPA's
     // root route to decide between rendering /login (normal flow) and

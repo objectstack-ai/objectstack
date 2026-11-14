@@ -89,10 +89,14 @@ import { AuthFooter, readLegalLinks } from './AuthFooter';
 import { followOauthAuthorize } from './followAuthorize';
 import { handoffMarkQuery, useHandoffRedirect } from './handoffRedirect';
 import { ssoCallbackRefusalMessage, ssoCallbackTechnicalDetail } from './ssoCallbackRefusal';
+import { decideDirectSignIn, directSignInStartUrl } from './directSignIn';
 // Was module-private here; lifted to a shared module so `SetupPage` (whose
 // first-run exits went without it) and `RegisterPage` (which had copied it)
 // share ONE implementation — objectui#4181. Behaviour here is unchanged.
 import { withConsoleBase } from '../../utils/consoleBase';
+
+/** The auth API base the direct sign-in door lives under (`main.tsx`'s `AUTH_URL`). */
+const AUTH_URL = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
 
 /** Restrict the post-login redirect to same-origin paths. */
 function isSafeRedirect(target: string | null): target is string {
@@ -264,6 +268,30 @@ export function LoginPage() {
     };
   }, [getAuthConfig, configReadAttempt]);
 
+  // Direct sign-in (`./directSignIn`): decided once the server's config is
+  // known, from the server's own flag and this URL. `start` navigates a
+  // signed-out visitor straight to the identity provider; `hold` and
+  // `incomplete` draw the page with a retry instead (the loop guard); `off`,
+  // `local` and `handoff` draw today's page.
+  const directSignIn =
+    configRead === 'known' && typeof window !== 'undefined'
+      ? decideDirectSignIn({ features: authConfig?.features, search: window.location.search })
+      : 'off';
+  const directSignInStartedRef = useRef(false);
+  const startDirectSignIn = () => {
+    directSignInStartedRef.current = true;
+    window.location.replace(
+      directSignInStartUrl(AUTH_URL, window.location.pathname, window.location.search),
+    );
+  };
+  useEffect(() => {
+    if (directSignIn !== 'start' || !hasBootstrapped || !signInNeeded) return;
+    if (directSignInStartedRef.current) return;
+    startDirectSignIn();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directSignIn, hasBootstrapped, signInNeeded]);
+  const directSignInRetry = directSignIn === 'hold' || directSignIn === 'incomplete';
+
   // Post-login orchestration — fires once we observe an authenticated user.
   useEffect(() => {
     if (!user) return;
@@ -358,7 +386,7 @@ export function LoginPage() {
     signInPickSaved,
   ]);
 
-  if ((isLoading && !hasBootstrapped) || !signInNeeded) {
+  if ((isLoading && !hasBootstrapped) || !signInNeeded || directSignIn === 'start') {
     return (
       <AuthLayout>
         <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
@@ -400,6 +428,16 @@ export function LoginPage() {
             </details>
           </div>
         ) : null}
+        {directSignIn === 'incomplete' && !callbackError ? (
+          <div data-testid="direct-sign-in-incomplete">
+            <AuthErrorBanner
+              message={t('auth.login.errors.directSignInIncomplete', {
+                defaultValue:
+                  'Sign-in did not complete: you came back from single sign-on without being signed in. Check that this browser allows cookies for this site, then try again.',
+              })}
+            />
+          </div>
+        ) : null}
         {ssoTarget ? (
           <div
             role="status"
@@ -423,6 +461,8 @@ export function LoginPage() {
               retrying={configRead === 'loading'}
               onRetry={retryConfigRead}
             />
+          ) : directSignInRetry ? (
+            <DirectSignInRetry onRetry={startDirectSignIn} />
           ) : invitationGone ? (
             <InvitationGoneNotice />
           ) : (
@@ -478,6 +518,46 @@ export function LoginPage() {
         <AuthFooter privacyUrl={legalLinks.privacyUrl} termsUrl={legalLinks.termsUrl} />
       </div>
     </AuthLayout>
+  );
+}
+
+/**
+ * Direct sign-in's retry, in place of the form when the last attempt came back
+ * with an error or without a session (the loop guard in `./directSignIn`): the
+ * page says so above, and this starts the sign-in again only when the person
+ * asks. No password form: under direct sign-in that page lives at
+ * `/login?local=1`, when the deployment keeps it at all.
+ */
+function DirectSignInRetry({ onRetry }: { onRetry: () => void }) {
+  const { t } = useObjectTranslation();
+  const [pending, setPending] = useState(false);
+  return (
+    <div data-testid="direct-sign-in-retry" className="flex flex-col gap-4">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          {t('auth.login.welcomeTitle', { defaultValue: 'Welcome back' })}
+        </h1>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          {t('auth.login.directSignIn.description', {
+            defaultValue: "Sign in with your organization's single sign-on.",
+          })}
+        </p>
+      </div>
+      <button
+        type="button"
+        data-testid="direct-sign-in-retry-button"
+        disabled={pending}
+        aria-busy={pending}
+        onClick={() => {
+          setPending(true);
+          onRetry();
+        }}
+        className={AUTH_PRIMARY_BUTTON_CLASS}
+      >
+        {pending ? <AuthSpinner /> : null}
+        {t('auth.login.directSignIn.retry', { defaultValue: 'Continue with single sign-on' })}
+      </button>
+    </div>
   );
 }
 

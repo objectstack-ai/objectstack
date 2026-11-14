@@ -2777,6 +2777,10 @@ const zhHant = {
       noAccountText: '還沒有賬戶？',
       signUpText: '註冊',
       signingIn: '正在登入…',
+      directSignIn: {
+        description: "使用你所在組織的單一登入。",
+        retry: "繼續單一登入",
+      },
       ssoHandoff: '繼續前往 {{target}}',
       devAdminHint: {
         title: '本地開發實例',
@@ -2793,6 +2797,8 @@ const zhHant = {
         ssoResponseRejected: "你所在組織的登入服務返回了本系統無法接受的響應。請聯絡管理員檢查單點登入配置。",
         ssoStartFromLoginPage: "登入需要從本系統的登入頁發起。請在此輸入你的工作郵箱，然後選擇“使用 SSO 登入”。",
         ssoTechnicalDetails: "技術詳情",
+        directSignInIncomplete: "登入沒有完成：你從單一登入返回時仍未登入。請確認瀏覽器允許本網站的 Cookie，然後重試。",
+        directSignInUnavailable: "無法為本系統發起單一登入。請聯絡管理員檢查本系統使用的登入服務。",
         twoFactorInvalidCode: '驗證碼無效，請檢查身份驗證器應用後重試。',
         twoFactorInvalidBackupCode: '該備用碼無效或已被使用。',
         twoFactorTooManyAttempts: '錯誤次數過多，請重新使用密碼登入。',

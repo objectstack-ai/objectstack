@@ -310,6 +310,21 @@ export interface AuthPublicConfig {
      */
     ssoEnforced?: boolean;
     /**
+     * Direct sign-in (`AuthFeaturesConfigSchema.directSignIn` in
+     * `@objectstack/spec`): `true` when a signed-out visitor to the sign-in
+     * page goes straight to the identity provider, through the server's
+     * `GET {authUrl}/sign-in/direct`, and comes back to the page they opened.
+     * The server serves `true` only when it can start that sign-in. Absent or
+     * `false` ⇒ the sign-in page is shown as usual.
+     */
+    directSignIn?: boolean;
+    /**
+     * The sign-in page behind direct sign-in, served only while
+     * `directSignIn` is on: `hidden` keeps it at `/login?local=1`, `off` means
+     * the page does not offer it.
+     */
+    localSignIn?: 'hidden' | 'off';
+    /**
      * The managed (cloud-hosted) mode: `true` when the cloud's control plane
      * runs this environment (`isCloudManaged()` server-side; declared as
      * `AuthFeaturesConfigSchema.cloudManaged` in `@objectstack/spec`). People

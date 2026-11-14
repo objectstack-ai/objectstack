@@ -3267,6 +3267,10 @@ const en = {
       noAccountText: "Don't have an account?",
       signUpText: 'Sign up',
       signingIn: 'Signing you in…',
+      directSignIn: {
+        description: "Sign in with your organization's single sign-on.",
+        retry: "Continue with single sign-on",
+      },
       ssoHandoff: 'Continue to {{target}}',
       // Phone/OTP sign-in labels. `LoginForm` interpolates `{seconds}` with a
       // literal `.replace('{seconds}', …)` of its own (in `LoginForm`),
@@ -3373,6 +3377,8 @@ const en = {
         ssoResponseRejected: "Your organization's sign-in service sent a response this system could not accept. Ask your administrator to check the single sign-on setup.",
         ssoStartFromLoginPage: "Sign-in has to start from this system's login page. Enter your work email here and choose Sign in with SSO.",
         ssoTechnicalDetails: "Technical details",
+        directSignInIncomplete: "Sign-in did not complete: you came back from single sign-on without being signed in. Check that this browser allows cookies for this site, then try again.",
+        directSignInUnavailable: "Single sign-on could not be started for this system. Ask your administrator to check which sign-in service it uses.",
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
         // server's code (`signInRefusalMessages`).
         twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',

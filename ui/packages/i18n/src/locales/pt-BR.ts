@@ -2763,6 +2763,10 @@ const pt = {
     },
     login: {
       signingIn: "Entrando…",
+      directSignIn: {
+        description: "Entre com o login único da sua organização.",
+        retry: "Continuar com login único",
+      },
       ssoHandoff: "Continuar para {{target}}",
       devAdminHint: {
         title: "Instância de desenvolvimento local",
@@ -2786,6 +2790,8 @@ const pt = {
         ssoResponseRejected: "O serviço de login da sua organização enviou uma resposta que este sistema não pôde aceitar. Peça ao seu administrador para verificar a configuração do logon único.",
         ssoStartFromLoginPage: "O login precisa começar pela página de acesso deste sistema. Informe aqui seu e-mail de trabalho e escolha “Entrar com SSO”.",
         ssoTechnicalDetails: "Detalhes técnicos",
+        directSignInIncomplete: "O login não foi concluído: você voltou do login único sem estar conectado. Verifique se este navegador permite cookies para este site e tente novamente.",
+        directSignInUnavailable: "Não foi possível iniciar o login único para este sistema. Peça ao seu administrador para verificar qual serviço de login ele usa.",
         twoFactorInvalidCode: "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
         twoFactorInvalidBackupCode: "Esse código de backup não é válido ou já foi usado.",
         twoFactorTooManyAttempts: "Muitos códigos incorretos. Faça login novamente com sua senha.",

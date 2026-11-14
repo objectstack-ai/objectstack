@@ -285,6 +285,17 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   ssoEnforced: z.boolean().optional().describe(
     'SSO-only login enforced: the UI hides the local password form + self-registration (a break-glass "use a password" link remains)',
   ),
+  // Served by plugin-auth (`getPublicConfig()`, refined by
+  // `isDirectSignInUsable()` in the `/config` route); read by the console
+  // sign-in page.
+  directSignIn: z.boolean().optional().describe(
+    'Direct sign-in on and able to start: a signed-out visitor to the sign-in page is sent straight to the identity provider through GET /auth/sign-in/direct and returns to the page they opened. '
+    + 'The served value is refined to "one provider resolves" before answering; absent or false means the sign-in page is shown as usual',
+  ),
+  localSignIn: z.enum(['hidden', 'off']).optional().describe(
+    'The sign-in page behind direct sign-in, served only while direct sign-in is on: hidden keeps it at /login?local=1, off means the page does not offer it. '
+    + 'It changes no server door: password sign-in answers the same either way',
+  ),
   phoneNumber: z.boolean().optional().describe(
     'Phone-number sign-in enabled (phone + password, V1.5)',
   ),

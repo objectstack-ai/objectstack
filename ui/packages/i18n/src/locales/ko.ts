@@ -2698,6 +2698,10 @@ const ko = {
     },
     login: {
       signingIn: "로그인하는 중…",
+      directSignIn: {
+        description: "조직의 싱글 사인온으로 로그인하세요.",
+        retry: "싱글 사인온으로 계속",
+      },
       ssoHandoff: "{{target}}(으)로 계속",
       devAdminHint: {
         title: "로컬 개발 인스턴스",
@@ -2721,6 +2725,8 @@ const ko = {
         ssoResponseRejected: "소속 조직의 로그인 서비스가 이 시스템에서 받아들일 수 없는 응답을 보냈습니다. 관리자에게 싱글 사인온 설정을 확인해 달라고 요청하세요.",
         ssoStartFromLoginPage: "로그인은 이 시스템의 로그인 페이지에서 시작해야 합니다. 여기에 회사 이메일을 입력하고 “SSO로 로그인”을 선택하세요.",
         ssoTechnicalDetails: "기술 세부 정보",
+        directSignInIncomplete: "로그인이 완료되지 않았습니다. 싱글 사인온에서 돌아왔지만 로그인되지 않았습니다. 이 브라우저에서 이 사이트의 쿠키가 허용되어 있는지 확인한 후 다시 시도하세요.",
+        directSignInUnavailable: "이 시스템의 싱글 사인온을 시작할 수 없습니다. 관리자에게 사용하는 로그인 서비스를 확인해 달라고 요청하세요.",
         twoFactorInvalidCode: "코드가 올바르지 않습니다. 인증 앱을 확인한 후 다시 시도하세요.",
         twoFactorInvalidBackupCode: "백업 코드가 올바르지 않거나 이미 사용되었습니다.",
         twoFactorTooManyAttempts: "잘못된 코드를 너무 많이 입력했습니다. 비밀번호로 다시 로그인하세요.",
