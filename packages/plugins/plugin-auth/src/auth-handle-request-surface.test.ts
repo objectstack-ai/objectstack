@@ -58,6 +58,7 @@ const LEDGERED_PLUGINS = {
 /** Env switches `buildPluginList` reads on top of the config; cleared so the surface is the config's. */
 const ENV_KEYS = [
   'OS_SSO_ENABLED', 'OS_SSO_DOMAIN_VERIFICATION', 'OS_SCIM_ENABLED',
+  'OS_AUTH_DIRECT_SIGN_IN_ENABLED', 'OS_AUTH_DIRECT_SIGN_IN_PROVIDER', 'OS_AUTH_LOCAL_SIGN_IN',
   'OS_AUTH_TWO_FACTOR', 'OS_AUTH_PASSWORD_REJECT_BREACHED',
   'OS_OIDC_PROVIDER_ENABLED', 'OS_MCP_SERVER_ENABLED',
 ];
@@ -174,7 +175,9 @@ describe('auth.handleRequest — every objectstack-mounted ledger row is answere
   let composition: Composition;
   let disclaimer: { status: number; body: string };
   beforeAll(async () => {
-    composition = await compose({ plugins: LEDGERED_PLUGINS, trustedAppSchemes: [APP_SCHEME] });
+    // `directSignIn` mounts the start door, the one row whose `requires` is a
+    // setting of this plugin rather than a better-auth plugin.
+    composition = await compose({ plugins: LEDGERED_PLUGINS, trustedAppSchemes: [APP_SCHEME], directSignIn: {} });
     disclaimer = await vendorDisclaimer(composition.manager);
   });
 

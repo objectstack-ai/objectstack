@@ -127,7 +127,7 @@ import type { CounterStore } from './rate-limit-storage.js';
 import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
-import { DIRECT_SIGN_IN_PATH, resolveDirectSignIn, type DirectSignInOptions } from './direct-sign-in.js';
+import { resolveDirectSignIn, type DirectSignInOptions } from './direct-sign-in.js';
 import {
   devSeedAdminEmail,
   devSeedAdminPassword,
@@ -3980,7 +3980,7 @@ export class AuthPlugin implements Plugin {
     // manager resolves it from.
     const env = ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>;
     if (resolveDirectSignIn(this.options.directSignIn, env).enabled) {
-      rawApp.get(`${basePath}${DIRECT_SIGN_IN_PATH}`, (c: any) =>
+      rawApp.get(`${basePath}/sign-in/direct`, (c: any) =>
         this.authManager!.startDirectSignIn(c.req.raw, transportOf(c)),
       );
     }
