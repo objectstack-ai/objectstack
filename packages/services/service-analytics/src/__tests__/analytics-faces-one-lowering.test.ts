@@ -202,7 +202,11 @@ const TYPED = strategyCtx((_o, f) => DECLARED[f]);
 const q = (rest: Partial<AnalyticsQuery>): AnalyticsQuery =>
   ({ cube: CUBE.name, measures: ['n'], dimensions: ['id'], ...rest }) as AnalyticsQuery;
 /** The WHERE of a statement, the grouping cut off. */
-const whereOf = (sql: string): string => sql.replace(/^[\s\S]*? WHERE /, '').replace(/ GROUP BY[\s\S]*$/, '');
+// The native compiler writes a column quoted (`"signed_at"`, #33138) and the
+// echo writes it bare; the bound is what these cases compare, so the quotes
+// around a plain identifier are read away.
+const whereOf = (sql: string): string =>
+  sql.replace(/^[\s\S]*? WHERE /, '').replace(/ GROUP BY[\s\S]*$/, '').replace(/"([A-Za-z_][A-Za-z0-9_]*)"/g, '$1');
 
 describe('[#5930 step 4] one source: the native compiler and the echo compile the bound they are handed', () => {
   const native = async (ctx: StrategyContext, rest: Partial<AnalyticsQuery>) =>

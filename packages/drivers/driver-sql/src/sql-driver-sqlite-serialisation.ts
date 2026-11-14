@@ -69,7 +69,7 @@ export interface SqliteSerialisationHost {
 /** The bodies of the "SQLite serialisation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class SqliteSerialisationFacet {
   /** The body of `SqlDriver#formatInput`; the method's docblock there is its contract. */
-  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'dateFieldsOnInstantColumn' | 'datetimeFields' | 'fileColumnsMoved' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
+  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'dateFieldsOnInstantColumn' | 'datetimeFields' | 'fileColumnsMoved' | 'isMysql' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
     let copy: any = data;
     let copied = false;
 
@@ -155,10 +155,11 @@ export class SqliteSerialisationFacet {
         const day = this.toDateOnly(v);
         // Oracle binds the day as its UTC-midnight instant — `oracleDayBinding`.
         // [#32851] So does a Postgres `timestamptz` column a `datetime` → `date`
-        // publish left: a bare day would be read in the SESSION's zone.
+        // publish left: a bare day would be read in the SESSION's zone. On
+        // MySQL and SQLite (#33002) the bare day already is UTC midnight.
         const normalized = this.isOracle
           ? oracleDayBinding(day)
-          : isDateOnInstantColumn(this, object, field) ? utcMidnightOfDay(day) : day;
+          : isDateOnInstantColumn(this, object, field) && !this.isMysql && !this.isSqlite ? utcMidnightOfDay(day) : day;
         if (normalized !== v) {
           if (!copied) { copy = { ...copy }; copied = true; }
           copy[field] = normalized;
