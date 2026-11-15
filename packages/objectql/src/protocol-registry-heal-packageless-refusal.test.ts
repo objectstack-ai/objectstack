@@ -37,17 +37,8 @@ const NAME = 'digest';
 const manifest = (id: string) => ({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop()! }) as never;
 const body = (label: string, extra: Record<string, unknown> = {}) => ({ name: NAME, label, type: 'script', target: `${label}_impl`, ...extra });
 
-function makeHarness(opts: { composite: boolean; row: boolean }) {
-    const registry = new SchemaRegistry({ multiTenant: false });
-    for (const id of [A, B]) registry.installPackage(manifest(id), 'code');
-    if (opts.composite) for (const id of [A, B]) registry.registerItem('action', body(id), 'name' as never, id);
-    // The removed row's entry, in the bare slot.
-    registry.registerItem('action', body('stale', opts.row ? { _provenance: 'org' } : {}), 'name' as never);
-    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
-    for (const id of [A, B]) manager.registerInMemory('action', NAME, body(id, { _packageId: id }));
-    const rows: Array<Record<string, unknown>> = opts.row
-        ? [{ id: 'row_digest', type: 'action', name: NAME, organization_id: null, package_id: null, state: 'active', checksum: 'sha256:head', metadata: JSON.stringify(body('stale')) }]
-        : [];
+/** The one engine double both harnesses read: a control-plane kernel's `sys_metadata` over `rows`. */
+function engineOver(registry: SchemaRegistry, rows: Array<Record<string, unknown>>): Record<string, unknown> {
     // The engine double: equality and `$in`, and nothing else — any other
     // operator or combinator is refused loudly rather than read as a field
     // (the matcher of `package-scoped-exact-qualifier.test.ts`).
@@ -87,6 +78,21 @@ function makeHarness(opts: { composite: boolean; row: boolean }) {
         async transaction(fn: (ctx: unknown) => Promise<unknown>) { return fn(undefined); },
         async execute() { return {}; },
     };
+    return engine;
+}
+
+function makeHarness(opts: { composite: boolean; row: boolean }) {
+    const registry = new SchemaRegistry({ multiTenant: false });
+    for (const id of [A, B]) registry.installPackage(manifest(id), 'code');
+    if (opts.composite) for (const id of [A, B]) registry.registerItem('action', body(id), 'name' as never, id);
+    // The removed row's entry, in the bare slot.
+    registry.registerItem('action', body('stale', opts.row ? { _provenance: 'org' } : {}), 'name' as never);
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    for (const id of [A, B]) manager.registerInMemory('action', NAME, body(id, { _packageId: id }));
+    const rows: Array<Record<string, unknown>> = opts.row
+        ? [{ id: 'row_digest', type: 'action', name: NAME, organization_id: null, package_id: null, state: 'active', checksum: 'sha256:head', metadata: JSON.stringify(body('stale')) }]
+        : [];
+    const engine = engineOver(registry, rows);
     // A control-plane kernel, whose registry takes stored rows.
     const protocol = new ObjectStackProtocolImplementation(engine as never, () => new Map<string, unknown>([['metadata', manager]]) as never, undefined);
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -174,33 +180,7 @@ describe('[#32620, ruling 6818436831] a refused heal of a non-holder\'s row reti
             id: 'row_other', type, name: NAME, organization_id: null, package_id: O, state: 'active', checksum: 'sha256:head',
             metadata: JSON.stringify(typed(type, 'row:other')),
         }];
-        // Equality only; a filter object (an operator) matches every row.
-        const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined) =>
-            Object.entries(where ?? {}).every(([k, v]) => v === undefined || (v !== null && typeof v === 'object') || (row[k] ?? null) === v);
-        const pick = (table: string, opts?: { where?: Record<string, unknown>; limit?: number }) => {
-            if (table !== 'sys_metadata') return [];
-            const hits = rows.filter((r) => matches(r, opts?.where));
-            return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
-        };
-        const engine: Record<string, unknown> = {
-            registry,
-            async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) { return pick(table, opts); },
-            async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
-                assertEngineFindOnePredicate(table, opts as never);
-                return pick(table, opts)[0] ?? null;
-            },
-            async insert(_t: string, data: Record<string, unknown>) { return { id: 'inserted', ...data }; },
-            async update(_t: string, data: Record<string, unknown>, options?: Record<string, unknown>) { assertEngineUpdateDispatch(data, options); return { id: null }; },
-            async delete(_t: string, options?: Record<string, unknown>) {
-                assertEngineDeleteDispatch(options);
-                const at = rows.findIndex((r) => r.id === (options as any)?.where?.id);
-                if (at >= 0) rows.splice(at, 1);
-                return { deleted: at >= 0 ? 1 : 0 };
-            },
-            async count() { return 0; },
-            async transaction(fn: (ctx: unknown) => Promise<unknown>) { return fn(undefined); },
-            async execute() { return {}; },
-        };
+        const engine = engineOver(registry, rows);
         const protocol: any = new ObjectStackProtocolImplementation(engine as never, () => new Map<string, unknown>([['metadata', manager]]) as never, undefined);
         vi.spyOn(console, 'warn').mockImplementation(() => {});
         const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
