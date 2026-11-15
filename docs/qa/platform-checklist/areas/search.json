@@ -709,7 +709,7 @@
       "title": "Global search (GET /api/v1/search) skips what the caller cannot read instead of failing: an unreadable object is never queried, named or counted; a readable object is searched only on fields the caller may query; row scope still narrows every searched object",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -738,7 +738,7 @@
         "positive control as admin: GET /api/v1/search?q=T&objects=W,showcase_invoice hits in W. A W with no matching row proves nothing about skipping",
         "as the member, an UNSCOPED search: GET /api/v1/search?q=T. Capture the status and the full body text, and check truncated is false: the sweep stops at the overall hit limit (limit, default 20, max 100) before later objects are scanned or counted (packages/metadata-protocol/src/protocol-record-reads.ts, searchAll), so choose T, or pass limit=100, so the limit is not hit. Otherwise W's absence and totalObjects reflect the stop, not the gate",
         "as the member, a mixed scope: GET /api/v1/search?q=T&objects=showcase_invoice,W. Then W alone: objects=W; then a name that matches no object: objects=qa_no_such_object. Capture all three bodies",
-        "row scope: as the member, GET /api/v1/search?q=INV&objects=showcase_invoice&perObject=25; as admin, the identical query. ⚠ perObject is required here: searchAll caps each object at 5 hits by default (max 25 — metadata-protocol protocol.ts searchAll), newest updated first, and `truncated` describes only the overall limit, so without it the admin's 5 hits omit INV-1003 and read like acceptance[3]'s admin half failing (QA run #24593). q=INV-1003 is the narrower alternative. Compare the hit sets against each persona's readable rows",
+        "row scope: as the member, GET /api/v1/search?q=INV&objects=showcase_invoice&perObject=25; as admin, the identical query. Then the same pair with q set to the member's own invoice name (the recipe's step 5 row; scripts/qa/qa-fixture.mjs names it QA-<timestamp>, so q=QA-2026 finds it and no seeded invoice). The q=INV pair alone cannot show the narrowing keep a readable row: the member reads none of INV-1001..INV-1012, so the member's hits and readable rows are both empty there. The q=INV pair carries the admin's INV-1003 half, the own-row pair the member's non-empty half. ⚠ perObject is required here: searchAll caps each object at 5 hits by default (max 25 — metadata-protocol protocol.ts searchAll), newest updated first, and `truncated` describes only the overall limit, so without it the admin's 5 hits omit INV-1003 and read like acceptance[3]'s admin half failing (QA run #24593). q=INV-1003 is the narrower alternative. Compare the hit sets against each persona's readable rows",
         "hidden field: as admin, read a sys_user row and pick a value V from an admin-only search column (on a fresh boot: `role` = `user`, fixtures.requires[2]) that appears in no column the member may query (premise guard). As admin, GET /api/v1/search?q=V&objects=sys_user must hit (positive control). Then as the member, the identical query",
         "run the pins: the dogfood file and the metadata-protocol unit file in automated.ref"
       ],
@@ -834,6 +834,12 @@
           "date": "2026-11-14",
           "change": "steps[2] and acceptance[0].verify re-pointed (stale spec, QA run #33081, comment 6850173588; ledger row 186 of #32908). searchAll stops sweeping at the overall hit limit before later objects are scanned or counted (protocol-record-reads.ts), so an unscoped probe must not hit the limit or W's absence proves nothing. The clause is unchanged. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-15",
+          "change": "steps[4] adds a second row-scope pair on the member's own invoice (q = its QA- name). The contributor-bound member reads none of INV-1001..INV-1012, so q=INV compares two empty sets on the member side and cannot tell narrowing from a blackout (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 31). The clause is unchanged. Read at base 895783a1",
+          "ref": "#PENDING-33964"
         }
       ]
     }
