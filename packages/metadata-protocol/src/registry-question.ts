@@ -14,7 +14,8 @@
  * objects (D6's roll-up half, and the follow door, which nothing else asks),
  * so a refused body is answered `422 INVALID_METADATA` and nothing is stored
  * or promoted. An `object_extension` item published on the same faces asks
- * the follow door too, of the extension judged as its object will be served.
+ * both record-currency doors too — D6's roll-up half of its own body, and the
+ * follow door of the extension judged as its object will be served.
  *
  * Every other producer (a draft save, the batch writers, a package publish)
  * keeps the body-only question per row. A batch that makes object rows live

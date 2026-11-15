@@ -16,7 +16,10 @@ export const entry: SemanticMigration = {
     + 'an install, upgrade or reload on a running server (the engine\'s `manifest` service, POST '
     + '/api/v1/marketplace/install-local, the artifact hot reload), a published single save of an `object_extension` '
     + 'item through the `/meta` doors, and the batch writers. Also the owner of the extended object, registering after '
-    + 'the extension, over the amounts the extension adds. Not the cold boot',
+    + 'the extension, over the amounts the extension adds. A published single save of an `object_extension` item also '
+    + 'meets D6\'s roll-up door, as the batch writer\'s extension row already did: a `summary` the extension adds that '
+    + 'rolls up `sum` / `avg` / `min` / `max` of a child amount whose rows carry their own currency is refused 422 '
+    + 'instead of being stored. Not the cold boot',
   replacement:
     'Name in the second segment of `currencyField` a field of the master_detail target that declares '
     + '`valueDomain: \'iso_4217_currency\'` (the refusal lists the candidates), or install the package that supplies '
@@ -36,7 +39,9 @@ export const entry: SemanticMigration = {
     + 'not refused over it. For runs (an install, an upgrade, a reload) this supersedes the entry '
     + '`record-currency-follow-pair-refused-on-install-and-reload` where it says the next upgrade or reload of a '
     + 'package holding only the other end of a pair is refused "although nothing in that package is wrong": such a run '
-    + 'is now refused only when it changes the pair. A single save and the batch writers keep their answer. '
+    + 'is now refused only when it changes the pair (the pair is compared, not the refusal sentence). A single save and '
+    + 'the batch writers judge against the slot left empty, so re-publishing an unchanged extension whose amount a cold '
+    + 'boot admitted is refused there, as an unchanged own body already was. '
     + 'A field another extension supplies counts only while that extension is installed and '
     + 'enabled. An extension of an object no package owns yet is no verdict until the owner registers. Packages '
     + 'installed before this release keep loading at every boot, which is not asked. There is no mechanical rewrite: '
