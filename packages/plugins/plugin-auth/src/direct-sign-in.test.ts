@@ -276,6 +276,48 @@ describe('runDirectSignIn: the start door', () => {
     expect((host.logger!.warn as any).mock.calls[0][1]).toMatchObject({ reason: 'rate_limited' });
   });
 
+  // The page hands the door its own path and query; its `?redirect=` survives every landing back on `/login`.
+  const PAGE_WITH_REDIRECT = `?callbackURL=${encodeURIComponent('/_console/login?redirect=%2Fapps%2Fcrm%3Fview%3Dall&direct=returned')}`;
+
+  it('hands the vendor a sign-in page error address that keeps the page\'s ?redirect=', async () => {
+    const { host, dispatched } = fakeHost();
+    await runDirectSignIn(door(PAGE_WITH_REDIRECT), host);
+    expect(dispatched[0].body.errorCallbackURL).toBe(`${ORIGIN}/_console/login?redirect=%2Fapps%2Fcrm%3Fview%3Dall`);
+    expect(new URL(dispatched[0].body.errorCallbackURL).searchParams.get('redirect')).toBe('/apps/crm?view=all');
+  });
+
+  it('lands a rate-limited start on the sign-in page with the page\'s ?redirect= kept', async () => {
+    const { host } = fakeHost({ dispatch: async () => new Response('{"message":"Too many requests"}', { status: 429 }) });
+    const res = await runDirectSignIn(door(PAGE_WITH_REDIRECT), host);
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get('location')!);
+    expect(`${location.origin}${location.pathname}`).toBe(`${ORIGIN}/_console/login`);
+    expect(location.searchParams.get('error')).toBe(DIRECT_SIGN_IN_RATE_LIMITED);
+    expect(location.searchParams.get('redirect')).toBe('/apps/crm?view=all');
+  });
+
+  it('CONTROL: with no ?redirect= on the page, both landings are the bare sign-in page as before', async () => {
+    const plain = `?callbackURL=${encodeURIComponent('/_console/login?direct=returned')}`;
+    const { host, dispatched } = fakeHost();
+    await runDirectSignIn(door(plain), host);
+    expect(dispatched[0].body.errorCallbackURL).toBe(`${ORIGIN}/_console/login`);
+    const limited = fakeHost({ dispatch: async () => new Response('{}', { status: 429 }) });
+    const res = await runDirectSignIn(door(plain), limited.host);
+    expect(res.headers.get('location')).toBe(`${ORIGIN}/_console/login?error=${DIRECT_SIGN_IN_RATE_LIMITED}`);
+  });
+
+  it('drops a ?redirect= that is not a same-origin path, the return path\'s own rule, and still lands on the page', async () => {
+    for (const foreign of ['//evil.example/x', 'https://evil.example/', '/%2F%2Fevil.example']) {
+      const page = `/_console/login?redirect=${encodeURIComponent(foreign)}&direct=returned`;
+      const { host, dispatched } = fakeHost();
+      await runDirectSignIn(door(`?callbackURL=${encodeURIComponent(page)}`), host);
+      expect(dispatched[0].body.errorCallbackURL).toBe(`${ORIGIN}/_console/login`);
+      const limited = fakeHost({ dispatch: async () => new Response('{}', { status: 429 }) });
+      const res = await runDirectSignIn(door(`?callbackURL=${encodeURIComponent(page)}`), limited.host);
+      expect(res.headers.get('location')).toBe(`${ORIGIN}/_console/login?error=${DIRECT_SIGN_IN_RATE_LIMITED}`);
+    }
+  });
+
   it('lands on the sign-in page with an error, never a retry, when no provider resolves or the start is refused', async () => {
     const cases: Array<Partial<DirectSignInHost>> = [
       { chooseProvider: async () => ({ miss: 'several_providers' }) },
