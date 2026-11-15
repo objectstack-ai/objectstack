@@ -28,6 +28,8 @@ import {
   trustingBodyNamedOrigins,
 } from './sso-discovery-companion-origins';
 import { runRegisterSsoProviderFromForm } from './register-sso-provider';
+import dnsPromises from 'node:dns/promises';
+import { syncBuiltinESMExports } from 'node:module';
 // better-auth's first module load is paid at module load, not inside the first
 // clocked case (AGENTS.md, Build & Test). `AuthManager` reaches these through a
 // lazy `await import()`.
@@ -86,15 +88,16 @@ interface Rp {
   ctx: { skipOriginCheck?: unknown };
 }
 
-async function makeRp(): Promise<Rp> {
+async function makeRp(trustedOrigins: string[] = [BASE]): Promise<Rp> {
   const engine = createMemoryEngine();
   (engine as any).resolveSecretField = async () => 'unused';
   const manager = new AuthManager({
     secret: SECRET,
     baseUrl: BASE,
     dataEngine: engine,
-    // The deployment's own origin only: no IdP host is configured anywhere.
-    trustedOrigins: [BASE],
+    // The deployment's own origin only, unless a case lists more: by default
+    // no IdP host is configured anywhere.
+    trustedOrigins,
     plugins: { sso: true },
     logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
   } as unknown as ConstructorParameters<typeof AuthManager>[0]);
@@ -485,6 +488,73 @@ describe('an origin a register or update body names is trusted for that provider
     const before = JSON.stringify(storedRows(rp));
     await expectOriginRefused(await postAs(rp, '/sso/update-provider', { providerId: 'other-oidc', issuer: OTHER_ISSUER, signOutOfIdp: true }, OTHER_ISSUER));
     expect(JSON.stringify(storedRows(rp))).toBe(before);
+  });
+
+  it('CONTROL: on update too, the sign-out capability check refuses a logout endpoint on a host the body does not name', async () => {
+    restore = stubDiscovery({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${BODY_HOST}/logout`) });
+    const rp = await makeCheckedRp();
+    expect((await postAs(rp, '/sso/register', registration('other-oidc', OTHER_ISSUER), BASE)).status).toBe(200);
+    const before = JSON.stringify(storedRows(rp));
+    const res = await postAs(rp, '/sso/update-provider', { providerId: 'other-oidc', issuer: OTHER_ISSUER, signOutOfIdp: true }, BASE);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'VALIDATION_FAILED', field: 'signOutOfIdp' });
+    expect(JSON.stringify(storedRows(rp))).toBe(before);
+  });
+
+  /**
+   * The vendor loads `node:dns/promises` natively, so the double goes on the
+   * builtin's exports and is published to ES importers (as
+   * `sso-domain-verification-instructed-record.test.ts` does for TXT records).
+   * `host` resolves to a private address; every other name answers ENOTFOUND,
+   * which the vendor's check passes.
+   */
+  function resolvePrivately(host: string): () => void {
+    const exportsObject = dnsPromises as unknown as { lookup: typeof dnsPromises.lookup };
+    const original = exportsObject.lookup;
+    exportsObject.lookup = (async (name: string) => {
+      if (name === host) return [{ address: '10.0.0.5', family: 4 }];
+      throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${name}`), { code: 'ENOTFOUND', hostname: name });
+    }) as unknown as typeof dnsPromises.lookup;
+    syncBuiltinESMExports();
+    return () => {
+      exportsObject.lookup = original;
+      syncBuiltinESMExports();
+    };
+  }
+
+  it('the sign-out capability check trusts a body-named origin for the logout endpoint only: on register, its discovery read keeps the configured trust', async () => {
+    const undoDiscovery = stubDiscovery({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${OTHER_ISSUER}/logout`) });
+    const undoDns = resolvePrivately(new URL(OTHER_ISSUER).hostname);
+    restore = () => { undoDns(); undoDiscovery(); };
+    const rp = await makeCheckedRp();
+    const res = await postAs(rp, '/sso/register', { ...registration('other-oidc', OTHER_ISSUER), signOutOfIdp: true }, BASE);
+    expect(res.status, await res.clone().text()).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'VALIDATION_FAILED', field: 'signOutOfIdp' });
+    expect(storedRows(rp)).toEqual([]);
+  });
+
+  it('the sign-out capability check trusts a body-named origin for the logout endpoint only: on update, its discovery read keeps the configured trust', async () => {
+    const undoDiscovery = stubDiscovery({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${OTHER_ISSUER}/logout`) });
+    const undoDns = resolvePrivately(new URL(OTHER_ISSUER).hostname);
+    restore = () => { undoDns(); undoDiscovery(); };
+    const rp = await makeCheckedRp();
+    expect((await postAs(rp, '/sso/register', registration('other-oidc', OTHER_ISSUER), BASE)).status).toBe(200);
+    const before = JSON.stringify(storedRows(rp));
+    const res = await postAs(rp, '/sso/update-provider', { providerId: 'other-oidc', issuer: OTHER_ISSUER, signOutOfIdp: true }, BASE);
+    expect(res.status, await res.clone().text()).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'VALIDATION_FAILED', field: 'signOutOfIdp' });
+    expect(JSON.stringify(storedRows(rp))).toBe(before);
+  });
+
+  it('CONTROL: an origin the deployment lists keeps both the discovery read and the logout endpoint trusted', async () => {
+    const undoDiscovery = stubDiscovery({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${OTHER_ISSUER}/logout`) });
+    const undoDns = resolvePrivately(new URL(OTHER_ISSUER).hostname);
+    restore = () => { undoDns(); undoDiscovery(); };
+    const rp = await makeRp([BASE, OTHER_ISSUER]);
+    rp.ctx.skipOriginCheck = false;
+    const res = await postAs(rp, '/sso/register', { ...registration('other-oidc', OTHER_ISSUER), signOutOfIdp: true }, BASE);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await storedConfig(rp, 'other-oidc')).endSessionEndpoint).toBe(`${OTHER_ISSUER}/logout`);
   });
 
   it('CONTROL: another POST is judged against the configured origins alone, as before', async () => {
