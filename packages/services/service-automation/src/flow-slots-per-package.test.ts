@@ -1174,6 +1174,15 @@ describe('[#33748] a trigger binding does not dispatch a slot whose package is d
         expect(skipSaid()).toEqual([]);
     });
 
+    it('CONTROL — two slots the registry no longer holds the name for (nothing disabled): both dispatch, as on `main`', async () => {
+        ship(P1, triggered('t', 'alpha'));
+        ship(P2, triggered('t', 'beta'));
+        // The resolver answers `not-found` for either package now; that is not a disable.
+        registry.unregisterItem('flow', 't');
+        expect(await fireAll()).toEqual(['alpha', 'beta']);
+        expect(skipSaid()).toEqual([]);
+    });
+
     it('CONTROL — a name one package holds: its trigger answers as on `main`, disabled or not (outside the ruling)', async () => {
         ship(P1, triggered('solo', 'alpha'));
         expect([...armed.keys()]).toEqual(['solo']);
