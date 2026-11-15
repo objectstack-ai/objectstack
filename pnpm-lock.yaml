@@ -1310,6 +1310,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../driver-sql
+      '@objectstack/observability':
+        specifier: workspace:*
+        version: link:../../observability
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -3410,6 +3413,9 @@ importers:
       '@objectstack/plugin-audit':
         specifier: workspace:*
         version: link:../../plugins/plugin-audit
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../service-settings
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

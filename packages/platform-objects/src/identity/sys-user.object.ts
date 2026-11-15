@@ -174,14 +174,26 @@ export const SysUser = ObjectSchema.create({
       },
     },
 
-    // ── Platform admin operations (require better-auth `admin` plugin) ─
+    // ── Platform admin operations ───────────────────────────────────────
     //
-    // These actions hit /api/v1/auth/admin/* endpoints that are only
-    // wired when `auth.plugins.admin` is enabled, so each one is gated on
-    // `requiresFeature: 'admin'` (#2874) — when the plugin is off the UI
-    // hides them instead of rendering buttons that 404. SCIM deployments
-    // keep them: SCIM forces the admin plugin (and `features.admin`) on
-    // (ADR-0134). UI surfaces them under the row menu AND the
+    // `unlock_user`, `create_user` and the actions further down that carry
+    // `requiresFeature: 'admin'` (#2874) are gated on the better-auth `admin`
+    // plugin: when `features.admin` is off the UI hides them instead of
+    // rendering buttons that 404. SCIM deployments keep them: SCIM forces the
+    // admin plugin (and `features.admin`) on (ADR-0134).
+    //
+    // Ban / Unban carry NO `requiresFeature: 'admin'`, deliberately. Their
+    // doors, plugin-auth's `admin/ban-user` / `admin/unban-user`, are
+    // ObjectStack mounts registered whether or not the vendor plugin is on
+    // (`admin-ban-endpoints.ts`): without it the ban is written through the
+    // data engine and the session refusal answers `403 BANNED_USER`
+    // (`user-session-admission.ts`). So `features.admin == true` would hide a
+    // working Deactivate / Reactivate on every kernel that runs without the
+    // plugin, managed environments included. Pinned in
+    // `action-state-visibility.test.ts` (the offer) and plugin-auth's
+    // `pending-sso-users.test.ts` (the declared targets, driven live).
+    //
+    // UI surfaces them under the row menu AND the
     // record-detail header (`record_header`, overflowing into the ⋯
     // "More" menu) so platform admins can manage an account from either
     // the Users list or an open user record — without dropping to SQL or
@@ -222,7 +234,6 @@ export const SysUser = ObjectSchema.create({
       // Platform-admin standing (ADR-0068 D4), then a user not banned yet —
       // see the block header above. A null `banned` reads as not banned.
       visible: 'current_user.isPlatformAdmin == true && has(record.banned) && record.banned != true',
-      requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'User banned',
       refreshAfter: true,
@@ -261,7 +272,6 @@ export const SysUser = ObjectSchema.create({
       // Platform-admin standing (ADR-0068 D4), then a banned user — see the
       // block header above.
       visible: 'current_user.isPlatformAdmin == true && has(record.banned) && record.banned == true',
-      requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'User unbanned',
       refreshAfter: true,
@@ -675,23 +685,22 @@ export const SysUser = ObjectSchema.create({
       recordIdParam: 'userId',
       successMessage: 'Manager updated',
       refreshAfter: true,
-      // Hidden for a directory-managed identity, whose manager the IdP owns:
-      // the endpoint's refusal 5 answers 403 / `idp_provisioned`, so the
-      // button would be an affordance the server side refuses by design.
-      // This carries the SAME `record.source` term the three self-service
-      // identity actions below carry — and only that term: this is an admin
-      // action on someone else's row, so their `record.id == ctx.user.id`
-      // half is deliberately NOT copied (it would hide the button from every
-      // admin). `has()` per operand for the sparse action face (#8990) — the
-      // rationale is on the self-service block below.
+      // Offered on every row, `idp_provisioned` ones included, and the
+      // endpoint refuses the one case it must. Its refusal 5 answers 403 /
+      // `idp_provisioned` only for an identity a SCIM directory HOLDS (a
+      // `sys_scim_subject` row, maintainer ruling record 6895645364, option
+      // A); a person who only signs in through SSO carries the same `source`
+      // with no directory behind them, and their manager is set here. No
+      // column on this row says "held by SCIM", so ⛔ a `record.source` term
+      // would hide the button from every SSO-only person — the defect this
+      // predicate used to carry — and a SCIM-held row is answered by the
+      // server's refusal, which names the directory to go to.
       //
-      // ANDed ahead of it, the platform-admin standing the door's gate judges
-      // (ADR-0068 D4, the admin block header above): without it the button
-      // was offered to every caller who could open a user row, and the door
-      // refused each one 403 `PERMISSION_DENIED`. One flat conjunction, the
-      // principal term first, the way the self-service predicates below lead
-      // with theirs.
-      visible: 'current_user.isPlatformAdmin == true && has(record.source) && record.source != "idp_provisioned"',
+      // The platform-admin standing the door's gate judges (ADR-0068 D4, the
+      // admin block header above): without it the button was offered to every
+      // caller who could open a user row, and the door refused each one 403
+      // `PERMISSION_DENIED`.
+      visible: 'current_user.isPlatformAdmin == true',
       // The action collects a param, so its explanatory line rides
       // `description` and ⛔ never `confirmText` — pairing the two shows two
       // dialogs for one decision (#7278/#7309).

@@ -1342,3 +1342,67 @@ describe('a single-object save is refused a `dynamic` roll-up over a child field
     expect(() => save(valid.engine, project('ext_home'))).not.toThrow();
   });
 });
+
+// ── [ADR-0144 D2, amended] A followed parent code field the parent no longer serves ──
+//
+// The fixture is the package-lifecycle measurement's shape: `billing` owns
+// `suite_invoice` and `suite_line`, `supplier` extends `suite_invoice` with the
+// code field, and `suite_line.amount` follows `invoice.currency_code`. After the
+// supplier leaves, the next child write is still refused ERR_CURRENCY_CODE_REQUIRED
+// / 400, and the message says the field is not served instead of asking for a
+// code to be written into a field that is not there.
+
+describe('a following amount whose parent code field is no longer served is refused, and the message says so (ADR-0144 D2, amended)', () => {
+  const BILLING = 'com.test.billing';
+  const SUPPLIER = 'com.test.supplier';
+  const NOT_SERVED = "and 'suite_invoice' does not serve a field 'currency_code' (";
+  const NO_CODE_TO_FOLLOW = "; the amount has no code to follow until that field is served again, or leave 'amount' empty. The row was not written.";
+
+  async function bootSuite() {
+    const booted = await bootEngine();
+    booted.engine.registerApp({
+      id: BILLING, name: 'billing',
+      objects: [
+        { name: 'suite_invoice', fields: { title: { type: 'text' } } },
+        { name: 'suite_line', fields: { title: { type: 'text' }, invoice: { type: 'master_detail', reference: 'suite_invoice' }, amount: { type: 'currency', currencyConfig: FOLLOWS } } },
+      ],
+    } as any);
+    booted.engine.registerApp({ id: SUPPLIER, name: 'supplier', objectExtensions: [{ extend: 'suite_invoice', fields: { currency_code: CODE_FIELD } }] } as any);
+    await booted.engine.insert('suite_invoice', { id: 'inv_usd', title: 'usd', currency_code: 'USD' });
+    await booted.engine.insert('suite_invoice', { id: 'inv_blank', title: 'blank' });
+    // CONTROL: while the supplier serves the field, a line under a parent holding a code is written.
+    await booted.engine.insert('suite_line', { title: 'before', invoice: 'inv_usd', amount: 100 });
+    return booted;
+  }
+
+  it('disable: the supplier disabled, a line with an amount is refused naming the field as not served and the disabled package', async () => {
+    const { engine, storeFor } = await bootSuite();
+    engine.registry.disablePackage(SUPPLIER);
+    expect((engine.registry.getObject('suite_invoice')?.fields as any)?.currency_code).toBeUndefined();
+    const err = await refusalOf(engine.insert('suite_line', { title: 'after', invoice: 'inv_usd', amount: 100 }));
+    expect(envelopeOf(err)).toEqual(CODE_REQUIRED);
+    expect(err?.field).toBe('invoice.currency_code');
+    expect(err?.message).toContain(`${NOT_SERVED}the package '${SUPPLIER}' that contributed it is disabled)${NO_CODE_TO_FOLLOW}`);
+    expect(err?.message).not.toContain('has a blank');
+    expect(storeFor('suite_line').size).toBe(1);
+    // Uninstalled, the registry no longer holds the contribution: the package clause is the generic one.
+    engine.registry.uninstallPackage(SUPPLIER);
+    const gone = await refusalOf(engine.insert('suite_line', { title: 'gone', invoice: 'inv_usd', amount: 100 }));
+    expect(envelopeOf(gone)).toEqual(CODE_REQUIRED);
+    expect(gone?.message).toContain(`${NOT_SERVED}a package that contributed it may be disabled or uninstalled)${NO_CODE_TO_FOLLOW}`);
+  });
+
+  it('CONTROL: a served code field that is blank on the parent keeps the blank-code text', async () => {
+    const { engine } = await bootSuite();
+    const err = await refusalOf(engine.insert('suite_line', { title: 'blank', invoice: 'inv_blank', amount: 100 }));
+    expect(envelopeOf(err)).toEqual(CODE_REQUIRED);
+    expect(err?.message).toBe(
+      "Insert on 'suite_line' was REFUSED: 'amount' holds an amount in its parent record's currency (currencyMode: 'record', "
+        + "following 'invoice.currency_code' through the master_detail 'invoice'), and the 'suite_invoice' record it names "
+        + "has a blank 'currency_code', or it names none. The row was not written. Write the parent's ISO 4217 code (for "
+        + "example 'USD') into 'suite_invoice.currency_code' first, and name that parent in 'invoice', or leave 'amount' "
+        + 'empty. A child stores no code of its own: it follows its parent\'s. The server never fills a currency in: a '
+        + 'form pre-fills the organization\'s currency, and the stored code is always the one submitted.',
+    );
+  });
+});

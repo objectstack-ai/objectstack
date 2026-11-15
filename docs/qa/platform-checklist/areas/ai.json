@@ -916,7 +916,7 @@
       "title": "MCP on v18: a coded refusal on the data tools, list_actions and the record resource renders {error:{code,message,status}} (not the bare message), both MCP doors honour a runtime-authored object's apiEnabled:false including after a restart, and run_action withholds PERMISSION_DENIED details",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -940,7 +940,7 @@
         {
           "clause": "coded MCP refusals and runtime-object exposure — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -986,7 +986,8 @@
         },
         { "revision": 3, "date": "2026-10-26", "change": "automated.ref extended — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807). acceptance[1]: mcp-coded-refusal.test.ts asserts the clause at plugin-unit layer but was not in the ref. acceptance[2]: the record found no pin driving query_records on an apiEnabled false runtime object across a restart; re-read on main at b4199c96, packages/qa/dogfood/test/mcp-stdio-runtime-object-exposure.test.ts does, on the stdio door at engine layer, so it joins the ref and the ref now names each pin's layer. No clause changed, no status changed", "ref": "#25836" },
         { "revision": 4, "date": "2026-10-31", "change": "fixtures.requires[3] and steps[2] name acceptance[3]'s producer. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the fixtures named no recipe for the PERMISSION_DENIED arm, and the run staged it with a runtime declarative update action on showcase_task, ai-exposed, run as auditor.demo. Re-read at base 488b3ed0: packages/runtime/src/action-execution.ts (the declarative update writes as the caller), packages/spec/src/ui/action.zod.ts (ai.exposed requires a description). The clause is unchanged", "ref": "#27409" },
-        { "revision": 5, "date": "2026-11-14", "change": "acceptance[1].verify names the door (stale spec, QA run #33025, comment 6844741021; ledger row 70 of #32908): the bare 'tool result body' named none, and the coded refusal holds on the HTTP /mcp face that mcp-coded-refusal.test.ts drives. The clause is unchanged. Read at base 82838e83", "ref": "#33328" }
+        { "revision": 5, "date": "2026-11-14", "change": "acceptance[1].verify names the door (stale spec, QA run #33025, comment 6844741021; ledger row 70 of #32908): the bare 'tool result body' named none, and the coded refusal holds on the HTTP /mcp face that mcp-coded-refusal.test.ts drives. The clause is unchanged. Read at base 82838e83", "ref": "#33328" },
+        { "revision": 6, "date": "2026-11-15", "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969", "ref": "#34068" }
       ]
     },
     {
@@ -994,14 +995,14 @@
       "title": "MCP names package items by their face: prompts/list serves NS-NAME for a package skill and the bare name for an environment skill, list_actions rows carry namespace and face, run_action takes namespace, and a name two holders share is refused naming the faces",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin holding an osk_ API key, over MCP HTTP"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a skill qa_triage with instructions (skill is narrowed to one holder per namespace, so two namespaces may each hold it); qa_a also holds an object-less action qa_a_ping and an object qa_a_ticket with an embedded action escalate, each exposed to AI so list_actions lists it (ai: { exposed: true, description }: the action schema requires a description of at least 40 characters on an exposed action, packages/spec/src/ui/action.zod.ts). One skill name long enough that NS-NAME passes 64 characters",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a skill qa_triage with instructions (skill is narrowed to one holder per namespace, so two namespaces may each hold it); qa_a also holds an object-less action qa_a_ping and an object qa_a_ticket with an embedded action escalate, each exposed to AI so list_actions lists it (ai: { exposed: true, description }: the action schema requires a description of at least 40 characters on an exposed action, packages/spec/src/ui/action.zod.ts). One skill name long enough that NS-NAME passes 64 characters. For negative[2], a third scratch package qa_c (manifest id com.qa.addr-c, namespace qa_c) declares a standalone action escalate bound to objectName qa_a_ticket and exposed to AI: an object-bound action's face is OBJECT-ACTION (packages/spec/src/ai/face-name.ts#deriveAiFaceName), so it derives qa_a_ticket-escalate, the face qa_a's embedded escalate derives. Its stack is defineStack(…, { strict: false }), since its action binds another package's object. A namespace named after the object does not stage the clash on the NS-NAME face: a namespace equal to an object name is refused at install (ADR-0150 D6)",
           "an environment skill qa_env_triage (PUT /api/v1/meta/skill/qa_env_triage with tools: [] and instructions)",
           "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)"
         ]
@@ -1051,7 +1052,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/mcp/src/skill-prompts.test.ts, packages/spec/src/ai/face-name.test.ts, packages/runtime/src/mcp-action-namespace.test.ts, packages/mcp/src/mcp-action-tools.test.ts (negative[2]: 'a face two actions derive is refused once, naming both', refusedFaces of length 1); no live spec drives the scratch-package pair"
+        "ref": "packages/mcp/src/skill-prompts.test.ts, packages/spec/src/ai/face-name.test.ts, packages/runtime/src/mcp-action-namespace.test.ts, packages/mcp/src/mcp-action-tools.test.ts (negative[2]: 'a face two actions derive is refused once, naming both', refusedFaces of length 1); no automated live spec drives the scratch-package pair; a run drives negative[2] live with fixtures.requires[0]'s third package qa_c (QA run #33829)"
       },
       "source": [
         "docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md D6 (the ruled faces NS-NAME and OBJECT-ACTION, the 64-character cut) and D5 (MCP)",
@@ -1079,6 +1080,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[0] and automated.ref re-pointed (stale spec, QA runs #33025 and #33081, comments 6844741021 and 6850173588; ledger row 71 of #32908). An exposed action needs an ai.description of 40 characters or more (action.zod.ts), which the fixture did not say. negative[2]'s pin, packages/mcp/src/mcp-action-tools.test.ts, was missing from automated.ref. No clause changed. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[0] adds the third scratch package qa_c that stages negative[2] live (a standalone escalate on qa_a_ticket derives qa_a's face qa_a_ticket-escalate), and automated.ref says a run drives it (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 23). No clause changed. Read at base bc6b7ffd",
+          "ref": "#34016"
         }
       ]
     },
@@ -1129,7 +1136,7 @@
       "title": "MCP serves the governed datasets: list_datasets lists each dataset this caller may query with its members and reports which terms match which member, and query_dataset answers rows with provenance, a row count and a truncation fact, never SQL",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1197,7 +1204,7 @@
         {
           "clause": "the pins pass at the run subject sha: a dataset this caller may not query answers the same NOT_FOUND as a missing one, a degraded read answers 503, and a token without data:read registers neither tool",
           "oracle": "test",
-          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "verify": "run each file in automated.ref with its package's vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); each reports ≥1 test and 0 failed",
           "evidence": "the vitest summary line per file, with the subject sha"
         }
       ],
@@ -1228,6 +1235,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0149 D2, the dataset pair on MCP. Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-15",
+          "change": "acceptance[7].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -1236,7 +1249,7 @@
       "title": "read_file answers the text of a PDF and a Word document with its facts, stops a long extraction at the CPU-time budget with a note, refuses past the concurrent-reading cap with a retryable 503, and a malformed budget variable fails the boot naming it",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1292,7 +1305,7 @@
         {
           "clause": "the pins pass at the run subject sha: over OS_MCP_READ_FILE_MAX_CONCURRENT readings the call answers SERVICE_UNAVAILABLE 503 with details.retryAfterSeconds, a file over the 10 MiB cap answers its facts and the link only, and a scanned PDF says it has no text layer",
           "oracle": "test",
-          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "verify": "run each file in automated.ref with its package's vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); each reports ≥1 test and 0 failed",
           "evidence": "the vitest summary line per file, with the subject sha"
         }
       ],
@@ -1327,6 +1340,12 @@
           "date": "2026-11-13",
           "change": "assertion-defect correction of acceptance[3] (with fixtures.requires[2] and [3], steps[0] and steps[2]). At OS_MCP_READ_FILE_CPU_BUDGET_MS=1 the budget is spent before the first page, so pdfAnswer's empty arm answers content 'none' with the budget note and no truncated (packages/mcp/src/file-content.ts#pdfAnswer); at 60 the clause's shape appears. The fixture budget is raised to 60, the clause names the zero-page shape as a fixture signal to re-read at a higher budget, and leaves open whether a stopped read must always carry truncated true (if ruled so, that is a product defect in pdfAnswer's empty arm, not this item's). The receipt field is on showcase_invoice_line, not showcase_invoice (examples/app-showcase/src/data/objects/invoice.object.ts), so the fixture and steps name the invoice line. Found by the 18.4.0 acceptance run #32940 (F-4 to F-8 and its R4/R5 comments; wave anchor #32908). Re-read at main cf1b55c0. Card #32945",
           "ref": "#32945"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[5].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -1335,7 +1354,7 @@
       "title": "A host-installed MCP tool-call interceptor sees every call with its door, transport, name and principal, may deny one with a coded refusal the tool never runs past, is told of a call to an unregistered name, and a verdict it cannot render refuses the call as a server fault",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1394,7 +1413,7 @@
         {
           "clause": "the pins pass at the run subject sha: with no interceptor every call runs untouched, a throw refuses the call with its code, and both servers route their calls through the seam",
           "oracle": "test",
-          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "verify": "run each file in automated.ref with its package's vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); each reports ≥1 test and 0 failed",
           "evidence": "the vitest summary line per file, with the subject sha"
         }
       ],
@@ -1428,6 +1447,12 @@
           "date": "2026-11-14",
           "change": "knownGaps[0], steps[4] and acceptance[4].verify re-pointed (stale spec, QA runs #33025 and #33089, comments 6844741021 and 6850460138; ledger row 72 of #32908). The inline interceptor plugin has been booted and all five legs held, so knownGaps[0] no longer says it was not; the typed-config cast is named. The stdio call waits for readiness. No clause changed. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[5].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },

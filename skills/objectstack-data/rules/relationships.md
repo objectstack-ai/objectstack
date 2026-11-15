@@ -212,14 +212,11 @@ parent-FK match). Dropped, the field counts EVERY child and shows a plausible
 wrong total that no check on the parent can see — worse than a visible 0. This
 is also how one child feeds several totals: completed / in-progress / overdue
 task counts are three `summary` fields over the same child, differing only in
-`filter`; one `procurement_receipt` child yields `received_amount`
-(`function: 'sum', filter: { status: 'received' }`). A select's value in
-`filter` is its option `value`, never its label; operator and compound forms
-work (`filter: { status: { $in: ['received', 'partial'] } }`). A child moving
-in or out of the predicate (a status change) recomputes the parent on its next
-write like any other child update. A **rate** (occupancy, completion rate = a
-child count ÷ a capacity) is a `formula` over a working `summary` — author the
-summary first; the rate computes only once it does.
+`filter`. A select's value in `filter` is its option `value`, never its label;
+operator and compound forms work
+(`filter: { status: { $in: ['received', 'partial'] } }`). A **rate** (occupancy,
+completion rate = a child count ÷ a capacity) is a `formula` over a working
+`summary` — author the summary first; the rate computes only once it does.
 
 **The recompute runs only on a child write.** A `summary` declared after its
 parent rows exist reads `NULL` on every existing parent until a child of it is
@@ -227,6 +224,22 @@ written. The backfill is `os migrate summary-nulls --apply`
 (`--recompute-undefined-on-empty OBJECT.FIELD` for a `min` / `max` / `avg`
 declared late) — never an edit to a child. Declare the summary with the object
 where you can; declared late, run the migration before you call the number ready.
+
+**Never finish with `security-rollup-source-unreadable` standing.** The total
+covers every child row and answers only to the parent field's own access, so
+`os build` warns for each permission set that reads the summary but not the
+child object, the aggregated field, or a field `filter` tests. Decide per set:
+it should see the children → grant the read; it should not → mask the summary
+on that set, after removing any View All / Modify All it holds on the parent
+(either overrides the mask).
+
+```typescript
+definePermissionSet({
+  name: 'client_viewer',
+  objects: { project: { allowRead: true } },  // no `task` read: warned
+  fields: { 'project.task_count': { readable: false } },  // the mask: resolved
+})
+```
 
 ## Inline Editing (Master-Detail Entry)
 

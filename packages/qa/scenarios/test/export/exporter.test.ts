@@ -19,9 +19,10 @@ import { GALLERY_GUARD, type GalleryGuard } from '../../src/export/generic.js';
 import { GalleryIndexSchema, parseIndex } from '../../src/export/manifest.js';
 import { judgeRecord } from '../../src/export/pass.js';
 import { readRunRecords, redactWorkDir, ScenarioRunRecordSchema, type ScenarioRunRecord } from '../../src/export/record.js';
+import { buildTranscript, mergeRecordings } from '../../src/export/transcript.js';
 import type { CaptureScreenshots } from '../../src/export/screenshots.js';
 import { main, parseExportArgs, renderSummary } from '../../src/export/cli.js';
-import type { Recording } from '../../src/runner/driver.js';
+import { stepKey, type Recording } from '../../src/runner/driver.js';
 import type { LoadedScenario } from '../../src/loader.js';
 import type { ScenarioOrigin, ScenarioTier } from '../../src/schema.js';
 import { CARD_ID, loadAllCards, loadCrm, runCrm, tempDir, writeRecord, type FixtureRun } from './fixture.js';
@@ -602,5 +603,46 @@ describe('export-gallery CLI', () => {
     expect(errors).toContainEqual(expect.stringMatching(new RegExp(`${CARD_ID}\\.json: origin: a \`generic\` card does not belong in the private overlay`)));
     expect(errors).toContainEqual(`refused  ${CARD_ID} · no loaded card \`${CARD_ID}\` (removed, renamed, or refused by the loader)`);
     expect(parseIndex(readFileSync(join(out, 'index.json'), 'utf8')).apps).toEqual([]);
+  });
+});
+
+describe('buildTranscript — a run that asked each question turn more than once (`--ask-repeats`, #33741)', () => {
+  it('N = 1: the record, the recording and every exported byte are those of a run that never heard of repeats', async () => {
+    const work = tempDir('work');
+    const once = await runCrm({ work });
+    const one = await runCrm({ work, askRepeats: 1 });
+    const written = JSON.stringify(one.record);
+    expect(written).toBe(JSON.stringify(once.record));
+    expect(written).not.toContain('"repeat"');
+    expect(written).not.toContain('askRepeats');
+    expect(Object.keys(one.recording.turns)).toEqual(Object.keys(once.recording.turns));
+    expect(Object.keys(one.recording.turns).some((k) => k.includes('/repeat-'))).toBe(false);
+    const a = await setup(once);
+    const b = await setup(one);
+    await exportGallery(a.opts());
+    await exportGallery(b.opts());
+    expect(tree(b.out)).toEqual(tree(a.out));
+  });
+
+  it('N = 3: each ask joins the reply recorded under its own key, so an ask that answered otherwise shows its own reply and grade, never a refusal', async () => {
+    const ask2 = stepKey({ card: CARD_ID, mode: 'scratch', phase: 'run', step: 'account_count', persona: 'sdr', repeat: 2 });
+    const fx = await runCrm({
+      modes: ['scratch'],
+      iterateRun: false,
+      askRepeats: 3,
+      wrap: (scripted) => ({
+        info: () => scripted.info(),
+        author: (task) => scripted.author(task),
+        ask: async (task) => (stepKey(task) === ask2 ? { replyText: 'I could not find that.', toolCalls: [], meta: { resultSubtype: 'success' } } : scripted.ask(task)),
+      }),
+    });
+    const record = asRecord(fx.record); // the record reader takes it: the repeat count is outside the exact `counts`
+    expect(record.cardRun.askRepeats).toBe(3);
+    const t = buildTranscript(fx.scenario, record, mergeRecordings([fx.recording]));
+    expect(t.halves.map((h) => h.turns.length)).toEqual([27]);
+    const asks = t.halves[0]!.turns.filter((x) => x.question === 'account_count' && x.persona === 'sdr');
+    const base = stepKey({ card: CARD_ID, mode: 'scratch', phase: 'run', step: 'account_count', persona: 'sdr' });
+    expect(asks.map((x) => x.answer!.replyText)).toEqual([fx.recording.turns[base]!.replyText, 'I could not find that.', fx.recording.turns[`${base}/repeat-3`]!.replyText]);
+    expect(asks.map((x) => x.grade!.correct)).toEqual([true, false, true]);
   });
 });
