@@ -29,7 +29,8 @@
  * - every caller shape keeps its row set: plain (restricted by ownership and a
  *   share), unrestricted (`viewAllRecords`), delegated (the ADR-0090 D10
  *   intersection), two-level chain, null and dangling master pointers
- *   (excluded — ruling B item 4), and a caller the master object does not
+ *   (excluded for every restricted caller; an unrestricted one reads them,
+ *   ruling record 6893097935), and a caller the master object does not
  *   admit (the deny door, `$in: []`);
  * - statements per request: find = 1, find + count = 2, no scan of the master
  *   on its own, the master inside the child's subquery;
@@ -440,10 +441,10 @@ for (const cell of CELLS) describe(`on ${cell.label}`, () => {
       }
     });
 
-    it('an unrestricted master scope (viewAllRecords) reads every contact whose account exists — never the null or dangling pointer (ruling B item 4)', async () => {
+    it('an unrestricted master scope (viewAllRecords) reads every contact, the null and dangling pointers included (ruling record 6893097935)', async () => {
       const context = member(VIEW_ALL, SET.viewAll);
-      expect(await rig.read(CONTACT, context)).toEqual(['c_open', 'c_other', 'c_secret', 'c_shared']);
-      expect(await rig.count(CONTACT, context)).toBe(4);
+      expect(await rig.read(CONTACT, context)).toEqual(['c_dangling', 'c_null', 'c_open', 'c_other', 'c_secret', 'c_shared']);
+      expect(await rig.count(CONTACT, context)).toBe(6);
     });
 
     it('a caller the master object does not admit reads no contact: canReadObject(ACCOUNT) is false, the leaf is $in: []', async () => {
@@ -465,9 +466,10 @@ for (const cell of CELLS) describe(`on ${cell.label}`, () => {
       expect(await rig.read(QUOTE, member(HUMAN, SET.member))).toEqual(['q_open']);
       expect(await rig.read(LINE, member(HUMAN, SET.member))).toEqual(['l_open']);
       expect(await rig.read(LINE, member(OTHER, SET.member))).toEqual(['l_other']);
-      expect(await rig.read(LINE, member(VIEW_ALL, SET.viewAll))).toEqual(['l_open', 'l_other']);
+      // [ruling record 6893097935] Unrestricted at both hops: no chain, so the orphans at either hop too.
+      expect(await rig.read(LINE, member(VIEW_ALL, SET.viewAll))).toEqual(['l_dangling', 'l_null', 'l_open', 'l_other', 'l_via_dangling', 'l_via_null']);
       expect(await rig.read(LINE, await rig.onBehalfOf(HUMAN))).toEqual(['l_open']);
-      expect(await rig.count(LINE, member(VIEW_ALL, SET.viewAll))).toBe(2);
+      expect(await rig.count(LINE, member(VIEW_ALL, SET.viewAll))).toBe(6);
     });
 
     it('CONTROL — a system context reads every detail whose master pointer is set, the chain composed with no restriction', async () => {
@@ -482,7 +484,6 @@ for (const cell of CELLS) describe(`on ${cell.label}`, () => {
 
     const shapes = (): Array<[string, string, unknown | Promise<unknown>, string]> => [
       ['plain', CONTACT, member(HUMAN, SET.member), ACCOUNT],
-      ['unrestricted', CONTACT, member(VIEW_ALL, SET.viewAll), ACCOUNT],
       ['two-level chain', LINE, member(HUMAN, SET.member), QUOTE],
     ];
 
@@ -504,6 +505,13 @@ for (const cell of CELLS) describe(`on ${cell.label}`, () => {
       const bothAll = `find + count:\n${both.join('\n')}`;
       expect(reading(both), bothAll).toHaveLength(2);
       for (const sql of reading(both)) expect(sql, bothAll).toMatch(/in \(select/i);
+    });
+
+    it('unrestricted: the find is one statement with no master subquery at all (ruling record 6893097935)', async () => {
+      const find = await rig.statementsDuring(() => rig.engine.find(CONTACT, { context: member(VIEW_ALL, SET.viewAll) } as never));
+      const reads = find.filter((sql) => readsTable(CONTACT)(sql) || readsTable(ACCOUNT)(sql));
+      expect(reads, find.join('\n')).toHaveLength(1);
+      expect(reads[0], find.join('\n')).not.toMatch(/in \(select/i);
     });
 
     it('a delegated find is one statement too: both halves write the leaf, the engine composes the master once, the subquery is carried twice', async () => {
