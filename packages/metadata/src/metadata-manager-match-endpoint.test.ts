@@ -451,12 +451,12 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
 
   it('a type outside the slotted set keeps one item per name: the later write replaces the earlier', async () => {
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
-    // A connector: `flow` (#31696) and `webhook` (#31699 PR 2) joined the slotted set.
-    manager.registerInMemory('connector', 'f', { name: 'f', _packageId: 'com.acme.alpha' });
+    // A job: `flow` (#31696), `webhook` (#31699 PR 2) and `connector` (#31699 PR 3) joined the slotted set.
+    manager.registerInMemory('job', 'f', { name: 'f', _packageId: 'com.acme.alpha' });
     const later = { name: 'f', _packageId: 'com.acme.beta' };
-    manager.registerInMemory('connector', 'f', later);
-    expect(await manager.get('connector', 'f')).toBe(later);
-    expect(await manager.list('connector')).toEqual([later]);
+    manager.registerInMemory('job', 'f', later);
+    expect(await manager.get('job', 'f')).toBe(later);
+    expect(await manager.list('job')).toEqual([later]);
   });
 });
 

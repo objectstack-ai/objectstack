@@ -132,11 +132,13 @@
  * A reload heard before the boot run is ignored: during the boot the catalog
  * is still being filled, and an old name whose holding package has not
  * registered yet would read as no position at all (condition 2). The boot run
- * judges it once the catalog is complete. A door that registers positions
- * without announcing `metadata:reloaded` (the runtime's package install and
- * enable routes), a hot upgrade over a version the running kernel still
- * serves (its old position reads as still declared), and a package the
- * announcement does not name are carried at the next boot.
+ * judges it once the catalog is complete. A hot upgrade over a version the
+ * running kernel still serves is carried at once: the re-register withdraws
+ * the position the new version no longer ships (#33050), so the old name is
+ * no current position when the announcement is heard. A door that registers
+ * positions without announcing `metadata:reloaded` (the runtime's package
+ * install and enable routes), and a package the announcement does not name,
+ * are carried at the next boot.
  *
  * ## Its one limit
  *
