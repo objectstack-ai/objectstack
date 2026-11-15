@@ -158,7 +158,7 @@ async function insertTicket(name: string): Promise<{ id: string; stamped: string
     const res = await http('POST', `/data/${TICKET}`, { name });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     const id = String(res.data?.id);
-    const rows = (await ql.find(TICKET, { where: { id }, fields: ['id', 'stamped_by'], context: { isSystem: true } } as any)) as any[];
+    const rows = (await ql.find(TICKET, { where: { id }, fields: ['id', 'stamped_by'], context: { isSystem: true } })) as Array<Record<string, unknown>>;
     return { id, stamped: String(rows[0]?.stamped_by ?? '') };
 }
 
@@ -166,9 +166,9 @@ async function insertTicket(name: string): Promise<{ id: string; stamped: string
 const run = (name: string, recordId: string) => http('POST', `/actions/${TICKET}/${name}/${recordId}`, {});
 
 /** The owners holding a handler under `TICKET`'s action `name`, from the engine's listing. */
-const holdersOf = (name: string) => ql.listRegisteredActions({} as any)
-    .filter((row: any) => row.objectName === TICKET && row.actionName === name)
-    .map((row: any) => row.package);
+const holdersOf = (name: string) => ql.listRegisteredActions()
+    .filter((row) => row.objectName === TICKET && row.actionName === name)
+    .map((row) => row.package);
 
 /** An authored package: installed through `POST /packages`, an action and a body hook saved under it through the metadata door. */
 async function authorPackage(id: string, by: string) {
@@ -215,7 +215,8 @@ describe('`DELETE /api/v1/packages/:id` leaves nothing of the package it uninsta
             actions: [action('qa_uh_run_bound', 'bound')],
             hooks: [hook('qa_uh_stamp_bound', 'bound')],
         };
-        await kernel.getService<any>('manifest').register(manifest, { source: 'marketplace' });
+        await kernel.getService<{ register(artifact: unknown, options?: { source?: 'code' | 'marketplace' }): unknown }>('manifest')
+            .register(manifest, { source: 'marketplace' });
         const bound = bindAppArtifactHandlers(ql as any, manifest, {
             appId: BOUND, logger: { info() {}, warn() {}, error() {}, debug() {} } as any,
             source: 'MarketplaceInstallLocal', withholdHooksWithoutBody: true,
