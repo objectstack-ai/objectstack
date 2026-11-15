@@ -4,7 +4,7 @@ import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { SysSecret } from '@objectstack/platform-objects/system';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AuditPlugin } from '../audit-plugin.js';
 import { installDefaultOrganization } from '../default-organization.testkit.js';
 import { migrateKeyMaterialCopies } from '../key-material-copy-migration.js';
@@ -18,6 +18,7 @@ import { bindingCrypto, recordingLogger } from './seal-store.testkit.js';
 import type { AuditSealer } from './sealer.js';
 import { amendmentRow, type RedactionAmendmentBody } from './signed-body.js';
 import { LocalCheckpointSigner, readAuditSealSecret } from './signer.js';
+import { SigningKeyTrust } from './verifier.js';
 
 /**
  * ADR-0154 D7 on a live engine over SQLite, with an `archive` datasource:
@@ -293,6 +294,86 @@ describe('the redaction writer admits only inputs that verify under a trusted ke
     await hot().update('sys_audit_checkpoint', String(row.id), { signature: Buffer.alloc(64).toString('base64') });
     const decision = await amender().decide(LOG, 'other_chain', await patchOf('other_chain'));
     expect(decision).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/^checkpoint 0 that lists it does not verify under a trusted signing key/) });
+  });
+});
+
+describe('one run admits, rebuilds and opens each checkpoint once, however many rows it lists (ADR-0154 D6, D7)', () => {
+  const crypto = bindingCrypto();
+  const plugin = new AuditPlugin({ cryptoProvider: crypto });
+  const ROWS = 4;
+  const CHAINS = ['org_a', 'org_b', 'org_c'] as const;
+  let kernel: ObjectKernel;
+  let engine: ObjectQL;
+  let report: Awaited<ReturnType<typeof migrateMailLogBodyCopies>>;
+  const logger = recordingLogger();
+  /** Each checkpoint's signature verifications, and each seed opened, during the one run. */
+  const verified = new Map<string, number>();
+  const opened = new Map<string, number>();
+  const past = Math.floor(Date.now() / H) * H - 3 * H;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const hot = () => engine.getDriverForObject(LOG) as unknown as Driver;
+  const idsOf = (tenant: string) => Array.from({ length: ROWS }, (_, i) => `${tenant}_${i}`);
+  const checkpointOf = async (tenant: string) =>
+    ((await engine.find('sys_audit_checkpoint', { context: SYS })) as Row[]).find((r) => r.tenant_id === tenant)!;
+
+  beforeAll(async () => {
+    ({ kernel, engine } = await bootSealedLog(plugin));
+    for (const tenant of CHAINS) {
+      for (const [i, id] of idsOf(tenant).entries()) {
+        await hot().create(LOG, {
+          id, created_at: iso(past + (i + 1) * 60_000), action: 'create', object_name: 'sys_email', record_id: `${id}_rec`, tenant_id: tenant,
+          new_value: JSON.stringify({ id: `em_${id}`, body_text: MAIL_BODY }),
+        });
+      }
+    }
+    const sealer = (plugin as unknown as { sealer: AuditSealer }).sealer;
+    await sealer.stop();
+    expect(await sealer.runPass()).toBe(CHAINS.length);
+    // org_b's checkpoint no longer verifies; org_c's seed no longer opens.
+    await hot().update('sys_audit_checkpoint', String((await checkpointOf('org_b')).id), { signature: Buffer.alloc(64).toString('base64') });
+    const seed = String((await checkpointOf('org_c')).seed_handle);
+    await (engine.getDriverForObject('sys_secret') as unknown as Driver).update('sys_secret', seed, { ciphertext: Buffer.alloc(60).toString('base64') });
+
+    // Both spies call through: they only count.
+    const signature = vi.spyOn(SigningKeyTrust.prototype, 'signature');
+    const decrypt = vi.spyOn(crypto, 'decrypt');
+    try {
+      report = await migrateMailLogBodyCopies(engine as never, logger, { apply: true, seal: { engine: engine as never, crypto }, objects: ['sys_audit_log'] });
+    } finally {
+      for (const [, bytes] of signature.mock.calls) {
+        const body = JSON.parse(Buffer.from(bytes).toString('utf8')) as Row;
+        if (Array.isArray(body.row_ids)) verified.set(String(body.tenant_id), (verified.get(String(body.tenant_id)) ?? 0) + 1);
+      }
+      for (const [, ctx] of decrypt.mock.calls) if (ctx.namespace === LOG) opened.set(ctx.key, (opened.get(ctx.key) ?? 0) + 1);
+      signature.mockRestore();
+      decrypt.mockRestore();
+    }
+  }, 120_000);
+
+  afterAll(async () => {
+    if (kernel) await Promise.race([kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+  }, 30_000);
+
+  it('verifies each checkpoint once (#32737)', () => {
+    expect(Object.fromEntries(verified)).toEqual({ org_a: 1, org_b: 1, org_c: 1 });
+  });
+
+  it('opens each seed it reaches once, an answer that does not open included (#32737)', () => {
+    // org_b's seed is never reached: its checkpoint does not verify.
+    expect(Object.fromEntries(opened)).toEqual({ '["org_a",0]': 1, '["org_c",0]': 1 });
+  });
+
+  it("amends every row of a checkpoint that verifies and opens, and the live check reads each redacted", async () => {
+    expect(report).toMatchObject({ scanned: CHAINS.length * ROWS, rewritten: ROWS, refused: 2 * ROWS, failures: 0 });
+    const result = await verifyAuditLedger({ engine: engine as never, crypto });
+    expect(verdicts(result)).toMatchObject(Object.fromEntries(idsOf('org_a').map((id) => [id, 'redacted'])));
+  });
+
+  it('still refuses every row a checkpoint that does not verify lists, and every row a seed that does not open sealed', async () => {
+    const refusals = (pattern: RegExp) => logger.lines.filter((l) => l.level === 'warn' && pattern.test(l.message)).map((l) => /sys_audit_log\/(\w+),/.exec(l.message)?.[1]);
+    expect(refusals(/a sealed row: checkpoint 0 that lists it does not verify under a trusted signing key/)).toEqual(idsOf('org_b'));
+    expect(refusals(/a sealed row: the seed of checkpoint 0 that sealed it does not open/)).toEqual(idsOf('org_c'));
+    for (const id of [...idsOf('org_b'), ...idsOf('org_c')]) expect(String((await hot().find(LOG, { where: { id } }))[0]!.new_value)).toContain(MAIL_BODY);
   });
 });
 

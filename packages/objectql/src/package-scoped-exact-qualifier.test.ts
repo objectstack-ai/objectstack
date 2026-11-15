@@ -2226,10 +2226,13 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
   });
 
   describe('location 4: one answer in every hydration state (both registration orders)', () => {
-    const STATES = ['stored, not hydrated', 'after the read-side hydrator', "bare-slot copy stamped ''", "bare-slot copy stamped 'sys_metadata'"] as const;
+    // [#32716 N3] The boot load (`loadMetaFromDb`) is the other hydration the
+    // card names beside the list read: the same answers before and after it.
+    const STATES = ['stored, not hydrated', 'after the read-side hydrator', 'after the boot load', "bare-slot copy stamped ''", "bare-slot copy stamped 'sys_metadata'"] as const;
     const enter = async (type: string, state: (typeof STATES)[number]) => {
       storeRow(type, 'active', 'stored');
       if (state === 'after the read-side hydrator') await protocol.getMetaItems({ type } as never);
+      if (state === 'after the boot load') expect(await protocol.loadMetaFromDb(), 'the boot load read the row').toMatchObject({ loaded: 1, errors: 0 });
       if (state.startsWith('bare-slot')) {
         registry.registerItem(type, { ...sealedBody(type, 'stored'), _provenance: 'org', _packageId: state.endsWith("''") ? '' : 'sys_metadata' }, 'name' as never);
       }
@@ -2258,11 +2261,12 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
         }
       }
 
-      it(`${type}, one holder: the stored row is declined before and after the read-side hydrator, on the exact and the bare read (BASE: after it, both served the row)`, async () => {
+      it(`${type}, one holder: the stored row is declined before and after the boot load and the read-side hydrator, on the exact and the bare read (BASE: after the hydrator, both served the row)`, async () => {
         shipSealed(type, A);
         storeRow(type, 'active', 'stored');
-        for (const when of ['before', 'after']) {
-          if (when === 'after') await protocol.getMetaItems({ type } as never);
+        for (const when of ['before', 'after the boot load', 'after the read-side hydrator']) {
+          if (when === 'after the boot load') await protocol.loadMetaFromDb();
+          if (when === 'after the read-side hydrator') await protocol.getMetaItems({ type } as never);
           expect(labelOf(await read(type, 'approve', A)), `${when} exact`).toBe(`alpha ${type}`);
           expect(labelOf(await protocol.getMetaItem({ type, name: 'approve' } as never)), `${when} bare`).toBe(`alpha ${type}`);
         }
@@ -2526,6 +2530,98 @@ describe('[#32183] an App\'s pair two modules share, one of them disabled', () =
     const neither = await read();
     expect(labelOf(neither)).toBeUndefined();
     expect(JSON.stringify(neither ?? null)).not.toMatch(/(suitex|suitey) dashboard/);
+  });
+});
+
+/**
+ * [#32354, ADR-0150 D3, epic note 6820147040] The list doors beside a disabled
+ * holder: a disabled package holds no name, so no list serves what it carries
+ * for one. FROM (measured on `2b2e5b41`, both registration orders and both save
+ * orders): with A disabled, the list naming no package and its execution face
+ * listed the row A's customization pair stores at a member A does not ship,
+ * and a dependent's added locale of A's template; the lists scoped to A and to
+ * A's pair listed the pair's row too, while the exact reads of both addresses
+ * answered 404. A send naming no package reads that execution list. TO: none
+ * of them. The dependent's own list keeps its addition, as its exact read
+ * does, and an enabled holder's lists are unchanged. Re-enabled, as before.
+ */
+describe('[#32354] the list doors serve nothing a disabled holder\'s pair or dependent carries for it', () => {
+  const DEP = 'com.acme.dep';
+  const tpl = (packageId: string, locale: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale, subject: locale, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const pairRow = (name: string, label: string) => rows.push({
+    id: `row_${name}`, type: 'email_template', name, state: 'active', package_id: PAIR_A, bundle_member: 'fr-FR',
+    metadata: JSON.stringify({ name, label, locale: 'fr-FR', subject: label, bodyHtml: '<p>p</p>' }),
+  });
+  const labelsOf = async (read: Promise<{ items?: unknown[] }>, name = 'welcome') => ((await read).items ?? [])
+    .filter((it) => (it as { name?: unknown }).name === name)
+    .map((it) => (it as { label?: string }).label)
+    .sort();
+  const answers = async () => ({
+    list: await labelsOf(protocol.getMetaItems({ type: 'email_template' })),
+    execution: await labelsOf(protocol.getMetaItemsForExecution({ type: 'email_template' })),
+    atA: await labelsOf(protocol.getMetaItems({ type: 'email_template', packageId: A })),
+    executionAtA: await labelsOf(protocol.getMetaItemsForExecution({ type: 'email_template', packageId: A })),
+    atPair: await labelsOf(protocol.getMetaItems({ type: 'email_template', packageId: PAIR_A })),
+    atDep: await labelsOf(protocol.getMetaItems({ type: 'email_template', packageId: DEP })),
+    atB: await labelsOf(protocol.getMetaItems({ type: 'email_template', packageId: B })),
+  });
+  type Answers = Awaited<ReturnType<typeof answers>>;
+  const lists = (unscoped: string[], atA: string[], rest: Pick<Answers, 'atPair' | 'atDep' | 'atB'>): Answers =>
+    ({ list: unscoped, execution: unscoped, atA, executionAtA: atA, ...rest });
+
+  /** `[state, holders, carried, enabled answers, A-disabled answers]`. */
+  const STATES: ReadonlyArray<[string, readonly string[], 'pair row' | 'addition', Answers, Answers]> = [
+    ['one holder, its pair\'s row', [A], 'pair row',
+      lists(['alpha en-US', 'pair fr-FR'], ['alpha en-US', 'pair fr-FR'], { atPair: ['pair fr-FR'], atDep: [], atB: [] }),
+      lists([], [], { atPair: [], atDep: [], atB: [] })],
+    ['two holders, the disabled one\'s pair\'s row', [A, B], 'pair row',
+      lists(['alpha en-US', 'beta en-US', 'pair fr-FR'], ['alpha en-US', 'pair fr-FR'], { atPair: ['pair fr-FR'], atDep: [], atB: ['beta en-US'] }),
+      lists(['beta en-US'], [], { atPair: [], atDep: [], atB: ['beta en-US'] })],
+    ['one holder, a dependent\'s addition', [A], 'addition',
+      lists(['alpha en-US', 'dep fr-FR'], ['alpha en-US'], { atPair: [], atDep: ['dep fr-FR'], atB: [] }),
+      lists([], [], { atPair: [], atDep: ['dep fr-FR'], atB: [] })],
+    ['two holders, a dependent of the disabled one\'s addition', [A, B], 'addition',
+      lists(['alpha en-US', 'beta en-US', 'dep fr-FR'], ['alpha en-US'], { atPair: [], atDep: ['dep fr-FR'], atB: ['beta en-US'] }),
+      lists(['beta en-US'], [], { atPair: [], atDep: ['dep fr-FR'], atB: ['beta en-US'] })],
+  ];
+  const CASES = STATES.flatMap(([state, holders, carried, enabled, disabled]) =>
+    (['as listed', 'reversed'] as const).flatMap((order) => (carried === 'pair row'
+      ? (['stored first', 'stored last'] as const)
+      : (['no row'] as const)).map((save) => [state, order, save, holders, carried, enabled, disabled] as const)));
+
+  beforeEach(() => {
+    registry.installPackage({ ...(manifest(DEP) as object), dependencies: { [A]: '^1.0.0' } } as never, 'code');
+    registry.installPackage(manifest(PAIR_A), 'code');
+  });
+
+  it.each(CASES)('%s, registered %s, row %s: A disabled, no list serves what is carried for A; re-enabled, as before', async (_state, order, save, holders, carried, enabled, disabled) => {
+    if (save === 'stored first') pairRow('welcome', 'pair fr-FR');
+    const shipped: Array<[string, string]> = [...holders.map((id): [string, string] => [id, 'en-US']), ...(carried === 'addition' ? [[DEP, 'fr-FR'] as [string, string]] : [])];
+    for (const [id, locale] of order === 'reversed' ? [...shipped].reverse() : shipped) tpl(id, locale);
+    if (save === 'stored last') pairRow('welcome', 'pair fr-FR');
+
+    // CONTROL — nothing disabled: every list as on FROM.
+    expect(await answers()).toEqual(enabled);
+    registry.disablePackage(A);
+    expect(await answers()).toEqual(disabled);
+    // Read again, after the first reads hydrated the stored row: the same answers.
+    expect(await answers()).toEqual(disabled);
+    registry.enablePackage(A);
+    expect(await answers()).toEqual(enabled);
+  });
+
+  it.each(['as listed', 'reversed'] as const)('CONTROL — registered %s: the pair\'s own item of a name A ships nothing of stays listed while A is disabled, as its by-name read serves it', async (order) => {
+    const arrange = [() => tpl(A, 'en-US'), () => pairRow('farewell', 'pair own farewell')];
+    for (const step of order === 'reversed' ? [...arrange].reverse() : arrange) step();
+    registry.disablePackage(A);
+    expect(labelOf(await protocol.getMetaItem({ type: 'email_template', name: 'farewell', member: 'fr-FR' } as never))).toBe('pair own farewell');
+    for (const read of [
+      protocol.getMetaItems({ type: 'email_template' }),
+      protocol.getMetaItemsForExecution({ type: 'email_template' }),
+      protocol.getMetaItems({ type: 'email_template', packageId: PAIR_A }),
+    ]) expect(await labelsOf(read, 'farewell')).toEqual(['pair own farewell']);
   });
 });
 

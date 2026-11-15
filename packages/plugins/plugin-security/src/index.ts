@@ -8,6 +8,8 @@
  */
 
 export { SecurityPlugin } from './security-plugin.js';
+// [#33132] The shape of `SecurityPluginOptions.platformBaselineOverrides`, for a host that declares one.
+export type { PlatformBaselineOverride, PlatformBaselineOverrides } from './platform-baseline-sets.js';
 export { PermissionEvaluator } from './permission-evaluator.js';
 export { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 export { FieldMasker, maskFieldValue, MASK_CHAR } from './field-masker.js';

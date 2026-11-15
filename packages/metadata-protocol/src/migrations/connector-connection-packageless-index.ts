@@ -50,10 +50,11 @@
  * - SQLite and PostgreSQL: a partial unique index,
  *   `(organization_id, connector_name) WHERE connector_package IS NULL`.
  * - MySQL (8.0.13+): a functional key part over the driver's hash-shadow digest,
- *   NULL for a packaged connection, which UNIQUE then exempts. ⚠ `driver-sql`
- *   reads that key part as an expression, not as a partial guard, so on MySQL
- *   the widening arm keeps the old key (a declared limit; the grant guard
- *   shares it). The old key keeps refusing what it refused, nothing more.
+ *   NULL for a packaged connection, which UNIQUE then exempts. `driver-sql`
+ *   reads that key part as a partial unique on the two columns
+ *   (`parseFunctionalRowScopedGuard`), but only while the digest is exactly the
+ *   one its own hash shadow writes, so this statement and that builder move
+ *   together.
  * - MariaDB: a UNIQUE key over an INVISIBLE generated column carrying that
  *   digest, `uniq_sys_connector_connection_packageless__hash` (MariaDB 10.3+),
  *   which `driver-sql` reads as a partial unique on the two columns.

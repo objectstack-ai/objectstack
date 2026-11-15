@@ -32,6 +32,7 @@ import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@obj
 import type { IDataEngine } from '@objectstack/core';
 import { readSsoProviderDeleteImpact, ssoProviderDeleteSummary, type SsoProviderDeleteImpact } from './sso-provider-lifecycle.js';
 import { samlLogoutServiceOf } from './sso-sign-out-of-idp.js';
+import { mappingWithAccountKeyAttribute } from './sso-saml-account-key.js';
 
 export interface RegisterSsoFormResult {
   /** HTTP status to return to the caller. */
@@ -390,7 +391,14 @@ export async function runRegisterSamlProviderFromForm(
     lastName: str(body?.mapLastName),
     name: str(body?.mapName),
   });
-  const mapping = mappingWithGroupsClaim(attributes, str(body?.mapGroups));
+  // The attribute the provider keys its accounts on instead of the NameID,
+  // under `mapping.extraFields.accountKey` (`sso-saml-account-key.ts`);
+  // blank keeps the default (Entra's object id for an Entra issuer, else the
+  // NameID).
+  const mapping = mappingWithAccountKeyAttribute(
+    mappingWithGroupsClaim(attributes, str(body?.mapGroups)),
+    str(body?.mapAccountKey),
+  );
   if (Object.keys(mapping).length > 0) samlConfig.mapping = mapping;
 
   const headers = forwardAuthHeaders(request, origin);
@@ -1265,10 +1273,13 @@ export async function runSsoProviderDeleteImpact(
 //  - SAML: email = attribute `mapping.email` (default `email`), else the
 //    NameID; name = `mapping.firstName` (default `givenName`) + `mapping.lastName`
 //    (default `surname`), else `mapping.name` (default `displayName`), else the
-//    NameID. An IdP whose attribute names differ from those defaults — Okta's
-//    `name`, Entra ID's claim URIs (`http://schemas.xmlsoap.org/ws/2005/05/
-//    identity/claims/givenname`, …) — names every user after their NameID until
-//    the provider maps them.
+//    NameID. An IdP whose attribute names differ from those defaults (Okta's
+//    `name`) names every user after their NameID until the provider maps them.
+//    A member left unset reads the standard claim first when the assertion
+//    carries it (Entra ID's and AD FS's `http://schemas.xmlsoap.org/ws/2005/05/
+//    identity/claims/emailaddress`, `givenname`, `surname`, `name`), at the ACS
+//    only (`sso-saml-standard-claims.ts`); the stored mapping is unchanged, so
+//    the get bridge below still answers `null` for such a member.
 //  - OIDC: email = claim `mapping.email` (default `email`), name = claim
 //    `mapping.name` (default `name`). The OIDC mapping has no first/last-name
 //    member (`oidcMappingSchema` is strict).

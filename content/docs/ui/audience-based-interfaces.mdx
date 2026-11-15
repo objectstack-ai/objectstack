@@ -19,7 +19,7 @@ description: "Serve one dataset to different audiences: give end users a curated
 
 The built-in permission sets already encode this split: `member_default` and `viewer_readonly` do **not** carry `studio.access` / `manage_metadata`, so Studio and schema-design surfaces are invisible to them; `admin_full_access` carries both, while `organization_admin` gets `setup.access` only — the Setup shell is reachable but Studio and schema design stay hidden from org-scoped admins (see [`default-permission-sets.ts`](https://github.com/objectstack-ai/objectstack/blob/main/packages/plugins/plugin-security/src/objects/default-permission-sets.ts)).
 
-**One package, one app.** A package of `type: 'app'` exposes **exactly one** App — `defineStack` refuses a second at load, per ADR-0019 (app-as-consumer-unit) D3. More audiences therefore never mean more apps: they are navigation groups **inside** that one app, gated by `requiredPermissions` exactly as below.
+**One package, one app.** A package of `type: 'app'` exposes **exactly one** App — `defineStack` refuses a second at load, per ADR-0019 (app-as-consumer-unit) D3; a `type: 'module'` package is held to at most one app the same way. More audiences in one package therefore never mean more apps: they are navigation groups **inside** that one app, gated by `requiredPermissions` exactly as below. More apps come only from more packages: a suite (one install: an app package plus the module packages it composes) may surface more than one app, each defined by a different package of the suite (ADR-0019 D3, amended 2026-11-12).
 
 ### 1. Gate the app and its navigation
 

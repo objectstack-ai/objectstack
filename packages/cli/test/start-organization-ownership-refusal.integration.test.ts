@@ -205,10 +205,11 @@ const startOn = (...extra: string[]): string[] => [process.execPath, CLI, 'start
 
 /**
  * A printed command, run through a shell exactly as printed: `os` is the built
- * entry, `PLAN` the plan file this run writes.
+ * entry, `PLAN` the plan file this run writes, `REPORT` the apply's report.
  */
 const shell = (command: string, plan = 'plan.json'): string[] => [
-  'bash', '-c', `os() { "${process.execPath}" "${CLI}" "$@"; }; ${command.replaceAll('PLAN', plan)}`,
+  'bash', '-c',
+  `os() { "${process.execPath}" "${CLI}" "$@"; }; ${command.replaceAll('PLAN', plan).replaceAll('REPORT', 'apply-report.json')}`,
 ];
 
 /**
@@ -254,7 +255,7 @@ function recorded(name: string): Run {
  */
 function namedCommands(output: string): { plan: string; apply: string } {
   const printed = output.split('\n').find((line) => line.trimStart().startsWith('✗ ') && line.includes('organization-ownership')) ?? '';
-  const m = /Run '(.+? --out PLAN)' to write and review its plan, take a backup, then run '(.+? --apply --plan-file PLAN --backup-taken)'/.exec(printed);
+  const m = /Run '(.+? --out PLAN)' to write and review its plan, take a backup, then run '(.+? --apply --plan-file PLAN --backup-taken --out REPORT)'/.exec(printed);
   if (!m) throw new Error(`the refusal names no ceremony commands\n--- output ---\n${output.slice(-6000)}`);
   return { plan: m[1]!, apply: m[2]! };
 }
@@ -375,7 +376,7 @@ describe('`os start` names an ownership ceremony that runs with the secret it se
     const exported = `OS_AUTH_SECRET="$(cat ${secretFile})" os migrate organization-ownership --database-url file:A.db`;
     expect(namedCommands(output)).toEqual({
       plan: `${exported} --out PLAN`,
-      apply: `${exported} --apply --plan-file PLAN --backup-taken`,
+      apply: `${exported} --apply --plan-file PLAN --backup-taken --out REPORT`,
     });
     expect(output).toContain(`Both commands export the auth secret this server read from ${secretFile}`);
     // The secret itself is never printed.
@@ -387,7 +388,7 @@ describe('`os start` names an ownership ceremony that runs with the secret it se
     expect(code, output.slice(-4000)).toBe(1);
     expect(namedCommands(output)).toEqual({
       plan: 'os migrate organization-ownership --database-url file:A.db --out PLAN',
-      apply: 'os migrate organization-ownership --database-url file:A.db --apply --plan-file PLAN --backup-taken',
+      apply: 'os migrate organization-ownership --database-url file:A.db --apply --plan-file PLAN --backup-taken --out REPORT',
     });
     expect(output).not.toContain('OS_AUTH_SECRET="$(cat');
   });
@@ -401,6 +402,8 @@ describe('`os start` names an ownership ceremony that runs with the secret it se
     const apply = recorded('apply');
     expect(apply.code, apply.output.slice(-6000)).toBe(0);
     expect(apply.output).toContain('The ceremony is complete');
+    // The printed apply names its report file: it lands where `--out` said.
+    expect(existsSync(join(dir, 'apply-report.json'))).toBe(true);
     // The plugin's own init line: the ceremony composed it, with the secret the command exported.
     expect(apply.output).toContain('Security Plugin initialized');
     expect(apply.output).not.toMatch(/Did not compose the security plugin/);
@@ -421,7 +424,7 @@ describe('#31488 — the refusal names the database it refused, and the commands
       `--database-url file:${flagHomeFile()}`;
     expect(namedCommands(output)).toEqual({
       plan: `${named} --out PLAN`,
-      apply: `${named} --apply --plan-file PLAN --backup-taken`,
+      apply: `${named} --apply --plan-file PLAN --backup-taken --out REPORT`,
     });
     const plan = recorded('planFlagHome');
     expect(plan.code, plan.output.slice(-4000)).toBe(0);
@@ -434,7 +437,7 @@ describe('#31488 — the refusal names the database it refused, and the commands
     const exported = `OS_AUTH_SECRET="$(cat ${join(dir, '.objectstack', 'auth-secret')})" os migrate organization-ownership`;
     expect(namedCommands(output)).toEqual({
       plan: `${exported} --out PLAN`,
-      apply: `${exported} --apply --plan-file PLAN --backup-taken`,
+      apply: `${exported} --apply --plan-file PLAN --backup-taken --out REPORT`,
     });
     const plan = recorded('planDefault');
     expect(plan.code, plan.output.slice(-4000)).toBe(0);
@@ -460,7 +463,7 @@ describe('#31547 — a driver and a token chosen by flag reach the ceremony, the
       `OS_AUTH_SECRET="$(cat ${join(home, 'auth-secret')})" os migrate organization-ownership --database-url file:A.db`;
     expect(namedCommands(output)).toEqual({
       plan: `${named} --out PLAN`,
-      apply: `${named} --apply --plan-file PLAN --backup-taken`,
+      apply: `${named} --apply --plan-file PLAN --backup-taken --out REPORT`,
     });
     expect(output).toContain('The database auth token this server was started with (--database-auth-token) is not printed');
     expect(output).not.toContain(CONNECTION_TOKEN);

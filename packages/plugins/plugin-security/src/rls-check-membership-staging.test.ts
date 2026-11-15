@@ -259,6 +259,8 @@ interface Stack {
     payload: { recordId?: string; data?: Record<string, unknown> },
     context: any,
   ) => Promise<WriteOutcome>;
+  /** A list read through the middleware on THIS context object (not a copy): the rows the store returns. */
+  read: (object: string, context: any) => Promise<any[]>;
   rows: (object: string) => any[];
 }
 
@@ -354,6 +356,16 @@ async function makeStack(resolver: Resolver | null): Promise<Stack> {
       if (operation === 'insert') opCtx.data = { ...payload.data };
       else opCtx.data = { id: payload.recordId, ...payload.data };
       return run(opCtx);
+    },
+    async read(object, context) {
+      const opCtx: any = { object, operation: 'find', context, options: { where: {} }, ast: { where: {} } };
+      let rows: any[] = [];
+      await securityMw(opCtx, async () => {
+        await sharingMw(opCtx, async () => {
+          rows = await engine.find(object, { filter: opCtx.ast.where });
+        });
+      });
+      return rows;
     },
   };
 }
@@ -591,5 +603,115 @@ describe('[#16607] the two shapes that passed by ACCIDENT pass by design', () =>
     expect(out.code).toBe('PERMISSION_DENIED');
     expect(out.status).toBe(403);
     expect(stack.rows('qa_employer_member').find((r) => r.id === 'mem_forged')).toBeUndefined();
+  });
+});
+
+// ── concurrent operations on ONE context: staging is awaited, not skipped ──
+
+/**
+ * [#33379] Staging is memoized per execution context, and a record page runs
+ * several operations on the SAME context at once (related slices, stream,
+ * timeline). The memo used to be a boolean set BEFORE the resolver was
+ * awaited, so a second operation arriving while the first was still waiting
+ * saw "staged", skipped, and compiled `current_user.employer_org_ids` against
+ * a bag not filled yet: policy dropped → deny filter → zero rows. Fail closed,
+ * so under-fill only — but the same read alone returned the caller's rows.
+ * The resolver here answers after a macrotask, so the second operation
+ * provably reaches staging while the first is still in flight.
+ */
+describe('[#33379] concurrent operations on one context — a second read awaits the in-flight staging', () => {
+  /** A job of a foreign employer: never in any answer, so no leg can widen unseen. */
+  const JOB_FOREIGN = { id: 'job_foreign', title: 'Foreign job', employer_org: OTHER_ORG, created_by: 'usr_seed' };
+  const ids = (rows: any[]) => rows.map((r) => r.id).sort();
+  const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  /** Resolves after a tick; a call (0-based) for which `fails` answers true rejects instead. */
+  function slowResolver(fails: (call: number) => boolean = () => false): Resolver {
+    let call = 0;
+    return {
+      keys: ['employer_org_ids'],
+      resolve: vi.fn(async () => {
+        const n = call++;
+        await tick();
+        if (fails(n)) throw new Error('membership service down');
+        return { employer_org_ids: [OWN_ORG] };
+      }),
+    };
+  }
+
+  async function stackWith(resolver: Resolver): Promise<Stack> {
+    const stack = await makeStack(resolver);
+    stack.rows('qa_job').push({ ...JOB_FOREIGN });
+    return stack;
+  }
+
+  it('control — one read alone returns the caller\'s rows, resolving once', async () => {
+    const resolver = slowResolver();
+    const stack = await stackWith(resolver);
+    expect(ids(await stack.read('qa_job', freshCtx()))).toEqual([JOB_OWN.id]);
+    expect(resolver.resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it('two concurrent reads on one context each return what the read alone returns, resolving once', async () => {
+    const resolver = slowResolver();
+    const stack = await stackWith(resolver);
+    const context = freshCtx();
+    const [first, second] = await Promise.all([stack.read('qa_job', context), stack.read('qa_job', context)]);
+    expect(ids(first)).toEqual([JOB_OWN.id]);
+    expect(ids(second), 'the second read compiled against the staged bag, not an empty one').toEqual([JOB_OWN.id]);
+    expect(resolver.resolve, 'the second read awaited the first resolution instead of starting its own').toHaveBeenCalledTimes(1);
+    expect(context.__rlsMembershipStaged).toBe(true);
+    expect(context.rlsMembership).toEqual({ employer_org_ids: [OWN_ORG] });
+  });
+
+  it('control — sequential reads on one context are unchanged: same rows, the resolver consulted once', async () => {
+    const resolver = slowResolver();
+    const stack = await stackWith(resolver);
+    const context = freshCtx();
+    expect(ids(await stack.read('qa_job', context))).toEqual([JOB_OWN.id]);
+    expect(ids(await stack.read('qa_job', context))).toEqual([JOB_OWN.id]);
+    expect(resolver.resolve).toHaveBeenCalledTimes(1);
+  });
+
+  // A read stages twice — before Layer 1 and again with the policies about to
+  // compile — so "the next staging call" after a failure is already the second
+  // half of the same read. Both reads below await the SAME attempts: two
+  // resolver calls for two concurrent reads, not four.
+  it('a failed resolution fails closed for every read that awaited it, and is not memoized: a later read asks again', async () => {
+    const resolver = slowResolver((call) => call < 2);
+    const stack = await stackWith(resolver);
+    const context = freshCtx();
+    const during = await Promise.all([stack.read('qa_job', context), stack.read('qa_job', context)]);
+    // Fail closed for both: the unresolved key drops the policy, nothing widened.
+    expect(during.map(ids)).toEqual([[], []]);
+    expect(resolver.resolve, 'the concurrent reads shared each failing attempt').toHaveBeenCalledTimes(2);
+    expect(stack.logger.warn).toHaveBeenCalledWith(expect.stringContaining('rls-membership-resolver threw'), expect.anything());
+    expect(context.__rlsMembershipStaged, 'a failure is not recorded as staged').toBeUndefined();
+    expect(context.rlsMembership).toBeUndefined();
+    // No permanently-staged empty bag: the next read asks again, and resolves.
+    expect(ids(await stack.read('qa_job', context))).toEqual([JOB_OWN.id]);
+    expect(resolver.resolve).toHaveBeenCalledTimes(3);
+    expect(context.__rlsMembershipStaged).toBe(true);
+    expect(context.rlsMembership).toEqual({ employer_org_ids: [OWN_ORG] });
+  });
+
+  it('a resolver that keeps failing keeps every operation on the context closed — asked again each time, never widened', async () => {
+    const resolver = slowResolver(() => true);
+    const stack = await stackWith(resolver);
+    const context = freshCtx();
+    const counts: number[] = [];
+    for (let i = 0; i < 2; i++) {
+      expect(ids(await stack.read('qa_job', context))).toEqual([]);
+      counts.push(resolver.resolve.mock.calls.length);
+    }
+    // A bare insert the resolved set would admit is refused by the CHECK gate.
+    const out = await stack.write('insert', 'qa_job', { data: { id: 'job_new', title: 'x', employer_org: OWN_ORG } }, context);
+    expectCheckDenial(out, 'insert', 'qa_job');
+    counts.push(resolver.resolve.mock.calls.length);
+    expect(stack.rows('qa_job').find((r) => r.id === 'job_new')).toBeUndefined();
+    expect(counts[1], 'the second read asked again').toBeGreaterThan(counts[0]);
+    expect(counts[2], 'the insert asked again').toBeGreaterThan(counts[1]);
+    expect(context.__rlsMembershipStaged).toBeUndefined();
+    expect(context.rlsMembership).toBeUndefined();
   });
 });

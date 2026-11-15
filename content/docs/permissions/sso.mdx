@@ -161,13 +161,16 @@ the endpoint and the registration member that names it explicitly, for example
 trusted only because a discovery document names it. Pass the endpoint as the
 `oidcConfig` member the message names (`authorizationEndpoint`, `tokenEndpoint`,
 `jwksEndpoint` or `userInfoEndpoint`), or as the field of the same name on the
-Register SSO Provider bridge, `POST /api/v1/auth/admin/sso/register` (the
-**Userinfo URL** field of **Setup → SSO Providers → Register SSO Provider** fills
-`userInfoEndpoint`), and the registration trusts it.
+Register SSO Provider bridge, `POST /api/v1/auth/admin/sso/register`, and the
+registration trusts it. **Setup → SSO Providers → Register SSO Provider** offers
+each of them as a field: **Authorization URL** fills `authorizationEndpoint`,
+**Token URL** `tokenEndpoint`, **JWKS URL** `jwksEndpoint` and **Userinfo URL**
+`userInfoEndpoint`.
 
 Google is one such provider: its discovery document names the token endpoint,
 the key set and the userinfo endpoint each on a host of its own, so a Google
-registration names all three:
+registration names all three, either in the **Token URL**, **JWKS URL** and
+**Userinfo URL** fields of the Setup form or through the bridge:
 
 ```typescript
 await fetch('http://localhost:3000/api/v1/auth/admin/sso/register', {
@@ -383,6 +386,15 @@ What verification decides, with it on:
 So if your people first sign in with addresses at a subdomain or at another
 domain, list each such domain on the provider as a bare host name and verify it.
 
+**With verification on or off, a provider creates an account only for an email
+address.** A SAML or OIDC sign-in that resolves to a value that is not an
+address (an IdP that sends no email attribute and an opaque persistent or
+transient NameID, or a mapping that names a claim holding a user name) is
+refused with `error=INVALID_EMAIL`, and nothing is created. Map the provider's
+email attribute or claim to the one that carries the address. With verification
+on, such a value is refused `error=EMAIL_DOMAIN_NOT_ALLOWED` by the rule above,
+as before. An account that already exists signs in as before.
+
 **A provider's domain list takes bare host names only.** Registering a provider,
 or editing its domain, with an entry written any other way (a URL, a port, a
 path, a user part) is refused with **400 `VALIDATION_FAILED`** on `domain`,
@@ -392,7 +404,10 @@ way. A provider saved before this rule may still hold such an entry: it is not
 rewritten, and it names no domain. To correct one, send the bare host names as
 `domain` to `POST /api/v1/auth/sso/update-provider` (`https://acme.com` becomes
 `acme.com`; the console has no action that edits a provider's domain), then
-verify the domain again, since writing the list clears the verified flag.
+verify the domain again, since writing the list clears the verified flag. To
+find them, read the server log at boot: each such provider gets one warning
+naming its `provider_id` and the entry. The warning only reads; it changes no
+row.
 
 ### Why an OIDC sign-in was refused
 
@@ -439,11 +454,12 @@ Fill in the IdP details collected by the **Register SAML Provider** action:
 | `entryPoint` | ✅ | The IdP's SAML single sign-on (redirect) URL that receives the `SAMLRequest`. |
 | `cert` | ✅ | The IdP's X.509 signing certificate (PEM body) — used to verify assertion signatures. |
 | `identifierFormat` | — | Requested SAML NameID format (defaults to the IdP's configured format), e.g. `urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress`. |
-| `mapEmail` | — | Assertion attribute the user's email is read from. Defaults to `email`, then the NameID. |
-| `mapFirstName` | — | Assertion attribute the user's first name is read from. Defaults to `givenName`. |
-| `mapLastName` | — | Assertion attribute the user's last name is read from. Defaults to `surname`. |
-| `mapName` | — | Assertion attribute the user's full name is read from when the first and last name are absent. Defaults to `displayName`, then the NameID. |
+| `mapEmail` | — | Assertion attribute the user's email is read from. Left blank: the standard `…/claims/emailaddress` claim when the assertion carries it, else `email`, else the NameID. |
+| `mapFirstName` | — | Assertion attribute the user's first name is read from. Left blank: the standard `…/claims/givenname` claim when present, else `givenName`. |
+| `mapLastName` | — | Assertion attribute the user's last name is read from. Left blank: the standard `…/claims/surname` claim when present, else `surname`. |
+| `mapName` | — | Assertion attribute the user's full name is read from when the first and last name are absent. Left blank: the standard `…/claims/name` claim when present, else `displayName`, else the NameID. |
 | `mapGroups` | — | Assertion attribute that carries the user's groups (see [Grant permission sets from IdP groups](#grant-permission-sets-from-idp-groups)). |
+| `mapAccountKey` | — | Assertion attribute with one stable value per person that the IdP sets and the user cannot edit, used as the account key instead of the NameID (see [Key accounts on a stable attribute](#key-accounts-on-a-stable-attribute)). Left blank: Entra ID's object id claim for an Entra ID provider, else the NameID. |
 
 On success the response returns the two **Service Provider (SP)** URLs you
 configure on the IdP side:
@@ -482,11 +498,80 @@ configure on the IdP side:
 
 ### Map the user's email and name
 
-A SAML sign-in reads the user's email and name from assertion attributes. With
-nothing mapped, the email is the `email` attribute (else the NameID) and the name
-is `givenName` + `surname`, else `displayName`, else the NameID. Okta and Entra ID
-use other attribute names, so their users are named after their NameID until the
-provider maps them:
+A SAML sign-in reads the user's email and name from assertion attributes. For
+each member left unmapped, the sign-in first reads the standard claim Microsoft
+Entra ID and AD FS send by default, when the assertion carries it:
+
+| Member | Standard claim, read first when unmapped |
+| :--- | :--- |
+| Email | `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress` |
+| First name | `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname` |
+| Last name | `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname` |
+| Full name | `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name` |
+
+Without that claim, the email is the `email` attribute (else the NameID) and the
+name is `givenName` + `surname`, else `displayName`, else the NameID. So an Entra
+ID provider with nothing mapped reads the address in the `emailaddress` claim,
+whether the person enters from your sign-in page (an email-format NameID) or from
+the IdP's app portal (Entra's default persistent NameID, an opaque id), so the two
+entries resolve to one address and never make a second account. Which account
+each entry signs in to is decided by the account key, below. When the assertion carries both an `email` attribute and the `emailaddress`
+claim, the claim is read. A member you map is always read as mapped. Two limits:
+
+- The claims are recognised by the attribute names in the assertion as posted.
+  An encrypted assertion's names cannot be read before it is decrypted, so a
+  provider that encrypts assertions reads only what it maps: map its members.
+- The stored mapping does not change: **Show Attribute Mapping** still shows an
+  unmapped member as empty.
+
+#### Key accounts on a stable attribute
+
+A SAML account is keyed on the provider and one value of the person. By default
+that value is the NameID, which is not the same on every entry: Entra ID sends
+the user principal name when the sign-in starts from your sign-in page and an
+opaque id when it starts from its app portal. So a provider can key its accounts
+on a stable attribute instead:
+
+1. the attribute named in **Map: Account key attribute** (`mapAccountKey`) when
+   the provider is registered, for any IdP. It must be one the IdP sets and the
+   user cannot edit, such as Entra ID's object id or Okta's user id: never an
+   attribute a user can change (an email, a display name, a profile field),
+   since whoever holds its value holds the account;
+2. with none named, for an Entra ID provider (its IdP Entity ID is on
+   `sts.windows.net` or `login.microsoftonline.com`), Entra's object id claim
+   `http://schemas.microsoft.com/identity/claims/objectidentifier`, which Entra
+   ID sends by default;
+3. otherwise, the NameID.
+
+For a provider keyed on a stable attribute, **both entries reach one account
+and both sign in**: from your sign-in page and then from the IdP's portal, or
+portal first, the same person ends on the same account. An email change at the
+IdP keeps the account too. When an assertion does not carry the attribute, that
+sign-in is keyed on its NameID, as before.
+
+- The key is the provider's own. A sign-in through another provider never
+  reaches the account by it, and an existing account at the same address (a
+  password account, or another provider's) is still judged by the linking rule
+  ([Linking to an existing account](#linking-to-an-existing-account)).
+- The value is read from the assertion as posted and confirmed against the
+  verified assertion before anything is written; a sign-in whose verified
+  assertion does not carry it is refused with `error=INVALID_REQUEST`. A value
+  written with a comment, CDATA, an entity reference or markup is not read, and
+  the NameID keys that sign-in. An encrypted assertion's value cannot be read
+  before it is decrypted, so a provider that encrypts assertions keys on the
+  NameID.
+- Accounts made before an account key applied keep the NameID they were made
+  with; they are not rewritten, and a sign-in reaches one only through the
+  account's email. The same entry with the same email still signs in to it; the
+  other entry (another NameID) is refused `error=account_not_linked` as before,
+  so the two entries do not reach one such account; and after the email changes
+  at the IdP the old account is not reached (a new user is made where the
+  provider allows JIT, otherwise the sign-in is refused
+  `error=SELF_REGISTRATION_CLOSED`). Name the attribute when the provider is
+  registered.
+
+Okta uses other attribute names, so its users are named after their NameID until
+the provider maps them:
 
 | Member | Default | Okta (common) | Entra ID |
 | :--- | :--- | :--- | :--- |

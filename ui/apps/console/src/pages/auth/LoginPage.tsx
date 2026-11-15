@@ -66,6 +66,7 @@ import {
   AuthFormHeader,
   AuthSpinner,
   AUTH_PRIMARY_BUTTON_CLASS,
+  AUTH_LINK_CLASS,
 } from '@object-ui/auth';
 import type { AuthPublicConfig } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
@@ -83,17 +84,24 @@ import {
   useInvitationArrival,
   hasSignInLanguagePick,
   saveSignInLanguagePick,
+  getRuntimeConfig,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { AuthFooter, readLegalLinks } from './AuthFooter';
 import { followOauthAuthorize } from './followAuthorize';
 import { handoffMarkQuery, useHandoffRedirect } from './handoffRedirect';
-import { ssoCallbackRefusalMessage, ssoCallbackTechnicalDetail } from './ssoCallbackRefusal';
+import {
+  accessDeniedExits,
+  ssoCallbackRefusalMessage,
+  ssoCallbackTechnicalDetail,
+  type AccessDeniedExits,
+} from './ssoCallbackRefusal';
 import { decideDirectSignIn, directSignInStartUrl } from './directSignIn';
 // Was module-private here; lifted to a shared module so `SetupPage` (whose
 // first-run exits went without it) and `RegisterPage` (which had copied it)
 // share ONE implementation — objectui#4181. Behaviour here is unchanged.
 import { withConsoleBase } from '../../utils/consoleBase';
+import { holdLinkRefusalForLanding } from '../../components/LinkRefusalNotice';
 
 /** The auth API base the direct sign-in door lives under (`main.tsx`'s `AUTH_URL`). */
 const AUTH_URL = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
@@ -354,6 +362,13 @@ export function LoginPage() {
       return;
     }
 
+    // Every exit below lands in the console. A signed-in person who came back
+    // from linking another sign-in with a refusal (`?error=`) is never shown
+    // this page's form, so the reason goes with them to where they land
+    // (`../../components/LinkRefusalNotice`); a code without a sentence of its
+    // own is not carried.
+    holdLinkRefusalForLanding(callbackError?.code);
+
     // 3. Auto-select a single org so post-login redirect doesn't bounce
     //    off `RequireOrganization`.
     if (!activeOrganization) {
@@ -390,6 +405,7 @@ export function LoginPage() {
     handoff.target,
     handoff.holdForSignIn,
     signInPickSaved,
+    callbackError,
   ]);
 
   if ((isLoading && !hasBootstrapped) || !signInNeeded || directSignIn === 'start') {
@@ -414,6 +430,16 @@ export function LoginPage() {
   // this visitor's sign-up: lead with creating the owner account.
   const firstOwner = offerSignUp && !invitationRedirect && ownerProbe.noOwner;
   const emailDelivery = authConfig?.features?.emailDelivery;
+  // objectstack#32992 — an `access_denied` return from the control plane's
+  // identity provider: switch account and back to the console, where the page
+  // can name them (`accessDeniedExits`).
+  const refusalExits = callbackError
+    ? accessDeniedExits({
+        code: callbackError.code,
+        cloudManaged: authConfig?.features?.cloudManaged,
+        cloudBase: getRuntimeConfig().cloudUrl ?? '',
+      })
+    : null;
 
   return (
     <AuthLayout formWidth="base">
@@ -424,6 +450,7 @@ export function LoginPage() {
           // behind a toggle the person can open and pass on.
           <div className="flex flex-col gap-1.5" data-testid="sso-callback-refusal">
             <AuthErrorBanner message={ssoCallbackRefusalMessage(t, callbackError.code)} />
+            {refusalExits ? <AccessDeniedActions exits={refusalExits} /> : null}
             <details className="px-1 text-xs text-muted-foreground">
               <summary className="cursor-pointer select-none">
                 {t('auth.login.errors.ssoTechnicalDetails', { defaultValue: 'Technical details' })}
@@ -527,6 +554,42 @@ export function LoginPage() {
         <AuthFooter privacyUrl={legalLinks.privacyUrl} termsUrl={legalLinks.termsUrl} />
       </div>
     </AuthLayout>
+  );
+}
+
+/**
+ * The ways on from an `access_denied` return (objectstack#32992), beside its
+ * sentence: the same two the identity provider's own refusal page offers.
+ * Switch account opens the provider's end-session door in a new tab, because
+ * the provider stays on its own page after it ends the session; this page
+ * stays put, with the sign-in below it, for the account that has access.
+ */
+function AccessDeniedActions({ exits }: { exits: AccessDeniedExits }) {
+  const { t } = useObjectTranslation();
+  const linkClass = `${AUTH_LINK_CLASS} inline-flex min-h-[44px] items-center sm:min-h-0`;
+  return (
+    <div data-testid="sso-access-denied-actions" className="flex flex-col gap-1 px-1 text-sm">
+      <div className="flex flex-wrap gap-x-4">
+        <a
+          data-action="switch-account"
+          href={exits.switchAccountUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={linkClass}
+        >
+          {t('auth.login.errors.ssoSwitchAccount', { defaultValue: 'Switch account' })}
+        </a>
+        <a data-action="back-to-console" href={exits.consoleUrl} className={linkClass}>
+          {t('auth.login.errors.ssoBackToConsole', { defaultValue: 'Back to console' })}
+        </a>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t('auth.login.errors.ssoSwitchAccountHint', {
+          defaultValue:
+            'Switch account opens your sign-in service in a new tab and signs you out there. Then sign in here again with an account that has access.',
+        })}
+      </p>
+    </div>
   );
 }
 

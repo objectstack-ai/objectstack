@@ -127,12 +127,17 @@ const SITES: ReadonlyArray<Site & {
         // [#23233] The body carries the row's package binding (`withRowBinding`); the disposition is unchanged.
         // [#28412] The body is built one line above (`registered`) so a flow row's `package_id` column is
         // recorded on it (`bindStoredRow`) before it registers; the body and the disposition are unchanged.
-        file: 'protocol-registry-hydration.ts', member: 'hydrateOverlayIntoRegistry', args: 'type, registered, \'name\' as any',
+        // [#33127] A row bound to a package, of a type the registry reads by package, registers in that
+        // package's own overlay slot (`storedRowPackage`), never under the bare name: the fifth argument.
+        file: 'protocol-registry-hydration.ts', member: 'hydrateOverlayIntoRegistry',
+        args: 'type, registered, \'name\' as any, undefined, overlaySlot ? { storedRowPackage: rowPackage } : undefined',
         disposition: 'yes, view only: skips a name another package ships',
         // [#23298] The write-through runs wherever the registry takes the kernel's stored rows.
         path: 'the list\'s hydration on an unscoped kernel; the write-through on an unscoped kernel and on an environment kernel that hydrated its own store; the boot\'s loadMetaFromDb on every kernel',
         why: 'a stored row: a view row bound to a package is not registered where another package ships its name, and the '
-            + 'reads answer it from its row; a package-less row, and every other type, register as before (#4624)',
+            + 'reads answer it from its row; a row bound to a package, of a type the registry reads by package, lands in '
+            + 'that package\'s own overlay slot, never the bare name (#33127); a package-less row, and every other type, '
+            + 'register as before (#4624)',
         viewOnlyBy: 'const bound = canonicalType === \'view\' ? boundPackageOf(options.packageId) : undefined;',
     },
     {

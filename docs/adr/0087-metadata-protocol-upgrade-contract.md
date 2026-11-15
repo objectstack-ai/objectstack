@@ -762,11 +762,24 @@ avoid. `registered` must name ids that resolve *and* are new in the diff;
 `unpublished` requires every bumped package to be `private: true`;
 `already-registered` requires the named ids to pre-date the merge base;
 `no-migration-prescription` is refused by a body that carries a migration
-prescription; `runtime-interface-only` is the subject of the rest of this
-addendum; `type-surface-only` — the sixth, added 2026-08-30 — is the subject of
-the addendum after it; and `runtime-export-retired` — the seventh, added 2026-10-12,
-whose whole-package operand `<package>#*` was added 2026-10-27 (#26220) — is the
-subject of the addendum after that. The checks live in
+prescription (**amended 2026-11-12**, #32601, seat decision A, landed as PR #32649,
+`a8c761fb`: it is also refused outright, before its justification or its body is
+read, on a changeset that declares `Metadata-protocol: narrowed`, signal (5) of the
+breaking declaration. A narrowing refuses something an author used to write, and the
+upgrade guide and `objectstack migrate meta`, both generated from the ledger, are
+where an upgrading author learns that before a save door, a publish or a boot
+refuses it; whether the fix is written as an arrow, a table or a sentence does not
+change that. The fix is a `registered` semantic entry, one file under
+`packages/spec/src/migrations/entries/semantic/`, or a category resting on a checked
+fact when one is true: `already-registered`, `unpublished`, `runtime-interface-only`,
+`type-surface-only`, `runtime-export-retired`. If the change refuses nothing an author
+could write, the `Metadata-protocol:` line is what is wrong, not the disposition.
+`added`, `semantic` and `none` keep the exemption, and a changeset already breaking
+at the branch point is inherited and never re-judged); `runtime-interface-only` is
+the subject of the rest of this addendum; `type-surface-only` — the sixth, added
+2026-08-30 — is the subject of the addendum after it; and `runtime-export-retired` —
+the seventh, added 2026-10-12, whose whole-package operand `<package>#*` was added
+2026-10-27 (#26220) — is the subject of the addendum after that. The checks live in
 [`scripts/check-adr-0087-registration.mjs`](../../scripts/check-adr-0087-registration.mjs),
 which is also where each one's measured history is written down.
 
@@ -864,7 +877,7 @@ for a disposition, and every one of the five is closed to it. Measured on the re
 | `registered` | refused — no id is new in the diff, and writing one would put a prescription in the ledger that `objectstack migrate meta`, `spec-changes.json` and the upgrade guide cannot project. False data in the one ledger this whole mechanism keeps true. |
 | `not-required (unpublished)` | refused — `@objectstack/client` publishes to npm. |
 | `not-required (already-registered <id>)` | the gate *admits* it, and that is the problem: it verifies the id RESOLVES and PRE-DATES the base, never that the entry COVERS this change. The only thing closing this door is the author's honesty, which is not a mechanism. |
-| `not-required (no-migration-prescription)` | refused — the body carries a FROM/TO block. |
+| `not-required (no-migration-prescription)` | refused — the body carries a FROM/TO block. (**Amended 2026-11-12**, #32601 / PR #32649: on a changeset declaring `Metadata-protocol: narrowed` it is refused before the body is read; see the vocabulary paragraph of the 2026-08-13 addendum.) |
 | `not-required (runtime-interface-only …)` | refused — it inherits that same refusal. |
 
 So the exit the gate names in its own refusal text — *"use a category that can be

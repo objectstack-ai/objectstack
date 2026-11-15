@@ -1727,6 +1727,9 @@ export class ProtocolSaveFacet {
             // has carried it all along, it just never reached the gate. Null
             // (a bare tenant overlay) narrows nothing.
             packageId: request.packageId ?? null,
+            // [#32656] The locales the door stated for the findings' user
+            // sentences (`advisories[].userMessage`, the 422's `issues[]`).
+            ...(request.userTextLocales !== undefined ? { userTextLocales: request.userTextLocales } : {}),
             // [#20611] The redaction context. The read path withholds a
             // credential from every served definition (a flow's start-node
             // `config.secret`), so a body saved back after a read arrives
@@ -1788,6 +1791,7 @@ export class ProtocolSaveFacet {
                 name: request.name,
                 state: mode === 'draft' ? 'draft' : 'active',
                 body: request.item,
+                ...(request.userTextLocales !== undefined ? { userTextLocales: request.userTextLocales } : {}),
             });
         }
 
