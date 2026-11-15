@@ -24,7 +24,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from './index';
+import { ObjectStackAdapter } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 const RECORDS = [
   { id: '1', stage: 'won', amount: 100 },

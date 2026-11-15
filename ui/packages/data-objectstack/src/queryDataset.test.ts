@@ -21,9 +21,9 @@ import { buildDatasetDrillFilter, type DatasetDrillRange } from '@object-ui/core
 import { DATASET_QUERY_BATCH_MAX_QUERIES } from '@objectstack/spec/api';
 import {
   ObjectStackAdapter,
-  clearSharedDiscoveryCache,
   isAnalyticsNotInstalledError,
 } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 /** A fetch mock that answers discovery + records the dataset-query POST. */
 function makeFetch(datasetResponse: { ok: boolean; status?: number; body: unknown }) {

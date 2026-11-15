@@ -23,7 +23,8 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 // (ui/AGENTS.md, flaky-test discipline). Specifiers identical to the previews'.
 import '@object-ui/plugin-report';
 import '@object-ui/plugin-dashboard';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
+import { ObjectStackAdapter } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../../../data-objectstack/src/sharedDiscovery';
 import { StudioDatasetAuthoringContext } from '../../studio-design/datasetCreate';
 
 const current = vi.hoisted(() => ({ adapter: null as unknown }));
