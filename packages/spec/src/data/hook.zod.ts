@@ -735,6 +735,11 @@ export const HookSchema = lazySchema(() => strictObject(
    * writes run outside the unit, on their own connection. Outside any unit it
    * starts at once, after the write. Nothing waits for it, and its errors
    * never reach the caller.
+   *
+   * That waiting is for a WRITE event's hook (`afterInsert` / `afterUpdate` /
+   * `afterDelete`). A rollback does not undo a read, so an async `afterFind`
+   * hook starts when the read is dispatched, outside the unit, whatever the
+   * unit it was read in does next.
    */
   async: z.boolean().default(false).describe('Run specifically as fire-and-forget'),
 
