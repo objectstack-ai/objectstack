@@ -449,7 +449,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_session: {
     label: "会话",
     pluralLabel: "会话",
-    description: "活跃的用户会话",
+    description: "用户会话",
     fields: {
       user_id: {
         label: "用户"

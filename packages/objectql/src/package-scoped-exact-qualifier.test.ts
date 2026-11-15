@@ -1368,6 +1368,87 @@ describe('[#32849] the bare layered read serves the pair\'s declared override of
 });
 
 /**
+ * [#33817, from #33131 N1] A package X of an App holds the name only through
+ * its own stored row (`package_id` X, hydrated into the bare slot), and that
+ * holding is a bundle ADDITION to a holder D: D ships the name, D is in X's
+ * declared dependency closure and outside X's App (a module of another App),
+ * and X's row carries a member D does not ship. The App's customization pair
+ * stores an undeclared row of another member. The review read (PR #33220, N1)
+ * predicted that X's scoped list leaves the pair row out while X's exact read
+ * admits X and serves it.
+ *
+ * MEASURED on `main` 1e65a389 with this fixture, both registration orders:
+ * they DISAGREE, as predicted. `packageScopedHoldersOf` with no caller drops X
+ * (an addition to D), so the list's `holdsNameForExactRead` is false and X's
+ * list and execution list leave the row out; X's exact read admits X (asked
+ * as the caller it names), the registry binds the row to X
+ * (`overlayRowBinding`), and `?package=X&member=de-DE` serves it. This pin
+ * records the cells as they are today; the route (which side moves) is the
+ * card's open question, so the fix flips the side it decides.
+ */
+describe('[#33817] a package holding the name only through a stored row that is a bundle addition to a closure dependency outside its App: its exact read serves the App pair\'s undeclared row, its scoped list leaves it out (measured, unresolved)', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  /** D's own App: D is a module of another App, so it is outside X's (X then has one App, APP). */
+  const OTHER = 'com.other.base';
+  const D = 'com.other.dee';
+  const PAIR = `${APP}.custom`;
+  const read = (packageId: string, member: string) => protocol.getMetaItem({
+    type: 'email_template', name: 'welcome', packageId, member,
+  } as never) as Promise<{ item?: { label?: string } } | undefined>;
+  const listed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
+    .items?.map((i) => i.label).sort();
+  const forSend = async (packageId: string) => ((await protocol.getMetaItemsForExecution({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
+    .items?.map((i) => i.label).sort();
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(manifest(OTHER), 'code');
+    registry.installPackage({
+      id: D, name: D, version: '1.0.0', type: 'module', namespace: 'dee', dependencies: { [OTHER]: '^1.0.0' },
+    } as never, 'code');
+    registry.installPackage({
+      id: X, name: X, version: '1.0.0', type: 'module', namespace: 'suitex',
+      dependencies: { [APP]: '^1.0.0', [D]: '^1.0.0' },
+    } as never, 'code');
+    registry.installPackage(manifest(PAIR), 'code');
+    registry.registerItem('email_template', {
+      name: 'welcome', label: 'dee en-US', locale: 'en-US', subject: 'dee en-US', bodyHtml: '<p>d</p>',
+    }, 'name' as never, D);
+  });
+
+  it.each([['holding first', true], ['pair row first', false]] as const)('X\'s exact read serves the pair\'s undeclared de-DE row; X\'s list and execution list leave it out (%s)', async (_order, holdingFirst) => {
+    const xFr = { name: 'welcome', label: 'suitex fr-FR', locale: 'fr-FR', subject: 'suitex fr-FR', bodyHtml: '<p>x</p>' };
+    const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
+    const registerHolding = () => {
+      rows.push({ id: 'row_x', type: 'email_template', name: 'welcome', state: 'active', package_id: X, bundle_member: 'fr-FR', metadata: JSON.stringify(xFr) });
+      registry.registerItem('email_template', { ...xFr, _packageId: X, _provenance: 'org' }, 'name' as never);
+    };
+    const registerPairRow = () => {
+      rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+      registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+    };
+    if (holdingFirst) { registerHolding(); registerPairRow(); } else { registerPairRow(); registerHolding(); }
+
+    // The fixture is the card's: X's holding is an addition to D, so the served holders leave X out…
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome'), 'X is an addition to D').not.toContain(X);
+    // …X's own count keeps it (the exact read's admission), and the registry binds the pair's row to X.
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome', X), 'the caller keeps its own holding').toContain(X);
+    expect(registry.overlayRowBinding('email_template', 'welcome', { ...pairDe, _packageId: PAIR })).toBe(X);
+
+    // The two sides disagree today: the exact read serves the row, both lists leave it out.
+    expect(labelOf(await read(X, 'de-DE')), '`?package=X&member=de-DE`').toBe('pair de-DE');
+    expect(await listed(X)).toEqual(['suitex fr-FR']);
+    expect(await forSend(X)).toEqual(['suitex fr-FR']);
+
+    // CONTROL: X's own member is X's, D's list is D's own, and the pair's own address serves its row.
+    expect(labelOf(await read(X, 'fr-FR'))).toBe('suitex fr-FR');
+    expect(await listed(D)).toEqual(['dee en-US']);
+    expect(labelOf(await read(PAIR, 'de-DE'))).toBe('pair de-DE');
+  });
+});
+
+/**
  * [#32183, epic rulings R4-B and R4-B2] A name only a disabled package holds,
  * read at an address that neither holds it nor is a pair of a holder (a
  * sibling module of the App), at a member only the App's customization pair

@@ -322,7 +322,9 @@ import {
 // [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
 import { applySeedBodiesOnHost, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
 // [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
-import { artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf } from './protocol-artifact-lookup.js';
+import {
+    type ArtifactOwnerKey, artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf,
+} from './protocol-artifact-lookup.js';
 // [#25467 cut 16] The stored-overlay row reads: a type's active rows, their parsed entries, the names with a row of their own, and one item's rows.
 import { namesWithOwnStoredRow, readActiveOverlayRows, readItemActiveRows, storedOverlayEntries } from './protocol-stored-overlay-reads.js';
 // [#25467 cut 17] The object-owner verdicts: which contributor kind a stored object row registers as, and handing an adopted object's name to its rebound row.
@@ -7094,14 +7096,22 @@ export class ObjectStackProtocolImplementation implements
      * member whose artifact to answer, as its discriminator value; omitted,
      * the bundle's artifact canonical-first. A registry without the parameter
      * ignores it, so a caller that needs the member checks the answer.
+     *
+     * [ADR-0150 D4, #33456] `owner` — for an `action`, the owner key of the
+     * item the envelope is for: only an artifact bound to that object (or,
+     * `object` undefined, object-less) answers, since an action is keyed
+     * `(package, object, name)`. Naming no package, it is the one package
+     * whose own artifact is bound there, else none. Omitted, by name, as
+     * before.
      */
-    private lookupArtifactItem(type: string, name: string, currentPackageId?: string, member?: string): unknown {
+    private lookupArtifactItem(type: string, name: string, currentPackageId?: string, member?: string,
+        owner?: ArtifactOwnerKey): unknown {
         // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof lookupArtifactItem> = {
             get engine() { return readEngine(); },
         };
-        return lookupArtifactItem.call(host, type, name, currentPackageId, member);
+        return lookupArtifactItem.call(host, type, name, currentPackageId, member, owner);
     }
 
     /**

@@ -97,6 +97,7 @@ import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import {
   BUILTIN_OPERATION_MESSAGES,
   objectFieldLabelKey,
+  objectLabelKey,
   operationMessageTranslationKey,
   renderOperationMessage,
   resolveBundleLocale,
@@ -130,6 +131,7 @@ import {
 } from './unresolved-posture.js';
 import { assertReadableQueryFields } from './predicate-guard.js';
 import { PermissionDeniedError, MaskedValueWriteError } from './errors.js';
+import { masterGateRefusalUserCopyOf, type MasterQuestion } from './security-plugin-cbp-write-gate.js';
 import {
   QUEUE_FIELD,
   CLAIM_REFUSAL,
@@ -274,8 +276,8 @@ function denialLocaleOf(
 /**
  * The catalog keys this middleware renders. The first three are the `message`
  * of the gates #7414 / #7451 localized; the rest are the `userMessage` of the
- * owner-anchor, queue and field-write refusals ({@link withUserMessage}); the
- * last two are the list rules `field_edit_denied`'s `{{fields}}` is spelled by
+ * owner-anchor, queue, field-write and master-detail write refusals
+ * ({@link withUserMessage}); the last two are the list rules `field_edit_denied`'s `{{fields}}` is spelled by
  * ({@link labelList}).
  */
 type UserFacingDenialKey =
@@ -289,6 +291,10 @@ type UserFacingDenialKey =
   | 'record_queue_assign_denied'
   | 'field_edit_denied'
   | 'field_edit_denied_opaque'
+  | 'master_record_edit_denied'
+  | 'master_record_edit_denied_opaque'
+  | 'master_record_read_denied'
+  | 'master_record_read_denied_opaque'
   | 'field_label_quoted'
   | 'field_label_list_separator';
 
@@ -384,6 +390,54 @@ function fieldEditDenialMessage(
     labels.push(label);
   }
   return userFacingDenialMessage(ctx, 'field_edit_denied', locale, { fields: labelList(ctx, labels, locale) });
+}
+
+/**
+ * [ADR-0055 §3] The master-detail write gate's `userMessage`: the user saving a
+ * `controlled_by_parent` record lacks edit (or read) access on its MASTER
+ * record, so the sentence names the master object's LABEL — the deployment's
+ * translation in the language the sentence resolves to, else the declared
+ * label — and sends the user to that record's owner
+ * (`master_record_edit_denied` / `master_record_read_denied`).
+ *
+ * The `_opaque` form names nothing, for two callers: one the gate names no
+ * master to (it cannot read the master reference, `copy.master` absent), and
+ * a master with no label, because an API name never reaches a user (#7414).
+ */
+function masterGateDenialMessage(
+  ctx: PluginContext,
+  ql: IObjectQLEngine,
+  copy: { question: MasterQuestion; master: string | undefined },
+  locales: DenialLocales,
+): string {
+  const named: UserFacingDenialKey = copy.question === 'read' ? 'master_record_read_denied' : 'master_record_edit_denied';
+  const opaque: UserFacingDenialKey =
+    copy.question === 'read' ? 'master_record_read_denied_opaque' : 'master_record_edit_denied_opaque';
+  const master = copy.master;
+  if (master === undefined) return userFacingDenialMessage(ctx, opaque, locales);
+  const translate = denialTranslator(ctx);
+  const loc = denialLocaleOf(named, locales, translate) ?? 'en';
+  let label: string | undefined;
+  if (translate) {
+    const key = objectLabelKey(master);
+    try {
+      const translated = translate(key, loc);
+      if (typeof translated === 'string' && translated.trim().length > 0 && translated !== key) label = translated.trim();
+    } catch {
+      // A misbehaving i18n service must not turn a 403 into a 500.
+    }
+  }
+  if (label === undefined) {
+    let declared: unknown;
+    try {
+      declared = typeof ql?.getSchema === 'function' ? (ql.getSchema(master) as { label?: unknown } | undefined)?.label : undefined;
+    } catch {
+      declared = undefined;
+    }
+    if (typeof declared === 'string' && declared.trim().length > 0) label = declared.trim();
+  }
+  if (label === undefined || label === master) return userFacingDenialMessage(ctx, opaque, [loc]);
+  return userFacingDenialMessage(ctx, named, [loc], { master: label });
 }
 
 /**
@@ -1473,23 +1527,34 @@ export function registerAuthzMiddleware(
       !!opCtx.context?.userId &&
       this.ql
     ) {
-      await this.assertControlledByParentWrite(
-        permissionSets,
-        opCtx.object,
-        opCtx.operation,
-        opCtx,
-        opCtx.context,
-      );
-      // [ADR-0090 D10] The delegator must ALSO have edit access to the master
-      // — a detail write on behalf of a user requires that user's master-edit.
-      if (delegatorSets) {
+      // [ADR-0055 §3] A refusal of the gate's keeps its `code`, status and
+      // `message`, and gains the end user's half ({@link masterGateDenialMessage}):
+      // the console shows a 403's `userMessage` in place of its generic line.
+      try {
         await this.assertControlledByParentWrite(
-          delegatorSets,
+          permissionSets,
           opCtx.object,
           opCtx.operation,
           opCtx,
-          delegatorContext,
+          opCtx.context,
         );
+        // [ADR-0090 D10] The delegator must ALSO have edit access to the master
+        // — a detail write on behalf of a user requires that user's master-edit.
+        if (delegatorSets) {
+          await this.assertControlledByParentWrite(
+            delegatorSets,
+            opCtx.object,
+            opCtx.operation,
+            opCtx,
+            delegatorContext,
+          );
+        }
+      } catch (e) {
+        const copy = masterGateRefusalUserCopyOf(e);
+        if (copy) {
+          withUserMessage(e as PermissionDeniedError, masterGateDenialMessage(ctx, ql, copy, denialLocalesOf(opCtx.context)));
+        }
+        throw e;
       }
     }
 

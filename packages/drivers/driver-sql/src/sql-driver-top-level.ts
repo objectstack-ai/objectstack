@@ -1190,30 +1190,31 @@ function uncompilableAggregateFunctionError(func: string): Error {
 
 /**
  * [#10576] An aggregation entry carries a per-aggregation `filter`
- * (`AggregationNodeSchema.filter`, the contract half of #10413) and this
- * backend compiles no conditional-aggregate expression (SQL `FILTER (WHERE …)`
- * / `CASE WHEN`) for it — so it is refused rather than silently aggregating
- * the UNFILTERED rows, which is exactly the wrong-numbers defect #10413
- * measured ("won deals" counting every row). Same class and envelope as
- * {@link uncompilableAggregateFunctionError}: the query is spelled correctly
- * and the spec declares the key, so this is a capability gap in the backend
- * (NOT_IMPLEMENTED/501), not a mistake in the query (400).
+ * (`AggregationNodeSchema.filter`, the contract half of #10413) whose compiled
+ * predicate this driver could not isolate for a conditional aggregate
+ * (`CASE WHEN … THEN … END` inside the aggregate) — so it is refused rather
+ * than silently aggregating the UNFILTERED rows, which is exactly the
+ * wrong-numbers defect #10413 measured ("won deals" counting every row). Same
+ * class and envelope as {@link uncompilableAggregateFunctionError}: the query
+ * is spelled correctly and the spec declares the key, so this is a capability
+ * gap in the backend (NOT_IMPLEMENTED/501), not a mistake in the query (400).
  *
- * Unreachable through `engine.aggregate`, deliberately: the engine routes any
- * call whose aggregations carry a filter through its in-memory lowering
- * (`applyInMemoryAggregation`), which honours the predicate on every driver.
- * This guard is the direct-caller half of "no silent drop, anywhere" — the
- * refusal names the remedy so a direct caller knows the engine path works.
+ * Since `aggregationFilter` (the `DriverCapabilities` bit) this driver compiles
+ * a measure filter with the SAME where compiler (`applyFilters`) a `where`
+ * goes through, then lifts the predicate out of `select * from t where …`.
+ * This refusal is the guard on that lift: a compiled statement that is not
+ * exactly that prefix plus one predicate, or whose `?` placeholders do not
+ * match its bindings one to one, cannot be embedded safely, and is refused
+ * instead of guessed at. No dialect this package tests reaches it.
  */
 function unsupportedAggregationFilterError(alias: string, backend: string): Error {
   const err = new Error(
-    `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (${backend}). ` +
+    `Per-aggregation \`filter\` on "${alias}" could not be compiled as a conditional aggregate by this backend (${backend}). ` +
     `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
-    `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
-    `for it, so it is refused rather than silently aggregating the UNFILTERED rows, which ` +
-    `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
-    `aggregations in memory for every driver without native support — route the query through the ` +
-    `engine, or drop the \`filter\` key.`,
+    `this backend could not isolate the compiled predicate for a CASE WHEN inside the aggregate, ` +
+    `so it is refused rather than silently aggregating the UNFILTERED rows, which ` +
+    `is why it answers NOT_IMPLEMENTED/501 rather than a 400. Drop the \`filter\` key, or move the ` +
+    `condition into \`where\` when it applies to every measure.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;

@@ -3794,6 +3794,65 @@ function storedRowPackageOf(entry: BundleEntry): string | undefined {
 }
 
 /**
+ * [ADR-0150 D4] The mark that opens and separates a package-less action's
+ * owner-key slot. An action is identified by `(owner, owning object, name)`,
+ * so the platform's action bound to `lead` and the environment's object-less
+ * action of the same name are two items under two keys, never one contested
+ * name. The bare slot `name` holds the package-less action registered last;
+ * each package-less action of another owner key it displaced keeps its own
+ * slot under this mark, one per owner key. Like {@link OVERLAY_SLOT_MARK}, a
+ * control character never occurs in an object or action name, so no reader of
+ * the other key forms mistakes this one for its own: it is never a bare key
+ * and never ends `:name`, so it adds no package holder and is no artifact.
+ */
+const PACKAGELESS_ACTION_SLOT_MARK = '\u0001';
+
+/** [ADR-0150 D4] A package-less action's owner key: its object, or `global` for every object-less spelling. */
+function packagelessActionOwnerKey(action: unknown): string {
+  const owner = standaloneActionOwnerKey(action);
+  return isObjectLessActionKey(owner) ? GLOBAL_ACTION_OBJECT_KEY : owner;
+}
+
+/** `lead` + `approve` → the owner-key slot of the package-less `approve` bound to `lead`. */
+function packagelessActionSlotKey(ownerKey: string, name: string): string {
+  return `${PACKAGELESS_ACTION_SLOT_MARK}${ownerKey}${PACKAGELESS_ACTION_SLOT_MARK}${name}`;
+}
+
+/**
+ * [ADR-0150 D4] The owner-key slots of the package-less action `name`
+ * ({@link packagelessActionSlotKey}), in the store's order: the package-less
+ * actions of the name beside the one in the bare slot, one per owner key.
+ */
+function packagelessActionSlotEntriesOf(collection: Map<string, any>, name: string): BundleEntry[] {
+  const out: BundleEntry[] = [];
+  for (const [key, item] of collection) {
+    if (!isPackagelessActionSlotKey(key)) continue;
+    const sep = key.indexOf(PACKAGELESS_ACTION_SLOT_MARK, 1);
+    if (sep > 0 && key.slice(sep + 1) === name) out.push({ key, item });
+  }
+  return out;
+}
+
+/** Is `key` a package-less action's owner-key slot ({@link packagelessActionSlotKey})? */
+function isPackagelessActionSlotKey(key: string): boolean {
+  return key.startsWith(PACKAGELESS_ACTION_SLOT_MARK);
+}
+
+/**
+ * [ADR-0150 D4] Is a package-less action registration a stored row — the
+ * environment's `sys_metadata` hydration or write-through — rather than code
+ * the host or a plugin registered with no package? A stored row is
+ * tenant-authored (ADR-0010 `_provenance: 'org'`), or wears the envelope of
+ * the package whose action it customizes (`_packageId`, which code registering
+ * with no package never carries).
+ */
+function isStoredActionRow(item: unknown): boolean {
+  if (isTenantAuthored(item)) return true;
+  const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+  return typeof stamped === 'string' && stamped !== '';
+}
+
+/**
  * [#32408, contract review F2, delta review N1] What a door's registration
  * brings to a bundled name: the package and the members it adds to its
  * composite slot.
@@ -6823,7 +6882,9 @@ export class SchemaRegistry {
     for (const [key, action] of collection) {
       if (!action || typeof action !== 'object' || typeof (action as any).name !== 'string') continue;
       const name: string = (action as any).name;
-      if (key !== name && collection.has(name)) continue;
+      // [ADR-0150 D4] A package-less action of another owner key than the
+      // bare slot's is its own item, never shadowed by it.
+      if (key !== name && !isPackagelessActionSlotKey(key) && collection.has(name)) continue;
       if (parseOverlaySlotKey(key) !== undefined ? !servedOverlays.has(key) : overlaysOf.has(key)) continue;
       if (isObjectLessActionKey(standaloneActionOwnerKey(action))) continue;
       // [#28877] …and so is an action that launches into a disabled package.
@@ -8987,6 +9048,12 @@ export class SchemaRegistry {
       }
     }
 
+    // [ADR-0150 D4] A package-less action never erases a package-less action
+    // of another owner key: the one it displaces from the bare slot keeps its
+    // own key's slot ({@link keepPackagelessActionOwnerKeys}).
+    if (type === 'action' && !packageId && rowPackage === undefined) {
+      this.keepPackagelessActionOwnerKeys(collection, bareKey, item);
+    }
     this.noteItem(type, storageKey);
     collection.set(storageKey, item);
     // [#33050] A slot the package's own body registration writes is one its
@@ -9006,6 +9073,68 @@ export class SchemaRegistry {
     // possible.
     if (type === 'flow' && this.hasDisabledPackage()) this.invalidateAll();
     this.log(`[Registry] Registered ${type}: ${storageKey}`);
+  }
+
+  /**
+   * [ADR-0150 D4] Before a package-less action `incoming` takes the bare slot
+   * of `name`, the name's package-less actions it does not replace keep their
+   * own owner keys: the bare slot's present item, when its owner key is
+   * another, moves to that key's own slot ({@link packagelessActionSlotKey}).
+   * So the platform's action bound to `lead` and the environment's object-less
+   * action of the name are both kept, in either registration order, and each
+   * is read on its own key.
+   *
+   * What `incoming` replaces: the item of its own owner key (one key, one
+   * item; the later registration stays, as in the bare slot), and, when it is
+   * a stored row ({@link isStoredActionRow}), the name's stored row on any key
+   * — the environment's store holds one row of a name, so a row saved again
+   * bound to another object is that row, never a second item.
+   */
+  private keepPackagelessActionOwnerKeys(collection: Map<string, any>, name: string, incoming: unknown): void {
+    const ownerKey = packagelessActionOwnerKey(incoming);
+    const replaces = (item: unknown): boolean =>
+      packagelessActionOwnerKey(item) === ownerKey || (isStoredActionRow(incoming) && isStoredActionRow(item));
+    for (const { key, item } of packagelessActionSlotEntriesOf(collection, name)) {
+      if (!replaces(item)) continue;
+      this.noteItem('action', key);
+      collection.delete(key);
+    }
+    const occupant = collection.get(name);
+    if (occupant === undefined || replaces(occupant)) return;
+    const aside = packagelessActionSlotKey(packagelessActionOwnerKey(occupant), name);
+    this.noteItem('action', aside);
+    collection.set(aside, occupant);
+    this.log(`[Registry] Kept package-less action ${name} on ${packagelessActionOwnerKey(occupant)} beside the one on ${ownerKey}`);
+  }
+
+  /**
+   * [ADR-0150 D4] The slot a removal of the package-less action `name`'s own
+   * entry retires ({@link removeRuntimeShadow}, {@link removeOverlayEntry}):
+   * the bare slot, unless another owner key's slot holds the name's one stored
+   * row ({@link isStoredActionRow}, the row the removal heals) while the bare
+   * slot holds code's.
+   */
+  private packagelessActionEntryToRetire(collection: Map<string, any>, name: string): string {
+    const aside = packagelessActionSlotEntriesOf(collection, name);
+    if (aside.length === 0 || isStoredActionRow(collection.get(name))) return name;
+    const rows = aside.filter(({ item }) => isStoredActionRow(item));
+    return rows.length === 1 ? rows[0].key : name;
+  }
+
+  /**
+   * [ADR-0150 D4] Retire one package-less action slot of `name`. When it is
+   * the bare slot, the first other owner key's item takes it, so the bare
+   * slot holds a package-less action of the name whenever one is kept.
+   */
+  private retirePackagelessActionSlot(collection: Map<string, any>, name: string, key: string): void {
+    collection.delete(key);
+    if (key !== name) return;
+    const [next] = packagelessActionSlotEntriesOf(collection, name);
+    if (next === undefined) return;
+    this.noteItem('action', next.key);
+    collection.delete(next.key);
+    this.noteItem('action', name);
+    collection.set(name, next.item);
   }
 
   /**
@@ -9083,7 +9212,10 @@ export class SchemaRegistry {
     }
 
     if (collection.has(name)) {
-      collection.delete(name);
+      // [ADR-0150 D4] …and another owner key's package-less action takes the
+      // bare slot it leaves ({@link retirePackagelessActionSlot}).
+      if (type === 'action') this.retirePackagelessActionSlot(collection, name, name);
+      else collection.delete(name);
       this.log(`[Registry] Unregistered ${type}: ${name}`);
       return;
     }
@@ -9921,6 +10053,23 @@ export class SchemaRegistry {
   }
 
   /**
+   * [ADR-0150 D4] Every environment-scoped `action` item of `name`
+   * ({@link getEnvironmentScopedItem}'s test), one per owner key: the bare
+   * slot's, then each other owner key's package-less action
+   * ({@link packagelessActionSlotKey}). An action is identified by its owner
+   * key too, so a reader of one owner key (`actionOwnerScopedRegistry`) finds
+   * the item on its key, never only the bare slot's of another key.
+   */
+  getEnvironmentScopedActions<T>(name: string): T[] {
+    const collection = this.metadata.get('action');
+    if (!collection) return [];
+    const holders = new Set(this.compositeHoldersOf(collection, name));
+    return this.bareSlotEntriesOf('action', collection, name)
+      .filter(({ item }) => this.overlaySlotBinding('action', item, name, collection, holders) === null)
+      .map(({ item }) => item as T);
+  }
+
+  /**
    * [ADR-0150 D3, #31680 child E8] Does a by-name read of `type` consult
    * `(package, name)` — is it one of `PACKAGE_SCOPED_READ_TYPES`
    * (`package-scoped-read.ts`)? Asked by a reader that picks its path before
@@ -9994,6 +10143,7 @@ export class SchemaRegistry {
       getPackageScopedItem: (type, itemName, packageId, member) =>
         this.isPackageDisabled(packageId) ? undefined : this.getPackageScopedItem(type, itemName, packageId, member),
       getEnvironmentScopedItem: (type, itemName, member) => this.getEnvironmentScopedItem(type, itemName, member),
+      getEnvironmentScopedActions: <T>(itemName: string) => this.getEnvironmentScopedActions<T>(itemName),
     };
     const objectLess = actionOwnerScopedRegistry(live, GLOBAL_ACTION_OBJECT_KEY);
     const packages = objectLess.packageScopedHoldersOf('action', name);
@@ -10028,13 +10178,17 @@ export class SchemaRegistry {
    * The bare-slot entries of `(type, name)`: one, or a bundle's members, canonical first.
    * [#33127, ADR-0150 D4] …then its package overlay slots ({@link overlaySlotKey}): every
    * stored row of the name, each bound to its package, read as the bare slot's entry is.
+   * [ADR-0150 D4] An action's package-less items of the other owner keys
+   * ({@link packagelessActionSlotKey}) follow the bare slot's: each is one
+   * more package-less item of the name, judged as the bare slot's is.
    */
   private bareSlotEntriesOf(type: string, collection: Map<string, any>, name: string): BundleEntry[] {
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     const bare = disc
       ? collectBundle(collection, name, disc).bare
       : collection.has(name) ? [{ key: name, item: collection.get(name) }] : [];
-    return [...bare, ...overlaySlotEntriesOf(collection, name, disc)];
+    const otherOwnerKeys = type === 'action' ? packagelessActionSlotEntriesOf(collection, name) : [];
+    return [...bare, ...otherOwnerKeys, ...overlaySlotEntriesOf(collection, name, disc)];
   }
 
   /**
@@ -10278,7 +10432,10 @@ export class SchemaRegistry {
       if (key !== name && key.endsWith(`:${name}`)) {
         const it = item as any;
         if (it && it._packageId && it._packageId !== 'sys_metadata') {
-          collection.delete(name);
+          // [ADR-0150 D4] …the package-less action's own entry, which may sit
+          // in another owner key's slot ({@link packagelessActionEntryToRetire}).
+          if (type === 'action') this.retirePackagelessActionSlot(collection, name, this.packagelessActionEntryToRetire(collection, name));
+          else collection.delete(name);
           // [#28356] An object may carry the shadow as a bound action; the
           // artifact it uncovers may bind elsewhere ({@link attachBoundActions}).
           if (type === 'action') this.invalidateAll();
@@ -10353,11 +10510,15 @@ export class SchemaRegistry {
     }
 
     if (!collection.has(name)) return false;
-    const plain = collection.get(name) as any;
+    // [ADR-0150 D4] A package-less action's own entry may sit in another
+    // owner key's slot beside the bare one ({@link packagelessActionEntryToRetire}).
+    const key = type === 'action' ? this.packagelessActionEntryToRetire(collection, name) : name;
+    const plain = collection.get(key) as any;
     if (plain && plain._packageId && plain._packageId !== 'sys_metadata' && !isTenantAuthored(plain)) {
       return false;
     }
-    collection.delete(name);
+    if (type === 'action') this.retirePackagelessActionSlot(collection, name, key);
+    else collection.delete(name);
     // [#28356] …and an object may carry the retired entry as a bound action
     // ({@link attachBoundActions}): drop the cached folds, as
     // {@link unregisterItem} does, or a deleted runtime action stays listed.

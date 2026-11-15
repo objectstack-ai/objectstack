@@ -2074,6 +2074,15 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 domainDecidesEveryVerb('GET', `${base}/automation/:ns/:name`);
                 domainDecidesEveryVerb('GET', `${base}/automation/:name/runs`);
                 domainDecidesEveryVerb('GET', `${base}/automation/connectors/credential-refs`);
+                // An address is served exactly as its bare path (ADR-0150 D5),
+                // so the addressed shapes of the bare rows above are declared
+                // too: the addressed `/runs` list, `trigger` and legacy trigger.
+                // Left undeclared, a verb they are not served under was the
+                // transport's `405` (its envelope, `Allow: GET, HEAD`, and that
+                // answer ahead of an anonymous caller's `401`), not the domain's.
+                domainDecidesEveryVerb('GET', `${base}/automation/:ns/:name/runs`);
+                domainDecidesEveryVerb('POST', `${base}/automation/:ns/:name/trigger`);
+                domainDecidesEveryVerb('POST', `${base}/automation/trigger/:ns/:name`);
                 for (const { verb, pattern, readsBody, encode } of addressedAutomationRoutes) {
                     server![verb](`${base}${pattern}`, async (req: any, res: any) => {
                         try {
