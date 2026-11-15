@@ -7,6 +7,8 @@
  * the box (not silently dropped) and a clear inline notice shown — NOT the
  * "Response failed / Retry" banner (which would regenerate the rolled-back turn).
  * A streamed-response error still shows the banner. A clean submit clears the box.
+ * A host that held the message itself names the text to restore (`unsentText`,
+ * objectstack#33562); absent, the composer restores its own last submit.
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -91,6 +93,28 @@ describe('ChatbotEnhanced send-failure UX', () => {
     );
 
     await waitFor(() => expect(textarea.value).toBe('hello there'));
+    expect(screen.getByTestId('chat-send-error')).toHaveTextContent('GENERIC_MSG');
+  });
+
+  it('restores the host-named unsentText instead of its own last-submitted text (objectstack#33562)', async () => {
+    const onSendMessage = vi.fn();
+    const { rerender } = render(
+      <ChatbotEnhanced placeholder="Ask…" onSendMessage={onSendMessage} labels={LABELS} />,
+    );
+    // The host held an earlier message and joined this one to it.
+    const textarea = await submit('second part', onSendMessage);
+
+    rerender(
+      <ChatbotEnhanced
+        placeholder="Ask…"
+        onSendMessage={onSendMessage}
+        labels={LABELS}
+        error={notSentError(503)}
+        unsentText={'first part\n\nsecond part'}
+      />,
+    );
+
+    await waitFor(() => expect(textarea.value).toBe('first part\n\nsecond part'));
     expect(screen.getByTestId('chat-send-error')).toHaveTextContent('GENERIC_MSG');
   });
 

@@ -574,6 +574,14 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   isLoading?: boolean;
   /** Current streaming/API error */
   error?: Error;
+  /**
+   * objectstack#33562 — the text a not-sent `error` gives back to the
+   * composer, when the host, not the composer, holds what was not sent: e.g.
+   * two messages the host joined into one while it waited to send them. Read
+   * once per not-sent error, under the same rules as the composer's own text
+   * (only into an empty box). Absent = the text the composer last submitted.
+   */
+  unsentText?: string;
   showTimestamp?: boolean;
   /**
    * Render avatars beside each message (assistant gets a bot glyph, the user
@@ -2433,6 +2441,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       readOnly = false,
       isLoading = false,
       error,
+      unsentText,
       showTimestamp = false,
       showAvatars = false,
       userAvatarUrl,
@@ -3250,8 +3259,10 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       // because those send a canned message the user never typed — leaving the
       // ref stale refilled the composer with the user's PREVIOUS prompt, a
       // message that had already been delivered and answered, reading as
-      // "resend this" (objectui#7253).
-      const text = lastSubmittedRef.current;
+      // "resend this" (objectui#7253). A host that held the message itself
+      // names the text instead (objectstack#33562): what the composer last
+      // submitted may be only part of what was not sent.
+      const text = unsentText ?? lastSubmittedRef.current;
       if (!text) return;
       const textarea = promptInputWrapRef.current?.querySelector('textarea');
       if (textarea && textarea.value.trim() === '') {
@@ -3260,7 +3271,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         textarea.focus();
       }
-    }, [error]);
+    }, [error, unsentText]);
 
     const handleCopy = React.useCallback((message: ChatbotEnhancedMessage) => {
       void navigator.clipboard?.writeText(message.content);
