@@ -410,17 +410,20 @@ describe('[ADR-0139 D6 as amended] a leaf inside a composed scope is composed to
   });
 });
 
-// ── [#33696 · ruling record 6893097935, option A] step 5: the required master's leaf over an unrestricted master ──
+// ── [#33696 · ruling record 6893666857] step 5: the required master's leaf over an unrestricted master ──
 //
 // A leaf over the REQUIRED master of a `controlled_by_parent` object, the whole
 // comparand of a `$in` on that master field in an AND position, is dropped when
-// the master's answered scope is unrestricted; a scope left empty by the drop is
-// unrestricted itself, so a chain drops whole only when every hop is. Every
-// other position, an optional master, a restricted hop and a leaf on an object
-// that is not `controlled_by_parent` compose exactly as before. The rows this
+// the master's answered scope is unrestricted AND the caller holds View All on
+// that object (the security service's effective object-permission map); a
+// scope left empty by the drop is unrestricted itself, so a chain drops whole
+// only when every hop is. Every other position, an optional master, a
+// restricted hop, a caller without View All, a delegated caller, a service
+// without the map or one whose map throws, and a leaf on an object that is not
+// `controlled_by_parent` compose exactly as before. The rows this
 // serves are measured on the real stack in `@objectstack/plugin-security`
 // (`security-plugin-cbp-read-filter.test.ts`).
-describe('[#33696 ruling 6893097935] the required master\'s leaf over an unrestricted master is dropped, nowhere else', () => {
+describe('[#33696 ruling 6893666857] the required master\'s leaf over an unrestricted master is dropped, nowhere else', () => {
   let engine: ObjectQL;
   let calls: SeenCall[];
 
@@ -439,13 +442,28 @@ describe('[#33696 ruling 6893097935] the required master\'s leaf over an unrestr
   const NOTE = cbp('rid_r4_note', 'opp', 'rid_r4_opp', false);
   /** The leaf the controlled-by-parent derivation answers for a detail over `master` on `fk`. */
   const leafOn = (fk: string, master: string) => ({ [fk]: { $in: ReadableIds.of(master) } });
-  /** The service of the chain: the opportunity's scope is its leaf over the account; the account's is `accountScope`. */
-  const chain = (accountScope: unknown) => makeSecurity({
-    scope: (object) => (object === 'rid_r4_opp' ? leafOn('account', 'rid_r4_account') : object === 'rid_r4_account' ? accountScope : undefined),
-  });
-  const whereOf = async (object: string, where: Record<string, unknown>) => {
+  /** View All on every detail: the effective map a security service answers for an administrator. */
+  const VIEW_ALL_DETAILS = { rid_r4_opp: { viewAllRecords: true }, rid_r4_line: { viewAllRecords: true }, rid_r4_note: { modifyAllRecords: true } };
+  /**
+   * The service of the chain: the opportunity's scope is its leaf over the
+   * account; the account's is `accountScope`; the caller's effective map is
+   * `effective` (`null`: the service has no such member; a function: its answer).
+   */
+  const chain = (accountScope: unknown, effective: unknown = VIEW_ALL_DETAILS) => {
+    const security = makeSecurity({
+      scope: (object) => (object === 'rid_r4_opp' ? leafOn('account', 'rid_r4_account') : object === 'rid_r4_account' ? accountScope : undefined),
+    });
+    if (effective !== null) {
+      security.svc.getEffectiveObjectPermissions = async (context?: unknown) => {
+        security.asked.push('getEffectiveObjectPermissions');
+        return typeof effective === 'function' ? (effective as (c: unknown) => unknown)(context) : effective;
+      };
+    }
+    return security;
+  };
+  const whereOf = async (object: string, where: Record<string, unknown>, context: unknown = { userId: 'u1' }) => {
     calls.length = 0;
-    await engine.find(object, { where, context: { userId: 'u1' } as any });
+    await engine.find(object, { where, context: context as any });
     expect(calls.map((c) => c.verb)).toEqual(['find']);
     return calls[0].ast.where;
   };
@@ -464,8 +482,10 @@ describe('[#33696 ruling 6893097935] the required master\'s leaf over an unrestr
     const { svc, asked } = chain(undefined);
     wire(engine, () => svc);
     expect(await whereOf('rid_r4_line', leafOn('opp', 'rid_r4_opp'))).toEqual({});
+    // The effective map is asked once per read, and only once a leaf could be dropped.
     expect(asked).toEqual([
       'canReadObject:rid_r4_opp', 'getReadFilter:rid_r4_opp', 'canReadObject:rid_r4_account', 'getReadFilter:rid_r4_account',
+      'getEffectiveObjectPermissions',
     ]);
     expect(await whereOf('rid_r4_line', { $and: [{ name: 'x' }, leafOn('opp', 'rid_r4_opp')] })).toEqual({ $and: [{ name: 'x' }] });
     expect(await whereOf('rid_r4_line', { name: 'x', ...leafOn('opp', 'rid_r4_opp') })).toEqual({ name: 'x' });
@@ -493,6 +513,23 @@ describe('[#33696 ruling 6893097935] the required master\'s leaf over an unrestr
     expect(optional.opp.$in.scope).toBeUndefined();
     const plain = await whereOf('rid_child', branch('rid_parent'));
     expect(isComposedReadableIds(plain.record_id.$in)).toBe(true);
+  });
+
+  it('a caller without View All on the detail keeps the whole chain, whatever the hops answer', async () => {
+    for (const [label, effective, context] of [
+      ['no View All on any detail', { rid_r4_line: { allowRead: true }, rid_r4_opp: { allowRead: true } }, { userId: 'u1' }],
+      ['View All on the read detail only', { rid_r4_line: { viewAllRecords: true } }, { userId: 'u1' }],
+      ['a service without the effective map', null, { userId: 'u1' }],
+      ['an effective map that throws', () => { throw new Error('resolution is down'); }, { userId: 'u1' }],
+      ['a delegated caller', VIEW_ALL_DETAILS, { userId: 'agent', onBehalfOf: { userId: 'u1' } }],
+    ] as const) {
+      const { svc } = chain(undefined, effective);
+      wire(engine, () => svc);
+      const outer = (await whereOf('rid_r4_line', leafOn('opp', 'rid_r4_opp'), context)).opp.$in;
+      expect(isComposedReadableIds(outer), label).toBe(true);
+      expect(isComposedReadableIds(outer.scope.account.$in), label).toBe(true);
+      expect(outer.scope.account.$in.scope, label).toBeUndefined();
+    }
   });
 
   it('a master the caller may not read keeps the leaf, answered `$in: []`', async () => {

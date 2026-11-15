@@ -63,15 +63,17 @@
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
  *
- * [#33696 · ruling record 6893097935, option A] `composeReadableIdsChain`
- * reads the registry too (`_registry`, a getter like the others): a leaf over
- * the REQUIRED master of a `controlled_by_parent` object is dropped when its
- * master's scope is unrestricted ({@link unrestrictedRequiredMasterLeavesDropped}).
+ * [#33696 · ruling record 6893666857] `composeReadableIdsChain` reads the
+ * registry too (`_registry`, a getter like the others): a leaf over the
+ * REQUIRED master of a `controlled_by_parent` object is dropped when its
+ * master's scope is unrestricted and the caller holds View All on the object
+ * ({@link unrestrictedRequiredMasterLeavesDropped}).
  */
 
 import { ReadableIds, RLS_DENY_FILTER, controlledByParentMasterOf, filterSubtreeProvenanceOf, isReadableIds, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { ISecurityService } from '@objectstack/spec/contracts';
 import { toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
 import { collectComposableReadableIds, composeReadableIdsLeaves, describeReadableIdsLeaf, readableIdsRefusalError } from './filter-comparand-shape.js';
 import type { ComposableReadableIdsSite } from './filter-comparand-shape.js';
@@ -158,14 +160,17 @@ export const READABLE_IDS_MAX_CHAIN_DEPTH = 8;
  * refuses it in a caller's `where` ({@link collectComposableReadableIds}):
  * the scope is the `where` of a read of its parent and is judged as one.
  *
- * [#33696 · ruling record 6893097935, option A] 5. A leaf over the REQUIRED
- * master of the object whose `where` or scope `node` is — that object
+ * [#33696 · ruling record 6893666857] 5. A leaf over the REQUIRED master of
+ * the object whose `where` or scope `node` is — that object
  * `controlled_by_parent`, the leaf the whole comparand of a `$in` on its
  * required `master_detail` field, in an AND position — is DROPPED, not
  * composed, when the master's answered scope is `undefined` (admitted, no
- * row restriction): `fk IN (SELECT id FROM master)` then removes only the
- * rows whose master is missing or empty, and the ruling has an unrestricted
- * reader see those. A scope that is left with no condition once its own leaves
+ * row restriction) AND the caller holds View All on that object
+ * ({@link readerViewsAllOf}): `fk IN (SELECT id FROM master)` then removes
+ * only the rows whose master is missing or empty, and the ruling has that
+ * reader see those, as #30905 ruling A has a View All holder see the
+ * null-master rows of an optional master. Every other reader, a delegated
+ * one included, keeps the chain. A scope that is left with no condition once its own leaves
  * are dropped is itself `undefined`, so a chain drops whole only when every
  * hop is unrestricted; a restricted hop keeps its leaf and every leaf below
  * it. An optional master, a leaf in an `$or`/`$not`, and every other
@@ -224,19 +229,55 @@ export async function composeReadableIdsChain<N>(
     // [#33696] Every condition of the scope was a dropped leaf: unrestricted.
     chain.answers.set(parent, { scope: isEmptyCondition(composed) ? undefined : composed });
   }
-  // [#33696] Step 5: the required master's leaf over an unrestricted master.
+  // [#33696] Step 5: the required master's leaf over an unrestricted master,
+  // for a reader who holds View All on the object this node scopes.
   const scoped = ancestors.length === 0 ? object : ancestors[ancestors.length - 1]!;
-  const pruned = unrestrictedRequiredMasterLeavesDropped(
-    node,
-    requiredControlledByParentMasterOf(this._registry.getObject(scoped)),
-    (leaf) => chain.answers.get(leaf.object)?.scope === undefined && chain.answers.get(leaf.object) != null,
-  );
+  const master = requiredControlledByParentMasterOf(this._registry.getObject(scoped));
+  const vacuous = (leaf: ReadableIds): boolean => {
+    const answer = chain.answers.get(leaf.object);
+    return leaf.object === master?.master && answer != null && answer.scope === undefined;
+  };
+  const pruned = master && sites.some((site) => vacuous(site.leaf)) && await readerViewsAllOf(chain, scoped)
+    ? unrestrictedRequiredMasterLeavesDropped(node, master, vacuous)
+    : node;
   // A parent with no answer (`null`, or never asked: not registered) is
   // `$in: []`.
   return composeReadableIdsLeaves(pruned, (leaf) => {
     const answer = chain.answers.get(leaf.object);
     return answer ? ReadableIds.compose(leaf, answer.scope) : [];
   });
+}
+
+/**
+ * [#33696 · ruling record 6893666857] The effective object-permission map of
+ * the read's caller, asked of the security service once per read
+ * (`ISecurityService.getEffectiveObjectPermissions`, the map
+ * `/auth/me/permissions` serves, folded through the same super-user predicate
+ * as the plugin's View All bypass). `null` — and so no leaf dropped — for a
+ * delegated (on-behalf-of) caller, a service without the member, and a
+ * resolution that threw: each keeps the chain, the answer every reader had
+ * before, so a failure here costs the subquery and never a row.
+ */
+const EFFECTIVE_PERMISSIONS = new WeakMap<ReadableIdsChain, Promise<Readonly<Record<string, unknown>> | null>>();
+
+/** Does the read's caller hold View All (`viewAllRecords`, or `modifyAllRecords`) on `object`? */
+async function readerViewsAllOf(chain: ReadableIdsChain, object: string): Promise<boolean> {
+  let pending = EFFECTIVE_PERMISSIONS.get(chain);
+  if (pending === undefined) {
+    const svc = chain.security.kind === 'usable'
+      ? (chain.security.svc as Partial<Pick<ISecurityService, 'getEffectiveObjectPermissions'>>)
+      : undefined;
+    const delegated = (chain.context as { onBehalfOf?: { userId?: unknown } } | undefined)?.onBehalfOf?.userId != null;
+    pending = svc && !delegated && typeof svc.getEffectiveObjectPermissions === 'function'
+      ? Promise.resolve()
+        .then(() => svc.getEffectiveObjectPermissions!(chain.context as never))
+        // Fails toward the chain: the read keeps its subquery, never a row.
+        .catch(() => null)
+      : Promise.resolve(null);
+    EFFECTIVE_PERMISSIONS.set(chain, pending);
+  }
+  const entry = (await pending)?.[object] as { viewAllRecords?: unknown; modifyAllRecords?: unknown } | undefined;
+  return entry?.viewAllRecords === true || entry?.modifyAllRecords === true;
 }
 
 /** A plain object with no key: a condition that matches every row. */
@@ -263,7 +304,7 @@ function requiredControlledByParentMasterOf(schema: unknown): { field: string; m
 }
 
 /**
- * [#33696 · ruling record 6893097935, option A] `node` — the `where` or
+ * [#33696 · ruling record 6893666857] `node` — the `where` or
  * scope of a `controlled_by_parent` object — with every leaf over its REQUIRED
  * master removed whose master `unrestricted` answers as unrestricted. Only a
  * leaf that is the whole comparand of `{ [master.field]: { $in: leaf } }` is

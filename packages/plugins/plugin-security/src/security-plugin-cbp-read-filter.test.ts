@@ -1,30 +1,34 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#33696 · ruling record 6893097935, option A] The controlled-by-parent read
-// leaf over a REQUIRED master, for a reader whose every hop of the chain is
-// unrestricted, is dropped by the engine's composition: the read carries no
-// parent-chain subquery, and that reader also sees the orphan detail rows (a
-// master that no longer exists, or a required master left empty) inside its own
-// tenant wall. A reader with any restricted hop keeps the whole chain; an
-// OPTIONAL master keeps its `$or` leaf whoever reads.
+// [#33696 · ruling record 6893666857] The controlled-by-parent read leaf over a
+// REQUIRED master is dropped by the engine's composition for a reader who holds
+// View All on the detail AND whose every master hop answers an unrestricted
+// scope: the read carries no parent-chain subquery, and that reader also sees
+// the orphan detail rows (a master that no longer exists, or a required master
+// left empty) inside its own tenant wall, as View All on the detail reads an
+// optional master's null-master rows (#30905 ruling A). Every other reader keeps
+// the chain unchanged: a restricted master hop, View All on the detail alone, a
+// plain member over an unrestricted master. An OPTIONAL master keeps its `$or`
+// leaf whoever reads.
 //
 // The leaf this module writes (`computeControlledByParentFilter`) is unchanged:
-// the drop is the engine's (`composeReadableIdsChain`, step 5), because only
-// the engine holds the per-hop answer — the master's scope after `canReadObject`
-// and `getReadFilter` — and the ruling keys the drop on that answer, never on
-// View All on the detail (`hasSuperuserReadBypass`, which does not open the
+// the drop is the engine's (`composeReadableIdsChain`, step 5), because only the
+// engine holds the per-hop answer — the master's scope after `canReadObject` and
+// `getReadFilter` — and the ruling keys the drop on that answer, never on View
+// All on the detail alone (`hasSuperuserReadBypass`, which does not open the
 // master arm).
 //
 // The real stack: `ObjectQL` over better-sqlite3, the real `SecurityPlugin`
-// and the real `SharingService` with its middleware, tenant-walled objects in
-// two organizations. The orphans are written the two ways measured on the
-// card: a system-context insert naming a master that does not exist (the
-// reference check's documented `isSystem` residual), and a row stored through
-// the driver with its required master empty (what a promotion of an optional
-// master to required leaves behind).
+// and the real `SharingService` with its middleware, objects in two
+// organizations. The orphans are written the two ways measured on the card: a
+// system-context insert naming a master that does not exist (the reference
+// check's documented `isSystem` residual), and a row stored through the driver
+// with its required master empty (what a promotion of an optional master to
+// required leaves behind).
 //
 //   r4_account (private) <-account- r4_opp (cbp, required) <-opp- r4_line (cbp, required)
 //                                   r4_opp <-opp?- r4_note (cbp, OPTIONAL master)
+//   r4_pub_account (public_read_write) <-account- r4_pub_line (cbp, required)
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
@@ -47,14 +51,18 @@ const ACCOUNT = 'r4_account';
 const OPP = 'r4_opp';
 const LINE = 'r4_line';
 const NOTE = 'r4_note';
-const OBJECTS = [ACCOUNT, OPP, LINE, NOTE];
+const PUB_ACCOUNT = 'r4_pub_account';
+const PUB_LINE = 'r4_pub_line';
+const OBJECTS = [ACCOUNT, OPP, LINE, NOTE, PUB_ACCOUNT, PUB_LINE];
 
 /** View All on every object of the chain: every hop answers an unrestricted scope. */
 const ADMIN_USER = 'usr_r4_admin';
 /** Read on every object, View All on none: the private account hop is owner-scoped. */
 const MEMBER_USER = 'usr_r4_member';
-/** View All on the DETAILS only: the account hop stays owner-scoped. */
+/** View All on every DETAIL, not on the account: a restricted master hop. */
 const DETAIL_ADMIN_USER = 'usr_r4_detail_admin';
+/** View All on the read detail (`r4_line`) only. */
+const LINE_ADMIN_USER = 'usr_r4_line_admin';
 
 const CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
 const ADMIN_SET = PermissionSetSchema.parse({
@@ -69,8 +77,12 @@ const DETAIL_ADMIN_SET = PermissionSetSchema.parse({
   name: 'r4_detail_admin',
   objects: Object.fromEntries(OBJECTS.map((o) => [o, o === ACCOUNT ? CRUD : { ...CRUD, viewAllRecords: true }])),
 });
+const LINE_ADMIN_SET = PermissionSetSchema.parse({
+  name: 'r4_line_admin',
+  objects: Object.fromEntries(OBJECTS.map((o) => [o, o === LINE ? { ...CRUD, viewAllRecords: true } : CRUD])),
+});
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
-const SETS = [MEMBER_DEFAULT, ADMIN_SET, MEMBER_SET, DETAIL_ADMIN_SET];
+const SETS = [MEMBER_DEFAULT, ADMIN_SET, MEMBER_SET, DETAIL_ADMIN_SET, LINE_ADMIN_SET];
 
 /** The execution context `resolveAuthzContext` hands the middleware for an organization member holding `set`. */
 const memberOf = (userId: string, set: string, tenantId: string) => ({
@@ -84,6 +96,7 @@ const ADMIN = memberOf(ADMIN_USER, ADMIN_SET.name, ORG_A);
 const ADMIN_B = memberOf(ADMIN_USER, ADMIN_SET.name, ORG_B);
 const MEMBER = memberOf(MEMBER_USER, MEMBER_SET.name, ORG_A);
 const DETAIL_ADMIN = memberOf(DETAIL_ADMIN_USER, DETAIL_ADMIN_SET.name, ORG_A);
+const LINE_ADMIN = memberOf(LINE_ADMIN_USER, LINE_ADMIN_SET.name, ORG_A);
 
 const detail = (name: string, fk: string, reference: string, required: boolean) => ({
   name,
@@ -145,12 +158,22 @@ async function boot(posture: Posture) {
       detail(OPP, 'account', ACCOUNT, true),
       detail(LINE, 'opp', OPP, true),
       detail(NOTE, 'opp', OPP, false),
+      {
+        name: PUB_ACCOUNT,
+        label: 'Public account',
+        sharingModel: 'public_read_write',
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          name: { name: 'name', type: 'text' },
+        },
+      },
+      detail(PUB_LINE, 'account', PUB_ACCOUNT, true),
     ],
   } as never);
   await engine.syncSchemas();
 
   await engine.insert('sys_organization', [ORG_A, ORG_B].map((id) => ({ id, name: id, slug: id })), SYS);
-  await engine.insert('sys_user', [ADMIN_USER, MEMBER_USER, DETAIL_ADMIN_USER].map((id) => ({
+  await engine.insert('sys_user', [ADMIN_USER, MEMBER_USER, DETAIL_ADMIN_USER, LINE_ADMIN_USER].map((id) => ({
     id, name: id, email: `${id}@r4.test`,
   })), SYS);
 
@@ -219,14 +242,21 @@ async function boot(posture: Posture) {
     { id: 'note_a_ghost', name: 'ghost', opp: 'opp_ghost' },
   ], inOrg(ORG_A));
 
+  // An unrestricted master for a plain member: the public account.
+  await engine.insert(PUB_ACCOUNT, [{ id: 'pub_a1', name: 'p1' }], inOrg(ORG_A));
+  await engine.insert(PUB_LINE, [
+    { id: 'pub_line_1', name: 'p1', account: 'pub_a1' },
+    { id: 'pub_line_ghost', name: 'ghost', account: 'pub_ghost' },
+  ], inOrg(ORG_A));
+
   const origFind = (driver as any).find.bind(driver);
   (driver as any).find = async (object: string, query: any, opts: any) => {
-    if (object === LINE || object === NOTE) received.push({ object, where: query?.where });
+    if (object === LINE || object === NOTE || object === PUB_LINE) received.push({ object, where: query?.where });
     return origFind(object, query, opts);
   };
   const origCount = (driver as any).count.bind(driver);
   (driver as any).count = async (object: string, query: any, opts: any) => {
-    if (object === LINE || object === NOTE) received.push({ object, where: query?.where });
+    if (object === LINE || object === NOTE || object === PUB_LINE) received.push({ object, where: query?.where });
     return origCount(object, query, opts);
   };
   (driver as any).knex.on('query', (q: { sql?: unknown }) => {
@@ -265,12 +295,12 @@ const CHAINED_LINES = ['line_a1', 'line_a2', 'line_b1'];
 /** The orphans: a missing master, a master whose own master is missing, an empty required master. */
 const ORPHAN_LINES = ['line_a_ghost', 'line_a_ghost_account', 'line_a_null', 'line_b_ghost'];
 
-describe('[#33696 ruling 6893097935] the parent chain of a REQUIRED master over unrestricted hops — the real engine', () => {
+describe('[#33696 ruling 6893666857] the parent chain of a REQUIRED master over unrestricted hops — the real engine', () => {
   let rig: Awaited<ReturnType<typeof boot>>;
   beforeAll(async () => { rig = await boot('single'); });
   afterAll(async () => { try { await rig?.engine.destroy(); } catch { /* noop */ } });
 
-  it('(4) an unrestricted reader runs no parent-chain subquery and sees every stored row, orphans included', async () => {
+  it('(a) View All on the detail over unrestricted hops runs no parent-chain subquery and sees every stored row, orphans included', async () => {
     const r = await rig.read(LINE, ADMIN);
     expect(leavesIn(r.where)).toEqual([]);
     expect(r.sql.filter((q) => /`r4_line`/.test(q))).toHaveLength(1);
@@ -303,19 +333,33 @@ describe('[#33696 ruling 6893097935] the parent chain of a REQUIRED master over 
     expect(r.ids).toEqual([...CHAINED_LINES, ...ORPHAN_LINES].sort());
   });
 
-  it('(3) a reader with a restricted hop keeps the whole chain and never sees an orphan', async () => {
-    // Read on every object, the private account owner-scoped: the member owns acc_a1 only.
-    const member = await rig.read(LINE, MEMBER);
-    expect(member.sql.some((q) => SUBQUERY.test(q))).toBe(true);
-    expect(member.ids).toEqual(['line_a1']);
-    // View All on every DETAIL, not on the account: View All on the detail does not open the master arm.
-    const detailAdmin = await rig.read(LINE, DETAIL_ADMIN);
-    expect(detailAdmin.sql.some((q) => SUBQUERY.test(q))).toBe(true);
-    expect(detailAdmin.ids).toEqual(['line_a2']);
-    for (const orphan of ORPHAN_LINES) {
-      expect(member.ids).not.toContain(orphan);
-      expect(detailAdmin.ids).not.toContain(orphan);
-    }
+  it('(b) a reader with a restricted master hop keeps the whole chain and never sees an orphan', async () => {
+    // View All on every detail; the private account stays owner-scoped (the detail admin owns acc_a2).
+    const r = await rig.read(LINE, DETAIL_ADMIN);
+    expect(r.sql.some((q) => SUBQUERY.test(q))).toBe(true);
+    expect(r.ids).toEqual(['line_a2']);
+    for (const orphan of ORPHAN_LINES) expect(r.ids).not.toContain(orphan);
+  });
+
+  it('(c) a reader with View All on the detail only keeps the whole chain and never sees an orphan', async () => {
+    const r = await rig.read(LINE, LINE_ADMIN);
+    expect(r.sql.some((q) => SUBQUERY.test(q))).toBe(true);
+    expect(r.ids).toEqual([]);
+    for (const orphan of ORPHAN_LINES) expect(r.ids).not.toContain(orphan);
+  });
+
+  it('(d) a plain member keeps the chain, over a restricted master and over an unrestricted one alike', async () => {
+    const restricted = await rig.read(LINE, MEMBER);
+    expect(restricted.sql.some((q) => SUBQUERY.test(q))).toBe(true);
+    expect(restricted.ids).toEqual(['line_a1']);
+    // The public account answers an unrestricted scope for the member: the chain stays, and so does its answer.
+    const unrestricted = await rig.read(PUB_LINE, MEMBER);
+    expect(unrestricted.sql.some((q) => SUBQUERY.test(q))).toBe(true);
+    expect(unrestricted.ids).toEqual(['pub_line_1']);
+    // The control: View All on the detail over the same unrestricted master drops it.
+    const admin = await rig.read(PUB_LINE, ADMIN);
+    expect(admin.sql.some((q) => SUBQUERY.test(q))).toBe(false);
+    expect(admin.ids).toEqual(['pub_line_1', 'pub_line_ghost']);
   });
 
   it('(2) an OPTIONAL master keeps its leaf for an unrestricted reader: a note naming a missing master stays hidden', async () => {
@@ -326,12 +370,12 @@ describe('[#33696 ruling 6893097935] the parent chain of a REQUIRED master over 
   });
 });
 
-describe('[#33696 ruling 6893097935] the tenant wall still bounds the detail rows — walled posture', () => {
+describe('[#33696 ruling 6893666857] the tenant wall still bounds the detail rows — walled posture', () => {
   let rig: Awaited<ReturnType<typeof boot>>;
   beforeAll(async () => { rig = await boot('isolated'); });
   afterAll(async () => { try { await rig?.engine.destroy(); } catch { /* noop */ } });
 
-  it('(5) an unrestricted reader of one organization never sees a row, orphan or not, of another', async () => {
+  it('(e) a View All reader of one organization never sees a row, orphan or not, of another', async () => {
     const a = await rig.read(LINE, ADMIN);
     const b = await rig.read(LINE, ADMIN_B);
     for (const id of ['line_b1', 'line_b_ghost']) expect(a.ids).not.toContain(id);
