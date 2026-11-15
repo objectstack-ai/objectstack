@@ -5085,6 +5085,7 @@ const ru = {
     disableAppNamed: "Отключить {{name}}",
     setDefault: "Установить по умолчанию",
     setDefaultNamed: "Установить {{name}} по умолчанию",
+    alreadyDefault: "Уже приложение по умолчанию",
     deleteApp: "Удалить приложение",
     deleteAppNamed: "Удалить {{name}}",
     confirmDelete: "Нажмите ещё раз для подтверждения удаления",

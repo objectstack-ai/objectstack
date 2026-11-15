@@ -1173,6 +1173,12 @@ async function respondToConnectorConnectionDoor(
     body: unknown,
     context: HttpProtocolContext,
     query: unknown,
+    /**
+     * [ADR-0150 D9, #31699] The package the namespace address admitted the
+     * door to, for a connector name two packages hold: that package's
+     * instance is the one connected, read or revoked.
+     */
+    connectorPackage?: string,
 ): Promise<HttpDispatcherResult> {
     const isCallback = parts[1] === CONNECTOR_OAUTH_SEGMENT && parts[2] === CONNECTOR_OAUTH_CALLBACK_SEGMENT;
     const queryRefusal = unknownQueryParamRefusalMessage(
@@ -1219,7 +1225,12 @@ async function respondToConnectorConnectionDoor(
             if ('refusal' in read) return { handled: true, response: deps.error(read.refusal, 400, { code: 'VALIDATION_ERROR' }) };
             client = read.client;
         }
-        const answer = await call.call(svc, { connector, context: executionContext, ...(client ? { client } : {}) });
+        const answer = await call.call(svc, {
+            connector,
+            ...(connectorPackage !== undefined ? { package: connectorPackage } : {}),
+            context: executionContext,
+            ...(client ? { client } : {}),
+        });
         return { handled: true, response: deps.success(answer) };
     } catch (err) {
         const refusal = connectorCredentialRefusal(deps, err);
@@ -3846,11 +3857,18 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // the run carries its slot key, so it is no guess at a name. A run of
     // another flow, or one whose key no one holder's slot is filed under,
     // keeps the `409`.
+    //
+    // [ADR-0150 D9, #31699] A connector name two packages hold, addressed by
+    // the namespace of one of them: the connection door connects, reads and
+    // revokes that holder's instance (`ConnectorConnectionRequest.package`).
+    let connectorPackage: string | undefined;
     {
         const admission = address.qualifier && address.item
             ? admitAutomationAddress(addressRegistry, address.qualifier, address.item)
             : bareByNameRefusal(addressRegistry, parts, m);
-        if (admission?.status === 'slot') {
+        if (admission?.status === 'slot' && address.item?.type === 'connector' && bareByNameItem(parts, m)?.type === 'connector') {
+            connectorPackage = admission.packageId;
+        } else if (admission?.status === 'slot') {
             const slotted = bareByNameItem(parts, m)?.type === 'flow' && address.item
                 ? flowSlotView(automationService, admission.packageId, address.item.name)
                 : undefined;
@@ -4060,7 +4078,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // ADR-0143 D5 — the connector connection door, ahead of `/:name` for the
     // reason `/connectors` is.
     if (isConnectorConnectionDoor(parts, m)) {
-        return respondToConnectorConnectionDoor(deps, automationService, parts, m, body, context, query);
+        return respondToConnectorConnectionDoor(deps, automationService, parts, m, body, context, query, connectorPackage);
     }
 
     if (parts[0] === 'connectors' && parts.length === 1 && m === 'GET') {
