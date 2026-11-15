@@ -523,92 +523,6 @@ describe('query_dataset', () => {
     }
   });
 
-  // [ADR-0149] The dataset is the one declared definition: `query_dataset`
-  // answers only the members it declares. A raw field (`amount`), the
-  // service's ad-hoc `count`, a suffix spelling (`amount_sum`) or an
-  // undeclared dimension used to reach `service.queryDataset`, which minted an
-  // aggregate for it, and the answer's provenance then cited that aggregate as
-  // a governed metric. The tool refuses it before anything is read, on both
-  // faces, naming the members this caller may use, so the model picks one or
-  // falls back to the object query tools.
-  describe('refuses a member the dataset does not declare', () => {
-    it.each([
-      ['a raw field as a measure', { measures: ['amount'] }, 'amount', 'measures'],
-      ['the ad-hoc count', { measures: ['count'] }, 'count', 'measures'],
-      ['a suffix spelling', { measures: ['amount_sum'] }, 'amount_sum', 'measures'],
-      ['a dataset-qualified spelling of a declared measure', { measures: ['pipeline.revenue'] }, 'pipeline.revenue', 'measures'],
-      ['an undeclared measure beside a declared one', { measures: ['revenue', 'amount'] }, 'amount', 'measures'],
-      ['a raw field as a dimension', { measures: ['revenue'], dimensions: ['amount'] }, 'amount', 'dimensions'],
-      [
-        'a raw field as a time dimension',
-        { measures: ['revenue'], timeDimensions: [{ dimension: 'closed_on', granularity: 'month' }] },
-        'closed_on',
-        'timeDimensions',
-      ],
-    ])('%s: 400 INVALID_FIELD naming the member and the declared ones, on both faces, reading nothing', async (_case, selection, member, param) => {
-      const { service, reads } = await bootWired();
-      const spy = vi.spyOn(service, 'queryDataset');
-      const tools = service.datasetTools({ loadDatasets: loadSaved });
-      const input = { datasetName: 'pipeline', selection };
-      const direct = await tools.queryDataset(input, ADMIN).catch((e) => e);
-      const chat = await tools.execute({ toolName: 'query_dataset', input }, ADMIN).catch((e) => e);
-      for (const e of [direct, chat]) {
-        expect(e).toBeInstanceOf(Error);
-        expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, member, param, cube: 'pipeline' });
-        // The declared members the caller may use are named, so the model can pick one.
-        for (const declared of ['revenue', 'margin_total', 'deal_count', 'margin_rate', 'stage', 'region']) {
-          expect(messageOf(e)).toContain(declared);
-        }
-      }
-      expect(spy).not.toHaveBeenCalled();
-      expect(reads).toEqual([]);
-    });
-
-    it('names only the members THIS caller may use: never a withheld one, never one over an internal field', async () => {
-      const { service } = await bootWired();
-      const e = await service
-        .datasetTools({ loadDatasets: loadSaved })
-        .queryDataset({ datasetName: 'pipeline', selection: { measures: ['amount'] } }, ME)
-        .catch((err) => err);
-      expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'amount' });
-      expect(messageOf(e)).toContain('revenue');
-      expect(messageOf(e)).not.toContain('margin_total');
-      expect(messageOf(e)).not.toContain('secret');
-    });
-
-    it('a dataset that is missing or hidden is still NOT_FOUND first, whatever the members', async () => {
-      const { service } = await bootWired();
-      const tools = service.datasetTools({ loadDatasets: loadSaved });
-      for (const datasetName of ['nope', 'locked_ds']) {
-        await expect(
-          tools.queryDataset({ datasetName, selection: { measures: ['amount'] } }, ME),
-        ).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
-      }
-    });
-
-    it('CONTROL: every declared measure (a derived one included) and dimension is served', async () => {
-      const { service } = await bootWired([{ stage: 'won', revenue: 100 }]);
-      const spy = vi.spyOn(service, 'queryDataset');
-      const tools = service.datasetTools({ loadDatasets: loadSaved });
-      const out = await tools.queryDataset(
-        { datasetName: 'pipeline', selection: { measures: ['revenue', 'deal_count', 'margin_rate'], dimensions: ['stage', 'region'] } },
-        ADMIN,
-      );
-      expect(spy).toHaveBeenCalledTimes(1);
-      expect(out.provenance.measures.map((m) => m.name)).toEqual(['revenue', 'deal_count', 'margin_rate']);
-    });
-
-    it('CONTROL: a time dimension the dataset declares reaches the service', async () => {
-      const { service } = await bootWired();
-      const spy = vi.spyOn(service, 'queryDataset');
-      await service
-        .datasetTools({ loadDatasets: loadSaved })
-        .queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'], timeDimensions: [{ dimension: 'stage' }] } }, ADMIN)
-        .catch(() => undefined);
-      expect(spy).toHaveBeenCalledTimes(1);
-    });
-  });
-
   it('dispatches by tool name through execute, and refuses an unknown one', async () => {
     const { service } = await bootWired();
     const tools = service.datasetTools({ loadDatasets: loadSaved });
@@ -618,6 +532,92 @@ describe('query_dataset', () => {
       code: 'NOT_FOUND',
       status: 404,
     });
+  });
+});
+
+// [ADR-0149] The dataset is the one declared definition: `query_dataset`
+// answers only the members it declares. A raw field (`amount`), the
+// service's ad-hoc `count`, a suffix spelling (`amount_sum`) or an
+// undeclared dimension used to reach `service.queryDataset`, which minted an
+// aggregate for it, and the answer's provenance then cited that aggregate as
+// a governed metric. The tool refuses it before anything is read, on both
+// faces, naming the members this caller may use, so the model picks one or
+// falls back to the object query tools.
+describe('query_dataset refuses a member the dataset does not declare', () => {
+  it.each([
+    ['a raw field as a measure', { measures: ['amount'] }, 'amount', 'measures'],
+    ['the ad-hoc count', { measures: ['count'] }, 'count', 'measures'],
+    ['a suffix spelling', { measures: ['amount_sum'] }, 'amount_sum', 'measures'],
+    ['a dataset-qualified spelling of a declared measure', { measures: ['pipeline.revenue'] }, 'pipeline.revenue', 'measures'],
+    ['an undeclared measure beside a declared one', { measures: ['revenue', 'amount'] }, 'amount', 'measures'],
+    ['a raw field as a dimension', { measures: ['revenue'], dimensions: ['amount'] }, 'amount', 'dimensions'],
+    [
+      'a raw field as a time dimension',
+      { measures: ['revenue'], timeDimensions: [{ dimension: 'closed_on', granularity: 'month' }] },
+      'closed_on',
+      'timeDimensions',
+    ],
+  ])('%s: 400 INVALID_FIELD naming the member and the declared ones, on both faces, reading nothing', async (_case, selection, member, param) => {
+    const { service, reads } = await bootWired();
+    const spy = vi.spyOn(service, 'queryDataset');
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    const input = { datasetName: 'pipeline', selection };
+    const direct = await tools.queryDataset(input, ADMIN).catch((e) => e);
+    const chat = await tools.execute({ toolName: 'query_dataset', input }, ADMIN).catch((e) => e);
+    for (const e of [direct, chat]) {
+      expect(e).toBeInstanceOf(Error);
+      expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, member, param, cube: 'pipeline' });
+      // The declared members the caller may use are named, so the model can pick one.
+      for (const declared of ['revenue', 'margin_total', 'deal_count', 'margin_rate', 'stage', 'region']) {
+        expect(messageOf(e)).toContain(declared);
+      }
+    }
+    expect(spy).not.toHaveBeenCalled();
+    expect(reads).toEqual([]);
+  });
+
+  it('names only the members THIS caller may use: never a withheld one, never one over an internal field', async () => {
+    const { service } = await bootWired();
+    const e = await service
+      .datasetTools({ loadDatasets: loadSaved })
+      .queryDataset({ datasetName: 'pipeline', selection: { measures: ['amount'] } }, ME)
+      .catch((err) => err);
+    expect(e).toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'amount' });
+    expect(messageOf(e)).toContain('revenue');
+    expect(messageOf(e)).not.toContain('margin_total');
+    expect(messageOf(e)).not.toContain('secret');
+  });
+
+  it('a dataset that is missing or hidden is still NOT_FOUND first, whatever the members', async () => {
+    const { service } = await bootWired();
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    for (const datasetName of ['nope', 'locked_ds']) {
+      await expect(
+        tools.queryDataset({ datasetName, selection: { measures: ['amount'] } }, ME),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    }
+  });
+
+  it('CONTROL: every declared measure (a derived one included) and dimension is served', async () => {
+    const { service } = await bootWired([{ stage: 'won', revenue: 100 }]);
+    const spy = vi.spyOn(service, 'queryDataset');
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    const out = await tools.queryDataset(
+      { datasetName: 'pipeline', selection: { measures: ['revenue', 'deal_count', 'margin_rate'], dimensions: ['stage', 'region'] } },
+      ADMIN,
+    );
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(out.provenance.measures.map((m) => m.name)).toEqual(['revenue', 'deal_count', 'margin_rate']);
+  });
+
+  it('CONTROL: a time dimension the dataset declares reaches the service', async () => {
+    const { service } = await bootWired();
+    const spy = vi.spyOn(service, 'queryDataset');
+    await service
+      .datasetTools({ loadDatasets: loadSaved })
+      .queryDataset({ datasetName: 'pipeline', selection: { measures: ['revenue'], timeDimensions: [{ dimension: 'stage' }] } }, ADMIN)
+      .catch(() => undefined);
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });
 
