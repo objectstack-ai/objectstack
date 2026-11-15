@@ -326,6 +326,47 @@ own field metadata:
 - **lookup / master\_detail / user** — the display text resolves to a record **id**.
   This is what a `lookup` transform is relying on when it copies its cell through.
 
+### A lookup cell is resolved within the row's own master
+
+The display text is matched against the target's id, its title field and its other
+identifying fields, as the caller who runs the import: a record that caller cannot read
+never matches. A name that matches no record fails the row with `reference_not_found`;
+a name that matches more than one fails it with `reference_ambiguous`, and nothing is
+linked.
+
+A detail record's name is often unique only inside its master: two contracts can each
+carry an "Advance 30%" billing milestone. When the same row also names the master, the
+cell is resolved **within that master's records**:
+
+- the lookup's target has a `master_detail` field, and exactly one other single-value
+  reference column of the row points at that master object and is filled in; or
+- the lookup field declares `dependsOn`, and the row fills in the sibling field it
+  names. The string form compares the target field of the same name; `{ field, param }`
+  compares the target field `param`. This is the filter the record form's picker applies.
+
+The `master_detail` rule has no counterpart in the picker, which narrows by `dependsOn`
+and `lookupFilters`, never by an inferred master: for a lookup without `dependsOn`, the
+import is stricter than the form.
+
+Inside that scope a tie is `reference_ambiguous` and a name that only another master
+carries is `reference_not_found`; it never resolves to another master's record. A row
+that leaves the master blank is resolved across the whole target as before. When two
+columns of the row point at the master object (a bill-to and a ship-to account), neither
+is taken as the master; declare `dependsOn` on the lookup to say which one is. A master
+cell that fails its own lookup scopes nothing, and the row already fails on that cell.
+
+The scope is part of the importing caller's own filter. A caller who cannot read the
+target's master field, or the target field a `dependsOn` entry names as `param`, has the
+scoped lookup refused, and the cell fails with `reference_not_found`, even for a detail
+that caller can read and whose name is unique. Without the master (or the `dependsOn`
+sibling) in the row, the same cell resolves.
+
+A pasted id is scoped too, so a row that means another master's detail cannot be linked
+in one import. Correct the master cell; or, when the cross-master link is intended, leave
+the master column out of the import and set it in a second update. For the
+field-permission case, grant the caller read access to that field, or leave the master
+column out in the same way.
+
 A field the object does not know is left untouched. A cell that cannot be coerced fails
 its own row with the offending column named.
 
