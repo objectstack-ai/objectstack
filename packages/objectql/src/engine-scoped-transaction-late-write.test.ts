@@ -621,7 +621,7 @@ describe('#33760 — an async after-hook fired inside a unit runs on its commit,
     await engine.insert('rec', { name: 'r0' }, { context: { isSystem: true } });
     bind(false, { read: true });
     await engine.transaction(async (trx: any) => {
-      await engine.find('rec', {}, { context: { ...trx, isSystem: true } } as any);
+      await engine.find('rec', {}, { context: { ...trx, isSystem: true } });
       events.push(await startedInUnit(runOf('read')));
     });
     await runOf('read');
@@ -636,7 +636,7 @@ describe('#33760 — an async after-hook fired inside a unit runs on its commit,
     await engine.insert('rec', { name: 'r0' }, { context: { isSystem: true } });
     bind(false, { read: true });
     await expect(engine.transaction(async (trx: any) => {
-      await engine.find('rec', {}, { context: { ...trx, isSystem: true } } as any);
+      await engine.find('rec', {}, { context: { ...trx, isSystem: true } });
       events.push(await startedInUnit(runOf('read')));
       throw new Error('the caller rolls back');
     })).rejects.toThrow('the caller rolls back');
