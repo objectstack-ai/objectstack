@@ -32,7 +32,7 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { executeEndpointTarget, type EndpointExecutionContext } from './endpoint-executor.js';
 import { endpointPackageOf, flowHolderForCaller, flowServiceForCaller, flowSlotView, flowWalkReads } from './flow-slot-view.js';
 import { SchemaRegistry, type PackageScopedRegistry } from '@objectstack/objectql';
-import { admitAutomationAddress, bareNameRefusal } from './domains/automation-address.js';
+import { admitAutomationAddress, bareNameAdmission, bareNameRefusal } from './domains/automation-address.js';
 
 const CRM = 'com.crm.pkg';
 const HR = 'com.hr.pkg';
@@ -418,22 +418,19 @@ describe('a start\'s record-read walk reads each callee from the calling flow\'s
 });
 
 /**
- * [#32183, ADR-0150 D3; epic ruling R4-G] The flow doors #31696 opened read
- * every holder of a flow name, a disabled package's included, so a disable
- * moves none of their answers: each answers as `main` does, where the
- * registry's holder read did not yet leave a disabled package out.
- *
- * Read only through the served holders, a disable would move them. With CRM
- * disabled, HR's own flow action would reach the bare service (the bare read
- * no longer refuses), whose bare entries still refuse the name two engine
- * slots hold; a package whose closure holds both would run HR's flow. Both
- * moves wait for #32670, the served judgment at the send and run doors.
+ * [ADR-0150 D3, #33386; seat ruling 6884403301] The flow doors #31696 opened
+ * judge the SERVED holders of a name two packages hold: a disabled package
+ * holds no name. Its slot stays armed and keyed in the engine (amendment 7),
+ * so a disable never re-points a slot; it only moves which slot a door
+ * reaches. Replaces the R4-G parity pin (`main` held these doors over every
+ * holder, a disabled package's included).
  *
  * Over a real `SchemaRegistry` (its `disablePackage`, its served filter) and
- * an engine double holding one slot per holder, as the engine holds them after
- * a runtime disable. Pinned as parity: for every non-empty set of disabled
- * holders, in both registration orders, every door answers what it answers
- * with nothing disabled. The CONTROLs say what that answer is.
+ * an engine double holding one slot per holder whose BARE entries judge the
+ * served holders, as the engine's do after this change (service-automation
+ * `engine.ts` `resolveFlowKey`, pinned there): one served holder runs that
+ * slot, two refuse naming them, none is no flow. Every row of the PR's
+ * Clause-② table for these doors is asserted per registration order.
  */
 
 /** Depends on both holders. */
@@ -465,13 +462,25 @@ function registryOf(order: readonly string[], disabled: readonly string[]): Sche
     return registry;
 }
 
-/** One slot per holder, the bare entries refusing the shared name, as the engine's do. */
-function engineWithBothSlots() {
-    const refusal = () => Object.assign(new Error(`Flow '${FLOW}' is held by several packages`), { code: 'RESOURCE_CONFLICT', status: 409 });
+/** One slot per holder; the bare entries judge the served holders, as the engine's do. */
+function engineWithBothSlots(registry: SchemaRegistry) {
+    const served = () => registry.packageScopedHoldersOf('flow', FLOW, null);
+    const refusal = (holders: string[]) => Object.assign(new Error(`Flow '${FLOW}' is held by ${holders.join(' and ')}`), {
+        code: 'RESOURCE_CONFLICT', status: 409, refusal: { candidates: holders.map((packageId) => ({ kind: 'package', packageId })) },
+    });
+    const bareSlot = (name: string): string | null => {
+        if (name !== FLOW) return null;
+        const holders = served();
+        if (holders.length > 1) throw refusal(holders);
+        return holders[0] ?? null;
+    };
     return {
         handlerReady: true,
-        getFlow: vi.fn(async (name: string) => { if (name === FLOW) throw refusal(); return null; }),
-        execute: vi.fn(async (name: string) => { if (name === FLOW) throw refusal(); return { success: true }; }),
+        getFlow: vi.fn(async (name: string) => { const pkg = bareSlot(name); return pkg ? { name, label: `${pkg} flow` } : null; }),
+        execute: vi.fn(async (name: string) => {
+            const pkg = bareSlot(name);
+            return pkg ? { success: true, output: { ran: pkg } } : { success: false, error: `Flow '${name}' not found` };
+        }),
         flowSlotKey: vi.fn((pkg: string | null, name: string) => (name === FLOW && pkg !== null && HOLDERS.includes(pkg) ? `${pkg}/${FLOW}` : undefined)),
         getFlowSlot: vi.fn((pkg: string | null, name: string) => (name === FLOW && pkg !== null && HOLDERS.includes(pkg) ? { name, label: `${pkg} flow` } : null)),
         executeSlot: vi.fn(async (pkg: string | null) => ({ success: true, output: { ran: pkg } })),
@@ -482,35 +491,38 @@ function engineWithBothSlots() {
 /** What a thrown refusal names, or its message. */
 const refusalOf = (err: any) => ['refused', err?.refusal?.candidates?.map((c: any) => c.packageId ?? c.kind) ?? String(err?.message)];
 
+/** A run's answer: the slot it ran, or no flow. */
+const ranOf = (result: any) => (result?.success ? ['ran', result.output.ran] : ['no flow']);
+
 /** Every door's answer, per caller and per namespace. */
 async function answersOf(registry: SchemaRegistry) {
     const out: Record<string, unknown> = {};
     for (const caller of CALLERS) {
-        const engine = engineWithBothSlots();
+        const engine = engineWithBothSlots(registry);
         try {
             const service = flowServiceForCaller(engine, registry, FLOW, caller);
-            await service.execute(FLOW);
-            out[`action ${caller}`] = ['ran', engine.executeSlot.mock.calls.map((c) => c[0])];
+            out[`action ${caller}`] = ranOf(await service.execute(FLOW));
         } catch (err) {
             out[`action ${caller}`] = refusalOf(err);
         }
         out[`holder ${caller}`] = flowHolderForCaller(registry, FLOW, caller);
-        const walk = flowWalkReads(engineWithBothSlots(), async () => registry);
+        const walk = flowWalkReads(engineWithBothSlots(registry), async () => registry);
         try {
             const callee = await walk.callee(FLOW, caller ?? null);
-            out[`callee ${caller}`] = ['read', callee.packageId, (callee.flow as { label?: string } | null)?.label];
+            out[`callee ${caller}`] = callee.flow === null ? ['no flow'] : ['read', callee.packageId, (callee.flow as { label?: string } | null)?.label];
         } catch (err) {
             out[`callee ${caller}`] = refusalOf(err);
         }
     }
-    out.root = await flowWalkReads(engineWithBothSlots(), async () => registry).rootPackage(FLOW);
+    out.root = await flowWalkReads(engineWithBothSlots(registry), async () => registry).rootPackage(FLOW);
     out.endpoint = endpointPackageOf(registry, API);
-    out.bare = bareNameRefusal(registry, 'flow', FLOW)?.candidates.map((c: any) => c.packageId ?? c.kind);
+    out.durable = bareNameRefusal(registry, 'flow', FLOW)?.candidates.map((c: any) => c.packageId ?? c.kind);
     const addressOf = (admitted: ReturnType<typeof admitAutomationAddress>) => {
         if (admitted === undefined) return 'bare path';
         if ('packageId' in admitted) return ['slot', admitted.packageId];
         return [admitted.status, 'refusal' in admitted ? admitted.refusal.candidates.map((c: any) => c.packageId ?? c.kind) : undefined];
     };
+    out.bare = addressOf(bareNameAdmission(registry, 'flow', FLOW));
     for (const namespace of NAMESPACES) {
         out[`address ${namespace}`] = addressOf(admitAutomationAddress(registry, { kind: 'namespace', namespace }, { type: 'flow', name: FLOW }));
     }
@@ -519,27 +531,101 @@ async function answersOf(registry: SchemaRegistry) {
 }
 
 const ORDERS = [HOLDERS, [...HOLDERS].reverse()];
-const DISABLED_SETS = [[CRM], [HR], [CRM, HR]];
 
-describe('the #31696 flow doors read every holder: a disable moves no answer (ADR-0150 D3, R4-G, #32183)', () => {
-    it.each(ORDERS.flatMap((order) => DISABLED_SETS.map((disabled) => [order.join(' then '), disabled.join(' and '), order, disabled] as const)))(
-        'registered %s, %s disabled: every door answers as with nothing disabled',
-        async (_o, _d, order, disabled) => {
-            expect(await answersOf(registryOf(order, disabled))).toEqual(await answersOf(registryOf(order, [])));
-        },
-    );
+/** The answers with `off` disabled and `on` the one served holder. */
+function oneServed(off: string, on: string, order: readonly string[]) {
+    return {
+        // the bare caller and the caller whose closure holds both: the served holder's slot (amendments 1, 5)
+        'action undefined': ['ran', on],
+        [`action ${BOTH}`]: ['ran', on],
+        // caller-first (amendment 4): the disabled holder's own action gets no flow, never the closure holder's
+        [`action ${off}`]: ['no flow'],
+        [`action ${on}`]: ['ran', on],
+        // reached only through the disabled holder, or reaching neither: refused naming the served holder only (amendment 6)
+        [`action ${OPS}`]: off === CRM ? ['refused', [on]] : ['ran', CRM],
+        [`action ${NONE}`]: ['refused', [on]],
+        'holder undefined': on,
+        [`holder ${BOTH}`]: on,
+        [`holder ${off}`]: undefined,
+        [`holder ${on}`]: on,
+        [`holder ${OPS}`]: off === CRM ? undefined : CRM,
+        [`holder ${NONE}`]: undefined,
+        // the walk reads the slot the run executes (amendment 8)
+        'callee undefined': ['read', on, `${on} flow`],
+        [`callee ${BOTH}`]: ['read', on, `${on} flow`],
+        [`callee ${off}`]: ['no flow'],
+        [`callee ${on}`]: ['read', on, `${on} flow`],
+        [`callee ${OPS}`]: off === CRM ? ['refused', [on]] : ['read', CRM, `${CRM} flow`],
+        [`callee ${NONE}`]: ['refused', [on]],
+        root: on,
+        // durable coordinates stay judged over every holder (amendment 7)
+        endpoint: undefined,
+        durable: [...order],
+        bare: ['slot', on],
+        // an address naming the disabled holder is never another package's flow (amendment 2)
+        [`address ${off === CRM ? 'crm' : 'hr'}`]: [409, [on]],
+        [`address ${on === CRM ? 'crm' : 'hr'}`]: ['slot', on],
+        'address ops': [409, [on]],
+        'address none': [409, [on]],
+        'address _env': [409, [on]],
+    };
+}
 
-    it.each(ORDERS.map((order) => [order.join(' then '), order] as const))('CONTROL — registered %s, nothing disabled: what `main` answers', async (_o, order) => {
-        const answers = await answersOf(registryOf(order, []));
-        expect(answers[`action ${HR}`]).toEqual(['ran', [HR]]);
-        expect(answers[`action ${OPS}`]).toEqual(['ran', [CRM]]);
-        expect(answers[`action ${BOTH}`]).toEqual(['refused', [...order]]);
-        expect(answers['action undefined']).toEqual(['refused', `Flow '${FLOW}' is held by several packages`]);
-        expect(answers[`callee ${HR}`]).toEqual(['read', HR, `${HR} flow`]);
-        expect(answers[`holder ${BOTH}`]).toBeUndefined();
-        expect(answers.bare).toEqual([...order]);
-        expect(answers.endpoint).toBeUndefined();
-        expect(answers['address crm']).toEqual(['slot', CRM]);
-        expect(answers['address hr']).toEqual(['slot', HR]);
+describe('the #31696 flow doors judge the served holders (ADR-0150 D3, #33386)', () => {
+    describe.each(ORDERS.map((order) => [order.join(' then '), order] as const))('registered %s', (_o, order) => {
+        it('CONTROL — nothing disabled: what `main` answers', async () => {
+            const answers = await answersOf(registryOf(order, []));
+            expect(answers[`action ${HR}`]).toEqual(['ran', HR]);
+            expect(answers[`action ${OPS}`]).toEqual(['ran', CRM]);
+            expect(answers[`action ${BOTH}`]).toEqual(['refused', [...order]]);
+            expect(answers['action undefined']).toEqual(['refused', [...order]]);
+            expect(answers[`action ${NONE}`]).toEqual(['refused', [...order]]);
+            expect(answers[`callee ${HR}`]).toEqual(['read', HR, `${HR} flow`]);
+            expect(answers['callee undefined']).toEqual(['refused', [...order]]);
+            expect(answers[`holder ${BOTH}`]).toBeUndefined();
+            expect(answers.root).toBeNull();
+            expect(answers.durable).toEqual([...order]);
+            expect(answers.bare).toEqual([409, [...order]]);
+            expect(answers.endpoint).toBeUndefined();
+            expect(answers['address crm']).toEqual(['slot', CRM]);
+            expect(answers['address hr']).toEqual(['slot', HR]);
+            expect(answers['address ops']).toEqual([409, [...order]]);
+            expect(answers['address _env']).toEqual([409, [...order]]);
+        });
+
+        it.each([[CRM, HR], [HR, CRM]])('%s disabled: every door answers the one served holder\'s slot, or no flow, or a refusal naming it', async (off, on) => {
+            expect(await answersOf(registryOf(order, [off]))).toEqual(oneServed(off, on, order));
+        });
+
+        it('both disabled: no door reaches a flow; the durable coordinates still name both', async () => {
+            const answers = await answersOf(registryOf(order, [CRM, HR]));
+            for (const caller of CALLERS) {
+                expect(answers[`action ${caller}`], `action ${caller}`).toEqual(['no flow']);
+                expect(answers[`holder ${caller}`], `holder ${caller}`).toBeUndefined();
+                expect(answers[`callee ${caller}`], `callee ${caller}`).toEqual(['no flow']);
+            }
+            expect(answers.root).toBeNull();
+            expect(answers.durable).toEqual([...order]);
+            expect(answers.bare).toBe('bare path');
+            for (const namespace of NAMESPACES) expect(answers[`address ${namespace}`], namespace).toEqual([404, undefined]);
+            expect(answers['address _env']).toBe('bare path');
+        });
+
+        it('CONTROL — one holder, disabled: judged as `main` judges it (not a name two packages hold)', async () => {
+            const registry = registryOf([CRM], [CRM]);
+            const engine = engineWithBothSlots(registry);
+            expect(flowServiceForCaller(engine, registry, FLOW, CRM)).toBe(engine);
+            expect(bareNameAdmission(registry, 'flow', FLOW)).toBeUndefined();
+            expect(addressOrNone(admitAutomationAddress(registry, { kind: 'namespace', namespace: 'crm' }, { type: 'flow', name: FLOW }))).toBe(404);
+        });
+
+        it('CONTROL — no holder: no admission, no flow', async () => {
+            const registry = new SchemaRegistry();
+            registry.logLevel = 'silent';
+            expect(bareNameAdmission(registry, 'flow', FLOW)).toBeUndefined();
+            expect(flowHolderForCaller(registry, FLOW, undefined)).toBeUndefined();
+        });
     });
 });
+
+const addressOrNone = (admitted: ReturnType<typeof admitAutomationAddress>) => (admitted && 'status' in admitted ? admitted.status : admitted);
