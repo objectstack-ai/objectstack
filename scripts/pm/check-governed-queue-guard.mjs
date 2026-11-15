@@ -5759,7 +5759,7 @@ export async function selfTest() {
     if (args[0] === 'merge-base') return `mb-${args[2]}\n`;
     if (args[0] === 'check-attr') return spec.attrs;
     if (args[0] === 'rev-parse') return `${REF_OLD}\n`;
-    const [, , , a, b] = args; // diff -z --name-only A B
+    const [a, b] = args.slice(-2); // diff -z --name-only --no-renames A B: the two revs are the TAIL
     return a === REF_OLD && b === REF_HEAD ? spec.moved : (spec.own?.[b] ?? '');
   };
   const qRegen = { moved: 'packages/spec/api-surface/ui.txt\0', attrs: 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0' };

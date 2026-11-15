@@ -6911,6 +6911,7 @@ async function selfTest() {
       execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest], {
         cwd,
         encoding: 'utf8',
+        env: gitFreeEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     const seed = join(fxRoot, 'seed');
@@ -6923,7 +6924,7 @@ async function selfTest() {
       execFileSync(
         'git',
         ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', msg],
-        { cwd: seed, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_COMMITTER_DATE: when, GIT_AUTHOR_DATE: when } },
+        { cwd: seed, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...gitFreeEnv(), GIT_COMMITTER_DATE: when, GIT_AUTHOR_DATE: when } },
       );
     backdated('chore: forty days ago', new Date(Date.now() - 40 * 86_400_000).toISOString());
     backdated('chore: thirty-five days ago', new Date(Date.now() - 35 * 86_400_000).toISOString());
@@ -8193,7 +8194,7 @@ async function selfTest() {
   try {
     const g2 = (cwd, ...rest) =>
       execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
-        { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        { cwd, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     const repo = join(derFx, 'repo');
     g2(derFx, 'init', '-q', repo);
     // The fixture is a checkout OF a governed repository: `--branch` / `--test`
@@ -8467,7 +8468,7 @@ async function selfTest() {
   try {
     const g3 = (cwd, ...rest) =>
       execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
-        { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        { cwd, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     const repo = join(sizeFx, 'repo');
     g3(sizeFx, 'init', '-q', repo);
     g3(repo, 'remote', 'add', 'origin', 'https://github.com/objectstack-ai/objectstack.git'); // the checkout's repository (ruling B2)
@@ -8648,14 +8649,14 @@ async function selfTest() {
   try {
     const og = (cwd, ...rest) =>
       execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
-        { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        { cwd, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     const seed = join(overFx, 'seed');
     og(overFx, 'init', '-q', seed);
     for (const [msg, ago] of [['chore: forty days ago', 40], ['chore: thirty-five days ago', 35]]) {
       const when = new Date(Date.now() - ago * 86_400_000).toISOString();
       execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', msg], {
         cwd: seed, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, GIT_COMMITTER_DATE: when, GIT_AUTHOR_DATE: when },
+        env: { ...gitFreeEnv(), GIT_COMMITTER_DATE: when, GIT_AUTHOR_DATE: when },
       });
     }
     const lines = (n) => `${Array.from({ length: n }, (_, i) => `line ${i}`).join('\n')}\n`;
@@ -8738,7 +8739,7 @@ async function selfTest() {
   try {
     const rg = (cwd, ...rest) =>
       execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
-        { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        { cwd, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     const repo = join(renFx, 'repo');
     rg(renFx, 'init', '-q', repo);
     rg(repo, 'config', 'diff.renames', 'false'); // a config that turns rename detection off must not reach the size read
@@ -8915,6 +8916,7 @@ async function selfTest() {
       execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest], {
         cwd,
         encoding: 'utf8',
+        env: gitFreeEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     const bannerSeed = join(bannerFx, 'seed');
@@ -8926,7 +8928,7 @@ async function selfTest() {
       const when = new Date(Date.now() - ago * 86_400_000).toISOString();
       execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', msg], {
         cwd: bannerSeed, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, GIT_COMMITTER_DATE: when, GIT_AUTHOR_DATE: when },
+        env: { ...gitFreeEnv(), GIT_COMMITTER_DATE: when, GIT_AUTHOR_DATE: when },
       });
     }
     mkdirSync(join(bannerSeed, 'docs', 'adr'), { recursive: true });
@@ -9076,8 +9078,8 @@ async function selfTest() {
     // A checkout whose origin IS objectstack, so the bare number's repository is
     // fixed by the fixture rather than by whatever clone runs this.
     const argvRoot = join(argvFx, 'objectstack');
-    execFileSync('git', ['init', '-q', argvRoot], { stdio: 'ignore' });
-    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/objectstack-ai/objectstack.git'], { cwd: argvRoot, stdio: 'ignore' });
+    execFileSync('git', ['init', '-q', argvRoot], { env: gitFreeEnv(), stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/objectstack-ai/objectstack.git'], { cwd: argvRoot, env: gitFreeEnv(), stdio: 'ignore' });
     const runArgv = (argv, env = {}) => new Promise((done) => {
       apiReads.length = 0;
       const child = spawn(process.execPath, [scriptPath, ...argv, '--root', argvRoot], {
