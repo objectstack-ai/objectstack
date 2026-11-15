@@ -2445,7 +2445,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "steps[2] and acceptance[3] name the door where the os lint arm is reachable, `defineStack(…, { strict: false })` (stale spec, card #33842, QA run #33829 acceptance[3]). Rev 3 planted the omitted `required` inside the default strict `defineStack`, whose parse has already defaulted it to false (ruling A of #30905) before `os lint` loads the stack, so the rule cannot see it there: QA reproduced `os lint` exit 0 with no finding twice. Driven live at base 895783a1 in a scratch copy of examples/app-todo with the CLI from the tree: default strict `defineStack` gives `os lint --json` exit 0 (passed, 0 errors, no relationship/master-detail-required) and `os validate --json` / `os build` exit 0; `{ strict: false }` gives `os lint --json` exit 1 with relationship/master-detail-required at objects[2].fields.hdr.required (plus security-controlled-by-parent-no-relation at objects[2].sharingModel) and `os validate --json` / `os build` exit 0; a raw-object default export gives `os lint` exit 1 with the same rule but `os validate` exit 1 and `os build` exit 2 (the export was not built by `defineStack`), so it cannot carry the clause. The other clauses and the os validate / os build half are unchanged",
-          "ref": "#PENDING-33842"
+          "ref": "#33929"
         }
       ]
     },
