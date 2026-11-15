@@ -268,7 +268,8 @@ text. `forbids` declares what the text asks for, so the grader reads it with cod
   persona leak check grades the figures where a persona may not read them.
 
 A card that declares no `forbids`, a seed that refused the cell's row, or a half in which no
-turn read the cell leaves the check **not measured**, never a pass.
+turn read the cell leaves the check **not measured**, never a pass. So does a grading failure,
+which never marks the Run half as errored: its questions and operations keep their own grades.
 
 ## The library
 
