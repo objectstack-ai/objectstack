@@ -30,7 +30,8 @@
  *
  * ## The five disjunctions — the rule text's, nothing narrower
  *
- * Excluded from every disjunction first: `tracking`, `status:parked`, every `pm:seat` post, `qa-run` records.
+ * Excluded from every disjunction first: `tracking`, `status:parked`, every `pm:seat` post, `qa-run` and `eval-run`
+ * records.
  *
  *   ① bare — no `pm:*` label, no `needs-user-decision`, no `domain:*` (other labels, `finding` among them, do not
  *      make a card "touched": ① is NOT "no labels");
@@ -87,7 +88,7 @@ export const TRIAGE_RULE_PHRASES = Object.freeze([
   '③ `domain:*` 无 pm-state',
   '④ `pm:queue`+`domain:*` 无 `priority:*`',
   '②③④ 只取 `updated_at` 早于 ~2min',
-  '排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录',
+  '排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 与 `eval-run` 记录',
   '析取 ⑤:窗内新建且 `pm:queue`/`priority:*` 与建卡同分钟',
   '不等 ⇒ 报 `sweep INCOMPLETE`',
 ]);
@@ -97,7 +98,7 @@ export const MULTI_LANE_REPOS = Object.freeze(['objectstack-ai/objectstack']);
 export const MULTI_LANE_RULE_PATH = '.claude/skills/pm-dispatch/references/cross-repo-coordination.md';
 export const MULTI_LANE_RULE = '多车道仓 `objectstack`';
 
-export const EXCLUDED_LABELS = Object.freeze(['tracking', 'status:parked', 'pm:seat', 'qa-run']);
+export const EXCLUDED_LABELS = Object.freeze(['tracking', 'status:parked', 'pm:seat', 'qa-run', 'eval-run']);
 export const SETTLE_MS = 2 * 60 * 1000;
 export const PAGE_SIZE = 100;
 export const PAGE_CEILING = 60;
@@ -426,7 +427,7 @@ export async function selfTest() {
   t('a routed, graded, queued card is owed nothing', c(['domain:spec', 'pm:queue', 'priority:p3']), []);
   t('②③④ wait ~2 min after the last update: a card mid-write is not owed', [c(['domain:skills'], { updated_at: FRESH }), c(['pm:queue'], { updated_at: FRESH })], [[], []]);
   t('…while ① is asked at once', c([], { updated_at: FRESH }), [1]);
-  t('exclusions come first: tracking, status:parked, pm:seat, qa-run', ['tracking', 'status:parked', 'pm:seat', 'qa-run'].map((x) => c([x]).length), [0, 0, 0, 0]);
+  t('exclusions come first: tracking, status:parked, pm:seat, qa-run, eval-run', ['tracking', 'status:parked', 'pm:seat', 'qa-run', 'eval-run'].map((x) => c([x]).length), [0, 0, 0, 0, 0]);
   t('labels compare case-insensitively', c(['Domain:Skills', 'PM:Queue']), [4]);
 
   battery('the fifth: created in the window, pm:queue or priority:* applied in the creation minute, never by actor');
