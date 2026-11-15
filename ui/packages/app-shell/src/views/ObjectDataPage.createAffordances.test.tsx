@@ -61,6 +61,8 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 let principal: Record<string, boolean> = {};
 /** Controllable server-resolved effective API operations (#3391); `undefined` = unrestricted. */
 let apiOperations: string[] | undefined;
+/** Whether the reader is a workspace admin (draws "Save as view"); off by default. */
+let workspaceAdmin = false;
 
 vi.mock('@object-ui/permissions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/permissions')>();
@@ -85,7 +87,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: { id: 'u1', name: 'Ada' }, activeOrganization: null }),
-  useWorkspaceAdminStatus: () => ({ isAdmin: false, isResolved: true }),
+  useWorkspaceAdminStatus: () => ({ isAdmin: workspaceAdmin, isResolved: true }),
   createAuthenticatedFetch: () => vi.fn(),
 }));
 
@@ -182,6 +184,7 @@ function expectCreateEntry(expected: { rendered: boolean; disabled?: boolean }) 
 beforeEach(() => {
   principal = {};
   apiOperations = undefined;
+  workspaceAdmin = false;
   cleanup();
   vi.stubGlobal(
     'fetch',
@@ -371,5 +374,33 @@ describe('#5164 — /data and the object-list page agree on one declaration', ()
   it('an open declaration shows "New" on /data, as on the object list', () => {
     renderDataPage(objects({ userActions: { create: { enabled: true, visibleWhen: SCOPE_TRUE } } }));
     expect(newButton()).toBeTruthy();
+  });
+});
+
+/**
+ * objectstack#33988 — the header's folded face (objectui#12705) keeps New
+ * labelled and puts Save as view in a `⋯`. With no New there is nothing to keep
+ * labelled, so the page offers no folded face: a long description must never
+ * send the page's one action into the `⋯`. The header marks a page that offers
+ * the fold with `data-folded`; one that does not keeps `actions` at every
+ * width, so the attribute is absent.
+ */
+describe('objectstack#33988 — /data offers the fold only with a New to keep labelled', () => {
+  const cluster = () => document.querySelector('[data-testid="page-header-actions"]') as HTMLElement | null;
+
+  it('an admin who cannot create keeps "Save as view" as a button: no folded face is offered', () => {
+    workspaceAdmin = true;
+    principal = { create: false };
+    renderDataPage(objects());
+    expect(newButton()).toBeNull();
+    expect(cluster()?.querySelector('[data-testid="object-data-save-as-view"]')).toBeTruthy();
+    expect(cluster()?.hasAttribute('data-folded')).toBe(false);
+  });
+
+  it('CONTROL: with New drawn, the folded face is still offered', () => {
+    workspaceAdmin = true;
+    renderDataPage(objects());
+    expect(newButton()).toBeTruthy();
+    expect(cluster()?.getAttribute('data-folded')).toBe('false');
   });
 });

@@ -315,6 +315,30 @@ export async function judgeBareActionRead(
 }
 
 /**
+ * [ADR-0150 D1 bucket 1, ruling 6893582352 option A] The bare by-name read of
+ * a `doc` (`GET /meta/doc/NAME`, both faces, and the doors that read through
+ * it), judged before any layer is read by the registry's own read of it
+ * (`resolveItem` naming no package, which `MetadataFacade.get` asks too): a
+ * name two or more enabled packages hold is refused naming every holder
+ * (`409 RESOURCE_CONFLICT`). It served one holder by registration order: the
+ * MetadataService's copy (kept by name alone, the holder registered last) or
+ * the registry's first composite.
+ *
+ * Judge only: any answer the registry gives leaves the read to its layers,
+ * exactly as before. The environment's own item answers first where the
+ * registry holds it (its package-less bare slot: a hydrated or saved row);
+ * a package-less row only the store holds is no exemption, because the
+ * layers below do not serve it for a `doc` and would answer a holder by
+ * registration order again.
+ *
+ * @throws {PackageScopedNameRefusedError} two or more enabled package holders.
+ */
+export function refuseAmbiguousBareDocRead(host: Pick<ProtocolHost, 'engine'>, name: string, member: string | undefined): void {
+    const registry = host.engine?.registry as { resolveItem?(type: string, name: string, caller: null, member?: string): unknown } | undefined;
+    if (typeof registry?.resolveItem === 'function') registry.resolveItem('doc', name, null, member);
+}
+
+/**
  * [ADR-0150 D3, #32365] Does the MetadataService's answer to a bare action
  * read agree with the judged answer ({@link judgeBareActionRead})? The
  * service is read before the registry, and holds its own copies, so its bare
@@ -638,6 +662,11 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         }
         bareActionAnswer = await judgeBareActionRead(host, request.name, objectLessRefused, opts.face);
     }
+    // [ADR-0150 D1 bucket 1, ruling 6893582352 option A] A `doc` name two or
+    // more enabled packages hold is refused here when the read names no
+    // package, naming each, before any layer is read; the environment's own
+    // item still answers first ({@link refuseAmbiguousBareDocRead}).
+    if (!request.packageId && request.type === 'doc') refuseAmbiguousBareDocRead(host, request.name, member);
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
             ? { item: registry.resolveItem(request.type, request.name, null, member) }
