@@ -1122,29 +1122,13 @@ export async function runAdminSetUserPassword(
       return pendingSsoPasswordRefusal('setUserPassword');
     }
 
-    // [#25083] On a cloud-managed environment a password is set here only on
-    // a local account. An `idp_provisioned` user signs in through the hosting
-    // organisation's identity provider, which owns their password; an
-    // `env_native` row (the break-glass administrator among them) still
-    // answers, because ADR-0135 D5.2 narrows by population, never wholesale.
-    if (isCloudManaged()) {
-      const source = await readUserSource(deps.getDataEngine(), userId);
-      if (!source.ok) {
-        return {
-          status: 503,
-          body: {
-            success: false,
-            error: {
-              code: 'SERVICE_UNAVAILABLE',
-              message:
-                "The user's identity source could not be read, so whether this cloud-managed environment may set "
-                + 'their password here cannot be judged. No password was changed.',
-            },
-          },
-        };
-      }
-      if (source.value === 'idp_provisioned') return cloudManagedRefusal('setUserPassword');
-    }
+    // [#25083] [#33203] On a cloud-managed environment no password is set
+    // here for anyone: everyone signs in through the hosting organisation's
+    // identity provider, and a hosted environment keeps no local break-glass
+    // administrator (ruling 10 of objectstack-ai/cloud#4465). So no arm below
+    // reads the target's identity source: an `env_native` row is refused like
+    // an `idp_provisioned` one. `cloud-managed.ts` states the rule.
+    if (isCloudManaged()) return cloudManagedRefusal('setUserPassword');
 
     // With SSO-only mode on, an IdP-provisioned user signs in through the
     // identity provider and is given no local password here; the one exception

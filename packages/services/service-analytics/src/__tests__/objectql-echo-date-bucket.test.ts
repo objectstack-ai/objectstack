@@ -254,15 +254,19 @@ for (const cell of CELLS) {
         });
       }
 
-      // [#21647] One of the two cells where the engine buckets in memory and
-      // the echo still prints, because the hook answers and the expression,
-      // run here, answers the face's rows (the last assertion). The other is
+      // [#21647] A measure filter: the echo still prints, because the hook
+      // answers and the expression, run here, answers the face's rows (the
+      // last assertion). [#33698] SqlDriver now compiles the filtered measure
+      // itself (`supports.aggregationFilter`), so the driver groups it as a
+      // conditional aggregate; the in-memory face of this case is
       // `driver-turso`'s remote face, pinned by code path in
       // `objectql-echo-bucket-enumeration.test.ts`.
-      it('a measure filter, which the engine aggregates in memory: the echo keeps the driver expression and runs with its params', async () => {
+      it('a measure filter, which the driver compiles as a conditional aggregate: the echo keeps the driver expression and runs with its params', async () => {
         const query = { cube: FILTERED.name, measures: ['big_sum'], timeDimensions: [{ dimension: 'closed_on', granularity: 'month' }], order: { closed_on: 'asc' } };
         const { res, ran } = await ask(query);
-        expect(ran.some((sql) => /group by/i.test(sql)), 'the driver grouped nothing').toBe(false);
+        expect(ran, 'the driver grouped the filtered measure').toHaveLength(1);
+        expect(ran[0]).toMatch(/group by/i);
+        expect(ran[0]).toMatch(/sum\(CASE WHEN \(.+\) THEN .+ END\)/);
         expect(tuples(res.rows, ['closed_on', 'big_sum'])).toEqual([['2026-01', 20], ['2026-02', 1], ['2026-03', 10], ['2026-04', 5]]);
         const dryRun = await analytics.generateSql(query as any);
         expect(dryRun.sql).toBe(res.sql);

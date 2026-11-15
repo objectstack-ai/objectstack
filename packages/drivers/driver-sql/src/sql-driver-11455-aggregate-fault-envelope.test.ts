@@ -290,13 +290,16 @@ describe(`[#11455] driver-sql — aggregate() takes the backend-fault envelope (
     expect(noField.code, 'count_distinct with no field').toBe('INVALID_QUERY');
     expect(noField.status, 'count_distinct with no field').toBe(400);
 
+    // [#33698] A per-aggregation filter now COMPILES (the where compiler,
+    // inside a CASE WHEN), so the build-time refusal it can raise is that
+    // compiler's: an operator outside the vocabulary.
     const filtered = await caught(() =>
       driver.aggregate(TABLE, {
-        aggregations: [{ function: 'count', alias: 'n', filter: { rank: 1 } }],
+        aggregations: [{ function: 'count', alias: 'n', filter: { rank: { $nope: 1 } } }],
       } as DriverQuery),
     );
-    expect(filtered.code, 'a per-aggregation filter').toBe('NOT_IMPLEMENTED');
-    expect(filtered.status, 'a per-aggregation filter').toBe(501);
+    expect(filtered.code, 'a per-aggregation filter the where compiler refuses').toBe('INVALID_FILTER');
+    expect(filtered.status, 'a per-aggregation filter the where compiler refuses').toBe(400);
   });
 });
 }
