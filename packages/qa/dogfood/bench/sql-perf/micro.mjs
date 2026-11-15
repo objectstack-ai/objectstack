@@ -12,8 +12,8 @@
  *   node packages/qa/dogfood/bench/sql-perf/micro.mjs --dialect pg --scale 1000000 \
  *     --pg-url postgres://postgres@127.0.0.1:5432/postgres
  *
- * It creates one temporary index (`owner_id`) for the index pair and drops it
- * again before exiting, so the seeded database is left as it was.
+ * It creates two temporary indexes (`owner_id`, `created_at`) for the index pairs
+ * and drops each again before moving on, so the seeded database is left as it was.
  * Output: `<work-dir>/results/micro-<dialect>-<scale>.{json,md}`.
  */
 
@@ -162,6 +162,19 @@ async function main() {
   results.push({ item: 'I7 owner_id carries no index (member chain count, unindexed vs indexed)', today: memberChainSql, todayMs: before.chain.ms, targetMs: after.chain.ms, target: '(same, with an index on bench_account.owner_id)' });
   results.push({ item: 'I7b owner_id carries no index (member account list)', today: accountsSql, todayMs: before.accounts.ms, targetMs: after.accounts.ms, target: '(same, with an index on bench_account.owner_id)' });
   console.log(`I7 member chain count: ${before.chain.ms} ms unindexed -> ${after.chain.ms} ms indexed; accounts ${before.accounts.ms} -> ${after.accounts.ms}`);
+
+  // I8: the default list order (`created_at desc`) has no index, so every
+  // default-ordered page sorts its whole filtered set before taking 50 rows.
+  const pageSql = `select * from bench_line_item where ${chainMember} order by created_at desc, id desc limit 50`;
+  const adminPageSql = 'select * from bench_line_item order by created_at desc, id desc limit 50';
+  const sortBefore = { member: await time(db, pageSql, [memberId]), admin: await time(db, adminPageSql) };
+  await db.run('create index if not exists tmp_bench_line_item_created on bench_line_item (created_at, id)');
+  if (args.dialect === 'pg') await db.run('analyze bench_line_item'); else await db.run('analyze');
+  const sortAfter = { member: await time(db, pageSql, [memberId]), admin: await time(db, adminPageSql) };
+  await db.run('drop index tmp_bench_line_item_created');
+  results.push({ item: 'I8 default order created_at carries no index (member page)', today: pageSql, todayMs: sortBefore.member.ms, targetMs: sortAfter.member.ms, target: '(same, with an index on bench_line_item (created_at, id))' });
+  results.push({ item: 'I8b default order created_at carries no index (unfiltered page)', today: adminPageSql, todayMs: sortBefore.admin.ms, targetMs: sortAfter.admin.ms, target: '(same, with an index on bench_line_item (created_at, id))' });
+  console.log(`I8 member page: ${sortBefore.member.ms} -> ${sortAfter.member.ms} ms; unfiltered page ${sortBefore.admin.ms} -> ${sortAfter.admin.ms} ms`);
   await db.close();
 
   const outDir = join(args.workDir, 'results');
