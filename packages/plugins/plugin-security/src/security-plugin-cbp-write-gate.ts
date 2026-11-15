@@ -148,6 +148,36 @@ export type MasterQuestion = 'edit' | 'read';
 const MASTER_DENIAL_QUESTION = new WeakMap<PermissionDeniedError, MasterQuestion>();
 
 /**
+ * [ADR-0055 §3] The master a gate refusal may NAME to the end user, keyed by
+ * the refusal itself, beside {@link MASTER_EDIT_DENIAL_LEG} and for the same
+ * reason: nothing is added to the error's own properties here. Written where a
+ * master-edit refusal is built (`masterEditDenied`, the master the caller's
+ * object names) and where it is reworded for a caller who cannot read the
+ * master reference (`undefined`: that caller is named no master). A refusal
+ * without an entry is not a master-access refusal — the owner rule of a row
+ * that names no master ({@link assertControlledByParentWrite}'s
+ * `nullMasterOwnerDenied`) has its own sentence and carries no user copy.
+ */
+const MASTER_DENIAL_NAMED_MASTER = new WeakMap<PermissionDeniedError, { master: string | undefined }>();
+
+/**
+ * The end user's half of a master-gate refusal, read off the refusal: the
+ * question it answered and the master object it may name (`undefined` = name
+ * none). `undefined` when `e` is not a master-access refusal of this gate.
+ * The authorization middleware renders it into the refusal's `userMessage`
+ * from the operation-message catalog (`master_record_edit_denied` and its
+ * siblings); `code`, status and `message` are the gate's, unchanged.
+ */
+export function masterGateRefusalUserCopyOf(
+  e: unknown,
+): { question: MasterQuestion; master: string | undefined } | undefined {
+  if (!(e instanceof PermissionDeniedError)) return undefined;
+  const named = MASTER_DENIAL_NAMED_MASTER.get(e);
+  if (!named) return undefined;
+  return { question: MASTER_DENIAL_QUESTION.get(e) ?? 'edit', master: named.master };
+}
+
+/**
  * The gate's refusal builder, as the chain walk and the legs receive it: the
  * leg, the reason, the master row it names, and the question that was asked
  * (`edit` when omitted).
@@ -423,6 +453,7 @@ export async function assertControlledByParentWrite(
     );
     MASTER_EDIT_DENIAL_LEG.set(withheld, leg);
     if (question !== 'edit') MASTER_DENIAL_QUESTION.set(withheld, question);
+    MASTER_DENIAL_NAMED_MASTER.set(withheld, { master: undefined });
     throw withheld;
   }
 }
@@ -467,6 +498,8 @@ async function judgeControlledByParentWrite(
     );
     MASTER_EDIT_DENIAL_LEG.set(denial, leg);
     if (question !== 'edit') MASTER_DENIAL_QUESTION.set(denial, question);
+    // Built only after `rel` below resolved: every caller of this builder runs past it.
+    MASTER_DENIAL_NAMED_MASTER.set(denial, { master: rel?.master });
     return denial;
   };
   const denyMasterEdit = (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown): never => {
