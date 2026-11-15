@@ -286,3 +286,36 @@ describe('conditionSubjectsForMetadataType — the per-type derivation (objectui
     }
   });
 });
+
+/* ── Field subjects read by label (objectstack#34122) ────────────────────── */
+
+describe('the generic condition mount names a field subject by its label (objectstack#34122)', () => {
+  /** The bound object's field catalog as the host loads it: one labelled field, one not. */
+  const context: WidgetContext = {
+    objectFields: {
+      status: 'loaded',
+      data: [
+        { name: 'status', label: 'Status', type: 'text' },
+        { name: 'code', type: 'text' },
+      ],
+    },
+  };
+
+  it('a field reads by its label, its spelling as the hint', async () => {
+    // `ux-conventions.labels-over-machine-names`: the widget passes no
+    // `labelSubjects`, so this is the builder's default as the mount gets it.
+    render(<Harness context={context} />);
+    const group = await screen.findByRole('group', { name: /Run only when/ });
+    await userEvent.click(within(group).getAllByRole('combobox')[0]);
+    const option = await screen.findByRole('option', { name: 'Status record.status' });
+    expect(option.querySelector('.font-mono')).toHaveTextContent(/^record\.status$/);
+  });
+
+  it('CONTROL: a field with no label reads as its spelling alone', async () => {
+    render(<Harness context={context} />);
+    const group = await screen.findByRole('group', { name: /Run only when/ });
+    await userEvent.click(within(group).getAllByRole('combobox')[0]);
+    const option = await screen.findByRole('option', { name: 'record.code' });
+    expect(option.querySelector('.font-mono')).toBeNull();
+  });
+});

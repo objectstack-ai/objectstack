@@ -846,7 +846,7 @@ function initFrom(value: string, valueOf: SubjectValueOf): { rows: Row[]; join: 
   return { rows: [], join: '&&', raw: !!value };
 }
 
-export function ConditionBuilder({ label, value, onCommit, objectName, fields: fieldsProp, disabled, onBlockingIssuesChange, subjects, scope, roots, scopeIssue, labelSubjects = false, verdictPath }: {
+export function ConditionBuilder({ label, value, onCommit, objectName, fields: fieldsProp, disabled, onBlockingIssuesChange, subjects, scope, roots, scopeIssue, labelSubjects = true, verdictPath }: {
   label?: string;
   value: string;
   onCommit: (cel: string) => void;
@@ -934,7 +934,10 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
   scopeIssue?: boolean;
   /**
    * The subject dropdown names a field by its label, with the CEL spelling
-   * beside it. Off by default, so a mount that lists spellings keeps them.
+   * beside it (`ux-conventions.labels-over-machine-names`); a field with no
+   * label reads as its spelling. On by default, because every mount's subjects
+   * are the fields of the object it edits. A mount whose spelling must stay
+   * primary passes `false` and says why at the mount.
    */
   labelSubjects?: boolean;
   /**
@@ -967,7 +970,11 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
     // With `labelSubjects`, a field reads by its label, its spelling beside it.
     const named = (spelling: string, label: string | undefined) =>
       labelSubjects && label ? { value: spelling, label, hint: spelling } : { value: spelling, label: spelling, hint: undefined };
-    const fieldOpts = visible.map((f) => named(`${fieldPrefix}${f.name}`, f.label));
+    // A label that only repeats the field's name is no label: the object-field
+    // catalog (`useObjectFields`) fills an unlabelled field's label with its
+    // name, and such a field reads as its spelling alone.
+    const labelOf = (f: { name: string; label?: string }) => (f.label && f.label !== f.name ? f.label : undefined);
+    const fieldOpts = visible.map((f) => named(`${fieldPrefix}${f.name}`, labelOf(f)));
     // The whole-record `previous` comes first: `previous == null` is how an
     // author branches on the create leg of a create-or-update trigger, and it
     // reads as the head of the group rather than as one more field.
@@ -977,7 +984,7 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
           ...visible.map((f) =>
             named(
               `previous.${f.name}`,
-              f.label ? tFormat('engine.inspector.condition.previousField', locale, { field: f.label }) : undefined,
+              labelOf(f) ? tFormat('engine.inspector.condition.previousField', locale, { field: labelOf(f) }) : undefined,
             ),
           ),
         ]
