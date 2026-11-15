@@ -2806,6 +2806,8 @@ const es = {
         ssoBackToConsole: "Volver a la consola",
         ssoSwitchAccountHint: "Cambiar de cuenta abre tu servicio de inicio de sesión en una pestaña nueva y cierra allí tu sesión. Después, vuelve a iniciar sesión aquí con una cuenta que tenga acceso.",
         linkEmailMismatch: "La cuenta no se vinculó: su dirección de correo electrónico no coincide con la de la cuenta con la que iniciaste sesión. Vincula una cuenta que use la misma dirección de correo electrónico.",
+        linkAlreadyLinkedToOtherUser: "La cuenta no se vinculó: ya está vinculada a otro usuario de este sistema. Vincula otra cuenta, o inicia sesión como el usuario al que está vinculada y desvincúlala allí primero.",
+        linkUnableToLink: "No se pudo vincular la cuenta. Comprueba que su dirección de correo electrónico esté verificada en ese servicio de inicio de sesión y vuelve a intentarlo. Si sigue fallando, contacta con tu administrador.",
         twoFactorInvalidCode: "Ese código no es válido. Revise su aplicación de autenticación e inténtelo de nuevo.",
         twoFactorInvalidBackupCode: "Ese código de respaldo no es válido o ya se ha utilizado.",
         twoFactorTooManyAttempts: "Demasiados códigos incorrectos. Vuelva a iniciar sesión con su contraseña.",
@@ -3660,12 +3662,13 @@ const es = {
       notAllowedToInvite: 'No tiene permiso para invitar usuarios a esta organización.',
       notAllowedToInviteWithRole: 'No tiene permiso para invitar a un usuario con este rol.',
       alreadyInvited: 'Este usuario ya ha sido invitado a esta organización.',
+      alreadyMember: 'Este usuario ya es miembro de esta organización.',
       organizationExists: 'Esa organización ya existe.',
       slugTaken: 'Ese slug ya está en uso.',
       notAllowedToCreate: 'No tiene permiso para crear una organización nueva.',
       organizationLimitReached: 'Ha alcanzado el número máximo de organizaciones que puede crear. Las organizaciones a las que se le ha invitado no cuentan para este límite.',
       notTheRecipient: 'No es el destinatario de esta invitación.',
-      invitationNotFound: 'Esta invitación ya no existe o ha caducado.',
+      invitationNotFound: 'Esta invitación ya se utilizó, caducó o fue revocada. Si ya la aceptó, encontrará la organización en su lista de organizaciones.',
       unknown: 'Algo salió mal. Inténtelo de nuevo.',
     },
     backToList: "Volver a las organizaciones",
@@ -4057,6 +4060,14 @@ const es = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'Te queda un {{left}} de tu cuota de IA. Un modelo marcado con ×N la consume N veces más rápido que el modelo predeterminado.',
+      confirmTitle: '¿Cambiar a {{model}}?',
+      confirmBody: 'Cada mensaje con este modelo consume {{multiplier}} veces más cuota de IA que uno con el modelo predeterminado.',
+      confirmAllowance: 'Te queda un {{left}}, y con este modelo se agota {{multiplier}} veces más rápido.',
+      confirmCancel: 'Cancelar',
+      confirmAction: 'Cambiar de modelo',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Enviar mensaje',
     scrollToBottom: 'Ir al último mensaje',
@@ -4084,7 +4095,9 @@ const es = {
     tool: {
       aggregate_data: "Resumir los datos",
       get_record: "Leer el registro",
+      list_datasets: "Ver las métricas disponibles",
       query_data: "Consultar los datos necesarios",
+      query_dataset: "Consultar por métrica",
       query_records: "Buscar los registros",
       read_package_doc: "Leer la guía de la aplicación",
       search_knowledge: "Consultar la base de conocimiento",

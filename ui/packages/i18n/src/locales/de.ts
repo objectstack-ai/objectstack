@@ -2736,6 +2736,8 @@ const de = {
         ssoBackToConsole: "Zurück zur Konsole",
         ssoSwitchAccountHint: "Konto wechseln öffnet Ihren Anmeldedienst in einem neuen Tab und meldet Sie dort ab. Melden Sie sich anschließend hier erneut mit einem Konto an, das Zugriff hat.",
         linkEmailMismatch: "Das Konto wurde nicht verknüpft: Seine E-Mail-Adresse stimmt nicht mit der des Kontos überein, mit dem Sie angemeldet sind. Verknüpfen Sie ein Konto mit derselben E-Mail-Adresse.",
+        linkAlreadyLinkedToOtherUser: "Das Konto wurde nicht verknüpft: Es ist bereits mit einem anderen Benutzer dieses Systems verknüpft. Verknüpfen Sie ein anderes Konto, oder melden Sie sich als der Benutzer an, mit dem es verknüpft ist, und heben Sie die Verknüpfung dort zuerst auf.",
+        linkUnableToLink: "Das Konto konnte nicht verknüpft werden. Prüfen Sie, ob seine E-Mail-Adresse bei diesem Anmeldedienst bestätigt ist, und versuchen Sie es erneut. Wenn es weiterhin fehlschlägt, wenden Sie sich an Ihren Administrator.",
         twoFactorInvalidCode: "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
         twoFactorInvalidBackupCode: "Dieser Backup-Code ist ungültig oder wurde bereits verwendet.",
         twoFactorTooManyAttempts: "Zu viele falsche Codes. Melden Sie sich erneut mit Ihrem Passwort an.",
@@ -3582,12 +3584,13 @@ const de = {
       notAllowedToInvite: 'Sie dürfen keine Benutzer in diese Organisation einladen.',
       notAllowedToInviteWithRole: 'Sie dürfen keine Benutzer mit dieser Rolle einladen.',
       alreadyInvited: 'Dieser Benutzer wurde bereits in diese Organisation eingeladen.',
+      alreadyMember: 'Dieser Benutzer ist bereits Mitglied dieser Organisation.',
       organizationExists: 'Diese Organisation existiert bereits.',
       slugTaken: 'Dieser URL-Slug ist bereits vergeben.',
       notAllowedToCreate: 'Sie dürfen keine neue Organisation erstellen.',
       organizationLimitReached: 'Sie haben die maximale Anzahl an Organisationen erreicht, die Sie erstellen können. Organisationen, zu denen Sie eingeladen wurden, zählen nicht dazu.',
       notTheRecipient: 'Sie sind nicht der Empfänger dieser Einladung.',
-      invitationNotFound: 'Diese Einladung existiert nicht mehr oder ist abgelaufen.',
+      invitationNotFound: 'Diese Einladung wurde bereits verwendet, ist abgelaufen oder wurde widerrufen. Wenn Sie sie angenommen haben, finden Sie die Organisation in Ihrer Organisationsliste.',
       unknown: 'Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.',
     },
     backToList: "Zurück zu den Organisationen",
@@ -3972,6 +3975,14 @@ const de = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: '{{left}} deines KI-Kontingents sind noch übrig. Ein mit ×N markiertes Modell verbraucht es N-mal so schnell wie das Standardmodell.',
+      confirmTitle: 'Zu {{model}} wechseln?',
+      confirmBody: 'Jede Nachricht mit diesem Modell verbraucht {{multiplier}}-mal so viel KI-Kontingent wie eine mit dem Standardmodell.',
+      confirmAllowance: 'Davon sind noch {{left}} übrig, und mit diesem Modell ist es {{multiplier}}-mal so schnell aufgebraucht.',
+      confirmCancel: 'Abbrechen',
+      confirmAction: 'Modell wechseln',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Nachricht senden',
     scrollToBottom: 'Zur neuesten Nachricht scrollen',
@@ -3999,7 +4010,9 @@ const de = {
     tool: {
       aggregate_data: "Die Daten zusammenfassen",
       get_record: "Den Datensatz lesen",
+      list_datasets: "Die verfügbaren Kennzahlen ansehen",
       query_data: "Die benötigten Daten abfragen",
+      query_dataset: "Über eine Kennzahl abfragen",
       query_records: "Passende Datensätze suchen",
       read_package_doc: "Die Anleitung der App lesen",
       search_knowledge: "In der Wissensdatenbank nachsehen",

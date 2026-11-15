@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/mcp",
-  "version": "18.4.0",
+  "version": "18.5.0",
   "license": "Apache-2.0",
   "description": "ObjectStack as an MCP server — exposes your app's objects (and AI tools) over the Model Context Protocol (stdio + Streamable HTTP)",
   "type": "module",
@@ -38,6 +38,7 @@
     "zod": "^4.6.6"
   },
   "devDependencies": {
+    "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.6.5",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

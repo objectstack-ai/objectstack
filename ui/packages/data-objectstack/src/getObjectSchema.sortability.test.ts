@@ -24,7 +24,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { resolveObjectSortability } from '@objectstack/spec/api';
 import { readObjectSortability, isPlatformSortableField } from '@object-ui/core';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from './index';
+import { ObjectStackAdapter } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 /** The #10235 oracle object: a formula column beside persisted siblings. */
 const OPPORTUNITY = {

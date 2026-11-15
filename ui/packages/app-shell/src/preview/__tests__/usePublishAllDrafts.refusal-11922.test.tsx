@@ -39,6 +39,10 @@ vi.mock('sonner', () => ({
 }));
 
 import { toast } from 'sonner';
+// The source under test reaches `@objectstack/lint` through a dynamic import; its
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { usePublishAllDrafts } from '../usePublishAllDrafts';
 
 const PKG_ID = 'com.acme.crm';
@@ -176,5 +180,24 @@ describe('control: a published batch reads as before (objectui#11922)', () => {
     // The health was recorded: the seeded-rows row, with the batch's 3.
     expect(calls(toast.success)).toEqual(['home.pendingDrafts.publishedVerified:3']);
     expect(calls(toast.error)).toEqual([]);
+  });
+
+  // objectstack#33277 — the registry refused an object of a batch that landed:
+  // `success` is false and `failed[]` empty. The hook reads it as it read the
+  // `published` answer the server gave for this before, not as a failure.
+  it('a published_unregistered batch reads as published, not as a failure', async () => {
+    batchBody = batch({
+      outcome: 'published_unregistered',
+      publishedCount: 1,
+      failedCount: 0,
+      published: [{ type: 'view', name: 'lead_list', version: 'sha256:0' }],
+      failed: [],
+      unregistered: [{ type: 'object', name: 'lead', rule: 'object-registry-refused' }],
+    });
+    const outcome = await publishAll();
+    expect(outcome).toEqual({ ok: true, attempted: 2 });
+    expect(posts).toHaveLength(2);
+    expect(calls(toast.error)).toEqual([]);
+    expect(calls(toast.success)).toEqual(['home.pendingDrafts.published']);
   });
 });

@@ -73,6 +73,27 @@
  * {@link bareNameRefusal} is the same resolution for a bare address: a bare
  * name the resolver refuses is answered `409` naming every candidate (D5), on
  * the doors whose own answer was no such `409`.
+ *
+ * [ADR-0150 D3, #33386; seat ruling 6884403301] A name two or more packages
+ * hold, one of them disabled, is judged over the SERVED holders at the doors
+ * (a disabled package holds no name), the shape the email send took
+ * (plugin-email `template-loader.ts`):
+ *
+ *  - a bare name ({@link bareNameAdmission}): one served holder is that
+ *    holder's slot, two or more are refused naming the served holders only,
+ *    and none is no item (the door's own `404`). A slot is `(package, name)`
+ *    and is never re-pointed: a disable only moves which slot the bare name
+ *    reaches;
+ *  - an address naming the disabled holder's namespace is never another
+ *    package's item: `not-held-by-qualifier` naming the served holders, or
+ *    `404` when none remains; `_env` and any other namespace name the served
+ *    holders only.
+ *
+ * The durable coordinates stay judged over EVERY holder (amendment 7): the
+ * engine's slot keys, a run's key, and {@link bareNameRefusal}, which the MCP
+ * resume door reads to tell a run row's slot. So does the refusal a slot
+ * carries for the doors that cannot serve from the slot (the definition
+ * writes): a write targets the name every holder holds.
  */
 
 import {
@@ -260,6 +281,33 @@ export function bareNameRefusal(
 }
 
 /**
+ * [ADR-0150 D3, #33386] A BARE by-name door's admission (see the module note):
+ * the bare name's `409` naming the served holders when two or more serve it,
+ * the slot of its one served holder when the name is held by two or more
+ * packages over every holder (each holder's item is then its own slot), and
+ * `undefined` otherwise — the bare path, as before, which answers its own
+ * `404` when no served holder remains. A name held by one package or none is
+ * judged as {@link bareNameRefusal} judges it, unchanged. Read-only.
+ */
+export function bareNameAdmission(
+    registry: AutomationAddressRegistry | undefined,
+    type: 'flow' | 'connector',
+    name: string,
+): AutomationAddressRefusal | AutomationAddressSlot | undefined {
+    if (!registry || !canResolve(registry)) return undefined;
+    const every = resolvePackageScopedName(registry, { type, name, callerPackageId: null, includeDisabledPackages: true });
+    if (every.status !== 'refused' || holdersOf(registry, type, name, { includeDisabledPackages: true }).length < 2) {
+        return every.status === 'refused' ? { status: 409, refusal: every } : undefined;
+    }
+    const served = resolvePackageScopedName(registry, { type, name, callerPackageId: null });
+    if (served.status === 'refused') return { status: 409, refusal: served };
+    if (served.status === 'resolved' && served.holder.kind === 'package') {
+        return { status: 'slot', packageId: served.holder.packageId, refusal: every };
+    }
+    return undefined;
+}
+
+/**
  * Judge an addressed path's qualifier (see the module note). `undefined`
  * admits it: the path is then served as its bare path, whose item is the
  * address's. An {@link AutomationAddressSlot} admits it to one holder's slot
@@ -279,14 +327,16 @@ export function admitAutomationAddress(
             ? undefined
             : { status: 404, message: `${noun} '${name}' not found in namespace '${qualifier.namespace}'` };
     }
-    // [#32183, R4-G] A name two or more packages hold over every holder (the
-    // state #31696 opened for a flow, each holder's flow in its own engine
-    // slot) is judged over every holder, a disabled package's included, so a
-    // disable moves no address of it (`main`'s answer). A one-holder name is
-    // judged over the served holders, as every by-name door is.
+    // [ADR-0150 D3, #33386] Judged over the served holders, as every by-name
+    // door is: a disabled package holds no name, so an address naming it is
+    // never another package's item, and a refusal names the served holders
+    // only (seat ruling 6884403301, amendments 2 and 6). A name two or more
+    // packages hold over EVERY holder (the state #31696 opened, each holder's
+    // item in its own engine slot) is still served from the addressed
+    // holder's slot: the slots are keyed over every holder (amendment 7).
     const everyHolder = holdersOf(registry, type, name, { includeDisabledPackages: true });
     const shared = everyHolder.length > 1;
-    const holders = shared ? everyHolder : holdersOf(registry, type, name);
+    const holders = holdersOf(registry, type, name);
     let holder: PackageScopedHolder;
     if (qualifier.kind === 'environment') {
         if (registry.getEnvironmentScopedItem(type, name) !== undefined || holders.length === 0) return undefined;
@@ -313,7 +363,9 @@ export function admitAutomationAddress(
         // [#31696] A flow name two packages hold: each holder's flow is its own
         // slot, and the address names one holder of it. [ADR-0150 D9, #31699]
         // So is a connector name: each holder's instance is its own, and the
-        // connection door connects the addressed one.
+        // connection door connects the addressed one. [#33386] The addressed
+        // holder is a served one (above); the slot's refusal, for the doors
+        // that cannot serve from it, stays the name's over every holder.
         return (type === 'flow' || type === 'connector') && holder.kind === 'package'
             ? { status: 'slot', packageId: holder.packageId, refusal: bare }
             : { status: 409, refusal: bare };

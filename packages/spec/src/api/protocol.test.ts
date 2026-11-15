@@ -378,6 +378,18 @@ describe('ObjectStack Protocol', () => {
       models: [{ id: 'gpt-4o-mini', label: 'GPT-4o mini', default: true }], defaultModel: 'gpt-4o-mini',
     }).success).toBe(true);
     expect(AiModelsResponseSchema.safeParse({ models: ['gpt-4o-mini'] }).success).toBe(true);
+    // objectstack#33660 — the optional per-model cost multiplier (positive; the default model is 1)
+    const entry = { id: 'claude-opus', label: 'Expert', default: false };
+    const withMultiplier = AiModelsResponseSchema.safeParse({ models: [{ ...entry, costMultiplier: 20 }] });
+    expect(withMultiplier.success).toBe(true);
+    expect(withMultiplier.data?.models[0]).toEqual({ ...entry, costMultiplier: 20 });
+    expect(AiModelsResponseSchema.safeParse({ models: [{ ...entry, costMultiplier: 0.5 }] }).success).toBe(true);
+    for (const bad of [0, -1, '20', Number.NaN]) {
+      expect(
+        AiModelsResponseSchema.safeParse({ models: [{ ...entry, costMultiplier: bad }] }).success,
+        `costMultiplier ${String(bad)} is refused`,
+      ).toBe(false);
+    }
 
     // conversations
     expect(CreateAiConversationRequestSchema.safeParse({ title: 'Q3 pipeline', metadata: { source: 'sdk' } }).success).toBe(true);
@@ -1529,10 +1541,37 @@ describe('PublishPackageDraftsResponseSchema (declares the batch publish respons
       published: [],
       failed: [],
     };
-    for (const key of ['seedApplied', 'materializeApplied', 'probes', 'commitId', 'unhiddenApps', 'unhideError', 'rebindError'] as const) {
+    for (const key of ['seedApplied', 'materializeApplied', 'probes', 'commitId', 'unhiddenApps', 'unhideError', 'rebindError', 'unregistered'] as const) {
       expect(minimal).not.toHaveProperty(key);
     }
     expect(PublishPackageDraftsResponseSchema.safeParse(minimal).success).toBe(true);
+  });
+
+  it('declares published_unregistered: the drafts landed, unregistered[] names each object the registry refused (#33277)', () => {
+    const unregistered = {
+      ...realResponse,
+      success: false,
+      outcome: 'published_unregistered',
+      published: [
+        ...realResponse.published,
+        { type: 'object', name: 'ticket', version: 'sha256:2cad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f2' },
+      ],
+      publishedCount: 3,
+      unregistered: [{ type: 'object', name: 'ticket', rule: 'object-registry-refused' }],
+    };
+    const parsed = PublishPackageDraftsResponseSchema.parse(unregistered);
+    expect(parsed).toEqual(unregistered);
+    // The rule is the declared id, not any string: an entry must say why.
+    expect(PublishPackageDraftsResponseSchema.safeParse({
+      ...unregistered,
+      unregistered: [{ type: 'object', name: 'ticket', rule: 'registry-said-no' }],
+    }).success).toBe(false);
+    expect(PublishPackageDraftsResponseSchema.safeParse({
+      ...unregistered,
+      unregistered: [{ type: 'object', name: 'ticket' }],
+    }).success).toBe(false);
+    // The vocabulary stays closed around the new value.
+    expect(PublishPackageDraftsResponseSchema.safeParse({ ...realResponse, outcome: 'partial' }).success).toBe(false);
   });
 
   it('does not fabricate any key: parse of a lean body adds nothing (byte-stability half)', () => {

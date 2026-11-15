@@ -49,7 +49,7 @@ computed truths and declared outcomes:
 ```ts
 import { gradeCardAnswer, gradeCardOperation, scoreCardArtifact } from '@objectstack/scenarios/score/full';
 
-scoreCardArtifact(card, artifact);                 // a built dist/objectstack.json: expect, tags, agent actions
+scoreCardArtifact(card, artifact);                 // a built dist/objectstack.json: expect, tags, agent actions, persona grants
 gradeCardOperation(card, 'remove_ben', observed);  // an observed write against its declared outcome
 gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // an agent's answer
 ```
@@ -59,7 +59,24 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
 - `scenario-tags.ts` — the capability-tag checks and the agent-action exposure check (each
   declared action exists on its object, carries `ai.exposed: true`, and carries
   `ai.requiresConfirmation: true` where the card says `confirm`; a missing action fails, never
-  skipped).
+  skipped), and the persona grant checks (`gradePersonaGrants`): one Build check per persona ×
+  object × verb the card implies, `persona-grant:<persona>:<object>:<verb>`, against that
+  persona's own set (`<namespace>_<persona id>`). A question asked as the persona needs `read` on
+  its object (not when the persona hides that object: it declines), and an `applied` or
+  `pending_confirmation` operation needs its kind; each passes when the set grants the verb, read
+  as the platform folds it (`buildEffectiveObjectPermissions`, a `'*'` wildcard included where
+  `access.default` lets it cover the object, then `objectPermissionGrants`). An operation refused
+  `PERMISSION_DENIED` passes when the set refuses it: no verb, or a field the write names locked
+  (not editable, no `when`); it is not measured, out of passed and total, when only a row rule
+  could refuse it (a write row policy, a row-conditioned field entry), and fails when nothing in
+  the set does. The same persona, object and verb also needed elsewhere yields the needed check
+  alone: the refusal is a row's or a field's, not the grant's. A persona whose set the build does
+  not declare fails each of its checks. One needed write is not measured, never a pass: a verb the
+  set withholds that only `pending_confirmation` operations need, where the build declares the
+  card's confirm-gated agent action (`confirm: true`) on that object. That action is the route the
+  card designs for a write that asks first, and its body writes as the platform, so whether the
+  write goes through it is the run's to observe (ruling A on #31999 item 9, carried to the Build
+  side). An `applied` write stays measured against the grant, whatever actions the build adds.
 - `scenario-operation-grade.ts` — an observed write against `applied` / `refused` /
   `pending_confirmation`; a fact the observation does not carry fails. The operation the
   card's `write_validation` guardrail names is graded in two halves: the agent half (its write
@@ -67,19 +84,43 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   asks for a correction) and the platform half, `platform:` checks (the runner's own write of
   the declared values, the probe, was refused with that code and stored nothing); so is every
   other `refused` create or update, permission oversteps included (`isProbedOperation`). A
-  declared `VALIDATION_FAILED` is met by an app-defined code at any 4xx status, or by the
-  app's flow refusal (`refusalMeets`); a platform catalogue code other than the declared one
-  never is. The platform half is not measured, out of passed and total with the reason in the
+  declared `VALIDATION_FAILED` is met by the app's own refusal at any 4xx status, or by the
+  app's flow refusal (`refusalMeets`). A hook's declared refusal reaches the MCP data tools
+  with `code` set to the status's catalogue code (`RESOURCE_CONFLICT` at 409) and the hook's
+  own code beside it as `declaredCode` (`ASSET_NOT_IN_STOCK`); the runner keeps both, and a
+  declared code meets its `declaredCode` exactly. A platform catalogue code other than the
+  declared one, with no `declaredCode`, never meets it. The platform half is not measured, out of passed and total with the reason in the
   scorecard's findings, when the probe met the build's own lock: refused 403
   `PERMISSION_DENIED`, nothing written, and the build locks a field the probe writes for the
   persona and declares an action on the object (`buildLockOf`; ruling A on #31999 item 9).
+  Beside it, `buildDeniesWrite`: a write the card gives the persona that the build denies it.
+  An `applied` create or update whose agent write was refused 403 `PERMISSION_DENIED` with
+  nothing written is probed too (`probesBuildDenial`); a probe denied the same way, with no
+  such lock, makes the whole operation not measured (`OperationGrade.notMeasured`), and the
+  `write_validation` probe that meets it leaves its platform half not measured (the agent
+  half too when the agent's own write met it). Each is a Build finding naming persona,
+  object and verb (`buildDenialFindings`). A declared 403 and `pending_confirmation` grade as
+  before.
   A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
+  **Temporary, until objectstack-ai/cloud#3826 item 6 (real human confirmation):** a
+  `pending_confirmation` operation is also met when the agent applied it through the action's
+  confirmation gate on the person's explicit instruction — the ask names the target row, read
+  off the card (`askNamesTarget`); the write went through `run_action`, never a raw data door;
+  the build declares `ai.requiresConfirmation: true` on that action; the call carried
+  `confirm: true`; and the rows written on the object are exactly the target, holding the
+  declared `values` (gone, for a `delete`). The grade says which way it went
+  (`OperationGrade.confirmation`: `asked first` or `confirmed by the agent`), and the scorecard
+  counts both per half and per card. The switch is `AGENT_CONFIRMATION_MEETS_PENDING` and the
+  rule is `agentConfirmationChecks`: set the switch to `false` to grade strictly again, or delete
+  both when the platform confirms for real.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
   (`scopeFigures`) equals it, and a hidden field leaks when a tool answer's keys carry it, not
-  when a call only asked for it.
+  when a call only asked for it. A number inside an identifier (`INV-003`, `i3`; a digit after a
+  Latin letter, `isIdentifierToken`) is no figure for the answer or the leak scan; `3k`, `3 days`
+  and `USD3,000` still are.
 
 ### The closed capability-tag table
 
@@ -150,6 +191,8 @@ pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # t
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
 pnpm --filter @objectstack/scenarios run-scenarios --model sonnet            # the model every turn asks for (default: the login's own)
 pnpm --filter @objectstack/scenarios run-scenarios --author-model opus --ask-model haiku  # build and persona turns apart
+pnpm --filter @objectstack/scenarios run-scenarios --effort medium           # the effort every turn asks for (default: the CLI's own)
+pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-effort low  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
 ```
 
@@ -204,7 +247,10 @@ npx @objectstack/scenarios help                                      # the comma
   authoring timeout and the turn caps. Every turn records its process: elapsed time, the turn cap it ran under
   (`--max-turns`), and for a turn that did not finish its exit code or signal, whether the runner's timeout killed it,
   and the end of its stderr. `RecordedDriver` replays a recording, and refuses the live-driver limits and models below;
-  its record keeps the driver of the recording (`replayOf`). For Codex and any other agent tool, see
+  its record keeps the driver of the recording (`replayOf`). It re-sends each turn's recorded writes to the booted app,
+  in recorded order, as the turn's persona, before the read-back (reads are never re-sent; a refused write must be
+  refused again; a row the run created is named by its new id); a turn the app answers otherwise, or one whose write
+  has no recorded answer, is not measured with the call named, never a fail. For Codex and any other agent tool, see
   [Other agent tools](#other-agent-tools--codex-and-the-external-driver-contract).
 - **Model** (`driver.ts`): `--model M` passes `claude --model M` on every turn, an alias (`sonnet`) or a name
   (`claude-sonnet-4-5`); `--author-model` sets the authoring turns (build and iterate) and `--ask-model` the question
@@ -214,6 +260,16 @@ npx @objectstack/scenarios help                                      # the comma
   `claude-sonnet-4-5-20250929`, `opus` is not) is a mismatch (`modelMismatch`). The scorecard's author rows name the
   served model (`⚠ asked for sonnet` on a mismatch), and its `Run · model` rows count the persona turns per served
   model (`claude-opus-5-5 ×9 ⚠ 9 not sonnet`).
+- **Effort** (`driver.ts`): `--effort LEVEL` passes `claude --effort LEVEL` on every turn; `--author-effort` and
+  `--ask-effort` set the two kinds apart, each in place of `--effort`, as the model flags do. The levels are the CLI's
+  own, read off its `--help` when an effort is asked for (Claude Code 2.1.325: `low`, `medium`, `high`, `xhigh`,
+  `max`): a level it does not list is refused before any card runs, because the CLI itself only warns on an unknown
+  level and runs the turn at its default effort. `CLAUDE_CODE_EFFORT_LEVEL`, which the CLI lets win over `--effort`,
+  never reaches a turn: with no effort flag the runner passes its level as `--effort` (`auto` and `unset` mean the
+  default), so the record names the effort that ran. Every turn records the effort it asked for (`requestedEffort`);
+  no stream reports the effort a turn was served, so there is no served effort to compare. The scorecard shows it
+  beside the served model, on the author rows (`… · claude-haiku-5-5 · effort high`) and the `Run · model` rows
+  (`claude-haiku-5-5 ×24 · effort low`). A turn that asked for none ran at the CLI's default and shows none.
 - **Cost** (`scorecard.ts`): every turn records the cost its driver reported (`reportedCostUsd`: the `claude` CLI's
   `total_cost_usd`, notional under a subscription login, or an external command's report) and, from an external
   command, its `inputTokens` and `outputTokens`; a turn that reported none records none, never a zero. The scorecard's
@@ -252,11 +308,20 @@ npx @objectstack/scenarios help                                      # the comma
   reads that answer as the **probe**: the app's validation is measured on every run, whether or not the agent sent
   the bad value, and a careful agent that caught it first is not failed for it. A failed probe is the platform's
   failure, never the agent's. Every other `refused` create or update is probed the same way, so a permission
-  overstep the agent declined still measures the platform's refusal. An answer that carries no code is reported
+  overstep the agent declined still measures the platform's refusal. An `applied` create or update is probed only
+  when the agent's own write met 403 `PERMISSION_DENIED` and nothing was written (a probe after a write that
+  landed would apply it twice): a denied probe charges the write to the build. A probe the door applies leaves the
+  runner's row in place for the operations after it. An answer that carries no code is reported
   with whose throw it was (`uncodedNote`: the build's own hook or action, named off the sandbox's wrapper, or the
   door's text). The runner also records the run dates (each clock instant's UTC and local date) and the fields
   the agent's own write calls set (`agentSetOf`: a create's or update's `data`, a `run_action`'s `params`); a
   declared `asOf` value is matched against a run date only in a field the agent did not set.
+- **Run date** (`run-date.ts`): before a card runs, its dates move onto the day it starts. One whole-day
+  delta, `run date − asOf`, moves `asOf`, every ISO date under `run` and `iterate`, and the dates an `ask` writes
+  in its text (ISO, English `[Weekday] D Month`, Chinese `M 月 D 日(周X)`, weekdays written again); the truths are
+  computed again over the moved seed. The prompt's "today", the seeded rows, the timestamps the app's real clock
+  stamps and the grader's expectations then agree, however long after `asOf` the run is. The card file is not
+  changed. A card on working days keeps to them only when the delta is whole weeks.
 - **Namespaces** (`namespace.ts`): every card's app is in the namespace `demo` + the card's `code` (`democrm`): scratch
   mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
   `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are
@@ -398,7 +463,9 @@ CLI was measured on `codex-cli 0.167.0`:
   (0600, deleted when the turn returns), that holds the persona's key as an `http_headers` `Authorization` header and
   turns off every MCP server of your own config (`enabled = false`). A server of your own named `app` is refused.
 - **Flags**: `--model`, `--author-model` and `--ask-model` pass `-m`; `--author-timeout` is the runner's own clock.
-  `codex exec` has no cap on its agentic turns, so `--author-max-turns` and `--ask-max-turns` are refused. Its JSONL
+  `codex exec` has no cap on its agentic turns, so `--author-max-turns` and `--ask-max-turns` are refused. It has no
+  effort flag either, and its `model_reasoning_effort` config key starts a turn whatever value it is given (measured
+  on 0.167.0), so no level can be checked: `--effort`, `--author-effort` and `--ask-effort` are refused. Its JSONL
   names no model, so the scorecard shows `model not reported (asked for …)`.
 
 ### `--driver external:COMMAND` — the contract
@@ -436,8 +503,11 @@ the directory you run from. For anything more, write a wrapper script.
   graded as the empty answer it is.
 - **Timeout**: `limits.timeoutMs` — `--author-timeout` for `author` (default 60 min), 5 min for `ask`. The runner kills
   a call still running then (SIGTERM).
-- **Limits**: `limits` carries `timeoutMs`, and `maxTurns` (`--author-max-turns` / `--ask-max-turns`) and `model`
-  (`--model`, `--author-model`, `--ask-model`) when given. The command may ignore them; the record states them.
+- **Limits**: `limits` carries `timeoutMs`, and `maxTurns` (`--author-max-turns` / `--ask-max-turns`), `model`
+  (`--model`, `--author-model`, `--ask-model`) and `effort` (`--effort`, `--author-effort`, `--ask-effort`, the level
+  name as typed) when given. The command may ignore them; the record states them. A command that cannot set the
+  effort it is given should fail the call rather than run at its default, or the record names an effort no turn ran
+  at.
 - ⛔ **The key**: the persona's API key is only in `mcp.configFile`, a 0600 file in the shape of Claude Code's
   `--mcp-config` (`{"mcpServers":{"app":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}`), deleted
   when the call returns. It is never on argv, in the environment or on stdin, and so never in a run record, a

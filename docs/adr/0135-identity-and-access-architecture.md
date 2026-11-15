@@ -242,6 +242,19 @@ An environment that has adopted SSO still needs a user-management surface, and t
   context, `isSystem` included, because the paths that actually lock an organization out are the
   system ones.
 
+> **Note (2026-11-14, objectstack, #33203; ruling 10 of objectstack-ai/cloud#4465) — on a
+> cloud-managed environment the break-glass bullet above does not apply.** A hosted environment
+> (`OS_CLOUD_MANAGED=1`) sets no local password for anyone and has no local break-glass
+> administrator: `admin/set-user-password` refuses every target, an `env_native` row included,
+> `set-initial-password` refuses every signed-in caller, a platform administrator included, and the
+> self-service reset doors (`reset-password`, `phone-number/reset-password` and the two
+> `request-password-reset` doors) refuse every request
+> (`packages/plugins/plugin-auth/src/cloud-managed.ts`). A password set before is not removed by
+> this rule; invalidating it is the hosting cloud's (objectstack-ai/cloud#4471). Everyone signs in through the hosting
+> cloud's identity provider, and recovery is the cloud's, not a local credential's. Self-hosted
+> deployments are unchanged: the split by population above, break-glass included, holds there.
+> Cloud ADR-0024's own text is not amended here.
+
 ### D6 — SSO per production environment, configured in the environment
 
 A production environment federates login to the customer's own identity provider, and that
@@ -263,7 +276,8 @@ compared exactly (a subdomain counts only when it is itself listed and verified,
 counts only for the host the provider proved), failing closed, and relaxed by no audience posture,
 invitation or JIT toggle (plugin-auth's rule at better-auth's `user.validateUserInfo` gate,
 `packages/plugins/plugin-auth/src/sso-account-at-proven-domain.ts#refuseSsoAccountOutsideProvenDomain`).
-Accounts that already exist are not re-checked. With the rule that a domain is claimed by one
+Accounts that already exist are not re-checked, except on an implicit link or a sign-in that
+would change the stored address (see the 2026-11-14 note). With the rule that a domain is claimed by one
 provider at most, held where a provider is registered and where its domain list is edited
 (`packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts#findSsoDomainClaim`), an SSO provider
 creates a new account at a domain only when it is the one provider that claims that domain and has
@@ -281,6 +295,24 @@ register-then-login flow. The surface is
 > provider's domain entry counting only when it is written as a bare host name (an entry written
 > as a URL or with a port proves nothing). That ruling, not this file, is its authority; #32669
 > implements it. Cloud ADR-0024's own text is not amended here.
+
+> **Note (2026-11-14, objectstack) — the same rule for an implicit link and for an address change.**
+> The proven-domain account rule above also decides the two other ways an SSO sign-in reaches an
+> account, so "accounts that already exist are not re-checked" now holds only for a sign-in that
+> neither links implicitly nor would change the stored address. With domain verification on: an
+> implicit link to an account that already exists is made only when the asserted address is at a
+> domain the provider has proven, compared exactly as for creation; and a sign-in into an
+> already-linked account is refused when it would change the stored address to one that is not
+> at such a domain, and refused where whether it would change the address cannot be determined. A
+> sign-in that reports an address outside the proven domains but changes nothing is admitted, and
+> a link the user starts from their own session (an explicit link) is not judged. The rule's own
+> refusal answers `EMAIL_DOMAIN_NOT_ALLOWED`, the code creation answers; an input the gate cannot
+> read is refused by the gate's general refusal. The authority is the maintainer's ruling of
+> 2026-11-14 on the security lane's decision card (option B, "only a sign-in that would change the
+> address is refused"), relayed in contract review record 6884303063; record 6880992920 is the
+> review that required this note. That ruling, not this file, is its authority; #33307 implements
+> it, in plugin-auth's rule at the same `user.validateUserInfo` gate
+> (`packages/plugins/plugin-auth/src/implicit-account-linking.ts`).
 
 ⚠️ **The SCIM half of "SSO + SCIM per production environment" is not restated here.** Its
 mechanism record is `cloud ADR-0071`, mirrored into this repository by its own card; this file
@@ -331,8 +363,8 @@ spelling. The re-pointing is per-site and semantic.
 
 ## What this record does NOT settle
 
-- **Anything cloud ADR-0024 did not decide.** This file adds no clause, except the one the D6
-  note on the proven-domain account rule names as this repository's own. Where the mechanism in
+- **Anything cloud ADR-0024 did not decide.** This file adds no clause, except the proven-domain
+  account rule the D6 notes name as this repository's own. Where the mechanism in
   this tree is richer than the decision (the ADR-0092 write guard, the ADR-0095 tenant wall, the
   ADR-0091 validity window), that richness belongs to those records, and is cited here only as the
   thing D4 and D5 lean on.

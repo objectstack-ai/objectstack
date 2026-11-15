@@ -157,6 +157,7 @@ import { lintConnectorCredentialLiterals } from './lint-connector-credential-lit
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
+import { lintDuplicateFieldLabels } from './lint-duplicate-field-labels.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
 import { validateEmailTemplateHoleGrammar } from './validate-email-template-hole-grammar.js';
@@ -172,6 +173,7 @@ import {
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { UserTextParams } from './finding-user-text.js';
+import type { StoredObjectExtension } from './object-graph.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -356,6 +358,15 @@ export interface AuthoringRuleContext {
    * platform names, a platform-prefixed name advised at `warning`) applies.
    */
   runtimeWriteType?: string;
+  /**
+   * [#33494] Set by the runtime gate on an `object_extension` write only: the
+   * written entry's target's other packages' published extensions, as the
+   * host's registry holds them. Read by one rule, `validateStackExpressions`,
+   * whose extension walk folds the written entry among them by priority (the
+   * build's own fold, `objectsAsServed`), so the door judges the definition
+   * the build judges (`StackExpressionOptions.storedObjectExtensions`).
+   */
+  storedObjectExtensions?: readonly StoredObjectExtension[];
   /**
    * [#32666] Set by the runtime gate on its SUBJECT pass only, which judges
    * the subject collections it withholds from every other pass
@@ -850,7 +861,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page', 'object_extension'],
     run: (stack, ctx) =>
-      runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
+      runStackExpressionPasses(stack, {
+        runtimeWriteType: ctx.runtimeWriteType,
+        ...(ctx.storedObjectExtensions !== undefined ? { storedObjectExtensions: ctx.storedObjectExtensions } : {}),
+      }).map((i) => ({
         severity: i.severity ?? 'error',
         // [#32529, #32554] The stored-expression input member names its own
         // two ids; every other finding of the pass is `expression-invalid`.
@@ -2343,6 +2357,35 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         path: f.path,
         message: f.message,
         hint: f.fix ?? '',
+      })),
+  },
+  // Two visible fields of one object served under one label
+  // (`field-label-duplicate`): the platform's `owner_id` and an author's
+  // `assignee`, both read as "负责人" by a zh-CN reader, are two columns of one
+  // name in every grid, card and form, and editing one reads as editing the
+  // other. GATING on all three commands and on the runtime publish gate's
+  // `object` writes, the door an AI or Studio author has. The labels compared
+  // are the ones `translateObject` serves (see the rule's module note). The
+  // gate's differential never charges a stored object's clash to a write of
+  // another object; a re-save of that object is judged on its own body, as
+  // for every gating rule at this door. No boot or registration path runs
+  // this table, so an app already installed keeps loading.
+  {
+    name: 'lintDuplicateFieldLabels',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/lint-duplicate-field-labels.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack) =>
+      lintDuplicateFieldLabels(stack).map((f) => ({
+        severity: f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.hint,
       })),
   },
   // #3991 / ADR-0120 D5b — a column carrying BOTH a field-level `unique` and a

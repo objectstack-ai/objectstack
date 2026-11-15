@@ -63,6 +63,16 @@ const SERVICE_ACCOUNT_ADMIN_VISIBLE = [
   ...[MEMBERSHIP_ROLE_OWNER, MEMBERSHIP_ROLE_ADMIN].map((grade) => `'${mapMembershipRole(grade)}' in current_user.positions`),
 ].join(' || ');
 
+/**
+ * Who is offered `add_sso_user` / `import_sso_users`: the platform-admin
+ * standing their doors' gate judges (ADR-0068 D4), on a cloud-managed
+ * environment only, the one place those doors answer. The two halves of the
+ * gate that hides `create_user` and the invitation mirrors there, read the
+ * other way.
+ */
+const MANAGED_ADD_PERSON_VISIBLE =
+  'current_user.isPlatformAdmin == true && has(features.cloudManaged) && features.cloudManaged == true';
+
 const TEMPORARY_PASSWORD_LABEL = 'Temporary password: copy it now, it is shown only once and never stored';
 
 /**
@@ -415,6 +425,116 @@ export const SysUser = ObjectSchema.create({
           { path: 'user.phoneNumber', label: 'Phone Number', format: 'text' },
           { path: 'permissionSet', label: 'Permission Set', format: 'text' },
           { path: 'temporaryPassword', label: TEMPORARY_PASSWORD_LABEL, format: 'secret' },
+        ],
+      },
+    },
+    // ── Adding people on a cloud-managed environment (cloud#4465 child 1b) ─
+    //
+    // On a cloud-managed environment the password and invitation doors above
+    // answer 409 and their actions are hidden (`features.cloudManaged`). These
+    // two are their managed counterparts: each adds a PENDING person ahead of
+    // their first sign-in (`sys_user.source = 'idp_pending'`, no password),
+    // who then signs in through the hosting organisation's identity provider.
+    // The doors are plugin-auth's `admin/add-sso-user` / `admin/import-sso-users`:
+    // platform-admin gated (ADR-0068), mounted with or without the better-auth
+    // admin plugin (so no `requiresFeature: 'admin'`), and answering
+    // `409 RESOURCE_CONFLICT` off a managed environment. So each is offered
+    // exactly where its door answers: the platform-admin standing AND the
+    // managed flag on. `has()` keeps both hidden while the console holds no
+    // served flag, rather than faulting (see `create_user`'s email params).
+    // No `ai` block: human-only and unassessed (ADR-0011 identity-actions note).
+    {
+      name: 'add_sso_user',
+      label: 'Add User',
+      description:
+        "Add someone by email address before their first sign-in. They sign in through your organization's identity provider; no password is set here.",
+      icon: 'user-plus',
+      variant: 'primary',
+      locations: ['list_toolbar'],
+      type: 'api',
+      target: '/api/v1/auth/admin/add-sso-user',
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
+      visible: MANAGED_ADD_PERSON_VISIBLE,
+      // The door's body is a closed key set: email, name, positions,
+      // permissionSets, manager. `positions` / `permissionSets` take a list or
+      // one `;`-separated string, so each picker's single name lands as a list
+      // of one; more are granted on the record afterwards.
+      params: [
+        { field: 'email', required: true },
+        { field: 'name', required: false },
+        {
+          name: 'positions',
+          type: 'text',
+          widget: 'position-ref',
+          label: 'Position',
+          required: false,
+          helpText: 'Optional. The position this person holds from the moment they are added.',
+        },
+        {
+          name: 'permissionSets',
+          type: 'text',
+          widget: 'permission-ref',
+          label: 'Permission Set',
+          required: false,
+          helpText: 'Optional. Grants this permission set to the person, so they can open their apps on first sign-in.',
+        },
+        {
+          name: 'manager',
+          type: 'email',
+          label: 'Manager Email',
+          required: false,
+          helpText: "Optional. The email address of this person's manager, a user of this environment.",
+        },
+      ],
+      refreshAfter: true,
+      resultDialog: {
+        title: 'User Added',
+        acknowledge: 'Done',
+        // Each field is skipped when its path is absent from the answer:
+        // `notApplied` only on a re-add of a person still pending, `managerError`
+        // only when no manager was linked, `host.reason` only when the hosting
+        // organisation was not told.
+        fields: [
+          { path: 'email', label: 'Email', format: 'text' },
+          { path: 'notApplied', label: 'Already pending, so not applied (set these on the record)', format: 'json' },
+          { path: 'managerError', label: 'Manager', format: 'text' },
+          { path: 'host.reason', label: 'Invitation not sent', format: 'text' },
+        ],
+      },
+    },
+    {
+      name: 'import_sso_users',
+      label: 'Import Users',
+      description:
+        "Add many people at once from CSV text. Each row is added on its own, so a bad row fails alone. They sign in through your organization's identity provider; no password is set here.",
+      icon: 'upload',
+      variant: 'secondary',
+      locations: ['list_toolbar'],
+      type: 'api',
+      target: '/api/v1/auth/admin/import-sso-users',
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
+      visible: MANAGED_ADD_PERSON_VISIBLE,
+      // The door takes `{ csv }` or `{ rows }`; the dialog sends the text.
+      params: [
+        {
+          name: 'csv',
+          type: 'textarea',
+          label: 'CSV',
+          required: true,
+          helpText:
+            'A header row, then one person per line, at most 500. Columns: email, name, positions and permission_sets '
+            + "(machine names separated by ;) and manager_id (the manager's email address).",
+        },
+      ],
+      refreshAfter: true,
+      resultDialog: {
+        title: 'Import Finished',
+        acknowledge: 'Done',
+        fields: [
+          { path: 'summary.added', label: 'Added', format: 'text' },
+          { path: 'summary.alreadyPending', label: 'Already pending, told again', format: 'text' },
+          { path: 'summary.failed', label: 'Not added', format: 'text' },
+          { path: 'rows', label: 'Result per row', format: 'json' },
         ],
       },
     },
@@ -1397,8 +1517,13 @@ export const SysUser = ObjectSchema.create({
       options: [
         { label: 'IdP-Provisioned', value: 'idp_provisioned' },
         { label: 'Local Account', value: 'env_native' },
+        // [#33181] A person added on a managed environment who has not signed
+        // in yet: no password, no session, until their first sign-in through
+        // the hosting organisation's identity provider moves the row to
+        // `idp_provisioned` (`plugin-auth` `pending-sso-marker.ts`).
+        { label: 'Pending SSO Sign-In', value: 'idp_pending' },
       ],
-      description: 'How this identity was created — idp_provisioned (federated SSO JIT or SCIM directory provisioning) or env_native (local signup, a local password, or an app end-user). System-managed; do not edit.',
+      description: 'How this identity was created — idp_provisioned (federated SSO JIT or SCIM directory provisioning), env_native (local signup, a local password, or an app end-user), or idp_pending (added on a managed environment and waiting for the first sign-in through the hosting organisation identity provider). System-managed; do not edit.',
     }),
 
     id: Field.text({

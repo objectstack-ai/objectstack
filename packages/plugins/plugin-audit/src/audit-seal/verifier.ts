@@ -79,6 +79,8 @@ export type AuditChainFaultKind =
   | 'chain_key'
   /** Two checkpoints at one sequence of one chain. */
   | 'duplicate'
+  /** A row id another checkpoint already lists (S7: the parts of a window never overlap). */
+  | 'listed_twice'
   /** Sequences no checkpoint holds and no honoured expiry covers. */
   | 'gap'
   /** A `previous_digest` that is not the digest of what precedes it. */
@@ -763,6 +765,13 @@ export abstract class ChainCheck<C extends VerdictLedger = VerdictLedger> {
       this.holdsNothing(head, body);
       return;
     }
+    // S7 (ADR-0154 D4 amended): no row is sealed twice, whatever cut a window into parts. A row another
+    // checkpoint already holds is a fault here, and this listing holds nothing more for it.
+    const again = new Set(body.row_ids.filter((id) => this.held.has(id)));
+    if (again.size > 0) {
+      const named = [...again].slice(0, 5).join(', ') + (again.size > 5 ? ` and ${again.size - 5} more` : '');
+      this.check.fault({ ...at, kind: 'listed_twice', sequence: body.sequence, message: `checkpoint ${body.sequence}: lists row(s) ${named} that another checkpoint already lists` });
+    }
     let hashes: string[];
     try {
       hashes = checkpointLeafHashesFromRow(row, body);
@@ -779,6 +788,7 @@ export abstract class ChainCheck<C extends VerdictLedger = VerdictLedger> {
     }
     const redactions = this.redactions.get(this.key(head.chain, body.sequence)) ?? [];
     for (const [i, id] of body.row_ids.entries()) {
+      if (again.has(id)) continue;
       this.held.add(id);
       const leaf = leaves[i];
       if (leaf === null) {
@@ -816,7 +826,8 @@ export abstract class ChainCheck<C extends VerdictLedger = VerdictLedger> {
 
 /** The columns of a stored checkpoint and amendment a proof bundle copies of a row that is not a signed body. */
 const CHECKPOINT_COLUMNS = [
-  'id', 'chain_key', 'signature', 'leaf_hashes', 'sealed_object', 'tenant_id', 'sequence', 'kind', 'window_start', 'window_end',
+  'id', 'chain_key', 'signature', 'leaf_hashes', 'sealed_object', 'tenant_id', 'sequence', 'kind', 'part_index', 'final_part',
+  'window_start', 'window_end',
   'sealed_through', 'leaf_count', 'row_ids', 'root', 'previous_digest', 'columns', 'canon_version', 'seed_handle', 'fencing_token',
   'sealed_at', 'signing_key_id',
 ];

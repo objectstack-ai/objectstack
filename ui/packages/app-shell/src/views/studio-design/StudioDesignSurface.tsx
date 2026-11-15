@@ -1111,7 +1111,13 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
         // the dispatcher's envelope and so hands back the batch's own
         // `success`), every refusal reached the author as "Action failed".
         await keepRefusals(failed);
-      } else if (payload?.success === false) {
+      } else if (payload?.success === false && payload?.outcome !== 'published_unregistered') {
+        // objectstack#33277 — `published_unregistered` answers `success: false`
+        // over drafts that DID land: the registry refused an object, and that
+        // object's `published[]` element carries the warning the client has
+        // already reported. It reads as the published branch below, as it did
+        // while the server answered `published` for it.
+        //
         // The status is no longer in hand — a non-2xx threw above — so the
         // last rung is a sentence rather than "HTTP 200".
         throw Object.assign(

@@ -46,6 +46,13 @@ export interface KanbanBoardCoreProps {
    */
   cardsMovable?: boolean;
   /**
+   * Whether a click on a card opens anything — see
+   * `KanbanBoardProps.rowOpensRecord` (objectstack#33548). A PROP, never a
+   * schema key, for the reason `cardsMovable` is: `ObjectKanban` passes the
+   * host's own answer.
+   */
+  rowOpensRecord?: boolean;
+  /**
    * The per-column drop gate — see `KanbanBoardProps.canDropCard` (#25933). A
    * PROP, never a schema key, for the reason `cardsMovable` is: `ObjectKanban`
    * derives it from the object's `state_machine` rule on the grouped field.
@@ -111,6 +118,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
   objectFields,
   onCardMove,
   cardsMovable,
+  rowOpensRecord,
   canDropCard,
   dropBlockedReason,
   onLaneRowsChange,
@@ -137,6 +145,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
         columns={processedColumns}
         onCardMove={onCardMove}
         cardsMovable={cardsMovable}
+        rowOpensRecord={rowOpensRecord}
         canDropCard={canDropCard}
         dropBlockedReason={dropBlockedReason}
         onLaneRowsChange={onLaneRowsChange}

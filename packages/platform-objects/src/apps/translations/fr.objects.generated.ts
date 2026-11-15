@@ -108,7 +108,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         help: "La langue dans laquelle cet utilisateur voit l’interface et reçoit ses notifications, sous forme d’étiquette de langue telle que zh-CN ou ja-JP. Si elle n’est pas définie, la langue par défaut du déploiement s’applique."
       },
       manager_id: {
-        label: "Responsable",
+        label: "Responsable hiérarchique",
         help: "Le responsable direct de cet utilisateur. Forme la chaîne hiérarchique que parcourt la portée hiérarchique `own_and_reports`."
       },
       primary_business_unit_id: {
@@ -120,7 +120,8 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         help: "Comment cette identité a été créée — idp_provisioned (JIT par SSO fédéré) ou env_native (inscription locale / utilisateur final de l’application). Géré par le système ; ne pas modifier.",
         options: {
           idp_provisioned: "Provisionné par l’IdP",
-          env_native: "Compte local"
+          env_native: "Compte local",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
@@ -214,6 +215,54 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             "user.phoneNumber": "Numéro de téléphone",
             permissionSet: "Ensemble d’autorisations",
             temporaryPassword: "Mot de passe temporaire : copiez-le maintenant, il n’est affiché qu’une seule fois et n’est jamais stocké"
+          }
+        }
+      },
+      add_sso_user: {
+        label: "Ajouter un utilisateur",
+        description: "Ajoutez une personne par son adresse e-mail avant sa première connexion. Elle se connecte via le fournisseur d'identité de votre organisation ; aucun mot de passe n'est défini ici.",
+        params: {
+          positions: {
+            label: "Poste",
+            helpText: "Facultatif. Le poste que cette personne occupe dès son ajout."
+          },
+          permissionSets: {
+            label: "Ensemble d'autorisations",
+            helpText: "Facultatif. Accorde cet ensemble d'autorisations à la personne, pour qu'elle puisse ouvrir ses applications dès sa première connexion."
+          },
+          manager: {
+            label: "E-mail du responsable",
+            helpText: "Facultatif. L'adresse e-mail du responsable de cette personne, un utilisateur de cet environnement."
+          }
+        },
+        resultDialog: {
+          title: "Utilisateur ajouté",
+          acknowledge: "Terminé",
+          fields: {
+            email: "E-mail",
+            notApplied: "Déjà en attente, donc non appliqué (à définir sur l'enregistrement)",
+            managerError: "Responsable",
+            "host.reason": "Invitation non envoyée"
+          }
+        }
+      },
+      import_sso_users: {
+        label: "Importer des utilisateurs",
+        description: "Ajoutez plusieurs personnes à la fois à partir d'un texte CSV. Chaque ligne est ajoutée séparément : une ligne erronée échoue seule. Elles se connectent via le fournisseur d'identité de votre organisation ; aucun mot de passe n'est défini ici.",
+        params: {
+          csv: {
+            label: "CSV",
+            helpText: "Une ligne d'en-tête, puis une personne par ligne, 500 au maximum. Colonnes : email, name, positions et permission_sets (noms machine séparés par ;) et manager_id (l'adresse e-mail du responsable)."
+          }
+        },
+        resultDialog: {
+          title: "Importation terminée",
+          acknowledge: "Terminé",
+          fields: {
+            "summary.added": "Ajoutés",
+            "summary.alreadyPending": "Déjà en attente, prévenus à nouveau",
+            "summary.failed": "Non ajoutés",
+            rows: "Résultat par ligne"
           }
         }
       },

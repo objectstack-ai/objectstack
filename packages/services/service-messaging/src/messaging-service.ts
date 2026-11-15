@@ -9,7 +9,7 @@ import type {
     MessagingChannelContext,
     Notification,
 } from './channel.js';
-import { RecipientResolver } from './recipient-resolver.js';
+import { RecipientResolver, isRoleAudience } from './recipient-resolver.js';
 import { PreferenceResolver, type PreferenceTarget } from './preference-resolver.js';
 import type { INotificationOutbox } from './outbox.js';
 import type {
@@ -158,7 +158,8 @@ export interface InboxNotificationView {
  * each one to user ids: an explicit user id (or `user:ID`), an email address
  * (to the user who holds it), `role:NAME` and `org:members` (the emitting
  * organization's members — those with that role, and all of them; both read
- * {@link EmitInput.organizationId}), `team:ID`, and `owner_of:OBJECT:ID` /
+ * {@link EmitInput.organizationId}, and `role:` alone falls back to the
+ * organization stored on the notification's event row when it is absent), `team:ID`, and `owner_of:OBJECT:ID` /
  * `{ ownerOf }` (the record's owner).
  */
 export type AudienceSpec =
@@ -209,7 +210,10 @@ export interface EmitInput {
     /**
      * Tenant stamp for sudo/background paths so RLS matches recipients. Also
      * the emitting organization the audience resolves in: `role:` scopes to
-     * it, and `org:members` names its members — nobody when this is absent.
+     * it (absent, to the organization stored on the event row, else nobody),
+     * and `org:members` names its members — nobody when this is absent. The
+     * recipients' preferences are read in the same organization `role:`
+     * resolves in.
      */
     readonly organizationId?: string;
     /** Channels to fan out to. Defaults to `['inbox']` (always on). */
@@ -1414,11 +1418,14 @@ export class MessagingService {
         }
 
         // 3) Resolve the audience to recipient user ids (RecipientResolver owns
-        //    role:/org:members/team:/owner_of:/email→id expansion). The
-        //    organization is the producer's, as role: has always read it.
-        const recipients = await this.resolver.resolve(input.audience, {
-            organizationId: input.organizationId,
-        });
+        //    role:/org:members/team:/owner_of:/email→id expansion). `role:`
+        //    resolves in the emitting organization, the same `owned`
+        //    organization every row below the event carries: the producer's,
+        //    else the one stored on the event row (step 2); with neither it
+        //    names nobody. Every other selector resolves with the producer's
+        //    organization alone — `org:members` names nobody when the producer
+        //    names none.
+        const recipients = await this.resolveAudience(input.audience, input.organizationId, owned.organizationId);
         if (recipients.length === 0) {
             this.ctx.logger.warn(`[messaging] emit: topic '${input.topic}' resolved to 0 recipients`);
             return { notificationId, deduped: false, deliveries: [], delivered: 0, enqueued: 0, failed: 0, suppressed };
@@ -1438,10 +1445,16 @@ export class MessagingService {
 
         // 3b) Preference filter (ADR-0030 P2): drop the (recipient × channel)
         //     pairs the user muted. Mandatory topics bypass; fail-open on error.
+        //     Read in the emitting organization, the same `owned` one `role:`
+        //     resolves in at step 3: preference rows are per organization, and
+        //     a read with no organization term runs unscoped under the system
+        //     opt-in, so another organization's row could decide this one's
+        //     delivery. With no organization from the producer or the event
+        //     row the read stays unscoped, as before.
         const payload = input.payload ?? {};
         const targets = await this.preferences.filter(recipients, channels, {
             topic: input.topic,
-            organizationId: input.organizationId,
+            organizationId: owned.organizationId,
             severity: input.severity,
         });
         if (targets.length === 0) {
@@ -1494,6 +1507,36 @@ export class MessagingService {
         // real terminal count and nothing is left in flight.
         const { deliveries, delivered, failed } = await this.fanOut(notification, targets, input.keyedText);
         return { notificationId, deduped: false, deliveries, delivered, enqueued: 0, failed, suppressed };
+    }
+
+    /**
+     * Expand an audience: `role:` specs with `roleOrganization` (the emitting
+     * organization, step 3 of {@link emit}), every other spec with
+     * `producerOrganization`. When the two agree — the producer named its
+     * organization, or the event row stored none — this is the single
+     * resolver call it always was. Otherwise each spec is resolved with its
+     * own organization, in audience order, and the ids de-duplicated as the
+     * resolver does.
+     */
+    private async resolveAudience(
+        audience: Audience,
+        producerOrganization: string | undefined,
+        roleOrganization: string | undefined,
+    ): Promise<string[]> {
+        if (roleOrganization === producerOrganization) {
+            return this.resolver.resolve(audience, { organizationId: producerOrganization });
+        }
+        const specs = Array.isArray(audience) ? audience : [audience as AudienceSpec];
+        const out: string[] = [];
+        for (const spec of specs) {
+            const organizationId = isRoleAudience(spec) ? roleOrganization : producerOrganization;
+            // A one-entry list, never the bare spec: the resolver reads a list
+            // entry by entry, so an entry here is read exactly as the
+            // single-call branch above reads it (an entry that is itself a
+            // list is skipped there, and would be expanded if passed bare).
+            out.push(...await this.resolver.resolve([spec], { organizationId }));
+        }
+        return [...new Set(out)];
     }
 
     /**

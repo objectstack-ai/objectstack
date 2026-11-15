@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.4.0"
+  version: "18.5.0"
   domain: automation
   tags: flow, workflow, trigger, approval, state-machine, scheduled, webhook
 ---
@@ -22,8 +22,7 @@ metadata:
 
 ## When to Use This Skill
 
-Flows, state machines and approvals, triggers, vendor integrations and
-their callbacks, and **assignment rules**.
+Also vendor-integration callbacks and **assignment rules**.
 
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
 > `entryCondition` / filter `value` is an **Expression** envelope: a plain CEL
@@ -105,15 +104,14 @@ Built-in (plugins register more):
 
 ### `notify`
 
-`NotifyConfigSchema` is `strictObject` — an undeclared key is a named parse
-error. **RAW** keys are read as written: a
-`{token}` in one is refused.
+An undeclared key is a named parse error. **RAW** keys are read as written:
+a `{token}` in one is refused.
 
 <!-- os:check -->
 ```ts
 import type { FlowNode } from '@objectstack/spec/automation';
 const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
-    recipients: { dialect: 'cel', source: 'record.assignee' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
+    recipients: { dialect: 'cel', source: 'record.owner_id' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
     // 4th form `{ emailField: 'applicant_email' }`: an `email` field of the trigger record, for a non-user —
     // then `channels: 'email'` alone. An envelope must yield USER ids: an address no user holds fails the node
     title: 'Done: {{ record.title }}', // inline; XOR `template` (RAW, localizable)
@@ -130,8 +128,8 @@ const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owne
 A recipient string, written or evaluated, may be an audience selector:
 
 - `team:ID` — that team's members.
-- `owner_of:OBJECT:ID` — that record's owner.
-- `org:members` — every member of the run's organization, else that of the record the notification is about; any other `org:` value reaches nobody, with a warning.
+- `owner_of:OBJECT:ID` — that record's owner; a computed id: `source: "'owner_of:crm_case:' + record.case_id"`.
+- `org:members` — every member of the run's organization, else that of the record the notification is about, else nobody (`single` posture: a `schedule` flow declaring no `organization`, no record). Any other `org:` value reaches nobody too. Each warns in the server log only; the node succeeds.
 
 An option label in a notice: `{{ stage | option:opportunity.stage }}` in the mail
 `template` (each recipient's language; mail-only, refused in inline `title` /
@@ -190,11 +188,11 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > writes across every tenant; filter on the platform-injected tenant column, never
 > re-declare it per object.
 
-> **Who may START a flow: `requiredPermissions: ['…']` on the flow** (ADR-0066
-> D4) — the four entrances above refuse a non-system caller missing any named
-> capability with `403 PERMISSION_DENIED`; an action starting it inherits the
-> list, a `subflow` node is not an entrance. Gate an elevated `screen` / `api`
-> flow here, never on `current_user.positions` inside it.
+> **Who may START a flow: `requiredPermissions: ['…']` on the flow** — the
+> four entrances above refuse a non-system caller missing any named capability
+> with `403 PERMISSION_DENIED`; an action starting it inherits the list, a
+> `subflow` node is not an entrance. Gate an elevated `screen` / `api` flow
+> here, never on `current_user.positions` inside it.
 
 > **A hook elevates itself with `runAs`, never with `sudo`.** An object hook
 > (objectstack-data) declares its own `runAs: 'system' | 'user' | 'inherit'` —
@@ -221,8 +219,8 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
   the remedy.
 - **A computed operand is a value, never a query operator**: a string, number,
   bigint, boolean or date, or at an `$in` / `$nin` / `$between` comparand a list
-  of them with no empty entry. Anything else fails the node as a guard before the
-  query runs. Make the expression evaluate to the compared value (for a record,
+  of them with no empty entry. Anything else fails the node as a guard.
+  Make the expression evaluate to the compared value (for a record,
   its `id`), and write conditions in the filter itself.
 
 ---
@@ -250,7 +248,8 @@ Most are caught by `objectstack build`:
 
    Text slots (notify `title` / `message` / `actionUrl`, screen `title` /
    `description`, end `message`, `http` `url` / `headers`) render `{{ }}`
-   holes — a variable path, optional formatter, no logic; a `{…}` token there
+   holes — a variable path, optional formatter (a `default:` argument is
+   literal text, never a path), no logic; a `{…}` token there
    is refused with its `{{ }}` spelling. A date or the run user has no hole:
    assign it first (`assignments: { v: { dialect: 'cel', source:
    'current_user.id' } }`), then write `{{ v }}`.
@@ -261,23 +260,23 @@ Most are caught by `objectstack build`:
 
 3. **`script` nodes call a registered function — nothing else.** `config.function`
    (**required**: an empty node refuses at execute, an unregistered name fails
-   loudly) names one registered in `defineStack({ functions })` (below).
+   loudly) names one registered in `defineStack({ functions })`.
 
    **The name resolves from the flow's package, as `subflow`'s `flowName`
-   does**, the platform's function (registered under no package) in every
-   flow's reach; a `.custom` override reads as a package-less flow. Packages of
-   two `namespace`s each run their own `normalize_phone` (one namespace, or
-   none: refused at install; a boot warns `Bare-name conflict at boot`). If the
-   flow's package holds none, two holders in reach or one only outside its
-   `dependencies` closure fail the step as a guard (no `fault` edge;
-   `$error.code: 'RESOURCE_CONFLICT'` in a `try_catch`); a flow door answers
-   `400 FLOW_FAILED`, `error.details.innerRefusal` naming each holder. Fix:
-   declare the dependency, or rename.
+   does**, the platform's ownerless function in every flow's reach; a
+   `.custom` override reads as a package-less flow. Packages of two
+   `namespace`s each run their own `normalize_phone`. One namespace (or
+   none): both held at boot warn `Bare-name conflict at boot`; a later one
+   installs but binds NONE of its functions or hooks (error `Failed to bind
+   declarative hooks`): rename, or another namespace. If the flow's package
+   holds none, two holders in reach or one only outside its `dependencies`
+   closure fail the step as a guard (no `fault` edge; `$error.code:
+   'RESOURCE_CONFLICT'` in a `try_catch`); a flow door's `innerRefusal` names
+   each holder. Fix: declare the dependency, or rename.
 
    **A flow `function` is a PURE compute step — it does NOT read/write the
-   database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`
-   exposes that value as a flow variable, and a later **declarative** node persists
-   it:
+   database.** It receives `ctx.input` and **returns** a value; a later
+   **declarative** node persists its `outputVariable`:
 
    ```ts
    { id: 'ai', type: 'script', config: {
@@ -291,9 +290,6 @@ Most are caught by `objectstack build`:
        fields: { ai_category: { dialect: 'cel', source: 'ai.ai_category' } },
    } },
    ```
-
-   Data-lifecycle **side effects** (read/write other records) are an L2 **hook**
-   (objectstack-data).
 
    A function that writes where the platform cannot see **declares** it, so the
    run reports "cannot say" rather than `acted: 0`:
@@ -322,7 +318,7 @@ Most are caught by `objectstack build`:
 `assignmentRules` on the stack routes each inserted
 row of an `ownership: 'user'` object whose `owner_id` and `queue` are both still
 empty — once, after every `beforeInsert` hook, never on update, never refusing the
-insert (ADR-0142 D5). Entries are ordered; the first whose `criteria` (CEL over
+insert. Entries are ordered; the first whose `criteria` (CEL over
 `record.*`) match decides:
 
 <!-- os:check -->
@@ -347,7 +343,7 @@ names one owner, who holds the row only while an active member of its organizati
 for the same people is a `queue` approver ([Approver Types](./references/state-machines-and-approvals.md#approver-types)).
 ⛔ Never a `beforeInsert` hook that picks an owner, nor a round-robin counter field.
 
-**A packaged rule's queue** (ADR-0150 D3) is its package's own, else the one holder
+**A packaged rule's queue** is its package's own, else the one holder
 in its `dependencies` closure plus `sys`: `acme.helpdesk` naming `acme.crm`'s queue
 declares `dependencies: { 'acme.crm': '^1.0.0' }`. Else refused — `outside-closure`
 (an undeclared package's or environment-only queue), `ambiguous-in-closure` (two

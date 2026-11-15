@@ -2802,6 +2802,8 @@ const fr = {
         ssoBackToConsole: "Retour à la console",
         ssoSwitchAccountHint: "Changer de compte ouvre votre service de connexion dans un nouvel onglet et vous y déconnecte. Reconnectez-vous ensuite ici avec un compte qui a accès.",
         linkEmailMismatch: "Le compte n'a pas été lié : son adresse e-mail ne correspond pas à celle du compte avec lequel vous êtes connecté. Liez un compte qui utilise la même adresse e-mail.",
+        linkAlreadyLinkedToOtherUser: "Le compte n'a pas été lié : il est déjà lié à un autre utilisateur de ce système. Liez un autre compte, ou connectez-vous en tant qu'utilisateur auquel il est lié et supprimez d'abord la liaison depuis ce compte.",
+        linkUnableToLink: "Le compte n'a pas pu être lié. Vérifiez que son adresse e-mail est confirmée auprès de ce service de connexion, puis réessayez. Si le problème persiste, contactez votre administrateur.",
         twoFactorInvalidCode: "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
         twoFactorInvalidBackupCode: "Ce code de secours n'est pas valide ou a déjà été utilisé.",
         twoFactorTooManyAttempts: "Trop de codes incorrects. Reconnectez-vous avec votre mot de passe.",
@@ -3656,12 +3658,13 @@ const fr = {
       notAllowedToInvite: "Vous n'êtes pas autorisé à inviter des utilisateurs dans cette organisation.",
       notAllowedToInviteWithRole: "Vous n'êtes pas autorisé à inviter un utilisateur avec ce rôle.",
       alreadyInvited: 'Cet utilisateur a déjà été invité dans cette organisation.',
+      alreadyMember: 'Cet utilisateur est déjà membre de cette organisation.',
       organizationExists: 'Cette organisation existe déjà.',
       slugTaken: 'Ce slug est déjà utilisé.',
       notAllowedToCreate: "Vous n'êtes pas autorisé à créer une nouvelle organisation.",
       organizationLimitReached: "Vous avez atteint le nombre maximal d'organisations que vous pouvez créer. Les organisations auxquelles vous avez été invité ne sont pas comptées.",
       notTheRecipient: "Vous n'êtes pas le destinataire de cette invitation.",
-      invitationNotFound: "Cette invitation n'existe plus ou a expiré.",
+      invitationNotFound: "Cette invitation a déjà été utilisée, a expiré ou a été révoquée. Si vous l'avez acceptée, vous trouverez l'organisation dans votre liste d'organisations.",
       unknown: 'Une erreur est survenue. Veuillez réessayer.',
     },
     backToList: "Retour aux organisations",
@@ -4053,6 +4056,14 @@ const fr = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'Il vous reste {{left}} de votre quota d’IA. Un modèle marqué ×N le consomme N fois plus vite que le modèle par défaut.',
+      confirmTitle: 'Passer à {{model}} ?',
+      confirmBody: 'Chaque message avec ce modèle consomme {{multiplier}} fois plus de quota d’IA qu’un message avec le modèle par défaut.',
+      confirmAllowance: 'Il en reste {{left}}, et avec ce modèle il s’épuise {{multiplier}} fois plus vite.',
+      confirmCancel: 'Annuler',
+      confirmAction: 'Changer de modèle',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Envoyer le message',
     scrollToBottom: 'Aller au dernier message',
@@ -4080,7 +4091,9 @@ const fr = {
     tool: {
       aggregate_data: "Synthétiser les données",
       get_record: "Lire l’enregistrement",
+      list_datasets: "Consulter les indicateurs disponibles",
       query_data: "Interroger les données nécessaires",
+      query_dataset: "Interroger un indicateur",
       query_records: "Rechercher les enregistrements",
       read_package_doc: "Lire le guide de l’application",
       search_knowledge: "Consulter la base de connaissances",

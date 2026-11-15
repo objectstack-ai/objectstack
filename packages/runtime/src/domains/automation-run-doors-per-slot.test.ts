@@ -50,6 +50,8 @@ interface HarnessOptions {
     bareKeys?: boolean;
     /** `getRun` answers `null` for every run: only the suspended-run list names it. */
     getRunBlind?: boolean;
+    /** [#33386] Packages disabled in the registry: the served holder read leaves them out (the caller's own holding stays). */
+    disabled?: string[];
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -88,10 +90,14 @@ function harness(options: HarnessOptions = {}) {
         });
     }
     const namespaces: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr' };
-    const holdersOf = (type: string, name: string) => (type === 'flow' && name === NAME ? [CRM, HR] : []);
+    const disabled = new Set(options.disabled ?? []);
+    const holdersOf = (type: string, name: string, caller?: string | null, read?: { includeDisabledPackages?: boolean }) =>
+        (type === 'flow' && name === NAME ? [CRM, HR] : [])
+            .filter((id) => read?.includeDisabledPackages === true || id === caller || !disabled.has(id));
     const registry = {
         getNamespaceOwners: (ns: string) => Object.keys(namespaces).filter((id) => namespaces[id] === ns),
         packageScopedHoldersOf: holdersOf,
+        isPackageDisabled: (id: string) => disabled.has(id),
         getPackageScopedItem: (type: string, name: string, packageId: string) =>
             (holdersOf(type, name).includes(packageId) ? { name, _packageId: packageId } : undefined),
         getEnvironmentScopedItem: () => undefined,
@@ -265,4 +271,49 @@ describe('[ADR-0150 D4, #31696] a bare run door on a shared name acts on the run
         const answer = await send(h, DOORS[0], `/${NAME}`, 'r-hr');
         expect(answer.body?.data?.flowName ?? answer.body?.flowName).toBe(NAME);
     });
+});
+
+/**
+ * [ADR-0150 D3, #33386; seat ruling 6884403301, amendments 2 and 3] The run
+ * doors while a holder is disabled: a run carries its slot key, and a run of
+ * the disabled holder's slot is no served holder's — never read or acted on
+ * as another package's, at the bare door or under any address. The served
+ * holder's run is served at the bare door and under its own address.
+ */
+/** {@link expectAnsweredAsNobodys} in the same disabled state: the answer the door gives a run nobody holds there. */
+async function expectNobodysWhile(disabled: string[], door: Door, prefix: string, runId: string) {
+    const answer = await send(harness({ disabled }), door, prefix, runId);
+    const nobody = await send(harness({ disabled }), door, prefix, 'r-nobody');
+    expect(JSON.stringify(answer).split(runId).join('RUNID'), `${prefix} ${runId}`).toBe(JSON.stringify(nobody).split('r-nobody').join('RUNID'));
+}
+
+describe('[#33386] the run doors while a holder is disabled', () => {
+    for (const door of DOORS) {
+        describe(door.label, () => {
+            it('CRM disabled: HR\'s run is served bare and under `hr`; CRM\'s run is nobody\'s at the bare door, and its verb is never called', async () => {
+                const h = harness({ disabled: [CRM] });
+                for (const prefix of ['/send_digest', '/hr/send_digest']) {
+                    const answer = await send(h, door, prefix, 'r-hr');
+                    expect(answer.status, `${prefix} ${JSON.stringify(answer.body)}`).toBe(200);
+                }
+                expect(verbRunIds(h, door.verb).filter((id: string) => id === 'r-hr').length).toBeGreaterThanOrEqual(door.verb === 'getRun' ? 1 : 2);
+                await expectNobodysWhile([CRM], door, '/send_digest', 'r-crm');
+                if (WRITES.has(door.verb)) expect(verbRunIds(h, door.verb)).not.toContain('r-crm');
+            });
+
+            it('CRM disabled: CRM\'s address is refused 409 naming HR only (FROM: CRM\'s run served), nothing acted on', async () => {
+                const h = harness({ disabled: [CRM] });
+                const answer = await send(h, door, '/crm/send_digest', 'r-crm');
+                expect([answer.status, codeOf(answer), candidatesOf(answer)]).toEqual([409, 'RESOURCE_CONFLICT', [{ kind: 'package', packageId: HR }]]);
+                if (WRITES.has(door.verb)) expect(h.automation[door.verb]).not.toHaveBeenCalled();
+            });
+
+            it('both disabled: either address answers 404; at the bare door each run is nobody\'s', async () => {
+                const h = harness({ disabled: [CRM, HR] });
+                for (const prefix of ['/crm/send_digest', '/hr/send_digest']) expect((await send(h, door, prefix, 'r-crm')).status, prefix).toBe(404);
+                for (const runId of ['r-crm', 'r-hr']) await expectNobodysWhile([CRM, HR], door, '/send_digest', runId);
+                if (WRITES.has(door.verb)) expect(h.automation[door.verb]).not.toHaveBeenCalled();
+            });
+        });
+    }
 });

@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { formulaCycleMessage } from '@objectstack/formula';
 import { EXPRESSION_INVALID, runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules } from './runtime-gate.js';
+import type { StoredObjectExtension } from './object-graph.js';
 
 const formula = (expression: string) => ({ type: 'formula', label: 'F', expression, returnType: 'number' });
 
@@ -99,8 +100,18 @@ describe('#33153 — formula cycles an object extension adds, at the object_exte
   const target = (formulas: Record<string, unknown> = {}) => xJob(formulas);
   const extension = (fields: Record<string, unknown>) => ({ extend: 'x_job', fields });
   const extWhere = (field: string, at = 0) => `object 'x_job' · objectExtensions[${at}] · field '${field}' expression`;
-  const gateExtension = (item: unknown, objects: unknown[] = [target()]) =>
-    runRuntimeAuthoringRules({ type: 'object_extension', item, context: { objects } });
+  /**
+   * The door, as `judgeRuntimeAuthoringRules` calls it: the live target, and
+   * (#33494) the target's other packages' published extensions when the host
+   * states them (`storedObjectExtensions`, from the registry's contributors).
+   */
+  const gateExtension = (item: unknown, objects: unknown[] = [target()], stored?: StoredObjectExtension[]) =>
+    runRuntimeAuthoringRules({
+      type: 'object_extension',
+      item,
+      context: { objects },
+      ...(stored !== undefined ? { storedObjectExtensions: stored } : {}),
+    });
   const build = (stack: Record<string, unknown>) =>
     cycleFindings(runAuthoringRules('build', { normalized: stack, parsed: stack }));
   const located = (fs: ReadonlyArray<{ where: string; message: string }>) => fs.map(({ where: w, message }) => ({ where: w, message }));
@@ -196,28 +207,78 @@ describe('#33153 — formula cycles an object extension adds, at the object_exte
     ]);
   });
 
-  it('the door judges the written entry\'s own definition whatever a sibling\'s priority: a tie and an outranked entry are refused there, though the build lets both through (#33494)', () => {
-    // The door's live target carries the sibling's `s__c` as a plain field,
-    // with no priority, and folds the written entry over it.
-    const served = target({ s__c: { type: 'number', label: 'Sibling' } });
-    const sibling = (priority: number) => ({ ...extension({ s__c: { type: 'number', label: 'Sibling' } }), priority });
-    const written = (priority: number) => ({ ...extension({ s__c: formula('record.s__c * 2') }), priority });
-    const twoPackages = (siblingPriority: number, writtenPriority: number) => ({
+  describe('#33494 — the door serves the build\'s winner when the host states the other packages\' extensions', () => {
+    // The door's live target carries a sibling package's published `s__c` as a
+    // plain field; the host also states the sibling's extension itself, with
+    // its package and priority, so the gate folds the written entry among it
+    // by priority, as the build folds both packages' entries.
+    const number = { type: 'number', label: 'Sibling' };
+    const stored = (fields: Record<string, unknown>, priority: number): StoredObjectExtension =>
+      ({ extend: 'x_job', priority, fields, packageId: 'com.acme.sibling' });
+    const twoPackages = (sibling: Record<string, unknown>, siblingPriority: number, written: unknown) => ({
       objects: [target()],
       packages: [
-        { manifest: { objectExtensions: [sibling(siblingPriority)] } },
-        { manifest: { objectExtensions: [written(writtenPriority)] } },
+        { manifest: { objectExtensions: [{ ...extension(sibling), priority: siblingPriority }] } },
+        { manifest: { objectExtensions: [written] } },
       ],
     });
+    const writtenAt = (packageWhere: string) => packageWhere.replace('objectExtensions[0]', 'packages[1].manifest.objectExtensions[0]');
 
-    for (const [label, siblingPriority, writtenPriority] of [['a tie', 200, 200], ['outranked', 300, 200]] as const) {
-      const door = cycleFindings(gateExtension(written(writtenPriority), [served]).errors);
-      expect(door.map((f) => f.where), `${label}: ${dump(door)}`).toEqual([extWhere('s__c')]);
-      // The build drops the tied name on a declared target, and serves the
-      // outranking sibling's number: neither leaves a cycle to name.
-      const built = build(twoPackages(siblingPriority, writtenPriority));
-      expect(built, `${label}: ${dump(built)}`).toEqual([]);
-    }
+    it('⭐ shapes 1 and 2 — a tie (200/200) and an outranked entry (sibling 300, written 200) are not refused at the door, as the build does not refuse them', () => {
+      const served = target({ s__c: number });
+      for (const [label, siblingPriority, writtenPriority] of [['a tie', 200, 200], ['outranked', 300, 200]] as const) {
+        const written = { ...extension({ s__c: formula('record.s__c * 2') }), priority: writtenPriority };
+        const door = cycleFindings(gateExtension(written, [served], [stored({ s__c: number }, siblingPriority)]).errors);
+        expect(door, `${label}: ${dump(door)}`).toEqual([]);
+        const built = build(twoPackages({ s__c: number }, siblingPriority, written));
+        expect(built, `${label}: ${dump(built)}`).toEqual([]);
+      }
+    });
+
+    it('⭐ LIT shape 3 — a higher sibling\'s definition closing a cycle through another field of the entry is refused at the door on that field, as the build refuses it', () => {
+      // The sibling (300) serves `s__c` as a formula reading `a__c`; the written
+      // entry (200) adds `s__c` as a number, outranked, and `a__c` reading `s__c`.
+      const siblingFields = { s__c: formula('record.a__c + 1') };
+      const served = target(siblingFields);
+      const written = { ...extension({ s__c: number, a__c: formula('record.s__c * 2') }), priority: 200 };
+
+      const door = cycleFindings(gateExtension(written, [served], [stored(siblingFields, 300)]).errors);
+      expect(door.map((f) => f.where), dump(door)).toEqual([extWhere('a__c')]);
+      expect(door[0]!.message).toContain(formulaCycleMessage('a__c', ['a__c', 's__c']));
+
+      // The build names the entry's member at the entry and the sibling's at the sibling's.
+      const built = build(twoPackages(siblingFields, 300, written));
+      expect(built.map((f) => f.where), dump(built)).toEqual([
+        "object 'x_job' · packages[0].manifest.objectExtensions[0] · field 's__c' expression",
+        writtenAt(extWhere('a__c')),
+      ]);
+    });
+
+    it('the entry that outranks the sibling (written 300 over sibling 200) is still refused at the door at the entry', () => {
+      const served = target({ s__c: number });
+      const written = { ...extension({ s__c: formula('record.s__c * 2') }), priority: 300 };
+      const door = cycleFindings(gateExtension(written, [served], [stored({ s__c: number }, 200)]).errors);
+      expect(door.map((f) => f.where), dump(door)).toEqual([extWhere('s__c')]);
+      const built = build(twoPackages({ s__c: number }, 200, written));
+      expect(built.map((f) => f.where), dump(built)).toEqual([writtenAt(extWhere('s__c'))]);
+    });
+
+    it('a tied name is not served again from the target as the sibling stored it: a sibling\'s cyclic definition there is not charged to the write', () => {
+      // The sibling's own `s__c` reads itself (its stored cycle); the written
+      // entry adds `s__c` at the same priority. The tie leaves the name out, as
+      // the build leaves it out; the target's served copy does not put it back.
+      const siblingFields = { s__c: formula('record.s__c + 1') };
+      const written = { ...extension({ s__c: number }), priority: 200 };
+      const door = cycleFindings(gateExtension(written, [target(siblingFields)], [stored(siblingFields, 200)]).errors);
+      expect(door, dump(door)).toEqual([]);
+      expect(build(twoPackages(siblingFields, 200, written))).toEqual([]);
+    });
+
+    it('a host that states no extensions leaves the door as it was: the written entry is folded over the target as served', () => {
+      const written = { ...extension({ s__c: formula('record.s__c * 2') }), priority: 200 };
+      const door = cycleFindings(gateExtension(written, [target({ s__c: number })]).errors);
+      expect(door.map((f) => f.where), dump(door)).toEqual([extWhere('s__c')]);
+    });
   });
 
   it('a sibling package\'s stored cycle, and a formula that only reads a cycle, are not the extension write\'s to answer for', () => {

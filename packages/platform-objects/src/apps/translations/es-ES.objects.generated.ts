@@ -120,7 +120,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Cómo se creó esta identidad: idp_provisioned (JIT de SSO federado) o env_native (registro local / usuario final de la aplicación). Gestionado por el sistema; no editar.",
         options: {
           idp_provisioned: "Aprovisionada por IdP",
-          env_native: "Cuenta local"
+          env_native: "Cuenta local",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
@@ -214,6 +215,54 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             "user.phoneNumber": "Número de teléfono",
             permissionSet: "Conjunto de permisos",
             temporaryPassword: "Contraseña temporal: cópiela ahora, se muestra una sola vez y no se almacena"
+          }
+        }
+      },
+      add_sso_user: {
+        label: "Añadir usuario",
+        description: "Añade a alguien por su dirección de correo antes de su primer inicio de sesión. Inicia sesión a través del proveedor de identidad de tu organización; aquí no se establece ninguna contraseña.",
+        params: {
+          positions: {
+            label: "Puesto",
+            helpText: "Opcional. El puesto que ocupa esta persona desde el momento en que se añade."
+          },
+          permissionSets: {
+            label: "Conjunto de permisos",
+            helpText: "Opcional. Concede este conjunto de permisos a la persona para que pueda abrir sus aplicaciones en su primer inicio de sesión."
+          },
+          manager: {
+            label: "Correo del responsable",
+            helpText: "Opcional. La dirección de correo del responsable de esta persona, un usuario de este entorno."
+          }
+        },
+        resultDialog: {
+          title: "Usuario añadido",
+          acknowledge: "Hecho",
+          fields: {
+            email: "Correo electrónico",
+            notApplied: "Ya estaba pendiente, así que no se aplicó (configúralo en el registro)",
+            managerError: "Responsable",
+            "host.reason": "Invitación no enviada"
+          }
+        }
+      },
+      import_sso_users: {
+        label: "Importar usuarios",
+        description: "Añade a muchas personas a la vez desde texto CSV. Cada fila se añade por separado, así que una fila errónea falla sola. Inician sesión a través del proveedor de identidad de tu organización; aquí no se establece ninguna contraseña.",
+        params: {
+          csv: {
+            label: "CSV",
+            helpText: "Una fila de encabezado y después una persona por línea, como máximo 500. Columnas: email, name, positions y permission_sets (nombres de máquina separados por ;) y manager_id (la dirección de correo del responsable)."
+          }
+        },
+        resultDialog: {
+          title: "Importación terminada",
+          acknowledge: "Hecho",
+          fields: {
+            "summary.added": "Añadidos",
+            "summary.alreadyPending": "Ya pendientes, avisados de nuevo",
+            "summary.failed": "No añadidos",
+            rows: "Resultado por fila"
           }
         }
       },

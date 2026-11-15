@@ -117,10 +117,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       source: {
         label: "Identity Source",
-        help: "How this identity was created — idp_provisioned (federated SSO JIT or SCIM directory provisioning) or env_native (local signup, a local password, or an app end-user). System-managed; do not edit.",
+        help: "How this identity was created — idp_provisioned (federated SSO JIT or SCIM directory provisioning), env_native (local signup, a local password, or an app end-user), or idp_pending (added on a managed environment and waiting for the first sign-in through the hosting organisation identity provider). System-managed; do not edit.",
         options: {
           idp_provisioned: "IdP-Provisioned",
-          env_native: "Local Account"
+          env_native: "Local Account",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
@@ -214,6 +215,54 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             "user.phoneNumber": "Phone Number",
             permissionSet: "Permission Set",
             temporaryPassword: "Temporary password: copy it now, it is shown only once and never stored"
+          }
+        }
+      },
+      add_sso_user: {
+        label: "Add User",
+        description: "Add someone by email address before their first sign-in. They sign in through your organization's identity provider; no password is set here.",
+        params: {
+          positions: {
+            label: "Position",
+            helpText: "Optional. The position this person holds from the moment they are added."
+          },
+          permissionSets: {
+            label: "Permission Set",
+            helpText: "Optional. Grants this permission set to the person, so they can open their apps on first sign-in."
+          },
+          manager: {
+            label: "Manager Email",
+            helpText: "Optional. The email address of this person's manager, a user of this environment."
+          }
+        },
+        resultDialog: {
+          title: "User Added",
+          acknowledge: "Done",
+          fields: {
+            email: "Email",
+            notApplied: "Already pending, so not applied (set these on the record)",
+            managerError: "Manager",
+            "host.reason": "Invitation not sent"
+          }
+        }
+      },
+      import_sso_users: {
+        label: "Import Users",
+        description: "Add many people at once from CSV text. Each row is added on its own, so a bad row fails alone. They sign in through your organization's identity provider; no password is set here.",
+        params: {
+          csv: {
+            label: "CSV",
+            helpText: "A header row, then one person per line, at most 500. Columns: email, name, positions and permission_sets (machine names separated by ;) and manager_id (the manager's email address)."
+          }
+        },
+        resultDialog: {
+          title: "Import Finished",
+          acknowledge: "Done",
+          fields: {
+            "summary.added": "Added",
+            "summary.alreadyPending": "Already pending, told again",
+            "summary.failed": "Not added",
+            rows: "Result per row"
           }
         }
       },

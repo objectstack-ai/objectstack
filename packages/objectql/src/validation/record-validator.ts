@@ -682,11 +682,12 @@ export function normalizeMultiValueFields(
  *
  * ## The three scopes
  *
- *  - `'skip'` — today's walk: a readonly field is not reached. The engine
- *    passes it where the strip has NOT yet run (the update path's first
- *    validation), because a caller's readonly value there is about to be
- *    dropped, not stored: judging it would turn a whole-record write-back that
- *    echoes a legacy stored value into a refusal.
+ *  - `'skip'` — a readonly field is not reached. The update path's first
+ *    validation passes it, AFTER both read-only strips (the insert path's
+ *    order): the multi-value wrap and this pass judge the payload left once
+ *    the fields the caller may not write are removed. A readonly value still on
+ *    that payload is a system writer's, a hook's or a stamp, and the second
+ *    pass (`'only'`) judges it, so this pass need not.
  *  - `'include'` — the caller-writable fields AND each readonly field's value,
  *    for a payload that is FINAL (the insert path and the dry run, both after
  *    their strips).

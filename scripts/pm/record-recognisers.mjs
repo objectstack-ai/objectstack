@@ -87,6 +87,8 @@ import {
   branchNameTarget,
   closingKeywordTargets,
   contractReviewHeadMatch,
+  contractReviewRecordReading,
+  contractReviewVerdictLines,
   deliveryEvidence,
   deliveryEvidenceNote,
   latestMarkedComment,
@@ -95,6 +97,11 @@ import {
   SEAT_SIGNATURE_SESSION_SOURCE,
   stripSignatureLine,
 } from './check-half-states.mjs';
+// The fleet's one verdict reader, in its counting form, re-exported so the queue guard's lazy loader
+// reaches it: every Tier S entry lands on a record with exactly one `VERDICT:` line reading PASS
+// (#33501 for the low-risk skills arm, #33541 for every other leg), and, through the whole
+// reading, no FAIL spelled elsewhere and no open must-fix or should-fix (#33604). ⛔ Never a second parser.
+export { contractReviewRecordReading, contractReviewVerdictLines };
 // The tier `isModelIdentifierToken` refuses by VALUE. IMPORTED, never restated:
 // `dispatch-gates.mjs` is the one line in `scripts/pm/**` where the model id is
 // spelled as a value, and a second value site here is the drift that let a
@@ -114,7 +121,7 @@ import {
 // The governed-rules face is the governed register itself — the same function the queue guard
 // classifies a merge group's paths with. `dispatch-gates.mjs` already imports this module at module
 // scope, so the edge adds no new module to this file's graph and no cycle.
-import { SELF_REPO_ID, governedPathsIn } from './check-governed-merges.mjs';
+import { SELF_REPO_ID, governedPathsIn, lowRiskRowHit } from './check-governed-merges.mjs';
 // How an unreadable `Served-tier:` line is quoted back — the declaration
 // line's own quoting helper, one spelling for both. The narrowing face is read
 // with the fleet's ONE reader of that line, imported, ⛔ never a second parser.
@@ -2065,6 +2072,9 @@ function templateFace({ face: faceId, paths }) {
 const BRIEF_GRADE_LINES = Object.freeze([
   '     Grade each finding must-fix, should-fix or nit — a nit has no effect on correctness or the contract.',
   '     A must-fix is a FAIL; a must-fix or should-fix earns a delta review of its fix; nits alone end the round.',
+  '     Spell a must-fix or should-fix with its id and grade, `S1 (should-fix) — …`, and a clean round as',
+  '     `No must-fix, no should-fix.`: the queue guard reads a graded finding as OPEN on this head and',
+  '     refuses the record; the delta record names those it closes by id alone, `S1: closed`.',
   '     A nit is fixed only on the prose faces, or left as an accepted deviation or a follow-up card: a fix',
   '     anywhere else moves the head, and this record no longer covers it.',
   "     ⛔ Judge the tree, never the PR body's account of it.",
@@ -2165,6 +2175,21 @@ export function contractReviewBriefLines(values = {}) {
     ] : []),
     '',
   ];
+  // A `hits` path on the low-risk skills arm lands on this record alone (#33501, ruling B): the arm reads
+  // the `security` label and the path's name, so teaching the name does not show must be flagged here. An
+  // isolated reviewer cannot label, so the record says so and the adopting seat adds the label. With no
+  // `--paths` the brief cannot know the hits, and the skill teaches the bare `--brief-template`, so every
+  // at-tier brief over unknown paths carries the duty in its conditional form.
+  const securityDuty = "  behaviour the path name doesn't show, the record says so and the seat adopting the record adds the `security` label.";
+  const lowRiskLines = scopeHits !== undefined ? (lowRiskRowHit(scopeHits) ? [
+    'Security — a `hits` path sits on the low-risk skills arm: when the change teaches security, auth or permission',
+    securityDuty,
+    '',
+  ] : []) : atTier && face?.id !== 'narrowing' ? [
+    'Security — if a `hits` path is under `skills/**` or `ui/skills/**` and the change teaches security, auth or permission',
+    securityDuty,
+    '',
+  ] : [];
   return [
     'record-recognisers --brief-template — the brief a seat hands its contract reviewer, copyable. The',
     "read-only shape is built in: keep every ⛔ line, they are the review's shape and not advice to it.",
@@ -2185,6 +2210,7 @@ export function contractReviewBriefLines(values = {}) {
     "⛔ Not the dispatch order, ⛔ not the dispatching seat's own conclusions — this brief is adversarial by design.",
     '',
     ...scopeLines,
+    ...lowRiskLines,
     '⛔ READ-ONLY. No worktree, no checkout, no build, no test run, no gate re-run, no ablation: the check-runs',
     '   on the head already answered every derived gate family, and a local run costs more than it returns.',
     "   If ONE probe is unavoidable, the record's `Local-runs:` line says `probe — REASON`; otherwise `none`.",
@@ -2266,7 +2292,11 @@ export function contractReviewBriefLines(values = {}) {
  * line under a bold first line, with no heading anywhere.
  *
  * ⛔ Not read: the verdict WORD (the file's boundary, and the corpus already
- * spells it two ways) and the ①②③ items (prose the seat reads).
+ * spells it two ways) and the ①②③ items (prose the seat reads). The queue guard
+ * reads the word and the grades on the comment this function chose, with
+ * `contractReviewRecordReading` (re-exported above), and drops comments by
+ * untrusted authors from the threads before calling this (card #33541): both
+ * are the guard's facts, so this locator's other callers keep their reading.
  *
  * @returns {{ state: 'unreadable', gaps: string[] }
  *          | { state: 'absent', read: { pr: number, card: number } }
@@ -2359,12 +2389,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the `Served-tier:` reading — the tier that SERVED the record (#17915 · #18060 · #18174)': 27,
   '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 22,
   '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 30,
-  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 17,
+  // Raised 17 → 19 by #33541: the template record's one `VERDICT:` line read PASS by the guard, and the same record
+  // posted by an untrusted author not read — two pins, two cases.
+  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 19,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 23,
   '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
-  '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 19,
+  '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 22,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
   '⭐ the `Contract-review-handoff:` line — names the current head ⇒ the named review or sibling seat\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own; `triage` unreadable': 17,
   // Raised 27 → 40 with the scenario table's seven admitted keys and the `seat-online` patrol field: one pin
@@ -2670,6 +2702,13 @@ export async function selfTest() {
   t('⛔ the declaration-face brief states none', !says(contractReviewBriefLines({ face: 'declaration' }).join('\n'), '`Scope:` line'));
   t('⭐ the brief over `paths` names the hits and hands the reviewer `--template --paths` over THEM — which reads back the same face and floor', (() => { const b = contractReviewBriefLines({ paths: MIXED }).join('\n'); const hits = reviewScopeHits(MIXED); return says(b, `file list: ${hits.join(', ')};`) && says(b, `--template --paths ${hits.join(' ')}\``) && fenced(contractReviewTemplateLines({ paths: hits })) === fenced(contractReviewTemplateLines({ paths: MIXED })); })());
   t('…and over a declaration-only list it hands `--face declaration`, as the face table would', says(contractReviewBriefLines({ paths: DECL_PATHS }).join('\n'), '--template --face declaration`') && contractReviewBriefLines({ paths: DECL_PATHS }).join('\n') === contractReviewBriefLines({ face: 'declaration' }).join('\n'));
+  // #33501 ruling B: the low-risk arm reads the `security` label and the path's name, so the brief over a
+  // catalog path hands the reviewer the label duty for teaching the name does not show.
+  const SECURITY_DUTY = 'the seat adopting the record adds the `security` label';
+  const SECURITY_IF = 'if a `hits` path is under `skills/**` or `ui/skills/**`';
+  t('⭐ the brief over a low-risk skills path hands the `security` label duty, unconditionally, on either catalog row and through the CLI — the record says so, the adopting seat labels', (() => { const own = ['skills/objectstack-data/SKILL.md', 'ui/skills/objectui-forms/SKILL.md']; return own.every((p) => { const b = contractReviewBriefLines({ paths: [p, ...DECL_PATHS] }).join('\n'); return says(b, SECURITY_DUTY) && says(b, 'sits on the low-risk skills arm') && !says(b, SECURITY_IF); }) && says(faceCli(['--brief-template', '--paths', own[0]]).stdout, "behaviour the path name doesn't show, the record says so") && !says(contractReviewBriefLines({ paths: [own[0]] }).join('\n'), 'reviewer adds'); })());
+  t('⭐ SF5: the bare `--brief-template` and `--face rules` brief — the spelling the skill teaches — carry the duty in its CONDITIONAL form', (() => { const forms = [contractReviewBriefLines(), contractReviewBriefLines({ face: 'rules' }), contractReviewBriefLines({ face: 'schema' })].map((b) => b.join('\n')); return forms.every((b) => says(b, SECURITY_IF) && says(b, SECURITY_DUTY)) && says(faceCli(['--brief-template']).stdout, SECURITY_IF) && says(faceCli(['--brief-template', '--face', 'rules']).stdout, SECURITY_IF); })());
+  t('⛔ …and a brief whose `hits` are known and off the arm carries none, nor does the declaration or the narrowing face', [contractReviewBriefLines({ paths: MIXED }), contractReviewBriefLines({ face: 'declaration' }), contractReviewBriefLines({ face: 'narrowing' })].every((b) => !says(b.join('\n'), SECURITY_DUTY)));
   t('⭐ `--template --paths` and `--brief-template --paths` print exactly the function output and exit 0', (() => { const a = faceCli(['--template', '--paths', ...MIXED]); const b = faceCli(['--brief-template', '--paths', ...MIXED]); return a.status === 0 && a.stdout === `${contractReviewTemplateLines({ paths: MIXED }).join('\n')}\n` && b.status === 0 && b.stdout === `${contractReviewBriefLines({ paths: MIXED }).join('\n')}\n`; })());
   t('⛔ `--paths` naming no path, or beside `--face` in either order, is REFUSED with the usage, exit 1', [['--template', '--paths'], ['--template', '--paths', RULES_PATH, '--face', 'rules'], ['--brief-template', '--face', 'rules', '--paths', RULES_PATH], ['--template', '--paths', '']].every((args) => { const r = faceCli(args); return r.status === 1 && says(r.stderr, 'usage:'); }));
   t('…and the usage names the flag, the face it reads and the line it fills', ['--paths PATH...', '`reviewFace`', '`Scope:`'].every((s) => usageLines().join('\n').includes(s)));
@@ -3240,9 +3279,12 @@ export async function selfTest() {
   // ⭐ The fixture record IS what `--template` tells a seat to paste, so this
   // pin also answers "is the thing we tell them to copy accepted where we tell
   // them to put it" -- in both places, on the same run.
+  // Posted the way a seat posts it: through the relay, whose login the guard's own loader assembles (#33541).
+  const PIN_RELAY = (await GUARD.loadRecordRecognisers()).trustedAuthors?.[0] ?? null;
   const PIN_RECORD = {
     id: 7701,
     created_at: '2026-09-16T10:00:00Z',
+    user: { login: PIN_RELAY },
     body: contractReviewRecordLines({ headSha: PIN_HEAD, reviewedBy: 'session_01PINSEAT' }).join('\n'),
   };
   // A Tier S path (the register's `.claude/**` row since #19133). The control
@@ -3274,6 +3316,22 @@ export async function selfTest() {
   t('⛔ CONTROL: the pin is not vacuous -- the set has two locations, not one', REVIEW_OF_RECORD_THREADS.length === 2 && stated.includes('PR') && stated.includes('card'));
   t('…and each run located the record on the thread it was posted to, not on the other one', pinRuns.every(([where, r]) => r.record?.where === where), JSON.stringify(pinRuns.map(([w, r]) => [w, r.record?.where])));
   t('…and the guard fetched exactly ONE thread per entry in the set, no more and no fewer', pinRuns.every(([, r]) => r.threadsRead.join() === `${PIN_PR},${PIN_CARD}`), JSON.stringify(pinRuns.map(([, r]) => r.threadsRead)));
+  t('⭐ #33541: the record the template prints carries exactly ONE `VERDICT:` line, and it reads PASS, so the guard that cleared it read its verdict', contractReviewVerdictLines(PIN_RECORD.body).join() === 'PASS' && pinRuns.every(([, r]) => r.record?.verdict === 'PASS'), JSON.stringify(pinRuns.map(([, r]) => r.record?.verdict)));
+  t('⭐ #33604: the grade shapes the BRIEF prescribes are the ones the GUARD reads — `S1 (should-fix)` refuses the template record, `No must-fix, no should-fix.` clears it', await (async () => {
+    const saved = PIN_RECORD.body;
+    const withProse = (prose) => saved.replace('### ④ Design judgment\n', `### ④ Design judgment\n\n${prose}\n`);
+    try {
+      PIN_RECORD.body = withProse('**S1 (should-fix) — the knock has no key.**');
+      const open = await pinRun('PR');
+      PIN_RECORD.body = withProse('No must-fix, no should-fix.');
+      const clean = await pinRun('PR');
+      const briefSays = ['`S1 (should-fix) — …`', '`No must-fix, no should-fix.`', '`S1: closed`'].every((frag) => BRIEF_BODY.includes(frag));
+      return briefSays && saved.includes('### ④ Design judgment\n') && open.verdict.exitCode !== GUARD.EXIT_CLEAR && open.record?.state === 'not-pass' && /S1 \(should-fix\)/.test(open.record?.verdictReason ?? '') && clean.verdict.exitCode === GUARD.EXIT_CLEAR && clean.record?.verdict === 'PASS';
+    } finally {
+      PIN_RECORD.body = saved;
+    }
+  })());
+  t('⛔ #33541: the same template record posted by an author outside the relay and GOVERNED_APPROVERS is not read -- refused as no record', await (async () => { const saved = PIN_RECORD.user; PIN_RECORD.user = { login: 'drive-by-commenter' }; try { const r = await pinRun('PR'); return r.verdict.exitCode !== GUARD.EXIT_CLEAR && r.record?.state === 'absent'; } finally { PIN_RECORD.user = saved; } })());
   t('⛔ CONTROL: with the record on NEITHER thread the same run is refused -- the pin can fail', await (async () => { const none = await pinRun('nowhere'); return none.verdict.exitCode !== GUARD.EXIT_CLEAR && none.record?.state === 'absent'; })());
   t('the guard prints the location in the WORDS this file owns, so a seat is told one thing', GUARD.REVIEW_OF_RECORD_LOCATION === REVIEW_OF_RECORD_LOCATION && TEMPLATE_TEXT.includes(`ONE comment on ${REVIEW_OF_RECORD_LOCATION}`));
   t('⭐ the record the guard cleared carries the at-tier `Scope:` line — the guard reads past it, unchanged (ruling record 6184805932)', PIN_RECORD.body.includes(`\nScope: ${RECORD_SCOPE_PLACEHOLDERS.hits} + ${RECORD_SCOPE_PLACEHOLDERS.cited}\n`) && readSet === THREAD_SET);

@@ -126,7 +126,7 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
     kind: 'off',
     why: "Studio: the object's view labels New view refuses to reuse, the read the list-view panel made before the switcher moved into the header (objectstack#30046)",
   },
-  'packages/app-shell/src/views/studio-design/studio-canvas-preview.tsx': { kind: 'off', why: 'Studio' },
+  'packages/app-shell/src/views/studio-design/studio-object-records-canvas.tsx': { kind: 'off', why: 'Studio' },
   'packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx': {
     kind: 'off',
     why: "Studio: the Data pillar's Form tab asks selectRecordFormView which form view the app opens, over the served objects (objectstack#30057)",

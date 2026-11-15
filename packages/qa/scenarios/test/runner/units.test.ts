@@ -28,6 +28,7 @@ import {
   DEFAULT_ASK_MAX_TURNS,
   DEFAULT_AUTHOR_MAX_TURNS,
   DEFAULT_AUTHOR_TIMEOUT_MIN,
+  effortLevelsFromHelp,
   MissingRecordingError,
   RecordedDriver,
   servedAsRequested,
@@ -312,8 +313,17 @@ describe('the validation operation (#30883 item 2, ruled B): the agent half and 
       answer: { kind: 'refused', code: uncodedToolError, note: 'the door answered "MCP error -32602"' },
       writes: 0,
     });
+    // A denial with no status is no 403: still the platform's measured fail.
+    const statusless = observeProbe(call, { output: '{"error":{"code":"PERMISSION_DENIED"}}', isError: true }, contacts, contacts);
+    expect(failing(observe(turnOf(PRE_VALIDATED), statusless))).toEqual(['platform:refused:VALIDATION_FAILED']);
+    // A 403 denial of the write the card gives the persona is the build's (#33596): the platform half is not measured.
     const denied = observeProbe(call, { output: '{"error":{"code":"PERMISSION_DENIED","status":403}}', isError: true }, contacts, contacts);
-    expect(failing(observe(turnOf(PRE_VALIDATED), denied))).toEqual(['platform:refused:VALIDATION_FAILED']);
+    const g = grade(observe(turnOf(PRE_VALIDATED), denied));
+    expect(g.pass).toBe(true);
+    expect(g.checks.slice(2).map((c) => c.notMeasured)).toEqual([
+      "the build denies the persona this write: the runner's probe of the declared write was refused PERMISSION_DENIED (403), and nothing was written",
+      "the build denies the persona this write: the runner's probe of the declared write was refused PERMISSION_DENIED (403), and nothing was written",
+    ]);
   });
 
   it('③ the agent caught the bad value first — no write, nothing written, a reply asking for a correction: passes', () => {
@@ -443,7 +453,7 @@ describe('prompts, seed order, template manifest and change size', () => {
   it('the build prompt carries the seed, the persona sets and the handles — never a question or an outcome', () => {
     const p = buildPrompt(namespacedScenario(crm).card);
     expect(p).toContain('"full_name": "Ana Ruiz"');
-    expect(p).toContain('`democrm_sdr` for `sdr` (Sales development representative): must not read the field `democrm_contact.email`');
+    expect(p).toContain('`democrm_sdr` for `sdr` (Sales development representative who adds, updates and removes contacts): must not read the field `democrm_contact.email`');
     expect(dataContract(crm.card)).toContain('`u_sam` → the `sdr` user');
     for (const q of crm.card.run.questions) expect(p).not.toContain(q.ask.en!);
     expect(p).not.toContain('VALIDATION_FAILED');
@@ -803,13 +813,22 @@ describe("the seed's load plan — reference cycles found from the card's own lo
  * one stream-json success saying what it read. Its init line names the model
  * it serves, as the real CLI's does: `--model X` resolves to
  * `claude-X-4-5-20250929`, except `retired`, which falls back to
- * `claude-opus-5-5`; with no `--model` it serves `stand-in`.
+ * `claude-opus-5-5`; with no `--model` it serves `stand-in`. `--help` prints
+ * the `--effort` entry as Claude Code 2.1.325 does (its level list wrapped onto
+ * the next line), or no such entry under `STAND_IN_NO_EFFORT`; an `ENV` turn
+ * answers its argument list and the `CLAUDE_CODE_EFFORT_LEVEL` it was started
+ * with.
  */
 const STAND_IN = `#!/usr/bin/env node
 process.on('SIGTERM', () => { process.stderr.write('stand-in: terminated\\n'); process.exit(143); });
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('2.1.0 (stand-in)'); process.exit(0); }
 if (args[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true, authMethod: 'oauth_token' })); process.exit(0); }
+if (args[0] === '--help') {
+  const effort = process.env.STAND_IN_NO_EFFORT ? [] : ['  --effort <level>                      Effort level for the current session', '                                        (low, medium, high, xhigh, max)'];
+  console.log(['Usage: claude [options] [command] [prompt]', '', 'Options:', '  --disallowedTools <tools...>          Tools to deny', ...effort, '  --model <model>                       Model for the current session'].join('\\n'));
+  process.exit(0);
+}
 let input = '';
 process.stdin.on('data', (d) => (input += d));
 process.stdin.on('end', () => {
@@ -819,7 +838,11 @@ process.stdin.on('end', () => {
   }
   if (input.startsWith('CRASH')) { process.stderr.write('stand-in: could not start a session\\n'); process.exit(1); }
   const longest = Math.max(...args.map((a) => a.length));
-  const text = input.startsWith('ARGV') ? JSON.stringify(args) : 'stdin ' + input.length + ' · longest argv ' + longest;
+  const text = input.startsWith('ARGV')
+    ? JSON.stringify(args)
+    : input.startsWith('ENV')
+      ? JSON.stringify({ argv: args, effortEnv: process.env.CLAUDE_CODE_EFFORT_LEVEL ?? null })
+      : 'stdin ' + input.length + ' · longest argv ' + longest;
   const asked = args.indexOf('--model') === -1 ? undefined : args[args.indexOf('--model') + 1];
   const served = asked === undefined ? 'stand-in' : asked === 'retired' ? 'claude-opus-5-5' : 'claude-' + asked + '-4-5-20250929';
   console.log(JSON.stringify({ type: 'system', subtype: 'init', model: served }));
@@ -847,6 +870,8 @@ describe('the live driver against a stand-in `claude`: the prompt on stdin, and 
   beforeEach(() => {
     vi.stubEnv('ANTHROPIC_API_KEY', '');
     vi.stubEnv('ANTHROPIC_AUTH_TOKEN', '');
+    // The box's own effort setting stays out of every case that does not set one.
+    vi.stubEnv('CLAUDE_CODE_EFFORT_LEVEL', '');
   });
   afterEach(() => vi.unstubAllEnvs());
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -1006,7 +1031,118 @@ describe('the live driver against a stand-in `claude`: the prompt on stdin, and 
     expect(replay({ model: 'sonnet' })).toMatch(/^--model applies to the live driver only/);
     expect(replay({ authorModel: 'opus', askModel: 'haiku' })).toMatch(/^--author-model, --ask-model apply to the live driver only/);
   });
+
+  /** The `--effort` value on the argument list the stand-in was started with, or `undefined` when it was given none. */
+  const effortArg = (argv: string[]): string | undefined => {
+    const at = argv.indexOf('--effort');
+    return at === -1 ? undefined : argv[at + 1];
+  };
+  /** An `ENV` turn's answer: the stand-in's argument list and the effort variable it was started with. */
+  const envOf = (t: ParsedTurn) => JSON.parse(t.replyText) as { argv: string[]; effortEnv: string | null };
+  /** The refusal's message, or `undefined` when nothing was refused. */
+  const refusalOf = (run: () => unknown): string | undefined => {
+    try {
+      run();
+    } catch (e) {
+      return (e as Error).message;
+    }
+    return undefined;
+  };
+
+  it('`--effort` reaches the CLI’s argument list on every turn, `--author-effort` / `--ask-effort` set the two kinds apart, and each turn records the effort it asked for', async () => {
+    vi.stubEnv('PATH', `${dir}${delimiter}${process.env.PATH ?? ''}`);
+    const every = makeDriver('claude', parseArgs(['--effort', 'high']));
+    for (const t of [(await every.author(task('ENV', 'starter'))).turn, await every.ask(ask('ENV'))]) {
+      expect([effortArg(envOf(t).argv), t.meta.process!.requestedEffort]).toEqual(['high', 'high']);
+    }
+    expect(every.info()).toMatchObject({ authorEffort: 'high', askEffort: 'high' });
+
+    const apart = makeDriver('claude', parseArgs(['--effort', 'high', '--author-effort', 'xhigh', '--ask-effort', 'low', '--model', 'haiku']));
+    const authored = (await apart.author(task('ENV'))).turn;
+    const persona = await apart.ask(ask('ENV'));
+    expect([effortArg(envOf(authored).argv), authored.meta.process!.requestedEffort, authored.meta.process!.requestedModel]).toEqual(['xhigh', 'xhigh', 'haiku']);
+    expect([effortArg(envOf(persona).argv), persona.meta.process!.requestedEffort]).toEqual(['low', 'low']);
+    expect(apart.info()).toMatchObject({ authorEffort: 'xhigh', askEffort: 'low', authorModel: 'haiku', askModel: 'haiku' });
+
+    // One kind set alone leaves the other on the CLI's default: no `--effort` on its argument list, nothing requested.
+    const askOnly = makeDriver('claude', parseArgs(['--ask-effort', 'medium']));
+    const defaulted = (await askOnly.author(task('ENV'))).turn;
+    expect([effortArg(envOf(defaulted).argv), defaulted.meta.process!.requestedEffort, effortArg(envOf(await askOnly.ask(ask('ENV'))).argv)]).toEqual([undefined, undefined, 'medium']);
+    expect([askOnly.info().authorEffort, askOnly.info().askEffort]).toEqual([undefined, 'medium']);
+
+    // With no flag, no turn passes `--effort`.
+    const plain = makeDriver('claude', parseArgs([]));
+    expect([effortArg(envOf((await plain.author(task('ENV'))).turn).argv), effortArg(envOf(await plain.ask(ask('ENV'))).argv)]).toEqual([undefined, undefined]);
+    expect([plain.info().authorEffort, plain.info().askEffort]).toEqual([undefined, undefined]);
+  });
+
+  it('`CLAUDE_CODE_EFFORT_LEVEL`, which the CLI lets win over `--effort`, never reaches a turn: the flag decides, and with no flag the variable’s level is passed as the flag and recorded', async () => {
+    vi.stubEnv('PATH', `${dir}${delimiter}${process.env.PATH ?? ''}`);
+    vi.stubEnv('CLAUDE_CODE_EFFORT_LEVEL', 'high');
+    const flagged = makeDriver('claude', parseArgs(['--effort', 'low']));
+    const t = await flagged.ask(ask('ENV'));
+    expect([effortArg(envOf(t).argv), envOf(t).effortEnv, t.meta.process!.requestedEffort]).toEqual(['low', null, 'low']);
+
+    const fromEnv = makeDriver('claude', parseArgs([]));
+    const built = (await fromEnv.author(task('ENV'))).turn;
+    expect([effortArg(envOf(built).argv), envOf(built).effortEnv, built.meta.process!.requestedEffort]).toEqual(['high', null, 'high']);
+    expect(fromEnv.info()).toMatchObject({ authorEffort: 'high', askEffort: 'high' });
+
+    // `auto` and `unset` are the CLI's default effort, as the CLI reads them: no flag, nothing recorded, the variable still kept off the turn.
+    for (const def of ['auto', 'UNSET']) {
+      vi.stubEnv('CLAUDE_CODE_EFFORT_LEVEL', def);
+      const d = makeDriver('claude', parseArgs([]));
+      const asked = await d.ask(ask('ENV'));
+      expect([def, effortArg(envOf(asked).argv), envOf(asked).effortEnv, asked.meta.process!.requestedEffort, d.info().askEffort]).toEqual([def, undefined, null, undefined, undefined]);
+    }
+  });
+
+  it('an effort level the CLI’s own `--help` does not list is refused before any turn — the CLI would warn, run at its default and exit 0 — and so is any effort on a CLI with no `--effort`', () => {
+    vi.stubEnv('PATH', `${dir}${delimiter}${process.env.PATH ?? ''}`);
+    expect(refusalOf(() => makeDriver('claude', parseArgs(['--effort', 'turbo'])))).toMatch(/^--effort takes one of the levels `claude` 2\.1\.0 \(stand-in\) accepts \(low, medium, high, xhigh, max\), not `turbo`$/);
+    expect(refusalOf(() => makeDriver('claude', parseArgs(['--effort', 'high', '--ask-effort', 'High'])))).toMatch(/^--ask-effort takes one of the levels .*, not `High`$/);
+    vi.stubEnv('CLAUDE_CODE_EFFORT_LEVEL', 'hgih');
+    expect(refusalOf(() => makeDriver('claude', parseArgs([])))).toMatch(/^CLAUDE_CODE_EFFORT_LEVEL takes one of the levels .*, not `hgih`$/);
+    vi.stubEnv('CLAUDE_CODE_EFFORT_LEVEL', '');
+    for (const level of ['low', 'medium', 'high', 'xhigh', 'max']) expect([level, refusalOf(() => makeDriver('claude', parseArgs(['--effort', level])))]).toEqual([level, undefined]);
+
+    vi.stubEnv('STAND_IN_NO_EFFORT', '1');
+    expect(refusalOf(() => makeDriver('claude', parseArgs(['--author-effort', 'high'])))).toMatch(/^--author-effort: `claude` 2\.1\.0 \(stand-in\) lists no `--effort` levels in its `--help`/);
+    // With no effort asked for, the help is never read: a CLI without `--effort` runs as before.
+    expect(refusalOf(() => makeDriver('claude', parseArgs([])))).toBeUndefined();
+  });
+
+  it('an effort flag with no level is refused, and a replay refuses every effort flag', () => {
+    for (const flag of ['--effort', '--author-effort', '--ask-effort']) {
+      expect(refusalOf(() => parseArgs([flag]))).toBe(`${flag} needs a value`);
+      for (const bad of ['', '  ', '--only']) {
+        const message = refusalOf(() => parseArgs([flag, bad]));
+        expect([flag, bad, message?.startsWith(`${flag} takes an effort level`), message?.endsWith(`\`${bad}\``)]).toEqual([flag, bad, true, true]);
+      }
+    }
+    expect(parseArgs(['--effort', 'high', '--author-effort', 'max', '--ask-effort', 'low'])).toMatchObject({ effort: 'high', authorEffort: 'max', askEffort: 'low' });
+    const replay = (opts: Parameters<typeof makeDriver>[1]) => refusalOf(() => makeDriver('recorded:/nowhere.json', opts));
+    expect(replay({ effort: 'high' })).toMatch(/^--effort applies to the live driver only/);
+    expect(replay({ model: 'sonnet', authorEffort: 'max', askEffort: 'low' })).toMatch(/^--model, --author-effort, --ask-effort apply to the live driver only/);
+  });
 });
+
+describe('effortLevelsFromHelp — the levels a `claude` CLI accepts, read off its own `--help`', () => {
+  it('reads the list Claude Code 2.1.325 wraps onto the line after `--effort`, and answers undefined with no entry or no list', () => {
+    const measured = [
+      '  --disallowedTools, --disallowed-tools <tools...>  Comma or space-separated list of tool names to deny',
+      '  --effort <level>                      Effort level for the current session',
+      '                                        (low, medium, high, xhigh, max)',
+      '  --environment <environment_id>        Create a new cloud session that runs on',
+    ].join('\n');
+    expect(effortLevelsFromHelp(measured)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(effortLevelsFromHelp('  --effort <level>  Effort level (low, high)\n  --model <m>  (sonnet, opus)')).toEqual(['low', 'high']);
+    expect(effortLevelsFromHelp('  --model <model>  Model for the session (sonnet, opus)')).toBeUndefined();
+    // The next option's list is never read as the effort entry's.
+    expect(effortLevelsFromHelp('  --effort <level>  Effort level\n  --model <model>  (sonnet, opus)')).toBeUndefined();
+  });
+});
+
 
 describe('`--packages published|workspace` — the flag and the line every record and scorecard states', () => {
   it('defaults to published, takes workspace, refuses anything else, and refuses a scaffolder version beside workspace', () => {

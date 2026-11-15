@@ -1,5 +1,193 @@
 # @objectstack/platform-objects
 
+## 18.5.0
+
+### Minor Changes
+
+- 68cb68e: feat(plugin-auth): an SSO provider can sign the person out of the company sign-in too, per provider and off by default
+  
+  Clause-②: yes (widening) — `sys_sso_provider` gains a `sign_out_of_idp` column (boolean, default false), `/sso/register` and `/sso/update-provider` accept a `signOutOfIdp` member, the Edit Sign-In Options action gains its param, the Register SAML Provider and Edit SAML Settings actions gain an optional `logoutUrl`, and `/sso/saml2/sp/slo/:providerId` and `/sso/saml2/logout/:providerId` answer for a provider whose switch is on. Nothing that was served before is refused now; with the switch off (every existing provider) sign-out answers exactly as before.
+  Metadata-protocol: added
+  
+  Each SSO provider has a new sign-in option, **Sign Out of the Company Sign-In Too**. It is off by default, and a change is recorded in the audit log like the other sign-in options (`trackHistory`). With it on, signing out of the platform also ends the person's session at the identity provider:
+  
+  - **SAML** through single logout. Sign-out answers `{ success, url, redirect }` with the identity provider's logout URL carrying a LogoutRequest for the session that signed in, and the platform session ends. The identity provider's logout address is the new **IdP Logout URL** on Register SAML Provider and Edit SAML Settings, stored in the provider's SAML configuration as its single logout service (no new column). The provider's single logout endpoint opens only while the switch is on, and a logout message from the identity provider is accepted only when it is signed; a signed logout request ends only the session it names.
+  - **OIDC** through an RP-initiated logout redirect. Sign-out answers `{ success, url, redirect }` with the provider's `end_session_endpoint`, carrying the ID token of that sign-in as `id_token_hint`, the `client_id`, a `post_logout_redirect_uri` when the sign-out's `callbackURL` is on a trusted origin, and the sign-out's `state`. The endpoint is read from the provider's discovery document when the switch is saved on, and kept in its stored OIDC configuration.
+  
+  Saving the switch on is refused `400 VALIDATION_FAILED` on `signOutOfIdp` for a provider that cannot honour it: a SAML provider with no IdP Logout URL, or an OIDC provider whose discovery document cannot be read or names no `end_session_endpoint` on a trusted origin. Saving it off is never refused. A sign-out through the SAML single logout writes the same logout audit row as `/sign-out`.
+  
+  Not in this change: the Console sign-out following the answered `url`, and any form item the Edit Sign-In Options form does not render by itself, are a later Console change. A session started before the switch was turned on signs out of the platform only.
+
+### Patch Changes
+
+- 6a36b79: feat(platform-objects,mcp): a member's agent finds a colleague by name or email over MCP, to fill a person field
+  
+  Clause-②: yes (widening) — the MCP read tools (`list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_records`) now admit one more system object, `sys_user`, which they refused before with `Object "sys_user" is a system object and is not exposed via MCP`. No write tool opens it.
+  Metadata-protocol: none
+  
+  - **`sys_user` declares `enable.aiReadable: true`.** An agent reads users with the existing record tools, under every gate a console read runs, and is served exactly what the caller's console person picker is served: their own row and the members of their active organization (the `sys_user_self` and `sys_user_org_members` row scopes of `member_default`), never another organization's users; and every field except the `Admin` group (sign-in trail, lockout, ban reason and expiry, sign-in phone, legacy role, AI seat), which the non-admin permission sets withhold on results and refuse on filters. For a plain member that is: `id`, `name`, `email`, `email_verified`, `two_factor_enabled`, `banned`, `image`, `locale`, `manager_id`, `primary_business_unit_id`, `principal_kind`, `accountable_user_id`, `source`, `created_at`, `updated_at`. An administrator's agent reads what the administrator reads.
+  - **Read only.** `create_record`, `update_record`, `delete_record` and `delete_records` keep refusing every `sys_*` object, so the self-service profile edit stays a console and data-API affordance; account changes an agent may make go through actions that declare their own `ai.exposed`.
+  - **What an agent is told.** `query_records`' description and the served `SKILL.md` (and its Console "Download skill" copy) say how to find a colleague's id for a person field: `where: { "email": "..." }` for exactly one person, or `{ "name": { "$contains": "..." } }`; names repeat, so people who share a name are told apart by email. The `list_objects` line no longer says every system object is hidden.
+- cbb876c: feat(auth)!: a managed environment adds pending, SSO-only people with their positions, permission sets and manager, and ban works without the admin plugin
+  
+  Clause-②: yes (narrowing) — narrowed: ban works without the admin plugin — `admin/ban-user` now works without the admin plugin, and a banned row is refused a session, with the admin plugin's own `403 BANNED_USER` answer; both ban doors answered `501 NOT_IMPLEMENTED` there. Widened: two doors, `POST /admin/add-sso-user` and `POST /admin/import-sso-users` (cloud-managed environments only; `409 RESOURCE_CONFLICT` elsewhere); the `idp_pending` value of `sys_user.source`, which every password door and every session refuses; the auth plugin's optional `environmentUserHost` option; `AuthManager#isAdminPluginMounted()`; the exports of `pending-sso-marker`, `environment-user-host` and `pending-sso-users`; and, re-exported from the package root, the helpers `bindUserToSoleOrganization`, `writeAdminAudit`, `joinCurrentOrganization` and `multiOrgCreationJoinsCurrentOrganization`, the class `CreationRefused`, the type `AdminAuditDecisions` (with its `user.admin_added_pending` event), `SetInitialPasswordOptions` (the optional third argument of `runSetInitialPassword`) and the optional `getBanWriter`, `host`, `getDataEngine` and `logger` members of `AdminBanEndpointDeps`. The cloud-managed refusals of `create-user`, `import-users` and the invitation doors point to Setup → Users.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the admin user doors, the ban doors or the cloud-managed refusals; `content/docs/permissions/authentication.mdx` gains the two doors, the pending state, the host option and the ban change in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key or metadata type is added, removed, renamed or re-shaped. `sys_user.source` gains one select option, `idp_pending`, which no existing row carries; the narrowed answer is a runtime refusal at session creation for a row already marked banned, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment that runs without the better-auth admin plugin (`auth.plugins.admin` off, and SCIM off): `admin/ban-user` now works without the admin plugin, and a banned row is refused a session, with the admin plugin's own `403 BANNED_USER` code and sentence. `admin/unban-user` lifts the ban there too. A ban with an expiry that has passed is lifted at the next sign-in, as the admin plugin does. A deployment with the admin plugin on answers exactly as before: the plugin still decides.
+  
+  Unchanged: the admin plugin's own ban enforcement where it is mounted; `create-user` and `import-users` off a managed environment; every row whose `source` is `env_native` or `idp_provisioned`.
+  
+  What to do: before upgrading a deployment that runs without the admin plugin, list the users whose `sys_user.banned` is true, platform administrators first, and unban every one who should keep signing in: turn the admin plugin on (`auth.plugins.admin`), call `POST /admin/unban-user` for each, then turn it off again. A banned sole platform administrator cannot reach `admin/unban-user` after the upgrade. After it, a user who should not be banned is unbanned with `POST /admin/unban-user`.
+  
+  New on a cloud-managed environment (`OS_CLOUD_MANAGED=1`): a platform administrator adds a person ahead of their first sign-in with `POST /admin/add-sso-user` (email, name, and optionally positions, permission sets and the manager's email address), or many with `POST /admin/import-sso-users` (CSV or rows, at most 500, a result per row, a bad row failing alone). The person is stored with `sys_user.source` = `idp_pending`: no password, refused by `set-user-password`, `set-initial-password`, `reset-password` and `phone-number/reset-password`, and refused a session on every channel, until their first sign-in through the platform identity provider attaches to the row and moves it to `idp_provisioned`. Positions, permission sets and the manager apply from the moment the person is added. Adding a person who is still pending again re-tells the host and changes nothing else; positions, permission sets or a manager sent with it are named on the answer as `notApplied`. A host passed as `environmentUserHost` is told after a person is added, and asked before a person is deactivated (`ban-user`) or reactivated (`unban-user`), never inside a transaction; the event names the administrator, the administrator at the keyboard on an impersonation session (`impersonatedBy`), and the administrator's cloud user id from their linked `objectstack-cloud` account. A host may refuse with `EnvironmentUserHostRefusal` (`409` or `403`, such as `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED`): the door answers with it, a refused deactivation or reactivation writes nothing, and a refused add takes that person back out (one import row fails alone). Any other host failure refuses a deactivation (`503`, nothing written), and never undoes an add or a reactivation, whose answer says so on the row.
+  
+  `@objectstack/platform-objects`: `sys_user.source` gains the option `idp_pending` ("Pending SSO Sign-In").
+- 8a8c21e: fix(platform-objects, plugin-audit)!: a member who holds `view_all_audit_log` and not `manage_platform_settings` (a separation-of-duties auditor) now finds the Audit Log entry in Setup › Diagnostics (#33224)
+  
+  Clause-②: yes (narrowing) — `GET /meta/app/setup` now serves `group_diagnostics` with the Audit Log entry (`nav_audit_logs`) to a member who holds `view_all_audit_log` without `manage_platform_settings`; before, the whole group was withheld from them. Every shipped permission set is served what it was before: `admin_full_access` holds both capabilities and still sees Sessions, Notification Events and Audit Log; `organization_admin` and the member sets hold neither and still see no Diagnostics group. One custom-set audience narrows: a set granting `manage_platform_settings` without `view_all_audit_log` is no longer served the Audit Log entry. A gate is all-of, so the entry cannot be gated on either capability.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema, accepted value or metadata type is added, removed, renamed or re-shaped. What moves is which entries of the platform's own Setup app the served app read lists for a caller, so nothing is stored for a migration to rewrite and nothing needs a tombstone. -->
+  
+  **BREAKING** for a custom permission set that grants `manage_platform_settings` without `view_all_audit_log`. Its holders were served the Setup › Diagnostics › Audit Log entry and no longer are. The Audit Log page itself is unchanged: it still opens by URL and still shows them the organization-attributed ledger rows it showed before. What to do: grant `view_all_audit_log` to that set if its holders should keep the menu entry, or open the page by URL. A third-party package that contributes an entry into `group_diagnostics` without its own `requiredPermissions` is now shown to every member who can open Setup, where before only `manage_platform_settings` holders saw it: declare `requiredPermissions` on the entry (see below).
+  
+  **What moved.** The Setup app's `group_diagnostics` slot carried `requiredPermissions: ['manage_platform_settings']`, and a group's gate prunes its whole subtree before any child is judged, so the audit entry contributed into it could never reach an auditor. The slot now carries no gate, and each entry carries its own: Sessions (`nav_sessions`) and Notification Events (`nav_notifications`) keep `manage_platform_settings`, and Audit Log is gated on `view_all_audit_log`, the ledger's own read capability.
+  
+  **If you contribute into `group_diagnostics`.** The slot no longer gates what you put in it. An entry that should stay admin-only declares `requiredPermissions` on the entry itself, as the platform's own entries now do.
+- b194618: fix(platform-objects): Setup no longer opens on Packaged Actions for a member who may not read the activation ledger
+  
+  Clause-②: no — the served `GET /meta/app/setup` tree is unchanged for every caller except that `nav_packaged_actions` now carries `visible: current_user.can('sys_metadata_activation', 'read')`, which the console asks with the member's `/auth/me/permissions` map. A member who may read the ledger is shown the entry and lands as before (the platform administrator still lands on System Overview). A member who may not read it stops being shown an entry whose page rendered only `activation ledger HTTP 403`; nothing they could use is withdrawn.
+  Metadata-protocol: none
+  
+  Packaged Actions was the first entry Setup serves, and the console's object-read prune judges `type: 'object'` entries only, so every member landed on it, including a separation-of-duties officer (for example an auditor holding `view_all_audit_log`) whose read of `sys_metadata_activation` answers 403. Such a member now lands on the first entry they can open, for example People & Org › Users. The entry still declares no `requiredPermissions` and no `requiresService`; the activation write doors keep their server-side gates. (#33224)
+- df9fe94: feat(spec, plugin-security): `sharing.controlledByParent.writeRequiresMasterRead` lets a `controlled_by_parent` detail ask read access on its master, not edit, for every write (ADR-0055 §3 as amended)
+  
+  Clause-②: yes (widening) — `ObjectSchema` accepts one new optional boolean, `sharing.controlledByParent.writeRequiresMasterRead`, that it refused as an unknown key before. An object that declares it as `true` moves runtime answers, all toward admit: a write by a principal who can read the master but not edit it was refused `403 PERMISSION_DENIED` and is now judged by the detail's own permissions, row-level security and field-level security. Two new parse refusals ship with the key, both on declarations that did not parse before (the key itself was unknown): the key set `true` on an object whose `sharingModel` is not `controlled_by_parent`, and the key set `true` beside `ownerMayEdit: true`. An object that leaves the key out, or sets it `false`, answers byte-for-byte as before.
+  Metadata-protocol: added
+  
+  **What the opt-in does.** A `controlled_by_parent` detail derives its access from its master. Reads already follow read access on the master; every write asked edit access on it (ADR-0055 §3). With `sharing.controlledByParent.writeRequiresMasterRead: true` on the detail, the master question for a write is read instead of edit, for every write path:
+  
+  - insert (single and batch), by-id update and delete, predicate (multi-row) update and delete;
+  - every hop of a master chain: a hop whose detail opted in asks read on its master and ends the walk there; a hop that did not opt in asks edit, as before;
+  - re-pointing a row to another master asks read on the new master and on the one it leaves; emptying an optional master asks read on the master it leaves;
+  - a write on behalf of another user (ADR-0090 D10) asks read on the master under each pass's own context, so the agent and the delegator must both read it.
+  
+  After the master question the detail's own object permissions, row-level security and field-level security decide, as they decide every write. A principal who cannot read the master still cannot write: an insert or re-point answers `403 PERMISSION_DENIED` ("requires read access to its master record"), and a by-id update or delete meets the read door first, `404 RECORD_NOT_FOUND`, because the detail row's own visibility derives from the master. Unchanged: the platform ownership floor on predicate writes, the required-master `422 MISSING_REQUIRED_FIELD`, and the optional-master owner rule for a row with no master.
+  
+  **Parse refusals (`ObjectSchema`).**
+  
+  - `writeRequiresMasterRead: true` on an object whose `sharingModel` is not `controlled_by_parent` is refused at `sharing.controlledByParent.writeRequiresMasterRead`, as `ownerMayEdit` is.
+  - `writeRequiresMasterRead: true` together with `ownerMayEdit: true` is refused at `sharing.controlledByParent.ownerMayEdit`: delete `ownerMayEdit`; `writeRequiresMasterRead` already admits the owner.
+  
+  **`@objectstack/spec`.** The new key, its `.describe()` text, the exported reader `controlledByParentWriteRequiresMasterRead(schema)` (`@objectstack/spec/data`), the object form's toggle ("Read on master is enough to write"), the liveness ledger entry (`live`), and prose on `ISecurityService.checkControlledByParentWrite`, `ControlledByParentWriteOutcome` and `ControlledByParentWriteDenialLeg`: under the opt-in, `allow` means the caller can read every master the write reaches, and a denial reuses the existing legs (`object_permission` when the master object is not readable, `row_level_security` when the master row is hidden). No type or union changes.
+  
+  **`@objectstack/plugin-security`.** The write gate, `checkControlledByParentWrite` and `os explain` (`explain-engine`) all ask the read question for an opted-in detail and agree with each other.
+  
+  **`@objectstack/lint`.** `security-controlled-by-parent-owner-policy-without-opt-in` stays silent on a detail that declares `writeRequiresMasterRead: true`: its own write policies decide there, so an `owner_id` policy is no longer dead under the master gate. No new rule.
+  
+  **`@objectstack/platform-objects`, `@object-ui/app-shell`.** The toggle's label and help text in every shipped metadata-form locale, and the Studio's zh-CN label.
+- 3c231cd: feat(platform-objects): the Register SSO Provider form names the token, authorization and JWKS endpoints
+  
+  Clause-②: yes (widening) — the `register_sso_provider` action on `sys_sso_provider` gains three optional params, `authorizationEndpoint`, `tokenEndpoint` and `jwksEndpoint` (type `url`), and the object translation bundles gain their label and help-text keys. The register bridge, `POST /api/v1/auth/admin/sso/register`, already accepted all three; nothing it accepted before is refused now.
+  Metadata-protocol: none
+  
+  **Setup → SSO Providers → Register SSO Provider** now offers **Authorization URL**, **Token URL** and **JWKS URL** beside **Discovery URL** and **Userinfo URL**. Each is posted to the register bridge under the `oidcConfig` member of the same name, kept instead of the endpoint the discovery document names, and trusted for that provider. Name one when the registration is refused `400 discovery_untrusted_origin` because the discovery document names that endpoint on a host the server does not trust. An identity provider whose token, key and userinfo endpoints sit on hosts other than its issuer's, such as Google (`https://oauth2.googleapis.com/token`, `https://www.googleapis.com/oauth2/v3/certs`, `https://openidconnect.googleapis.com/v1/userinfo`), now registers from Setup by filling Token URL, JWKS URL and Userinfo URL; before, only the API door took those endpoints.
+  
+  The three new fields are blank by default, and a blank field sends nothing, so a registration that names none of them is unchanged. The translated locales show the new labels and help texts in English until they are translated.
+- 480246b: fix(auth)!: a SAML provider keys its accounts on a stable attribute (Entra ID's object id by default), so a sign-in from the app and one from the IdP's portal reach one account
+  
+  Clause-②: yes (narrowing) — widened: the Register SAML Provider form and its bridge (`POST /api/v1/auth/admin/sso/register-saml`) take an optional `mapAccountKey`, the assertion attribute a provider keys its accounts on, stored as the provider's `mapping.extraFields.accountKey`; with none named, a Microsoft Entra ID provider (IdP Entity ID on `sts.windows.net` or `login.microsoftonline.com`) keys on `http://schemas.microsoft.com/identity/claims/objectidentifier` when the assertion carries it, so an IdP-initiated entry after an SP-initiated one (or the other way round) signs in to the same account where it was refused `account_not_linked`. Narrowed: on such a provider a new account's key is that value instead of the NameID, and an account made before this change keeps its NameID key, which a sign-in no longer looks up directly: a sign-in that resolves to the account's email and carries its NameID still signs in to it, but one whose email changed at the IdP no longer reaches it (a new user is made where the provider allows JIT, otherwise the sign-in is refused); and a SAML sign-in whose verified assertion does not carry the account-key value read from the posted one is refused `INVALID_REQUEST`. No first-party composition in this repository registers a SAML provider.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches SAML account keys or the SSO register form; `content/docs/permissions/sso.mdx` gains the rule in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: the new form parameter is an action parameter of a platform object stored inside the provider's existing SAML mapping, existing account rows are deliberately not rewritten (maintainer ruling: the stable key applies to new sign-ins only), and the moved answers are runtime sign-in outcomes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment with a Microsoft Entra ID SAML provider that already has accounts: those accounts stay keyed on the NameID they were made with (they are not rewritten), and a sign-in now looks an account up by the object id, so it reaches one of them only through the account's email. Measured on the real stack for an account made from the sign-in page (keyed on the user principal name):
+  
+  - the same entry again (same NameID, same email) still signs in to it;
+  - the other entry (the IdP's portal, another NameID) is refused `account_not_linked` by the linking rule, as before this change, so for such an account the two entries do not yet reach one account;
+  - after the person's email changed at the IdP (same NameID), the sign-in no longer reaches it: where the provider allows JIT a new user is made, keyed on the object id; otherwise the sign-in is refused `SELF_REGISTRATION_CLOSED`. Before this change that sign-in signed in to the old account.
+  
+  A provider that is not Entra ID and names no account-key attribute is unchanged.
+  
+  Unchanged: every OIDC provider; a SAML provider that is not Entra ID and names no attribute; linking across providers and to a password account (an existing account at the same address is still judged by the linking rule); and a sign-in whose assertion does not carry the key attribute, which is keyed on its NameID as before.
+  
+  What to do: nothing for a new provider. For a provider whose IdP is not Entra ID and whose NameID differs between sign-in-page and portal entries, name a stable per-person attribute in `mapAccountKey` when registering it.
+- 481f642: fix(platform-objects): three translated locales no longer show two visible fields of one platform object under one label
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - ru: `sys_import_job.created_count` now reads "Создано записей" (a count of records created), so it no longer shares "Создано" with `created_at`.
+  - ar: `sys_oauth_resource.identifier` now reads "معرّف URI للمورد" (the resource indicator URI), so it no longer shares "المعرّف" with `id`.
+  - fr: `sys_user.manager_id` now reads "Responsable hiérarchique" (the direct manager), so it no longer shares "Responsable" with `accountable_user_id`.
+  
+  Only translated leaf values change; English labels and the bundle structure are unchanged.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [8c88db6]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [6e28797]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/metadata-core@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes
@@ -614,20 +802,20 @@
   The new labels and help texts are translated in every locale bundle.
 - cac0f1a: fix(metadata)!: history, diff and rollback of a type stored per package address one package's row, and a removed package's version is no longer written into the remaining holder's row
   
-  Clause-②: no (narrowing) — for a type stored per `(package, name)` (the types in `PACKAGE_SLOTTED_STORE_TYPES`; at this release `api`, `agent`, `skill`, `action`, `email_template`, `permission`, `flow`) read through `DatabaseLoader`: `MetadataManager.getHistory` / `diff` and `DatabaseLoader.queryHistory` / `getHistoryRecord` of a name two row slots hold (two packages', or a package's beside the package-less row), naming no address, answered every holder's versions and now answer `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming every holder), and so do `rollback` and `diff` there of a version that does not exist, which answered "Version N not found"; `MetadataManager.rollback` to the version of a package that holds no row of the name (one since removed) wrote that version's body into the remaining holder's row and now answers `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`, naming that package). A rollback to a version recorded under no package (a history row written before this release) on a name two row slots hold answered `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`) and answers it still, at every door and under every address, since no address reads it. A name one row slot holds, and every other type, answer as before.
+  Clause-②: no (narrowing) — for a type stored per `(package, name)` (the types in `PACKAGE_SLOTTED_STORE_TYPES`; at this release `api`, `agent`, `skill`, `action`, `email_template`, `permission`, `flow`, `picklist`, `mapping`, `dataset`, `webhook`) read through `DatabaseLoader`: `MetadataManager.getHistory` / `diff` and `DatabaseLoader.queryHistory` / `getHistoryRecord` of a name two row slots hold (two packages', or a package's beside the package-less row), naming no address, answered every holder's versions and now answer `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming every holder), and so do `rollback` and `diff` there of a version that does not exist, which answered "Version N not found"; `MetadataManager.rollback` to the version of a package that holds no row of the name (one since removed) wrote that version's body into the remaining holder's row and now answers `409 RESOURCE_CONFLICT` (`not-held-by-qualifier`, naming that package). A rollback to a version recorded under no package (a history row written before this release) on a name two row slots hold answered `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`) and answers it still, at every door and under every address, since no address reads it. A name one row slot holds, and every other type, answer as before.
   Metadata-protocol: none
   
-  <!-- adr-0087: not-required (no-migration-prescription) no key of any authorable schema is added, removed or re-shaped. The one stored-shape change is a nullable `package_id` column on `sys_metadata_history`, which the history object's schema sync adds without rewriting any row; a row written before it reads exactly as it did, its package being the one its stored body names, as for a `sys_metadata` row. The two refusals answer a request without writing anything, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any authorable schema is added, removed or re-shaped. The one stored-shape change is a nullable `package_id` column on `sys_metadata_history`, which the history object's schema sync adds without rewriting any row; no row written before it is rewritten: its `package_id` stays NULL, and it is read as the package its stored body names, else as attributed to none. The refusals answer a request without writing anything, so there is nothing for `objectstack migrate meta` to rewrite. -->
   
   **BREAKING** for a caller of `MetadataManager` (or `DatabaseLoader`) history on a database-backed loader that reads the history of a name two packages hold without naming a package, or that rolls back to a version of a package removed since. No first-party door reaches `DatabaseLoader` history today: the REST `/meta/:type/:name/history`, `/rollback` and `/diff` doors go through the protocol's own repository.
   
   ADR-0150 D3/D4: such a type keeps a row per package of a name, its versions numbered per name across those rows. Until now its history rows did not say whose row they were taken of, so a rollback by name could not tell which row a version belongs to.
   
-  - **Each history row names its package.** `sys_metadata_history` gains a nullable `package_id` column. `DatabaseLoader` fills it on a save and a rollback of such a type with the package of the row written, including a package-less customization saved into a package's row (D4). A snapshot of the package-less row records the `sys_metadata` sentinel. NULL means "not attributed", never the environment: it stays NULL for every other type and on every row `SysMetadataRepository` writes. The unique `(type, name, version)` is unchanged. Upgrade path: the boot's schema sync adds the column on every driver (`ALTER TABLE … ADD COLUMN package_id`, nullable, no default, no row rewritten). A row written before it is read as the package its stored body names (the `_packageId` stamp), else as attributed to none. No row is backfilled; a later backfill attributes a legacy row only on a name one row slot holds, and writes the sentinel for the environment's.
+  - **Each history row names its package.** `sys_metadata_history` gains a nullable `package_id` column. `DatabaseLoader` fills it on a save and a rollback of such a type with the package of the row written, including a package-less customization saved into a package's row (D4). A snapshot of the package-less row records the `sys_metadata` sentinel. NULL means "not attributed", never the environment: it stays NULL for every other type and on every row `SysMetadataRepository` writes. The unique `(type, name, version)` is unchanged. Upgrade path: the boot's schema sync adds the column on every driver (`ALTER TABLE … ADD COLUMN package_id`, nullable, no default, no row rewritten). A row written before it keeps a NULL `package_id` and is read as the package its stored body names (the `_packageId` stamp), else as attributed to none; a rollback to a version attributed to none reads its package from the restored body's stamp. No row is backfilled; a later backfill attributes a legacy row only on a name one row slot holds, and writes the sentinel for the environment's.
   - **Name the package.** `getHistory(type, name, { packageId })`, `diff(type, name, v1, v2, { packageId })` and `rollback(type, name, version, { packageId })` on `MetadataManager`, and `queryHistory(…, { packageId })`, `getHistoryRecord(…, { packageId })` and `registerRollback(…, { packageId })` on `DatabaseLoader`, read or write that package's versions and row only. `total` and `hasMore` count that package's versions. Another package's version answers "not found". A rollback writes that package's row and leaves every other package's row untouched. A package that holds no row of the name is refused `409` (`not-held-by-qualifier`), and a name with no row left answers "not found for rollback". The new options type is exported as `MetadataHistoryAddress`.
   - **The environment.** `{ packageId: null }` addresses the name's package-less row and the versions recorded of it (`''` and the `sys_metadata` sentinel name no package, so they address it too). A package-less save of a name two packages hold writes that row, and its versions stay readable and restorable this way. A rollback by this address restores that row and the registry's package-less entry, never a package's.
   - **Naming none.** One holder answers as before. Two or more row slots, two packages' or a package's beside the package-less row, are refused `409` naming every holder. The rollback was already refused this way.
-  - **A version lands only in its own package's row.** A rollback to a version whose history row names a package that no longer holds a row is refused `409` naming that package, and one naming a package that still holds a row is refused saying the version is that package's. Nothing is written either way. An environment version is refused into a package's row the same way while the name has several row slots; on a name one row slot holds (a package took over the package-less row, or saved after it was removed) it lands in that row, as before. A version attributed to none (a row written before the column, or one `SysMetadataRepository` wrote) is in no address's history; a rollback to it lands in the name's row only when one row slot holds the name, as before, and with several is refused `409` (`ambiguous-in-environment`) naming every holder, addressed or not. Before, after package B's item was removed, `rollback(name, <B's version>)` wrote B's body into package A's row.
+  - **A version lands only in its own package's row.** A rollback to a version whose history row names a package that no longer holds a row is refused `409` naming that package, and one naming a package that still holds a row is refused saying the version is that package's. Nothing is written either way. An environment version is refused into a package's row the same way while the name has several row slots; on a name one row slot holds (a package took over the package-less row, or saved after it was removed) it lands in that row, as before. A version attributed to none (a row written before the column, or one `SysMetadataRepository` wrote) is in no address's history (an addressed `getHistory` leaves it out, and an addressed `diff` of it answers "not found"); a rollback to it lands in the name's row only when one row slot holds the name, as before, and with several is refused `409` (`ambiguous-in-environment`) naming every holder, addressed or not. Before, after package B's item was removed, `rollback(name, <B's version>)` wrote B's body into package A's row.
   
   **Who moves, and the fix.** A caller reading the history of a name two packages hold names the package: `getHistory(type, name, { packageId })`, once per package. A rollback names the package whose version it restores: `rollback(type, name, version, { packageId })`. The package-less row's versions are addressed with `{ packageId: null }`. A removed package's version cannot be restored into another package's row: reinstall that package, or save the body you want into the remaining package's item.
 - 5694bf5: feat(messaging): an organization administrator can send an in-app message to everyone in their organization, or to the members they pick, from Setup

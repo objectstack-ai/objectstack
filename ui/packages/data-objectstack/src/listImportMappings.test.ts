@@ -9,10 +9,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   ObjectStackAdapter,
-  clearSharedDiscoveryCache,
   classifyImportMappingsFailure,
   type MetadataReadWarningEvent,
 } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 /**
  * `listImportMappings(objectName)` feeds the import wizard's "saved mapping"

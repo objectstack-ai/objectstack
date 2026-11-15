@@ -3399,6 +3399,9 @@ const en = {
         ssoSwitchAccountHint: "Switch account opens your sign-in service in a new tab and signs you out there. Then sign in here again with an account that has access.",
         // A signed-in person's link refused by the callback (`email_does_not_match`), shown where they land.
         linkEmailMismatch: "The account was not linked: its email address doesn't match the one on the account you're signed in with. Link an account that uses the same email address.",
+        // objectstack#33498 — the vendor's other two link refusals, shown the same way.
+        linkAlreadyLinkedToOtherUser: "The account was not linked: it is already linked to a different user of this system. Link a different account, or sign in as the user it is linked to and unlink it there first.",
+        linkUnableToLink: "The account could not be linked. Check that its email address is verified with that sign-in service, then try again. If it still fails, ask your administrator.",
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
         // server's code (`signInRefusalMessages`).
         twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',
@@ -4464,12 +4467,13 @@ const en = {
       notAllowedToInvite: 'You are not allowed to invite users to this organization',
       notAllowedToInviteWithRole: 'You are not allowed to invite a user with this role',
       alreadyInvited: 'This user has already been invited to this organization',
+      alreadyMember: 'This user is already a member of this organization',
       organizationExists: 'Organization already exists',
       slugTaken: 'That URL slug is already taken',
       notAllowedToCreate: 'You are not allowed to create a new organization',
       organizationLimitReached: 'You have reached the limit on organizations you can create. Organizations you were invited to do not count toward it.',
       notTheRecipient: 'You are not the recipient of the invitation',
-      invitationNotFound: 'This invitation no longer exists or has expired',
+      invitationNotFound: 'This invitation has already been used, has expired, or was revoked. If you accepted it, the organization is in your organization list.',
       unknown: 'Something went wrong. Please try again.',
     },
     backToList: 'Back to organizations',
@@ -4896,6 +4900,15 @@ const en = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    // objectstack#33660 — the composer's model picker: the allowance note and the ×20 confirmation.
+    modelPicker: {
+      allowanceNote: '{{left}} of your AI allowance is left. A model marked ×N uses it N times as fast as the default model.',
+      confirmTitle: 'Switch to {{model}}?',
+      confirmBody: 'Each message on this model uses {{multiplier}} times as much of your AI allowance as one on the default model.',
+      confirmAllowance: '{{left}} of it is left, and on this model it runs out {{multiplier}} times as fast.',
+      confirmCancel: 'Cancel',
+      confirmAction: 'Switch model',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Send message',
     scrollToBottom: 'Scroll to the latest message',
@@ -4923,7 +4936,9 @@ const en = {
     tool: {
       aggregate_data: 'Aggregate the data',
       get_record: 'Read the record',
+      list_datasets: 'Check the available metrics',
       query_data: 'Query the data',
+      query_dataset: 'Query by a metric',
       query_records: 'Look up the records',
       read_package_doc: 'Read the app guide',
       search_knowledge: 'Search the knowledge base',

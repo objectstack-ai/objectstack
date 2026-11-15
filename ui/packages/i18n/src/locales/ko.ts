@@ -2736,6 +2736,8 @@ const ko = {
         ssoBackToConsole: "콘솔로 돌아가기",
         ssoSwitchAccountHint: "계정 전환을 누르면 새 탭에서 로그인 서비스가 열리고 그곳에서 로그아웃됩니다. 그런 다음 액세스 권한이 있는 계정으로 여기에서 다시 로그인하세요.",
         linkEmailMismatch: "계정이 연결되지 않았습니다. 해당 계정의 이메일 주소가 현재 로그인한 계정의 이메일 주소와 일치하지 않습니다. 같은 이메일 주소를 사용하는 계정을 연결하세요.",
+        linkAlreadyLinkedToOtherUser: "계정이 연결되지 않았습니다. 이 시스템의 다른 사용자에게 이미 연결되어 있습니다. 다른 계정을 연결하거나, 해당 계정이 연결된 사용자로 로그인하여 먼저 그곳에서 연결을 해제하세요.",
+        linkUnableToLink: "계정을 연결할 수 없습니다. 해당 계정의 이메일 주소가 그 로그인 서비스에서 인증되었는지 확인한 후 다시 시도하세요. 계속 실패하면 관리자에게 문의하세요.",
         twoFactorInvalidCode: "코드가 올바르지 않습니다. 인증 앱을 확인한 후 다시 시도하세요.",
         twoFactorInvalidBackupCode: "백업 코드가 올바르지 않거나 이미 사용되었습니다.",
         twoFactorTooManyAttempts: "잘못된 코드를 너무 많이 입력했습니다. 비밀번호로 다시 로그인하세요.",
@@ -3581,12 +3583,13 @@ const ko = {
       notAllowedToInvite: '이 조직에 사용자를 초대할 권한이 없습니다.',
       notAllowedToInviteWithRole: '이 역할로 사용자를 초대할 권한이 없습니다.',
       alreadyInvited: '이 사용자는 이미 이 조직에 초대되었습니다.',
+      alreadyMember: '이 사용자는 이미 이 조직의 구성원입니다.',
       organizationExists: '해당 조직이 이미 존재합니다.',
       slugTaken: '해당 슬러그는 이미 사용 중입니다.',
       notAllowedToCreate: '새 조직을 만들 권한이 없습니다.',
       organizationLimitReached: '만들 수 있는 조직 수의 한도에 도달했습니다. 초대받아 참여한 조직은 한도에 포함되지 않습니다.',
       notTheRecipient: '이 초대의 수신자가 아닙니다.',
-      invitationNotFound: '이 초대는 더 이상 존재하지 않거나 만료되었습니다.',
+      invitationNotFound: '이 초대는 이미 사용되었거나 만료되었거나 취소되었습니다. 이미 수락했다면 조직 목록에서 해당 조직을 찾을 수 있습니다.',
       unknown: '문제가 발생했습니다. 다시 시도해 주세요.',
     },
     backToList: "조직 목록으로 돌아가기",
@@ -3971,6 +3974,14 @@ const ko = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'AI 사용 한도가 {{left}} 남았습니다. ×N으로 표시된 모델은 기본 모델보다 N배 빠르게 한도를 사용합니다.',
+      confirmTitle: '{{model}}(으)로 전환할까요?',
+      confirmBody: '이 모델은 메시지 하나에 기본 모델의 {{multiplier}}배만큼 AI 사용 한도를 사용합니다.',
+      confirmAllowance: '{{left}} 남았으며, 이 모델에서는 {{multiplier}}배 빠르게 소진됩니다.',
+      confirmCancel: '취소',
+      confirmAction: '모델 전환',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: '메시지 보내기',
     scrollToBottom: '최신 메시지로 스크롤',
@@ -3998,7 +4009,9 @@ const ko = {
     tool: {
       aggregate_data: "관련 데이터 집계하기",
       get_record: "이 레코드 읽기",
+      list_datasets: "사용 가능한 지표 확인하기",
       query_data: "필요한 데이터 조회하기",
+      query_dataset: "지표로 조회하기",
       query_records: "해당 레코드 찾기",
       read_package_doc: "앱 안내서 읽기",
       search_knowledge: "지식 베이스에서 찾아보기",

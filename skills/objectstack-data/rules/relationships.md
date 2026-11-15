@@ -62,7 +62,7 @@ export default ObjectSchema.create({
     invoice_id: {
       type: 'master_detail',
       reference: 'invoice',
-      deleteBehavior: 'cascade',  // Delete line items when invoice deleted
+      deleteBehavior: 'cascade',
       required: true,
     },
     product: { type: 'text', required: true },
@@ -113,10 +113,13 @@ chain hop with no master ends there under the same rule. Refused beside a
 second `master_detail` or as `readonly`/`system`; `ObjectSchema.create()` reads
 an omitted `required` as `true`.
 
+**Import resolves a detail's name within its master** when the row sets that
+master (one reference column to it) or the lookup's `dependsOn` sibling: a tie
+there is `reference_ambiguous`, another master's detail `reference_not_found`.
+
 ### Many-to-Many: Junction Object
 
 ```typescript
-// Junction: Project Assignment between project and employee
 export default ObjectSchema.create({
   name: 'project_assignment',
   sharingModel: 'public_read_write',
@@ -151,7 +154,7 @@ export default ObjectSchema.create({
     name: { type: 'text', required: true },
     parent_category: {
       type: 'tree',
-      reference: 'category',  // Self-reference
+      reference: 'category',
       required: false,
     },
   }
@@ -281,15 +284,14 @@ inlineEdit: 'form'     // read-only list; "Add" / per-row edit opens the FULL fo
   editable fields, else `grid`. Set the string to override.
 
 **Modeling a `'grid'` line item for the full editor.** The grid lights up extra
-behaviors purely from how you model the child + parent (no UI config — details
-in the objectstack-ui skill → Master-Detail Forms):
+behaviors purely from how you model the child + parent (no UI config):
 
 ```typescript
 // Parent
 Invoice = {
   fields: {
     tax_rate: Field.number({ label: 'Tax Rate (%)' }),          // → live Subtotal/Tax/Total stack
-    total: Field.summary({ summaryOperations: {                  // server roll-up of the line subtotal
+    total: Field.summary({ summaryOperations: {
       object: 'invoice_line', field: 'amount', function: 'sum' } }),
   },
 }
@@ -297,12 +299,12 @@ Invoice = {
 InvoiceLine = {
   fields: {
     invoice:  Field.masterDetail('invoice', { inlineEdit: 'grid' }),
-    position: Field.number({ defaultValue: 0 }),                 // → drag-reorder, persisted (auto-hidden col)
-    product:  Field.lookup('product', { required: true }),       // → catalog typeahead
-    description: Field.text(),                                    // ← auto-filled from product.description
+    position: Field.number({ defaultValue: 0 }),
+    product:  Field.lookup('product', { required: true }),
+    description: Field.text(),
     quantity: Field.number({ required: true, defaultValue: 1 }),
-    unit_price: Field.currency(),                                // ← auto-filled from product.unit_price
-    amount:   Field.currency({ expression: 'record.quantity * record.unit_price' }), // computed, read-only, live
+    unit_price: Field.currency(),
+    amount:   Field.currency({ expression: 'record.quantity * record.unit_price' }),
   },
 }
 ```
@@ -310,8 +312,17 @@ InvoiceLine = {
 - **Computed column** — a *stored* `currency`/`number` field with an `expression`
   renders read-only and recomputes live in the grid, then persists. Keep it
   stored (NOT a `formula` field) so the parent `summary` can roll it up; the
-  engine computes a stored field's `expression` from the row the write stores
-  and stores the result, so a client-sent value never stands.
+  engine computes it from the row the write stores, so a client-sent value
+  never stands. It reads only that row: a related record's value
+  (`record.product.unit_price`) keeps what it held at this row's last write
+  (warning `stored-expression-cross-record-input`), so it stays a `formula`
+  (read time, not totallable) or a snapshot a flow on the related object
+  writes; repair a field left stored with `os migrate stored-expressions
+  --object OBJECT --field FIELD --changed --apply`. The clock (`now()`,
+  `today()`, `daysFromNow()`, `daysAgo()`), the acting user, `can()` and
+  `hasCapability()` are fixed at the write (warning
+  `stored-expression-volatile-input`): a `formula` keeps them current (the
+  clock: a scheduled flow too).
 - **Catalog auto-fill** — a `lookup` line field + sibling columns whose names
   match fields on the referenced record (e.g. `unit_price`, `description`) →
   picking a record fills those cells.
@@ -333,7 +344,7 @@ project: {
   reference: 'project',
   inlineEdit: true,                 // write side: edit inline in the Project form
   relatedList: 'primary',           // read side: a body table
-  relatedListTitle: 'Tasks',        // title of the detail-page list
+  relatedListTitle: 'Tasks',
   relatedListColumns: ['title', 'status', 'priority', 'due_date'],
 },
 
@@ -341,7 +352,7 @@ project: {
 audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 ```
 
-`relatedList` is tri-state — placement (ADR-0085):
+`relatedList` is tri-state — placement:
 
 - `'primary'` — part of the record's main content: a full-width table in the
   record's detail body. Default for a `master_detail` FK with `inlineEdit`.
@@ -357,12 +368,11 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 
 `relatedListTitle` / `relatedListColumns` override the derived title / columns;
 otherwise columns auto-derive from the child object's
-`highlightFields` (the same source the lookup picker uses). Audit FKs
+`highlightFields`. Audit FKs
 (`created_by`/`updated_by`/`owner_id`) never become related lists. A child that
 references the parent through several FKs (e.g. `primary_account` +
 `partner_account`) yields **one related list per FK**; a self-referential FK
-(a hierarchy) surfaces a "children" list. See the objectstack-ui skill for the
-rendering side.
+(a hierarchy) surfaces a "children" list.
 
 ## Incorrect vs Correct
 
@@ -373,27 +383,19 @@ export default ObjectSchema.create({
   name: 'invoice_line_item',
   fields: {
     invoice_id: {
-      type: 'lookup',  // ❌ Child can exist without parent — wrong!
+      type: 'lookup',  // ❌ Child can exist without parent — use the master_detail pattern above
       reference: 'invoice',
     },
   }
 });
 ```
 
-### ✅ Correct — Using master_detail for Owned Children
-
-The [master_detail](#one-to-many-master_detail) pattern above.
-
 ### ❌ Incorrect — Native Many-to-Many
 
 ```typescript
-// ObjectStack does not have native many-to-many type
 {
-  type: 'many_to_many',  // ❌ Not a valid field type
+  type: 'many_to_many',  // ❌ Not a valid field type — use a junction object
   reference: 'tag',
 }
 ```
 
-### ✅ Correct — Junction Object Pattern
-
-The [junction object](#many-to-many-junction-object) pattern above.

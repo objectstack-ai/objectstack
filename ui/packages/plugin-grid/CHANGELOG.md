@@ -1,5 +1,133 @@
 # @object-ui/plugin-grid
 
+## 18.5.0
+
+### Patch Changes
+
+- d574341: fix: a row action's declared `disabled` predicate greys its inline row button, and every row surface gives its `disabledReason`
+  
+  Clause-②: yes (widening) — new exports `useDisabledReason`, `DisabledReasonTrigger`, `DisabledReasonMenuLabel`, `menuItemReasonAria` and the type `DisabledReason` from `@object-ui/components`, the helper the `action:*` renderers already used, now shared with `@object-ui/plugin-grid`'s row menu. Nothing stops rendering; the inline row button is now disabled where its `disabled` predicate is true or faults, as the record header's button already is.
+  Metadata-protocol: none
+  
+  An action placed on list rows (`list_item`, or `record_related` on a parent's related list) with `variant: 'primary'` renders as the row's inline button. That button ignored the action's `disabled` predicate: it stayed enabled and clickable on a row whose record made `disabled` true, while the same action in the record header rendered disabled. `ActionSchema.disabled` reads "shown but refused when it evaluates TRUE", so the row now does what the header does:
+  
+  - **Inline row button** (`@object-ui/plugin-grid`, the object list and the enlarged related list): `disabled` is evaluated with the same row-predicate evaluator the "⋮" item beside it uses, against that row's record. A predicate that faults disables the button, as on the record header. A disabled button carries the action's `disabledReason` (the generic "Not available for this record" when it declares none) as its `aria-describedby` and in a tooltip on a focusable wrapper.
+  - **"⋮" row menu items** (`@object-ui/plugin-grid`'s grid row menu and `@object-ui/components`' `data-table` row menu, which the record page's related list draws): they already greyed out on a true `disabled`; they now also show the reason as a second line under the label and name it as the item's accessible description, the way `action:menu` does.
+  
+  The server still refuses a disabled action's call either way; this is the display catching up with the declaration.
+- f068cde: fix: in a narrow host such as a record drawer, a list's inline primary row action folds into the row's "⋮" menu instead of letting the pinned Actions column cover the last data column
+  
+  Clause-②: no — no export, prop or authored key changes; `@object-ui/plugin-grid` decides from layout alone whether to draw a row's inline button.
+  Metadata-protocol: none
+  
+  The Actions column of an object grid is pinned to the right edge of the table's scroll box. A `variant: 'primary'` row action drew as an inline button beside the "⋮" trigger, which roughly doubled that column. In a record drawer's enlarged related list (622 px of content at the default drawer width), that extra width alone could tip a table whose data columns fit into one that overflowed, and the pinned column then sat over the last data column (Status, in the reported case) at rest.
+  
+  The grid now draws inline row buttons only while the table fits its scroll box with them. When the table overflows with them, each row's primary action moves to the top of that row's "⋮" menu, so no action is dropped and the pinned column shrinks to the trigger. The buttons return once the box is as wide as the table was with them. On the full list page, where the table fits, nothing changes, and the phone card layout is untouched. A table that overflows even with the menu alone still scrolls sideways under the pinned "⋮" column, as any list that scrolls does today.
+- beff1fb: fix(plugin-grid, plugin-list, app-shell): a list row whose click opens nothing no longer looks clickable
+  
+  Clause-②: yes (widening) — `ObjectGridComponentProps` (published by `@object-ui/plugin-grid`) and `ListViewProps` (published by `@object-ui/plugin-list`) each gain one optional prop, `rowOpensRecord?: boolean`. Absent, every row renders as before. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  **Rows that open nothing.** A list row opens nothing when its view is authored `navigation: { mode: 'none' }`, or when its object's data API serves no single-record read (a list-only object, such as the SCIM connection credentials in Setup). The grid still drew such a row's first column as a link, and its right-click menu still offered Open and Open in new tab, so a click that did nothing looked like a broken page. The Console's object list, object data page and interface list pages now tell the grid that these rows open nothing (`rowOpensRecord={false}`, handed through `ListView`): the first column, and any column authored `link: true`, show the value as plain text, and the right-click menu offers no Open items. The row's actions (`list_item`) stay in the row menu and the right-click menu. The row click itself still reaches the host, so a Cmd/Ctrl-click on a row of a view authored `none` still opens the record in a new tab, as before. Rows that open a drawer or a page are unchanged.
+- bea3328: fix(plugin-grid, plugin-list, plugin-kanban, app-shell): cards whose click opens nothing no longer look clickable, and a view authored `navigation: { mode: 'none' }` opens no record on a Cmd/Ctrl or middle click
+  
+  Clause-②: yes (widening) — `ObjectGalleryProps` (published by `@object-ui/plugin-list`) and `ObjectKanbanComponentProps` (published by `@object-ui/plugin-kanban`) each gain one optional prop, `rowOpensRecord?: boolean`, the name `ObjectGridComponentProps` and `ListViewProps` already carry. Absent, every card renders as before. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  **Cards that open nothing.** A list's rows open nothing when its view is authored `navigation: { mode: 'none' }`, or when its object's data API serves no single-record read (a list-only object). The grid already drew such rows plain on a desktop; its phone cards, the gallery's cards and the board's cards still drew a pointer and a hover lift, so a tap that did nothing looked like a broken page. `ListView` now hands its `rowOpensRecord` to the gallery and the board as well as the grid, and none of these faces draws a pointer or a hover lift for a card that opens nothing. A board card the reader may not drag is no control at all: no `button` role, no tab stop, no Enter/Space activation and no title hover. A board card the reader may drag keeps its grab cursor and its drag semantics. Card actions (the phone card's "⋮") stay, and the click still reaches the host.
+  
+  **No new tab on an authored `none`.** On the Console's object list a Cmd/Ctrl-click or a middle click on a row of a view authored `navigation: { mode: 'none' }` opened the record in a new tab, though the view declares no navigation. It now opens nothing, like a plain click. This supersedes the sentence in the `33317-row-opens-nothing-plain` note that says such a click "still opens the record in a new tab, as before". Rows that open a drawer or a page still open a new tab on a Cmd/Ctrl or middle click.
+- f06f064: fix(plugin-grid): a multi-field row conflict lists each field, and a summary column's footer total is formatted as its cells
+  
+  Clause-②: yes (widening) — `@object-ui/fields` gains the export `summaryDeclaresCurrency`; nothing is removed or narrowed, and the `@object-ui/plugin-grid` changes are internal.
+  Metadata-protocol: none
+  
+  **Row save conflicts in the grid.** A row save that changed several fields and met a newer version (409 `CONCURRENT_UPDATE`) opened the conflict dialog with your edit and the current value printed as two raw JSON objects. The dialog now lists each changed field on its own row, under its column header, with your edit and the current value. A one-field conflict looks as before.
+  
+  **The list footer total of a roll-up (`summary`) field.** The total ignored the field's `scale`, so a summary with `scale: 2` read "Paid 230,000" beside a currency column's "215,000.00". The footer now formats a summary's total the way the list cell draws the same field: as money when the summary declares its currency (`currencyConfig`), else as a number at its declared `scale`. A summary that declares neither keeps its plain total. Money follows the summary's own `currencyConfig`, not the type of the field it sums, as the spec states and as the cell already draws it.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [f530d25]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [f5121e8]
+- Updated dependencies [b462444]
+- Updated dependencies [82838e8]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [ba32e79]
+- Updated dependencies [9317833]
+- Updated dependencies [8ed2b89]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [a9da547]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [4c32b96]
+- Updated dependencies [12d090d]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [d574341]
+- Updated dependencies [bc50d11]
+- Updated dependencies [de476f1]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [159dbe3]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [020ce3d]
+- Updated dependencies [ee627c6]
+- Updated dependencies [6446935]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [f06f064]
+- Updated dependencies [06e53a7]
+- Updated dependencies [5604aeb]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @object-ui/i18n@18.5.0
+  - @object-ui/fields@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/plugin-detail@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/mobile@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

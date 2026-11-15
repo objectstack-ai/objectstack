@@ -27,6 +27,12 @@
  *     marked `⚠`: `asked for sonnet` on the author row, `⚠ N not sonnet` on a
  *     Run row. Each turn in the record's `cardRun` carries `model`,
  *     `requestedModel` and `modelMismatch`.
+ *   - Effort: the effort level each turn ASKED for (`--effort`,
+ *     `--author-effort`, `--ask-effort`; `TurnSummary.requestedEffort`), shown
+ *     beside the served model — `· effort high` on the author row and on the
+ *     `Run · model` rows. No stream reports the effort a turn was served, so
+ *     this is the asked-for level, never a reading; a turn that asked for none
+ *     ran at the CLI's default and shows no effort.
  *   - Run-问数: one turn per (question, persona); it passes when the answer is
  *     correct AND cited AND leaks nothing. Leaks are also counted apart, so a
  *     leaking answer shows up even when it is otherwise right.
@@ -35,7 +41,14 @@
  *     the card. It is stated only when EVERY authoring turn that ran reported
  *     one; otherwise it is `not reported` — a turn that reported none is never
  *     read as zero, and a partial sum is never shown as the channel's cost.
- *   - Run-operations: one per operation; it passes when its grade passes.
+ *   - Run-operations: one per operation; it passes when its grade passes. An
+ *     operation whose grade measured nothing (`OperationGrade.notMeasured`:
+ *     the build denies the acting persona the write the card gives it, and
+ *     the runner's own probe of the declared write was denied 403 too) is
+ *     NOT MEASURED, like a seed-dependent one below. Each write the build
+ *     denies — that one, or a validation operation's probe met by the same
+ *     denial — is a Build finding naming persona, object and verb
+ *     ({@link buildDenialFindings}).
  *   - A turn that errored counts in the total and not in passed.
  *   - Seed: rows loaded of rows sent. A refused row is shown as
  *     `⚠ seed: N refused`, and every question turn and operation that depends
@@ -44,6 +57,7 @@
  *     half with nothing measured is `not-run` in the record, never `fail`.
  */
 
+import { askedFirst, confirmedByAgent } from '../score/index.js';
 import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
 import { packagesLine, type PackageSource } from './packages.js';
@@ -61,17 +75,20 @@ export interface HalfScores {
     /** The authoring turn did not finish (`BuildHalf.notMeasured`): 0 of 0, never degraded. */
     notMeasuredReason?: string;
     /** The authoring turn: how it ended, the turns it took of the cap it ran under, its wall-clock time, and the model it was served of the one it asked for. */
-    author?: { resultSubtype?: string; numTurns?: number; maxTurns?: number; elapsedMs?: number; model?: string; requestedModel?: string; modelMismatch?: true };
+    author?: { resultSubtype?: string; numTurns?: number; maxTurns?: number; elapsedMs?: number; model?: string; requestedModel?: string; modelMismatch?: true; requestedEffort?: string };
   };
   /** Rows the app took of the rows the runner sent. */
   seed?: { inserted: number; total: number; refused: number };
   ask?: Tally & { leaks: number; notMeasured: number };
   /**
    * `platformNotMeasured`: measured operations whose platform half met the
-   * build's own lock — graded on the agent half alone, the reason in the
-   * mode's findings ({@link platformNotMeasuredFindings}). Absent ⇒ none.
+   * build's own lock, or the build's denial of the write — graded on the
+   * agent half alone, the reason in the mode's findings
+   * ({@link platformNotMeasuredFindings}). Absent ⇒ none.
    */
   operations?: Tally & { notMeasured: number; platformNotMeasured?: number };
+  /** How the half's passing `pending_confirmation` operations were met ({@link confirmationTally}); absent ⇒ none passed. */
+  confirmation?: ConfirmationTally;
   /** The models the half's question and operation turns were served ({@link modelTally}). */
   models?: ModelTally;
 }
@@ -84,9 +101,23 @@ export interface ModelTally {
   requested: string[];
   /** Turns served a model other than the one they asked for (`TurnSummary.modelMismatch`). */
   mismatched: number;
+  /** Every effort level the turns asked for (`--effort` / `--ask-effort`, `TurnSummary.requestedEffort`); empty ⇒ the CLI's default. */
+  requestedEfforts: string[];
 }
 
 export const MODEL_NOT_REPORTED = '(not reported)';
+
+/**
+ * How the passing `pending_confirmation` operations were met
+ * (`OperationGrade.confirmation`): the agent asked the person first, or it
+ * sent `confirm: true` itself through the action's gate, accepted only until
+ * objectstack-ai/cloud#3826 item 6 (`AGENT_CONFIRMATION_MEETS_PENDING`).
+ * Absent ⇒ none passed.
+ */
+export interface ConfirmationTally {
+  askedFirst: number;
+  confirmedByAgent: number;
+}
 
 /** What the authoring turns cost, as their driver reported it ({@link authorCost}). */
 export interface AuthorCost {
@@ -116,6 +147,8 @@ export interface CardScorecard {
   counts: CardRun['counts'];
   /** Every authoring turn of the card, across its modes: the channel's cost on this card. Absent on a record written before the scorecard carried it. */
   authorCost?: AuthorCost;
+  /** {@link ConfirmationTally} summed over every mode and half; absent ⇒ none passed. */
+  confirmation?: ConfirmationTally;
   modes: ModeScorecard[];
 }
 
@@ -132,6 +165,7 @@ export function buildTally(b: BuildHalf | undefined, expectCount: number): HalfS
         ...(b.author.model ? { model: b.author.model } : {}),
         ...(b.author.requestedModel ? { requestedModel: b.author.requestedModel } : {}),
         ...(b.author.modelMismatch ? { modelMismatch: true as const } : {}),
+        ...(b.author.requestedEffort ? { requestedEffort: b.author.requestedEffort } : {}),
       }
     : undefined;
   if (b.notMeasured) return { passed: 0, total: 0, degraded: false, failedCommands: [], notMeasuredReason: b.notMeasured, ...(author ? { author } : {}) };
@@ -171,6 +205,14 @@ export function opsTally(r: RunHalf | undefined): HalfScores['operations'] | und
   };
 }
 
+/** Each way a half's passing `pending_confirmation` operations were met (`OperationGrade.confirmation`); `undefined` when none was. */
+export function confirmationTally(r: RunHalf | undefined): ConfirmationTally | undefined {
+  const ways = (r?.operations ?? []).filter((o) => !o.notMeasured).map((o) => o.grade?.confirmation);
+  const asked = ways.filter((w) => w === askedFirst).length;
+  const confirmed = ways.filter((w) => w === confirmedByAgent).length;
+  return asked + confirmed > 0 ? { askedFirst: asked, confirmedByAgent: confirmed } : undefined;
+}
+
 /** Why an operation's platform half was not measured (its `platform:` checks' shared reason), or `undefined`. */
 function platformNotMeasuredReason(o: OperationResult): string | undefined {
   return o.grade?.checks.find((c) => c.check.startsWith('platform:') && c.notMeasured !== undefined)?.notMeasured;
@@ -184,13 +226,27 @@ export function platformNotMeasuredFindings(r: RunHalf | undefined, half: string
   });
 }
 
+/**
+ * One Build finding per operation whose grade charged a write to the build's
+ * denial (`OperationResult.buildDenial`, `buildDeniesWrite`): the build denies
+ * the acting persona a write the card gives it.
+ */
+export function buildDenialFindings(r: RunHalf | undefined, half: string): string[] {
+  return (r?.operations ?? []).flatMap((o) =>
+    o.buildDenial === undefined
+      ? []
+      : [`${half}: the build denies ${o.buildDenial.persona} the ${o.buildDenial.verb} on ${o.buildDenial.object} that the card gives it (operation ${o.operation}: its probe of the declared write was refused PERMISSION_DENIED (403))`],
+  );
+}
+
 export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
   const turns = [...(r?.questions ?? []), ...(r?.operations ?? [])].flatMap((x) => (x.turn ? [x.turn] : []));
   if (turns.length === 0) return undefined;
   const served: Record<string, number> = {};
   for (const t of turns) served[t.model ?? MODEL_NOT_REPORTED] = (served[t.model ?? MODEL_NOT_REPORTED] ?? 0) + 1;
   const requested = [...new Set(turns.flatMap((t) => (t.requestedModel ? [t.requestedModel] : [])))];
-  return { served, requested, mismatched: turns.filter((t) => t.modelMismatch).length };
+  const requestedEfforts = [...new Set(turns.flatMap((t) => (t.requestedEffort ? [t.requestedEffort] : [])))];
+  return { served, requested, mismatched: turns.filter((t) => t.modelMismatch).length, requestedEfforts };
 }
 
 /** Sum USD figures without float noise (`0.1 + 0.2`): to the millionth of a dollar. */
@@ -252,6 +308,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   if (o) first.operations = o;
   const mt = modelTally(m.run);
   if (mt) first.models = mt;
+  const cf = confirmationTally(m.run);
+  if (cf) first.confirmation = cf;
   const out: ModeScorecard = {
     mode: m.mode,
     first,
@@ -261,9 +319,11 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
       ...m.findings,
       ...bareNameFindings(m.build, 'build'),
       ...requiredCycleFindings(m.build, 'build'),
+      ...buildDenialFindings(m.run, 'build'),
       ...platformNotMeasuredFindings(m.run, 'run'),
       ...bareNameFindings(m.iterate?.build, 'iterate build'),
       ...requiredCycleFindings(m.iterate?.build, 'iterate build'),
+      ...buildDenialFindings(m.iterate?.run, 'iterate build'),
       ...platformNotMeasuredFindings(m.iterate?.run, 'iterate run'),
     ],
   };
@@ -280,6 +340,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     if (io) it.operations = io;
     const imt = modelTally(m.iterate.run);
     if (imt) it.models = imt;
+    const icf = confirmationTally(m.iterate.run);
+    if (icf) it.confirmation = icf;
     if (m.iterate.changeSize) it.changeSize = m.iterate.changeSize.total;
     out.iterate = it;
   }
@@ -287,17 +349,25 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
 }
 
 export function cardScorecard(run: CardRun, packages?: PackageSource): CardScorecard {
+  const modes = run.modes.map((m) => modeScorecard(m));
+  const halves = modes.flatMap((m) => [m.first.confirmation, m.iterate?.confirmation]);
+  const asked = halves.reduce((n, c) => n + (c?.askedFirst ?? 0), 0);
+  const confirmed = halves.reduce((n, c) => n + (c?.confirmedByAgent ?? 0), 0);
   return {
     card: run.card,
     ...(packages ? { packages } : {}),
     counts: run.counts,
     authorCost: authorCost(run.modes.flatMap(authorTurnsOf)),
-    modes: run.modes.map((m) => modeScorecard(m)),
+    ...(asked + confirmed > 0 ? { confirmation: { askedFirst: asked, confirmedByAgent: confirmed } } : {}),
+    modes,
   };
 }
 
 const cell = (t: (Tally & { notMeasured?: number; platformNotMeasured?: number }) | undefined) =>
   t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}${t.platformNotMeasured ? ` · ${t.platformNotMeasured} platform half not measured` : ''}` : '—';
+/** `1 asked first · 1 confirmed by the agent`: how the passing irreversible operations were met. */
+const confirmationText = (c: ConfirmationTally): string => `${c.askedFirst} asked first · ${c.confirmedByAgent} confirmed by the agent`;
+const opsCell = (h: HalfScores | undefined) => `${cell(h?.operations)}${h?.confirmation ? ` (irreversible: ${confirmationText(h.confirmation)})` : ''}`;
 const seedCell = (s: HalfScores['seed']) => (s ? `${s.inserted}/${s.total}${s.refused ? ` ⚠ seed: ${s.refused} refused` : ''}` : '—');
 
 /** `42s`, `15m 00s`. */
@@ -318,18 +388,31 @@ const servedText = (a: { model?: string; requestedModel?: string; modelMismatch?
     : a.requestedModel
       ? `model not reported (asked for ${a.requestedModel})`
       : undefined;
+/** `effort high`; `effort low / high` when a half's turns asked for more than one; nothing when none asked for any. */
+const effortText = (efforts: readonly string[]): string | undefined => (efforts.length ? `effort ${efforts.join(' / ')}` : undefined);
 const authorCell = (b: HalfScores['build']) =>
   b?.author
-    ? [b.author.resultSubtype ?? '(no result)', turnsText(b.author), b.author.elapsedMs !== undefined ? elapsedText(b.author.elapsedMs) : 'elapsed not recorded', servedText(b.author)]
+    ? [
+        b.author.resultSubtype ?? '(no result)',
+        turnsText(b.author),
+        b.author.elapsedMs !== undefined ? elapsedText(b.author.elapsedMs) : 'elapsed not recorded',
+        servedText(b.author),
+        effortText(b.author.requestedEffort ? [b.author.requestedEffort] : []),
+      ]
         .filter(Boolean)
         .join(' · ')
     : '—';
-/** `claude-sonnet-4-5 ×20, claude-opus-5-5 ×4 ⚠ 4 not sonnet`; `—` when no turn named a model and none was asked for. */
+/**
+ * `claude-sonnet-4-5 ×20, claude-opus-5-5 ×4 ⚠ 4 not sonnet · effort medium`;
+ * `—` when no turn named a model and none asked for a model or an effort.
+ */
 const modelCell = (t: ModelTally | undefined): string => {
   if (!t) return '—';
+  const efforts = t.requestedEfforts;
   const served = Object.entries(t.served).sort(([an, a], [bn, b]) => b - a || an.localeCompare(bn));
-  if (t.requested.length === 0 && served.every(([name]) => name === MODEL_NOT_REPORTED)) return '—';
-  return `${served.map(([name, n]) => `${name} ×${n}`).join(', ')}${t.mismatched ? ` ⚠ ${t.mismatched} not ${t.requested.join(' / ')}` : ''}`;
+  if (t.requested.length === 0 && efforts.length === 0 && served.every(([name]) => name === MODEL_NOT_REPORTED)) return '—';
+  const effort = effortText(efforts);
+  return `${served.map(([name, n]) => `${name} ×${n}`).join(', ')}${t.mismatched ? ` ⚠ ${t.mismatched} not ${t.requested.join(' / ')}` : ''}${effort ? ` · ${effort}` : ''}`;
 };
 
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
@@ -340,6 +423,7 @@ export function renderScorecard(sc: CardScorecard): string {
     ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
     `author cost: ${authorCostText(sc.authorCost)}`,
     '',
+    ...(sc.confirmation ? [`irreversible operations: ${confirmationText(sc.confirmation)} (accepted until real human confirmation lands)`, ''] : []),
     `| Half | ${sc.modes.map((m) => m.mode).join(' | ')} |`,
     `|:---|${sc.modes.map(() => ':---').join('|')}|`,
   ];
@@ -348,13 +432,13 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Build · author', (m) => authorCell(m.first.build));
   row('Seed', (m) => seedCell(m.first.seed));
   row('Run-问数', (m) => (m.first.ask ? `${cell(m.first.ask)}${m.first.ask.leaks ? ` ⚠ ${m.first.ask.leaks} leaking` : ''}` : '—'));
-  row('Run-operations', (m) => cell(m.first.operations));
+  row('Run-operations', (m) => opsCell(m.first));
   row('Run · model', (m) => modelCell(m.first.models));
   row('Iterate · Build', (m) => buildCell(m.iterate?.build));
   row('Iterate · author', (m) => authorCell(m.iterate?.build));
   row('Iterate · Seed', (m) => seedCell(m.iterate?.seed));
   row('Iterate · Run-问数', (m) => (m.iterate?.ask ? `${cell(m.iterate.ask)}${m.iterate.ask.leaks ? ` ⚠ ${m.iterate.ask.leaks} leaking` : ''}` : '—'));
-  row('Iterate · Run-operations', (m) => cell(m.iterate?.operations));
+  row('Iterate · Run-operations', (m) => opsCell(m.iterate));
   row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
   row('Author cost', (m) => (m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
@@ -398,7 +482,7 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
     const iterateOut = firstOut ?? (m.iterate?.build.notMeasured ? `not run: the iterate build was not measured (${m.iterate.build.notMeasured})` : undefined);
     const buildNote = (b: HalfScores['build']) => (b?.notMeasuredReason ? `not measured: ${b.notMeasuredReason}` : b ? cell(b) : '');
     const halves: Array<[string, Tally | undefined, string | undefined, unknown[], string]> = [
-      ['build', s.first.build, m.build?.error, m.build?.score ? [...m.build.score.expect.checks, ...m.build.score.tags.flatMap((t) => t.checks), ...m.build.score.agentActions, ...m.build.score.naming] : [], buildNote(s.first.build)],
+      ['build', s.first.build, m.build?.error, m.build?.score ? [...m.build.score.expect.checks, ...m.build.score.tags.flatMap((t) => t.checks), ...m.build.score.agentActions, ...m.build.score.personaGrants, ...m.build.score.naming] : [], buildNote(s.first.build)],
       ['run-ask', s.first.ask, m.run?.error, m.run?.questions ?? [], s.first.ask ? cell(s.first.ask) : (firstOut ?? '')],
       ['run-operations', s.first.operations, m.run?.error, m.run?.operations ?? [], s.first.operations ? cell(s.first.operations) : (firstOut ?? '')],
       ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? [...m.iterate.build.score.expect.checks, ...m.iterate.build.score.naming] : [], s.iterate?.build ? buildNote(s.iterate.build) : (firstOut ?? '')],

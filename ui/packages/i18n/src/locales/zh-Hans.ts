@@ -2808,6 +2808,8 @@ const zh = {
         ssoBackToConsole: "返回控制台",
         ssoSwitchAccountHint: "“切换账号”会在新标签页中打开你的登录服务并在那里退出登录。之后请在此处使用有权访问的账号重新登录。",
         linkEmailMismatch: "该账号未关联：它的邮箱地址与你当前登录账号的邮箱地址不一致。请关联使用相同邮箱地址的账号。",
+        linkAlreadyLinkedToOtherUser: "该账号未关联：它已关联到本系统中的另一个用户。请关联其他账号，或先以它所关联的用户登录，在那里解除关联。",
+        linkUnableToLink: "无法关联该账号。请确认它的邮箱地址已在该登录服务中完成验证，然后重试。如果仍然失败，请联系管理员。",
         twoFactorInvalidCode: '验证码无效，请检查身份验证器应用后重试。',
         twoFactorInvalidBackupCode: '该备用码无效或已被使用。',
         twoFactorTooManyAttempts: '错误次数过多，请重新使用密码登录。',
@@ -3830,12 +3832,13 @@ const zh = {
       notAllowedToInvite: '您无权邀请用户加入该组织。',
       notAllowedToInviteWithRole: '您无权以该角色邀请用户。',
       alreadyInvited: '该用户已被邀请加入本组织。',
+      alreadyMember: '该用户已是本组织成员。',
       organizationExists: '该组织已存在。',
       slugTaken: '该标识已被占用。',
       notAllowedToCreate: '您无权创建新组织。',
       organizationLimitReached: '您创建的组织数量已达上限。被邀请加入的组织不计入此上限。',
       notTheRecipient: '您不是该邀请的收件人。',
-      invitationNotFound: '该邀请已失效或已过期。',
+      invitationNotFound: '该邀请已被使用、已过期或已撤销。如果您已接受过该邀请，可在组织列表中找到该组织。',
       unknown: '出了点问题，请重试。',
     },
     backToList: '返回组织列表',
@@ -4220,6 +4223,14 @@ const zh = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'AI 额度还剩 {{left}}。标有 ×N 的模型消耗额度的速度是默认模型的 N 倍。',
+      confirmTitle: '切换到 {{model}}？',
+      confirmBody: '此模型每条消息消耗的 AI 额度是默认模型的 {{multiplier}} 倍。',
+      confirmAllowance: '额度还剩 {{left}}，使用此模型会以 {{multiplier}} 倍的速度用完。',
+      confirmCancel: '取消',
+      confirmAction: '切换模型',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: '发送消息',
     scrollToBottom: '滚动到最新消息',
@@ -4247,7 +4258,9 @@ const zh = {
     tool: {
       aggregate_data: '汇总相关数据',
       get_record: '读取这条记录',
+      list_datasets: '查看指标',
       query_data: '查询所需数据',
+      query_dataset: '按指标查询',
       query_records: '查找相关记录',
       read_package_doc: '阅读应用文档',
       search_knowledge: '在知识库中查找',

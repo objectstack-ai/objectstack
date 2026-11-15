@@ -2738,6 +2738,8 @@ const ja = {
         ssoBackToConsole: "コンソールに戻る",
         ssoSwitchAccountHint: "「アカウントを切り替える」を選ぶと、新しいタブでサインインサービスが開き、そこでサインアウトします。その後、アクセス権のあるアカウントでここから再度サインインしてください。",
         linkEmailMismatch: "アカウントはリンクされませんでした。そのメールアドレスが、サインイン中のアカウントのメールアドレスと一致しません。同じメールアドレスを使用するアカウントをリンクしてください。",
+        linkAlreadyLinkedToOtherUser: "アカウントはリンクされませんでした。このシステムの別のユーザーに既にリンクされています。別のアカウントをリンクするか、リンク先のユーザーとしてサインインし、先にそちらでリンクを解除してください。",
+        linkUnableToLink: "アカウントをリンクできませんでした。そのメールアドレスがそのサインインサービスで確認済みであることを確かめてから、もう一度お試しください。それでも失敗する場合は、管理者にお問い合わせください。",
         twoFactorInvalidCode: "コードが無効です。認証アプリを確認して、もう一度お試しください。",
         twoFactorInvalidBackupCode: "このバックアップコードは無効か、すでに使用されています。",
         twoFactorTooManyAttempts: "誤ったコードの入力が多すぎます。パスワードでもう一度サインインしてください。",
@@ -3584,12 +3586,13 @@ const ja = {
       notAllowedToInvite: 'この組織にユーザーを招待する権限がありません。',
       notAllowedToInviteWithRole: 'このロールでユーザーを招待する権限がありません。',
       alreadyInvited: 'このユーザーはすでにこの組織に招待されています。',
+      alreadyMember: 'このユーザーはすでにこの組織のメンバーです。',
       organizationExists: 'その組織はすでに存在します。',
       slugTaken: 'そのスラッグはすでに使用されています。',
       notAllowedToCreate: '新しい組織を作成する権限がありません。',
       organizationLimitReached: '作成できる組織の数が上限に達しました。招待されて参加した組織は上限に含まれません。',
       notTheRecipient: 'この招待の宛先はあなたではありません。',
-      invitationNotFound: 'この招待は存在しないか、有効期限が切れています。',
+      invitationNotFound: 'この招待はすでに使用済みか、有効期限切れか、取り消されています。承認済みの場合は、組織一覧にその組織があります。',
       unknown: '問題が発生しました。もう一度お試しください。',
     },
     backToList: "組織一覧に戻る",
@@ -3974,6 +3977,14 @@ const ja = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'AI 利用枠の残りは {{left}} です。×N と表示されたモデルは、既定のモデルの N 倍の速さで利用枠を消費します。',
+      confirmTitle: '{{model}} に切り替えますか？',
+      confirmBody: 'このモデルでは、1 件のメッセージで既定のモデルの {{multiplier}} 倍の AI 利用枠を消費します。',
+      confirmAllowance: '残りは {{left}} で、このモデルでは {{multiplier}} 倍の速さで使い切ります。',
+      confirmCancel: 'キャンセル',
+      confirmAction: 'モデルを切り替え',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'メッセージを送信',
     scrollToBottom: '最新のメッセージまでスクロール',
@@ -4001,7 +4012,9 @@ const ja = {
     tool: {
       aggregate_data: "関連データを集計する",
       get_record: "このレコードを読み込む",
+      list_datasets: "利用できる指標を確認する",
       query_data: "必要なデータを照会する",
+      query_dataset: "指標で照会する",
       query_records: "該当するレコードを探す",
       read_package_doc: "アプリのガイドを読む",
       search_knowledge: "ナレッジベースで調べる",

@@ -14,7 +14,7 @@
  * fails its Build half.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,12 +22,12 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
-import { truthFigures } from '../../src/score/index.js';
+import { buildDeniesWrite, truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
-import { RecordedDriver, RecordingDriver, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
+import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
-import { runCard, seedApp, type ProjectOps } from '../../src/runner/orchestrate.js';
-import { cardScorecard, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
+import { runCard, runHalf, seedApp, type ProjectOps } from '../../src/runner/orchestrate.js';
+import { buildDenialFindings, cardScorecard, modelTally, opsTally, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
@@ -319,6 +319,13 @@ describe('runCard — the crm card, both modes, a clean agent', () => {
     const results = record.results as Array<{ id: string; verdict: string }>;
     expect(results.find((r) => r.id === 'crm_account_with_contacts.scratch.run-operations')!.verdict).toBe('pass');
     expect(results.find((r) => r.id === 'crm_account_with_contacts.template.build')!.verdict).toBe('not-run'); // template mode builds nothing first
+    // The build's persona grant checks are its evidence, each named, as its other Build checks are.
+    const grants = run.modes[0]!.build!.score!.personaGrants;
+    expect(grants.length).toBeGreaterThan(0);
+    const buildEvidence = (record.results as Array<{ id: string; clauses: Array<{ evidence: { check?: string } }> }>)
+      .find((r) => r.id === 'crm_account_with_contacts.scratch.build')!
+      .clauses.map((c) => c.evidence.check);
+    expect(buildEvidence.filter((c) => c?.startsWith('persona-grant:'))).toEqual(grants.map((g) => g.check));
     expect(renderScorecard(sc)).toContain('| Run-问数 | 9/9 | — |');
     expect(renderScorecard(sc)).toContain('| Seed | 8/8 | — |'); // every row loaded: no warning
   });
@@ -1016,6 +1023,7 @@ describe('runCard — every turn states the model it was served, and a mismatch 
       served: { 'claude-sonnet-4-5-20250929': firstTurns - firstFellBack, 'claude-opus-5-5': firstFellBack },
       requested: ['sonnet'],
       mismatched: firstFellBack,
+      requestedEfforts: [],
     });
     const table = renderScorecard(sc);
     expect(table).toContain(' · claude-opus-4-1-20250805 |'); // the build's author row
@@ -1045,7 +1053,7 @@ describe('runCard — every turn states the model it was served, and a mismatch 
   it('turns that named no model and asked for none leave the model rows empty, as before', async () => {
     const { scenario, ops, driver } = setup();
     const sc = cardScorecard(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN }));
-    expect(sc.modes[0]!.first.models).toEqual({ served: { '(not reported)': 14 }, requested: [], mismatched: 0 });
+    expect(sc.modes[0]!.first.models).toEqual({ served: { '(not reported)': 14 }, requested: [], mismatched: 0, requestedEfforts: [] });
     const table = renderScorecard(sc);
     expect(table).toContain('| Run · model | — |');
     expect(table).toContain('| Build · author | success · elapsed not recorded |');
@@ -1146,5 +1154,390 @@ describe('runCard — the authoring cost a driver reports is stated only when ev
     const olderTable = renderScorecard({ ...older, modes: older.modes.map(({ authorCost: _mode, ...m }) => m) });
     expect(olderTable).toContain('author cost: not reported\n');
     expect(olderTable).toContain('| Author cost | not reported | skipped |');
+  });
+});
+
+describe('runHalf — a write the build denies the persona is charged to the build, replayed from eval#1 round 1 (#33596)', () => {
+  /**
+   * The recorded turns (eval#1 round 1, 2026-11-14, published 18.4.0, scratch
+   * mode) of the four operations whose 403 the round charged to the
+   * operation. The fixture keeps each turn's reply and its write calls
+   * verbatim; the read calls before them are trimmed (an answer is read off a
+   * turn's write calls whenever it made one). The app below answers the
+   * replay's re-sent writes and the runner's own probe as that build would
+   * have: it denies `contractor` every write on tasks, refuses `sales_rep`'s
+   * invoice line without a unit price (the agent's first create, and the
+   * declared line), and denies `sales_rep` the unit price field.
+   */
+  const FIXTURE = resolve(HERE, 'fixtures/eval-r1-build-denial.recording.json');
+  const REPLAY = RecordedDriver.fromFile(FIXTURE);
+  const RECORDED = JSON.parse(readFileSync(FIXTURE, 'utf8')) as { turns: Record<string, ParsedTurn> };
+  const DENIED = JSON.stringify({ error: { code: 'PERMISSION_DENIED', message: 'You do not have permission to perform this action.', status: 403 } });
+  const REASON = `${buildDeniesWrite}: the runner's probe of the declared write was refused PERMISSION_DENIED (403), and nothing was written`;
+
+  class DenyingApp extends FakeApp {
+    /** A refusal by `apiKey tool objectName`, or one the function picks from the call; anything else is applied. */
+    constructor(private readonly answers: Readonly<Record<string, string>> | ((apiKey: string, tool: string, args: Record<string, unknown>) => string | undefined)) {
+      super();
+    }
+    override async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
+      this.toolCalls.push({ apiKey, tool, args });
+      const answer = typeof this.answers === 'function' ? this.answers(apiKey, tool, args) : this.answers[`${apiKey} ${tool} ${String(args.objectName)}`];
+      if (answer !== undefined) return { output: answer, isError: true };
+      const rows = (this.rows[String(args.objectName)] ??= []);
+      rows.push({ id: `probe-${rows.length}`, ...(args.data as Record<string, unknown>) });
+      return { output: JSON.stringify({ id: `probe-${rows.length - 1}` }), isError: false };
+    }
+  }
+
+  /** The card's own namespace, with only the recorded operations and no question turns. */
+  function only(file: string, ops: readonly string[]): LoadedScenario {
+    const scenario = namespacedScenario(load(resolve(HERE, `../../../../../docs/qa/scenarios/${file}`)));
+    const run = { ...scenario.card.run, questions: [], operations: scenario.card.run.operations.filter((o) => ops.includes(o.id)) };
+    return { ...scenario, card: { ...scenario.card, run } };
+  }
+  const ref = { card: '', mode: 'scratch', phase: 'run' } as const;
+
+  it('project_with_tasks as contractor: add_task (applied) and task_without_title (the validation write) are not measured, each a Build finding; drop_packing grades as before', async () => {
+    const scenario = only('project_with_tasks.json', ['add_task', 'drop_packing', 'task_without_title']);
+    const app = new DenyingApp({ 'key-contractor create_record demoproject_task': DENIED, 'key-contractor delete_record demoproject_task': DENIED });
+    const half = await runHalf(scenario, app, REPLAY, { ...ref, card: 'project_with_tasks' });
+    const op = (id: string) => half.operations.find((o) => o.operation === id)!;
+
+    // The replay re-sent each recorded write as contractor (refused again, as recorded), and after each
+    // create the runner sent the declared create itself: the applied one because the agent's write met 403.
+    const data = (c: { args: Record<string, unknown> }) => (c.args.data as Record<string, unknown> | undefined) ?? {};
+    expect(app.toolCalls.map((c) => [c.apiKey, c.tool, c.args.objectName, data(c).title ?? null, 'assignee' in data(c)])).toEqual([
+      ['key-contractor', 'create_record', 'demoproject_task', 'Launch checklist', false], // add_task, re-sent
+      ['key-contractor', 'create_record', 'demoproject_task', 'Launch checklist', true], // add_task, the probe
+      ['key-contractor', 'delete_record', 'demoproject_task', null, false], // drop_packing, re-sent
+      ['key-contractor', 'create_record', 'demoproject_task', null, false], // task_without_title, re-sent
+      ['key-contractor', 'create_record', 'demoproject_task', null, true], // task_without_title, the probe
+    ]);
+    for (const id of ['add_task', 'task_without_title']) {
+      expect(op(id).error, id).toBeUndefined();
+      expect(op(id).observation!.answer, id).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+      expect(op(id).observation!.probe, id).toEqual({ answer: { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 }, writes: 0 });
+      expect([op(id).notMeasured, op(id).grade!.pass, op(id).grade!.notMeasured], id).toEqual([REASON, false, REASON]);
+      expect(op(id).buildDenial, id).toEqual({ persona: 'contractor', object: 'demoproject_task', verb: 'create' });
+    }
+    // The delete the card wants confirmed first: the agent sent `confirm: true` itself (the door's gate answers
+    // before its permission check), so its 403 is no build denial. No probe, graded as before.
+    expect(RECORDED.turns['project_with_tasks/scratch/run/drop_packing/contractor']!.toolCalls[0]!.input).toMatchObject({ confirm: true });
+    expect([op('drop_packing').notMeasured, op('drop_packing').grade!.pass, op('drop_packing').buildDenial]).toEqual([undefined, false, undefined]);
+    expect(op('drop_packing').observation!.probe).toBeUndefined();
+
+    // On the scorecard: out of numerator and denominator, and a Build finding naming persona, object and verb.
+    expect(opsTally(half)).toEqual({ passed: 0, total: 1, notMeasured: 2 });
+    expect(buildDenialFindings(half, 'build')).toEqual([
+      'build: the build denies contractor the create on demoproject_task that the card gives it (operation add_task: its probe of the declared write was refused PERMISSION_DENIED (403))',
+      'build: the build denies contractor the create on demoproject_task that the card gives it (operation task_without_title: its probe of the declared write was refused PERMISSION_DENIED (403))',
+    ]);
+  });
+
+  it('invoice_with_line_items add_line as sales_rep: the declared line reaches the app\'s rule for the runner, so the agent\'s 403 stays the operation\'s', async () => {
+    const scenario = only('invoice_with_line_items.json', ['add_line']);
+    const required = JSON.stringify({ error: { code: 'VALIDATION_FAILED', message: 'Unit Price is required', status: 400 } });
+    const fieldDenied = JSON.stringify({ error: { code: 'PERMISSION_DENIED', message: '[Security] Field write denied: not permitted to edit [unit_price]', status: 403 } });
+    const app = new DenyingApp((apiKey, tool, args) =>
+      apiKey === 'key-sales_rep' && tool === 'create_record' && args.objectName === 'demoinvoice_invoice_line'
+        ? 'unit_price' in (args.data as Record<string, unknown>) ? fieldDenied : required
+        : undefined,
+    );
+    const half = await runHalf(scenario, app, REPLAY, { ...ref, card: 'invoice_with_line_items' });
+    const [res] = half.operations;
+    expect(app.toolCalls).toHaveLength(3); // the agent's two creates, re-sent, then the probe
+    expect(res!.observation!.probe).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED', status: 400 }, writes: 0 });
+    expect([res!.notMeasured, res!.grade!.notMeasured, res!.grade!.pass, res!.buildDenial]).toEqual([undefined, undefined, false, undefined]);
+    expect(opsTally(half)).toEqual({ passed: 0, total: 1, notMeasured: 0 });
+  });
+
+  it('⛔ a probe the door applies is the agent\'s fail, measured, and the runner\'s row stays (the state impact of this probe)', async () => {
+    const scenario = only('project_with_tasks.json', ['add_task']);
+    // The re-sent agent write is refused as recorded; the door then applies the runner's probe (it carries the assignee).
+    const app = new DenyingApp((_k, _t, args) => ('assignee' in ((args.data as Record<string, unknown> | undefined) ?? {}) ? undefined : DENIED));
+    const half = await runHalf(scenario, app, REPLAY, { ...ref, card: 'project_with_tasks' });
+    const [res] = half.operations;
+    expect(res!.observation!.probe).toEqual({ answer: { kind: 'applied' }, writes: 1 });
+    expect([res!.notMeasured, res!.grade!.pass, res!.buildDenial]).toEqual([undefined, false, undefined]);
+    expect(app.rows.demoproject_task!.filter((r) => r.title === 'Launch checklist')).toHaveLength(1);
+  });
+
+  it('⛔ an applied operation whose agent write landed is never probed', async () => {
+    const scenario = only('project_with_tasks.json', ['add_task']);
+    const app = new DenyingApp({});
+    const landed: ParsedTurn = {
+      replyText: 'Added.',
+      toolCalls: [{ name: 'create_record', rawName: 'mcp__app__create_record', input: { objectName: 'demoproject_task', data: { title: 'Launch checklist', project: 'p1', status: 'todo' } }, output: '{"id":"t9"}' }],
+      meta: {},
+    };
+    const driver = new RecordedDriver({ driver: { driver: 'claude-code-cli', apiBilled: false }, turns: { 'project_with_tasks/scratch/run/add_task/contractor': landed }, files: {} });
+    const half = await runHalf(scenario, app, driver, { ...ref, card: 'project_with_tasks' });
+    // The one call the app saw is the replay's re-send of the agent's create; the runner sent no probe.
+    expect(app.toolCalls).toEqual([{ apiKey: 'key-contractor', tool: 'create_record', args: landed.toolCalls[0]!.input }]);
+    expect(half.operations[0]!.observation!.probe).toBeUndefined();
+  });
+});
+
+// ── The effort each turn asked for ──────────────────────────────────────────
+
+/**
+ * A driver that answers as `inner` does, each turn stamped as the live driver
+ * stamps it under `--author-effort xhigh --ask-effort medium --model haiku`:
+ * the model and effort it asked for (`meta.process`) and the model it was
+ * served (`meta.model`). No stream reports an effort, so none is served.
+ */
+class AskedEfforts implements AgentDriver {
+  constructor(private readonly inner: AgentDriver) {}
+  info(): DriverInfo {
+    return { ...this.inner.info(), authorModel: 'haiku', askModel: 'haiku', authorEffort: 'xhigh', askEffort: 'medium' };
+  }
+  private stamp(t: ParsedTurn, requestedEffort: string): ParsedTurn {
+    return { ...t, meta: { ...t.meta, model: 'claude-haiku-5-5', process: { elapsedMs: 1_000, exit: 0, timedOut: false, timeoutMs: 60_000, maxTurns: 12, requestedModel: 'haiku', requestedEffort } } };
+  }
+  async author(task: AuthorTask) {
+    const r = await this.inner.author(task);
+    return { ...r, turn: this.stamp(r.turn, 'xhigh') };
+  }
+  async ask(task: AskTask): Promise<ParsedTurn> {
+    return this.stamp(await this.inner.ask(task), 'medium');
+  }
+}
+
+describe('runCard — every turn states the effort it asked for, beside the model it was served', () => {
+  it('the record carries the requested effort per turn and on the driver, and the scorecard shows it on the author rows and the Run · model rows', async () => {
+    const { scenario, ops, driver: scripted } = setup();
+    const driver = new RecordingDriver(new AskedEfforts(scripted));
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    const scratch = run.modes[0]!;
+
+    expect(scratch.build!.author).toMatchObject({ model: 'claude-haiku-5-5', requestedModel: 'haiku', requestedEffort: 'xhigh' });
+    expect(scratch.iterate!.build.author).toMatchObject({ requestedEffort: 'xhigh' });
+    const turns = [...scratch.run!.questions, ...scratch.run!.operations, ...scratch.iterate!.run!.questions, ...scratch.iterate!.run!.operations];
+    expect(turns.length).toBeGreaterThan(0);
+    expect(turns.map((x) => x.turn!.requestedEffort)).toEqual(turns.map(() => 'medium'));
+
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.models).toEqual({ served: { 'claude-haiku-5-5': scratch.run!.questions.length + scratch.run!.operations.length }, requested: ['haiku'], mismatched: 0, requestedEfforts: ['medium'] });
+    expect(sc.modes[0]!.first.build!.author).toMatchObject({ model: 'claude-haiku-5-5', requestedEffort: 'xhigh' });
+    const table = renderScorecard(sc);
+    expect(table).toContain(' · claude-haiku-5-5 · effort xhigh |'); // the build's author row
+    expect(table).toMatch(/\| Iterate · author \| [^|]* · claude-haiku-5-5 · effort xhigh \|/);
+    expect(table).toMatch(/\| Run · model \| claude-haiku-5-5 ×\d+ · effort medium \|/);
+    expect(table).toMatch(/\| Iterate · Run · model \| claude-haiku-5-5 ×\d+ · effort medium \|/);
+
+    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-15', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
+    expect(written.env.driver).toMatchObject({ authorEffort: 'xhigh', askEffort: 'medium' });
+    expect(written.cardRun.modes[0].build.author).toMatchObject({ requestedEffort: 'xhigh' });
+    expect(written.cardRun.modes[0].run.questions[0].turn).toMatchObject({ requestedEffort: 'medium' });
+    expect(written.scorecard.modes[0].first.models.requestedEfforts).toEqual(['medium']);
+  });
+
+  it('a Run half whose turns named no model but asked for an effort still shows the effort', () => {
+    const half = { questions: [{ turn: { toolCalls: 0, requestedEffort: 'low' } }], operations: [] } as unknown as Parameters<typeof modelTally>[0];
+    expect(modelTally(half)).toEqual({ served: { '(not reported)': 1 }, requested: [], mismatched: 0, requestedEfforts: ['low'] });
+  });
+});
+
+// ── A replay re-sends the recorded writes ───────────────────────────────────
+
+describe('runHalf — a replay re-sends the turn\'s recorded writes before the read-back, replayed from eval#1 (#33737)', () => {
+  /**
+   * The recorded operation turns of eval#1's haiku control run
+   * (`crm_account_with_contacts`, scratch, published 18.4.0, 2026-11-15),
+   * verbatim: reads and writes, replies and answers. Replayed on `main`
+   * before this change, `add_contact` read back 0 rows and failed, though the
+   * live run wrote it and passed.
+   */
+  const FIXTURE = resolve(HERE, 'fixtures/eval-haiku-crm-replay.recording.json');
+  const RECORDED = JSON.parse(readFileSync(FIXTURE, 'utf8')) as Recording;
+  const DENIED = JSON.stringify({ error: { code: 'PERMISSION_DENIED', message: 'You do not have permission to perform this action.', status: 403 } }, null, 2);
+  const KEY = 'crm_account_with_contacts/scratch/run';
+  const ref = { card: 'crm_account_with_contacts', mode: 'scratch', phase: 'run' } as const;
+  const OPS = ['add_contact', 'move_eli', 'remove_ben', 'contact_bad_email'];
+  const WRITES = ['create_record', 'update_record', 'delete_record', 'run_action'];
+
+  /**
+   * The build the run met, as an MCP write door over the fake rows: `sdr` may
+   * create and edit contacts but not delete them; `partner_user` may write
+   * nothing. `refuse` overrides an answer, to make the app answer otherwise
+   * than the recorded run did.
+   */
+  class BuildApp extends FakeApp {
+    private next = 0;
+    constructor(private readonly refuse: (persona: string, tool: string) => boolean = () => false) {
+      super();
+    }
+    override async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
+      this.toolCalls.push({ apiKey, tool, args });
+      const persona = apiKey.replace(/^key-/, '');
+      const object = String(args.objectName);
+      const data = (args.data ?? {}) as Record<string, unknown>;
+      const rows = (this.rows[object] ??= []);
+      const grants = persona === 'sdr' && (tool === 'create_record' || tool === 'update_record');
+      if (grants === this.refuse(persona, tool)) return { output: DENIED, isError: true };
+      if (tool === 'delete_record') {
+        rows.splice(rows.findIndex((r) => r.id === args.recordId), 1);
+        return { output: JSON.stringify({ object, id: args.recordId, deleted: true }), isError: false };
+      }
+      if (tool === 'create_record') {
+        const id = `replayed-${this.next++}`;
+        rows.push({ id, ...data });
+        this.audit[id] = `u-${persona}`;
+        return { output: JSON.stringify({ object, id, record: { id, ...data } }, null, 2), isError: false };
+      }
+      const row = rows.find((r) => r.id === args.recordId);
+      if (!row) return { output: JSON.stringify({ error: { code: 'NOT_FOUND', status: 404 } }), isError: true };
+      Object.assign(row, data);
+      this.audit[String(args.recordId)] = `u-${persona}`;
+      return { output: JSON.stringify({ object, id: args.recordId, record: row }, null, 2), isError: false };
+    }
+  }
+
+  function crm(): LoadedScenario {
+    const scenario = namespacedScenario(load());
+    const run = { ...scenario.card.run, questions: [], operations: scenario.card.run.operations.filter((o) => OPS.includes(o.id)) };
+    return { ...scenario, card: { ...scenario.card, run } };
+  }
+
+  /** Every recorded write of the four turns, in recorded order, as the app should receive it. */
+  const recordedWrites = OPS.flatMap((op) =>
+    Object.entries(RECORDED.turns)
+      .filter(([k]) => k.startsWith(`${KEY}/${op}/`))
+      .flatMap(([k, t]) => t.toolCalls.filter((c) => WRITES.includes(c.name)).map((c) => ({ apiKey: `key-${k.split('/').pop()}`, tool: c.name, args: c.input }))),
+  );
+
+  it('add_contact reads back the row the recorded run wrote and passes; move_eli too, with its audit actor', async () => {
+    const app = new BuildApp();
+    const half = await runHalf(crm(), app, RecordedDriver.fromFile(FIXTURE), ref);
+    const op = (id: string) => half.operations.find((o) => o.operation === id)!;
+    expect(half.operations.map((o) => [o.operation, o.notMeasured?.startsWith('the replay') ?? false, o.error])).toEqual(OPS.map((id) => [id, false, undefined]));
+    expect(op('add_contact').grade!.pass).toBe(true);
+    expect(op('add_contact').observation!.writes).toBe(1);
+    expect(app.rows.democrm_contact!.filter((r) => r.full_name === 'Fay Wu')).toEqual([{ id: 'replayed-0', full_name: 'Fay Wu', account: 'ac3' }]);
+    expect(op('move_eli').grade!.pass).toBe(true);
+    expect(op('move_eli').grade!.checks.find((c) => c.check === 'audit-actor')!.pass).toBe(true);
+  });
+
+  it('the app receives exactly the recorded writes, in recorded order, each as its persona; no recorded read is re-sent', async () => {
+    const app = new BuildApp();
+    await runHalf(crm(), app, RecordedDriver.fromFile(FIXTURE), ref);
+    const reads = Object.values(RECORDED.turns).flatMap((t) => t.toolCalls).filter((c) => !WRITES.includes(c.name));
+    expect(reads.length).toBeGreaterThan(10); // the fixture keeps the turns' reads, so their absence below is measured
+    expect(app.toolCalls.every((c) => WRITES.includes(c.tool))).toBe(true);
+    // The validation operation's probe follows the agent's re-sent create (the runner's own call, as before).
+    const probe = { apiKey: 'key-partner_user', tool: 'create_record', args: { objectName: 'democrm_contact', data: { full_name: 'Gil Ray', email: 'gil at acme' } } };
+    expect(app.toolCalls).toEqual([...recordedWrites, probe]);
+  });
+
+  it('⛔ a recorded refused write is re-sent and meets its refusal again; the operation grades as the run did', async () => {
+    const app = new BuildApp();
+    const half = await runHalf(crm(), app, RecordedDriver.fromFile(FIXTURE), ref);
+    const op = (id: string) => half.operations.find((o) => o.operation === id)!;
+    expect(app.toolCalls.filter((c) => c.tool === 'delete_record')).toEqual([{ apiKey: 'key-sdr', tool: 'delete_record', args: { objectName: 'democrm_contact', recordId: 'ct2', confirm: true } }]);
+    expect(app.rows.democrm_contact!.some((r) => r.id === 'ct2')).toBe(true);
+    expect(op('remove_ben').observation!.answer).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+    expect([op('remove_ben').notMeasured, op('remove_ben').grade!.pass]).toEqual([undefined, false]);
+    expect(op('contact_bad_email').observation!.answer).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+    expect(app.rows.democrm_contact!.some((r) => r.full_name === 'Gil Ray')).toBe(false);
+  });
+
+  it('⛔ a write the app answers otherwise than the recorded run makes the operation NOT MEASURED, with the call named, never a fail', async () => {
+    // The replay's app refuses sdr's create (the run's was applied) and applies sdr's delete (the run's was refused).
+    const app = new BuildApp((persona, tool) => persona === 'sdr' && (tool === 'create_record' || tool === 'delete_record'));
+    const half = await runHalf(crm(), app, RecordedDriver.fromFile(FIXTURE), ref);
+    const op = (id: string) => half.operations.find((o) => o.operation === id)!;
+    expect(op('add_contact').notMeasured).toBe(
+      'the replay is not faithful: the booted app answered a re-sent write otherwise than the recorded run: `create_record` on democrm_contact was applied in the recorded run and refused PERMISSION_DENIED on replay',
+    );
+    expect(op('remove_ben').notMeasured).toBe(
+      'the replay is not faithful: the booted app answered a re-sent write otherwise than the recorded run: `delete_record` on democrm_contact was refused PERMISSION_DENIED in the recorded run and applied on replay',
+    );
+    for (const id of ['add_contact', 'remove_ben']) {
+      expect([op(id).grade, op(id).observation, op(id).error], id).toEqual([undefined, undefined, undefined]);
+      expect(op(id).turn!.resultSubtype, id).toBe('success'); // the recorded turn stays on the record
+    }
+    expect([op('move_eli').notMeasured, op('move_eli').grade!.pass]).toEqual([undefined, true]);
+    expect(app.rows.democrm_contact!.some((r) => r.id === 'ct2')).toBe(false); // the app did delete it: the state differs from the run's
+    expect(opsTally(half)!.notMeasured).toBeGreaterThanOrEqual(2);
+  });
+
+  // ── The driver alone ──
+
+  const turnOf = (...calls: ParsedTurn['toolCalls']): ParsedTurn => ({ replyText: 'Done.', toolCalls: calls, meta: { resultSubtype: 'success' } });
+  const call = (name: string, input: Record<string, unknown>, output?: string, isError?: boolean): ParsedTurn['toolCalls'][number] => ({
+    name,
+    rawName: `mcp__app__${name}`,
+    input,
+    output,
+    ...(isError ? { isError } : {}),
+  });
+  const task = (step: string, callTool?: AskTask['callTool']): AskTask => ({ card: 'c', mode: 'scratch', phase: 'run', step, persona: 'p', prompt: '', mcp: { url: '', apiKey: '' }, ...(callTool ? { callTool } : {}) });
+  const door = () => {
+    const sent: Array<[string, Record<string, unknown>]> = [];
+    let n = 0;
+    const callTool: AskTask['callTool'] = async (tool, args) => {
+      sent.push([tool, args]);
+      return { output: JSON.stringify({ id: tool === 'create_record' ? `new-${n++}` : args.recordId }), isError: false };
+    };
+    return { sent, callTool };
+  };
+
+  it('a row the recorded run created is named by the id the replay\'s app gave it, in a later write of the same turn and of a later turn', async () => {
+    const replay = new RecordedDriver({
+      driver: { driver: 'claude-code-cli', apiBilled: false },
+      turns: {
+        'c/scratch/run/a/p': turnOf(
+          call('create_record', { objectName: 'o', data: { name: 'x' } }, '{"id":"rec-1"}'),
+          call('update_record', { objectName: 'o', recordId: 'rec-1', data: { parent: 'rec-1', tags: ['rec-1', 'seed-1'] } }, '{"id":"rec-1"}'),
+        ),
+        'c/scratch/run/b/p': turnOf(call('delete_record', { objectName: 'o', recordId: 'rec-1', confirm: true }, '{"id":"rec-1"}')),
+      },
+      files: {},
+    });
+    const { sent, callTool } = door();
+    await replay.ask(task('a', callTool));
+    await replay.ask(task('b', callTool));
+    expect(sent).toEqual([
+      ['create_record', { objectName: 'o', data: { name: 'x' } }],
+      ['update_record', { objectName: 'o', recordId: 'new-0', data: { parent: 'new-0', tags: ['new-0', 'seed-1'] } }],
+      ['delete_record', { objectName: 'o', recordId: 'new-0', confirm: true }],
+    ]);
+  });
+
+  it('⛔ a recorded write with no recorded answer (a turn cut short): nothing of the turn is re-sent, and the turn is not faithful', async () => {
+    const t = turnOf(call('create_record', { objectName: 'o', data: {} }, '{"id":"r1"}'), call('update_record', { objectName: 'o', recordId: 'r1', data: {} }));
+    const replay = new RecordedDriver({ driver: { driver: 'x', apiBilled: false }, turns: { 'c/scratch/run/a/p': t }, files: {} });
+    const { sent, callTool } = door();
+    const err = await replay.ask(task('a', callTool)).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ReplayNotFaithfulError);
+    expect((err as ReplayNotFaithfulError).reason).toBe('the recording holds no answer to `update_record` (the turn was cut short), so whether it wrote is unknown; nothing was re-sent');
+    expect((err as ReplayNotFaithfulError).turn).toBe(t);
+    expect(sent).toEqual([]);
+  });
+
+  it('⛔ a write the door could not take is not faithful, naming why', async () => {
+    const t = turnOf(call('create_record', { objectName: 'o', data: {} }, '{"id":"r1"}'));
+    const replay = new RecordedDriver({ driver: { driver: 'x', apiBilled: false }, turns: { 'c/scratch/run/a/p': t }, files: {} });
+    const err = await replay
+      .ask(
+        task('a', async () => {
+          throw new Error('tools/call create_record: 502');
+        }),
+      )
+      .catch((e: unknown) => e);
+    expect((err as ReplayNotFaithfulError).reason).toBe(
+      'the booted app answered a re-sent write otherwise than the recorded run: `create_record` on o was applied in the recorded run and not sent (tools/call create_record: 502) on replay',
+    );
+  });
+
+  it('a turn with no write, or read without a door, is handed back as recorded and sends nothing', async () => {
+    const reads = turnOf(call('query_records', { objectName: 'o' }, '{"records":[]}'));
+    const writes = turnOf(call('create_record', { objectName: 'o', data: {} }, '{"id":"r1"}'));
+    const replay = new RecordedDriver({ driver: { driver: 'x', apiBilled: false }, turns: { 'c/scratch/run/a/p': reads, 'c/scratch/run/b/p': writes }, files: {} });
+    const { sent, callTool } = door();
+    expect(await replay.ask(task('a', callTool))).toBe(reads);
+    expect(await replay.ask(task('b'))).toBe(writes);
+    expect(sent).toEqual([]);
   });
 });

@@ -10,7 +10,9 @@
  *             its persona, each over the app's own MCP, and a probed
  *             operation's declared write — the validation operation's and
  *             each permission overstep's — re-sent by the runner itself as
- *             that persona, `observeProbe`) → the iterate change →
+ *             that persona, `observeProbe`; an `applied` operation's too
+ *             when the agent's own write was denied 403, `probesBuildDenial`)
+ *             → the iterate change →
  *             rebuild + re-score Build, and (unless disabled) re-run the Run half.
  *             A build whose authoring turn did not finish (killed by the
  *             runner's timeout, no result, an error result) is NOT MEASURED,
@@ -32,10 +34,12 @@
  */
 
 import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } from '../loader.js';
-import { isProbedOperation, PERSON_USER_FIELD, scenarioNamespace, type CardTitle } from '../schema.js';
+import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
   gradeCardAnswer,
+  buildDeniesWrite,
   gradeCardOperation,
+  isWriteDenial,
   readArtifactFacts,
   scoreCardArtifact,
   type OperationGrade,
@@ -45,9 +49,9 @@ import {
   type ScenarioArtifactScore,
 } from '../score/index.js';
 import type { AppHarness, PersonaAccount } from './app.js';
-import { servedAsRequested, type AgentDriver, type StepRef } from './driver.js';
+import { ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, type Row } from './observe.js';
+import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, writeCallsOn, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import { buildPrompt, iteratePrompt, operationPrompt, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, userHandleFields, verifyArgs } from './prompts.js';
 import { lookupKey, requiredLookups, seedPlan, type SeedLookup } from './seed.js';
@@ -102,6 +106,13 @@ export interface TurnSummary {
   requestedModel?: string;
   /** The served model is not the requested one ({@link servedAsRequested}); only when both are known. */
   modelMismatch?: true;
+  /**
+   * The effort level the driver asked for (`--effort` / `--author-effort` /
+   * `--ask-effort`, `meta.process`); absent ⇒ the CLI's default effort, or a
+   * turn recorded before the runner kept it. No stream reports the effort a
+   * turn was served, so there is no served effort to compare it with.
+   */
+  requestedEffort?: string;
   /** Wall-clock time of the CLI process, when the driver ran one (`meta.process`). */
   elapsedMs?: number;
   /**
@@ -140,7 +151,11 @@ export interface BuildHalf {
 export interface QuestionResult {
   question: string;
   persona: string | null;
-  /** Why this turn was not asked: its expected answer changes without the rows the seed could not load ({@link seedDependence}). Not measured, never a fail. */
+  /**
+   * Why this turn measures nothing: it was not asked, because its expected
+   * answer changes without the rows the seed could not load ({@link seedDependence});
+   * or it was replayed and the replay was not faithful (`ReplayNotFaithfulError`). Never a fail.
+   */
   notMeasured?: string;
   grade?: PersonaRunGrade;
   turn?: TurnSummary;
@@ -150,8 +165,21 @@ export interface QuestionResult {
 export interface OperationResult {
   operation: string;
   persona: string;
-  /** Why this operation was not run: it acts on a row the seed could not load ({@link seedDependence}). Not measured, never a fail. */
+  /**
+   * Why this operation is not measured: it was not run, because it acts on a
+   * row the seed could not load ({@link seedDependence}); or it ran and its
+   * grade measured nothing (`OperationGrade.notMeasured`: the build denies the
+   * persona the write the card gives it, `buildDeniesWrite`); or it was
+   * replayed and the app did not answer its re-sent writes as it answered the
+   * recorded run (`ReplayNotFaithfulError`). Never a fail.
+   */
   notMeasured?: string;
+  /**
+   * The write the build denies the acting persona, when the grade charged a
+   * check to it (`buildDeniesWrite`): the persona, the operation's object as
+   * the app names it, and the verb. The scorecard lists it as a Build finding.
+   */
+  buildDenial?: { persona: string; object: string; verb: 'create' | 'update' };
   observation?: OperationObservation;
   grade?: OperationGrade;
   turn?: TurnSummary;
@@ -227,6 +255,7 @@ const summarize = (t: ParsedTurn): TurnSummary => {
     ...(t.meta.model ? { model: t.meta.model } : {}),
     ...(p?.requestedModel ? { requestedModel: p.requestedModel } : {}),
     ...(p?.requestedModel && t.meta.model && !servedAsRequested(p.requestedModel, t.meta.model) ? { modelMismatch: true as const } : {}),
+    ...(p?.requestedEffort ? { requestedEffort: p.requestedEffort } : {}),
     toolCalls: t.toolCalls.length,
     ...(p ? { elapsedMs: p.elapsedMs } : {}),
     ...(t.meta.reportedCostUsd !== undefined ? { reportedCostUsd: t.meta.reportedCostUsd } : {}),
@@ -245,6 +274,9 @@ const summarize = (t: ParsedTurn): TurnSummary => {
 };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 2000);
+
+/** Why a replayed turn measures nothing ({@link ReplayNotFaithfulError}): what its read-back would grade is the replay's, not the agent's. */
+const replayNotFaithful = (e: ReplayNotFaithfulError): string => `the replay is not faithful: ${e.reason}`.slice(0, 2000);
 
 /** `60 min`, `0.5 min`: a timeout as the not-measured reason states it. */
 export const minutesText = (ms: number): string => `${Number((ms / 60_000).toFixed(2))} min`;
@@ -493,6 +525,30 @@ export function buildLockOf(built: unknown, card: Card, op: Operation): string |
   return `${setName} locks ${locked.join(', ')} and the build declares the action${actions.length > 1 ? 's' : ''} ${actions.join(', ')} on ${op.object}`;
 }
 
+/**
+ * The build's confirmation gate per action on an operation's object, read from
+ * the built artifact: each action name declared there, `true` when it carries
+ * `ai.requiresConfirmation: true`. `undefined` when the artifact cannot be
+ * read. The grader's temporary rule reads it (`AGENT_CONFIRMATION_MEETS_PENDING`,
+ * until objectstack-ai/cloud#3826 item 6).
+ */
+export function actionGatesOf(built: unknown, op: Operation): Record<string, boolean> | undefined {
+  if (built === undefined) return undefined;
+  let facts: ReturnType<typeof readArtifactFacts>;
+  try {
+    facts = readArtifactFacts(built);
+  } catch {
+    return undefined;
+  }
+  const gates: Record<string, boolean> = {};
+  for (const { object, action } of facts.actions) {
+    if (object !== op.object) continue;
+    const ai = typeof action.ai === 'object' && action.ai !== null ? (action.ai as { requiresConfirmation?: unknown }) : undefined;
+    gates[String(action.name)] = ai?.requiresConfirmation === true;
+  }
+  return gates;
+}
+
 function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[], adminId: string): string | null {
   if (userId === null) return null;
   const hit = accounts.find((a) => a.userId === userId);
@@ -689,6 +745,12 @@ export async function runHalf(
     await seedApp(scenario, app, accounts, half.seed, requiredLookups(built)); // tallied in place, so a throw keeps the partial seed
 
     const keyOf = (persona: string | null) => (persona === null ? adminKey : accounts.find((a) => a.persona === persona)!.apiKey);
+    // The door a turn is given: the app's MCP endpoint as the persona, and the
+    // runner's own call through it (a replay re-sends the recorded writes there).
+    const doorOf = (persona: string | null): Pick<AskTask, 'mcp' | 'callTool'> => {
+      const apiKey = keyOf(persona);
+      return { mcp: { url: app.mcpUrl, apiKey }, callTool: (tool, args) => app.callTool(apiKey, tool, args) };
+    };
     // A refused seed row makes what reads it not measured — never a fail of the app's answer.
     const dependence = seedDependence(scenario, half.seed.refused);
 
@@ -702,7 +764,7 @@ export async function runHalf(
           continue;
         }
         try {
-          const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), prompt: questionPrompt(scenario, q.id), mcp: { url: app.mcpUrl, apiKey: keyOf(persona) } });
+          const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), prompt: questionPrompt(scenario, q.id), ...doorOf(persona) });
           res.turn = summarize(turn);
           res.grade = gradeCardAnswer(scenario, {
             question: q.id,
@@ -711,7 +773,10 @@ export async function runHalf(
             turn,
           });
         } catch (e) {
-          res.error = errText(e);
+          if (e instanceof ReplayNotFaithfulError) {
+            res.turn = summarize(e.turn);
+            res.notMeasured = replayNotFaithful(e);
+          } else res.error = errText(e);
         }
         half.questions.push(res);
       }
@@ -727,7 +792,14 @@ export async function runHalf(
       try {
         const before = (await app.listRows(op.object)).rows as Row[];
         const started = new Date();
-        const turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), mcp: { url: app.mcpUrl, apiKey: keyOf(op.actingAs) } });
+        let turn: ParsedTurn;
+        try {
+          turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), ...doorOf(op.actingAs) });
+        } catch (e) {
+          if (!(e instanceof ReplayNotFaithfulError)) throw e;
+          half.operations.push({ ...res, turn: summarize(e.turn), notMeasured: replayNotFaithful(e) });
+          continue;
+        }
         res.turn = summarize(turn);
         const after = (await app.listRows(op.object)).rows as Row[];
         // The card's today, the dates the app's clock read during the turn, and
@@ -743,12 +815,21 @@ export async function runHalf(
           const id = touchedRowId(op, rowsByObject, today);
           auditActor = id === undefined ? null : personaOfUser(await app.auditActorUserId(op.object, id), accounts, app.adminUserId());
         }
-        // A probed operation's probe (the validation operation, or a permission
-        // overstep): the runner sends the declared write itself, as the same
-        // persona through the same MCP door, after the turn. A probe that cannot
-        // be sent leaves the platform half "not observed".
+        const actionGates = op.outcome.kind === 'pending_confirmation' ? actionGatesOf(built, op) : undefined;
+        const observed = { op, turn, before, after, rowsByObject, today, ...(auditActor !== undefined ? { auditActor } : {}), ...(actionGates ? { actionGates } : {}) };
+        // The runner's probe: it sends the declared write itself, as the same
+        // persona through the same MCP door, after the turn. A probed operation
+        // (the validation operation, or a permission overstep) is always
+        // probed; an `applied` one only when the agent's own write was denied
+        // 403 and nothing was written (`probesBuildDenial`), so the build's
+        // denial is told from the agent's (`buildDeniesWrite`). A probe that
+        // cannot be sent leaves the platform half "not observed".
+        const agentDenied = () => {
+          const seen = observeOperation(observed);
+          return writeCallsOn(turn, op.object).length > 0 && isWriteDenial(seen.answer, seen.writes);
+        };
         let probe: ProbeObservation | undefined;
-        if (isProbedOperation(card, op.id)) {
+        if (isProbedOperation(card, op.id) || (probesBuildDenial(card, op.id) && agentDenied())) {
           try {
             const call = probeCall(op, probeValues(card, op, accounts, app.adminUserId()));
             const answer = await app.callTool(keyOf(op.actingAs), call.tool, call.args);
@@ -759,8 +840,12 @@ export async function runHalf(
             res.error = `probe: ${errText(e)}`;
           }
         }
-        res.observation = observeOperation({ op, turn, before, after, rowsByObject, today, ...(auditActor !== undefined ? { auditActor } : {}), ...(probe ? { probe } : {}) });
+        res.observation = observeOperation({ ...observed, ...(probe ? { probe } : {}) });
         res.grade = gradeCardOperation(scenario, op.id, res.observation);
+        if (res.grade.notMeasured !== undefined) res.notMeasured = res.grade.notMeasured;
+        if (op.kind !== 'delete' && res.grade.checks.some((c) => c.notMeasured?.startsWith(buildDeniesWrite))) {
+          res.buildDenial = { persona: op.actingAs, object: op.object, verb: op.kind };
+        }
       } catch (e) {
         res.error = errText(e);
       }

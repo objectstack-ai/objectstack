@@ -3010,6 +3010,8 @@ const ar = {
         ssoBackToConsole: "العودة إلى وحدة التحكم",
         ssoSwitchAccountHint: "يفتح «تبديل الحساب» خدمة تسجيل الدخول في علامة تبويب جديدة ويسجّل خروجك هناك. ثم سجّل الدخول هنا مرة أخرى بحساب لديه صلاحية الوصول.",
         linkEmailMismatch: "لم يتم ربط الحساب: عنوان بريده الإلكتروني لا يطابق عنوان البريد الإلكتروني للحساب الذي سجّلت الدخول به. اربط حسابًا يستخدم عنوان البريد الإلكتروني نفسه.",
+        linkAlreadyLinkedToOtherUser: "لم يتم ربط الحساب: إنه مرتبط بالفعل بمستخدم آخر في هذا النظام. اربط حسابًا آخر، أو سجّل الدخول باسم المستخدم المرتبط به وألغِ الربط من هناك أولًا.",
+        linkUnableToLink: "تعذّر ربط الحساب. تأكد من أن عنوان بريده الإلكتروني مُتحقَّق منه لدى خدمة تسجيل الدخول تلك، ثم أعد المحاولة. إذا استمر الفشل، فاتصل بالمسؤول.",
         twoFactorInvalidCode: "هذا الرمز غير صالح. تحقّق من تطبيق المصادقة وحاول مرة أخرى.",
         twoFactorInvalidBackupCode: "رمز النسخ الاحتياطي هذا غير صالح أو سبق استخدامه.",
         twoFactorTooManyAttempts: "رموز غير صحيحة كثيرة جدًا. سجّل الدخول بكلمة المرور مرة أخرى.",
@@ -3891,12 +3893,13 @@ const ar = {
       notAllowedToInvite: 'لا يُسمح لك بدعوة مستخدمين إلى هذه المؤسسة.',
       notAllowedToInviteWithRole: 'لا يُسمح لك بدعوة مستخدم بهذا الدور.',
       alreadyInvited: 'تمت دعوة هذا المستخدم إلى هذه المؤسسة بالفعل.',
+      alreadyMember: 'هذا المستخدم عضو بالفعل في هذه المؤسسة.',
       organizationExists: 'هذه المؤسسة موجودة بالفعل.',
       slugTaken: 'هذا المُعرِّف مستخدَم بالفعل.',
       notAllowedToCreate: 'لا يُسمح لك بإنشاء مؤسسة جديدة.',
       organizationLimitReached: 'لقد بلغت الحد الأقصى لعدد المؤسسات التي يمكنك إنشاؤها. لا تُحتسب المؤسسات التي دُعيت إليها ضمن هذا الحد.',
       notTheRecipient: 'لست المستلم المقصود بهذه الدعوة.',
-      invitationNotFound: 'لم تعد هذه الدعوة موجودة أو أنها منتهية الصلاحية.',
+      invitationNotFound: 'تم استخدام هذه الدعوة بالفعل أو انتهت صلاحيتها أو تم إلغاؤها. إذا كنت قد قبلتها، فستجد المؤسسة في قائمة مؤسساتك.',
       unknown: 'حدث خطأ ما. يرجى المحاولة مرة أخرى.',
     },
     backToList: "العودة إلى المؤسسات",
@@ -4309,6 +4312,14 @@ const ar = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'تبقّى {{left}} من حصتك في الذكاء الاصطناعي. النموذج الموسوم بـ ×N يستهلكها أسرع بـ N مرة من النموذج الافتراضي.',
+      confirmTitle: 'هل تريد التبديل إلى {{model}}؟',
+      confirmBody: 'كل رسالة على هذا النموذج تستهلك من حصتك في الذكاء الاصطناعي {{multiplier}} أضعاف ما تستهلكه رسالة على النموذج الافتراضي.',
+      confirmAllowance: 'تبقّى منها {{left}}، وعلى هذا النموذج تنفد أسرع بـ {{multiplier}} مرة.',
+      confirmCancel: 'إلغاء',
+      confirmAction: 'تبديل النموذج',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'إرسال الرسالة',
     scrollToBottom: 'الانتقال إلى أحدث رسالة',
@@ -4336,7 +4347,9 @@ const ar = {
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",
       get_record: "قراءة هذا السجل",
+      list_datasets: "عرض المؤشرات المتاحة",
       query_data: "الاستعلام عن البيانات المطلوبة",
+      query_dataset: "الاستعلام حسب المؤشر",
       query_records: "البحث عن السجلات المطابقة",
       read_package_doc: "قراءة دليل التطبيق",
       search_knowledge: "البحث في قاعدة المعرفة عن معلومات",

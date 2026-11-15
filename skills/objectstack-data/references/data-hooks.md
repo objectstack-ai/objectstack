@@ -137,9 +137,6 @@ body: {
 }
 ```
 
-The deprecated `handler` takes an inline function or a registered function's
-name ([Registration Methods](#registration-methods)).
-
 #### `condition` — Declarative Filtering
 
 Skip the hook if the condition is false. Author it as a **CEL
@@ -211,16 +208,7 @@ in neither). So:
 ⚠️ **An unevaluable condition ABORTS the operation.** A typo'd key
 (`record.stauts`), a column read off `previous` on an insert, or a comparison
 CEL has no overload for does **not** degrade to "the hook did not fire" — it
-**fails the write**. Until protocol 17 the gate emitted a `logger.warn` and
-returned `false`, which is why the `previous`-on-insert and `has(...)` bullets
-above are load-bearing rather than stylistic: a `before*` guard swallowed into
-`false` silently let writes through, and an audit hook swallowed into `false`
-silently dropped records.
-
-Practical consequence when authoring: spell keys against the object's **declared**
-fields, and on an insert event read `previous` only against `null` — a column
-read off it there is the mistake that used to cost you a hook that quietly never
-ran, and now costs you every write the hook is attached to.
+**fails the write**.
 
 ---
 
@@ -270,7 +258,7 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.previous` | object \| `undefined` | Pre-write record on update/delete. **`undefined` on insert** → use `!ctx.previous` to detect *create*. |
 | `ctx.result` | object \| `undefined` | `after*` only. ⚠️ **partial** on afterUpdate — see gotcha 1. |
 | `ctx.user` | object \| `undefined` | `{ id, name, email, organizationId }`. `undefined` for system / unauthenticated writes. |
-| `ctx.session` | object \| `undefined` | `{ userId, organizationId, isSystem, … }`. **No role list** — `session.roles` was retired in 17.0.0 (declared, never produced). |
+| `ctx.session` | object \| `undefined` | `{ userId, organizationId, isSystem, … }`. **No role list** — `session.roles` was retired in 17.0.0. |
 | `ctx.event` | string | e.g. `'afterUpdate'` — dispatch on it when one hook subscribes to several events. |
 | `ctx.object` | string | The target object name. |
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
@@ -284,10 +272,6 @@ The sandbox is handed a **JSON snapshot** of these (built by
 (Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
 wrap is `(async (input, ctx) => { … })(input, ctx)` — the action params arrive as
 the first arg.)
-
-Because the VM only holds a snapshot, mutating `ctx.previous` / `ctx.result` is
-local and thrown away; the only way to change the persisted write is
-`ctx.input.x = …` or `return { … }`.
 
 ### `ctx.api.object(name)` — the cross-object repo
 
@@ -311,7 +295,7 @@ same DSL as the [objectstack-query](../../objectstack-query/SKILL.md) skill:
 await ctx.api.object('candidate').findOne({ where: { id: ctx.result.id } });
 await ctx.api.object('candidate').find({ where: { stage: 'hired' } });
 await ctx.api.object('invoice').count({ where: { amount: { $gte: 1000 } } });
-await ctx.api.object('task').find({ where: { $and: [{ done: false }, { owner: uid }] } });
+await ctx.api.object('task').find({ where: { $and: [{ done: false }, { owner_id: uid }] } });
 ```
 
 > `filter:` is tolerated as an **object-valued** alias (normalised to `where`),
@@ -397,10 +381,6 @@ const full = await ctx.api.object('candidate').findOne({ where: { id: ctx.result
 // full.position_id is present even though this PATCH only set `stage`.
 ```
 
-(A declarative `condition` does **not** hit this wall — it is
-evaluated against the stored record overlaid with the payload, so
-`record.position_id` is readable there even when the PATCH never wrote it.)
-
 ### ⚠️ Gotcha 2 — cross-object writes obey the *target's* sharing model
 
 A hook's `ctx.api.object('other').update(…)` goes through the engine's normal
@@ -449,9 +429,6 @@ const fillPositionOnHire = defineHook({
 
 export default fillPositionOnHire;
 ```
-
-Register it like any hook — add it to `defineStack({ hooks: [fillPositionOnHire] })`
-(the `AppPlugin` binds `body` hooks onto the engine automatically).
 
 ### Troubleshooting (`[BodyRunner]` log lines)
 
@@ -635,17 +612,20 @@ const protectStrategicAccounts = defineHook({
   name: 'crm_protect_strategic_accounts',
   object: 'account',
   events: ['beforeDelete'],
+  refusals: {
+    STRATEGIC_ACCOUNT: { message: 'A strategic account cannot be deleted.' },
+    OPEN_OPPORTUNITIES: { message: 'Close its open opportunities first.', status: 409 },
+  },
   body: {
     language: 'js',
     source: `
       // A delete's ctx.input is empty: ctx.previous is the row being deleted.
       if (ctx.previous && ctx.previous.type === 'Strategic')
-        throw new Error('Cannot delete Strategic accounts');
+        throw Object.assign(new Error(), { code: 'STRATEGIC_ACCOUNT' });
       const open = await ctx.api.object('opportunity').count({
         where: { account_id: ctx.previous.id, stage: { $in: ['Prospecting', 'Negotiation'] } },
       });
-      if (open > 0)
-        throw new Error('Cannot delete an account with ' + open + ' open opportunities');
+      if (open > 0) throw Object.assign(new Error(), { code: 'OPEN_OPPORTUNITIES' });
     `,
     capabilities: ['api.read'],
   },
@@ -834,8 +814,8 @@ the layout both real hook modules in the repo use.
 
 ✅ **DO** — use `before*` for validation and `after*` for side effects; set
 `async: true` for non-critical background work; go through `ctx.api` for
-cross-object operations; give a thrown error a message the caller can act on;
-test hooks in isolation.
+cross-object operations; refuse a business rule by a
+[declared code](#declared-refusals-refusals); test hooks in isolation.
 
 ❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); let a
 hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
@@ -848,29 +828,58 @@ hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
 ## Error Handling
 
 A throw aborts the operation and rolls back its transaction; `onError: 'log'`
-(above) makes an `after*` hook log and continue instead.
+(above) makes an `after*` hook log and continue instead; neither gives the hook's own code.
 
 ### Declared refusals (`refusals`)
 
-With a `refusals` catalogue, a sandboxed `body` refuses **by code only** and the
-runtime answers with that entry:
+A hook that enforces a business rule declares a `refusals` catalogue, one
+SCREAMING_SNAKE code per rule, and the hook throws the code. Without one, a `body`'s
+throw is answered `HOOK_ABORTED`, the platform's code: fine for a failure you did not
+plan, not for a rule the user can act on. A cross-object guard a validation rule
+cannot read:
 
+<!-- os:check -->
 ```typescript
-refusals: {
-  CREDIT_LIMIT: { message: 'Over the credit limit.' },
-  ON_HOLD: { message: 'Account on hold.', status: 409 }, // default 400
-},
-body: { language: 'js', source: `
-  if (ctx.input.amount > 100000) throw Object.assign(new Error(), { code: 'CREDIT_LIMIT' });
-` },
+import { defineHook } from '@objectstack/spec/data';
+
+export default defineHook({
+  name: 'checkout_requires_stock',
+  object: 'asset_checkout',
+  events: ['beforeInsert'],
+  refusals: {
+    ASSET_NOT_IN_STOCK: {
+      message: 'Only an in-stock asset can be checked out.',
+      status: 409,
+      params: ['due'],
+      reasons: { on_loan: { message: 'This asset is on loan until {{ due }}.' } },
+    },
+  },
+  body: {
+    language: 'js',
+    capabilities: ['api.read'],
+    source: `
+      const id = ctx.input.asset_id;
+      const asset = id && await ctx.api.object('asset').findOne({ where: { id } });
+      if (asset?.status === 'on_loan') throw Object.assign(new Error(),
+        { code: 'ASSET_NOT_IN_STOCK', reason: 'on_loan', params: { due: asset.due_date } });
+      if (asset?.status !== 'in_stock') throw Object.assign(new Error(), { code: 'ASSET_NOT_IN_STOCK' });
+    `,
+  },
+});
 ```
 
-- Codes are SCREAMING_SNAKE; the envelope carries one as `declaredCode`.
-- Refused at save without a `js` body (e.g. a bare `handler`).
-- The message is plain text (a `{{ }}` hole is refused), translated via
-  `hooks.<hook>.refusals.<CODE>.message`; the body's own text and `status` are unused.
-- An undeclared code, or none, is refused: at save if thrown literally, else as
-  a `500`. Unchanged `ctx.api` errors and crashes pass through.
+- A `js` `body` or a `handler` (inline or named) can declare one; an
+  `expression` body, or neither, is refused at save.
+- The wire `code` is the status's (default 400), with the hook's as `declaredCode`.
+- `reasons` (snake_case, thrown as `reason`) add sentences that keep the code's wire
+  `code` and status.
+- `params` names what a `{{ name }}` hole may fill (thrown as `params`); a hole
+  over any other name, or any hole with no `params`, is refused.
+- Translated via `hooks.<hook>.refusals.<CODE>.message` (or
+  `….<CODE>.reasons.<REASON>.message`); the thrown text and `status` are unused.
+- An undeclared code (or none), or a reason missing from a code's `reasons`, is
+  refused: at save if thrown literally, else as a `500`. Unchanged `ctx.api`
+  errors and crashes pass through.
 
 ---
 
