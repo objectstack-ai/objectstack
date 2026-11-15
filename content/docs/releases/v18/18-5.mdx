@@ -1,6 +1,6 @@
 ---
 title: 18.5.0
-description: "Release notes and upgrade checklist for 18.5.0, compiled from the 283 changesets its Version Packages pull request consumes. A minor that carries breaking changes: a 10 MiB request-body limit, tighter SSO account linking, connectors and tools held per namespace, a disabled package that holds no name, localized save refusals, and a new os migrate audit-side-copies command."
+description: "Release notes and upgrade checklist for 18.5.0, compiled from the 284 changesets on `main` that its Version Packages pull request consumes. A minor that carries breaking changes: a 10 MiB request-body limit, tighter SSO account linking, connectors and tools held per namespace, a disabled package that holds no name, localized save refusals, and a new os migrate audit-side-copies command."
 ---
 
 <Callout type="info">
@@ -9,10 +9,11 @@ Packages pull request #33097 writes into the CHANGELOGs at its head
 `25559f43`, backend and `ui/` alike, whose parent is `main` at `b76df9a6`.
 Its bullets were deduplicated on their full text, after dropping
 `Updated dependencies` bullets, which leaves 283 entries, one per changeset
-the pull request consumes. Each entry is placed by `classifyReleaseBullet` in
+the pull request consumes. One changeset landed on `main` after that head, at
+`1e65a389`, and is read from its file the same way, which makes 284. Each entry is placed by `classifyReleaseBullet` in
 `scripts/release-github-releases.mjs`, the function that groups the GitHub
 Release body, so the five sections below use its five headings, in its order,
-and its counts: **45** need you to act, **21** carry a registered
+and its counts: **45** need you to act, **22** carry a registered
 `os migrate meta` entry, **70** add capabilities, **1** declares a semantic
 change, and **146** are other fixes. The breaking entries are listed in full,
 each with what changes and what to do, read from its changeset; the
@@ -35,9 +36,9 @@ has not been walked.
 
 ## Highlights — 18.5.0
 
-- ⚠️ **A minor that breaks.** 66 of the 283 entries are declared breaking:
-  23 graded `minor` because they narrow the metadata protocol, and 43 graded
-  `patch` under the level rule. 45 need you to act; 21 carry an
+- ⚠️ **A minor that breaks.** 67 of the 284 entries are declared breaking:
+  24 graded `minor` because they narrow the metadata protocol, and 43 graded
+  `patch` under the level rule. 45 need you to act; 22 carry an
   `os migrate meta` entry that lists what to check. Read
   [the version number](#the-version-number-is-not-the-signal).
 - **The HTTP server holds a request-body limit.** A JSON, form or other body
@@ -84,13 +85,13 @@ re-reads every row.
 
 | | Measured |
 | :--- | :--- |
-| Source | Version Packages pull request #33097 at head `25559f43`, one commit on `main` at `b76df9a6`. 334 first-parent commits after 18.4.0's version commit `181ad7d445` |
-| Changesets consumed | 283, every changeset in `.changeset/` at `b76df9a6`. All 283 are entries in the 122 CHANGELOG sections the pull request writes: 110 `## 18.5.0` sections, and 12 of private packages at their own versions |
-| Levels | 38 entries graded `minor`, 245 `patch`, none `major` |
-| Declared breaking | 66: 23 `minor`, 43 `patch`. 45 under 需手动处理 and 21 under 自动迁移. Every one of the 61 commits since 18.4.0 whose subject carries a `!` has its changeset among them |
+| Source | Version Packages pull request #33097 at head `25559f43`, one commit on `main` at `b76df9a6`, and the one changeset `main` gained after it, at `1e65a389`. 335 first-parent commits after 18.4.0's version commit `181ad7d445` |
+| Changesets consumed | 284, every changeset in `.changeset/` at `1e65a389`. The 283 at `b76df9a6` are entries in the 122 CHANGELOG sections the pull request writes: 110 `## 18.5.0` sections, and 12 of private packages at their own versions |
+| Levels | 39 entries graded `minor`, 245 `patch`, none `major` |
+| Declared breaking | 67: 24 `minor`, 43 `patch`. 45 under 需手动处理 and 22 under 自动迁移. Every one of the 62 commits since 18.4.0 whose subject carries a `!` has its changeset among them |
 | Packages | 110 publish at 18.5.0: 75 `@objectstack/*`, `create-objectstack` and 34 `@object-ui/*`, the same set as 18.4.0. `@object-ui/app-shell` takes `18.4.1` and stays private |
 | npm, before the cut | `@objectstack/spec` `latest` is `18.4.0`; `next` is the snapshot `0.0.0-next-20261115100430` of `main` |
-| Console | 53 of the 283 entries touch an `@object-ui/*` package or `@objectstack/console`. See [Console (Studio)](#console) |
+| Console | 53 of the 284 entries touch an `@object-ui/*` package or `@objectstack/console`. See [Console (Studio)](#console) |
 
 No tag, npm version, Docker image or GitHub Release for 18.5.0 exists yet.
 The 18.5.0 sweep (#33761) was still running, and none of its results are on
@@ -112,7 +113,7 @@ Every package still versions in lockstep. The level of a release says whether
 | Semantic: the meaning or default of an authorable key changes | `minor` |
 | Everything else: REST, drivers, services, the CLI, the Console, `feat:` and `fix!:` alike | `patch` |
 
-So 18.5.0 carries 43 entries graded `patch` that say **BREAKING**, beside 23
+So 18.5.0 carries 43 entries graded `patch` that say **BREAKING**, beside 24
 graded `minor`. Pin exact versions of both scopes, and read the release notes
 for every version you cross.
 
@@ -390,15 +391,15 @@ namespace address, or `/meta/:type/:ns/:name`); a bare read of it is refused
 
 ### 自动迁移 — listed for you by `os migrate meta` [#migrated-for-you]
 
-21 breaking entries carry a registered ADR-0087 entry on the protocol-18
-step, 22 registry ids between them. All 22 are semantic entries, not
+22 breaking entries carry a registered ADR-0087 entry on the protocol-18
+step, 23 registry ids between them. All 23 are semantic entries, not
 conversions: `os migrate meta` rewrites nothing for them. It prints each under
 "manual change(s) require your judgment", with the surface it applies to, the
 replacement and how to tell it is done, so the list below is a checklist the
 command repeats. Eleven of them judge your metadata at `os validate`,
 `os build`, `defineStack` or a publish door, one refuses a flow step at run
-time, and nine move what a `/meta` read or a registry read answers when two
-packages hold one name. `os migrate meta --from 17` lists every entry of the
+time, nine move what a `/meta` read or a registry read answers when two
+packages hold one name, and one announces a change no door makes yet. `os migrate meta --from 17` lists every entry of the
 protocol-18 step, the ones earlier 18.x releases added included; the ids in
 the last column are this release's.
 
@@ -425,6 +426,7 @@ the last column are this release's.
 | The exact read (`?package=X`) no longer serves an undeclared App-pair row that the registry binds to no package (`89d7bef`, #33148) | Save the row with `overrides.package` naming the package whose locale it customizes | `pair-row-exact-read-no-owner` |
 | The bare read withholds a customization pair's row of a name every holder of which is disabled, answering `404` (`9673030`, #33383) | Enable a holder, or read the pair's own address (`?package=PACKAGE.custom`) | `disabled-holder-pair-row-bare-read-withheld` |
 | An App pair row declared for a package that still ships the name is never served at a bundle addition's address as that addition's own item (`51ceb43`, #33251) | Read the row at the package it declares | `declared-row-not-moved-to-addition` |
+| **Announced, not yet at any door.** An action declaring `ai.requiresConfirmation: true` will be confirmed by a person, elicited in the MCP client or handed off to the app, and a caller's own `confirm: true` will stop counting on `run_action` and `resume_run`. In 18.5.0 every door still runs such an action on `confirm: true`; what ships is the contract in `@objectstack/spec/contracts` (`AI_ACTION_CONFIRMATION_CAPABILITY`, `IActionConfirmationService`) (`1e65a38`, #33725) | Keep sending `confirm: true` until a release says the doors confirm by elicitation. Then advertise `elicitation` (form mode) at `initialize`, or relay the pending answer to the person; an action that is safe unattended declares `ai.requiresConfirmation: false` | `action-requires-confirmation-elicited` |
 
 ### 新增能力 — new capabilities [#new-capabilities]
 
@@ -630,7 +632,7 @@ Among them, grouped by what they fix:
 
 18.5.0 ships the Console and the `@object-ui/*` packages from this repository,
 at the commit it releases. Every Console change is listed once, in its section
-above: 53 of the 283 entries touch an `@object-ui/*` package or
+above: 53 of the 284 entries touch an `@object-ui/*` package or
 `@objectstack/console`, 4 under [需手动处理](#action-required), 21 under
 [新增能力](#new-capabilities) and 28 under [其他修复](#other-fixes). What a
 Console user notices first:
