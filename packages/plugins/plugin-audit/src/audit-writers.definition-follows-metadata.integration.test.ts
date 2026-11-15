@@ -35,11 +35,11 @@ import { installDefaultOrganization } from './default-organization.testkit.js';
  * its first write makes the writers look the definition up BEFORE the change,
  * which is the lookup a held copy kept.
  *
- * `sys_comment` is a stand-in under the real name: the gate reads only
- * `thread_id`, whose `object:record` prefix names the target object.
+ * `sys_comment` is the capability's own object, registered by `AuditPlugin`;
+ * the gate reads only `thread_id`, whose `object:record` prefix names the
+ * target object.
  */
 describe('audit writers answer from the current definition after a metadata-door change (#24565)', () => {
-  const HARNESS_PACKAGE = 'com.objectstack.audit.test.definition-follows-metadata';
   const SYSTEM = { context: { isSystem: true } } satisfies DataEngineInsertOptions;
 
   let kernel: ObjectKernel;
@@ -85,14 +85,6 @@ describe('audit writers answer from the current definition after a metadata-door
     const driver = new SqliteWasmDriver({ filename: ':memory:' });
     await driver.connect();
     engine.registerDriver(driver, true);
-    engine.registry.registerObject(
-      {
-        name: 'sys_comment',
-        label: 'Comment',
-        fields: { thread_id: text('thread_id'), body: text('body') },
-      } as any,
-      HARNESS_PACKAGE,
-    );
     await engine.syncSchemas();
     // A real `single` install's Default Organization: the system writes below
     // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
