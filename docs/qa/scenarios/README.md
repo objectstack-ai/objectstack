@@ -262,6 +262,15 @@ for not guessing a name.
   minimum option counts, dashboards and app navigation targets. The iterate prompt does the
   same for `iterate.expectDelta`. A card therefore picks its dashboard names knowing the build
   is told them.
+- **Grants.** The Build half checks each persona's permission set for what the card has that
+  persona do (`persona-grant:<persona>:<object>:<verb>`): `read` on the object of each question
+  it answers, the kind of each write it applies or confirms, and a refusal of each write the card
+  refuses it with `PERMISSION_DENIED` (no grant, or a field it may not edit). A write the card
+  has wait on confirmation may instead go through the card's confirm-gated agent action: when
+  the set withholds the verb and the build declares that action, the check is not measured. The prompt names
+  the set and the persona's role; the questions and operations stay out of it, so the role the
+  card's prose gives a persona must already imply its reads and writes. A grant it does not imply
+  is a card fix, never a sentence added to the prompt.
 - **Tags.** A capability tag whose check reads something the seed does not show is asked for
   in the card's prose: `records-forms.master-detail-inline-edit` names the detail edited inline
   on its master, in every language the prompt carries.
