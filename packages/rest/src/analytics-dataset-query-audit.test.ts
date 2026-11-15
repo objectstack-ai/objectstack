@@ -47,16 +47,22 @@ function protocolWith(items: any[]) {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn().mockResolvedValue([]),
-    getMetaItem: vi.fn(async ({ name }: { name: string }) => ({ type: 'dataset', name, item: items.find((d) => d?.name === name) })),
+    // A `packageId` reads that holder's item (the exact qualifier `?package=`
+    // resolves to); none reads the first item of the name.
+    getMetaItem: vi.fn(async ({ name, packageId }: { name: string; packageId?: string }) => ({
+      type: 'dataset',
+      name,
+      item: items.find((d) => d?.name === name && (packageId === undefined || d?._packageId === packageId)),
+    })),
   };
 }
 
-function boot(opts: { queryDataset?: (...a: any[]) => Promise<any>; sink?: Record<string, unknown> } = {}) {
+function boot(opts: { queryDataset?: (...a: any[]) => Promise<any>; sink?: Record<string, unknown>; datasets?: any[] } = {}) {
   const events: any[] = [];
   const sink = opts.sink ?? { recordDatasetQuery: (event: any) => { events.push(event); } };
   const queryDataset = vi.fn(opts.queryDataset ?? (async () => ({ rows: [{ region: 'NA', revenue: 1 }, { region: 'EU', revenue: 2 }], fields: [] })));
   const rest = new RestServer(
-    mockServer() as any, protocolWith([SALES]) as any, { api: { requireAuth: false } } as any,
+    mockServer() as any, protocolWith(opts.datasets ?? [SALES]) as any, { api: { requireAuth: false } } as any,
     undefined, undefined, undefined, undefined, undefined, undefined, undefined,
     undefined, undefined, undefined, undefined,
     async () => ({ queryDataset }), // analyticsServiceProvider
@@ -72,9 +78,9 @@ function boot(opts: { queryDataset?: (...a: any[]) => Promise<any>; sink?: Recor
   rest.registerRoutes();
   const single = rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/analytics/dataset/query'))!;
   const batch = rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/analytics/dataset/query/batch'))!;
-  const post = async (body: unknown) => {
+  const post = async (body: unknown, query: Record<string, unknown> = {}) => {
     const res = mockRes();
-    await single.handler({ method: 'POST', params: {}, query: {}, headers: {}, body } as any, res);
+    await single.handler({ method: 'POST', params: {}, query, headers: {}, body } as any, res);
     return res;
   };
   const postBatch = async (queries: unknown[]) => {
@@ -152,6 +158,31 @@ describe('POST /analytics/dataset/query hands the ledger one event per query tha
       ['sales', 'succeeded'],
       ['sales', 'succeeded'],
     ]);
+  });
+
+  it('two packages holding one name: the event names the holder the door read, so ?package=A and ?package=B are two different rows', async () => {
+    const { events, post } = boot({
+      datasets: [
+        { ...SALES, _packageId: 'com.acme.crm' },
+        { ...SALES, _packageId: 'com.acme.ops' },
+      ],
+    });
+    expect((await post({ datasetName: 'sales', selection }, { package: 'com.acme.crm' })).statusCode).toBe(200);
+    expect((await post({ datasetName: 'sales', selection }, { package: 'com.acme.ops' })).statusCode).toBe(200);
+    expect(events.map((e) => [e.datasetName, e.datasetPackage])).toEqual([
+      ['sales', 'com.acme.crm'],
+      ['sales', 'com.acme.ops'],
+    ]);
+  });
+
+  it("the environment's own definition names no holder package, and a served draft says so", async () => {
+    const { events, post } = boot({
+      datasets: [{ ...SALES, _packageId: 'sys_metadata', _draft: true }],
+    });
+    expect((await post({ datasetName: 'sales', selection })).statusCode).toBe(200);
+    expect(events).toHaveLength(1);
+    expect(events[0].datasetPackage).toBeNull();
+    expect(events[0].preview).toBe(true);
   });
 
   it('a ledger sink that throws never changes the answer', async () => {

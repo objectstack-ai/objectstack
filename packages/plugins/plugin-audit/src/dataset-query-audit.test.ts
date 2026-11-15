@@ -102,6 +102,7 @@ describe('the dataset_query writer over the real ledger', () => {
     expect(row.new_value ?? null).toBeNull();
     expect(metadataOf(row)).toEqual({
       dataset: 'sales',
+      dataset_package: null,
       dimensions: ['region'],
       measures: ['revenue'],
       filter: [
@@ -111,6 +112,19 @@ describe('the dataset_query writer over the real ledger', () => {
       row_count: 3,
       outcome: 'succeeded',
     });
+    await writer.stop();
+  });
+
+  it('names the package holding the dataset, and a served draft, so two holders of one name are two different rows', async () => {
+    const writer = createDatasetQueryAuditWriter({ getEngine: () => engine, datasets: ['sales'] });
+    writer.recordDatasetQuery(queryEvent({ datasetPackage: 'com.acme.crm', rowCount: 31 }));
+    writer.recordDatasetQuery(queryEvent({ datasetPackage: 'com.acme.ops', preview: true, rowCount: 32 }));
+    await writer.flush();
+    const rows = (await queryRows(engine)).map(metadataOf).filter((m) => m.row_count === 31 || m.row_count === 32);
+    expect(rows.map((m) => [m.dataset, m.dataset_package, m.preview])).toEqual([
+      ['sales', 'com.acme.crm', undefined],
+      ['sales', 'com.acme.ops', true],
+    ]);
     await writer.stop();
   });
 
