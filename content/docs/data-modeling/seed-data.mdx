@@ -473,7 +473,7 @@ organization**, by what the target object carries:
 | `sys_user` (people: `owner_id`, people lookups) | a person who is a **member** of the load's organization (a `sys_member` row there); a same-named person outside it is never used |
 | `sys_organization` | the load's own organization only |
 | An object no organization walls: no `organization_id` column and no tenant field (for example `tenancy: { enabled: false }`) | any row: global rows belong to every organization |
-| An object walled by another tenant column (`tenancy.tenantField`) with no `organization_id` column | nothing on such a load: the lookup is refused and reported, never answered from another organization |
+| An object walled by another tenant column (`tenancy.tenantField`) with no `organization_id` column | a row of the load's organization only, matched on that tenant column (the column a seeded row of such an object is stamped with); another organization's row with the same key is never used |
 
 A load with no organization (the single-tenant boot) resolves across the whole
 database, as it always has. When the database refuses a lookup outright (for
