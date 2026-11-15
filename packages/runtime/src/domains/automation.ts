@@ -3029,6 +3029,10 @@ async function unregisterAndDeleteFlow(
  *
  * Scoped by the request's environment, as the door's reads are: unscoped, a
  * scoped registration is a fault to the classifier.
+ *
+ * Per-leg loud resolution (a wired slot that fails on an earlier step refuses
+ * even when a later step answers) is a shared resolver change for every
+ * dispatcher door, tracked by the security lane; it is not in this function.
  */
 async function resolveSlotAsActionsDoorReads(
     deps: DomainHandlerDeps,
@@ -3082,8 +3086,9 @@ async function servedActionDeclarations(
         return collectActionDeclarations(deps, undefined, objects, actions);
     }
     const rows: Array<{ action: unknown; objectName: string }> = [];
-    // The engine the `/actions` door's `getObjectQL` reads, resolved so that a
-    // wired slot that fails to resolve is loud, which that probe is not.
+    // The engine the `/actions` door's `getObjectQL` reads. A slot that no step
+    // of that door's order answers, because a step failed to resolve it, throws,
+    // which that probe does not; where a later step answers, that engine is read.
     const engine = (await resolveSlotAsActionsDoorReads(deps, context, 'objectql')) as
         | { registry?: { listItems?: (type: string) => unknown[] } }
         | undefined;

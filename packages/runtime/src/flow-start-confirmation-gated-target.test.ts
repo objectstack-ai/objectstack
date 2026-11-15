@@ -410,7 +410,8 @@ describe('the declarations are read from the services the request\'s own /action
         expectConfirmationRefusal(await start(new HttpDispatcher(host as never), { kernel: env, environmentId: ENV_ID }), automation.execute);
     });
 
-    it('kernel-resolver host: where the request\'s own kernel fails to resolve the slot and the host kernel answers it, the start is judged on the host instance, as the /actions door would serve it', async () => {
+    // Records today's limitation: this answer changes when per-leg loud resolution lands for every dispatcher door.
+    it('kernel-resolver host (records today\'s limitation, changes when per-leg loud resolution lands): where the request\'s own kernel fails to resolve the slot and the host kernel answers it, the start is judged on the host instance, as the /actions door would serve it', async () => {
         const host = bareKernel();
         host.registerService('protocol', protocolServing(true));
         const env = bareKernel();
