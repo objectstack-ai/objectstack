@@ -11,6 +11,8 @@
  * (#30975): each writes the private `appAuthored` of the instance it builds,
  * which the codemod refuses to move (`foreign-private`), so each writes it
  * through that instance's own host setter.
+ * The body of `[DETACHED_HOOK_RUN]` (#33651) was written here, in the same
+ * stub-and-facet shape.
  *
  * A MOVE, not a redesign. {@link ScopedContextFacet} is a stateless facet of
  * `ScopedContext`: each static method of it is the body of the `ScopedContext`
@@ -44,6 +46,7 @@ import { rolledBackRefusal } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import { UnscopedHookApi } from './hook-run-as.js';
+import { runOutsideOpenUnits } from './unit-detach.js';
 import { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 import type { HookRunAs, HookRunAsRef } from './hook-run-as.js';
 import { scopedContextHost } from './engine-scoped-hosts.js';
@@ -162,6 +165,13 @@ export class ScopedContextFacet {
       ...(needsMembership ? { accessible_org_ids: grants.accessible_org_ids } : {}),
       ...(needsEmail && grants.email ? { email: grants.email } : {}),
     });
+  }
+
+  /** The body of `ScopedContext#[DETACHED_HOOK_RUN]`; the method's docblock there is its contract. */
+  static detachedHookRun<T>(this: Pick<ScopedContextHost, 'engine' | 'executionContext'>, body: () => T): T {
+    // The engine's ambient store, reached the `as any` way `transaction` below reaches it.
+    const txStore = (this.engine as any)?.txStore;
+    return runOutsideOpenUnits(txStore, this.executionContext?.transaction, body);
   }
 
   /** The body of `ScopedContext#transaction`; the method's docblock there is its contract. */

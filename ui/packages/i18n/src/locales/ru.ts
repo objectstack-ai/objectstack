@@ -4189,7 +4189,9 @@ const ru = {
     tool: {
       aggregate_data: "Агрегировать данные",
       get_record: "Прочитать запись",
+      list_datasets: "Посмотреть доступные метрики",
       query_data: "Запросить нужные данные",
+      query_dataset: "Запросить данные по метрике",
       query_records: "Найти нужные записи",
       read_package_doc: "Прочитать руководство приложения",
       search_knowledge: "Поискать в базе знаний",

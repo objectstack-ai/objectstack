@@ -4347,7 +4347,9 @@ const ar = {
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",
       get_record: "قراءة هذا السجل",
+      list_datasets: "عرض المؤشرات المتاحة",
       query_data: "الاستعلام عن البيانات المطلوبة",
+      query_dataset: "الاستعلام حسب المؤشر",
       query_records: "البحث عن السجلات المطابقة",
       read_package_doc: "قراءة دليل التطبيق",
       search_knowledge: "البحث في قاعدة المعرفة عن معلومات",

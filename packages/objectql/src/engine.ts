@@ -244,6 +244,7 @@ import { stripReadonlyFields, staticReadonlyInsertSubject } from './validation/r
 // and points at `ctx.previous` — the module owns the measurement and the
 // reason the explanation cannot be composed any further downstream.
 import { UnscopedHookApi, SEED_USER_GRANTS, APP_AUTHORED_HOOK_API, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
+import { DETACHED_HOOK_RUN } from './unit-detach.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
 // same helper every other server seam materialises with (#1871/#4649/#4953).
@@ -6527,6 +6528,21 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   [SEED_USER_GRANTS](opts?: { membershipUnread?: true }): Promise<ScopedContext> {
     // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
     return ScopedContextFacet.seedUserGrants.call(scopedContextHost.of(this), opts);
+  }
+
+  /**
+   * [#33651] Run an `async: true` hook's `body` outside every unit of work open
+   * for this api: out of the engine's ambient store, with that unit's handle
+   * and the one this api carries treated as closed for the run
+   * (`runOutsideOpenUnits`, `unit-detach.ts`). Called by `wrapDeclarativeHook`
+   * when such a hook detaches, so its writes never enrol in a unit that
+   * commits under them.
+   *
+   * Keyed on {@link DETACHED_HOOK_RUN}, a symbol the package entry does not
+   * export, so it is no nameable member of this class's published face.
+   */
+  [DETACHED_HOOK_RUN]<T>(body: () => T): T {
+    return (ScopedContextFacet.detachedHookRun<T>).call(scopedContextHost.of(this), body);
   }
 
   /**

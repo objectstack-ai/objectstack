@@ -4095,7 +4095,9 @@ const es = {
     tool: {
       aggregate_data: "Resumir los datos",
       get_record: "Leer el registro",
+      list_datasets: "Ver las métricas disponibles",
       query_data: "Consultar los datos necesarios",
+      query_dataset: "Consultar por métrica",
       query_records: "Buscar los registros",
       read_package_doc: "Leer la guía de la aplicación",
       search_knowledge: "Consultar la base de conocimiento",

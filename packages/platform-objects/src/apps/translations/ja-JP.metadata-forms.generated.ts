@@ -971,11 +971,23 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "refusals.message": {
         label: "メッセージ",
-        helpText: "本体がこのコードをスローしたときにユーザーが読む文 — プレーンテキスト、プレースホルダーなし"
+        helpText: "本体がこのコードをスローしたときにユーザーが読む文。プレーンテキスト。ただしエントリが params を宣言している場合、{{ name }} プレースホルダーに宣言済みのパラメーターが入ります"
       },
       "refusals.status": {
         label: "ステータス",
         helpText: "拒否の HTTP ステータス（400–499）。未指定: 400"
+      },
+      "refusals.reasons": {
+        label: "理由",
+        helpText: "同じコードの下に置く追加の文。本体がコードと一緒にスローする snake_case の理由（{ code, reason }）をキーとします。送信されるコードとステータスはこのエントリのものです。ここで宣言されていない理由は拒否されます。未指定: スローされた理由は読まれません"
+      },
+      "refusals.reasons.message": {
+        label: "メッセージ",
+        helpText: "本体がこのコードの下でこの理由をスローしたときにユーザーが読む文。{{ }} プレースホルダーはエントリの params に従います"
+      },
+      "refusals.params": {
+        label: "パラメーター",
+        helpText: "文に埋め込める名前（例: state）。本体が { code, params: { state } } をスローすると、{{ state }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
       },
       handler: {
         label: "ハンドラー",
