@@ -469,6 +469,8 @@ const TEN_CASE = 'rest_ten_case_33626';
 const TEN_CONTACT = 'rest_ten_contact_33626';
 const TEN_ACCOUNT = 'rest_ten_account_33626';
 const TEN_REGION = 'rest_ten_region_33626';
+const TEN_TICKET = 'rest_ten_ticket_33626';
+const TEN_GRID = 'rest_ten_grid_33626';
 const ORG_A = 'org_ten_a';
 const ORG_B = 'org_ten_b';
 
@@ -480,6 +482,9 @@ const ORG_B = 'org_ten_b';
  */
 const TEN_OBJECTS = [
   { name: TEN_REGION, label: 'Region T 33626', fields: { name: { name: 'name', type: 'text' as const } } },
+  // The other direction: a tenant-scoped ticket on a grid that is no tenant's.
+  { name: TEN_GRID, label: 'Grid T 33626', tenancy: { enabled: false }, fields: { name: { name: 'name', type: 'text' as const } } },
+  { name: TEN_TICKET, label: 'Ticket T 33626', fields: { grid: { name: 'grid', type: 'lookup' as const, reference: TEN_GRID } } },
   {
     name: TEN_ACCOUNT, label: 'Account T 33626', tenancy: { enabled: false },
     fields: { region: { name: 'region', type: 'lookup' as const, reference: TEN_REGION } },
@@ -502,6 +507,8 @@ const TEN_SEED: ReadonlyArray<readonly [string, ReadonlyArray<Record<string, unk
   [TEN_ACCOUNT, [{ id: 'ta_a', region: 'tr_a' }, { id: 'ta_b', region: 'tr_b' }]],
   [TEN_CONTACT, [{ id: 'tc_a', account: 'ta_a' }, { id: 'tc_b', account: 'ta_b' }]],
   [TEN_CASE, [{ id: 'tk_a', contact: 'tc_a', region: 'tr_a' }, { id: 'tk_b', contact: 'tc_b', region: 'tr_b' }]],
+  [TEN_GRID, [{ id: 'tg_1', name: 'NA' }]],
+  [TEN_TICKET, [{ id: 'tt_a', grid: 'tg_1', organization_id: ORG_A }, { id: 'tt_b', grid: 'tg_1', organization_id: ORG_B }]],
 ];
 
 /** name · the `where` on the case — both mean "my tenant's NA region". */
@@ -568,6 +575,22 @@ for (const cell of CELLS) {
           expect(await engine.count(TEN_CASE, { where, context: CALLER_B }), `count, ${name}`).toBe(1);
         });
       }
+
+      it('the other direction — a tenant-scoped ticket on a grid that is no tenant\'s: tenant B\'s ticket, the two-step route\'s answer, the grid read dispatched once', async () => {
+        const grids = { n: 0 };
+        engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+          if (opCtx.object === TEN_GRID && opCtx.operation === 'find') grids.n += 1;
+          return next();
+        });
+        const idsAs = async (object: string, where: FilterCondition) =>
+          (await engine.find(object, { where, fields: ['id'], context: CALLER_B })).map((r: any) => r.id).sort();
+        const got = await idsAs(TEN_TICKET, { grid: { name: 'NA' } });
+        expect(got).toEqual(['tt_b']);
+        // Decided from the registry before planning: one dispatch of the grid read.
+        expect(grids.n).toBe(1);
+        expect(got, 'two-step parity').toEqual(await idsAs(TEN_TICKET, { grid: { $in: await idsAs(TEN_GRID, { name: 'NA' }) } }));
+        expect(await engine.count(TEN_TICKET, { where: { grid: { name: 'NA' } }, context: CALLER_B }), 'count').toBe(1);
+      });
 
       it('a read rule the region applies after its driver call gives the two-step route\'s answer', async () => {
         const hook = async (ctx: any) => { ctx.result = (ctx.result as any[]).filter((row) => row.id !== 'tr_b'); };

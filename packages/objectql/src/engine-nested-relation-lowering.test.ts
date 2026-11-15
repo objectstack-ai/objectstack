@@ -564,12 +564,14 @@ describe('[#33626] the semi-join falls back to the id read wherever it is not pr
     expect(normalized(rec.reads[rec.reads.length - 1].ast.where)).toEqual(OUTER_REF);
   });
 
-  it('a federated related object keeps the id read', async () => {
+  it('a federated related object keeps the id read, decided before planning: the related read is dispatched once', async () => {
     const { engine, rec } = await makeEngine();
     // ADR-0015 `external`, on the read's own datasource and driver.
     engine.registry.registerObject({ ...OWNER_OBJECT, external: { remoteName: 'owners' } } as any, 'test');
+    const dispatched = countRelatedDispatch(engine);
     rec.answers.set(OWNER, idRows('u1'));
     expectIdRead(await readsOf(engine, rec), ['u1'], 'federated related object');
+    expect(dispatched).toEqual({ middleware: 1, beforeFind: 1 });
   });
 
   /**
@@ -643,6 +645,30 @@ describe('[#33626] the semi-join falls back to the id read wherever it is not pr
     expectIdRead(r, ['u1'], 'boundary fallback');
     expect(seen).toEqual([{ object: OWNER, tenantId: 'org_b' }, { object: OBJECT, tenantId: undefined }]);
     expect(dispatched).toEqual({ middleware: 2, beforeFind: 2 });
+  });
+
+  it('a related read a middleware answers itself falls back after planning, which dispatches the related read twice', async () => {
+    const { engine, rec } = await makeEngine();
+    const dispatched = countRelatedDispatch(engine);
+    engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      if (opCtx.object !== OWNER) return next();
+      opCtx.result = [{ id: 'u9' }];
+    });
+    const r = await readsOf(engine, rec);
+    expect(normalized(r.outerWhere)).toEqual({ owner: { $in: ['u9'] } });
+    // The answering middleware stops both dispatches before `beforeFind`.
+    expect(dispatched).toEqual({ middleware: 2, beforeFind: 0 });
+  });
+
+  it('CONTROL without a wall (the single posture) two tenancy classes read under the same options, and the leaf is composed', async () => {
+    const { engine, rec } = await makeEngine();
+    engine.registry.registerObject({ ...LEDGER, tenancy: { enabled: false } } as any, 'test');
+    engine.setTenancyPostureProvider(() => 'single');
+    const dispatched = countRelatedDispatch(engine);
+    const r = await readsOf(engine, rec, { userId: 'u_b', tenantId: 'org_b' });
+    expect(r.related).toHaveLength(0);
+    expect(normalized(r.outerWhere)).toEqual({ owner: { $in: { SEMI_JOIN: OWNER, scope: { region: 'NA' } } } });
+    expect(dispatched).toEqual({ middleware: 1, beforeFind: 1 });
   });
 
   it('a read whose leaves are all planned does not report, nor spend, the once-only "no usable security service" warning', async () => {
