@@ -17,6 +17,12 @@
  * one of the two owners, until a restart; the restart answered `200` with the
  * remaining package's result. Its body hooks kept firing the same way.
  *
+ * The withdrawal had a second half in the engine: the unqualified slot a bare
+ * call runs held the LAST registration under the key — the uninstalled
+ * package's — and removing a package's handlers emptied that slot rather than
+ * handing it back to the owner still holding the key, so the bare call would
+ * have answered "not found" where the restart runs the remaining handler.
+ *
  * ## What is real here
  *
  * An `ObjectKernel` with `ObjectQLPlugin` — the real engine, whose action
@@ -206,16 +212,15 @@ async function boot() {
         });
     };
     /** The engine's dispatch of `POST /actions/OBJECT/escalate/RID` — no package named, unless `packageId` is. */
-    const call = (packageId?: string) => ql.executeAction(
-        OBJECT,
-        ACTION,
-        { params: { objectName: OBJECT, recordId: RECORD.id }, record: RECORD },
-        ...(packageId === undefined ? [] : [{ packageId }]) as [],
-    );
-    /** The owners holding a handler under the action key, from the engine's own listing. */
-    const holders = () => ql.listRegisteredActions()
-        .filter((row) => row.objectName === OBJECT && row.actionName === ACTION)
-        .map((row) => row.package);
+    const call = (packageId?: string) => {
+        const actionCtx = { params: { objectName: OBJECT, recordId: RECORD.id }, record: RECORD };
+        return packageId === undefined
+            ? ql.executeAction(OBJECT, ACTION, actionCtx)
+            : ql.executeAction(OBJECT, ACTION, actionCtx, { packageId });
+    };
+    /** The packages holding a handler of their own under the action key, from the engine's package-scoped listing. */
+    const holders = () => [A, B].filter((id) => ql.listRegisteredActions({ packageId: id })
+        .some((row) => row.objectName === OBJECT && row.actionName === ACTION && row.coordinate === id));
     return { ql, install, uninstall, call, holders };
 }
 
@@ -244,11 +249,11 @@ describe('install-local uninstall withdraws the package\'s action handlers and h
 
     it('CONTROL: the remaining package keeps its handler and its hook, and its package-qualified call runs', async () => {
         const { ql, uninstall, call, holders } = await boot();
-        expect(holders(), 'precondition: both packages hold the key').toEqual(expect.arrayContaining([`app:${A}`, `app:${B}`]));
+        expect(holders(), 'precondition: both packages hold the key').toEqual([A, B]);
 
         expect((await uninstall(B)).status).toBe(200);
 
-        expect(holders()).toEqual([`app:${A}`]);
+        expect(holders()).toEqual([A]);
         await expect(call(A)).resolves.toEqual({ by: 'a' });
         expect(ql.unregisterHooksByPackage(`app:${A}`), 'the remaining package\'s hook is still bound').toBe(1);
     });

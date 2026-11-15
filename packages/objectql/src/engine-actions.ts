@@ -459,11 +459,28 @@ export class ActionsFacet {
         else if (kept !== entry) slot.set(key, kept);
       }
     };
+    const held = new Set(this.actions.keys());
     prune(this.actions);
     // [ADR-0150 D4, #31673] …and from every package coordinate's slot.
     for (const [coordinate, slot] of Array.from(this.packageActions.entries())) {
       prune(slot);
       if (slot.size === 0) this.packageActions.delete(coordinate);
+    }
+    // A key the removal emptied in the unqualified slot while another owner's
+    // handler stays in its own coordinate's slot takes that handler back —
+    // the very entry that slot holds, so `coordinateOfUnqualified` still
+    // finds it — the last coordinate holding the key, in the order the
+    // slots were created. Left empty, a call that names no package answered
+    // "not found" for an action the remaining owner still holds, where the
+    // same composition booted without the removed package runs that owner's
+    // handler. While two or more packages still hold the key the bare call
+    // is refused naming them ({@link unqualifiedHandler}) whichever entry
+    // this restores.
+    for (const key of held) {
+      if (this.actions.has(key)) continue;
+      let remaining: ActionHandlerEntry | undefined;
+      for (const slot of this.packageActions.values()) remaining = slot.get(key) ?? remaining;
+      if (remaining !== undefined) this.actions.set(key, remaining);
     }
   }
 
