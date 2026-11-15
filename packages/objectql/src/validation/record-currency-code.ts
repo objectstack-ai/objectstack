@@ -433,9 +433,9 @@ export class RecordCurrencyCodeRequiredError extends Error {
     super(codeRequiredMessage(object, operation, hits, recordId, unserved));
     this.name = 'RecordCurrencyCodeRequiredError';
     this.object = object;
-    this.field = first.codeField;
+    this.field = hits[0].codeField;
     this.fields = [...new Set(hits.map((h) => h.codeField))];
-    this.amountField = first.amountField;
+    this.amountField = hits[0].amountField;
   }
 }
 
