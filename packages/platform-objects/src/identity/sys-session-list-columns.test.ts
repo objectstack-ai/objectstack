@@ -11,6 +11,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { SysSession } from './sys-session.object.js';
+import { enObjects } from '../apps/translations/en.objects.generated.js';
+import { zhCNObjects } from '../apps/translations/zh-CN.objects.generated.js';
 
 type ViewLike = { columns?: unknown };
 const views = (SysSession as any).listViews as Record<string, ViewLike>;
@@ -41,5 +43,25 @@ describe('sys_session list views tell one user\'s sessions apart', () => {
       expect(fields[col], `sys_session.listViews.${view} column ${col}`).toBeDefined();
       expect(fields[col]?.internal, `sys_session.listViews.${view} column ${col}`).not.toBe(true);
     }
+  });
+});
+
+// The console draws the OBJECT description as the subtitle of every list view,
+// the `revoked` audit view included, so it may not claim the sessions are
+// active. Pinned at the source and in the en and zh-CN bundles the subtitle is
+// read from.
+describe('sys_session description holds on every list view, revoked included', () => {
+  const ACTIVE = { en: /\bactive\b/i, 'zh-CN': /活跃|活動|有效/ } as const;
+  const descriptions = {
+    source: (SysSession as any).description as string,
+    en: enObjects.sys_session?.description as string,
+    'zh-CN': zhCNObjects.sys_session?.description as string,
+  };
+
+  it.each(Object.entries(descriptions))('%s description is declared and does not say active', (where, text) => {
+    expect(typeof text, `sys_session description (${where})`).toBe('string');
+    expect(text.trim().length, `sys_session description (${where})`).toBeGreaterThan(0);
+    const rule = where === 'zh-CN' ? ACTIVE['zh-CN'] : ACTIVE.en;
+    expect(text, `sys_session description (${where})`).not.toMatch(rule);
   });
 });

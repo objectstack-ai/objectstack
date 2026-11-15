@@ -18,7 +18,13 @@
  * 1. **Assignments naming no position** — `sys_user_position` rows whose
  *    `position` the catalog does not resolve.
  * 2. **Grants naming no permission set** — `sys_user_permission_set` rows
- *    whose `permission_set` the catalog does not resolve.
+ *    whose `permission_set` the catalog does not resolve. [ADR-0150 D3] A name
+ *    the catalog holds but refuses for the grant — a grant naming no package,
+ *    of a name two packages hold, is the usual one — is listed here with the
+ *    resolver's refusal naming every candidate, and the fix follows the
+ *    grant's package column: one that names no package is bound after review
+ *    (`os migrate stored-references bind`), one that names a package already
+ *    is granted again naming the package meant, then removed.
  * 3. **Grants that name nothing** — `sys_user_permission_set` rows whose
  *    `permission_set` is empty. The v18 ceremony's verified rewrite names
  *    every grant it can before the legacy id column is dropped, and blocks on
@@ -103,7 +109,7 @@ import {
   type SecurityCatalogType,
 } from '@objectstack/core';
 import { GRANT_OBJECT, GRANT_SET_NAME_FIELD } from './grant-permission-set-name.js';
-import { PERMISSION_SET_PACKAGE_COLUMN } from './stored-permission-set-package-backfill.js';
+import { bindCommandFor, PERMISSION_SET_PACKAGE_COLUMN } from './stored-permission-set-package-backfill.js';
 
 /** The user ↔ position assignment object (ADR-0057 D4). */
 export const POSITION_ASSIGNMENT_OBJECT = 'sys_user_position';
@@ -143,6 +149,23 @@ export interface UnresolvedReference {
   userId: string | null;
   /** The name the row carries. */
   name: string;
+  /**
+   * [ADR-0150 D3] A grant's name the catalog holds but refuses for the grant,
+   * with every candidate — absent when nothing holds the name.
+   */
+  refusal?: GrantRefusal;
+}
+
+/** [ADR-0150 D3] Why the catalog refuses a grant's name: every candidate named, none picked. */
+export interface GrantRefusal {
+  /** The package the grant's column names, or `null` for a grant naming none — the bind applies only to `null`. */
+  packageId: string | null;
+  /** The resolver's reason (`ambiguous-in-environment` for a grant naming no package). */
+  reason: string;
+  /** Every candidate holder, described. */
+  candidates: string[];
+  /** The resolver's sentence. */
+  message: string;
 }
 
 /** One grant that names no permission set. */
@@ -377,6 +400,34 @@ function staleColumnHolderOutsideNamespace(
 }
 
 /**
+ * [ADR-0150 D3] The catalog's refusal of a stored grant's name, read in the
+ * grant's own scope (`storedPermissionSetScope`), or `undefined` when the
+ * catalog does not refuse it (a name nothing holds, or a reader that cannot
+ * tell a refusal from a miss). Each (name, column) is asked once.
+ */
+function grantRefusal(
+  catalog: SecurityCatalogReader,
+): (name: string, packageColumn: unknown) => Promise<GrantRefusal | undefined> {
+  const memo = new Map<string, GrantRefusal | undefined>();
+  return async (name, packageColumn) => {
+    const scope = storedPermissionSetScope(packageColumn);
+    const key = `${name}\u0000${scope?.packageId ?? ''}`;
+    if (memo.has(key)) return memo.get(key);
+    let answer: Awaited<ReturnType<typeof resolveCatalogReference>>;
+    try {
+      answer = await resolveCatalogReference(catalog, 'permission', name, scope);
+    } catch (e) {
+      throw new ReportStop('catalog-unreadable', 'the security catalog', e);
+    }
+    const refusal = answer.status === 'refused'
+      ? { packageId: scope?.packageId ?? null, reason: answer.reason, candidates: [...answer.candidates], message: answer.message }
+      : undefined;
+    memo.set(key, refusal);
+    return refusal;
+  };
+}
+
+/**
  * Read the stored references and the catalog, and return what resolves
  * nowhere. Logs nothing; {@link reportCatalogReferences} is the boot entry.
  * A read that did not happen is returned in `stopped`, never thrown.
@@ -416,6 +467,7 @@ export async function collectCatalogReferences(
   };
   const resolves = catalogResolver(deps.catalog);
   const outsideNamespaceHolder = staleColumnHolderOutsideNamespace(deps.catalog);
+  const refusalOf = grantRefusal(deps.catalog);
 
   try {
     if (readAssignments) {
@@ -464,8 +516,13 @@ export async function collectCatalogReferences(
             });
             continue;
           }
+          // [ADR-0150 D3] A name the catalog holds but refuses for this grant
+          // (two holders, none named) carries the refusal: declaring the set
+          // again would change nothing.
+          const refusal = await refusalOf(name, row[PERMISSION_SET_PACKAGE_COLUMN]);
           bucket(organizationOf(row)).permissionSetGrants.push({
             id: String(row.id), userId: stringOrNull(row.user_id), name,
+            ...(refusal ? { refusal } : {}),
           });
           continue;
         }
@@ -586,16 +643,35 @@ function logReport(report: CatalogReferenceReport, logger?: CatalogReferenceRepo
     );
   }
 
-  const grants = perOrganization(report, (o) => o.permissionSetGrants, (items) => ({
-    permissionSets: nameCounts(items), grants: listed(items.map((i) => i.id)),
-  }));
+  const refused = report.organizations.flatMap((o) => o.permissionSetGrants).flatMap((i) => (i.refusal ? [i.refusal] : []));
+  const grants = perOrganization(report, (o) => o.permissionSetGrants, (items) => {
+    const refusals = items.flatMap((i) => (i.refusal ? [{ id: i.id, userId: i.userId, permissionSet: i.name, ...i.refusal }] : []));
+    return {
+      permissionSets: nameCounts(items),
+      grants: listed(items.map((i) => i.id)),
+      ...(refusals.length > 0 ? { refusals: listed(refusals) } : {}),
+    };
+  });
   if (grants.count > 0) {
     logError(
       logger,
       `[security] ${grants.count} ${GRANT_OBJECT} grant(s) name a permission set the security catalog does not ` +
         'resolve at this boot (ADR-0131 D4), so each confers nothing, while Setup still lists it. Nothing was ' +
         'changed. Fix: declare the permission set again (its package, or its environment definition), or remove ' +
-        'the grants.',
+        'the grants.' +
+        (refused.length > 0
+          ? ' A grant listed under refusals names a set that is held, but the catalog refuses the reading the grant ' +
+            'asks for — more than one holder, and none named (ADR-0150 D3) — so declaring it again changes nothing: ' +
+            'each refusal names every candidate, and nothing picks one.'
+          : '') +
+        (refused.some((r) => r.packageId === null)
+          ? ' Bind a refused grant that names no package to the candidate meant, after review: ' +
+            `${bindCommandFor(GRANT_OBJECT)}.`
+          : '') +
+        (refused.some((r) => r.packageId !== null)
+          ? ' A refused grant that already names a package is not bound (the bind writes only a grant naming none): ' +
+            'grant the candidate meant again naming its package, then remove the listed grant.'
+          : ''),
       { count: grants.count, organizations: grants.organizations },
     );
   }
