@@ -118,6 +118,48 @@ const UNIT: Readonly<Record<string, number>> = {
  */
 const ISO_DATE = /\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g;
 
+/**
+ * A run of Latin letters and digits, its parts joined by `-` or `_` (and a
+ * decimal point between digits, `v1.2`) — the shape of a record name, code or
+ * id (`INV-003`, `i3`, `AST-0041`, `ord_12`, `3fa85f64-5717-…`). It is an identifier when {@link isIdentifierToken} says
+ * so; a token is never cut inside, so `INV-003` is one token and `3 days` two.
+ * Only Latin letters join: a CJK character is a word of its own, so the 3 of
+ * `共3张` stands alone.
+ */
+export const IDENTIFIER_TOKEN = /[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+|\.\d+)*/g;
+
+/**
+ * A currency code written straight onto its amount (`USD3,000`, `RMB3000`):
+ * an amount, not an id. Only the codes a reply is likely to glue on; with a
+ * separator (`EUR-001`) the token reads as an id like any other.
+ */
+const GLUED_CURRENCY = /^(?:USD|EUR|GBP|JPY|CNY|RMB|HKD|TWD|SGD|AUD|CAD|CHF|KRW|INR)\d+$/;
+
+/**
+ * `token` (one {@link IDENTIFIER_TOKEN} match) is an identifier: a digit in it
+ * follows a Latin letter, directly (`i3`, `Q3`, `v2`) or across a separator
+ * (`INV-003`, `ord_12`). Every number inside an identifier is part of its
+ * name, so {@link readingsIn} reads none of them — the same reason it reads
+ * none of an ISO date's parts.
+ *
+ * Digits the letters only FOLLOW are a number and its unit or suffix, and
+ * stay figures: `3k`, `1.2M`, `3days`, `3-day`, `3rd`, `5GB`. So does an
+ * amount behind a glued currency code ({@link GLUED_CURRENCY}). A period
+ * label (`Q3`, `FY2026`) is an identifier: it names a period, it counts nothing.
+ */
+export function isIdentifierToken(token: string): boolean {
+  return /[A-Za-z][-_]?\d/.test(token) && !GLUED_CURRENCY.test(token);
+}
+
+/** The `[start, end)` spans of `text`'s identifier tokens ({@link isIdentifierToken}). */
+function identifierSpans(text: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  for (const m of text.matchAll(IDENTIFIER_TOKEN)) {
+    if (isIdentifierToken(m[0])) out.push([m.index, m.index + m[0].length]);
+  }
+  return out;
+}
+
 /** One number as the text writes it: its value, its decimal places and its significant digits. */
 interface Reading {
   value: number;
@@ -127,11 +169,18 @@ interface Reading {
   digits: number;
 }
 
-/** Every number in `text` as {@link Reading}s, thousands separators dropped and ISO dates skipped; a unit suffix adds the multiplied reading too. */
+/**
+ * Every number in `text` as {@link Reading}s, thousands separators dropped,
+ * ISO dates and identifiers ({@link isIdentifierToken}) skipped; a unit suffix
+ * adds the multiplied reading too.
+ */
 function readingsIn(text: string): Reading[] {
   const out: Reading[] = [];
   const re = /(\d{1,3}(?:[,，]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(万|亿|million|billion|mn|bn|[kKmMbB](?![a-zA-Z]))?/g;
-  for (const m of text.replace(ISO_DATE, ' ').matchAll(re)) {
+  const plain = text.replace(ISO_DATE, (d) => ' '.repeat(d.length));
+  const ids = identifierSpans(plain);
+  for (const m of plain.matchAll(re)) {
+    if (ids.some(([start, end]) => m.index >= start && m.index < end)) continue;
     const written = m[1]!.replace(/[,，]/g, '');
     const n = Number(written);
     if (!Number.isFinite(n)) continue;
@@ -146,7 +195,7 @@ function readingsIn(text: string): Reading[] {
   return out;
 }
 
-/** Every number in `text`, thousands separators dropped and ISO dates skipped; a unit suffix adds the multiplied reading too. */
+/** Every number in `text`, thousands separators dropped, ISO dates and identifiers skipped; a unit suffix adds the multiplied reading too. */
 export function numbersIn(text: string): number[] {
   return readingsIn(text).map((r) => r.value);
 }

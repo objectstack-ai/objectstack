@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 314 |
-| Object name statically decidable | 219 |
+| Write call sites | 315 |
+| Object name statically decidable | 220 |
 | Object name chosen at run time | 95 |
-| Against a tenancy-enabled object | 212 |
+| Against a tenancy-enabled object | 213 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 243 |
+| Threading a tenant context | 244 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 59 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 177 |
+| Threading a decidably elevated context | 178 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 125 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-14 at `aad3132fa`.
+Measured on 2026-11-15 at `c1014aa8e`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1160 |
-| engine-shaped types recognised | 138 |
+| tracked non-test sources scanned | 1170 |
+| engine-shaped types recognised | 139 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 298 |
+| same-named calls subtracted as non-engine | 309 |
 
 ## Every site
 
@@ -129,6 +129,7 @@ Measured on 2026-11-14 at `aad3132fa`.
 | `packages/plugins/plugin-audit/src/comment-parent-pair-backfill.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/credential-use-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/data-export-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/dataset-query-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/mail-log-body-migration.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/mail-log-body-migration.ts` | `update` | `object` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/package-lifecycle-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
