@@ -34,7 +34,7 @@
 
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import type { NavigateFunction, Location, SetURLSearchParams } from 'react-router-dom';
-import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view';
+import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view/core';
 import { useNavigationOverlay } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import type { ViewNavigationConfig } from '@object-ui/types';

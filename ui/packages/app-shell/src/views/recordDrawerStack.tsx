@@ -64,7 +64,7 @@ import {
   type NavigationOverlayMode,
   type RecordTopBarStepper,
 } from '@object-ui/components';
-import { overlayWidthFor } from '@object-ui/plugin-view';
+import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
