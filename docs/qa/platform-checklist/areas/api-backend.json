@@ -3079,7 +3079,7 @@
       "title": "Every read that reaches a NON-addressed object asks that object's own `enable` block (nested-relation filter → 404/405, $expand withheld to the bare id, search skips it), and an `internal: true` field is refused 400 INVALID_FIELD in every evaluate position (filter, sort, groupBy, aggregate, $expand where/orderBy)",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3105,7 +3105,7 @@
         {
           "clause": "second-object exposure and internal-field refusal at the protocol and engine — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -3168,6 +3168,12 @@
           "date": "2026-11-14",
           "change": "automated.ref re-pointed (stale ref, QA run #33081 acceptance[0], card #33086 item 2): packages/metadata-protocol/src/protocol.data-door-internal-field-positions.test.ts no longer exists, and acceptance[0].verify says a missing file is not a pass. The data door's internal-field evaluate refusal moved into the engine, and its position pin with it, to packages/objectql/src/protocol-data-door-internal-field-positions.test.ts; the door's own half (that it asks the engine's gate, with what, before what) is packages/metadata-protocol/src/protocol.data-door-internal-field-delegation.test.ts, which the ref now names beside it. The move is b388cfeca6 (#29003), read from the commit listing of both paths; the card named bca2a515 (#32128), which touches neither file. No clause changed. Read at base e540baf8",
           "ref": "#33086"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -3176,7 +3182,7 @@
       "title": "Request-shape gates on v18: a /data write with a null / array / scalar body or an empty version token is refused 400 (never an unguarded 200), a repeated single-valued query name is refused 400 on the dispatcher doors (a doubled keepData no longer drops tables), and a stale If-Match on an unreadable row answers 404",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3201,7 +3207,7 @@
         {
           "clause": "request-schema gate, empty-token refusal, dispatcher query arity and conflict caller visibility — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -3270,6 +3276,12 @@
           "date": "2026-10-27",
           "change": "acceptance[1]–[4] are pinned at the layer their oracle names (the release-18.2.0 Tier 1 sweep #26468 scored a1–a4 and n0 partial: every pin stopped above the Hono adapter). The new data-request-shape-live.dogfood.test.ts drives each step through the HTTP stack of its own showcase boot (the destructive keepData probe runs on that throwaway stack) and automated.ref names it with what it asserts. Measured at base 74db43ef. No clause changed",
           "ref": "#26572"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -3278,7 +3290,7 @@
       "title": "/meta read doors on v18: GET /meta/app/PACKAGE_ID returns that package's app, `?member=` selects one bundle member on by-name doors, an unknown query parameter on any by-name door is refused 400, `?package=all` folds to the no-parameter answer, and the object definition marks an FLS-denied field unsortable for that caller",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3303,7 +3315,7 @@
         {
           "clause": "app-by-package-id, member selector, closed query sets, package=all fold and caller-FLS sortability — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -3375,6 +3387,12 @@
           "date": "2026-11-04",
           "change": "fixtures.requires[1] corrected: the bare PUT of a zh-CN member onto the shipped showcase_task_done_email is package-less, which ADR-0146 D11 refuses 403 NOT_OVERRIDABLE. The member is now authored into com.example.showcase.custom with no `overrides`, the shape meta-read-doors-live.dogfood.test.ts already uses. Measured on a fresh showcase boot at base 232d3bb5ef: package-less PUT 403; pair PUT with overrides 403 (the base ships no zh-CN member); pair PUT without overrides 200, then ?member=zh-CN serves it and ?member=en-US the shipped member. No clause changed",
           "ref": "#30129"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -3383,7 +3401,7 @@
       "title": "Error answers made honest on v18: a hook refusal on a hand-built write route answers 400 with the hook's own sentence, a crash answers a generic 500 that withholds the caught message, and a unique-constraint refusal is 409 UNIQUE_VIOLATION with details at the action door, MCP and sandboxed bodies too",
       "since": "v18",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3406,7 +3424,7 @@
         {
           "clause": "hook-refusal sentences, withheld 500 text and the unique-violation wire code — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -3493,6 +3511,12 @@
           "date": "2026-11-14",
           "change": "acceptance[2] (clause, verify) and automated.ref re-pointed to the widened details (stale spec, QA run #33025 acceptance[2], card #33032 item 2; the same clause #33086 lists as still open, done once here). 28a15270 (#32935) made the 409 UNIQUE_VIOLATION details for a duplicate in an organization-scoped unique field {developerMessage, field, object}: the composite key (organization_id, FIELD) now names FIELD (packages/types/src/unique-violation.ts#uniqueViolationField). r8 expected exactly developerMessage and object, no field. Both pins already assert the new set: packages/qa/dogfood/test/error-sentences-live.dogfood.test.ts ('details exactly { developerMessage, field, object }', field 'email') and packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts. Status, code and the row keeping its email are unchanged. Read at base e540baf8",
           "ref": "#33032"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },

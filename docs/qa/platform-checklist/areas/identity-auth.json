@@ -2556,7 +2556,7 @@
       "title": "A session held by the ADR-0069 credential policy (password expired, forced reset, MFA not enrolled) is refused with the gate's own 403 code on EVERY raw-host route family, and an API key whose owner holds an account-scope posture is refused too",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2581,7 +2581,7 @@
         {
           "clause": "the auth gate runs before route logic on every raw-host family, outage answers 503, and the API-key account posture is enforced at REST, the dispatcher and install-local — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The pins prove this at mixed layers, and this clause scores only that: the storage, settings, share-link and cloud-connection pins call the registered handlers with a fake IHttpRequest / IHttpResponse; the vendor-admin-doors pin arms PASSWORD_RESET_REQUIRED by a system write of must_change_password plus auth.noteMustChangePasswordIssued(), simulating the forced-reset route rather than driving it; the two API-key posture pins drive RestServer.enforceAuth with a hand-built req/res and a fake auth, and HttpDispatcher with fakes, so neither answers an HTTP x-api-key call. A pass here does not score acceptance[1], acceptance[2] or acceptance[3], which are driven live",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2652,6 +2652,12 @@
           "date": "2026-11-15",
           "change": "fixtures.requires[1] warns that saving mfa_required=everyone with grace 0 through PUT /api/settings/auth also holds the admin who saved it (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 32). No clause changed. Read at base bc6b7ffd",
           "ref": "#34016"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2660,7 +2666,7 @@
       "title": "API-key lifecycle policy: a mint with no expiry gets the default (90 days) echoed back, an expiry past the ceiling is refused 400 API_KEY_EXPIRY_TOO_LONG, and an expired / inactive / revoked key is refused with its own 403 code",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2683,7 +2689,7 @@
         {
           "clause": "default expiry, ceiling refusal and the three distinct 403 codes — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The pins are layered, and this clause scores only what they assert: the dogfood file drives the 90-day default and the ceiling refusal's status + code through a booted server; 'nothing is stored' on a refused mint and the revoked / expired / inactive 403 codes are pinned at unit layer only (the runtime pin over a fake objectql and a fake kernel, the rest pin over an HTTP stub and a fake ql), so a pass here does not score acceptance[2]'s no-key half or acceptance[3]",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2735,6 +2741,12 @@
           "date": "2026-10-31",
           "change": "acceptance[2].verify counted keys with GET /api/v1/keys. That route is a refusal-only mount: packages/runtime/src/route-ledger.ts lists GET /keys as server-only, answering anonymous 401 and signed-in the keys domain's 405, and QA run #27438 measured 405. The count now reads GET /api/v1/data/sys_api_key (its total) before and after the refused mint. The clause is unchanged: no key is minted. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310",
           "ref": "#27438"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2743,7 +2755,7 @@
       "title": "A cookie session past its updateAge is renewed ONLY by GET /auth/get-session: in-process reads (data, meta, me/permissions, SSO admin) leave sys_session.expires_at unchanged and set no cookie, while bearer-only calls still renew",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2765,7 +2777,7 @@
         {
           "clause": "in-process session reads never renew a cookie session; get-session does — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The runtime pin's doors are GET /data/:object, GET /auth/me/permissions and GET /i18n/locales; none is a meta read, so a pass here does not score acceptance[1]'s meta leg",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2807,6 +2819,12 @@
           "date": "2026-10-26",
           "change": "checklist-accuracy finding of the 18.2.0 sweep (QA run #25815, identity-auth.cookie-session-renewal-in-process a1; wave anchor #25807; card #25843). The runtime pin's DOORS are GET /data/:object, /auth/me/permissions and /i18n/locales, so acceptance[1]'s 'meta reads' leg has no door in it. acceptance[0] now names the doors and says it does not score the meta leg, and acceptance[1].verify scores the meta read on its own. acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
           "ref": "#25843"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2815,7 +2833,7 @@
       "title": "ADR-0131 single posture: the Default Organization exists from boot BEFORE any sign-up — the first sign-up becomes its owner, later sign-ups its members, every session carries it as active org, and seeded org-columned rows carry it instead of NULL",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -2839,7 +2857,7 @@
         {
           "clause": "ensureDefaultOrganization runs at boot and the identity objects stamp the org — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2908,6 +2926,12 @@
           "date": "2026-11-14",
           "change": "steps[0] re-pointed (stale spec, QA run #32953 R1, comment 6840054712; ledger row 23 of #32908): 'boot WITHOUT --seed-admin' still seeds on os dev, because the seed-admin flag defaults on and --fresh implies it (packages/cli/src/commands/dev.ts, `flags['seed-admin'] ?? true`). The step now names --no-seed-admin. No clause changed. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2916,7 +2940,7 @@
       "title": "Identity import sends the dedicated account-invitation mail whose link opens the console set-password page, and the SSO domain-verification doors answer 404 for an unknown provider when enabled and 400 DOMAIN_VERIFICATION_DISABLED when off",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2940,7 +2964,7 @@
         {
           "clause": "import sends auth.account_invitation with a working link, while a self-requested reset still sends auth.password_reset; the SSO domain doors answer by flag — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). admin-import-users-invite-link.test.ts asserts the invitation template on the import only; the password_reset half is admin-import-users-account-invitation.test.ts cases ① and ②. sso-domain-verification-unknown-provider.pin.test.ts mounts the real AuthPlugin on Hono but over createMemoryEngine, a hand-rolled engine fake, so it scores the domain doors at unit layer only and a pass here does not score acceptance[3]",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2996,6 +3020,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[2] and acceptance[1].verify re-pointed (stale spec, QA run #33092, comment 6850793622; ledger row 81 of #32908). The domain doors need OS_SSO_ENABLED=true on both boots (auth-manager-plugin-list.ts wires @better-auth/sso only then), and sys_identity_email carries subject and body columns, no template id (sys-identity-email.object.ts). The clause is unchanged. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },

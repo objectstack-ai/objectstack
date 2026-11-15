@@ -2051,7 +2051,7 @@
       "title": "`os migrate meta` on v18: `--from 17 --write` rewrites the provable mechanical edits in place (byte-preserving otherwise), lists what it cannot write with a reason and restores + exits 1 when a re-run disagrees; `--stored` lists a TODO per refused stored shape; and provably-absent semantic notices collapse into one line that `--all` expands",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2078,7 +2078,7 @@
         {
           "clause": "--write, --stored TODOs and the relevance predicate — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2136,6 +2136,12 @@
           "date": "2026-10-26",
           "change": "fixtures.knownGaps[0] added — checklist-accuracy finding of QA run #25815 (18.2.0 sweep, Tier 1 at 6679644a), parked on wave anchor #25807 and filed as #25841: acceptance[4]'s pins hold the TODO sink (canonicalizeStoredFlow todos, the refused-shape onTodo) and none reads the printed TODO lines of `os migrate meta --stored`. Read at base 9753d163: the meta.stored-* tests in packages/cli assert the stored pass's flags, actor and flow resolution, never its TODO output. No clause changed",
           "ref": "#25841"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2144,7 +2150,7 @@
       "title": "`os migrate organization-ownership` upgrades a database 17.x or an 18.0 pre-release (18.0.0-next.*) created (18.x): a bare run writes the reviewed plan and changes nothing; `--apply --plan-file PLAN --backup-taken` runs every step — attribution through the moves, the declared webhook and sharing-rule settlements, the column drops and NOT NULL — and certifies the marker at this release's ownership shape generation; the served boot refuses an uncertified database, naming the command, and boots a certified one; `os migrate apply --allow-destructive` still withholds every organization_id drop the ceremony owns, and `os migrate comment-reactions --apply` stays pinned",
       "since": "v18",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -2179,7 +2185,7 @@
         {
           "clause": "the ceremony and the guard — plan, refusals, checkpoints, the generation-1 steps, the drop gate, the birth marker and the reactions conversion — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, never through a bare `--`: RUNNER environment facts hold the Tier 1 vitest pins under this container's memory limit only at --maxWorkers=1); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, never through a bare `--`: RUNNER environment facts hold the Tier 1 vitest pins under this container's memory limit only at --maxWorkers=1); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2304,6 +2310,12 @@
           "date": "2026-11-15",
           "change": "acceptance[5].verify re-pointed twice, with the cli-18-prerelease-db recipe it scores on (rows 5, 6 and 186 of ledger 6896511848 on #33761; QA runs #33784 at a557fa38 and #33909 at b914e724). (1) 'Each table's count after equals its count before, less what moved' had no room for the rows this release's own second boot adds (showcase_invoice_line 5 → 10, sys_seed_landed_key 0 → 141 and others, none a duplicate or a loss): the oracle is now that every pre-existing id survives unless the report moved or deleted it, and a count may grow. (2) The carve-out for a sys_activity shard dropped at the first boot is retired: cli-prerelease-fixture.ts restore now re-dates rotation shards to the day before the run (dumpAsOf over fixture-as-of.ts), and QA run #33784 read sys_activity__r20261114, 66 rows, after the refused boot. The recipe's knownGaps[4] and sequence[0].expect say the same. No clause weakened: every pre-existing row is still accounted for. Read from source at base 0ac112fc",
           "ref": "#34004"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2312,7 +2324,7 @@
       "title": "CLI authoring commands on v18: `os meta delete|register --package ID` address one package's row (an empty --package is refused before send), `os meta register --force` passes a 409 DESTRUCTIVE_CHANGE, a no-op delete prints \"Nothing deleted\", and `os explain RULE_ID` explains a lint rule (unknown id exits 1)",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -2337,7 +2349,7 @@
         {
           "clause": "package addressing, --force, the no-op line and rule explain — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2398,6 +2410,12 @@
           "date": "2026-11-15",
           "change": "steps[0] gives the ViewItem body its viewKind (row 42 of ledger 6896511848 on #33761; QA run #33829 at a557fa38): a body with no viewKind answers 422 INVALID_METADATA, because ViewItemSchema is a union discriminated on viewKind ('list' | 'form'). The example body parses against the built schema at base 0ac112fc. No clause changed",
           "ref": "#34004"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2406,7 +2424,7 @@
       "title": "`os validate` / `os build` verdicts new on v18: an unknown seed record key (with did-you-mean), a misspelt record[…] / previous[…] field, a duplicate stack entry name, a controlled_by_parent object with no master_detail or with two required ones (also through objectExtensions), a component-props finding (now an error), and a credential in stack email/sms config each fail the build",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2428,7 +2446,7 @@
         {
           "clause": "each new build verdict — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2485,6 +2503,12 @@
           "date": "2026-11-15",
           "change": "steps[2] and acceptance[3] name the door where the os lint arm is reachable, `defineStack(…, { strict: false })` (stale spec, card #33842, QA run #33829 acceptance[3]). Rev 3 planted the omitted `required` inside the default strict `defineStack`, whose parse has already defaulted it to false (ruling A of #30905) before `os lint` loads the stack, so the rule cannot see it there: QA reproduced `os lint` exit 0 with no finding twice. Driven live at base 895783a1 in a scratch copy of examples/app-todo with the CLI from the tree: default strict `defineStack` gives `os lint --json` exit 0 (passed, 0 errors, no relationship/master-detail-required) and `os validate --json` / `os build` exit 0; `{ strict: false }` gives `os lint --json` exit 1 with relationship/master-detail-required at objects[2].fields.hdr.required (plus security-controlled-by-parent-no-relation at objects[2].sharingModel) and `os validate --json` / `os build` exit 0; a raw-object default export gives `os lint` exit 1 with the same rule but `os validate` exit 1 and `os build` exit 2 (the export was not built by `defineStack`), so it cannot carry the clause. The other clauses and the os validate / os build half are unchanged",
           "ref": "#33929"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2493,7 +2517,7 @@
       "title": "`os verify` gains five derived proof families on v18 — --reference-shapes, --delete-behaviors, --unique-scopes, --parent-write-reach, --dashboard-windows — each clean (exit 0) on the showcase with its report in --json, and non-zero on a planted defect",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -2513,7 +2537,7 @@
         {
           "clause": "the five verify families — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2557,6 +2581,12 @@
           "date": "2026-10-20",
           "change": "automated.ref narrowed per clause — checklist-accuracy finding C8 of QA run #24786 (wave anchor #24579 round 13, round 6's theme-B rule): the five pins spawn the CLI over their own fixture stacks, never the showcase, so acceptance[1]'s 'on the showcase' needs the live run, which QA run #24786 drove. The ref now names acceptance[0] for all five and acceptance[2] for verify-delete-behaviors.test.ts's NEGATIVE CONTROL case (read at base 7697ddcf94). No clause changed",
           "ref": "#24850"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -3223,7 +3253,7 @@
       "title": "A package upgrade's dry run returns the plan and writes nothing, and lists as advice the customizations that would hide a change of the upgrade; the upgrade installs without a token",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3270,7 +3300,7 @@
         {
           "clause": "the pins pass at the run subject sha: a stale override (taken from another version) is listed in its own section, and unread overrides say they could not be read",
           "oracle": "test",
-          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "verify": "run each file in automated.ref with its package's vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); each reports ≥1 test and 0 failed",
           "evidence": "the vitest summary line per file, with the subject sha"
         }
       ],
@@ -3305,6 +3335,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[1] and [2] re-pointed (under-specified fixture, card #33330, row 109 of the #32908 close-out ledger; QA run #33048 comment 6846028996 on #32908). requires[1] names the view the build registers, qa_up_ticket.default: a container's list key expands to '<object>.default' (packages/spec/src/ui/view.zod.ts, the default list's implicit claim). requires[2] admits RUNNER.md's ensure-customization plus PUT ?package=PAIR recipe beside the Studio route, since #33048 drove it and read the same hidesChange advice. No clause changed. Read from source at base 87330e89, not driven live",
           "ref": "#33330"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[4].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     }

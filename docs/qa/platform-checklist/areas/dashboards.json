@@ -1285,7 +1285,7 @@
       "title": "Analytics on v18 asks each object's `enable` block and internal flags: a cube or dataset over an apiEnabled:false object is 404, an internal field as dimension / measure / filter is 400 even for admin, an unexposed configured cube is warned at boot and absent from /analytics/meta, and a dataset answer's measure column states its aggregate",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1309,7 +1309,7 @@
         {
           "clause": "the analytics exposure door, registration refusal, label withholding and measure aggregate — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -1370,6 +1370,12 @@
           "date": "2026-11-15",
           "change": "steps[1] names the filter key, `where` (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 29). No clause changed. Read at base bc6b7ffd",
           "ref": "#34016"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },

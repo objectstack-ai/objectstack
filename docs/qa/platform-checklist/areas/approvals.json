@@ -1413,7 +1413,7 @@
       "title": "The anonymous /approvals/act door: a minted one-tap token renders a confirm page and one POST decides as exactly the bound approver — every dead-token shape is a designed refusal page with no state change",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (submitter of the seeded invoice request — remind is submitter-only). Since PR #24620 the remind fan-out mints no token, so the admin drives only the live legs: the reminder at-rest read and the server reads beside the anonymous probes", "the ANONYMOUS bearer of an action link: a clean HTTP client holding NO session cookie and NO bearer token"],
@@ -1432,7 +1432,7 @@
       "steps": [
         "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "at-rest leg: POST /api/v1/approvals/requests/:id/remind on the admin-submitted invoice request — the answer's notified is positive and GET /:id/actions gains one remind row (notified counts the reminders handed over, ONE per distinct concrete address on pending_approvers: an approver the slate lists twice — a per_group slate keeps one slot per group they resolved into — is reminded once and counted once, a position:* literal adds nothing, and a user id and the same account's email are two addresses, counted twice exactly as at the opening. approval-service.ts remind; pinned by remind-notified-per-person.integration.test.ts. So expect notified to equal the number of distinct concrete addresses, never the slot count: QA run #27409 read notified:1 for the admin listed twice); then GET /api/v1/data/sys_notification (topic approval.reminder, source_id = the request id) as the admin and confirm each reminder payload carries NO actions list and no /api/v1/approvals/act URL — only its title, its body and the /system/approvals deep link. ⛔ Do NOT read sys_approval_token through the data API: since PR #22633 the object is apiEnabled: false with apiMethods: [], so GET /api/v1/data/sys_approval_token answers 404 OBJECT_API_DISABLED for every caller (the administrator included) — that 404 is the designed answer, not a finding",
-        "the live-token legs — the per-approver mint (one approve + one reject row per concrete pending approver, SHA-256 at rest, FORBIDDEN for a non-pending approver), the confirm page that never mutates, the redemption as the bound approver (comment 'Via action link'), the replay, the dead-slot and expired shapes and the bearer probe — need a raw token no stock door mints (knownGaps[0]): run the pins in automated.ref and cite each file's summary line, per clause as each verify names them",
+        "the live-token legs — the per-approver mint (one approve + one reject row per concrete pending approver, SHA-256 at rest, FORBIDDEN for a non-pending approver), the confirm page that never mutates, the redemption as the bound approver (comment 'Via action link'), the replay, the dead-slot and expired shapes and the bearer probe — need a raw token no stock door mints (knownGaps[0]): run the pins in automated.ref with `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts), and cite each file's summary line, per clause as each verify names them",
         "switch to a CLEAN anonymous client (no cookies, no Authorization header — prove it: GET /api/v1/approvals/requests from the same client answers 401); GET and then POST (form body token=garbage) /api/v1/approvals/act?token=garbage — both answer the 'Invalid link · 链接无效' page, 200 text/html, with no request summary rows, and the admin's before/after reads of the invoice request show no change. It is the one dead-token shape a live boot can still produce without a minted token",
         "expiry: no live door on this build (see knownGaps) — cite the pinned unit test's 'expired' reason and the RESULT_COPY.expired page copy ('Link expired · 链接已过期'), and record the leg as blocked(fixture)"
       ],
@@ -1507,7 +1507,8 @@
         { "revision": 7, "date": "2026-10-20", "change": "fixtures.knownGaps[0] and knownGaps[2] score each live-token leg at its own clause's layer. PR #24891's carried finding (round 15's acceptance notes: legs scored from pins, mixed clause oracles), read under RUNNER rule 6. Read at base feb09db14a: acceptance[0]–[3] are test-oracle clauses and their pins are their oracle; acceptance[4] is a network clause, and action-page-member.integration.test.ts renders its invalid, expired and consumed pages through the plugin's page member and mount on a started kernel (driver-sql over in-memory SQLite, a real Hono app), while its not_pending / not_approver pages and acceptance[5]'s bearer probe have no pin at their door. knownGaps[0] said every such leg is scored from the pins, and knownGaps[2] scored the expired shape from the service test; both now say this, as acceptance[4].verify already did. No clause changed", "ref": "#24963" },
         { "revision": 8, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" },
         { "revision": 9, "date": "2026-10-26", "change": "three checklist-accuracy findings of the 18.2.0 sweep's QA run #25815, Tier 1 set, at framework 6679644a (findings card #25838, wave anchor #25807): acceptance[0]'s FORBIDDEN arm is pinned with 'stranger', no approver at all, not a non-pending approver, and its live at-rest sys_notification read stays a run leg; acceptance[1]'s pins read status pending and no decisions, not the byte-identity of the actions timeline or the token's consumed_at; acceptance[3]'s 'a decide that fails still burns it' has no named pin. Each verify now names its unpinned half, and automated.ref and knownGaps[0] no longer call acceptance[0], [1] and [3] fully pinned. Pins re-read at base 9753d163. No clause changed", "ref": "#26116" },
-        { "revision": 10, "date": "2026-10-31", "change": "steps[1] said notified counts pending SLOTS, a slot listed twice counting twice. QA run #27409 read notified:1 with the admin listed twice in pending_approvers. remind() now counts one reminder per distinct concrete address (approval-service.ts remind: a Set over pending_approvers, position:* literals not counted), pinned by remind-notified-per-person.integration.test.ts. The step now states that count, which is more precise than 'a positive count'. No clause changed: no clause asserts notified. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6488948228", "ref": "#27409" }
+        { "revision": 10, "date": "2026-10-31", "change": "steps[1] said notified counts pending SLOTS, a slot listed twice counting twice. QA run #27409 read notified:1 with the admin listed twice in pending_approvers. remind() now counts one reminder per distinct concrete address (approval-service.ts remind: a Set over pending_approvers, position:* literals not counted), pinned by remind-notified-per-person.integration.test.ts. The step now states that count, which is more precise than 'a positive count'. No clause changed: no clause asserts notified. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6488948228", "ref": "#27409" },
+        { "revision": 11, "date": "2026-11-15", "change": "steps[2] names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969", "ref": "#PENDING-33969" }
       ]
     },
     {
@@ -1826,7 +1827,7 @@
       "title": "Approval requests on v18: the request record page serves record:approval_decision and a Reply action that lands in its timeline, `enable.approvalsVisibleToReaders` lets a plain record reader see the record's requests read-only (and only then), the generic /data door serves request rows by approvals visibility, and titles shown to a reader use only what that reader may read",
       "since": "v18",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1854,7 +1855,7 @@
         {
           "clause": "request page, reply, reader opt-in, generic-door read gate and reader-scoped titles — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -1944,6 +1945,12 @@
           "date": "2026-11-15",
           "change": "acceptance[2].verify names the stock recipe for the 403 leg's external member (invite-member with role external, sign-up with invitationId, accept-invitation) where it said to record the leg not exercised (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 69). The clause is unchanged. Read at base bc6b7ffd",
           "ref": "#34016"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -1952,7 +1959,7 @@
       "title": "Approvals on v18: the email action door /approvals/act works through the dispatcher exactly as the self-hosted mount (GET renders, POST redeems, a PUT neither door claims an ordinary 404 miss with no Allow header, a dead link a 200 page, a policy-held session not 403'd before the token), and an approval over an unstaffed position opens on the org administrators as ordinary approvers",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1975,7 +1982,7 @@
         {
           "clause": "the dispatcher act door and the admin_rescue slate — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2031,6 +2038,12 @@
           "date": "2026-10-28",
           "change": "automated.ref says which 404 arm is pinned. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): the ref is accurate, and the run noted that approvals-act.test.ts asserts PUT → 404 ROUTE_NOT_FOUND through the real dispatcher while the self-hosted ENDPOINT_NOT_FOUND arm has no pin. Re-read at base fd246c22: grep ENDPOINT_NOT_FOUND over the ref's five files, no hit. No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     }

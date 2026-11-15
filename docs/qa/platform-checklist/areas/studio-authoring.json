@@ -1939,7 +1939,7 @@
       "title": "Metadata save preconditions on v18: the item read serves its `version` and sending it back as If-Match saves, `If-None-Match: *` refuses an existing item 409 METADATA_CONFLICT with currentVersion, any other If-None-Match is 400, pending-draft rows carry the draft's label, and every stored row records its acting user",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1964,7 +1964,7 @@
         {
           "clause": "version-token OCC, create-only precondition, draft rows and row actor — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2017,6 +2017,12 @@
           "date": "2026-11-08",
           "change": "steps[1] says the create-only precondition needs the ACTIVE row: it is judged per lifecycle, so an active save where only the draft row exists answers 200. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
           "ref": "#31499"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2025,7 +2031,7 @@
       "title": "One item name, one stored row PER PACKAGE (ADR-0048) on v18: a package-less save resolves its owning package and an ambiguous one is 409, a dropStorage delete while another package's row remains is 409 and keeps the table, a save into the wrong package is 422 OBJECT_OVERLAY_PACKAGE_MISMATCH, a sealed packaged name answers one ruled 403 NOT_OVERRIDABLE text, and revert discards a Studio package's drafts",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2049,7 +2055,7 @@
         {
           "clause": "multi-package row addressing, drop-storage and owner-mismatch refusals, the sealed sentence and stored-package revert — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2126,6 +2132,12 @@
           "date": "2026-11-14",
           "change": "steps[4]'s ⛔ note and acceptance[1].verify re-pointed (QA run #33088's A-FIX notes, comment 6850413952): /publish's quoted 'No metadata items found' answer is stale since collectPackageMembers reads the _packageId stamp (packages/metadata/src/metadata-manager.ts), though publish-drafts stays the door for drafts; and the package-less layered read is itself refused 409 while two packages hold the name (packages/metadata-protocol/src/protocol-meta-layered-reads.ts), so the before/after evidence reads ?package=A and ?package=B. No clause changed. Read at base 87330e89",
           "ref": "#33329"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2134,7 +2146,7 @@
       "title": "The metadata save door runs the build's authoring rules on v18 — a page with an unknown component prop, a page with the retired slots.tabs, a second default record page, a chart list view with no dataset, an object predicate that does not compile, a `protection` block or a lock change, and a non-http(s) URL target are each refused 4xx at PUT (drafts still admitted where the rule says so)",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2160,7 +2172,7 @@
         {
           "clause": "the runtime authoring gate on the page, view, object and action save doors — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2227,6 +2239,12 @@
           "date": "2026-11-14",
           "change": "title re-pointed (QA run #33025's note, comment 6844741021): page.slots.tabs has been retired whole since 18.3.0 (packages/spec/src/ui/page.zod.ts, the PAGE_SLOTS_TABS_RETIRED tombstone), so the case the title names is the retired slot's refusal, as steps[1] already drives it since revision 4; the details-beside-tabs pair check left with the slot. No clause changed. Read at base 87330e89",
           "ref": "#33329"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -5440,7 +5458,7 @@
       "title": "A page's `api`-bound elements read again after the page's own successful action: one more GET, the old rows kept while it is in flight, the new answer drawn in place; a failed action reads nothing",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -5484,7 +5502,7 @@
         {
           "clause": "the pins pass at the run subject sha: a cancelled confirmation reads nothing, a bus change alone reads nothing, a failed re-read draws the error face, and a request in flight is not joined",
           "oracle": "test",
-          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "verify": "run each file in automated.ref with its package's vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); each reports ≥1 test and 0 failed",
           "evidence": "the vitest summary line per file, with the subject sha"
         }
       ],
@@ -5513,6 +5531,12 @@
           "date": "2026-11-10",
           "change": "initial — the page `api` binding re-read after the page's own action (#31891). Scoped sweep #32269 (epic #32022 M3, theme 6: action preflight and page bindings), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-15",
+          "change": "acceptance[3].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },

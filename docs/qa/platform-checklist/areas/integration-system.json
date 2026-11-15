@@ -2470,7 +2470,7 @@
       "title": "Inbound mail (new on v18): with requires:[\"mailbox\"] and an IMAP mailbox, a synced message is stored as sys_mail_message and associated with the record whose mailAssociation email field matches (inline forwards by an org member match on the original participants), attachments land as sys_file + sys_attachment, and an unmatched message is visible only to manage_mailboxes holders",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2496,7 +2496,7 @@
         {
           "clause": "mailbox ingest, association, inline-forward matching and attachments — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2546,6 +2546,12 @@
           "date": "2026-10-26",
           "change": "acceptance[1].verify and acceptance[2].verify name the HTTP read their api oracle needs, and automated.ref adds the engine-layer association pin — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a2: the run scored the attachment clause at in-process — the pin reads the stored rows through the real engine after a real ingest, and no HTTP read was made. a1: inline-forward.test.ts pins the parser's participant extraction, not the association; mail-ingest-service.test.ts pins the association on a real engine for all three client formats and was not in the ref. Read on main 9753d163. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2554,7 +2560,7 @@
       "title": "Messaging and integration answers on v18: a notify from a system-context run stores the organization of the record it is about (never NULL), mark-read writes a receipt only for notifications delivered to the caller, redelivering for an inactive or deleted webhook subscription is 409 DELIVERY_NOT_ELIGIBLE, and a declarative MCP stdio connector with a relative command boots healthy from another directory",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2579,7 +2585,7 @@
         {
           "clause": "notification org stamping, recipient-only receipts, redeliver eligibility and MCP stdio cwd — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2641,6 +2647,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[2]'s recipe said to create an ACTIVE webhook with POST /api/v1/data/sys_webhook and gave no body. QA run #27438 found the create needs method in lower case ('post') and definition_json, or it answers 400 VALIDATION_FAILED. sys-webhook.object.ts declares method a select with lower-case option values and definition_json a required textarea. The recipe now names both. No clause changed. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
           "ref": "#27438"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -2860,7 +2872,7 @@
       "title": "An Oracle datasource reads its tables as objects, refuses an empty-string comparand (Oracle stores '' as NULL), writes only under the double opt-in, and refuses upsert as a capability gap",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2903,7 +2915,7 @@
         {
           "clause": "the pins pass at the run subject sha: upsert is refused NOT_IMPLEMENTED 501 before any statement, DDL is refused as federation-only, and the dialect binds dates and day values as it declares",
           "oracle": "test",
-          "verify": "run each file in automated.ref with the driver-sql vitest; the dialect file reports ≥1 test and 0 failed, and the conformance file runs (not skipped) only with OS_TEST_ORACLE_URL set",
+          "verify": "run each file in automated.ref with the driver-sql vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); the dialect file reports ≥1 test and 0 failed, and the conformance file runs (not skipped) only with OS_TEST_ORACLE_URL set",
           "evidence": "the vitest summary lines, with the subject sha and whether OS_TEST_ORACLE_URL was set"
         }
       ],
@@ -2932,6 +2944,12 @@
           "date": "2026-11-10",
           "change": "initial — the Oracle federation dialect: reads, the empty-string refusal, gated writes and the upsert gap. Blocked(fixture): no credentialed Oracle. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-15",
+          "change": "acceptance[3].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
@@ -3014,7 +3032,7 @@
       "title": "A SQL Server datasource reads its tables as objects, matches a uniqueidentifier column in text operators by the lower-case text every read answers, keeps case-exact matching exact, and writes only under the double opt-in",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3057,7 +3075,7 @@
         {
           "clause": "the pins pass at the run subject sha: the mssql dialect, the analytics text-match parity on mssql and oracle, and the SQL Server row window",
           "oracle": "test",
-          "verify": "run each file in automated.ref with its package's vitest; each non-live file reports ≥1 test and 0 failed; the conformance file runs only with OS_TEST_MSSQL_URL set",
+          "verify": "run each file in automated.ref with its package's vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); each non-live file reports ≥1 test and 0 failed; the conformance file runs only with OS_TEST_MSSQL_URL set",
           "evidence": "the vitest summary lines, with the subject sha"
         }
       ],
@@ -3089,6 +3107,12 @@
           "date": "2026-11-10",
           "change": "initial — the SQL Server federation dialect: uniqueidentifier text matching, case-exact parity and gated writes. Blocked(fixture): no credentialed SQL Server. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-15",
+          "change": "acceptance[3].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
