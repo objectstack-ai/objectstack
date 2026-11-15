@@ -135,10 +135,12 @@
  * judges it once the catalog is complete. A hot upgrade over a version the
  * running kernel still serves is carried at once: the re-register withdraws
  * the position the new version no longer ships (#33050), so the old name is
- * no current position when the announcement is heard. A door that registers
- * positions without announcing `metadata:reloaded` (the runtime's package
- * install and enable routes), and a package the announcement does not name,
- * are carried at the next boot.
+ * no current position when the announcement is heard. The runtime's package
+ * install (`POST /packages`) and the enable of a disabled package
+ * (`PATCH /packages/:id/enable`) announce `app/ID` too, so they are carried
+ * at once; an install that leaves the package disabled is refused
+ * `claimant-disabled` until that enable announces it. A package the
+ * announcement does not name is carried at the next boot.
  *
  * ## Its one limit
  *
