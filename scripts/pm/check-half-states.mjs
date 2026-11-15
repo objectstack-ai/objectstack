@@ -12868,13 +12868,15 @@ export function contractReviewVerdictLines(body) {
  *
  *   verdicts      every explicit `VERDICT:` line's word, whole comment (N3);
  *   failSpellings the trimmed lines that read FAIL OUTSIDE the explicit form (N2),
- *                 in every verdict-bearing shape measured: any heading's own
- *                 tail (the patrol's inline dialect); a `verdict` key in any
- *                 case, under a heading mark, quote, list bullet or emphasis,
- *                 after up to two words (`Overall verdict:`), with `:`, a dash
- *                 or `=` (`Verdict — FAIL`); a table row with a verdict cell and
- *                 a FAIL cell; a line that opens with a bare `FAIL` and nothing
- *                 but a separator or a full stop after it. A record carrying one
+ *                 in every verdict-bearing shape measured: a caps FAIL anywhere
+ *                 in any heading's own tail (the patrol's inline dialect); a
+ *                 `verdict` key in any case, under a heading mark, quote, list
+ *                 bullet or emphasis, after up to two words (`Overall verdict:`),
+ *                 with a parenthetical (`Verdict (delta):`), with `:`, a dash,
+ *                 `=` or `is`, reading FAIL, FAILED or FAILS; a table row with a
+ *                 verdict cell and a FAIL cell in either order; a line that opens
+ *                 with a bare `FAIL` and nothing but a separator, a full stop or
+ *                 `!` after it. A record carrying one
  *                 never clears beside its one PASS line: it contradicts itself;
  *   findings      the must-fix and should-fix grades (`contract-review.md`: a
  *                 must-fix is a FAIL, a should-fix earns a delta review of its
@@ -12885,10 +12887,15 @@ export function contractReviewVerdictLines(body) {
  *                               `S1 (should-fix) —`, `**M2 (must-fix, rules face)**`,
  *                               `- should-fix: …`;
  *                   closed      a named finding whose line goes on to say
- *                               `closed` and nothing before it but punctuation:
+ *                               `closed` and nothing before it but punctuation, and
+ *                               nothing after it but closing emphasis, `.`, `;` or
+ *                               `on this head` / `at this head` / `here` (a full stop
+ *                               ending the bold title may lead a new sentence):
  *                               `- **S1 (should-fix): closed.**` — a delta record
- *                               closing what an earlier one raised;
- *                   none        a named grade whose value is `none` (`must-fix: none`);
+ *                               closing what an earlier one raised. `closed in part`,
+ *                               a title opening `Closed …` stay OPEN;
+ *                   none        a named grade whose value is `none`, on the same
+ *                               terms (`must-fix: none`; `none of …` stays OPEN);
  *                   cited       a mention inside the citation of an earlier
  *                               record, `(record 6891274033: PASS, should-fix S3, …)`,
  *                               the preamble a delta record opens with;
@@ -12909,12 +12916,17 @@ export function contractReviewVerdictLines(body) {
  * never read. Pure.
  */
 const CONTRACT_REVIEW_LINE_LEAD = String.raw`^[ \t]*(?:#{1,6}[ \t]+)?(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?[*_]{0,3}[ \t]*`;
-const CONTRACT_REVIEW_FAIL_KEYED = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`(?:[A-Za-z-]+[ \t]+){0,2}verdict[ \t]*[*_]{0,3}[ \t]*(?:[:：=]|[—–]|-(?=[ \t]))[ \t]*[*_` + '`' + String.raw`]{0,3}[ \t]*fail\b`, 'i');
-const CONTRACT_REVIEW_FAIL_CELL = /^[ \t]*\|.*\bverdict\b[^|]*\|[ \t]*[*_`]{0,3}[ \t]*fail\b/i;
-const CONTRACT_REVIEW_FAIL_BARE = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`FAIL[*_]{0,3}[ \t]*(?:$|[—–·:：|.。]|-[ \t])`);
+const CONTRACT_REVIEW_FAIL_KEYED = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`(?:[A-Za-z-]+[ \t]+){0,2}verdict(?:[ \t]*\([^)]*\))?[ \t]*[*_]{0,3}[ \t]*(?:[:：=]|[—–]|-(?=[ \t])|is(?=[ \t]))[ \t]*[*_` + '`' + String.raw`]{0,3}[ \t]*fail(?:ed|s)?\b`, 'i');
+// A table row with a verdict cell and a FAIL cell, in either order (the word may carry emphasis or a code mark).
+const CONTRACT_REVIEW_FAIL_CELL = { test: (line) => /^[ \t]*\|/.test(line) && line.split('|').some((cell) => /\bverdict\b/i.test(cell)) && line.split('|').some((cell) => /^[ \t]*[*_`]{0,3}[ \t]*fail(?:ed|s)?\b/i.test(cell)) };
+const CONTRACT_REVIEW_FAIL_BARE = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`FAIL(?:ED)?[*_]{0,3}[ \t]*(?:$|[—–·:：|.。!！]|-[ \t])`);
 const CONTRACT_REVIEW_GRADE = /\b(must|should)-fix(?:es)?\b/gi;
 const CONTRACT_REVIEW_GRADE_NAMED = new RegExp(CONTRACT_REVIEW_LINE_LEAD + String.raw`(?:([A-Z]{1,3}\d+)[*_]{0,3}[ \t]*([(\[][ \t]*|[—–:][ \t]*)?)?[*_]{0,3}(must|should)-fix\b`, 'i');
-const CONTRACT_REVIEW_GRADE_NAMED_STATE = /^[^\S\n]*[*_:：—–.,-]*[ \t]*[*_]{0,3}(closed|none)\b/i;
+// ⛔ The state word must END the finding (review 6892305129): nothing but closing emphasis, a full stop or a
+// semicolon may follow it, or the measured tails `on this head` / `at this head` / `here`; a full stop that
+// closes the bold title may then be followed by a new sentence. `closed in part`, `Closed PRs are …` and
+// `none of the three ablations ran` are titles, and the finding they name stays OPEN.
+const CONTRACT_REVIEW_GRADE_NAMED_STATE = /^[^\S\n]*[*_:：—–.,-]*[ \t]*[*_]{0,3}(closed|none)(?:[ \t]+(?:(?:on|at)[ \t]+this[ \t]+head|here))?(?:[*_]{0,3}[.;。]?[*_]{0,3}[ \t]*$|[.。](?:\*\*|__)[ \t]+\S)/i;
 const CONTRACT_REVIEW_GRADE_NEGATED = /\b(?:no|nor|neither|zero|0)[ \t]+(?:(?:new|open|further|remaining|other|outstanding)[ \t]+)?(?:(?:must|should)-fix(?:es)?[ \t]*(?:(?:or|nor|\/)[ \t]*|(?:,|and)[ \t]*(?:no|nor)[ \t]+(?:(?:new|open|further|remaining|other|outstanding)[ \t]+)?))?$/i;
 const CONTRACT_REVIEW_RECORD_CITATION = /\(record[ \t]+\d{6,}\b[^()]*\)/gi;
 export function contractReviewRecordReading(body) {
@@ -12928,7 +12940,8 @@ export function contractReviewRecordReading(body) {
   for (const line of text.split(/\r?\n/)) {
     // Every heading's own tail is read for an inline FAIL, not only the first one's (nit N3, review 6891926185).
     const heading = headingLine.exec(line);
-    if (heading && CONTRACT_REVIEW_VERDICT_INLINE.exec(line.slice(heading.index + heading[0].length))?.[1] === 'FAIL') failSpellings.push(line.trim());
+    // …and a caps FAIL anywhere in that tail, not only the first verdict word (`— PASS withdrawn, FAIL`, nit N2 of review 6892305129).
+    if (heading && (CONTRACT_REVIEW_VERDICT_INLINE.exec(line.slice(heading.index + heading[0].length))?.[1] === 'FAIL' || /\bFAIL(?:ED)?\b/.test(line.slice(heading.index + heading[0].length)))) failSpellings.push(line.trim());
     const explicit = CONTRACT_REVIEW_VERDICT_EXPLICIT.exec(line);
     if (explicit) verdicts.push(explicit[1]);
     else if (!heading && (CONTRACT_REVIEW_FAIL_KEYED.test(line) || CONTRACT_REVIEW_FAIL_CELL.test(line) || CONTRACT_REVIEW_FAIL_BARE.test(line))) failSpellings.push(line.trim());
@@ -32951,6 +32964,8 @@ async function selfTest() {
   t43('#33604 S1 (review 6891926185): the measured delta preamble cites, a named finding whose line says closed is closed, `No new should-fix` denies', ['DELTA review from `42323f34` (record 6891274033: PASS, should-fix S3, nits N7 and N8) to this head.', '- **S1 (should-fix): closed.**', 'S1 (should-fix) — closed on this head', 'No new should-fix.', 'must-fix: none'].map(grades43).join(), '|0,|0,|0,|0,|0');
   t43('#33604 S2 (review 6891926185): `No must-fix, should-fix S1 and S2 below.` is unreadable (a comma carries no denial); its own `no` after `and` does', [grades43('No must-fix, should-fix S1 and S2 below.'), grades43('No must-fix and no should-fix.')].join(), '|1,|0');
   t43('#33604 S2 (review 6891926185): heading-led key, table cell, words before the key, a dash, a bare `FAIL.` and a second heading read FAIL', ['### VERDICT: FAIL', '## Verdict: FAIL', '| Verdict | FAIL |', 'Overall verdict: FAIL', 'Verdict — FAIL', 'FAIL.', '**FAIL.**', '## Contract review — FAIL', '| Verdict | PASS |'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,1,1,1,1,1,0');
+  t43('#33604 r3 (review 6892305129): the state word must end the finding — `closed in part`, `Closed PRs …`, `none of …` stay open; `closed here.`, a closed bold title then a sentence, `closed;` close', ['S1 (should-fix): closed in part, still open for X', '**S2 (should-fix) — Closed PRs are still read as merged.**', '- should-fix: none of S1, S2 is fixed', 'S1 (should-fix): closed here.', '- **S1 (should-fix): closed.** Every knock names a key.', 'S1 (should-fix): closed;'].map(grades43).join(), 'S1:should-fix|0,S2:should-fix|0,-:should-fix|0,|0,|0,|0');
+  t43('#33604 r3 N2: `Verdict: FAILED`, `Verdict is FAIL`, `Verdict (delta): FAIL`, `| FAIL | Verdict |`, `FAIL!` and a late FAIL in a heading tail read FAIL', ['Verdict: FAILED', 'Verdict is FAIL', 'Verdict (delta): FAIL', '| FAIL | Verdict |', 'FAIL!', '## Contract review — PASS withdrawn, FAIL', 'The verdict is PASS.'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,1,1,1,0');
   t43('#33604 reading: no heading is no record (null); the template record reads one PASS, no FAIL, no grade', [contractReviewRecordReading('**VERDICT: PASS**'), JSON.stringify(contractReviewRecordReading(PASS43))].join(), ',{"verdicts":["PASS"],"failSpellings":[],"findings":{"open":[],"unreadable":[]}}');
   t43('H43 verdict: latestContractReviewOnHead now carries the verdict beside id and sha', [latestContractReviewOnHead(rows43(ACCEPT43, PASS43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(FAIL43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(PASS43), '0123456789abcdef')].join(), 'PASS,FAIL,');
   // The row and the probe, gated on the reading.
