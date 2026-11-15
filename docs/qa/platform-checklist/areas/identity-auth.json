@@ -9,7 +9,7 @@
       "title": "ssoEnforced login honors SSO on first paint — no password-wall flash",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": ["anonymous visitor at the login page", "env owner (break-glass password holder)"],
@@ -17,7 +17,7 @@
         "app": "any",
         "requires": [
           "an env with ssoEnforced configured, cold-started",
-          "ssoEnforced needs an IdP behind it: set auth.ssoOnlyMode: true (or OS_AUTH_SSO_ONLY=true) plus at least one configured oidcProviders[] entry — stock showcase ships neither, so this is a bespoke-env item"
+          "ssoEnforced needs an IdP behind it: set auth.ssoOnlyMode: true (or OS_AUTH_SSO_ONLY=true) plus at least one configured oidcProviders[] entry — stock showcase ships neither, but a stock showcase boot satisfies it without a bespoke app: OS_SSO_ENABLED=true and OS_AUTH_SSO_ONLY=true, with one provider registered at runtime (POST /api/v1/auth/admin/sso/register against a local discovery stub on a trusted origin, as identity-auth.sso-provider-groups-claim fixtures.requires[0] says). GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET placeholders give the login page a social button for steps[4]'s watchdog leg (QA run #33853)"
         ]
       },
       "steps": [
@@ -73,7 +73,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-10-17", "change": "steps[4] and acceptance[2].verify and [3].verify corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The step's 'IdP that never redirects back' is outside the console's watchdog, which covers only the hung sign-in request (20 s) — the console is not on the page while the browser sits at the IdP — so the step now hangs the request itself. And the sign-up half of clause 2 cannot discriminate on the invite_only showcase, where the register link is withheld regardless of enforcement. Not loosened: the break-glass link and the retry path are still required", "ref": "#24036" }
+        { "revision": 3, "date": "2026-10-17", "change": "steps[4] and acceptance[2].verify and [3].verify corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The step's 'IdP that never redirects back' is outside the console's watchdog, which covers only the hung sign-in request (20 s) — the console is not on the page while the browser sits at the IdP — so the step now hangs the request itself. And the sign-up half of clause 2 cannot discriminate on the invite_only showcase, where the register link is withheld regardless of enforcement. Not loosened: the break-glass link and the retry path are still required", "ref": "#24036" },
+        { "revision": 4, "date": "2026-11-15", "change": "fixtures.requires[1] no longer calls this a bespoke-env item: a stock showcase boot with OS_SSO_ENABLED, OS_AUTH_SSO_ONLY and a runtime-registered provider satisfies it (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 104). No clause changed. Read at base bc6b7ffd", "ref": "#PENDING-33967" }
       ]
     },
     {
@@ -156,16 +157,16 @@
       "title": "Every auth method a stock boot can switch on signs in when enabled, is absent when disabled, and is advertised exactly as configured (device authorization, which no stock boot can switch on, is identity-auth.device-authorization-grant)",
       "since": "v16",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "per-variant env boots: the matrix flips AuthPluginConfigSchema flags (phoneNumber, twoFactor, oidcProvider; deviceAuthorization belongs to identity-auth.device-authorization-grant) and the socialProviders/oidcProviders maps — each variant names which boot it needs",
+          "per-variant env boots: the matrix flips AuthPluginConfigSchema flags (phoneNumber, twoFactor, oidcProvider; deviceAuthorization belongs to identity-auth.device-authorization-grant) and the socialProviders/oidcProviders maps — each variant names which boot it needs. The generic OIDC variant (oidcProviders[], advertised as socialProviders[] of type 'oidc') has no env switch: read its advertisement and login button on identity-auth.linked-accounts-social's scratch-copy OIDC boot (fixtures.requires[1] there), against a stock boot for the off side (QA run #33853: /auth/config listed one socialProviders entry of type oidc with features.sso false, and the login page drew its button; the stock boot carried neither)",
           "an SMS service (@objectstack/service-sms) is required ONLY to make phone-OTP pass; its ABSENCE is itself a tested state (loud 400 SMS_SERVICE_REQUIRED)",
-          "for the enterprise SSO half (features.sso): a boot with OS_SSO_ENABLED=true (packages/plugins/plugin-auth/src/auth-manager-plugin-list.ts) and a run-local mock OIDC IdP whose origin is listed in OS_TRUSTED_ORIGINS (read in packages/cli/src/commands/serve.ts): the register door POST /api/v1/auth/admin/sso/register re-dispatches into @better-auth/sso, whose validateOIDCEndpointUrl refuses a loopback or private discovery URL 400 discovery_private_host unless its origin is trusted. features.sso reads true only once a provider is registered (isSsoUsable). Under the stock invite_only posture the SSO user must hold a pending invitation unless the provider's allowJit is on (packages/plugins/plugin-auth/src/audience-posture.ts). The same recipe drove identity-auth.idp-group-permission-set-mapping's SSO leg in QA run #33092"
+          "for the enterprise SSO half (features.sso): a boot with OS_SSO_ENABLED=true (packages/plugins/plugin-auth/src/auth-manager-plugin-list.ts) and a run-local mock OIDC IdP whose origin is trusted: the register door POST /api/v1/auth/admin/sso/register re-dispatches into @better-auth/sso, whose validateOIDCEndpointUrl refuses a loopback or private discovery URL 400 discovery_private_host unless its origin is trusted. A development boot (`os dev`) already trusts http://localhost:* (packages/cli/src/commands/serve.ts), so a stub on an http://localhost:PORT origin needs no setting; a production boot (`os serve` or `os start` without --dev), or another loopback or private origin, lists the origin in OS_TRUSTED_ORIGINS. features.sso reads true only once a provider is registered (isSsoUsable). Under the stock invite_only posture the SSO user must hold a pending invitation unless the provider's allowJit is on (packages/plugins/plugin-auth/src/audience-posture.ts). The same recipe drove identity-auth.idp-group-permission-set-mapping's SSO leg in QA run #33092"
         ],
         "knownGaps": [
           "magic-link and passkeys: the AuthPluginConfigSchema flags still exist, but objectui ships NO login UI for either, so #7481 withdrew both from the /api/v1/auth/config payload (protocol 17) — features.magicLink / features.passkeys are now ABSENT by design, not false. objectui#4179 (the login-UI card) was CLOSED not_planned on 2026-09-24: the maintainer's 'no UI for now' stands until the login UI is scheduled. So the browser-lane variants have no environment to run in; record them blocked(dependency, objectui#4179 closed not_planned), never pass (QA run #21784 N3, parked on #22017 row 20). The flag-advertisement clause inverts here: seeing either key in the payload is itself a FAIL now, and magic-link's endpoints (/magic-link/send, /magic-link/verify) stay live and drivable without a UI",
@@ -177,7 +178,7 @@
         "for each variant: boot with the method configured ON, GET /api/v1/auth/config, and record the advertisement (data.features.* flag, data.emailPassword block, data.socialProviders list: the route answers { success: true, data: config }, packages/plugins/plugin-auth/src/auth-plugin.ts)",
         "email+password: POST /api/v1/auth/sign-up/email (when sign-up enabled), POST /api/v1/auth/sign-in/email, GET /api/v1/auth/get-session, POST /api/v1/auth/sign-out — capture each response and the session cookie lifecycle",
         "phone+password: create a phone-carrying user with a known password, POST the phone sign-in (better-auth /sign-in/phone-number surface — 'always works' when the plugin is on per the spec), verify get-session identifies the user",
-        "phone OTP with NO SMS service configured, on a boot with NODE_ENV=production: request /phone-number/send-otp and capture the loud 400 SMS_SERVICE_REQUIRED rejection (never a silent 200, never a hang, never a bare 500). On a development boot the SMS service falls back to its log transport, which delivers in dev (LogSmsTransport prints the body — packages/services/service-sms/src/sms-service.ts), so send-otp succeeds there and the no-SMS state never occurs",
+        "phone OTP with NO SMS service configured, on a boot with NODE_ENV=production: `objectstack serve` (not `os dev`, which forces NODE_ENV=development) with OS_DATABASE_URL, OS_AUTH_SECRET and OS_SECRET_KEY set, a fresh file DB serving (QA run #33853): request /phone-number/send-otp and capture the loud 400 SMS_SERVICE_REQUIRED rejection (never a silent 200, never a hang, never a bare 500). On a development boot the SMS service falls back to its log transport, which delivers in dev (LogSmsTransport prints the body — packages/services/service-sms/src/sms-service.ts), so send-otp succeeds there and the no-SMS state never occurs",
         "SSO/OIDC: the two halves surface differently. A generic oidcProviders[] entry is advertised as a socialProviders[] entry of type 'oidc' in /api/v1/auth/config (getPublicConfig, auth-manager.ts) — the list the login page's provider buttons read; features.sso tracks ONLY the @better-auth/sso plugin (isSsoWired), so a generic OIDC provider never sets it. Drive the generic-OIDC authorization-code round trip against a localhost IdP, or cite the pinned OIDC dogfood test per rule 6. The enterprise half, on the fixtures.requires[2] boot: as admin register the mock IdP (POST /api/v1/auth/admin/sso/register), read data.features.sso true, and sign the invited user in through it; on a boot without OS_SSO_ENABLED, features.sso is false or absent and the register door is refused",
         "2FA: with twoFactor on, enable it for a user (sys_user enable_two_factor action, gated on features.twoFactor), sign in, and verify the server-driven challenge (ADR-0069) interrupts before a session is granted",
         "discovery documents: GET /.well-known/openid-configuration and GET /.well-known/oauth-authorization-server (both mounted at the APP ROOT, not under /api/v1/auth — RFC 8414 / OIDC require it, auth-plugin.ts) and record the issuer + advertised endpoints. The same documents also answer 200 under /api/v1/auth/.well-known/ (QA run #33093); that is not a defect, the app-root mounts are what this step reads",
@@ -286,7 +287,8 @@
         { "revision": 9, "date": "2026-10-26", "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.auth-method-matrix a3, a6, a9 and ref; wave anchor #25807; card #25843). acceptance[3], [6] and [9] each named a pin that exists but was not in automated.ref (phone-otp-no-sms-service-refusal.test.ts, two-factor-lockout.dogfood.test.ts, change-email-delete-user-wiring.test.ts), and the ref held a single OIDC pin (acceptance[7]) under kind 'e2e', over-implying coverage of a 10-clause item. automated.ref now lists all four pins with the clause and layer each scores, and kind reads 'dogfood'; acceptance[3].verify and acceptance[9].verify say their pins drive AuthManager at unit layer, not the production boot's send-otp door or a booted server, so they score partial and the live calls are still driven. No clause's assertion changed", "ref": "#25843" },
         { "revision": 10, "date": "2026-10-31", "change": "knownGaps[3] said registering an enterprise SSO provider 'needs a reachable external IdP'. The precise rule, measured by QA run #27438: the register door re-dispatches into @better-auth/sso's /sso/register, whose validateOIDCEndpointUrl refuses a loopback or private discovery URL with 400 discovery_private_host unless its origin is in trustedOrigins. So the localhost IdP that unblocks generic OIDC does not unblock features.sso. The gap now says so, and names the two environments that would lift it. Verdicts are unchanged: device and features.sso stay blocked(environment). Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310", "ref": "#27438" },
         { "revision": 11, "date": "2026-11-14", "change": "steps[0], steps[7] and acceptance[9].verify re-pointed (stale spec, QA runs #32949 and #33093, comment 6850899929; ledger row 54 of #32908). /auth/config answers { success: true, data } (auth-plugin.ts), so the flags sit under data. The delete-user callback needs ?token= or its query schema answers 400 before the disabled branch (change-email-delete-user-wiring.test.ts sends ?token=whatever). The /api/v1/auth/.well-known/ copies answering 200 are recorded as not a defect. No clause changed. Read at base 82838e83", "ref": "#33328" },
-        { "revision": 12, "date": "2026-11-14", "change": "split (coverage, card #33353 row 8; ledger row 8 of #32908, QA runs #32949 and #33093, comment 6850899929). The SSO and device variants were recorded blocked(environment), which kept acceptance[0], [4] and [5] (per variant) from ever scoring whole. Re-measured on main: device authorization still has no stock switch (serve.ts injects only the env-mapped plugins; auth-manager-plugin-list.ts reads plugins.deviceAuthorization from config alone), so the variant, steps[5], knownGaps[1] (its spec-path divergence) and the device half of knownGaps[3] moved to a new item, identity-auth.device-authorization-grant, which keeps the blocked(environment) marker and the same three clauses for that variant. The enterprise SSO half stays here and is no longer recorded blocked: OS_SSO_ENABLED arms it and OS_TRUSTED_ORIGINS lifts the register door's loopback refusal (fixtures.requires[2], new; the road QA runs #33092 and #33093 used). The rule followed is the README's Lifecycle 'Append' and 'Change' (an item is never deleted; a semantic edit bumps revision and records history), with the new item's history naming this parent. No clause changed and none is narrowed: every clause still reads per variant, over the variants this item now lists. Read from source at base bd439f17", "ref": "#33353" }
+        { "revision": 12, "date": "2026-11-14", "change": "split (coverage, card #33353 row 8; ledger row 8 of #32908, QA runs #32949 and #33093, comment 6850899929). The SSO and device variants were recorded blocked(environment), which kept acceptance[0], [4] and [5] (per variant) from ever scoring whole. Re-measured on main: device authorization still has no stock switch (serve.ts injects only the env-mapped plugins; auth-manager-plugin-list.ts reads plugins.deviceAuthorization from config alone), so the variant, steps[5], knownGaps[1] (its spec-path divergence) and the device half of knownGaps[3] moved to a new item, identity-auth.device-authorization-grant, which keeps the blocked(environment) marker and the same three clauses for that variant. The enterprise SSO half stays here and is no longer recorded blocked: OS_SSO_ENABLED arms it and OS_TRUSTED_ORIGINS lifts the register door's loopback refusal (fixtures.requires[2], new; the road QA runs #33092 and #33093 used). The rule followed is the README's Lifecycle 'Append' and 'Change' (an item is never deleted; a semantic edit bumps revision and records history), with the new item's history naming this parent. No clause changed and none is narrowed: every clause still reads per variant, over the variants this item now lists. Read from source at base bd439f17", "ref": "#33353" },
+        { "revision": 13, "date": "2026-11-15", "change": "fixtures.requires[0] names the boot for the generic OIDC variant, which has no env switch: identity-auth.linked-accounts-social's scratch-copy OIDC boot (ledger 6896511848 of #33761 row 92). steps[3] names the production leg's boot, `objectstack serve` with OS_DATABASE_URL, OS_AUTH_SECRET and OS_SECRET_KEY (row 94) (QA run #33853, comment 6894307378). Found while doing #33967, from the #33968 report 6897030673: fixtures.requires[2] says a dev boot already trusts http://localhost:*, so OS_TRUSTED_ORIGINS is needed only on a production boot or another private origin. No clause changed. Read at base bc6b7ffd", "ref": "#PENDING-33967" }
       ]
     },
     {
@@ -1345,7 +1347,7 @@
       "title": "Linked accounts: link a social/OIDC identity through the redirect round-trip → a sys_account row appears in mine-view; unlink removes it; provider-less boot degrades honestly",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a signed-in user linking a second identity", "the same user after unlinking"],
@@ -1353,7 +1355,7 @@
         "app": "showcase",
         "requires": [
           "at least one social/OIDC provider configured (socialProviders or oidcProviders) so the link door has a provider to dance with — stock showcase ships none, so the runtime fixture below supplies one. A social provider has an env and settings door (google_enabled / google_client_id / google_client_secret, OS_AUTH_GOOGLE_ENABLED, GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, packages/plugins/plugin-auth/src/auth-plugin.ts) but needs real client credentials; oidcProviders has none",
-          "RUNTIME FIXTURE — a local OIDC provider (proved by run #21845; a test fixture in the run's scratch dir, ⛔ never committed and never a product change): a localhost authorization-code + PKCE OpenID provider serving discovery (/.well-known/openid-configuration), authorize, token, userinfo and jwks, registered with the auth service through its public config patch from a scratch app plugin — call the auth manager's applyConfigPatch({ oidcProviders: [ { the local provider's id, discovery URL, client id/secret } ] }). The 'auth:configure' hook is NOT usable for this: it fires before a scratch app plugin can contribute. The provider must be up, and the patch applied, before the first auth request (better-auth is built lazily on that request)",
+          "RUNTIME FIXTURE — a local OIDC provider (proved by run #21845; a test fixture in the run's scratch dir, ⛔ never committed and never a product change): a localhost authorization-code + PKCE OpenID provider serving discovery (/.well-known/openid-configuration), authorize, token, userinfo and jwks, registered with the auth service through its public config patch from a scratch app plugin — call the auth manager's applyConfigPatch({ oidcProviders: [ { the local provider's id, discovery URL, client id/secret } ] }). The 'auth:configure' hook is NOT usable for this: it fires before a scratch app plugin can contribute. The provider must be up, and the patch applied, before the first auth request (better-auth is built lazily on that request). Its test identity must carry the CALLER's email: the link door refuses a provider identity whose email differs from the signed-in user's (the callback ends in error=email_does_not_match)",
           "the Account app's 'Linked Accounts' surface (nav_account_linked → sys_account) reachable"
         ],
         "knownGaps": [
@@ -1367,7 +1369,7 @@
         "confirm a sys_account row now exists for that provider in the caller's mine-view (provider_id = the provider, user_id = the caller) — (provider_id, account_id) is the whole account identity; there is no issuer to check, sys_account.issuer retired with better-auth 1.7.3 (packages/spec/src/migrations/entries/semantic/18.sys-account-issuer-retired.ts)",
         "unlink it: the unlink_account row action, which the console posts to the action door POST /api/v1/actions/sys_account/unlink_account (ui/packages/app-shell/src/utils/apiActionDoor.ts) and the server forwards to POST /api/v1/auth/unlink-account; the direct auth door answers too. Either way accountId = the sys_account ROW id (better-auth 1.7 keys on the row id); confirm the row is gone from mine-view",
         "both-sides / degradation: on a boot with NO provider configured, confirm the Linked Accounts surface degrades honestly — any link affordance is absent or names the missing provider, rather than offering a link that dead-ends (open-edition honest-degradation posture)",
-        "confirm sys_account is read-only over the data API — a forged direct insert/delete is refused (apiMethods ['get','list'] — declared in sys-account.object.ts and served so by the meta read; the read-family aggregate and export routes pass that method gate and meet their own checks instead, a bare aggregate 400 VALIDATION_ERROR and export 403 EXPORT_NOT_PERMITTED, never 405; writes 405)"
+        "confirm sys_account is read-only over the data API — a forged direct insert/delete is refused (apiMethods ['get','list'] — declared in sys-account.object.ts and served so by the meta read; the read-family export route passes that method gate and meets its own check instead, export 403 EXPORT_NOT_PERMITTED, never 405; writes 405. There is no aggregate route on the data door at this base: GET /api/v1/data/sys_account/aggregate reads 'aggregate' as a record id (404 RECORD_NOT_FOUND) and POST …/aggregate answers 405 METHOD_NOT_ALLOWED, neither of them a write door)"
       ],
       "acceptance": [
         {
@@ -1423,7 +1425,8 @@
         { "revision": 4, "date": "2026-10-16", "change": "PROVENANCE, no clause change: #23803 removed Setup's nav_accounts ('Identity Links') entry, so the source anchor that cited it no longer resolved. Re-pointed it at SysUserDetailPage, whose Linked Accounts tab (a related list over sys_account keyed on user_id) is where an administrator reaches a user's identity links now. Steps, acceptance clauses, oracles and negatives are unchanged: they drive the user's Account-app surface, which did not move", "ref": "#23803" },
         { "revision": 5, "date": "2026-10-17", "change": "steps[1] and [5] and acceptance[3].verify and [4].verify corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The slice read sys_account's live methods as [get, list, aggregate, export]; the re-run on #24036 found the meta read still serving ['get','list'] while the aggregate and export routes pass the method gate (400 VALIDATION_ERROR / 403 EXPORT_NOT_PERMITTED, never 405), so the step now says both — reads only either way, and writes still 405; link_social is retired, so a provider-less boot's missing link action is the same absence every boot shows and clause 3 cannot discriminate on it; and the link callback lands on the 'All' tab. Not loosened: a forged write must still answer 405", "ref": "#24036" },
         { "revision": 6, "date": "2026-11-14", "change": "steps[3], acceptance[2].verify and fixtures.requires[0] re-pointed (stale spec, QA runs #33058 and #33093, comments 6846283471 and 6850899929; ledger row 168 of #32908). The console's unlink is a declared api action, so it posts the action door, which forwards to /auth/unlink-account (apiActionDoor.ts); both doors are named. A social provider can be switched on from env or settings (auth-plugin.ts), but no real client credentials exist for a run, so the local OIDC fixture stays. The clause is unchanged. Read at base 82838e83", "ref": "#33328" },
-        { "revision": 7, "date": "2026-11-14", "change": "fixtures.knownGaps[1] added (environment, ledger row 154 of #32908): a real social provider needs client credentials no QA runner holds; the link clauses stay on the local OIDC provider", "ref": "#33351" }
+        { "revision": 7, "date": "2026-11-14", "change": "fixtures.knownGaps[1] added (environment, ledger row 154 of #32908): a real social provider needs client credentials no QA runner holds; the link clauses stay on the local OIDC provider", "ref": "#33351" },
+        { "revision": 8, "date": "2026-11-15", "change": "fixtures.requires[1] says the local IdP's test identity carries the caller's email, since link-social refuses another email (error=email_does_not_match) (row 97); steps[5] drops the aggregate route, which the data door does not serve: GET …/aggregate answers 404 RECORD_NOT_FOUND and POST 405 (row 98) (QA run #33853, comment 6894307378; ledger 6896511848 of #33761). No clause changed. Read at base bc6b7ffd", "ref": "#PENDING-33967" }
       ]
     },
     {
@@ -2294,7 +2297,7 @@
       "title": "Workspace switcher: org chrome follows posture × membership count (nothing under single; read-only indicator at one membership; switcher at two), and a switch is a full-document reload after which every tenant-scoped read answers from the new org",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a member with one org membership", "the same member after gaining a second membership", "admin, the walled boot's platform operator (OS_PLATFORM_OWNER_EMAIL): mints the member with POST /api/v1/auth/admin/create-user (RUNNER.md 'A walled boot is a fixture of its own'). On a walled boot Create User joins the administrator's CURRENT organization (ADR-0093 D3 amendment). The walled admin already holds a Default Organization (the walled default-organization bootstrap, packages/plugins/plugin-auth/src/ensure-default-organization.ts; QA run #33093), so make the intended organization active (POST /api/v1/auth/organization/set-active), creating one first (POST /api/v1/auth/organization/create) if the admin has none; with no active organization create-user answers 400 NO_ACTIVE_ORGANIZATION and mints nobody. The member lands as `member` of that organization, its one membership. The admin does not provision the second org: the member creates that itself (fixtures.requires[1])"],
@@ -2338,9 +2341,9 @@
           "evidence": "the navigation trace"
         },
         {
-          "clause": "tenant-scoped reads follow the switch: after the reload, data reads answer from the new org — under `isolated` a row id that exists only in the previous org is ABSENT; under `group`, where reads span all the user's orgs, a row written after the switch lands in the NEW org — and /meta reads answer exactly as before the switch, because metadata is deployment-level since ADR-0131 D6/D7 (no organization-scoped metadata write exists, so there is no org-only metadata id to be absent); the console drops its metadata cache on the change (objectui#4486)",
+          "clause": "tenant-scoped reads follow the switch: after the reload, data reads answer from the new org — under `isolated` a row id that exists only in the previous org is ABSENT; under `group`, where reads span all the user's orgs, a row written after the switch lands in the NEW org — and a role-neutral /meta read answers exactly as before the switch, because metadata is deployment-level since ADR-0131 D6/D7 (no organization-scoped metadata write exists, so there is no org-only metadata id to be absent); the console drops its metadata cache on the change (objectui#4486)",
           "oracle": "api",
-          "verify": "under `isolated`, the post-switch data read lacks the old-org sentinel row id; under `group`, a post-switch create carries the new org's id and the old-org row is still readable (not a FAIL — group reads span orgs); the post-switch /meta read equals the pre-switch one. A metadata id that differs between the two orgs would itself be a finding against ADR-0131 D6, not this clause's pass",
+          "verify": "under `isolated`, the post-switch data read lacks the old-org sentinel row id; under `group`, a post-switch create carries the new org's id and the old-org row is still readable (not a FAIL — group reads span orgs); the post-switch /meta read equals the pre-switch one, on a read that does not depend on the caller's grade in the active org, e.g. GET /api/v1/meta/object/showcase_task. GET /api/v1/meta/app is not one: it lists apps by the caller's permissions in that org (an app with requiredPermissions, such as Setup's setup.access, is listed where the member owns the org and absent where it is a plain member), which is per-org role filtering, not org-scoped metadata. A metadata id that differs between the two orgs would itself be a finding against ADR-0131 D6, not this clause's pass",
           "evidence": "the before/after reads + the sentinel id"
         },
         {
@@ -2395,6 +2398,12 @@
           "date": "2026-11-14",
           "change": "personas[2], steps[6] and acceptance[5] (clause and verify) re-pointed (stale spec, QA runs #33058 and #33093, comments 6846283471 and 6850899929; ledger row 171 of #32908). acceptance[5]'s 'the UI surfaces an error' had no UI door, since the forged set-active is API-only; the clause keeps the 403 and never-the-foreign-org halves. The walled admin already holds a Default Organization. A new session starts on the owned org (selectActiveOrg, auth-manager-database-hooks.ts). The group write needs a target org the member can write in. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-15",
+          "change": "acceptance[3] names a role-neutral /meta read: GET /api/v1/meta/app differed across the switch because it filters apps by the caller's per-org grade, not because metadata is org-scoped; QA scored the meta half on /meta/object/showcase_task (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 105). The clause's requirement is unchanged: metadata is deployment-level. Read at base bc6b7ffd",
+          "ref": "#PENDING-33967"
         }
       ]
     },
@@ -2533,7 +2542,7 @@
       "title": "A session held by the ADR-0069 credential policy (password expired, forced reset, MFA not enrolled) is refused with the gate's own 403 code on EVERY raw-host route family, and an API key whose owner holds an account-scope posture is refused too",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2544,7 +2553,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "a member whose session the policy holds — the cheapest: create the member with POST /api/v1/auth/admin/create-user, which lands mustChangePassword:true, and sign it in BEFORE it changes its password (held with PASSWORD_RESET_REQUIRED); the other two codes each need more than a policy switch. PASSWORD_EXPIRED needs password_expiry_days > 0 AND a sys_user.password_changed_at older than that many days, so a fresh member never qualifies (sign-up stamps the clock now, and a null stamp never expires): age the stamp in the run's own scratch DB. MFA_REQUIRED holds an unenrolled member only once mfa_grace_period_days (default 7) have elapsed from sys_user.mfa_required_at, which is stamped on first sight of the required-but-unenrolled member, so switching MFA on alone holds nobody for a week: set mfa_grace_period_days to 0 through the settings door (PUT /api/settings/auth) or age that stamp too (packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts#resolveUserAuthGates; QA run #27438). ⚠️ An organization's require_mfa reaches the gate only after the 'any org requires MFA' cache refreshes — a 60 s TTL, refreshed in the background by a request made after it goes stale (packages/plugins/plugin-auth/src/auth-manager.ts refreshOrgMfaCacheIfStale) — so the MFA hold can lag the switch by over a minute (QA run #24538 saw ~70 s): poll the held call until it answers MFA_REQUIRED before scoring, never probe once and score a 200",
+          "a member whose session the policy holds — the cheapest: create the member with POST /api/v1/auth/admin/create-user, which lands mustChangePassword:true, and sign it in BEFORE it changes its password (held with PASSWORD_RESET_REQUIRED); the other two codes each need more than a policy switch. PASSWORD_EXPIRED needs password_expiry_days > 0 AND a sys_user.password_changed_at older than that many days, so a fresh member never qualifies (sign-up stamps the clock now, and a null stamp never expires): age the stamp in the run's own scratch DB. MFA_REQUIRED holds an unenrolled member only once mfa_grace_period_days (default 7) have elapsed from sys_user.mfa_required_at, which is stamped on first sight of the required-but-unenrolled member, so switching MFA on alone holds nobody for a week: set mfa_grace_period_days to 0 through the settings door (PUT /api/settings/auth) or age that stamp too. ⚠️ Saving mfa_required=everyone with grace 0 holds every unenrolled user, the admin who saved it included: enroll the admin in two-factor before that save, or age the member's stamp instead (packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts#resolveUserAuthGates; QA run #27438). ⚠️ An organization's require_mfa reaches the gate only after the 'any org requires MFA' cache refreshes — a 60 s TTL, refreshed in the background by a request made after it goes stale (packages/plugins/plugin-auth/src/auth-manager.ts refreshOrgMfaCacheIfStale) — so the MFA hold can lag the switch by over a minute (QA run #24538 saw ~70 s): poll the held call until it answers MFA_REQUIRED before scoring, never probe once and score a 200",
           "an API key minted by the member before the hold (POST /api/v1/keys)"
         ]
       },
@@ -2623,6 +2632,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[1] said 'an expiry / MFA-required policy in auth settings holds it with the other two codes'. A policy switch alone holds nobody, as QA run #27438 found and resolveUserAuthGates (plugin-auth auth-manager-password-session-policy.ts) shows. PASSWORD_EXPIRED needs password_expiry_days > 0 and a password_changed_at older than it; sign-up stamps the clock and a null stamp never expires. MFA_REQUIRED waits out mfa_grace_period_days (default 7, settings manifest) from the lazily stamped mfa_required_at. The recipe now names both preconditions and the cheap levers: age the stamp in a scratch DB, or set the grace to 0. The finding line in the anchor comment is truncated after 'require_mfa alone holds nobody for a week'; the rest is read from source. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310",
           "ref": "#27438"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[1] warns that saving mfa_required=everyone with grace 0 through PUT /api/settings/auth also holds the admin who saved it (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 32). No clause changed. Read at base bc6b7ffd",
+          "ref": "#PENDING-33967"
         }
       ]
     },
@@ -2975,7 +2990,7 @@
       "title": "A platform administrator maps an identity-provider group to a permission set: a SCIM group push grants the set to the group's members at once, an SSO sign-in grants it from the groups claim, deleting the mapping removes only the grants it made, and a set outside the organization boundary is refused",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["platform administrator: the mapping doors", "an organization administrator: the 403 leg", "an identity provider: the SCIM pushes"],
@@ -2983,7 +2998,7 @@
         "app": "showcase",
         "requires": [
           "a boot with OS_SCIM_ENABLED=true, one SCIM connection credential, and a user provisioned through it; a scratch permission set qa_group_reader inside the organization boundary",
-          "for the SSO leg: OS_SSO_ENABLED=true, a registered OIDC provider whose groups claim is set, and an identity provider that signs a user in with a groups claim. A run-local mock OIDC IdP serves (QA run #33092): its origin must be in OS_TRUSTED_ORIGINS, because @better-auth/sso refuses a loopback or private discovery URL otherwise (validateOIDCEndpointUrl, discovery_private_host; OS_TRUSTED_ORIGINS is read in packages/cli/src/commands/serve.ts), and the SSO user must hold a pending invitation: under the stock invite_only posture an uninvited SSO user is refused unless the provider's allowJit is on (packages/plugins/plugin-auth/src/audience-posture.ts, SSO_JIT_CLOSED_MESSAGE)"
+          "for the SSO leg: OS_SSO_ENABLED=true, a registered OIDC provider whose groups claim is set, and an identity provider that signs a user in with a groups claim. A run-local mock OIDC IdP serves (QA run #33092): its origin must be trusted, because @better-auth/sso refuses a loopback or private discovery URL otherwise (validateOIDCEndpointUrl, discovery_private_host). A development boot (`os dev`) already trusts http://localhost:* (packages/cli/src/commands/serve.ts adds it when the boot is a dev boot), so a stub on an http://localhost:PORT origin needs no setting; a production boot (`os serve` or `os start` without --dev), or another loopback or private origin, lists the origin in OS_TRUSTED_ORIGINS, and the SSO user must hold a pending invitation: under the stock invite_only posture an uninvited SSO user is refused unless the provider's allowJit is on (packages/plugins/plugin-auth/src/audience-posture.ts, SSO_JIT_CLOSED_MESSAGE). Leave OS_SSO_DOMAIN_VERIFICATION unset (it is opt-in, ADR-0135 D6): with it true, SSO sign-in is refused 'Provider domain has not been verified' until the provider's domain is verified"
         ],
         "knownGaps": ["no stock OIDC identity provider (FOLLOW-UPS §3, still open): the SSO leg is blocked(fixture) without one, and a run-local mock IdP per fixtures.requires[1] unblocks it; the SCIM legs need none"]
       },
@@ -3049,6 +3064,12 @@
           "date": "2026-11-14",
           "change": "steps[3], acceptance[2].verify, fixtures.requires[1] and knownGaps[0] re-pointed (stale spec, QA runs #32940 and #33092, comment 6850793622; ledger row 32 of #32908). A hand grant of the same set after the push is refused 409 UNIQUE_VIOLATION by sys_user_permission_set's unique index, so the hand-made control is now a second user granted before the push, as the CONTROL case in packages/plugins/plugin-auth/src/scim-group-projection.test.ts does. The SSO leg names its fixture: a mock OIDC IdP whose origin is in OS_TRUSTED_ORIGINS (@better-auth/sso validateOIDCEndpointUrl) and an invited SSO user (audience-posture.ts refuses uninvited SSO users without allowJit). The clause is unchanged. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[1] adds the OS_SSO_DOMAIN_VERIFICATION note: with it true the SSO leg's sign-in is refused 'Provider domain has not been verified' (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 30). Found while doing #33967, from the #33968 report 6897030673: the local IdP's origin needs OS_TRUSTED_ORIGINS only on a production boot, since a dev boot trusts http://localhost:* (serve.ts). No clause changed. Read at base bc6b7ffd",
+          "ref": "#PENDING-33967"
         }
       ]
     },
@@ -3057,13 +3078,13 @@
       "title": "The SSO Providers record shows and edits the groups claim: get-groups-claim answers only the provider id and its claim, set-groups-claim stores it (blank clears it) and changes nothing else in the provider's mapping",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["platform administrator", "an organization administrator: the 403 leg"],
       "fixtures": {
         "app": "showcase",
-        "requires": ["a boot with OS_SSO_ENABLED=true and one registered OIDC provider (POST /api/v1/auth/admin/sso/register). A local IdP's origin must be in OS_TRUSTED_ORIGINS (read in packages/cli/src/commands/serve.ts): @better-auth/sso refuses a loopback or private discovery URL otherwise (validateOIDCEndpointUrl, discovery_private_host), and the register door answers 400 SSO_REGISTER_FAILED 'not publicly routable' (packages/plugins/plugin-auth/src/register-sso-provider.ts)"],
+        "requires": ["a boot with OS_SSO_ENABLED=true and one registered OIDC provider (POST /api/v1/auth/admin/sso/register). A local IdP's origin must be trusted: @better-auth/sso refuses a loopback or private discovery URL otherwise (validateOIDCEndpointUrl, discovery_private_host), and the register door answers 400 SSO_REGISTER_FAILED 'not publicly routable' (packages/plugins/plugin-auth/src/register-sso-provider.ts). A development boot (`os dev`) already trusts http://localhost:* (packages/cli/src/commands/serve.ts adds it when the boot is a dev boot), so a discovery + jwks stub on an http://localhost:PORT origin registers with no setting; a production boot (`os serve` or `os start` without --dev), or another loopback or private origin, lists the origin in OS_TRUSTED_ORIGINS"],
         "knownGaps": ["registering a provider needs its issuer reachable, and a local one allowlisted (fixtures.requires[0]); with no stock OIDC identity provider (FOLLOW-UPS §3) the run brings its own"]
       },
       "steps": [
@@ -3122,6 +3143,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[0] and knownGaps[0] re-pointed (fixture gap, QA run #33093, comment 6850899929; ledger rows 250 and 241 of #32908, row 241 from #33331). A local IdP needs its origin in OS_TRUSTED_ORIGINS, or register answers 400 SSO_REGISTER_FAILED (register-sso-provider.ts, @better-auth/sso validateOIDCEndpointUrl). No clause changed. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[0] re-pointed (found while doing #33967, from the #33968 report 6897030673): it said a local IdP's origin must be in OS_TRUSTED_ORIGINS, but a dev boot (`os dev`) already trusts http://localhost:* (packages/cli/src/commands/serve.ts), so the setting is needed only on a production boot or another private origin. No clause changed. Read at base bc6b7ffd",
+          "ref": "#PENDING-33967"
         }
       ]
     },
@@ -3440,7 +3467,7 @@
       "title": "The Console's phone doors on a two-factor account ask for the code: phone + password and the phone code each move to the two-factor step instead of an error, and a code completes the sign-in",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -3451,7 +3478,7 @@
         "requires": [
           "a showcase development boot (dogfood §0) with OS_AUTH_TWO_FACTOR=true and OS_AUTH_PHONE_NUMBER_ENABLED=true on the os dev command (the switches identity-auth.two-factor-verify-to-activate fixtures.requires[0] and identity-auth.phone-signin-surfaces fixtures.requires[2] name); GET /api/v1/auth/config answers data.features.twoFactor and data.features.phoneNumber true. The console bundle built from this tree",
           "the user: created with a phone number and a known password as identity-auth.auth-method-matrix creates its phone user, then enrolled and VERIFIED in TOTP by the walk identity-auth.two-factor-verify-to-activate drives (signed in by email: POST /api/v1/auth/two-factor/enable { password }, one correct code). Keep the TOTP secret; codes come from the copied RFC 6238 helper",
-          "the phone-code legs only: data.features.phoneNumberOtp true on this boot. On a development boot the SMS log transport prints the code in the server log (identity-auth.auth-method-matrix, the phone OTP step) at info level (LogSmsTransport, packages/services/service-sms/src/sms-service.ts), so boot with --log-level info: at os dev's default warn level the line is not printed"
+          "the phone-code legs only: data.features.phoneNumberOtp true on this boot. On a development boot the SMS log transport prints the code in the server log (identity-auth.auth-method-matrix, the phone OTP step) at info level (LogSmsTransport, packages/services/service-sms/src/sms-service.ts), so boot with --log-level info: at os dev's default warn level the line is not printed. Read the code from the line's body field ('body: NNNNNN is your … verification code'): a bare six-digit grep also matches the digits of the messageId (dev-sms-EPOCHMS-N) on the same line"
         ],
         "knownGaps": [
           "the verify-email half of #32287 (ui/apps/console/src/pages/auth/VerifyEmailPage.tsx#VerifyEmailPage reads a two-factor challenge from the verification link as 'Email verified' and sends the person to sign in) needs a verification mail for an enrolled account, which this fixture does not send; it is held by ui/apps/console/src/pages/auth/__tests__/VerifyEmailPage-11633.test.tsx and not driven here"
@@ -3486,7 +3513,7 @@
         {
           "clause": "control: a wrong password still reads as a credentials error and asks for no code",
           "oracle": "dom",
-          "verify": "the form shows 'Invalid phone number or password.' and no two-factor step",
+          "verify": "the form shows the server's credentials error, 'Invalid phone number or password' (no period), and no two-factor step. The period-ended 'Invalid phone number or password.' is ui/packages/auth/src/createAuthClient.ts's fallback for a 2xx answer that carries no token, not the wrong-password path, which is a 401 whose message the form renders",
           "evidence": "a screenshot of the error"
         }
       ],
@@ -3521,6 +3548,12 @@
           "date": "2026-11-14",
           "change": "acceptance[0].verify and fixtures.requires[2] re-pointed (stale spec, QA runs #33025 and #33048, comments 6844741021 and 6846028996; ledger row 40 of #32908). The console's LoginPage renders the challenge with hideHeader, so TwoFactorChallengeForm draws only its description, not the 'Two-factor authentication' title the verify quoted. LogSmsTransport prints the phone code at info level, which os dev's default warn level hides. The clause is unchanged. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[3].verify quotes the rendered wrong-password text without the period (the period-ended literal is the client's no-token fallback, createAuthClient.ts) (row 95), and fixtures.requires[2] says to read the code from the log line's body field, since a six-digit grep catches the messageId digits (row 96) (QA run #33853, comment 6894307378; ledger 6896511848 of #33761). The clause is unchanged. Read at base bc6b7ffd",
+          "ref": "#PENDING-33967"
         }
       ]
     },

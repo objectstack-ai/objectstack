@@ -745,7 +745,7 @@
       "title": "The platform lifecycle sweep reaps expired tombstones and abandoned pending uploads WITH byte reclaim; sweep-time re-verification vetoes rather than losing data",
       "since": "v15.1",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": ["admin (setup access, drives the sweep)"],
@@ -757,7 +757,7 @@
       },
       "steps": [
         "run the pinned dogfood lifecycle suite first (RUNNER rule 6 — do not hand re-prove what it pins) and capture its output",
-        "for the hand-driven spot check (the sweep has no HTTP door: the trigger here and in every later step is a restart after the backdate, then a wait past the first sweep, which runs 60 s after boot (packages/objectql/src/lifecycle/lifecycle-service.ts#DEFAULT_LIFECYCLE_INITIAL_DELAY_MS) and hourly after that (DEFAULT_LIFECYCLE_SWEEP_MS); a boot with lifecycle disabled (OS_LIFECYCLE_DISABLED=1) never sweeps): tombstone a file (last join-row delete), backdate deleted_at past 30d, trigger the LifecycleService sweep, then verify the sys_file row AND its storage bytes are gone",
+        "for the hand-driven spot check (the sweep has no HTTP door: the trigger here and in every later step is a restart after the backdate, then a wait past the first sweep, which runs 60 s after boot (packages/objectql/src/lifecycle/lifecycle-service.ts#DEFAULT_LIFECYCLE_INITIAL_DELAY_MS) and hourly after that (DEFAULT_LIFECYCLE_SWEEP_MS); a boot with lifecycle disabled (OS_LIFECYCLE_DISABLED=1) never sweeps. On a restart onto an existing datastore that first tick sweeps only when the watermark is older than one interval: the sys_lifecycle_state row 'lifecycle' carries last_swept_at, and a value younger than 1 h defers the sweep to the hourly interval (packages/objectql/src/lifecycle/lifecycle-service.ts#runFirstScheduledSweep, #29918). So with the server stopped, age that row's last_swept_at past 1 h (or delete the row) in the DB file before each restart; the object has no data API): tombstone a file (last join-row delete), backdate deleted_at past 30d, trigger the LifecycleService sweep, then verify the sys_file row AND its storage bytes are gone",
         "create a pending upload, backdate past the 7d retention, sweep, verify row + best-effort bytes gone",
         "create a tombstone, then re-add a sys_attachment reference BEHIND the hooks (system write), backdate, sweep — verify the row is un-tombstoned (committed, deleted_at null), not reaped",
         "verify fresh tombstones (inside the window), committed rows and NULL-deleted_at rows all survive the sweep untouched"
@@ -825,6 +825,12 @@
           "date": "2026-10-31",
           "change": "steps[1] said 'trigger the LifecycleService sweep' without naming a trigger. QA run #27409 found the sweep has no HTTP door, and a restart runs the scheduler's first sweep 60 s after boot. lifecycle-service.ts arms a setTimeout of DEFAULT_LIFECYCLE_INITIAL_DELAY_MS (60_000), then a setInterval of DEFAULT_LIFECYCLE_SWEEP_MS (hourly). No route calls sweep(). The step now names that trigger for every sweep in the item. No clause changed. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
           "ref": "#27409"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "steps[1] adds the watermark rule to its trigger: since #29918 a restart sweeps at the first tick only when sys_lifecycle_state 'lifecycle' last_swept_at is older than one interval (1 h), so the step ages it before each restart (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 27). No clause changed. Read at base bc6b7ffd",
+          "ref": "#PENDING-33967"
         }
       ]
     },
@@ -833,7 +839,7 @@
       "title": "Chunked uploads are resumable; abandoned sessions are reaped and their backend multipart uploads ABORTED before the row (the only pointer) is deleted",
       "since": "v15.1",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -851,7 +857,7 @@
         "POST /api/v1/storage/upload/chunked { filename, mimeType, totalSize, chunkSize } and capture { uploadId, resumeToken, fileId, totalChunks } (every later chunk PUT carries that resumeToken) — the init route's required trio is filename/mimeType/`totalSize` (a body spelling `size` is refused 400 INVALID_REQUEST), and the body is parsed with InitiateChunkedUploadRequestSchema: a `totalSize` that is not a whole JSON number of at least 1, or a `chunkSize` below 5 MiB (5242880), is refused 400 INVALID_REQUEST naming the field, never clamped; an omitted `chunkSize` takes the declared 5242880 default (storage-routes.ts)",
         "PUT one chunk — PUT /api/v1/storage/upload/chunked/<uploadId>/chunk/0 with the bytes as the body and the init answer's resumeToken in the `x-resume-token` header (a missing or wrong token answers 403 INVALID_RESUME_TOKEN, storage-routes.ts) — and keep the eTag it answers; then GET /upload/chunked/<uploadId>/progress and record uploadedChunks/percentComplete/status ('in_progress') — progress is the first step of the SDK's resumeUpload",
         "complete a full session on a second upload — every chunk PUT as in steps[1], then POST /api/v1/storage/upload/chunked/<uploadId>/complete with { parts: [{ chunkIndex, eTag }, …] }, chunkIndex zero-based and eTag the string each chunk PUT answered (a malformed entry answers 400 INVALID_REQUEST, an eTag the session does not hold 409 RESOURCE_CONFLICT) — and verify its sys_upload_session row reaches status 'completed'",
-        "abandon the first session mid-flight; backdate its expires_at past the 1d TTL (system write) and trigger the lifecycle sweep",
+        "abandon the first session mid-flight; backdate its expires_at past the 1d TTL (system write) and trigger the lifecycle sweep. A restart triggers it only when the sweep watermark is older than one interval: with the server stopped, age the sys_lifecycle_state row 'lifecycle' last_swept_at past 1 h (or delete the row) before the restart, as attachments-storage.orphan-tombstone-reap steps[1] says (lifecycle-service.ts#runFirstScheduledSweep, #29918)",
         "verify the abandoned session's row is reaped AND the storage adapter's abortChunkedUpload was invoked for its backend_upload_id (dogfood suite instruments this)",
         "verify the completed session's row is reaped by the 7d terminal-status retention WITHOUT an abort attempt (an abort on a finalized multipart would NoSuchUpload-error and wedge the reap)",
         "simulate an abort failure (test seam) and verify the row is VETOED — kept so backend_upload_id survives for the retry",
@@ -940,6 +946,12 @@
           "date": "2026-10-31",
           "change": "steps[0] to [2] name the chunk door's resume token and the complete body. QA run #27409 noted that 'PUT one chunk' needs the x-resume-token header and that complete takes parts [{chunkIndex, eTag}]. storage-routes.ts: the init answer carries resumeToken, the chunk PUT refuses a missing or wrong x-resume-token with 403 INVALID_RESUME_TOKEN, and complete parses req.body.parts as {chunkIndex, eTag} entries (listedParts) and judges them against the held chunks. No clause changed. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
           "ref": "#27409"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-15",
+          "change": "steps[3], the sweep leg, names the watermark rule: a restart sweeps at the first tick only when sys_lifecycle_state 'lifecycle' last_swept_at is older than 1 h (#29918) (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 28). No clause changed. Read at base bc6b7ffd",
+          "ref": "#PENDING-33967"
         }
       ]
     },

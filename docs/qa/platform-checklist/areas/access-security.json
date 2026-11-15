@@ -9,7 +9,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -63,7 +63,7 @@
         {
           "clause": "runRlsProofs reports rls-consistent (or member-visible on deliberately public objects) for every non-skipped showcase object; any rls-hole verdict is a FAIL and files an issue",
           "oracle": "test",
-          "verify": "run `objectstack verify --rls` (or runRlsProofs(stack, adminToken, memberToken, config) from packages/verify/src/rls.ts directly); summary.holes must be 0. A bare `objectstack verify` emits no PROVEN/HOLES line and cannot satisfy this clause. An object whose report line carries `[target adopted from existing rows — admin create failed (STATUS)]` was proven on a SEEDED row, not one this run created: when the app's own validation refuses the probe's derived create body, the sweep adopts an existing row so the object and its dependents are still probed (packages/verify/src/rls.ts, the #7685 cascade-stopper; RlsResult target 'adopted'). On the stock showcase that is showcase_account, whose derived admin create answers 400 (QA run #27409), and the verdict on the adopted row stands. The run record names every object whose proof rode an adopted row. The derived-body 400 is the app's validation answering a body the sweep invented, not an RLS finding",
+          "verify": "run `objectstack verify --rls` (or runRlsProofs(stack, adminToken, memberToken, config) from packages/verify/src/rls.ts directly); summary.holes must be 0. A bare `objectstack verify` emits no PROVEN/HOLES line and cannot satisfy this clause. An object whose report line carries `[target adopted from existing rows — admin create failed (STATUS)]` was proven on a SEEDED row, not one this run created: when the app's own validation refuses the probe's derived create body, the sweep adopts an existing row so the object and its dependents are still probed (packages/verify/src/rls.ts, the #7685 cascade-stopper; RlsResult target 'adopted'). On the stock showcase that was showcase_account at first, whose derived admin create answers 400 (QA run #27409); at a557fa38 and b914e724 showcase_invoice rode an adopted row too, and showcase_invoice_line did not (QA runs #33784 and #33909). The set moves with the seed and the app's validation, so read it from the report lines, never from this list. The verdict on an adopted row stands. The run record names every object whose proof rode an adopted row. The derived-body 400 is the app's validation answering a body the sweep invented, not an RLS finding",
           "evidence": "formatRlsReport output"
         },
         {
@@ -149,7 +149,8 @@
           "change": "acceptance[4].verify names the adopted-row proof. In QA run #27409's `objectstack verify --rls` block, showcase_account's RLS proof rode a seeded row because the sweep's derived admin create was refused 400. Source agrees: packages/verify/src/rls.ts falls back to adopting an existing row when the app's validation rejects the derived body (the #7685 cascade-stopper, RlsResult target 'adopted', report suffix '[target adopted from existing rows — admin create failed (STATUS)]'), so the object and its dependents are probed instead of skipped. The verify text now says the adopted-row verdict stands, asks the run record to name the objects that rode one, and records that the derived-body 400 is not an RLS finding. No assertion is relaxed: summary.holes must still be 0. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488948228",
           "ref": "#27409"
         },
-        { "revision": 11, "date": "2026-11-08", "change": "The invite step presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the sign-up sends the id invite-member answered as invitationId beside the email, and the address alone answers 403 SELF_REGISTRATION_CLOSED. Prose only; no clause changed" }
+        { "revision": 11, "date": "2026-11-08", "change": "The invite step presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the sign-up sends the id invite-member answered as invitationId beside the email, and the address alone answers 403 SELF_REGISTRATION_CLOSED. Prose only; no clause changed" },
+        { "revision": 12, "date": "2026-11-15", "change": "acceptance[4].verify re-pointed: it named showcase_account as the one adopted-row object, and QA read showcase_invoice adopted too and showcase_invoice_line no longer adopted (QA run #33784, comment 6893243542; ledger 6896511848 of #33761 row 3). The verify now says to read the set from the report lines. The clause is unchanged and summary.holes must still be 0. Read at base bc6b7ffd", "ref": "#PENDING-33967" }
       ]
     },
     {
@@ -1925,7 +1926,7 @@
       "title": "Share-link capability tokens: anon resolve renders the record minus redactFields, password/audience gates hold, revoke/expire refuse without leaking, the stored password hash never leaves the server, the password travels in the X-Share-Password header, and public answers are never cached",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1952,7 +1953,7 @@
         "mint a password-gated link; anon resolve WITHOUT ?password / x-share-password header → 401; with a WRONG password → 401; with the correct password → 200",
         "mint audience:'signed_in'; anon resolve → 401 SIGN_IN_REQUIRED; mint audience:'email' (the mint needs emailAllowlist: [\"<an address>\"], or it answers 400 VALIDATION_FAILED) and resolve anonymously and as a signed-in member whose email is OFF the allowlist → 404 INVALID_OR_EXPIRED, byte-identical to an unknown-token resolve. Links that COMBINE an audience with a password are access-security.share-link-combined-gates' to score",
         "DELETE /api/v1/share-links/<idOrToken> (revoke); anon resolve → 410 EXPIRED_OR_REVOKED; mint a short-expiry link and, after it expires, resolve → 410 — the record must never appear",
-        "delete the shared record r, then anon resolve the still-live (un-passworded, link_only) token → 404 INVALID_OR_EXPIRED, byte-identical to the answer for an unknown token (fail-closed, #5190: \"that record is gone\" is itself information) — capture it beside an unknown-token resolve for the byte comparison",
+        "delete the shared record r AS THE ADMIN (the minter persona cannot delete a brief: its DELETE answers 403), then anon resolve the still-live (un-passworded, link_only) token → 404 INVALID_OR_EXPIRED, byte-identical to the answer for an unknown token (fail-closed, #5190: \"that record is gone\" is itself information) — capture it beside an unknown-token resolve for the byte comparison",
         "GET /api/v1/share-links?object=F&recordId=r as the minter vs a SECOND member — the list returns only the caller's own links",
         "the stored hash never leaves: mint a password-gated link and capture the MINT response, the LIST (GET /api/v1/share-links?object=F&recordId=r as the minter) and a SUCCESSFUL resolve. Search every body for the key password_hash and for any hash-shaped value",
         "the password travels in a header: resolve the password-gated link with the password ONLY in the X-Share-Password request header (no ?password=). Then send a wrong value in the header, then the right password as ?password= (the compatibility form). Send a CORS preflight for the resolve route from another origin, with Access-Control-Request-Headers: x-share-password",
@@ -2100,6 +2101,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[1] and steps[0] re-pointed (fixture text, card #33332; QA run #33081 comment 6850173588). No stock user holds showcase_client_liaison, so the requires line now carries the run's minter recipe: the admin binds usr_showcase_phone_demo to the position (demo-personas.ts, positions.ts) and the run signs in as phone.demo@example.com. steps[0]'s control needs a visible private note, which a fresh boot does not seed for the member, so the step creates one first; its 'no showcase object opts in' is narrowed to every object but showcase_client_brief, as knownGaps[0] already says. No clause changed. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-15",
+          "change": "steps[6], acceptance[4]'s record-gone leg, says the admin deletes the shared record: the minter persona (showcase_client_liaison) gets 403 deleting a brief (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 46). No clause changed. Read at base bc6b7ffd",
+          "ref": "#PENDING-33967"
         }
       ]
     },
@@ -3481,7 +3488,7 @@
       "title": "Opt-in record-view auditing writes `read` rows for exactly the opted-in objects' detail reads, batched off the request path — stock boot audits nothing, excluded names refuse loudly, values never copied",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3500,7 +3507,7 @@
         ]
       },
       "steps": [
-        "stock leg: boot showcase stock with OS_LOG_LEVEL=info (or --log-level info) — os dev defaults to warn, and the install line logs at INFO, so on a default boot its absence proves nothing; confirm INFO lines are present in the boot log as the positive control. As M open a record detail M can READ — GET /api/v1/data/showcase_account/<id> answering 200 (a baseline member is refused showcase_contact at the object gate with 403, and a refused read audits nothing under any configuration, so a contact specimen makes the zero vacuous); wait past the 2s default flush window; as admin GET /api/v1/data/sys_audit_log with a $filter on action 'read' — expect zero rows; the boot log must carry NO 'record-view auditing installed' line",
+        "stock leg: boot showcase stock with OS_LOG_LEVEL=info (or --log-level info) — os dev defaults to warn, and the install line logs at INFO, so on a default boot its absence proves nothing; confirm INFO lines are present in the boot log as the positive control. As M open a record detail M can READ — GET /api/v1/data/showcase_account/<id> answering 200 (a baseline member is refused showcase_contact at the object gate with 403, and a refused read audits nothing under any configuration, so a contact specimen makes the zero vacuous); wait past the 2s default flush window; as admin GET /api/v1/data/sys_audit_log with a $filter on action 'read' in the JSON filter form, $filter={\"action\":\"read\"} (or the AST [\"action\",\"=\",\"read\"]): the OData text form action eq 'read' answers 400 INVALID_FILTER, because the normalizer parses $filter as JSON (packages/metadata-protocol/src/protocol-data-crud.ts) — expect zero rows; the boot log must carry NO 'record-view auditing installed' line",
         "configured leg (the scratch-copy recipe in knownGaps[0]): boot the scratch copy with readAudit.objects naming X = showcase_account plus the excluded sys_job, at OS_LOG_LEVEL=info; read the boot log for the install line and the exclusion warning",
         "as M (user context): GET /api/v1/data/X/<id>; wait past the flush window (or drive maxBatchSize reads); as admin read the ledger rows for action 'read'",
         "as M: LIST /api/v1/data/X (a collection read) and GET a detail of an object NOT in the opt-in that M can read (showcase_project) — then re-read the ledger",
@@ -3620,6 +3627,12 @@
           "date": "2026-11-14",
           "change": "negative[0] and automated.ref re-pointed (card #33332; QA run #33081 comment 6850173588): negative[0] was out of scope for a stock run by the item's own word yet stood as a clause, so the item could never PASS. Its behaviour is pinned in packages/plugins/plugin-audit/src/read-audit.test.ts (write failure never reaches the read; once per cause), so it is now scored from those pins, as negative[1] already was. automated.ref now says the dogfood pin constructs new AuditPlugin() itself, so the CLI's option-less auto-registration stays a live leg. No clause changed. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-15",
+          "change": "steps[0] names the JSON filter form for the sys_audit_log read: the OData text $filter=action eq 'read' answers 400 INVALID_FILTER (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 25). No clause changed. Read at base bc6b7ffd",
+          "ref": "#PENDING-33967"
         }
       ]
     },
@@ -4206,7 +4219,7 @@
       "title": "The security catalog has exactly one holder per name: two packages declaring one permission-set / position name refuse boot (on install-local, 422 PLUGIN_REGISTER_FAILED naming each name and its holder), a body packageId that disagrees with its package is refused, `os migrate security-catalog-overlays` clears environment shadows, and boot reports grants naming undefined catalog entries",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4217,7 +4230,7 @@
         "app": "showcase",
         "requires": [
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
-          "a second scratch package declaring a permission set with the same name as a showcase set (for the install-local leg)"
+          "a second scratch package declaring a permission set with the same name as a showcase set (for the install-local leg), with no namespace or the showcase's own: a permission set is one name per namespace, so a package of another namespace holds the name beside the showcase's"
         ]
       },
       "steps": [
@@ -4236,7 +4249,7 @@
         {
           "clause": "install-local of an inline manifest (a `{ manifest }` body) whose package redeclares a catalog name → 422 PLUGIN_REGISTER_FAILED whose message names each conflicting name and its holder, and nothing is recorded as installed",
           "oracle": "api",
-          "verify": "status + error.code + error.message: every redeclared catalog name (permission set, position or capability) appears in the message with the package, environment or built-in that already holds it; GET /api/v1/packages lists the same packages before and after. ⛔ No `conflicts[]` is expected on this door: it answers its own registered PLUGIN_REGISTER_FAILED and interpolates only the register error's message (that route's entry in packages/spec/src/api/error-code-ledger.zod.ts); the structured `conflicts` ride the thrown SecurityCatalogNameConflictError, which the boot-refusal pins in automated.ref assert",
+          "verify": "status + error.code + error.message: every redeclared catalog name (permission set, position or capability) appears in the message with the package, environment or built-in that already holds it. A permission set conflicts only where the two holders meet: it holds one name per NAMESPACE (packages/objectql/src/security-catalog-namespace.ts, permissionSetHoldersMeet), so a manifest that declares its own namespace is admitted for the set and the message names only its positions and capabilities; drive the leg with a manifest that declares no namespace or the holder's (QA measured: namespace qa_dup redeclaring showcase_auditor and showcase_manager names only showcase_manager; no namespace names both); GET /api/v1/packages lists the same packages before and after. ⛔ No `conflicts[]` is expected on this door: it answers its own registered PLUGIN_REGISTER_FAILED and interpolates only the register error's message (that route's entry in packages/spec/src/api/error-code-ledger.zod.ts); the structured `conflicts` ride the thrown SecurityCatalogNameConflictError, which the boot-refusal pins in automated.ref assert",
           "evidence": "the refusal body + the package list before and after"
         },
         {
@@ -4302,6 +4315,12 @@
           "date": "2026-11-14",
           "change": "steps[3] and acceptance[4] re-pointed (card #33332; QA runs #33048 comment 6846028996 and #33094 comment 6852480973). The data API refuses the grant step[3] plants (400 VALIDATION_FAILED reference_not_found), so the step now names the SQL write into a stopped server's scratch DB it always needed. acceptance[4]'s '≤50 names' was the grant-id list: catalog-reference-report.ts caps grant ids at LOGGED_LIMIT 50 per organization and counts set names uncapped (QA run #33094 saw all 51 names printed). The clean-boot line is logged at info, so the step boots with --log-level info. The clause's substance is unchanged. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[1].verify and fixtures.requires[1] re-pointed: a permission set is one name per namespace since ADR-0150 D2/D9, so a manifest with its own namespace redeclaring a showcase set is admitted for the set and the 422 names only the position (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 67). The fixture now asks for a manifest with no namespace or the holder's. The clause is unchanged. Read at base bc6b7ffd",
+          "ref": "#PENDING-33967"
         }
       ]
     },
@@ -4963,7 +4982,7 @@
       "title": "A permission set travels as (package, name) from the grant to every request's evaluation: the execution context carries permissionSetAddresses, the evaluator reads each set at its holder, the activation ledger switches a set off per holder, and an OAuth client acting for a user carries none",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4975,7 +4994,7 @@
         "requires": [
           "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket and the permission set qa_a_reader (read on qa_a_ticket, nothing else); qa_b declares one object and no permission set",
           "a boot on a file database, as platform-core.activation-ledger-row-contract boots, because two steps stop the server and write the ledger directly",
-          "a member M (any signed-up person) granted qa_a_reader as admin with POST /api/v1/data/sys_user_permission_set {\"user_id\": M, \"permission_set\": \"qa_a_reader\"}; the grant door stamps permission_set_package (access-security.permission-set-package-resolution); one qa_a_ticket record"
+          "a member M (any signed-up person) granted qa_a_reader as admin with POST /api/v1/data/sys_user_permission_set {\"user_id\": M, \"permission_set\": \"qa_a_reader\"}; the grant door stamps permission_set_package (access-security.permission-set-package-resolution); one qa_a_ticket record owned by M (create it as admin with owner_id set to M). qa_a_ticket's declared sharingModel decides who reads a row; on a private object M reads only rows M owns, so a record the admin owns reads as 0 rows for M though the qa_a_reader grant holds"
         ],
         "knownGaps": [
           "two packages each shipping qa_a_reader is not reachable through install today (#32027's own note), so the cases this change exists for (one name, two holders, each grant reaching only its own) are held by packages/plugins/plugin-security/src/permission-set-address.test.ts, not driven live"
@@ -5055,6 +5074,12 @@
           "date": "2026-11-13",
           "change": "assertion-defect correction of acceptance[1] (with steps[1], a negative and acceptance[1]'s evidence). Step 2's row names com.qa.addr-b, which holds no qa_a_reader: that is a stale column, not a second holder, and the ledger reads it by the D3 rule with no caller, switching off the holder the name resolves to (packages/core/src/security/resolve-authz-context.ts#ledgerRowHolders, #31698: a switch-off is never read as none), so M loses the set. The clause now asserts that stale-column contract live, and scores the true two-holder case, which install cannot reach (knownGaps), from the pin in permission-set-address.test.ts. Found by the 18.4.0 acceptance run #32940 (F-4 to F-8 and its R4/R5 comments; wave anchor #32908). Re-read at main cf1b55c0. Card #32945",
           "ref": "#32945"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[2] says the qa_a_ticket record is owned by M: on a private scratch object a row the admin owns reads 0 rows for M, which hides the grant the item reads (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 24). No clause changed. Read at base bc6b7ffd",
+          "ref": "#PENDING-33967"
         }
       ]
     },
