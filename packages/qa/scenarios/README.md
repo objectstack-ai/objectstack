@@ -49,7 +49,7 @@ computed truths and declared outcomes:
 ```ts
 import { gradeCardAnswer, gradeCardOperation, scoreCardArtifact } from '@objectstack/scenarios/score/full';
 
-scoreCardArtifact(card, artifact);                 // a built dist/objectstack.json: expect, tags, agent actions
+scoreCardArtifact(card, artifact);                 // a built dist/objectstack.json: expect, tags, agent actions, persona grants
 gradeCardOperation(card, 'remove_ben', observed);  // an observed write against its declared outcome
 gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // an agent's answer
 ```
@@ -59,7 +59,24 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
 - `scenario-tags.ts` — the capability-tag checks and the agent-action exposure check (each
   declared action exists on its object, carries `ai.exposed: true`, and carries
   `ai.requiresConfirmation: true` where the card says `confirm`; a missing action fails, never
-  skipped).
+  skipped), and the persona grant checks (`gradePersonaGrants`): one Build check per persona ×
+  object × verb the card implies, `persona-grant:<persona>:<object>:<verb>`, against that
+  persona's own set (`<namespace>_<persona id>`). A question asked as the persona needs `read` on
+  its object (not when the persona hides that object: it declines), and an `applied` or
+  `pending_confirmation` operation needs its kind; each passes when the set grants the verb, read
+  as the platform folds it (`buildEffectiveObjectPermissions`, a `'*'` wildcard included where
+  `access.default` lets it cover the object, then `objectPermissionGrants`). An operation refused
+  `PERMISSION_DENIED` passes when the set refuses it: no verb, or a field the write names locked
+  (not editable, no `when`); it is not measured, out of passed and total, when only a row rule
+  could refuse it (a write row policy, a row-conditioned field entry), and fails when nothing in
+  the set does. The same persona, object and verb also needed elsewhere yields the needed check
+  alone: the refusal is a row's or a field's, not the grant's. A persona whose set the build does
+  not declare fails each of its checks. One needed write is not measured, never a pass: a verb the
+  set withholds that only `pending_confirmation` operations need, where the build declares the
+  card's confirm-gated agent action (`confirm: true`) on that object. That action is the route the
+  card designs for a write that asks first, and its body writes as the platform, so whether the
+  write goes through it is the run's to observe (ruling A on #31999 item 9, carried to the Build
+  side). An `applied` write stays measured against the grant, whatever actions the build adds.
 - `scenario-operation-grade.ts` — an observed write against `applied` / `refused` /
   `pending_confirmation`; a fact the observation does not carry fails. The operation the
   card's `write_validation` guardrail names is graded in two halves: the agent half (its write
@@ -67,19 +84,32 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   asks for a correction) and the platform half, `platform:` checks (the runner's own write of
   the declared values, the probe, was refused with that code and stored nothing); so is every
   other `refused` create or update, permission oversteps included (`isProbedOperation`). A
-  declared `VALIDATION_FAILED` is met by an app-defined code at any 4xx status, or by the
-  app's flow refusal (`refusalMeets`); a platform catalogue code other than the declared one
-  never is. The platform half is not measured, out of passed and total with the reason in the
+  declared `VALIDATION_FAILED` is met by the app's own refusal at any 4xx status, or by the
+  app's flow refusal (`refusalMeets`). A hook's declared refusal reaches the MCP data tools
+  with `code` set to the status's catalogue code (`RESOURCE_CONFLICT` at 409) and the hook's
+  own code beside it as `declaredCode` (`ASSET_NOT_IN_STOCK`); the runner keeps both, and a
+  declared code meets its `declaredCode` exactly. A platform catalogue code other than the
+  declared one, with no `declaredCode`, never meets it. The platform half is not measured, out of passed and total with the reason in the
   scorecard's findings, when the probe met the build's own lock: refused 403
   `PERMISSION_DENIED`, nothing written, and the build locks a field the probe writes for the
   persona and declares an action on the object (`buildLockOf`; ruling A on #31999 item 9).
+  Beside it, `buildDeniesWrite`: a write the card gives the persona that the build denies it.
+  An `applied` create or update whose agent write was refused 403 `PERMISSION_DENIED` with
+  nothing written is probed too (`probesBuildDenial`); a probe denied the same way, with no
+  such lock, makes the whole operation not measured (`OperationGrade.notMeasured`), and the
+  `write_validation` probe that meets it leaves its platform half not measured (the agent
+  half too when the agent's own write met it). Each is a Build finding naming persona,
+  object and verb (`buildDenialFindings`). A declared 403 and `pending_confirmation` grade as
+  before.
   A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
   (`scopeFigures`) equals it, and a hidden field leaks when a tool answer's keys carry it, not
-  when a call only asked for it.
+  when a call only asked for it. A number inside an identifier (`INV-003`, `i3`; a digit after a
+  Latin letter, `isIdentifierToken`) is no figure for the answer or the leak scan; `3k`, `3 days`
+  and `USD3,000` still are.
 
 ### The closed capability-tag table
 
@@ -252,7 +282,10 @@ npx @objectstack/scenarios help                                      # the comma
   reads that answer as the **probe**: the app's validation is measured on every run, whether or not the agent sent
   the bad value, and a careful agent that caught it first is not failed for it. A failed probe is the platform's
   failure, never the agent's. Every other `refused` create or update is probed the same way, so a permission
-  overstep the agent declined still measures the platform's refusal. An answer that carries no code is reported
+  overstep the agent declined still measures the platform's refusal. An `applied` create or update is probed only
+  when the agent's own write met 403 `PERMISSION_DENIED` and nothing was written (a probe after a write that
+  landed would apply it twice): a denied probe charges the write to the build. A probe the door applies leaves the
+  runner's row in place for the operations after it. An answer that carries no code is reported
   with whose throw it was (`uncodedNote`: the build's own hook or action, named off the sandbox's wrapper, or the
   door's text). The runner also records the run dates (each clock instant's UTC and local date) and the fields
   the agent's own write calls set (`agentSetOf`: a create's or update's `data`, a `run_action`'s `params`); a

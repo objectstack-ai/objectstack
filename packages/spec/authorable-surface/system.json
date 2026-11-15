@@ -1351,6 +1351,7 @@
     "system/TracingConfig:traceIdGenerator",
     "system/TranslationConfig:defaultLocale",
     "system/TranslationConfig:fallbackLocale",
+    "system/TranslationConfig:sourceLocale",
     "system/TranslationConfig:supportedLocales",
     "system/TranslationCoverageResult:breakdown",
     "system/TranslationCoverageResult:coveragePercent",

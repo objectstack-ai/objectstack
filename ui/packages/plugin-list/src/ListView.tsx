@@ -478,6 +478,21 @@ export interface ListViewProps {
    */
   recordLinkAdornment?: (record: Record<string, unknown>) => React.ReactNode;
   /**
+   * Whether a click on a row opens anything, as the host that owns the row
+   * click (`onRowClick`) knows it (objectstack#33317), handed to the view's own
+   * `rowOpensRecord`: the grid (its table and its phone cards), the gallery and
+   * the board (objectstack#33548). `false` ⇒ the grid draws its record-link
+   * cells as plain text and its row context menu offers no Open, and no card
+   * face draws a pointer or a hover lift; the row or card click still reaches
+   * `onRowClick`, and card actions stay. The console's object list passes
+   * `false` for a view authored `navigation.mode: 'none'` and for a list-only
+   * object.
+   *
+   * A HOST prop, never a schema key, for the reason `rowAdornment` is one.
+   * Absent ⇒ every row and card is exactly what it was.
+   */
+  rowOpensRecord?: boolean;
+  /**
    * The VIEW'S OWN hidden fields, row height and sort, for a host that lays
    * the user's own preference over them in `schema` (objectui#12949). The
    * Display control's trigger count and its "Reset to view default" compare
@@ -1787,6 +1802,13 @@ function isDeclaredHidden(
 const OUTSIDE_OPTIONS = 'outside';
 
 /**
+ * The view faces handed the host's `rowOpensRecord`: each draws its rows as
+ * something to open, and draws them plain when the host says a click opens
+ * nothing. No other face reads the prop.
+ */
+const ROW_OPENS_RECORD_VIEW_TYPES: ReadonlySet<string> = new Set(['object-grid', 'object-gallery', 'object-kanban']);
+
+/**
  * objectui#11865 — the toolbar's "Color by field" and the record-count bar's
  * rows-per-page selector, drawn with the shared `Select`, the control the rest
  * of the console picks with. Both used to be browser-native `<select>`
@@ -1883,6 +1905,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   defaultRowNumbers = true,
   rowAdornment,
   recordLinkAdornment,
+  rowOpensRecord,
   compact = false,
   capped = false,
   onTotalChange,
@@ -7599,6 +7622,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectstack#26681 — the host's node beside each row's record
               // link, on the grid's host channel (a React prop, never a node key).
               ? { recordLinkAdornment }
+              : {})}
+            {...(ROW_OPENS_RECORD_VIEW_TYPES.has(viewComponentSchema.type) && rowOpensRecord !== undefined
+              // objectstack#33317, objectstack#33548 — whether the host's row
+              // click opens anything, on the view's host channel (a React
+              // prop, never a node key).
+              ? { rowOpensRecord }
               : {})}
             // [objectui#12081] A windowed calendar keeps drawing while the
             // next window loads (the refresh bar above says so), and shows its

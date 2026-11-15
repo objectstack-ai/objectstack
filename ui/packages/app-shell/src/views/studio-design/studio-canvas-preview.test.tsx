@@ -30,6 +30,10 @@ import {
   StudioObjectRecordsCanvas,
 } from './studio-canvas-preview';
 import type { StudioCanvasListView } from './studio-canvas-preview';
+// The grid's own module: the registry above holds it behind a lazy wrapper of
+// the same name (objectstack#33582), so the grid's behaviour is pinned on the
+// module's component, and the wrapper by the lazy-registration block below.
+import { StudioObjectRecordsCanvas as ObjectRecordsCanvas } from './studio-object-records-canvas';
 
 describe('studio-canvas-preview registry', () => {
   it('ships a built-in default for `object` (the records grid)', () => {
@@ -104,7 +108,7 @@ describe('navEntryListTarget — the runtime reading of an object entry (objectu
   });
 });
 
-describe('StudioObjectRecordsCanvas — renders the entry it is open on (objectui#11774)', () => {
+describe('the default object canvas — renders the entry it is open on (objectui#11774)', () => {
   /** Stands in for `plugin-view`'s `object-view`, recording the schema it is handed. */
   function ObjectViewRecorder({ schema }: { schema: Record<string, unknown> }) {
     return <pre data-testid="object-view-schema">{JSON.stringify(schema)}</pre>;
@@ -134,7 +138,7 @@ describe('StudioObjectRecordsCanvas — renders the entry it is open on (objectu
     render(
       <MetadataCtx.Provider value={METADATA}>
         <StudioCanvasNavEntryContext.Provider value={entry}>
-          <StudioObjectRecordsCanvas type="object" name="showcase_task" draft={{}} />
+          <ObjectRecordsCanvas type="object" name="showcase_task" draft={{}} />
         </StudioCanvasNavEntryContext.Provider>
       </MetadataCtx.Provider>,
     );
@@ -177,7 +181,7 @@ describe('StudioObjectRecordsCanvas — renders the entry it is open on (objectu
  * it is editing: the panel's buffer, handed over through
  * `StudioCanvasListViewContext` (beside the published props, like the entry).
  */
-describe('StudioObjectRecordsCanvas — shows the list view its panel edits (objectui#11823)', () => {
+describe('the default object canvas — shows the list view its panel edits (objectui#11823)', () => {
   function ObjectViewRecorder({ schema }: { schema: Record<string, unknown> }) {
     return <pre data-testid="object-view-schema">{JSON.stringify(schema)}</pre>;
   }
@@ -212,7 +216,7 @@ describe('StudioObjectRecordsCanvas — shows the list view its panel edits (obj
       <MetadataCtx.Provider value={METADATA}>
         <StudioCanvasNavEntryContext.Provider value={entry}>
           <StudioCanvasListViewContext.Provider value={edited}>
-            <StudioObjectRecordsCanvas type="object" name="showcase_task" draft={{}} />
+            <ObjectRecordsCanvas type="object" name="showcase_task" draft={{}} />
           </StudioCanvasListViewContext.Provider>
         </StudioCanvasNavEntryContext.Provider>
       </MetadataCtx.Provider>,
@@ -252,5 +256,55 @@ describe('StudioObjectRecordsCanvas — shows the list view its panel edits (obj
       type: 'object-view',
       objectName: 'showcase_task',
     });
+  });
+});
+
+/**
+ * objectstack#33582 — the registered `object` default is a lazy wrapper of the
+ * grid's module, not the module's component: the registry module is imported
+ * by the package entry at load, so a by-value default held the grid and the
+ * designer strings in the console's eager closure. Drawn through the registry,
+ * as `StudioDesignSurface` draws it, the wrapper shows its loading line, then
+ * the grid with the schema the module's own component renders.
+ */
+describe('the registered object default loads the grid on first draw (objectstack#33582)', () => {
+  function ObjectViewRecorder({ schema }: { schema: Record<string, unknown> }) {
+    return <pre data-testid="object-view-schema">{JSON.stringify(schema)}</pre>;
+  }
+  const METADATA: MetadataContextValue = {
+    apps: [],
+    objects: [{ name: 'showcase_task', label: 'Task' }],
+    dashboards: [],
+    reports: [],
+    pages: [],
+    loading: false,
+    error: null,
+    refresh: async () => {},
+    invalidate: () => {},
+    ensureType: async () => [],
+    getItem: async () => null,
+    getItemsByType: () => [],
+  };
+
+  beforeAll(() => {
+    ComponentRegistry.register('object-view', ObjectViewRecorder as never, { namespace: 'plugin-view' });
+  });
+  afterEach(cleanup);
+
+  it('the default is the wrapper, not the grid module\'s own component', () => {
+    expect(getStudioCanvasPreview('object')).toBe(StudioObjectRecordsCanvas);
+    expect(StudioObjectRecordsCanvas).not.toBe(ObjectRecordsCanvas);
+  });
+
+  it('drawn through the registry, it loads and draws the grid', async () => {
+    const Canvas = getStudioCanvasPreview('object')!;
+    render(
+      <MetadataCtx.Provider value={METADATA}>
+        <Canvas type="object" name="showcase_task" draft={{}} />
+      </MetadataCtx.Provider>,
+    );
+    const grid = await screen.findByTestId('object-view-schema');
+    expect(JSON.parse(grid.textContent ?? 'null')).toEqual({ type: 'object-view', objectName: 'showcase_task' });
+    expect(screen.queryByText('Loading studio canvas…')).toBeNull();
   });
 });

@@ -108,7 +108,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         help: "La langue dans laquelle cet utilisateur voit l’interface et reçoit ses notifications, sous forme d’étiquette de langue telle que zh-CN ou ja-JP. Si elle n’est pas définie, la langue par défaut du déploiement s’applique."
       },
       manager_id: {
-        label: "Responsable",
+        label: "Responsable hiérarchique",
         help: "Le responsable direct de cet utilisateur. Forme la chaîne hiérarchique que parcourt la portée hiérarchique `own_and_reports`."
       },
       primary_business_unit_id: {

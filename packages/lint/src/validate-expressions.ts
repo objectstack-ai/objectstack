@@ -135,7 +135,14 @@ import type { FlowNodeParsed, FlowEdgeParsed, FlowTriggerKind } from '@objectsta
 // hand-written notion of "blank" here — that drift is what #15662 built the
 // shared refusal to prevent.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
-import { referenceCarrierOf, referenceTargetOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
+import {
+  injectedSystemColumnDefs,
+  isInjectedColumnDefinition,
+  platformProvisionsStorage,
+  referenceCarrierOf,
+  referenceTargetOf,
+  REFERENCE_VALUE_TYPES,
+} from '@objectstack/spec/data';
 import {
   isStoredMetadataBodyObject,
   STORED_METADATA_BODY_PRESCRIPTION,
@@ -158,7 +165,7 @@ import {
 import type { FlowCelEntrance } from './flow-cel-root-scope.js';
 import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } from './validate-null-guards.js';
-import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
+import type { NullGuardFinding, NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
 import { stripInjectedSystemColumns } from '@objectstack/metadata-core';
 import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
@@ -566,6 +573,99 @@ interface FlowBareNames {
    * here because every flow site that reads the names reads it too.
    */
   readonly timeRelativeSweep: boolean;
+}
+
+/**
+ * [#33246] The injected system columns the platform writes on EVERY stored
+ * row, so a read of one is never `null`: the wildcard audit hook
+ * (`sys_stamp_audit_insert` in `@objectstack/objectql`) writes `created_at`
+ * and `updated_at` unconditionally, and driver-sql creates both on every
+ * table it provisions (`PLATFORM_PROVISIONED_COLUMNS`, which adds the
+ * primary key `id`; the registry never injects `id` into the field map, so
+ * it has no entry here). The other injected columns are stamped only when
+ * there is something to stamp: a system-context insert stores `NULL` in
+ * `owner_id`, `created_by`, `updated_by`, `owning_business_unit_id` and
+ * `queue` (measured on the real engine), so they stay nullable. This package
+ * may not import a runtime, so the two names are spelled here.
+ */
+const PLATFORM_STAMPED_COLUMNS: ReadonlySet<string> = new Set(['created_at', 'updated_at']);
+
+/**
+ * [#33246] Is this served field a platform-stamped column that is never `null`
+ * on a stored row? Only the platform's own definition counts
+ * (`isInjectedColumnDefinition` against the object's injection plan): a
+ * column the author declared keeps the author's keys and the author's
+ * verdict. An object whose schema the platform does not provision (an
+ * ADR-0015 `external` binding, `platformProvisionsStorage`) has no stamp
+ * behind the column, so it is no exception there.
+ */
+function isPlatformStampedColumn(obj: AnyRec, fname: string, def: AnyRec): boolean {
+  if (!PLATFORM_STAMPED_COLUMNS.has(fname) || !platformProvisionsStorage(obj)) return false;
+  const injected = injectedSystemColumnDefs(obj)[fname];
+  return injected !== undefined && isInjectedColumnDefinition(def, injected);
+}
+
+/**
+ * [#33246] object name → the platform-stamped columns
+ * ({@link isPlatformStampedColumn}) it serves. Read only at a runtime publish
+ * door, whose objects are SERVED: the registry injects its system columns as
+ * declared `required: false` fields with no default, so the null-guard gate
+ * reads `created_at` / `updated_at` as nullable there, while `os build`
+ * (declared fields only) never judges them. The nullable index keeps them;
+ * {@link isStampedComparisonFinding} says which of its findings the door
+ * leaves out.
+ */
+function buildPlatformStampedIndex(objects: AnyRec[]): Map<string, Set<string>> {
+  const idx = new Map<string, Set<string>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const stamped = new Set<string>();
+    for (const [fname, def] of fieldEntries(obj)) {
+      if (isPlatformStampedColumn(obj, fname, def)) stamped.add(fname);
+    }
+    if (stamped.size > 0) idx.set(name, stamped);
+  }
+  return idx;
+}
+
+/**
+ * [#33246] The null-guard verdicts the door leaves out: an ORDERING comparison
+ * (`<`, `<=`, `>`, `>=`) whose operand is a platform-stamped column of the
+ * CURRENT row, spelled bare (a record-triggered flow's flattened trigger
+ * record) or `record.<column>`, which a stored row never holds `null` in.
+ * Every other finding keeps its verdict:
+ *
+ * - an arithmetic operand (`+`, `-`, `*`, `/`, `%`): at a record-triggered
+ *   flow's `record.` read the null guard is the only refusal date arithmetic
+ *   on the column meets (the flattened site type-checks only the bare
+ *   spelling);
+ * - a `previous.<column>` operand: an insert binds `previous` itself to
+ *   `null`, so the read faults there whatever the column holds, and the
+ *   finding's message names the full guard (`PREVIOUS_GUARD_CLAUSE`).
+ */
+const STAMPED_COMPARISON_OPERATORS: ReadonlySet<string> = new Set(['<', '<=', '>', '>=']);
+function isStampedComparisonFinding(stamped: ReadonlySet<string> | undefined, finding: NullGuardFinding): boolean {
+  if (!stamped || !stamped.has(finding.field) || !STAMPED_COMPARISON_OPERATORS.has(finding.operator)) return false;
+  return finding.operand === finding.field || finding.operand === 'record.' + finding.field;
+}
+
+/**
+ * [#33246] The hook events on which a hook condition reads a STORED row the
+ * platform has already stamped: `record` is the stored row (overlaid with the
+ * write's payload) after the stamp on an `afterInsert`, and the prior row on
+ * an update or a delete. Not here: `beforeInsert`, which a hook can run on
+ * ahead of `sys_stamp_audit_insert` (priority 10) and read both columns as
+ * `null`, at any priority; `beforeFind` / `afterFind`, which carry no record
+ * at all. A hook keeps every stamped-column verdict unless each of its events
+ * is listed.
+ */
+const STAMPED_ROW_HOOK_EVENTS: ReadonlySet<string> = new Set([
+  'afterInsert', 'beforeUpdate', 'afterUpdate', 'beforeDelete', 'afterDelete',
+]);
+function hookReadsStampedRow(hookEvents: unknown): boolean {
+  return Array.isArray(hookEvents) && hookEvents.length > 0
+    && hookEvents.every((e) => typeof e === 'string' && STAMPED_ROW_HOOK_EVENTS.has(e));
 }
 
 function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
@@ -2375,7 +2475,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // through `stripInjectedSystemColumns` (`@objectstack/metadata-core`, the
   // write path's own strip of exactly those, as `authored-site-expression.ts`
   // reads the served objects), and the indexes re-derive the injected columns
-  // themselves, as they do at the build.
+  // themselves, as they do at the build. Every other runtime door keeps the
+  // served objects, so its type verdicts on an injected column stand; only an
+  // ordering comparison over the two platform-stamped timestamps leaves the
+  // null-guard verdicts (#33246, {@link buildPlatformStampedIndex}).
   if (extensionWrite) stack = { ...stack, objects: recordsOf(stack.objects).map((o) => stripInjectedSystemColumns(o)) };
   const objects = recordsOf(stack.objects);
   // [#30471] The field indexes read the objects as the registry SERVES them,
@@ -2395,6 +2498,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
   const nullableIndex = buildNullableFieldIndex(typedObjects);
+  // [#33246] Read at a runtime publish door only: the build passes no write
+  // type, so its null-guard verdicts are what they were.
+  const platformStampedIndex = options.runtimeWriteType !== undefined
+    ? buildPlatformStampedIndex(typedObjects)
+    : new Map<string, Set<string>>();
   // [#24316] object name → its references into a stored-metadata-body table,
   // read the first time a site of that object serves a hop, or (#24677) when
   // the walk reaches the object's fields, whichever comes first — never before
@@ -2605,13 +2713,19 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     outcome: NullGuardOutcome = 'fail-closed',
     // [#29026] A flow's flattened bare names and its start condition's proofs.
     scope: Pick<NullGuardOptions, 'bareFields' | 'presumed'> = {},
+    // [#33246] At a runtime door, leave out an ordering comparison over a
+    // platform-stamped column ({@link isStampedComparisonFinding}). A caller
+    // whose predicate can run before the stamp passes `false`.
+    { stampedComparisons = true }: { stampedComparisons?: boolean } = {},
   ): void => {
     if (!objectName) return;
     const nullableFields = nullableIndex.get(objectName);
     if (!nullableFields || nullableFields.size === 0) return;
     const source = celSourceOf(raw);
     if (!source) return;
+    const stamped = stampedComparisons ? platformStampedIndex.get(objectName) : undefined;
     for (const finding of findUnguardedNullableOperands(source, { nullableFields, ...scope })) {
+      if (isStampedComparisonFinding(stamped, finding)) continue;
       issues.push({
         where,
         message: nullGuardMessage(subject, objectName, finding, outcome),
@@ -4321,6 +4435,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // run on every record (or never) instead of the intended subset.
   for (const hook of objectWrite ? [] : recordsOf(stack.hooks)) {
     const hookName = (hook.name as string) ?? '?';
+    // [#33246] Only a hook whose every event reads a stamped stored row may
+    // leave out an ordering over `created_at` / `updated_at`
+    // ({@link hookReadsStampedRow}): not on `beforeInsert`, `beforeFind` or
+    // `afterFind`.
+    const stampedComparisons = hookReadsStampedRow(hook.events);
     if (typeof hook.object === 'string') {
       check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record', undefined, undefined, undefined, undefined, faultOutcomeOf({ kind: 'hook condition' }));
       // #4763 — the third instance the issue found lived on exactly this path.
@@ -4329,6 +4448,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         `hook '${hookName}' condition`,
         hook.condition,
         hook.object,
+        undefined,
+        undefined,
+        { stampedComparisons },
       );
       continue;
     }
@@ -4361,6 +4483,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         `hook '${hookName}' condition`,
         hook.condition,
         target,
+        undefined,
+        undefined,
+        { stampedComparisons },
       );
       for (let i = mark; i < issues.length; i++) {
         const issue = issues[i];

@@ -57,11 +57,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { parseFilterAST } from '@objectstack/spec/data';
 import {
   ObjectStackAdapter,
-  clearSharedDiscoveryCache,
   isMalformedFilterError,
   AnalyticsKeysOnSpecShapeError,
   UnloweredAggregateWhereError,
 } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 /** Rows the spec-shape door answers with, so nothing degrades to a fallback. */
 const QUERY_ROWS = { success: true, data: { object: 'opportunity', records: [{ stage: 'won', n: 2 }], total: 1 } };

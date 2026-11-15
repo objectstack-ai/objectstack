@@ -53,7 +53,9 @@ export const zhCN: TranslationData = {
         days_overdue: { label: '逾期天数', help: '距截止日期已过的整天数;未逾期或未设置截止日期时为 0' },
         reminder_date: { label: '提醒日期/时间' },
         completed_date: { label: '完成日期' },
-        owner: { label: '负责人' },
+        // Not 负责人: a zh-CN reader is served that for the platform's `owner_id`
+        // on this object too (`field-label-duplicate`).
+        owner: { label: '处理人' },
         tags: {
           label: '标签',
           options: {
@@ -104,7 +106,7 @@ export const zhCN: TranslationData = {
   reports: {
     todo_tasks_by_status: { label: '按状态统计任务', description: '按状态分组的任务汇总' },
     todo_tasks_by_priority: { label: '按优先级统计任务', description: '按优先级分组的任务汇总' },
-    todo_tasks_by_owner: { label: '按负责人统计任务', description: '按负责人汇总的任务' },
+    todo_tasks_by_owner: { label: '按处理人统计任务', description: '按处理人汇总的任务' },
     todo_completed_tasks: { label: '已完成任务', description: '所有已完成任务及其工时记录' },
     todo_time_tracking: { label: '工时跟踪报表', description: '预计工时与实际工时分析' },
   },

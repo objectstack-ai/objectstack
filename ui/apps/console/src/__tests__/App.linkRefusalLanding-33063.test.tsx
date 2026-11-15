@@ -210,3 +210,61 @@ describe('a signed-in person whose link was refused for an email mismatch is tol
     expect(sessionStorage.getItem(LINK_REFUSAL_STORAGE_KEY)).toBeNull();
   });
 });
+
+/**
+ * objectstack#33498 — better-auth's two other refusals of a signed-in link
+ * (`linkOAuthAccount`, `oauth2/link-account.mjs`) travel the same way, each
+ * with its own sentence: `account_already_linked_to_different_user` (the
+ * provider account belongs to another user here) and `unable_to_link_account`
+ * (chiefly an untrusted provider that did not assert the email as verified).
+ */
+describe('the other two link refusals are told where the signed-in person lands (objectstack#33498)', () => {
+  const SENTENCES = {
+    account_already_linked_to_different_user: {
+      en: en.auth.login.errors.linkAlreadyLinkedToOtherUser,
+      'zh-Hans': zh.auth.login.errors.linkAlreadyLinkedToOtherUser,
+    },
+    unable_to_link_account: {
+      en: en.auth.login.errors.linkUnableToLink,
+      'zh-Hans': zh.auth.login.errors.linkUnableToLink,
+    },
+    email_does_not_match: { en: EN_SENTENCE, 'zh-Hans': ZH_SENTENCE },
+  } as const;
+
+  it('each code has a sentence of its own, in each language', () => {
+    for (const language of ['en', 'zh-Hans'] as const) {
+      const shown = Object.values(SENTENCES).map((s) => s[language]);
+      for (const sentence of shown) expect(typeof sentence).toBe('string');
+      expect(new Set(shown).size).toBe(shown.length);
+    }
+  });
+
+  it.each([
+    ['account_already_linked_to_different_user', 'en'],
+    ['account_already_linked_to_different_user', 'zh-Hans'],
+    ['unable_to_link_account', 'en'],
+    ['unable_to_link_account', 'zh-Hans'],
+    // CONTROL: the first link refusal keeps its own sentence beside the new ones.
+    ['email_does_not_match', 'en'],
+    ['email_does_not_match', 'zh-Hans'],
+  ] as const)('%s under %s: the landing page shows that code’s sentence, and nothing the URL carried', async (code, language) => {
+    const landed = await arriveSignedIn(
+      `?error=${code}&error_description=${encodeURIComponent('bob@example.com already owns it')}`,
+      language,
+    );
+    expect(landed).toBe('/');
+
+    const notice = await screen.findByTestId('link-refusal-notice', undefined, { timeout: 3000 });
+    expect(notice.textContent).toBe(SENTENCES[code][language]);
+    expect(document.body.textContent).not.toContain('bob@example.com');
+    expect(sessionStorage.getItem(LINK_REFUSAL_STORAGE_KEY)).toBeNull();
+  });
+
+  it('CONTROL: a vendor callback code that is not a link refusal still shows nothing new', async () => {
+    const landed = await arriveSignedIn('?error=email_not_found');
+    expect(landed).toBe('/');
+    await settle();
+    expect(screen.queryByTestId('link-refusal-notice')).toBeNull();
+    expect(sessionStorage.getItem(LINK_REFUSAL_STORAGE_KEY)).toBeNull();
+  });
+});

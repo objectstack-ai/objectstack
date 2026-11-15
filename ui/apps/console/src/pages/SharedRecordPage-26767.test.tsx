@@ -12,7 +12,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { formatDate } from '@object-ui/core';
 import { I18nProvider } from '@object-ui/i18n';
@@ -115,15 +115,11 @@ describe('SharedRecordPage — a shared non-chat record renders as read-only row
     expect(valueOf('Founded On')).toBe(formatDate('2026-03-15', undefined, { locale: 'en' }));
     expect(valueOf('Founded On')).not.toBe('2026-03-15');
     expect(valueOf('Parent Id')).toBe('—');
-    expect(valueOf('Created At')).not.toContain('T03:04:05');
 
-    // Exactly the keys the record carried: no row is added, none is dropped.
-    expect(container.querySelectorAll('dt')).toHaveLength(Object.keys(ACCOUNT).length);
-    // System fields are shown, ordered after the business fields.
-    const system = screen.getByTestId('shared-record-system-fields');
-    expect(within(system).getByText('Id', { selector: 'dt' })).toBeInTheDocument();
-    expect(within(system).getByText('Created At', { selector: 'dt' })).toBeInTheDocument();
-    expect(within(system).queryByText('Name', { selector: 'dt' })).toBeNull();
+    // The keys the record carried, minus the record page's system and audit
+    // columns (objectstack#33346): no row is added, and `created_at` is not listed.
+    expect(container.querySelectorAll('dt')).toHaveLength(Object.keys(ACCOUNT).length - 1);
+    expect(screen.queryByText('Created At', { selector: 'dt' })).toBeNull();
   });
 
   it('a nested value renders as text, never as [object Object] or JSON', async () => {
