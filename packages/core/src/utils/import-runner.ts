@@ -1,11 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { randomUUID } from 'node:crypto';
-import { coerceRow, type CoerceContext, type RefResolver, type RefMatch } from './import-coerce.js';
+import { coerceRow, type CoerceContext, type ReferenceMaster, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './import-field-meta.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
 import {
-  canServeApiOperation, isMultiValueField, isUniqueDeclared, isVirtualSearchField, resolveDisplayField, STRUCTURED_JSON_TYPES,
+  canServeApiOperation, isMultiValueField, isUniqueDeclared, isVirtualSearchField, referenceTargetOf, resolveDisplayField,
+  STRUCTURED_JSON_TYPES,
   type DisplayNameObjectMeta, type DroppedFieldsEvent, type EnableLike, type SearchFieldMeta,
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -674,7 +675,30 @@ async function servesReferenceTarget(p: ImportProtocolLike, target: string): Pro
     titleField: resolveDisplayField(item),
     fields,
     uniqueFields: Object.keys(fields ?? {}).filter((f) => isUniqueReferenceField(fields?.[f])),
+    masters: mastersOf(fields),
   };
+}
+
+/**
+ * [#33523] The `master_detail` fields of a lookup target's declaration, each
+ * with the master object the spec's one arbiter `referenceTargetOf` names. A
+ * field whose master cannot be read is left out: it scopes nothing.
+ */
+function mastersOf(fields: ServedReferenceTarget['fields']): ReferenceMaster[] {
+  const out: ReferenceMaster[] = [];
+  for (const [field, def] of Object.entries(fields ?? {})) {
+    if (!def || typeof def !== 'object' || def.type !== 'master_detail') continue;
+    const carrier = (def as { reference?: unknown }).reference;
+    if (carrier != null && typeof carrier !== 'string') continue;
+    let reference: string | undefined;
+    try {
+      reference = referenceTargetOf(def);
+    } catch {
+      continue;
+    }
+    if (reference) out.push({ field, reference });
+  }
+  return out;
 }
 
 /**
@@ -766,6 +790,12 @@ interface ServedReferenceTarget {
    * written before a record's title changed still resolves by its autonumber.
    */
   uniqueFields?: readonly string[];
+  /**
+   * [#33523] The target's `master_detail` fields and the master each points
+   * at: a cell naming a detail is resolved within the master the same row
+   * sets (`referenceScopeSources` in `import-coerce.ts`).
+   */
+  masters?: readonly ReferenceMaster[];
 }
 
 /** Upper bound on rows in one createManyData batch (framework#2678 suggests 100-500). */
@@ -909,12 +939,19 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   // target's exposure is asked first, once per target per import (#22739).
   const refCache = new Map<string, RefMatch>();
   const servedTargets = new Map<string, Promise<ServedReferenceTarget | null>>();
-  const resolveRef: RefResolver = async (referenceObject, display, meta) => {
+  const servedTarget = (referenceObject: string): Promise<ServedReferenceTarget | null> => {
     let served = servedTargets.get(referenceObject);
     if (!served) servedTargets.set(referenceObject, served = servesReferenceTarget(p, referenceObject));
-    const target = await served;
+    return served;
+  };
+  const resolveRef: RefResolver = async (referenceObject, display, meta, scope) => {
+    const target = await servedTarget(referenceObject);
     if (!target) return {};
-    const cacheKey = `${referenceObject}::${display}`;
+    // [#33523] A scoped lookup is a different question from the unscoped one:
+    // the same name can be one record under one master and none under another.
+    const cacheKey = scope
+      ? `${referenceObject}::${display}::${JSON.stringify(Object.entries(scope).sort(([a], [b]) => a.localeCompare(b)))}`
+      : `${referenceObject}::${display}`;
     const cached = refCache.get(cacheKey);
     if (cached) return cached;
     // Try an exact id first (authoritative + unique when the user pasted an id),
@@ -939,14 +976,19 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       ...(target.titleField ? [target.titleField] : []),
       'name', 'title', 'label', 'full_name', 'email', 'username',
       ...(target.uniqueFields ?? []),
-    ])].filter((f) => !isVirtualSearchField(target.fields?.[f]));
+    ])].filter((f) => !isVirtualSearchField(target.fields?.[f]))
+      // A field the scope already fixes is no candidate: it cannot equal both.
+      .filter((f) => !scope || !Object.prototype.hasOwnProperty.call(scope, f));
     const lookup = async (): Promise<RefMatch> => {
       let match: RefMatch = {};
       for (const f of candidates) {
         try {
           const r = await p.findData(findArgsBase({
             object: referenceObject,
-            query: { object: referenceObject, where: { [f]: display }, limit: 2 },
+            // [#33523] The scope (the row's own master) narrows every
+            // candidate, so a tie and a miss are judged inside it. It is only
+            // more conditions on the same read, run as the same caller.
+            query: { object: referenceObject, where: { [f]: display, ...(scope ?? {}) }, limit: 2 },
           }));
           const recs = findRows(r);
           if (recs.length === 0) continue;
@@ -1013,6 +1055,9 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   // grouped by below is the value its own coercion produces.
   const coerceCtx: CoerceContext = {
     trimWhitespace, nullValues, createMissingOptions, resolveRef,
+    // [#33523] A target the caller may not read answers no masters, as it
+    // answers no records.
+    referenceMasters: async (referenceObject) => (await servedTarget(referenceObject))?.masters ?? [],
     // Cell-coercion failures land in the same row report as the engine's
     // validation errors, so they speak the same language (#3957).
     locale: context?.locale, translate: messageTranslator,
@@ -1054,7 +1099,9 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       for (const f of keyColumns) if (Object.prototype.hasOwnProperty.call(rows[i], f)) cells[f] = rows[i][f];
       let data: Record<string, unknown>;
       try {
-        const coerced = await coerceRow(cells, metaMap, coerceCtx);
+        // The whole row is the scope source: a key column naming a detail is
+        // resolved within the row's master exactly as the row's own pass does.
+        const coerced = await coerceRow(cells, metaMap, coerceCtx, rows[i]);
         if (coerced.errors.length > 0) continue;
         data = coerced.data;
       } catch { continue; /* the row's own pass reports the throw */ }

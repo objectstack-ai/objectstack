@@ -98,12 +98,51 @@ export interface RefMatch {
  * hit, or `{ ambiguous: true }` when several records share the value. Legacy
  * resolvers that return `string | undefined` keep working. Implementations are
  * expected to cache — the same name shows up on many rows.
+ *
+ * `scope`, when given, is a set of equalities on the TARGET's fields that every
+ * candidate must also satisfy: the row's own master (see
+ * {@link ReferenceScopeSource}). A match, a tie and a miss are all judged
+ * inside it, so a cache keyed by the display value alone must key by the scope
+ * too.
  */
 export type RefResolver = (
   referenceObject: string,
   displayValue: string,
   meta: ExportFieldMeta,
+  scope?: Readonly<Record<string, unknown>>,
 ) => Promise<string | undefined | RefMatch>;
+
+/**
+ * A `master_detail` field of a lookup's TARGET: the target field (`field`) and
+ * the master object it points at (`reference`).
+ */
+export interface ReferenceMaster {
+  field: string;
+  reference: string;
+}
+
+/**
+ * One equality a reference cell's lookup is scoped by: the target field
+ * (`param`) must equal the value the same row's `field` column coerced to.
+ */
+export interface ReferenceScopeSource {
+  field: string;
+  param: string;
+}
+
+/**
+ * Ask the resolver, passing a scope only when there is one, so an unscoped
+ * lookup calls a resolver exactly as it always has.
+ */
+function resolveScoped(
+  resolveRef: RefResolver,
+  referenceObject: string,
+  display: string,
+  meta: ExportFieldMeta,
+  scope: Readonly<Record<string, unknown>> | undefined,
+): Promise<string | undefined | RefMatch> {
+  return scope ? resolveRef(referenceObject, display, meta, scope) : resolveRef(referenceObject, display, meta);
+}
 
 /** Normalise a resolver result (legacy string or structured) to a RefMatch. */
 function normalizeRefMatch(result: string | undefined | RefMatch): RefMatch {
@@ -128,6 +167,13 @@ export interface CoerceContext {
   createMissingOptions?: boolean;
   /** Async reference resolver (name/email/id → record id). Optional. */
   resolveRef?: RefResolver;
+  /**
+   * The `master_detail` fields a lookup target declares. With it, a reference
+   * cell whose target is the detail of a master the SAME row also sets is
+   * resolved within that master's records ({@link referenceScopeSources}).
+   * Absent → only a field's own `dependsOn` scopes a lookup.
+   */
+  referenceMasters?: (referenceObject: string) => Promise<readonly ReferenceMaster[]>;
   /**
    * Locale of the importing principal (`ExecutionContext.locale`). Cell-coercion
    * failures land in the same row report as the engine's validation errors, so
@@ -711,6 +757,7 @@ export async function coerceFieldValue(
   raw: unknown,
   meta: ExportFieldMeta | undefined,
   ctx: CoerceContext,
+  scope?: Readonly<Record<string, unknown>>,
 ): Promise<{ value?: unknown; keptOptionValues?: string[] } | { error: FieldCoerceError }> {
   const trim = ctx.trimWhitespace !== false;
   const field = meta?.name ?? '';
@@ -797,7 +844,7 @@ export async function coerceFieldValue(
       if (!ctx.resolveRef || !meta.reference) return { value: tokens };
       const out: unknown[] = [];
       for (const token of tokens) {
-        const m = normalizeRefMatch(await ctx.resolveRef(meta.reference, token, meta));
+        const m = normalizeRefMatch(await resolveScoped(ctx.resolveRef, meta.reference, token, meta, scope));
         if (m.ambiguous) {
           return coerceError(meta, field, 'reference_ambiguous', 'import_reference_ambiguous', token, ctx);
         }
@@ -813,7 +860,7 @@ export async function coerceFieldValue(
     // no target object, store the raw value and let referential integrity be
     // enforced downstream.
     if (!ctx.resolveRef || !meta?.reference) return { value: display };
-    const match = normalizeRefMatch(await ctx.resolveRef(meta.reference, display, meta));
+    const match = normalizeRefMatch(await resolveScoped(ctx.resolveRef, meta.reference, display, meta, scope));
     if (match.ambiguous) {
       return coerceError(meta, field, 'reference_ambiguous', 'import_reference_ambiguous', display, ctx);
     }
@@ -861,15 +908,85 @@ export async function coerceFieldValue(
 // the mirror must not silently retire its coverage.
 
 /**
+ * [#33523] The equalities a reference column's lookup is scoped by on this
+ * row, or none. A detail's name is unique only inside its master, so a cell
+ * naming one is resolved within the master the same row sets, and a tie or a
+ * miss is judged there too, as the record picker narrows its candidates:
+ *
+ * 1. The field's own `dependsOn`: each sibling the row sets scopes the target
+ *    field it names (`param`), the filter the picker applies.
+ * 2. A `master_detail` field the TARGET declares
+ *    ({@link CoerceContext.referenceMasters}), when exactly one other
+ *    single-value reference column of the row points at that master and the
+ *    row sets it. Two such columns (a bill-to and a ship-to account) do not say
+ *    which one is the master, so neither scopes; `dependsOn` says it.
+ *
+ * A row that sets no such column has no scope, and its cell is resolved across
+ * the whole target as before. Nothing here widens a lookup: a scope only adds
+ * conditions to the caller's own read.
+ */
+export async function referenceScopeSources(
+  key: string,
+  meta: ExportFieldMeta | undefined,
+  row: Record<string, unknown>,
+  metaMap: ReadonlyMap<string, ExportFieldMeta>,
+  ctx: CoerceContext,
+): Promise<ReferenceScopeSource[]> {
+  if (!ctx.resolveRef || !meta?.reference || !meta.type || !REFERENCE_TYPES.has(meta.type)) return [];
+  const sets = (f: string): boolean =>
+    f !== key && Object.prototype.hasOwnProperty.call(row, f) && !isBlank(row[f], ctx.nullValues);
+  const out: ReferenceScopeSource[] = [];
+  const params = new Set<string>();
+  for (const d of meta.dependsOn ?? []) {
+    if (!sets(d.field) || params.has(d.param)) continue;
+    out.push({ field: d.field, param: d.param });
+    params.add(d.param);
+  }
+  if (ctx.referenceMasters) {
+    for (const master of await ctx.referenceMasters(meta.reference)) {
+      if (params.has(master.field)) continue;
+      const columns: string[] = [];
+      for (const [column, m] of metaMap) {
+        if (m.reference !== master.reference || !m.type || !REFERENCE_TYPES.has(m.type)) continue;
+        if (isMultiValueField(m) || !sets(column)) continue;
+        columns.push(column);
+      }
+      if (columns.length !== 1) continue;
+      out.push({ field: columns[0], param: master.field });
+      params.add(master.field);
+    }
+  }
+  return out;
+}
+
+type CoerceOutcome = Awaited<ReturnType<typeof coerceFieldValue>>;
+
+/** A scope value is the one scalar a source column coerced to, else none. */
+function scopeValueOf(res: CoerceOutcome): unknown {
+  if ('error' in res) return undefined;
+  const v = res.value;
+  return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? v : undefined;
+}
+
+/**
  * Coerce a whole raw row into a storage-ready record. Unknown columns (no
  * matching field metadata) pass through untouched so ad-hoc / schemaless
  * objects still import. Collects every field error rather than stopping at the
  * first, so a UI can show all problems in a row at once.
+ *
+ * [#33523] A reference column scoped by other columns of the row
+ * ({@link referenceScopeSources}) is coerced after them, with their coerced
+ * values as its scope. A source column that fails or coerces to no single
+ * value scopes nothing, and columns scoped by each other in a cycle resolve
+ * unscoped. `sourceRow` is the whole row the scope is read from when `rawRow`
+ * holds only some of its columns (the match-key pass); a source column outside
+ * `rawRow` is coerced for its value only, never written or reported.
  */
 export async function coerceRow(
   rawRow: Record<string, unknown>,
   metaMap: Map<string, ExportFieldMeta>,
   ctx: CoerceContext,
+  sourceRow: Record<string, unknown> = rawRow,
 ): Promise<{
   data: Record<string, unknown>;
   errors: FieldCoerceError[];
@@ -881,12 +998,46 @@ export async function coerceRow(
    */
   keptOptionValues: Record<string, string[]>;
 }> {
+  const outcomes = new Map<string, CoerceOutcome>();
+  const scoped = new Map<string, ReferenceScopeSource[]>();
+  for (const key of Object.keys(rawRow)) {
+    const sources = await referenceScopeSources(key, metaMap.get(key), sourceRow, metaMap, ctx);
+    if (sources.length > 0) scoped.set(key, sources);
+  }
+  for (const [key, raw] of Object.entries(rawRow)) {
+    if (!scoped.has(key)) outcomes.set(key, await coerceFieldValue(raw, metaMap.get(key), ctx));
+  }
+  if (scoped.size > 0) {
+    const outside = new Map<string, CoerceOutcome>();
+    const sourceValue = async (f: string): Promise<unknown> => {
+      let res = outcomes.get(f) ?? outside.get(f);
+      if (!res) outside.set(f, res = await coerceFieldValue(sourceRow[f], metaMap.get(f), ctx));
+      return scopeValueOf(res);
+    };
+    const settled = (f: string): boolean =>
+      !scoped.has(f) || outcomes.has(f);
+    let pending = [...scoped.keys()];
+    while (pending.length > 0) {
+      const ready = pending.filter((k) => scoped.get(k)!.every((s) => settled(s.field)));
+      for (const key of ready.length > 0 ? ready : pending) {
+        let scope: Record<string, unknown> | undefined;
+        if (ready.length > 0) {
+          for (const s of scoped.get(key)!) {
+            const v = await sourceValue(s.field);
+            if (v !== undefined) (scope ??= {})[s.param] = v;
+          }
+        }
+        outcomes.set(key, await coerceFieldValue(rawRow[key], metaMap.get(key), ctx, scope));
+      }
+      pending = pending.filter((k) => !outcomes.has(k));
+    }
+  }
+
   const data: Record<string, unknown> = {};
   const errors: FieldCoerceError[] = [];
   const keptOptionValues: Record<string, string[]> = {};
-  for (const [key, raw] of Object.entries(rawRow)) {
-    const meta = metaMap.get(key);
-    const res = await coerceFieldValue(raw, meta ? meta : undefined, ctx);
+  for (const key of Object.keys(rawRow)) {
+    const res = outcomes.get(key)!;
     if ('error' in res) {
       // Attribute the error to the column even when metadata was missing.
       errors.push({ ...res.error, field: res.error.field || key });
