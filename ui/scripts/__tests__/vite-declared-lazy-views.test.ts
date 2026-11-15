@@ -254,7 +254,7 @@ describe('EAGER_WALK_CONTROL', () => {
     // means anything while AppContent still imports it outside a `lazy()`.
     expect(fs.existsSync(path.join(REPO_ROOT, EAGER_WALK_CONTROL))).toBe(true);
     const appContent = read(APP_CONTENT_PATH);
-    expect(appContent).toContain("import { ObjectView } from '../views/ObjectView.js';");
+    expect(appContent).toContain("import { ConsoleLayout } from '../layout/ConsoleLayout.js';");
     expect(parseDeclaredLazyViews(appContent)).not.toContain(EAGER_WALK_CONTROL);
   });
 });
