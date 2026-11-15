@@ -207,7 +207,11 @@ const OWNER_PACKAGE = 'com.objectstack.test.activity-lookup-name-field-label';
 const ADA = 'usr_ada_lovelace_000000000000000';
 const GRACE = 'usr_grace_hopper_00000000000000';
 const ALAN = 'usr_alan_turing_000000000000000';
-/** A writer the security layer refuses every `sys_user` read. */
+/**
+ * A writer the security layer refuses any `sys_user` read that asks for the
+ * `name` column (the predicate/projection guard's 403). The engine's own
+ * lookup-integrity read asks for no such column, so the write itself lands.
+ */
 const REFUSED_WRITER = 'usr_refused_writer';
 /** A writer served `sys_user` rows without the `name` column. */
 const NAMELESS_WRITER = 'usr_nameless_writer';
@@ -229,7 +233,8 @@ async function boot() {
   // layer it enforces on: refused outright, and served without the column.
   engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
     const userId = op.context && !op.context.isSystem ? op.context.userId : undefined;
-    if (op.operation === 'find' && userId === REFUSED_WRITER) {
+    const projected: unknown = op.ast?.fields ?? op.options?.fields;
+    if (op.operation === 'find' && userId === REFUSED_WRITER && Array.isArray(projected) && projected.includes('name')) {
       throw Object.assign(new Error('PERMISSION_DENIED: no read on sys_user'), { code: 'PERMISSION_DENIED', status: 403 });
     }
     await next();
@@ -295,13 +300,14 @@ describe('an object whose nameField is a lookup is named by the target record\'s
     expect(row.record_label).toBe('Grace Hopper, Alan Turing');
   });
 
-  it('an id the target has no row for keeps the stored value', async () => {
+  it('a target row whose title is blank keeps the stored value', async () => {
     const { engine, storeFor } = await boot();
+    await engine.insert('sys_user', { id: 'usr_blank_name', name: '   ', email: 'blank@example.com' });
 
-    await engine.insert('ln_member', { id: 'm2', person: 'usr_gone', rate: 1 }, as(ADA) as any);
+    await engine.insert('ln_member', { id: 'm2', person: 'usr_blank_name', rate: 1 }, as(ADA) as any);
 
     const [row] = activityFor(storeFor, 'm2');
-    expect(row.record_label).toBe('usr_gone');
+    expect(row.record_label).toBe('usr_blank_name');
   });
 });
 
@@ -346,13 +352,14 @@ describe('the title is read as the writer: no label names a title the writer cou
 
   it('a target whose declared exposure serves no get is never read for a label', async () => {
     const { engine, storeFor, queriesOf } = await boot();
-    const before = queriesOf('ln_private_code').length;
+    const titleReads = () => queriesOf('ln_private_code').filter(isTitleRead).length;
+    const before = titleReads();
 
     await engine.insert('ln_coded', { id: 'k1', code: 'code_1' }, as(ADA) as any);
 
     const [row] = activityFor(storeFor, 'k1');
     expect(row.record_label).toBe('code_1');
-    expect(queriesOf('ln_private_code').length - before).toBe(0);
+    expect(titleReads() - before).toBe(0);
   });
 });
 
@@ -381,11 +388,12 @@ describe('the label costs one batched read of the target per write', () => {
 
   it('control: an object titled by a text field reads nothing for its label, a lookup field beside it included', async () => {
     const { engine, queriesOf } = await boot();
-    const before = queriesOf('sys_user').length;
+    const titleReads = () => queriesOf('sys_user').filter(isTitleRead).length;
+    const before = titleReads();
 
     await engine.insert('ln_plain', { id: 'r3', title: 'Plain One', owner: GRACE }, { context: { isSystem: true } } as any);
     await engine.update('ln_plain', { title: 'Plain Two' }, { where: { id: 'r3' }, context: { isSystem: true } } as any);
 
-    expect(queriesOf('sys_user').length - before).toBe(0);
+    expect(titleReads() - before).toBe(0);
   });
 });
