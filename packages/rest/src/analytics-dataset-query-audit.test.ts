@@ -13,6 +13,10 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
+// The server under test reaches `@objectstack/objectql` only through a dynamic
+// import inside a handler, so this module-top import pays that module graph's
+// load during collection rather than inside a case's clocked window.
+import '@objectstack/objectql';
 
 function mockServer() {
   return {
