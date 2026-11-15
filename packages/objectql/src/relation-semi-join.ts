@@ -187,9 +187,11 @@ const plannedScopes = new WeakMap<object, PlannedRelationScope>();
  * answered without the driver, or that added rows after it, is a read the
  * planned `where` does not describe. A middleware that reshapes the rows
  * (the field mask maps each row to a masked copy) changes no id and is not
- * one; a middleware that removes rows after the driver call is an
- * object-scoped read middleware, and ADR-0139 D5.2 knows one by the object it
- * is registered for ({@link relationSemiJoinServes} keeps the id read for it).
+ * one. A read rule that narrows the related object's rows after its driver
+ * call bounds a relation condition only when it is registered for that
+ * object, as ADR-0139 D5.2 bounds a `ReadableIds` parent: an object-keyed
+ * middleware or an `afterFind` hook, for which {@link relationSemiJoinServes}
+ * keeps the id read.
  */
 export async function planRelationSemiJoinLeaf(
   target: string,

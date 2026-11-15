@@ -578,18 +578,20 @@ for (const cell of CELLS) {
 
       it('the other direction — a tenant-scoped ticket on a grid that is no tenant\'s: tenant B\'s ticket, the two-step route\'s answer, the grid read dispatched once', async () => {
         const grids = { n: 0 };
-        engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
-          if (opCtx.object === TEN_GRID && opCtx.operation === 'find') grids.n += 1;
-          return next();
-        });
-        const idsAs = async (object: string, where: FilterCondition) =>
-          (await engine.find(object, { where, fields: ['id'], context: CALLER_B })).map((r: any) => r.id).sort();
-        const got = await idsAs(TEN_TICKET, { grid: { name: 'NA' } });
-        expect(got).toEqual(['tt_b']);
-        // Decided from the registry before planning: one dispatch of the grid read.
-        expect(grids.n).toBe(1);
-        expect(got, 'two-step parity').toEqual(await idsAs(TEN_TICKET, { grid: { $in: await idsAs(TEN_GRID, { name: 'NA' }) } }));
-        expect(await engine.count(TEN_TICKET, { where: { grid: { name: 'NA' } }, context: CALLER_B }), 'count').toBe(1);
+        const packageId = 'test.ten-grid-dispatch';
+        engine.registerHook('beforeFind', async () => { grids.n += 1; }, { object: TEN_GRID, packageId });
+        try {
+          const idsAs = async (object: string, where: FilterCondition) =>
+            (await engine.find(object, { where, fields: ['id'], context: CALLER_B })).map((r: any) => r.id).sort();
+          const got = await idsAs(TEN_TICKET, { grid: { name: 'NA' } });
+          expect(got).toEqual(['tt_b']);
+          // Decided from the registry before planning: one dispatch of the grid read.
+          expect(grids.n).toBe(1);
+          expect(got, 'two-step parity').toEqual(await idsAs(TEN_TICKET, { grid: { $in: await idsAs(TEN_GRID, { name: 'NA' }) } }));
+          expect(await engine.count(TEN_TICKET, { where: { grid: { name: 'NA' } }, context: CALLER_B }), 'count').toBe(1);
+        } finally {
+          engine.unregisterHooksByPackage(packageId);
+        }
       });
 
       it('a read rule the region applies after its driver call gives the two-step route\'s answer', async () => {

@@ -729,6 +729,10 @@ A hop that falls back after planning (a middleware answering the related read, o
 options only the request decides) dispatches the related read twice: its middleware chain
 and `beforeFind` hooks run for the planned read and again for the id read.
 
+A read rule that narrows a related object's rows after its driver call bounds a relation
+condition on that object only when it is registered for that object — as an object-keyed
+middleware or an `afterFind` hook; registered that way, the hop keeps the id read.
+
 - **Every verb that takes a `where`** serves it — `find`, `findOne`, `count`,
   `aggregate`, `update` and `delete` — and so do the REST `GET /data/:object` and
   `POST /data/:object/query` doors, which read through the same engine calls. A

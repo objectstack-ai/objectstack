@@ -222,6 +222,10 @@ single-valued relation on a read verb in each of these cases:
   boundary otherwise;
 - a related read that a middleware answers itself (or adds rows to after the driver call).
 
+A read rule that narrows a related object's rows after its driver call bounds a relation
+condition on that object only when it is registered for that object — as an object-keyed
+middleware or an `afterFind` hook; registered that way, the hop keeps the id read.
+
 A hop that falls back after planning (a middleware answering the related read, or driver
 options only the request decides) dispatches the related read twice: its middleware chain and `beforeFind` hooks run for the
 planned read and again for the id read. Past the cap, run the two steps yourself — filter
