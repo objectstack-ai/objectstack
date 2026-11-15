@@ -772,7 +772,7 @@ describe('feature-gate lowering matrix (#2874)', () => {
     // The rest of the platform-admin family. Three carry no feature gate, so
     // the authored predicate is served as written — no lowering — and is
     // pinned here anyway, beside add_member, so every member has its row.
-    ['SysUser', SysUser, 'set_user_manager', `${STANDING} && has(record.source) && record.source != "idp_provisioned"`],
+    ['SysUser', SysUser, 'set_user_manager', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'register_sso_provider', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'register_saml_provider', STANDING],
     ['SysSsoProvider', SysSsoProvider, 'request_domain_verification', STANDING],
@@ -786,7 +786,7 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysMember', SysMember, 'transfer_ownership', `((has(record.role) && record.role != 'owner') && ${OWNER}) && ${ORG}`],
     ['SysInvitation', SysInvitation, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     ['SysInvitation', SysInvitation, 'cancel_invitation', `${ADMINS} && ${ORG}`],
-    ['SysInvitation', SysInvitation, 'resend_invitation', `${INVITE} && ${ORG}`],
+    ['SysInvitation', SysInvitation, 'resend_invitation', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     ['SysTeam', SysTeam, 'create_team', `${ADMINS} && ${ORG}`],
     ['SysTeam', SysTeam, 'update_team', `${ADMINS} && ${ORG}`],
     ['SysTeam', SysTeam, 'remove_team', `${ADMINS} && ${ORG}`],
@@ -798,8 +798,10 @@ describe('feature-gate lowering matrix (#2874)', () => {
     // Their doors are platform-admin gated, so the standing leads.
     // The three also read the row's state after the standing (the
     // evaluated truth tables are `identity/action-state-visibility.test.ts`).
-    ['SysUser', SysUser, 'ban_user', `(${STANDING} && has(record.banned) && record.banned != true) && features.admin == true`],
-    ['SysUser', SysUser, 'unban_user', `(${STANDING} && has(record.banned) && record.banned == true) && features.admin == true`],
+    // Ban / Unban carry no `admin` gate: their doors work without the plugin,
+    // so nothing is lowered onto the hand-written predicate.
+    ['SysUser', SysUser, 'ban_user', `${STANDING} && has(record.banned) && record.banned != true`],
+    ['SysUser', SysUser, 'unban_user', `${STANDING} && has(record.banned) && record.banned == true`],
     ['SysUser', SysUser, 'unlock_user', `(${STANDING} && ((has(record.locked_until) && record.locked_until != null) || (has(record.two_factor_enabled) && record.two_factor_enabled == true))) && features.admin == true`],
     ['SysUser', SysUser, 'set_user_password', `(${STANDING} && ${MANAGED}) && features.admin == true`],
     ['SysUser', SysUser, 'impersonate_user', `(${STANDING}) && features.admin == true`],
