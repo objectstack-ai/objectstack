@@ -363,6 +363,11 @@
  * clears only when it carries exactly ONE `VERDICT:` line and that line reads
  * PASS (`recordPassVerdict`, the fleet reader's counting form
  * `contractReviewVerdictLines`); FAIL, none or two refuse, naming the comment.
+ * Since card #33604 that PASS must also be clean, read by the same record
+ * reader (`contractReviewRecordReading`): a FAIL spelled anywhere else on the
+ * comment, a must-fix or should-fix it names (owed a delta review, so the
+ * later same-head record that closes them clears), or a grade it cannot
+ * attribute refuses — the guard decides, not the seat's pre-landing check.
  * And only a comment posted by the relay's identity or an account in
  * `GOVERNED_APPROVERS` is read at all (`recordAuthorTrusted`): any other
  * author's comment is dropped before the locator sees the thread — ignored,
@@ -981,13 +986,14 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
       reviewFace: tier?.reviewFace,
       threads: tier?.REVIEW_OF_RECORD_THREADS,
       location: tier?.REVIEW_OF_RECORD_LOCATION,
-      // Every `VERDICT:` line of a record (#33541): a Tier S entry lands on exactly one, reading PASS.
-      verdictLines: tier?.contractReviewVerdictLines,
+      // The record's whole reading (#33541, #33604): its `VERDICT:` lines, its FAIL spellings and its
+      // must-fix / should-fix grades — a Tier S entry lands on one PASS line, no FAIL, no open grade.
+      reading: tier?.contractReviewRecordReading,
       // Who may post a record (#33541): the relay's identity and the authorized approvers, nobody else.
       trustedAuthors: typeof bot === 'string' && bot !== '' ? Object.freeze([bot, ...GOVERNED_APPROVERS]) : null,
     };
     const missing = [
-      ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace', 'verdictLines'].filter((key) => typeof found[key] !== 'function'),
+      ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace', 'reading'].filter((key) => typeof found[key] !== 'function'),
       ...(found.trustedAuthors === null ? [`trustedAuthors (FLEET_BOT_LOGIN from ${RECOGNISER_SOURCES.author})`] : []),
       ...(Array.isArray(found.threads) && found.threads.length > 0 ? [] : ['threads']),
       ...(typeof found.location === 'string' && found.location.length > 0 ? [] : ['location']),
@@ -2068,8 +2074,8 @@ export function landsOnLowRiskArm(entry) {
  * The record leg's VERDICT, on every Tier S entry (card #33541; AGENTS.md
  * Prime Directive 14 lands Tier S on "a PASS verdict"): a record that STANDS
  * must also READ PASS. Read off the SAME comment the locator chose, with the
- * fleet's verdict reader in its counting form (`contractReviewVerdictLines`,
- * `check-half-states.mjs`, re-exported by the recognisers — one regex with
+ * fleet's one record reader (`contractReviewRecordReading`,
+ * `check-half-states.mjs`, re-exported by the recognisers — the regexes of
  * `contractReviewVerdictOf`, ⛔ never a second parser): the record carries
  * exactly ONE `VERDICT:` line and it reads PASS. FAIL, no `VERDICT:` line (a
  * heading-inline or bare word alone included), two such lines (a quoted
@@ -2077,21 +2083,44 @@ export function landsOnLowRiskArm(entry) {
  * rows, or no reader loaded — each is `not-pass`, a refusal naming the
  * comment id. Several same-head records: the locator's newest one is the one
  * read, so a later FAIL withdraws an earlier PASS and a later PASS supersedes
- * an earlier FAIL. Pure.
+ * an earlier FAIL.
+ *
+ * ⚖️ And a PASS that is not clean does not clear either (card #33604; the
+ * guard decides, not the seat's pre-landing check): a record that ALSO reads
+ * FAIL anywhere else — its heading, a lower-case or bulleted `verdict:` key, a
+ * bare FAIL line (N2 of record 6890532571) — contradicts itself; a record that
+ * names an open must-fix or should-fix owes a delta review of its fix
+ * (`contract-review.md`), so the LATER same-head record that closes them is
+ * the one that clears; and a grade the reader cannot attribute is unreadable,
+ * which fails closed. Pure.
  */
 export function recordPassVerdict(record, pair, recognisers) {
   if (record?.state !== 'stands') return record;
   const refuse = (verdict, why) => ({ ...record, state: 'not-pass', verdict, verdictReason: why });
-  if (typeof recognisers?.verdictLines !== 'function') return refuse(null, 'the contract-review verdict reader was not loaded');
+  if (typeof recognisers?.reading !== 'function') return refuse(null, 'the contract-review verdict reader was not loaded');
   const rows = (recognisers.threads ?? []).flatMap((thread) => (Array.isArray(pair?.[thread.rows]) ? pair[thread.rows] : []));
   const comment = record.id === null || record.id === undefined ? null : rows.find((r) => r?.id === record.id) ?? null;
   if (comment === null) return refuse(null, 'the record comment was not among the rows read, so its verdict is unknown');
   // The author the binding admitted, carried for the words (the rows reached here are trusted ones only).
   const author = typeof comment.user?.login === 'string' ? comment.user.login : null;
-  const words = recognisers.verdictLines(comment.body);
-  if (words.length === 0) return { ...refuse(null, 'it states no verdict (no `VERDICT:` line under its heading)'), author };
+  const reading = recognisers.reading(comment.body);
+  const words = reading?.verdicts ?? [];
+  if (words.length === 0) return { ...refuse(null, 'it states no verdict (no `VERDICT:` line anywhere in it)'), author };
   if (words.length > 1) return { ...refuse(null, `it states ${words.length} \`VERDICT:\` lines (${words.join(', ')}), and a record states exactly one`), author };
-  return words[0] === 'PASS' ? { ...record, verdict: 'PASS', author } : { ...refuse(words[0], `it reads ${words[0]}`), author };
+  if (words[0] !== 'PASS') return { ...refuse(words[0], `it reads ${words[0]}`), author };
+  // A quoted record line is comment text: flattened (no backtick, pipe or angle bracket survives) and cut.
+  const quote = (line) => `\`${String(line).replace(/[`|<>\r\n]+/g, ' ').slice(0, 80)}\``;
+  const fails = Array.isArray(reading?.failSpellings) ? reading.failSpellings : null;
+  const open = Array.isArray(reading?.findings?.open) ? reading.findings.open : null;
+  const unreadable = Array.isArray(reading?.findings?.unreadable) ? reading.findings.unreadable : null;
+  if (fails === null || open === null || unreadable === null) return { ...refuse(null, 'its FAIL spellings and finding grades could not be read, so it clears nothing'), author };
+  if (fails.length > 0) return { ...refuse(null, `its one \`VERDICT:\` line reads PASS, yet it also reads FAIL (${fails.slice(0, 2).map(quote).join(', ')}), and a record that contradicts itself clears nothing (#33604)`), author };
+  if (open.length > 0) {
+    const named = open.slice(0, 4).map((f) => (f.id ? `${f.id} (${f.grade})` : f.grade)).join(', ');
+    return { ...refuse(null, `it reads PASS but names ${open.length} open must-fix/should-fix finding(s) (${named}${open.length > 4 ? ', …' : ''}): each earns a delta review of its fix, and the later same-head record that closes them is the one that clears (#33604)`), author };
+  }
+  if (unreadable.length > 0) return { ...refuse(null, `it reads PASS but a must-fix/should-fix grade on it cannot be attributed (${unreadable.slice(0, 2).map(quote).join(', ')}): name each finding \`S1 (should-fix)\`, or state \`no should-fix\` (#33604)`), author };
+  return { ...record, verdict: 'PASS', author };
 }
 
 /**
@@ -5520,6 +5549,35 @@ export async function selfTest() {
   assert('⛔ #33541-a-FAIL-AFTER-a-PASS-on-the-same-head-is-REFUSED-the-latest-record-decides', failAfterPass.exitCode === EXIT_REFUSED_UNAPPROVED && failAfterPass.entries[0].record.id === 922 && failAfterPass.entries[0].record.state === 'not-pass', JSON.stringify(failAfterPass.entries[0].record));
   const passAfterFail = await tierRun({ comments: [recordComment({ id: 923, at: '2026-09-13T12:00:00Z', verdictWord: '**VERDICT: FAIL**' })], cardComments: [recordComment({ id: 924, at: '2026-09-13T14:00:00Z' })] });
   assert('#33541-a-PASS-AFTER-a-FAIL-on-the-same-head-CLEARS-across-the-two-threads-the-latest-record-decides', passAfterFail.exitCode === EXIT_CLEAR && passAfterFail.entries[0].record.id === 924 && passAfterFail.entries[0].record.verdict === 'PASS', JSON.stringify(passAfterFail.entries[0].record));
+  {
+    // ⭐ #33604: a PASS that is not clean clears nothing — the guard decides, not the seat's pre-landing check.
+    // Grades in the shapes measured on the records of PRs #33686, #33687, #33688 and #33711 (2026-11-15).
+    const graded = (prose, extra = {}) => tierRun({ comments: [recordComment({ prose, ...extra })] });
+    const openShould = await graded(['', '### ④ Design judgment', '', 'No must-fix. Two should-fix, both owing a delta review.', '', '**S1 (should-fix) — a landing the maintainer cleared is reported as a BREACH.**', '- **S2 (should-fix) — two knocks have no row.**', '- **N1 (nit) — wording.**']);
+    assert('⛔ #33604-a-same-head-PASS-record-naming-an-OPEN-should-fix-is-REFUSED-naming-the-findings', openShould.exitCode === EXIT_REFUSED_UNAPPROVED && openShould.entries[0].record.state === 'not-pass' && openShould.entries[0].record.verdict === null && /comment 900, .*reads PASS but names 2 open must-fix\/should-fix finding\(s\) \(S1 \(should-fix\), S2 \(should-fix\)\)/.test(renderGuardVerdict(openShould)), renderGuardVerdict(openShould));
+    const openMust = await graded(['- must-fix: the arm reads no label.']);
+    assert('⛔ #33604-…and-a-PASS-naming-a-must-fix-unnumbered-under-a-bullet-is-refused-too', openMust.exitCode === EXIT_REFUSED_UNAPPROVED && /names 1 open must-fix\/should-fix finding\(s\) \(must-fix\)/.test(renderGuardVerdict(openMust)), renderGuardVerdict(openMust));
+    const deltaCloses = await tierRun({ comments: [recordComment({ id: 941, at: '2026-09-13T12:00:00Z', prose: ['**S1 (should-fix) — the knock has no key.**'] }), recordComment({ id: 942, at: '2026-09-13T14:00:00Z', prose: ['Delta review.', '- **S1: closed.** Every knock names a key.', 'No must-fix. S1 of record 941 is closed on this head.'] })] });
+    assert('#33604-the-LATER-same-head-delta-record-that-CLOSES-them-CLEARS', deltaCloses.exitCode === EXIT_CLEAR && deltaCloses.entries[0].record.id === 942 && deltaCloses.entries[0].record.verdict === 'PASS', JSON.stringify(deltaCloses.entries[0].record));
+    const deltaRaises = await tierRun({ comments: [recordComment({ id: 943, at: '2026-09-13T12:00:00Z' }), recordComment({ id: 944, at: '2026-09-13T14:00:00Z', prose: ['- **S1: closed.**', '- **S3 (should-fix, the seat\'s, no head change) — the PR body describes round 1.**'] })] });
+    assert('⛔ #33604-a-delta-record-that-raises-a-NEW-should-fix-is-refused-though-an-older-clean-PASS-stands', deltaRaises.exitCode === EXIT_REFUSED_UNAPPROVED && deltaRaises.entries[0].record.id === 944 && /S3 \(should-fix\)/.test(renderGuardVerdict(deltaRaises)), renderGuardVerdict(deltaRaises));
+    const clean = await graded(['Findings: no must-fix, no should-fix.', '- N1 (nit, prose face): the body overstates.', '- nit: the compare is sent first.', 'Nits only; the head is not moved.']);
+    assert('#33604-CONTROL-a-PASS-whose-grades-read-no-must-fix-no-should-fix-and-nits-CLEARS', clean.exitCode === EXIT_CLEAR && clean.entries[0].record.verdict === 'PASS', renderGuardVerdict(clean));
+    const unattributed = await graded(['Two should-fix remain, see the thread.']);
+    assert('⛔ #33604-a-grade-the-reader-cannot-attribute-FAILS-CLOSED', unattributed.exitCode === EXIT_REFUSED_UNAPPROVED && /cannot be attributed \(`Two should-fix remain, see the thread\.`\)/.test(renderGuardVerdict(unattributed)), renderGuardVerdict(unattributed));
+    const unread = await tierRun({ comments: [recordComment()], recognisers: { ...live, reading: () => ({ verdicts: ['PASS'] }) } });
+    assert('⛔ #33604-a-reading-with-no-grades-in-it-FAILS-CLOSED', unread.exitCode === EXIT_REFUSED_UNAPPROVED && /could not be read, so it clears nothing/.test(renderGuardVerdict(unread)), renderGuardVerdict(unread));
+    // ⛔ N2 of record 6890532571: a self-contradicting record never clears beside its one PASS line.
+    const headingFail = await tierRun({ comments: [{ ...recordComment(), body: recordComment().body.replace('## Contract review', '## Contract review (delta) — **FAIL**') }] });
+    assert('⛔ #33604-N2-a-heading-reading-FAIL-above-the-template-PASS-line-is-REFUSED', headingFail.exitCode === EXIT_REFUSED_UNAPPROVED && /yet it also reads FAIL \(`## Contract review \(delta\) — \*\*FAIL\*\*`\)/.test(renderGuardVerdict(headingFail)), renderGuardVerdict(headingFail));
+    const n2Spellings = await Promise.all(['verdict: fail', '- **VERDICT: FAIL**', '**Verdict:** FAIL', '> * Verdict: Fail', 'FAIL', '**FAIL** — the arm reads no label'].map((line) => graded([line])));
+    assert('⛔ #33604-N2-a-FAIL-spelled-outside-the-explicit-regex-lower-case-key-list-bullet-emphasis-bare-is-REFUSED', n2Spellings.every((r) => r.exitCode === EXIT_REFUSED_UNAPPROVED && /yet it also reads FAIL/.test(renderGuardVerdict(r))), n2Spellings.map((r) => r.entries[0].record.verdictReason).join(' | '));
+    const n2Prose = await graded(['- Newest FAIL over an older PASS: refused.', 'FAIL, none or two refuse, naming the comment.', 'The fail-closed verdict: holds.']);
+    assert('#33604-N2-CONTROL-prose-that-merely-MENTIONS-FAIL-is-not-a-verdict-line-the-record-CLEARS', n2Prose.exitCode === EXIT_CLEAR, renderGuardVerdict(n2Prose));
+    // ⛔ N3 of record 6890532571: `VERDICT:` lines above the heading count.
+    const above = await tierRun({ comments: [{ ...recordComment(), body: `**VERDICT: FAIL**\n\n${recordComment().body}` }] });
+    assert('⛔ #33604-N3-a-VERDICT-line-ABOVE-the-heading-counts-two-lines-REFUSED', above.exitCode === EXIT_REFUSED_UNAPPROVED && /states 2 `VERDICT:` lines \(FAIL, PASS\)/.test(renderGuardVerdict(above)), renderGuardVerdict(above));
+  }
   // ⭐ #33541, the author: the relay and GOVERNED_APPROVERS post records; any other author is IGNORED, never refused loudly.
   const PM_DIRECT = 'os-project-manager';
   assert('#33541-the-account-a-seat-would-post-from-directly-is-outside-the-trusted-set-the-relay-carries-its-records', !live.trustedAuthors.includes(PM_DIRECT));
@@ -5944,9 +6002,9 @@ export async function selfTest() {
     assert('the-template-VERDICT-PASS-line-clears-the-arm', explicitPass.exitCode === EXIT_CLEAR && explicitPass.entries[0].record.verdict === 'PASS');
     const newestFail = await tierRun({ ...arm, comments: [recordComment({ id: 901, at: '2026-09-13T12:00:00Z' }), recordComment({ id: 902, at: '2026-09-13T14:00:00Z', verdictWord: '**VERDICT: FAIL**' })] });
     assert('⛔ the-NEWEST-same-head-record-is-the-one-whose-verdict-is-read-an-older-PASS-does-not-clear-a-newer-FAIL', newestFail.exitCode === EXIT_REFUSED_UNAPPROVED && newestFail.entries[0].record.id === 902 && newestFail.entries[0].record.state === 'not-pass');
-    const noReader = await tierRun({ ...arm, recognisers: { ...live, verdictLines: undefined } });
+    const noReader = await tierRun({ ...arm, recognisers: { ...live, reading: undefined } });
     assert('⛔ a-recogniser-set-without-the-verdict-reader-REFUSES-the-arm-fail-closed', noReader.exitCode === EXIT_REFUSED_UNAPPROVED && noReader.entries[0].record.state === 'not-pass' && /verdict reader was not loaded/.test(renderGuardVerdict(noReader)));
-    assert('the-live-loader-reaches-the-fleet-verdict-reader-in-its-counting-form', typeof live.verdictLines === 'function' && live.verdictLines('## Contract review\n\n**VERDICT: FAIL**').join() === 'FAIL');
+    assert('the-live-loader-reaches-the-fleet-record-reader-and-its-counting-form', typeof live.reading === 'function' && live.reading('## Contract review\n\n**VERDICT: FAIL**').verdicts.join() === 'FAIL' && live.verdict === undefined && live.verdictLines === undefined);
     assert('lowRiskRecordVerdict-passes-a-non-standing-record-through-and-reads-the-chosen-comment', (() => {
       const absent = { state: 'absent' };
       const pair = { prComments: [{ id: 5, body: '## Contract review\n\n**VERDICT: PASS**' }], cardComments: [] };
