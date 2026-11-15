@@ -9954,9 +9954,9 @@ export class SchemaRegistry {
    * Unchanged: one holder; a package-less bare-slot entry (the environment's
    * own item) answers first, as {@link getItem} serves it; a disabled package
    * holds no name ({@link packageScopedHoldersOf}), so beside one enabled
-   * holder the read serves that holder's item, never the disabled one's. The
-   * protocol's by-name read asks this before any layer
-   * (`protocol-meta-item-reads.ts`), and so does {@link MetadataFacade.get}.
+   * holder the read serves that holder's item, never the disabled one's.
+   * `MetadataFacade.get` serves this answer; the protocol's by-name read asks
+   * it before any layer for its refusal only (`protocol-meta-item-reads.ts`).
    *
    * @throws {PackageScopedNameRefusedError} two or more enabled holders.
    */
