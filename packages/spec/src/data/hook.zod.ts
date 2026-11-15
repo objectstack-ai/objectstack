@@ -493,7 +493,11 @@ export type HookRefusal = z.input<typeof HookRefusalSchema>;
  * write happened". They are dispatched before the enclosing transaction (if
  * there is one) commits, so a later refusal can roll the row back after the
  * hook has already run. Ruled on #7477 (2026-08-11) as the declared semantics,
- * not an implementation detail to be re-timed later.
+ * not an implementation detail to be re-timed later. A blocking hook RUNS at
+ * that dispatch; an `async: true` hook is dispatched there too but runs only
+ * once the unit commits, and never when it rolls back (#33760, see `async`
+ * below) — so for an async hook, what this section says about a hook that
+ * "has already run" does not apply.
  *
  * Four ordinary ways a write ends up inside such a unit:
  *   - the write door itself, when the object has a blocking (not `async`)
@@ -521,7 +525,9 @@ export type HookRefusal = z.input<typeof HookRefusalSchema>;
  *     file deletion, email. On a rollback the row survives and the
  *     announcement has already gone out. Make such an effect idempotent and
  *     reconcilable, or enqueue it for a worker that re-reads the row before
- *     acting rather than trusting the event alone.
+ *     acting rather than trusting the event alone. This is a blocking hook's
+ *     burden: an `async: true` hook runs only after the commit, so it never
+ *     announces a write that was rolled back.
  *
  * The `before*` events carry no such caveat: they run before the write is
  * issued, and throwing from one refuses the operation.

@@ -475,6 +475,13 @@ export function wrapDeclarativeHook(
     }
 
     const restore = installFlatInput(ctx);
+    // [#33760] The engine-built api, held before a `runAs` install replaces it:
+    // the unit an `async` run waits for is the one the TRIGGERING write is in,
+    // and only this api knows it. A derived api need not — the unscoped one a
+    // `'user'` pin gets on a user-less trigger (`UnscopedHookApi`) carries no
+    // engine and no detach at all, so asking it would start the run at once,
+    // inside the unit, and after a rollback too.
+    const engineApi = ctx.api;
     // [#14010] `runAs` is applied to `ctx.api` ONLY, and only for the handler
     // call — the same install/restore shape as the flat input above, so the
     // engine's own context object is never touched (the condition gate above
@@ -526,8 +533,9 @@ export function wrapDeclarativeHook(
         // the door's own unit for a blocking `after*` beside it (#22782), or a
         // caller's: nothing awaits it, so a unit it joined would commit under
         // its writes ("Transaction query already complete"). [#33760] Once
-        // that unit commits, and not at all when it rolls back. `unit-detach.ts`.
-        void runDetachedHook(detached.api, () => runWithErrorPolicy(dispatching ? detached : atDispatch))
+        // that unit commits, and not at all when it rolls back — the unit read
+        // off `engineApi`, whatever api the handler itself runs on. `unit-detach.ts`.
+        void runDetachedHook(engineApi, () => runWithErrorPolicy(dispatching ? detached : atDispatch))
           .then((ran) => {
             if (ran !== UNIT_ROLLED_BACK) { recordOutcome(); return; }
             logger.debug('[hook] async handler not run: the unit of work it was fired in rolled back', {

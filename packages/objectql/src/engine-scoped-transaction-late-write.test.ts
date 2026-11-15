@@ -402,11 +402,30 @@ async function makeCommitEngine() {
       if (String(ctx.input.name).startsWith('veto')) throw new Error('refused by the gate');
     },
   } as unknown as Hook;
-  const bind = (withGate: boolean) => bindHooksToEngine(engine, withGate ? [asyncNote, gate] : [asyncNote], { packageId: 'app:t', logger: logger as any });
+  // [#33760 review] A `'user'` pin on a trigger that carries no user: the
+  // handler's `ctx.api` is the unscoped api (`UnscopedHookApi`), which has no
+  // engine and no detach of its own. It records the api it got, and touches no
+  // data (that api refuses every data door).
+  const apiKinds: string[] = [];
+  const userPin = {
+    name: 'user_pin', object: 'rec', events: ['afterInsert'], async: true, runAs: 'user', onError: 'log',
+    handler: (ctx: any) => {
+      const name = String(ctx.input.name);
+      events.push(`user-pin started:${name}`);
+      apiKinds.push(ctx.api?.constructor?.name);
+      runOf(name);
+      settle[name]!(0);
+    },
+  } as unknown as Hook;
+  const bind = (withGate: boolean, opts: { userPin?: boolean } = {}) => bindHooksToEngine(
+    engine,
+    opts.userPin ? [userPin] : withGate ? [asyncNote, gate] : [asyncNote],
+    { packageId: 'app:t', logger: logger as any },
+  );
   const api = new ScopedContext({ isSystem: true } as any, engine as any);
   const droppedRun = () => new Promise<string>((r) => { dropped = r; });
   const notes = () => driver.rowsOf('note').map((r: any) => r.name);
-  return { engine, driver, api, events, drops, bind, runOf, droppedRun, notes };
+  return { engine, driver, api, events, drops, bind, runOf, droppedRun, notes, apiKinds };
 }
 
 describe('#33760 — an async after-hook fired inside a unit runs on its commit, never on its rollback', () => {
@@ -529,6 +548,31 @@ describe('#33760 — an async after-hook fired inside a unit runs on its commit,
     expect(await drop).toBe('async_note');
     expect(events).toEqual(['rollback']);
     expect(notes()).toEqual([]);
+  });
+
+  it('runAs \'user\' on a user-less system write in engine.transaction(): the unscoped api still waits for the commit', async () => {
+    const { engine, events, bind, runOf, apiKinds } = await makeCommitEngine();
+    bind(false, { userPin: true });
+    await engine.transaction(async (trx: any) => {
+      await engine.insert('rec', { name: 'r1' }, { context: { ...trx, isSystem: true } });
+      events.push('callback returns');
+    });
+    await runOf('r1');
+    expect(events).toEqual(['callback returns', 'commit', 'user-pin started:r1']);
+    expect(apiKinds).toEqual(['UnscopedHookApi']);
+  });
+
+  it('runAs \'user\' on a user-less system write in engine.transaction() that rolls back: the hook never starts', async () => {
+    const { engine, events, drops, bind, droppedRun } = await makeCommitEngine();
+    bind(false, { userPin: true });
+    const drop = droppedRun();
+    await expect(engine.transaction(async (trx: any) => {
+      await engine.insert('rec', { name: 'r1' }, { context: { ...trx, isSystem: true } });
+      throw new Error('the caller rolls back');
+    })).rejects.toThrow('the caller rolls back');
+    expect(await drop).toBe('user_pin');
+    expect(events).toEqual(['rollback']);
+    expect(drops).toEqual(['user_pin']);
   });
 
   it('CONTROL outside any unit: the hook starts at dispatch, before the write returns, unchanged', async () => {
