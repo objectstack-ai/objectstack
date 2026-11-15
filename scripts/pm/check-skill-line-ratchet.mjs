@@ -410,7 +410,15 @@ export const CEILINGS = new Map([
   // two sentences AGENTS.md Prime Directive #15 carries and outranks this file
   // on (a publish nobody ordered is filed as an incident, never counter-published;
   // a path to a release is not authorization to walk it), never by re-wrap.
-  ['.claude/skills/pm-dispatch/SKILL.md', 319],
+  // Raised 319 → 320 by the area-lease mode (an ORDINARY ruled raise; ruling of record:
+  // the maintainer, 2026-11-15, verbatim: 「然后应该立卡更新skills。这种方式适合推广到其他车道吗？」 ·
+  // 「所以是否分区域，如何分区域应该是动态的是吗？」 · 「你直接立卡，然后让 server 5 按照你的卡处理也可以」;
+  // quoted in the body of card #33751 (filing gate ③), claim comment 6892768967):
+  // one 阶段细则索引 row naming `references/area-lease.md` and its reader, which is
+  // also the one lane-wide line saying the mode is open to any lane past the split
+  // threshold (cheaper than a line in each `lanes/*.md`). Measured delta +1; landed
+  // count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 320],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -1351,7 +1359,21 @@ export const CEILINGS = new Map([
   // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
   // One line: a stay-behind card takes its lane's state in the `seat-offline` stroke, or triage
   // sets it on reading that knock. Measured delta +1; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 99],
+  // Raised 99 → 100 by the area-lease mode (an ORDINARY ruled raise; ruling of record:
+  // the maintainer, 2026-11-15, verbatim: 「然后应该立卡更新skills。这种方式适合推广到其他车道吗？」 ·
+  // 「所以是否分区域，如何分区域应该是动态的是吗？」 · 「你直接立卡，然后让 server 5 按照你的卡处理也可以」;
+  // quoted in the body of card #33751 (filing gate ③), claim comment 6892768967):
+  // one line, the moving seat — an outgoing account still draining moves to a free
+  // seat with its own mailbox, the seat post carries the ownership split, and it posts
+  // `ownership transferred` when done. Measured delta +1; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 100],
+  // Area-lease mode (any lane): dynamic partitioning at seating and at every hand-over
+  // or shift, startup with the maintainer's authorising line per thread, the in-area
+  // rules as pointers to their owning references, the cross-account hand-over on
+  // GitHub and the ownership split. Ordered by the same ruling of record as the two
+  // raises above. A NEW file, so this is an added row and no other row moves for it;
+  // set at the landed line count, headroom 0, same convention as every entry above.
+  ['.claude/skills/pm-dispatch/references/area-lease.md', 60],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
   // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
@@ -2622,6 +2644,8 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   // The five per-phase references of the principle-only cut carry no table
   // row (their tables stayed in SKILL.md), so each pin is the measurement 0.
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 0],
+  // area-lease.md carries no table row: the measurement 0.
+  ['.claude/skills/pm-dispatch/references/area-lease.md', 0],
   ['.claude/skills/pm-dispatch/references/coordinator.md', 0],
   ['.claude/skills/pm-dispatch/references/untrusted-text.md', 0],
   // security-findings.md carries no table row (#29111): the measurement 0.

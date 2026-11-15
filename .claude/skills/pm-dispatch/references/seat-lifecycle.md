@@ -40,6 +40,7 @@
 - 收班同笔删 routine、关信箱、发 `seat-offline`;强制接管者代发 `seat-online`(`project-forms.md`)。
 - 下班席(`seat-offline`,或两敲 `Request: progress` 无答走接管四件)的在飞归同车道在线兄弟席。
 - 兄弟席 `Resume-from:` 引简报或轮次记录认领;待裁先等字;无兄弟席「待席」;公告归安全席。
+- 移座:让席旧号仍排空即移空席、开自有信箱,原贴写所有权切分,毕评 `ownership transferred`。
 - 离任留守只写点名的已 ACCEPT 待队列或待人批 PR,⛔ 不读队列、不新派发、不碰未点名卡。
 - 留守卡在 `seat-offline` 同笔落其车道一态并清 assignee;漏者分诊读到该敲门当轮代落。
 - 换班报告默认零建议,只收三类:原则错/缺、可机械化项、平台事实变化(事实表改一行)。
