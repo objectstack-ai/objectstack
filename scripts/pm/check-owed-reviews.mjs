@@ -69,7 +69,7 @@
  *              a barred seat is never named; `area-lease.md` lets the maintainer's
  *              own word in that seat's review thread seat it anyway, a word this
  *              GitHub-only reader cannot see, so the bar stands here and the
- *              report says so beside every barred seat), `unjudged` (seated ones, but the
+ *              report says so once whenever any row bars a seat), `unjudged` (seated ones, but the
  *              card's comments could not be read, so the dispatching account
  *              is unknown and none is printed as free), `stood-down`,
  *              `absent`, `unknown` (roster unread).
@@ -602,7 +602,7 @@ const USAGE = [
   '  names; else a seated review seat first (`review#N`), the lane seat once a further round has',
   '  passed with no claim, or the lane seat alone while no review seat is seated — never triage.',
   `  --repo   the repository whose pulls are read (default ${DEFAULT_REPO}); --board, where the seat posts live`,
-  '  --now    the clock (default: now); --json prints the rows as JSON',
+  '  --now    the clock (default: now); --json prints the rows and the report\'s notes (the area-lease note when a seat is barred) as JSON',
   '  Report-only: reads through `gh api`, writes nothing, exits 0 on every read; 2 on a usage error.',
 ].join('\n');
 
@@ -833,7 +833,7 @@ export function selfTest() {
   t('the header counts what was read and what is owed', printed[0].includes('2 open PR(s) read (1 draft)') && printed[0].includes('1 owe a contract review — 1 to take'));
   t('rows sort TAKE, WAIT, HELD, DONE, then by number', owedReviewRows({ pulls: [pull({ number: 3, comments: [recordRow(HEAD)] }), pull({ number: 2, headCommittedAt: '2026-10-28T12:59:00Z' }), pull({ number: 1, labels: [{ name: WAITING_LABEL }] })], seats: SEATED }, { now: NOW }).map((r) => `${r.status}${r.pr}`).join() === 'TAKE1,WAIT2,DONE3');
   const jsonOut = [];
-  t('--json prints the rows as one JSON document, still exit 0', main(['--repo', DEFAULT_REPO, '--json', '--now', '2026-10-28T13:00:00Z'], { get: fake(routes), log: (l) => jsonOut.push(l) }) === EXIT_OK && JSON.parse(jsonOut.join('\n')).rows[0].pr === 27136);
+  t('--json prints the rows and the report\'s notes as one JSON document, still exit 0', main(['--repo', DEFAULT_REPO, '--json', '--now', '2026-10-28T13:00:00Z'], { get: fake(routes), log: (l) => jsonOut.push(l) }) === EXIT_OK && (() => { const doc = JSON.parse(jsonOut.join('\n')); return doc.rows[0].pr === 27136 && Array.isArray(doc.notes) && JSON.stringify(doc.notes) === JSON.stringify(reportNotes(doc.rows)); })());
   t('a usage error exits 2 and prints the usage', main(['--bogus'], { get: fake({}), log: () => {}, error: () => {} }) === EXIT_USAGE);
 
   battery('the hold: a live hold on this head holds (b) alone, (a) and (c) still fire; a new head clears it; at 24 hours it is listed, still WAIT');
