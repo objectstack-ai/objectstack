@@ -3,7 +3,7 @@
 '@objectstack/service-settings': patch
 ---
 
-fix(i18n): Setup no longer shows five audit actions and five AI settings help lines in English under a translated locale
+fix(i18n): Setup no longer shows five audit actions, or the AI settings help for conversation titles and two provider models, in English under a translated locale
 
 Clause-②: no
 Metadata-protocol: none
