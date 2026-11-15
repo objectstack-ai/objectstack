@@ -1,24 +1,27 @@
 name: Fleet Patrols
 
-# Four daily patrols, one file — ruling: batch #397 item 2 · letter A, the
-# maintainer's 「同意」, recorded on the decision card that measured the fleet's
-# scheduled workflows. Each job below is one retired workflow moved here whole:
-# its steps, its `permissions:` grant, its `concurrency:` group and its `env:`
-# are the retired file's, so the job's failure signal, its least-privilege
-# grant and its budget are still its own, and nothing is widened to the
-# workflow level.
+# Four daily patrols and one weekly audit, one file — ruling: batch #397 item 2 ·
+# letter A, the maintainer's 「同意」, recorded on the decision card that measured
+# the fleet's scheduled workflows. Each of the first four jobs below is one
+# retired workflow moved here whole: its steps, its `permissions:` grant, its
+# `concurrency:` group and its `env:` are the retired file's, so the job's
+# failure signal, its least-privilege grant and its budget are still its own,
+# and nothing is widened to the workflow level. The fifth,
+# `governed-merges-audit`, was born here (the maintainer's option 0
+# 「每周定时工作流」, recorded on #33717) and keeps the same discipline.
 #
 #   job                            formerly                                  cron
 #   required-set-patrol            required-set-patrol.yml                   23 4,16 * * *
 #   platform-checklist-watchdog    platform-checklist-watchdog.yml           51 2 * * *
 #   release-coverage-patrol        release-coverage-patrol.yml               19 4 * * *
 #   board-snapshot                 board-snapshot.yml                        7 2,8,14,20 * * *
+#   governed-merges-audit          (new: #33717)                             31 23 * * 0
 #
-# ## One file, four clocks
+# ## One file, five clocks
 #
 # A `schedule` event carries the cron expression that fired it
 # (`github.event.schedule`), and every job's `if:` compares against its own, so
-# a scheduled run executes exactly one job and the other three read as skipped.
+# a scheduled run executes exactly one job and the others read as skipped.
 # ⛔ A cron string under `schedule:` and the same string in its job's `if:` are
 # ONE fact spelled twice: change both in the same edit. A cron no `if:` names
 # fires a run that does nothing, and a job whose `if:` names a cron the
@@ -35,7 +38,8 @@ name: Fleet Patrols
 # (`scripts/pm/dispatch-gates.mjs` pins tree-wide that no discovered gate family
 # is reachable only through a schedule), so this file's `pull_request:` trigger
 # is `paths`-filtered to the UNION of what the four retired files declared: this
-# file, plus each job's own inputs. A matching pull request runs all four jobs.
+# file, plus each job's own inputs. A matching pull request runs every job (the
+# weekly audit on a short window: see its own header).
 # A `pull_request` run proves transport, invocation and rendering on a real
 # runner and WRITES NOTHING — no job files, refreshes or archives anything on a
 # pull_request event: every board write below carries that guard in its own
@@ -132,6 +136,20 @@ on:
     # inside one interval was never archived, and nothing cheaper than a webhook
     # closes that, which is a different card.
     - cron: '7 2,8,14,20 * * *'
+    # ── `governed-merges-audit` ─────────────────────────────────────────────────────────
+    # Weekly, Sunday 23:31 UTC: the post-merge governed audit over the past
+    # week's `main` (ruled weekly, #33717). The HOUR is chosen against the other
+    # spenders of this repository's `GITHUB_TOKEN` request budget: a week's sweep
+    # costs a few hundred API reads (measured 2026-11-15: 191 governed entries,
+    # 71 of them read on the low-risk arm), and hour 23 UTC carries no other
+    # scheduled workflow at all — board-snapshot reads the board at 2/8/14/20 and
+    # `stale.yml` runs at 01:00. The minute is off the top of the hour, as in
+    # every patrol here.
+    #
+    # ⚠️ Two readers, one fact. This value is restated as `PATROL_SCHEDULE` in
+    # the job's `env:` block, where the card's `Swept` line computes its next
+    # deadline. Change the cron and change that env in the same edit.
+    - cron: '31 23 * * 0'
   # The manual fire, and the smoke test. One input: `all` runs every job, a job
   # id runs that one alone (each job's `if:` reads it).
   workflow_dispatch:
@@ -146,6 +164,7 @@ on:
           - platform-checklist-watchdog
           - release-coverage-patrol
           - board-snapshot
+          - governed-merges-audit
   # Changes to a patrol, or to the sweep it calls, get exercised before they
   # merge: the transport, the flags, the exit-code split and the rendering are
   # proven on a real runner rather than argued about. No job publishes a
@@ -173,6 +192,16 @@ on:
       # `platform-checklist-watchdog` names no path beyond this file: its gate
       # runs through `pnpm check:platform-checklist`, which stays OFF the per-PR
       # path by a standing maintainer decision.
+      #
+      # `governed-merges-audit` names no path beyond this file either, ON PURPOSE:
+      # its script and the queue-guard readers it imports change several times a
+      # week, each such change already runs the script's own `--self-test` in
+      # `lint.yml`, and a live sweep on every one of those pull requests would
+      # spend this repository's shared `GITHUB_TOKEN` budget for no new reading.
+      # It still runs before it merges on a change to the job itself (this file),
+      # and — because a `pull_request` run exercises every job — on every pull
+      # request matching a sibling patrol's path above (`scripts/pm/check-half-states.mjs`
+      # among them): one 24 h sweep each, a few dozen API reads, writing nothing.
 
 jobs:
 
@@ -264,9 +293,9 @@ jobs:
     # ruleset — see the header. It is deliberately not registered in
     # REQUIRED_CONTEXTS, and check-required-contexts' self-test asserts so.
     name: Live required-set sweep
-    # One file, four clocks: a `schedule` event carries the cron that fired it, so
+    # One file, five clocks: a `schedule` event carries the cron that fired it, so
     # each job runs only on its own cron; `workflow_dispatch` runs the one the input
-    # names (default: all four); a `pull_request` run exercises every job.
+    # names (default: all of them); a `pull_request` run exercises every job.
     if: >-
       (github.event_name != 'schedule' || github.event.schedule == '23 4,16 * * *')
       && (github.event_name != 'workflow_dispatch' || inputs.patrol == 'all' || inputs.patrol == 'required-set-patrol')
@@ -468,9 +497,9 @@ jobs:
     # no pull request at all, so a ruleset naming it would block every PR
     # forever on a check that cannot report.
     name: Platform checklist gate sweep
-    # One file, four clocks: a `schedule` event carries the cron that fired it, so
+    # One file, five clocks: a `schedule` event carries the cron that fired it, so
     # each job runs only on its own cron; `workflow_dispatch` runs the one the input
-    # names (default: all four); a `pull_request` run exercises every job.
+    # names (default: all of them); a `pull_request` run exercises every job.
     if: >-
       (github.event_name != 'schedule' || github.event.schedule == '51 2 * * *')
       && (github.event_name != 'workflow_dispatch' || inputs.patrol == 'all' || inputs.patrol == 'platform-checklist-watchdog')
@@ -850,9 +879,9 @@ jobs:
   # this workflow gates no branch and blocks no queue.
   release-coverage-patrol:
     name: Release section-coverage sweep
-    # One file, four clocks: a `schedule` event carries the cron that fired it, so
+    # One file, five clocks: a `schedule` event carries the cron that fired it, so
     # each job runs only on its own cron; `workflow_dispatch` runs the one the input
-    # names (default: all four); a `pull_request` run exercises every job.
+    # names (default: all of them); a `pull_request` run exercises every job.
     if: >-
       (github.event_name != 'schedule' || github.event.schedule == '19 4 * * *')
       && (github.event_name != 'workflow_dispatch' || inputs.patrol == 'all' || inputs.patrol == 'release-coverage-patrol')
@@ -1175,9 +1204,9 @@ jobs:
   # board.
   board-snapshot:
     name: Snapshot the board to the archive branch
-    # One file, four clocks: a `schedule` event carries the cron that fired it, so
+    # One file, five clocks: a `schedule` event carries the cron that fired it, so
     # each job runs only on its own cron; `workflow_dispatch` runs the one the input
-    # names (default: all four); a `pull_request` run exercises every job.
+    # names (default: all of them); a `pull_request` run exercises every job.
     if: >-
       (github.event_name != 'schedule' || github.event.schedule == '7 2,8,14,20 * * *')
       && (github.event_name != 'workflow_dispatch' || inputs.patrol == 'all' || inputs.patrol == 'board-snapshot')
@@ -1424,4 +1453,517 @@ jobs:
         if: steps.snapshot.outputs.exit_code != '0'
         run: |
           echo "::error::board-snapshot exited ${{ steps.snapshot.outputs.exit_code }} — 2 is a failed count check (the archive and the board disagree about how many open issues exist), 3 is a prerequisite the runner did not meet, 4 is a rate-limit stop with a resume cursor written, 5 is a STALE archive (no run has confirmed it against the live board for longer than a day; the run summary names the streak and what clears it). Whatever was read HAS been committed; see this run's summary."
+          exit 1
+
+  # ══ `governed-merges-audit` — the weekly post-merge governed audit (#33717) ══
+  #
+  # The standing caller for `node scripts/pm/check-governed-merges.mjs` in its
+  # sweep mode over the past week's `main`. AGENTS.md Prime Directive 14 names
+  # that audit as the compensating control for every seat-landed governed merge
+  # (Tier S, and the low-risk skills arm the queue guard reads at Tier S); until
+  # this job it had no caller that does not depend on a seat being on duty — and
+  # the seat it audits was the one running it.
+  #
+  # ## What lands where — the maintainer's ruling, verbatim in its effect
+  #
+  # The ruling (option 0, recorded on #33717): 「#33711 合并后加一个每周任务，只在
+  # 发现违规或读不到时开一张卡给你。」 So:
+  #
+  #   * a CLEAN week — the sweep exits 0 and no low-risk arm landing reads
+  #     ⛔ BREACH — writes NOTHING. The run summary and the uploaded JSON are the
+  #     record that it ran; the Actions run list is the heartbeat.
+  #   * a BREACH (an arm landing without a same-head at-tier PASS record) or a
+  #     NOT MEASURED week (exit 2: a repo, a window edge, an attribution or an arm
+  #     read the sweep could not make; exit 1 or no JSON: it could not sweep at
+  #     all) opens or refreshes ONE card for the maintainer.
+  #
+  # The card enters `pm:awaiting-maintainer` with a `Maintainer-action:` line:
+  # AGENTS.md Prime Directive 14 already decides what a seat landing without its
+  # record is ("a seat violation, filed and rolled back. No seat judges this"),
+  # so what the card asks is the maintainer's act, not a seat's dispatch.
+  # ⛔ No seat's dispatch depends on this job and no seat reads its card as a
+  # precondition — ruling #208 (`half-state-patrol.yml`) retired a schedule whose
+  # report-only rows had become a dispatch precondition, and this job stays on
+  # the other side of that line. It also publishes no required context.
+  #
+  # Identity and de-duplication copy the platform-checklist watchdog above: an
+  # identity label that is never graded off, a plain-text body marker (⛔ never
+  # an HTML comment — the body sanitizer eats them), and the stable title. An
+  # OPEN card is refreshed in place (body only; labels are never rewritten); a
+  # CLOSED one is not reopened — a later bad week files a new card naming it.
+  #
+  # A refresh never drops a BREACH row and never goes unannounced:
+  #
+  #   * every BREACH row already on the open card that this run did not read
+  #     again (it left the 7-day window, or this week's sweep could not read it)
+  #     is CARRIED into the new body, marked as carried. Rows leave the card only
+  #     when the maintainer closes it. NOT MEASURED rows are one run's reading
+  #     and are NOT carried: each refresh states the current run's.
+  #   * a refresh posts ONE comment naming the run, the BREACH rows new to the
+  #     card, the counts read again, carried and already ruled, the NOT MEASURED
+  #     count, and how many lines under the BREACH heading carry no row key (a
+  #     hand-edited row is not carried, so a dropped row is visible) — a body
+  #     edit notifies nobody, a comment notifies the card's participants.
+  #
+  # A ruled row is never re-announced. Closing the card is the maintainer's
+  # "every BREACH row here is ruled", so the keys on the NEWEST CLOSED card
+  # (its BREACH and already-ruled sections; closed within `AUDIT_HISTORY_DAYS`,
+  # and not as a duplicate) are read as ruled: a later run that
+  # reads one again inside the 7-day window (a dispatch with `patrol=all`, or
+  # the scheduled run's skew overlap) lists it under "Already ruled on card #N"
+  # instead of as a new BREACH, and a run whose every BREACH row is ruled and
+  # that has nothing unread files nothing at all. Deleting a row from an OPEN
+  # card by hand does not retire it — a row still inside the window is read
+  # again and returns; rule on it in a comment and close the card instead.
+  #
+  # Why the card's `done when` cannot be "a re-run reads clean" for a BREACH: the
+  # arm reads only evidence that existed BEFORE the landing, so a breach keeps
+  # reading breach on every re-run until it ages out of the window. A BREACH row
+  # is closed by the maintainer's ruling on it, recorded on the card; only a
+  # NOT MEASURED row is answered by a clean manual re-run.
+  #
+  # ## What it reads, and how
+  #
+  #   * The sweep reads a FRESH shallow clone of `main` (`--repo-root`), never
+  #     this job's own checkout: a `pull_request` checkout is a merge ref whose
+  #     shallow grafts are not `main`'s, and the sweep refuses — correctly — to
+  #     read a window its history does not cover. `AUDIT_HISTORY_DAYS` covers the
+  #     7-day window, the script's 1 h build-to-land skew budget and the walk
+  #     below the boundary it must see, with room to spare. The script runs from
+  #     this job's checkout, so a pull request runs the version it carries.
+  #   * `--repos objectstack`: this runner holds no sibling checkout, and an
+  #     absent checkout reads UNAUDITED (exit 2) by design. The siblings stay the
+  #     seats' sweep, as before.
+  #   * Attribution and the arm reads go through `GITHUB_TOKEN` (the script's env
+  #     channel). The grant below is exactly what those reads and the card need.
+  #   * A `main` that moves between the clone and the script's own `ls-remote`
+  #     probe makes the sweep refuse the mirror as stale (exit 1, `[stale-mirror]`,
+  #     zero API reads spent). That one refusal is answered by a re-fetch and a
+  #     re-run, at most twice; every other refusal is reported as it stands.
+  #
+  # ## The window, and its one known gap
+  #
+  # `--since 7d` on a weekly clock: consecutive runs overlap by the script's
+  # skew budget, so a landing is never dropped between two runs that both fire.
+  # A run that does NOT fire (an Actions outage, a disabled schedule) leaves its
+  # week unread, and nothing here can see that — the Actions run list shows the
+  # missing run. Re-read such a week by hand with a wider `--since` from a seat.
+  #
+  # ## The `pull_request` run
+  #
+  # Runs the same sweep on a 24 h window — enough to prove the clone, the
+  # flags, the token's reads, the JSON contract and the rendering on a real
+  # runner, at a few dozen API reads instead of a few hundred — and WRITES
+  # NOTHING: the card step's `if:` carries the pull_request guard (the watchdog
+  # pin refuses a board write without it), and a run on any ref but `main`
+  # files nothing either.
+  #
+  # ## When the job goes red
+  #
+  # When the sweep could not read its whole window (any exit but 0), after the
+  # card is filed — the patrol reporting that a week went unread, never a gate on
+  # the repo. A BREACH is a SUCCESSFUL patrol: it files the card and stays green.
+  # A sweep step that hits its own 12-minute timeout (a 7-day sweep measured
+  # 222 s) records no exit code and leaves no complete JSON: the verdict reads
+  # that as NOT MEASURED, so on `main` the card IS filed (or refreshed), and the
+  # run goes red. The step timeout sits under the job's 20 so the verdict, the
+  # artifact, the card and the red step still get their minutes.
+  governed-merges-audit:
+    # ⛔ This job is NOT a required context and must never become one.
+    name: Weekly governed-merges audit
+    # One file, five clocks: a `schedule` event carries the cron that fired it, so
+    # each job runs only on its own cron; `workflow_dispatch` runs the one the input
+    # names (default: all of them); a `pull_request` run exercises every job.
+    if: >-
+      (github.event_name != 'schedule' || github.event.schedule == '31 23 * * 0')
+      && (github.event_name != 'workflow_dispatch' || inputs.patrol == 'all' || inputs.patrol == 'governed-merges-audit')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Least privilege. `pull-requests: read` is the attribution read and the
+    # arm's review read; `issues: write` is the arm's timeline and comment reads
+    # plus the one card this job files or refreshes. Nothing else is written.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    # One audit at a time per ref: a dispatch overlapping the schedule on `main`
+    # would race the same card lookup and the loser would mint a duplicate.
+    concurrency:
+      group: governed-merges-audit-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
+    env:
+      # The card's IDENTITY — all three ways in, single-sourced here.
+      # ⛔ The identity label is the machine's and is never graded off.
+      ANCHOR_IDENTITY_LABEL: governed-merges-audit
+      ANCHOR_TITLE: 'governed-merges audit: a BREACH or an unread week on main'
+      ANCHOR_MARKER: os-governed-merges-audit
+      # Applied on CREATE only, beside the identity label; never rewritten on a
+      # refresh. The card's body carries the `Maintainer-action:` line this state
+      # owes.
+      ANCHOR_STATE_LABEL: pm:awaiting-maintainer
+      # This job's own `cron:`, restated so the card's `Swept` line can state its
+      # cadence (#17720). ⛔ Change both in the same edit.
+      PATROL_SCHEDULE: '31 23 * * 0'
+      # The audited window: a week on the clock, a day on a pull request.
+      AUDIT_SINCE: ${{ github.event_name == 'pull_request' && '24h' || '7d' }}
+      # How much of `main` the shallow clone holds (see the header).
+      AUDIT_HISTORY_DAYS: '10'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # No `pnpm install`: the sweep and the queue-guard readers it imports load
+      # on node builtins and repo-local modules alone (measured 2026-11-15 on a
+      # tree with no node_modules), and a weekly run must not fail on a lockfile.
+      - name: Clone a shallow mirror of main for the sweep to read
+        run: |
+          floor=$(date -u -d "$AUDIT_HISTORY_DAYS days ago" +%Y-%m-%dT%H:%M:%SZ)
+          git clone --quiet --no-checkout --single-branch --branch main --no-tags \
+            --shallow-since="$floor" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$RUNNER_TEMP/audit-main"
+          echo "mirror of main from $floor: $(git -C "$RUNNER_TEMP/audit-main" rev-list --count origin/main) commit(s), tip $(git -C "$RUNNER_TEMP/audit-main" rev-parse --short origin/main)"
+
+      - name: Run the governed-merges sweep
+        id: sweep
+        # Under the job's 20 on purpose: a timed-out sweep still gets its verdict
+        # (NOT MEASURED), its card on main, and its red step (see the header).
+        timeout-minutes: 12
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          for attempt in 1 2 3; do
+            node scripts/pm/check-governed-merges.mjs --since "$AUDIT_SINCE" --repos objectstack \
+              --repo-root "objectstack=$RUNNER_TEMP/audit-main" --json \
+              > "$RUNNER_TEMP/audit.json" 2> "$RUNNER_TEMP/audit.err"
+            code=$?
+            # The one refusal a re-fetch answers: main moved between the clone and
+            # the script's own probe. Exit 1 there has read nothing and spent nothing.
+            if [ "$code" = 1 ] && grep -qF '[stale-mirror]' "$RUNNER_TEMP/audit.err" && [ "$attempt" -lt 3 ]; then
+              echo "attempt $attempt: main moved under the mirror; re-fetching and sweeping again"
+              git -C "$RUNNER_TEMP/audit-main" fetch --quiet --no-tags origin main
+              continue
+            fi
+            break
+          done
+          set -e
+          # Captured with NO pipe in between (`cmd | tail` reports tail's status).
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "check-governed-merges --since $AUDIT_SINCE exited $code (attempt $attempt)"
+          cat "$RUNNER_TEMP/audit.err" >&2 || true
+
+      - name: Read the sweep into a verdict
+        id: verdict
+        if: always()
+        uses: actions/github-script@v9
+        env:
+          AUDIT_EXIT: ${{ steps.sweep.outputs.exit_code }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const read = (name) => {
+              try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8'); }
+              catch { return ''; }
+            };
+            // Commit subjects and reasons are written into an issue body: no
+            // angle bracket survives the sanitizer, and no `@` may ping anyone.
+            const clean = (s) => String(s ?? '').replace(/</g, '‹').replace(/>/g, '›').replace(/@/g, '@​').replace(/\s+/g, ' ').trim();
+            const exit = String(process.env.AUDIT_EXIT ?? '').trim();
+            const stderr = read('audit.err').trim();
+            const raw = read('audit.json');
+            let sweep = null;
+            let parseError = null;
+            if (raw.trim()) {
+              try { sweep = JSON.parse(raw); } catch (error) { parseError = String(error?.message ?? error).split('\n')[0]; }
+            }
+            const breaches = [];
+            // The same rows, keyed, for the card step's carry-forward: the key is
+            // the row's leading `PR #N` or `commit SHA12`.
+            const breachRows = [];
+            const unread = [];
+            const rowKey = (e) => (e.pr != null ? `PR #${e.pr}` : `commit ${String(e.sha ?? '').slice(0, 12)}`);
+            const rowName = (e) => (e.pr != null ? rowKey(e) : `${rowKey(e)} (no PR number in its subject)`);
+            const readable = sweep && Array.isArray(sweep.entries) && Array.isArray(sweep.repos);
+            if (readable) {
+              for (const r of sweep.repos) {
+                if (r.status !== 'audited') unread.push(`\`${clean(r.slug)}\` UNAUDITED [${clean(r.precondition ?? 'unstated')}]: ${clean(r.reason)}`);
+                else if (r.windowIncomplete) unread.push(`\`${clean(r.slug)}\` WINDOW EDGE: ${clean(r.windowIncomplete)}`);
+              }
+              for (const e of sweep.entries) {
+                if (e.arm?.state === 'breach') {
+                  const who = e.attribution ? `merged_by ${clean(e.attribution.mergedBy ?? '(none)')} at ${clean(e.attribution.mergedAt ?? '(unknown)')}` : 'merge attribution unavailable';
+                  const head = e.arm.headSha ? ` on head \`${String(e.arm.headSha).slice(0, 12)}\`` : '';
+                  const line = `${rowName(e)} — ${clean(e.subject)} — commit \`${String(e.sha ?? '').slice(0, 12)}\`; ${who}${head}: ${clean(e.arm.reason)}`;
+                  breaches.push(line);
+                  breachRows.push({ key: rowKey(e), line });
+                }
+                if (e.arm?.state === 'not-measured') unread.push(`${rowName(e)} low-risk arm NOT MEASURED: ${clean(e.arm.reason)}`);
+                if (e.attributionError) unread.push(`${rowName(e)} attribution unavailable: ${clean(e.attributionError)}`);
+              }
+              if (exit !== '0' && unread.length === 0) unread.push(`the sweep exited ${exit || '(not recorded)'} but its JSON names no unread row — read the run log`);
+              if (exit === '0' && sweep.complete !== true) unread.push('the sweep exited 0 but its JSON does not say `complete: true` — read the run log');
+            } else {
+              unread.push(`the sweep left no readable JSON (exit ${exit || 'not recorded'}${parseError ? `; parse error: ${clean(parseError)}` : ''}) — it could not sweep at all${stderr ? '; its stderr is quoted below' : ', and it wrote nothing to stderr'}`);
+            }
+            const verdict = breaches.length > 0 ? (unread.length > 0 ? 'breach-and-unread' : 'breach') : unread.length > 0 ? 'unread' : 'clean';
+            const cap = (rows) => (rows.length > 40 ? [...rows.slice(0, 40), `… and ${rows.length - 40} more — see the run log`] : rows);
+            const unreadLines = [];
+            if (unread.length > 0) {
+              unreadLines.push(`## NOT MEASURED — ${unread.length} reading(s) the sweep could not make`, '', ...cap(unread).map((u) => `- ${u}`), '');
+              if (!readable && stderr) unreadLines.push('```', stderr.slice(-6000).replace(/```/g, "'''"), '```', '');
+            }
+            const lines = [];
+            if (breaches.length > 0) {
+              lines.push(`## ⛔ BREACH — ${breaches.length} low-risk skills arm landing(s) without a same-head at-tier PASS record`, '', ...cap(breaches).map((b) => `- ${b}`), '');
+            }
+            lines.push(...unreadLines);
+            const counts = readable
+              ? `${sweep.entries.length} governed entr${sweep.entries.length === 1 ? 'y' : 'ies'} over ${sweep.scanned ?? '?'} mainline commit(s) since ${clean(sweep.since)}`
+              : 'no sweep reading';
+            // The card step composes its own BREACH section (this run's rows plus
+            // the open card's carried ones), so it gets the rows, not the markdown.
+            fs.writeFileSync(path.join(process.env.RUNNER_TEMP, 'findings.json'), JSON.stringify({
+              breaches: breachRows,
+              unreadCount: unread.length,
+              unreadSection: unreadLines.join('\n'),
+            }));
+            core.setOutput('verdict', verdict);
+            core.setOutput('counts', counts);
+            await core.summary
+              .addHeading(`Governed-merges audit — sweep exit ${exit || '(not recorded)'} · verdict ${verdict}`, 3)
+              .addRaw(`${counts}.\n\n`)
+              .addRaw(context.eventName === 'pull_request' ? '_Card write skipped: a pull_request run proves the sweep without filing anything._\n\n' : '')
+              .addRaw(lines.length > 0 ? `${lines.join('\n')}\n` : 'Clean week: no BREACH, nothing unread. Nothing is filed.\n')
+              .write();
+            if (verdict === 'clean') core.notice(`governed-merges audit: clean — ${counts}.`);
+            else core.warning(`governed-merges audit: ${verdict} — ${counts}. See this run's summary.`);
+
+      - name: Keep the sweep's JSON with the run
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: governed-merges-audit
+          path: |
+            ${{ runner.temp }}/audit.json
+            ${{ runner.temp }}/audit.err
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: File or refresh the audit card
+        # BREACH or NOT MEASURED only; a clean week writes nothing (the ruling).
+        # ⛔ NEVER on a `pull_request` run, and never from a ref other than main.
+        if: >-
+          always() && steps.verdict.outputs.verdict != '' && steps.verdict.outputs.verdict != 'clean'
+          && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/github-script@v9
+        env:
+          AUDIT_EXIT: ${{ steps.sweep.outputs.exit_code }}
+          VERDICT: ${{ steps.verdict.outputs.verdict }}
+          COUNTS: ${{ steps.verdict.outputs.counts }}
+        with:
+          # Delivery is retried, never assumed: this write is the whole product
+          # of a bad week.
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const marker = process.env.ANCHOR_MARKER;
+            const title = process.env.ANCHOR_TITLE;
+            const identityLabel = process.env.ANCHOR_IDENTITY_LABEL;
+            const stateLabel = process.env.ANCHOR_STATE_LABEL;
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const findings = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'findings.json'), 'utf8'));
+            const current = Array.isArray(findings.breaches) ? findings.breaches : [];
+            const unreadSection = String(findings.unreadSection ?? '').trim();
+            if (current.length === 0 && !unreadSection) throw new Error(`verdict ${process.env.VERDICT} but no findings were rendered — refusing to file an empty card`);
+
+            // ── Anchor lookup: identity label, then marker or exact title ──────
+            const isThisAnchor = (i) => !i.pull_request && (String(i.body ?? '').includes(marker) || i.title === title);
+            const MAX_PAGES = 3;
+            const candidates = [];
+            let scanComplete = true;
+            for (let page = 1; page <= MAX_PAGES; page += 1) {
+              const res = await github.rest.issues.listForRepo({
+                owner, repo, state: 'all', labels: identityLabel,
+                sort: 'created', direction: 'desc', per_page: 100, page,
+              });
+              candidates.push(...res.data.filter(isThisAnchor));
+              if (res.data.length < 100) break;
+              if (page === MAX_PAGES) scanComplete = false;
+            }
+            if (!scanComplete) {
+              // A truncated scan cannot establish absence; filing on it mints a duplicate.
+              throw new Error(`the card scan hit its ${MAX_PAGES}-page bound without completing — nothing was filed; the findings are in this run's summary`);
+            }
+            const open = candidates.filter((i) => i.state !== 'closed').sort((a, b) => a.number - b.number);
+            const closed = candidates.filter((i) => i.state === 'closed').sort((a, b) => b.number - a.number);
+            const existing = open[0] ?? null;
+            const prior = !existing ? (closed.find((i) => i.state_reason !== 'duplicate') ?? null) : null;
+
+            // ── Reading a card body's keyed rows ─────────────────────────────────
+            // A row is keyed by its leading `PR #N` or `commit SHA12`. Lines under
+            // a read heading that carry no key (a hand-edited row) are counted, so
+            // a row the carry-forward cannot see is reported rather than silent.
+            const CARRIED = " · _carried: on this card from an earlier run and not in this run's reading; it stays until this card is closed_";
+            const ROW_KEY = /^- (PR #\d+|commit [0-9a-f]{7,40})\b/;
+            const RULED_HEADING = '## Already ruled';
+            // The body's footer opens with this; the reader stops there too.
+            const FOOTER = 'The full sweep JSON is the `governed-merges-audit` artifact';
+            const readRows = (text, headings) => {
+              const rows = [];
+              let unkeyed = 0;
+              // A section runs from its heading to the next `## ` heading or the
+              // footer, blank lines included: a row the maintainer set apart with a
+              // blank line is still read. Blank lines are never counted.
+              let inSection = false;
+              for (const raw of String(text ?? '').split(/\r?\n/)) {
+                if (raw.startsWith('## ')) { inSection = headings.some((h) => raw.startsWith(h)); continue; }
+                if (raw.startsWith(FOOTER)) { inSection = false; continue; }
+                if (!inSection || !raw.trim() || raw.startsWith('… and ')) continue;
+                const m = ROW_KEY.exec(raw);
+                if (m) rows.push({ key: m[1], line: raw.slice(2).split(CARRIED)[0].trimEnd() });
+                else unkeyed += 1;
+              }
+              return { rows, unkeyed };
+            };
+
+            // ── Ruled: the keys on the newest closed card ───────────────────────
+            // Closing the card is the maintainer's word that every row on it is
+            // ruled, so a key there is never re-announced as a new BREACH. Only a
+            // card closed within AUDIT_HISTORY_DAYS counts: an older ruling cannot
+            // cover a landing this window reads, so a reused key is never hidden.
+            const ruledSince = Date.now() - Number(process.env.AUDIT_HISTORY_DAYS || 10) * 86400000;
+            const ruledCard = closed.find((i) => i.state_reason !== 'duplicate' && Date.parse(i.closed_at ?? '') >= ruledSince) ?? null;
+            const ruled = new Set(ruledCard ? readRows(ruledCard.body, ['## ⛔ BREACH', RULED_HEADING]).rows.map((r) => r.key) : []);
+
+            // ── Carry-forward: a refresh never drops a BREACH row ────────────────
+            // Every keyed row under the open card's BREACH heading that this run
+            // did not read again stays, marked as carried. A row leaves only when
+            // the card is closed.
+            const thisRun = new Set(current.map((b) => b.key));
+            const onCard = new Set();
+            const carried = [];
+            let unkeyed = 0;
+            if (existing) {
+              const read = readRows(existing.body, ['## ⛔ BREACH']);
+              unkeyed = read.unkeyed;
+              for (const r of read.rows) {
+                if (onCard.has(r.key)) continue;
+                onCard.add(r.key);
+                if (!thisRun.has(r.key)) carried.push(r);
+              }
+            }
+            // A row already on the open card stays live; a row ruled on the closed
+            // card and not on the open one is listed as already ruled, not as new.
+            const alreadyRuled = current.filter((b) => !onCard.has(b.key) && ruled.has(b.key));
+            const live = current.filter((b) => onCard.has(b.key) || !ruled.has(b.key));
+            if (live.length === 0 && carried.length === 0 && !unreadSection) {
+              core.notice(`governed-merges audit: every BREACH row this run read (${alreadyRuled.map((b) => b.key).join(', ')}) was ruled on card #${ruledCard.number}, and nothing is unread — nothing filed.`);
+              return;
+            }
+            const ruledSection = alreadyRuled.length === 0 ? '' : [
+              `${RULED_HEADING} on card #${ruledCard.number} — ${alreadyRuled.length} BREACH row(s) this run read again, ruled there when it was closed; not re-announced`,
+              '',
+              ...alreadyRuled.map((b) => `- ${b.key} — ruled on card #${ruledCard.number}`),
+              '',
+            ].join('\n');
+            const breachTotal = live.length + carried.length;
+            const BREACH_CAP = 100;
+            const breachRowsMd = [...live.map((b) => `- ${b.line}`), ...carried.map((b) => `- ${b.line}${CARRIED}`)];
+            const breachSection = breachTotal === 0 ? '' : [
+              `## ⛔ BREACH — ${breachTotal} low-risk skills arm landing(s) without a same-head at-tier PASS record (${live.length} read by this run, ${carried.length} carried from earlier runs)`,
+              '',
+              ...(breachRowsMd.length > BREACH_CAP
+                ? [...breachRowsMd.slice(0, BREACH_CAP), `… and ${breachRowsMd.length - BREACH_CAP} more, NOT on this card and so not carried — see the run log and the artifact`]
+                : breachRowsMd),
+              '',
+            ].join('\n');
+
+            // The weekly `M H * * D` cron makes the `Swept` line decidable (#17720);
+            // any other form says so rather than publishing a deadline it did not read.
+            const sweptAt = new Date();
+            const schedule = String(process.env.PATROL_SCHEDULE ?? '').trim();
+            const f = /^(\d{1,2}) (\d{1,2}) \* \* ([0-6])$/.exec(schedule);
+            let expectation = `⚠️ expected cadence UNSTATED — PATROL_SCHEDULE is \`${schedule}\`, not the weekly \`M H * * D\` form this step computes a deadline from`;
+            if (f && Number(f[1]) <= 59 && Number(f[2]) <= 23) {
+              const next = new Date(sweptAt);
+              next.setUTCHours(Number(f[2]), Number(f[1]), 0, 0);
+              next.setUTCDate(next.getUTCDate() + ((Number(f[3]) - next.getUTCDay() + 7) % 7));
+              if (next <= sweptAt) next.setUTCDate(next.getUTCDate() + 7);
+              expectation = `expected weekly (cron \`${schedule}\` UTC) · next by ${next.toISOString().slice(0, 16)}Z`;
+            }
+
+            const body = [
+              `${marker} — machine-findable marker for this generated card. ⛔ Do not delete this line: it is how the weekly audit finds this card instead of filing a new one.`,
+              '',
+              'Maintainer-action: rule on each ⛔ BREACH row below (kept, or rolled back) and record that ruling as a comment on this card, and re-run the `governed-merges-audit` job of Fleet Patrols by hand for any NOT MEASURED row — done when every BREACH row has your ruling recorded on this card and a manual run reads no NOT MEASURED row; then close this card. A BREACH row never reads clean on a re-run (the arm reads only evidence that existed before the landing, so the row reads BREACH until it leaves the 7-day window): only your ruling closes it.',
+              '',
+              '# Weekly governed-merges audit: a BREACH or an unread week on `main`',
+              '',
+              `_Swept ${sweptAt.toISOString()} · ${expectation} · [run log](${runUrl}) · commit \`${process.env.GITHUB_SHA}\` · trigger \`${context.eventName}\` · sweep exit ${process.env.AUDIT_EXIT || '(not recorded)'} · verdict \`${process.env.VERDICT}\` · ${process.env.COUNTS}._`,
+              '',
+              'This card is for the maintainer: the weekly post-merge governed audit (AGENTS.md Prime Directive 14, the',
+              'compensating control for seat-landed governed merges) found a low-risk skills arm landing with no same-head',
+              'at-tier PASS record, or could not read the whole week. A seat landing without its record is a seat violation,',
+              'filed and rolled back, and no seat judges it. ⛔ No seat dispatches this card. The audit files nothing on a',
+              'clean week and closes nothing, so a `Swept` line past its `next by` deadline means the audit died OR the',
+              'week was clean; the Actions run list tells the two apart. Ruling: option 0, recorded on #33717.',
+              '',
+              'A refresh rewrites this body and comments here. BREACH rows are carried from run to run until this card is',
+              'closed; NOT MEASURED rows are the latest run\'s only. Deleting a row by hand does not retire it (a row still',
+              'inside the window is read again and returns): rule on it in a comment, and close this card when all are ruled.',
+              'Rows on the newest closed card count as ruled and are not announced again.',
+              '',
+              ...(prior
+                ? [`⚠️ The previous audit card #${prior.number} was closed on its own merits and a later week is bad again; its conclusion is in that issue.`, '']
+                : []),
+              ...(breachSection ? [breachSection] : []),
+              ...(unreadSection ? [unreadSection, ''] : []),
+              ...(ruledSection ? [ruledSection] : []),
+              `${FOOTER} of the run above (kept 30 days). Re-read the week by`,
+              'hand: `node scripts/pm/check-governed-merges.mjs --since 7d --repos objectstack` from a fresh `origin/main`.',
+            ].join('\n');
+
+            if (existing) {
+              // Rewritten in place; ⛔ labels are never rewritten on a refresh.
+              await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+              // A body edit notifies nobody: the refresh is announced as a comment.
+              const fresh = live.filter((b) => !onCard.has(b.key)).map((b) => b.key);
+              const again = live.length - fresh.length;
+              const unreadCount = Number(findings.unreadCount) || 0;
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: existing.number,
+                body: [
+                  `Weekly governed-merges audit refreshed this card — [run log](${runUrl}) · trigger \`${context.eventName}\` · sweep exit ${process.env.AUDIT_EXIT || '(not recorded)'} · verdict \`${process.env.VERDICT}\`.`,
+                  '',
+                  `- ⛔ BREACH rows new to this card: ${fresh.length > 0 ? fresh.join(', ') : 'none'}.`,
+                  `- BREACH rows read again by this run: ${again}; carried from earlier runs: ${carried.length}. They stay until this card is closed.`,
+                  ...(alreadyRuled.length > 0 ? [`- Read again but already ruled on card #${ruledCard.number}, so not announced: ${alreadyRuled.map((b) => b.key).join(', ')}.`] : []),
+                  `- Lines under the BREACH heading that carried no row key (hand-edited, so not carried): ${unkeyed}.`,
+                  `- NOT MEASURED readings in this run: ${unreadCount}${unreadCount > 0 ? ' (listed in the body; a clean manual re-run answers them)' : ''}.`,
+                ].join('\n'),
+              });
+              core.notice(`governed-merges audit: ${process.env.VERDICT} — card #${existing.number} refreshed (${fresh.length} new BREACH, ${carried.length} carried).`);
+              return;
+            }
+            const created = await github.rest.issues.create({
+              owner, repo, title, body,
+              // Additive on create; ⛔ nothing here replaces a whole label set.
+              labels: [identityLabel, stateLabel],
+            });
+            core.notice(`governed-merges audit: ${process.env.VERDICT} — card #${created.data.number} filed.`);
+
+      - name: Fail the run if the sweep did not read its whole window
+        # LAST, on purpose: the card is filed or refreshed before this runs. A
+        # BREACH alone never reaches here — it is a successful patrol.
+        if: always() && steps.sweep.outputs.exit_code != '0'
+        run: |
+          echo "::error::check-governed-merges exited '${{ steps.sweep.outputs.exit_code }}' — the week was NOT read in full (1: could not sweep; 2: swept INCOMPLETE). NOT MEASURED is not a clean week (#4690); see this run's summary."
           exit 1

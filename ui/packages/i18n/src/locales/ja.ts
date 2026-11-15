@@ -3977,6 +3977,14 @@ const ja = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'AI 利用枠の残りは {{left}} です。×N と表示されたモデルは、既定のモデルの N 倍の速さで利用枠を消費します。',
+      confirmTitle: '{{model}} に切り替えますか？',
+      confirmBody: 'このモデルでは、1 件のメッセージで既定のモデルの {{multiplier}} 倍の AI 利用枠を消費します。',
+      confirmAllowance: '残りは {{left}} で、このモデルでは {{multiplier}} 倍の速さで使い切ります。',
+      confirmCancel: 'キャンセル',
+      confirmAction: 'モデルを切り替え',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'メッセージを送信',
     scrollToBottom: '最新のメッセージまでスクロール',
@@ -4004,7 +4012,9 @@ const ja = {
     tool: {
       aggregate_data: "関連データを集計する",
       get_record: "このレコードを読み込む",
+      list_datasets: "利用できる指標を確認する",
       query_data: "必要なデータを照会する",
+      query_dataset: "指標で照会する",
       query_records: "該当するレコードを探す",
       read_package_doc: "アプリのガイドを読む",
       search_knowledge: "ナレッジベースで調べる",

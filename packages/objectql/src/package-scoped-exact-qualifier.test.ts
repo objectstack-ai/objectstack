@@ -1009,6 +1009,54 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
       expect(labelOf(await read(PAIR, 'fr-FR'))).toBe('pair fr-FR');
     });
 
+    // [#32849, ADR-0146 D8 item 2] A row of the App's pair declaring Z, for
+    // the very locale Z adds to X's template, is Z's declared override:
+    // `?package=Z`, Z's lists and the registry's slot at Z serve it. The read
+    // naming no package took its content from the name's shippers (X and Z)
+    // and the row's binding (the pair, no shipper), so it answered the
+    // package-unbound row alone and served Z's shipped `fr-FR`, dropping the
+    // declared override. Now it reads the member at its one shipper, Z.
+    const declaredForZ = () => {
+      pairRow({ overrides: { package: Z } });
+      registry.registerItem('email_template', {
+        name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', overrides: { package: Z }, _packageId: PAIR, _provenance: 'org',
+      }, 'name' as never);
+    };
+    const bareRead = (member: string, face: 'served' | 'execution' = 'served') =>
+      (face === 'served' ? protocol.getMetaItem : protocol.getMetaItemForExecution).call(protocol, {
+        type: 'email_template', name: 'welcome', member,
+      } as never) as Promise<{ item?: { label?: string; _packageId?: string }; packageId?: string } | undefined>;
+    it.each([
+      ['addition installed first', () => { installZ(); tpl('en-US', X); tpl('fr-FR', Z); declaredForZ(); }],
+      ['row stored first', () => { tpl('en-US', X); declaredForZ(); installZ(); tpl('fr-FR', Z); }],
+    ] as const)('[#32849] the bare member read serves the pair\'s declared override of an addition Z\'s own locale, as Z\'s address does (%s; BASE: served `zeta fr-FR`)', async (_order, arrange) => {
+      arrange();
+      expect(labelOf(await read(Z, 'fr-FR')), 'CONTROL: `?package=Z&member=fr-FR` serves the override (UNCHANGED)').toBe('pair fr-FR');
+      const bare = await bareRead('fr-FR');
+      expect([bare?.item?.label, bare?.item?._packageId, bare?.packageId], 'bare `?member=fr-FR`').toEqual(['pair fr-FR', Z, Z]);
+      const forExecution = await bareRead('fr-FR', 'execution');
+      expect([forExecution?.item?.label, forExecution?.item?._packageId], 'the bare execution read').toEqual(['pair fr-FR', Z]);
+      // CONTROL: X's own member is untouched by the override of Z's.
+      expect((await bareRead('en-US'))?.item?.label).toBe('suitex en-US');
+    });
+
+    it.each([
+      ['no row stored', () => { installZ(); tpl('en-US', X); tpl('fr-FR', Z); }],
+      ['an undeclared pair row of the locale', () => { installZ(); tpl('en-US', X); tpl('fr-FR', Z); pairRow(); hydratePairRow(); }],
+    ] as const)('[#32849] CONTROL — no override of Z declared (%s): the bare member read serves Z\'s own `fr-FR` (UNCHANGED)', async (_order, arrange) => {
+      arrange();
+      const bare = await bareRead('fr-FR');
+      expect([bare?.item?.label, bare?.packageId]).toEqual(['zeta fr-FR', Z]);
+      expect((await bareRead('fr-FR', 'execution'))?.item?.label).toBe('zeta fr-FR');
+    });
+
+    it('[#32849] CONTROL — the row declares X (the #32606 shape): the bare member read is not moved to Z, and keeps its refusal naming both (UNCHANGED)', async () => {
+      installZ(); tpl('en-US', X); tpl('fr-FR', Z); declaredForX();
+      const err = await refusalOf(() => bareRead('fr-FR'));
+      expect([err.code, err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()])
+        .toEqual(['RESOURCE_CONFLICT', 409, [X, Z].sort()]);
+    });
+
     // [#31593] CONTROL — the moved edit still follows its item: X ships
     // nothing of the name any more (no member), so the row declaring X is
     // the tenant's edit of the item that moved to Z, served at Z.

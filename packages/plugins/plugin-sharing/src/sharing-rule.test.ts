@@ -1824,9 +1824,9 @@ describe('#8710 — a deactivated position confers no sharing-rule shares', () =
 
     await rules.evaluateAllForRecord('opportunity', 'opp1', SYS);
     expect(ledgerReads).toBe(1);
-    // One share row, not two: `grant` upserts per (record, recipient), so the
-    // second rule re-grants the row the first one created.
-    expect(shareRecipients()).toEqual(['u_cfo']);
+    // One share row PER RULE: `grant` upserts per (record, recipient, rule),
+    // so the second rule writes its own row beside the first one's.
+    expect(shareRecipients()).toEqual(['u_cfo', 'u_cfo']);
 
     switchCfo(false);
     await rules.evaluateAllForRecord('opportunity', 'opp1', SYS);

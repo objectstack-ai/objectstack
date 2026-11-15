@@ -295,19 +295,32 @@ describe('[#32366 S1, ADR-0146] a row bound to a package that holds no item of t
         expect(healLines(h.logged)).toEqual([]);
     });
 
-    it('a row of a package that pairs no holder, on a name two packages hold: the refusal stands and is logged, nothing picked or retired', async () => {
+    it('a row of a package that pairs no holder, on a name two packages hold: the refusal is logged, nothing is picked, and the removed row\'s bare-slot entry is retired', async () => {
         const h = makeHarness({ rows: [overlayRow(OTHER)], holders: [[ALPHA, 'alpha'], [BETA, 'beta']], installed: [OTHER] });
 
         const result = await h.protocol.deleteMetaItem({ type: 'action', name: NAME, packageId: OTHER });
 
         expect(result.success).toBe(true);
-        // A row bound to a package keeps the logged stop: the Q2 retirement
-        // names the package-less heal only.
-        expect(tiers(h)).toEqual({ tier1: [false], tier2: [], tier3: [] });
+        // [#32620, epic ruling 6818436831] Retired as the Q2 package-less row
+        // is (at a557fa38: kept, `tier3: []`); no holder's baseline is picked.
+        expect(tiers(h)).toEqual({ tier1: [false], tier2: [], tier3: [`action|${NAME}`] });
         const lines = healLines(h.logged);
         expect(lines).toHaveLength(1);
         expect(lines[0]).toContain(ALPHA);
         expect(lines[0]).toContain(BETA);
+        expect(lines[0]).toContain('was retired from the bare slot');
+    });
+
+    it('…and when the verb removes nothing for that row (an empty bare slot, or a packaged artifact): the line says no entry was retired', async () => {
+        const h = makeHarness({ rows: [overlayRow(OTHER)], holders: [[ALPHA, 'alpha'], [BETA, 'beta']], installed: [OTHER], retireAnswers: false });
+
+        await h.protocol.deleteMetaItem({ type: 'action', name: NAME, packageId: OTHER });
+
+        // The verb was asked and removed nothing: the line says so.
+        expect(tiers(h)).toEqual({ tier1: [false], tier2: [], tier3: [`action|${NAME}`] });
+        const lines = healLines(h.logged);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain('No registry entry was retired');
     });
 
     it('CONTROL — no package holds the name: the row was the item, and tier 3 retires its entry', async () => {
