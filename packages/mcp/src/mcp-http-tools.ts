@@ -1162,8 +1162,11 @@ const DELETE_RECORD_TOOL = 'delete_record';
  * The confirmation gate on the MCP `delete_record` tool: `run_action`'s gate,
  * widened by the maintainer's decision to this one tool, for every object.
  *
- * A delete over MCP is permanent, and the bridge's checks say whether the
- * caller MAY delete, never whether a human asked for it. So a call that does
+ * A delete over MCP is destructive: a business record goes to the recycle
+ * bin (a person restores it from there until the retention ends), and a
+ * platform object's record, or any record on a host with no bin, is gone for
+ * good ({@link DELETE_RECYCLE_BIN_FACT}). And the bridge's checks say whether
+ * the caller MAY delete, never whether a human asked for it. So a call that does
  * not carry the confirmation member as the boolean `true` is refused with the
  * refusal `run_action` answers an author-gated action with: the same code,
  * status, envelope keys and `details` shape (`ActionConfirmationRequiredDetails`),
@@ -1195,10 +1198,35 @@ function recordDeleteConfirmationRefusal(
     DELETE_RECORD_TOOL,
     objectName,
     `delete_record on '${objectName}' record '${recordId}' carries no confirmation — nothing was deleted. `
-      + 'A delete over MCP is permanent: confirm with the human in the loop, then retry this call with '
+      + `${DELETE_IS_DESTRUCTIVE}: confirm with the human in the loop, then retry this call with `
       + `'${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`,
   );
 }
+
+/**
+ * What a delete over MCP does with the record, as measured on a booted stack
+ * over both transports and both delete tools: every by-id delete of a
+ * business object is kept in the recycle bin (`sys_recycle_bin`, ADR-0148)
+ * for the deployment's retention (`OS_RECYCLE_BIN_RETENTION_DAYS` or the
+ * host's resolver, else 30 days), restorable through the REST door and the
+ * console's recycle-bin page by a holder of `manageRecycleBin`, or by the
+ * deleter under `allowRestoreOwnDeleted` (ADR-0148 D5); no MCP tool
+ * restores. The engine keeps nothing for a platform object (`sys_`, `cloud_`,
+ * `ai_`) or on a composition that registers no bin, and both delete tools
+ * always delete by id, so those are the only permanent deletes here. There is no per-object switch. The answer
+ * is the per-call fact: `recycleBinEntryId` (the spec's `DeleteDataResponse`
+ * key) present means kept, absent means permanent. One sentence for both
+ * tools' descriptions, so the one-row and many-row text cannot disagree.
+ */
+const DELETE_RECYCLE_BIN_FACT =
+  'A deleted business record goes to the recycle bin, where it can be restored until the deployment\'s retention '
+  + 'ends (30 days by default) by a recycle-bin manager of the object, or by you where your permissions let you '
+  + 'restore your own deletes; a record of a platform object (sys_, cloud_, ai_), or any record on a '
+  + 'deployment with no recycle bin, is deleted permanently. No MCP tool restores: tell the human it can be '
+  + 'restored from the recycle bin (the console, or POST /api/v1/data/{objectName}/recycle-bin/{recycleBinEntryId}/restore).';
+
+/** The clause both delete refusals open their instruction with: true whether or not the bin keeps the record. */
+const DELETE_IS_DESTRUCTIVE = 'Deleting is destructive even where the recycle bin keeps the record';
 
 /** The refusal both delete tools answer an unconfirmed call with: `run_action`'s, addressed to the tool. */
 type DeleteConfirmationRefusal = ThrownRefusalEnvelope & { details: ActionConfirmationRequiredDetails };
@@ -1407,11 +1435,29 @@ interface DeleteFault {
   message: string;
 }
 
+/** A deleted row the recycle bin kept, and the entry a person restores it from. */
+interface RecycledRecord {
+  recordId: string;
+  recycleBinEntryId: string;
+}
+
+/**
+ * The recycle-bin entry a `remove` answer names, or `undefined` when the
+ * delete wrote none: the answer's `recycleBinEntryId`, the spec's
+ * `DeleteDataResponse` key both bridges answer with.
+ */
+function recycleBinEntryIdOf(answer: unknown): string | undefined {
+  const entryId = (answer as { recycleBinEntryId?: unknown } | null | undefined)?.recycleBinEntryId;
+  return typeof entryId === 'string' && entryId !== '' ? entryId : undefined;
+}
+
 /** What {@link deleteEach} did with the attempt set, in order. */
 interface DeleteEachOutcome {
   /** Rows the bridge was asked to delete: every row before a fault, and the faulted one. */
   attempted: number;
   deleted: number;
+  /** The deleted rows the recycle bin kept, in delete order: each row's answered `recycleBinEntryId`. */
+  recycled: RecycledRecord[];
   refusals: DeleteRefusalGroup[];
   notRemoved: string[];
   /** Set when a fault stopped the walk; the rows after it were not attempted. */
@@ -1478,6 +1524,11 @@ async function deleteEach(
 ): Promise<DeleteEachOutcome> {
   let deleted = 0;
   let attempted = 0;
+  const recycled: RecycledRecord[] = [];
+  const kept = (id: string, answer: unknown) => {
+    const recycleBinEntryId = recycleBinEntryIdOf(answer);
+    if (recycleBinEntryId !== undefined) recycled.push({ recordId: id, recycleBinEntryId });
+  };
   const notRemoved: string[] = [];
   const groups = new Map<string, DeleteRefusalGroup>();
   let fault: DeleteFault | undefined;
@@ -1488,11 +1539,16 @@ async function deleteEach(
       // `success: false` is the protocol's "matched, and deliberately NOT
       // removed" (a reset, not a delete); anything else is a deletion.
       if ((answer as { success?: unknown } | null | undefined)?.success === false) notRemoved.push(id);
-      else deleted++;
+      else {
+        deleted++;
+        kept(id, answer);
+      }
     } catch (err) {
-      if (earnedAnswerOf(err) !== undefined) {
+      const earned = earnedAnswerOf(err);
+      if (earned !== undefined) {
         for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) console.error(`[MCP] ${line}`);
         deleted++;
+        kept(id, earned);
         continue;
       }
       const refusal = rowRefusalOf(err, objectName);
@@ -1515,7 +1571,7 @@ async function deleteEach(
   }
   // Largest group first; a tie keeps the order the rows were refused in.
   const refusals = [...groups.values()].sort((a, b) => b.count - a.count);
-  return { attempted, deleted, refusals, notRemoved, ...(fault ? { fault } : {}), notAttempted: ids.length - attempted };
+  return { attempted, deleted, recycled, refusals, notRemoved, ...(fault ? { fault } : {}), notAttempted: ids.length - attempted };
 }
 
 /** How many records one call names: the exact count, or that more than the cap match. */
@@ -1545,7 +1601,7 @@ function deleteRecordsRefusalMessage(objectName: string, resolved: ResolvedDelet
     : `more than ${resolved.cap} records`;
   return (
     `delete_records on '${objectName}' carries no confirmation — nothing was deleted. The selection matches ${count}; `
-    + `a confirmed call deletes up to ${resolved.cap} of them. A delete over MCP is permanent: show `
+    + `a confirmed call deletes up to ${resolved.cap} of them. ${DELETE_IS_DESTRUCTIVE}: show `
     + `the preview to the human in the loop, then retry this call with '${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`
   );
 }
@@ -1576,6 +1632,9 @@ function deleteRecordsOutcome(objectName: string, resolved: ResolvedDeleteSelect
     ...selectionCount(resolved),
     attempted: done.attempted,
     deleted: done.deleted,
+    // The deleted records the recycle bin kept, with the entry each is
+    // restored from; a deleted record not listed was deleted permanently.
+    ...(done.recycled.length > 0 ? { recycleBinEntries: done.recycled } : {}),
     refused,
     refusals: done.refusals,
     ...(done.notRemoved.length > 0 ? { notRemoved: done.notRemoved } : {}),
@@ -1598,6 +1657,7 @@ function deleteRecordsFaultMessage(objectName: string, done: DeleteEachOutcome &
     `delete_records on '${objectName}' stopped at record '${done.fault.recordId}': ${done.fault.message} `
     + 'This is a fault, not a delete rule\'s refusal, so no record after it was attempted. '
     + `${done.deleted} record(s) were deleted before it and stay deleted; ${done.notAttempted} were not attempted. `
+    + (done.recycled.length > 0 ? 'progress.recycleBinEntries names the deleted records the recycle bin kept. ' : '')
     + 'Retry the same call once the fault is resolved: it selects what still matches.'
   );
 }
@@ -3016,8 +3076,10 @@ export function registerObjectTools(
       note('delete_record'),
       {
         description:
-          'Delete a record by id. This is destructive and permanent. A call is REFUSED unless it also sends ' +
-          'confirm: true — ask the human first, then retry; nothing is deleted on a refused call.',
+          'Delete a record by id. This is destructive. A call is REFUSED unless it also sends ' +
+          'confirm: true — ask the human first, then retry; nothing is deleted on a refused call. ' +
+          `${DELETE_RECYCLE_BIN_FACT} The answer's recycleBinEntryId names the recycle-bin entry; an answer ` +
+          'without one means this delete was permanent.',
         inputSchema: strictToolInput(
           { surface: 'this delete_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
@@ -3087,13 +3149,15 @@ export function registerObjectTools(
         {
           description:
             'Delete many records of ONE object in one call: those a filter (where) matches, or an id list (recordIds) — '
-            + 'instead of one delete_record per row. Destructive and permanent. A call without confirm: true deletes '
+            + 'instead of one delete_record per row. Destructive. A call without confirm: true deletes '
             + 'nothing: it is REFUSED (ACTION_CONFIRMATION_REQUIRED) with a `preview` of what a confirmed call would '
             + 'delete (how many match, sample ids). Show that to the human, and retry with confirm: true only once they '
             + `approve. A confirmed call deletes at most ${DELETE_RECORDS_MAX_PER_CALL} records (fewer when the `
             + 'deployment\'s read page size or row budget is smaller; the answer\'s cap says), each under your '
             + 'permissions, row-level security and the object\'s delete rules, which no caller can bypass. Records a '
-            + 'rule refuses stay; the answer counts them grouped by reason with their ids, and says how many still match.',
+            + 'rule refuses stay; the answer counts them grouped by reason with their ids, and says how many still match. '
+            + `${DELETE_RECYCLE_BIN_FACT} The answer's recycleBinEntries lists each deleted record the recycle bin kept `
+            + '(recordId, recycleBinEntryId); a deleted record not listed there was deleted permanently.',
           inputSchema: strictToolInput(
             {
               surface: 'this delete_records call',

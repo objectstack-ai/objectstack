@@ -851,15 +851,15 @@ function refuseAggregateFunction(func: string): never {
 
 /**
  * [#10576] An aggregation entry carries a per-aggregation `filter`
- * (`AggregationNodeSchema.filter`, the contract half of #10413) — the twin of
- * `driver-sql`'s `unsupportedAggregationFilterError`, first sentence for first
- * sentence, and the same NOT_IMPLEMENTED/501 class for the same reason: the
- * spec declares the key, this transport compiles no conditional-aggregate
- * expression for it, so it is a capability gap in the backend rather than a
- * mistake in the query. Refused rather than silently aggregating the
- * UNFILTERED rows — the #10413 defect. Unreachable through `engine.aggregate`
- * (the engine lowers filtered aggregations in memory for every driver); this
- * fires only for a caller that reached the transport directly.
+ * (`AggregationNodeSchema.filter`, the contract half of #10413). NOT_IMPLEMENTED/501
+ * because the spec declares the key and this transport compiles no
+ * conditional-aggregate expression for it, so it is a capability gap in the
+ * backend rather than a mistake in the query. Refused rather than silently
+ * aggregating the UNFILTERED rows — the #10413 defect. Unreachable through
+ * `engine.aggregate`: `TursoDriver` reports `supports.aggregationFilter: false`
+ * in remote mode (#33698), so the engine lowers a filtered aggregation in
+ * memory there; the local face inherits driver-sql's compile. This fires only
+ * for a caller that reached the transport directly.
  */
 function refusePerAggregationFilter(alias: string): never {
   const err = new Error(

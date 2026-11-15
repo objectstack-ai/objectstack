@@ -2803,6 +2803,7 @@ const zh = {
         directSignInIncomplete: "登录没有完成：你从单点登录返回时仍未登录。请确认浏览器允许本站点的 Cookie，然后重试。",
         directSignInUnavailable: "无法为本系统发起单点登录。请联系管理员检查本系统使用的登录服务。",
         directSignInRateLimited: "刚刚从此网络发起的登录过多。请等待几秒后再试。",
+        networkNotAllowed: "本系统不允许从你当前的网络登录。请从允许的网络（例如组织的办公网络或 VPN）连接，或联系管理员。",
         ssoAccessDenied: "你登录所用的账号无权访问本系统。请使用有权访问的账号登录，或请本系统所属组织的管理员将你添加为成员。",
         ssoSwitchAccount: "切换账号",
         ssoBackToConsole: "返回控制台",
@@ -4254,6 +4255,9 @@ const zh = {
       aggregations: '汇总',
       records: '记录',
       visibleToYou: '仅包含你可见的记录',
+      dataset: '数据集',
+      metrics: '指标',
+      noAddedFilter: '未在数据集定义之外添加筛选条件',
     },
     tool: {
       aggregate_data: '汇总相关数据',
