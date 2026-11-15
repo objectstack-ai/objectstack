@@ -10,6 +10,7 @@ import { loadConfig, bundleConfigModule } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
+import { handHostCryptoToAppAuditPlugin } from '../utils/app-audit-plugin-host-crypto.js';
 import { mountsAiServicePlugin, resolveAiServiceLoad, resolveOptionalPluginLoad } from '../utils/ai-service-auto-inject.js';
 import { registerInstalledPlugins } from '../utils/installed-plugins-boot.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
@@ -4978,6 +4979,17 @@ export default class Serve extends Command {
       // got that far), for `refuseUnloadedCryptoProviderPlugins` below.
       const unloadedStackPlugins: UnloadedStackPlugin[] = [];
       if (plugins.length > 0) {
+        // [ADR-0154 D2, D6; seat ruling 6884540128 item 3] The class an app's
+        // own AuditPlugin is judged by, loaded as this host loads it: only an
+        // instance of it is handed the host's crypto provider below, never a
+        // plugin that merely carries its name. Optional, as at 5d.
+        let RealAuditPlugin: typeof import('@objectstack/plugin-audit').AuditPlugin | undefined;
+        try {
+          const auditPkg = '@objectstack/plugin-audit';
+          ({ AuditPlugin: RealAuditPlugin } = await import(/* webpackIgnore: true */ auditPkg));
+        } catch {
+          RealAuditPlugin = undefined;
+        }
         let index = -1;
         for (const plugin of plugins) {
           index += 1;
@@ -5014,6 +5026,14 @@ export default class Serve extends Command {
             // declared contract (`packages/core/src/plugin-registration.ts`),
             // with a `warn` naming both versions. That is how an app supplies
             // options to a plugin this CLI mounts without them.
+            //
+            // [ADR-0154 D2, D6; seat ruling 6884540128 item 3] An app's own
+            // AuditPlugin composed with no crypto provider is handed the
+            // host's — the same provider function, and the same one-shot
+            // posture, as the instance at 5d and the `requires: ['audit']`
+            // resolver — so superseding the CLI's instance does not leave the
+            // sealed objects unsealed. An explicit provider is never replaced.
+            handHostCryptoToAppAuditPlugin(pluginToLoad, RealAuditPlugin, () => hostCrypto?.provider, !migrateAndExit);
             await kernel.use(pluginToLoad);
             stackMountedPlugins.push(pluginToLoad);
             const pluginName = plugin.name || plugin.constructor?.name || 'unnamed';

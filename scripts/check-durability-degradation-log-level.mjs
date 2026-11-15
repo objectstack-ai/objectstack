@@ -423,6 +423,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'The compliance audit row for a refused SCIM request was never written — the identity provider was answered its refusal exactly as it would have been without the ledger, so the API and every counter read clean, while the `sys_audit_log` row recording WHICH connection was refused, and why, is simply absent and nothing retries it. A SCIM console or SIEM feed reading `scim_refused` rows keeps showing a connection with no errors (#31829, the #5226 shape on the SCIM door).',
     ],
     [
+        'persistDatasetQueryAuditRows',
+        'A batch of compliance `dataset_query` rows was never written — the dataset queries themselves were answered, so every report, dashboard and counter read clean, while the `sys_audit_log` rows recording WHO read WHICH dataset, under which filter and how many rows, are simply absent and nothing retries them. Written from a BUFFER off the request path, so no request is left to notice, and a SIEM feed reading `dataset_query` rows answers who read the data with a confident, short list (the #5226 shape on the analytics dataset door).',
+    ],
+    [
         'deleteMetaItemFromLoader',
         'The metadata definition was never deleted from the authoritative store — `unregister()` still resolves and still announces `deleted`, the in-memory registry entry is gone, and the surviving row is read straight back out of storage by the very next `list()`/`get()`, so the "deleted" item reappears and survives every restart. Nothing retries it (#5259).',
     ],

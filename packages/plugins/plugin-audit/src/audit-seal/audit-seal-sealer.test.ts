@@ -2,7 +2,7 @@
 
 import type { IAuditCheckpointSigner, IClusterService, LockHandle } from '@objectstack/spec/contracts';
 import { describe, expect, it } from 'vitest';
-import { checkpointBodyFromRow, checkpointDigest, signedBodyBytes } from './index.js';
+import { checkpointBodyFromRow, checkpointDigest, signedBodyBytes, verifyAuditLedger } from './index.js';
 import { bindingCrypto, memoryEngine, recordingLogger } from './seal-store.testkit.js';
 import { AUDIT_SEALER_LOCK, AuditSealer } from './sealer.js';
 import { LocalCheckpointSigner } from './signer.js';
@@ -201,6 +201,107 @@ describe('late rows: re-counted and sealed as late, before the pass seals its wi
     expect(s.checkpoints().filter((c) => c.row_ids.includes('late')).map((c) => [c.kind, c.sequence])).toEqual([['late', 1]]);
     expect(s.hot.table('sys_secret').filter((r) => r.namespace === 'ledger_probe').map((r) => r.id).sort())
       .toEqual(s.checkpoints().map((c) => c.seed_handle).sort()); // nothing was sealed for the rows dropped
+  });
+});
+
+describe('per-chain isolation: only a chain-local fault skips a chain, and only that chain (S4, seat ruling 6884540128 item 2)', () => {
+  /** A row the canonical rule of its `payload` column (text) refuses: a number. */
+  const refused = (id: string, created: string, tenant: string | null) => ({ ...row(id, created, tenant), payload: 42 });
+  const errors = (s: ReturnType<typeof setup>) => s.logger.lines.filter((l) => l.level === 'error').map((l) => l.message);
+
+  it('skips the chain of a row a canonical rule refuses, seals every other chain, and holds sealed_through at the skipped window', async () => {
+    const s = setup();
+    s.hot.table('ledger_probe').push(
+      row('a1', at(8, 10)), refused('b1', at(8, 20), 'org_b'), row('d1', at(8, 30), null),
+      row('a2', at(9, 10)), row('b2', at(9, 20), 'org_b'), row('a3', at(10, 10)),
+    );
+    expect(await s.sealer.runPass()).toBe(4);
+    expect(s.checkpoints().map((c) => [c.window_start, c.tenant_id, c.kind, c.row_ids, c.sealed_through])).toEqual([
+      [at(8, 0), null, 'window', ['d1'], at(8, 0)],
+      [at(8, 0), 'org_a', 'window', ['a1'], at(8, 0)],
+      // org_b is out for the rest of the pass, so the 09:00 window has a skipped chain: no watermark past 08:00.
+      [at(9, 0), 'org_a', 'window', ['a2'], at(8, 0)],
+      [at(10, 0), 'org_a', 'window', ['a3'], at(8, 0)],
+    ]);
+    expect(errors(s)).toEqual([expect.stringMatching(/'ledger_probe'.*chain 'org:org_b'.*b1\.payload.*not text.*NOT being sealed/)]);
+  });
+
+  it('resumes a skipped chain from its own oldest unsealed window, as window checkpoints and not late ones', async () => {
+    const s = setup();
+    s.hot.table('ledger_probe').push(row('a1', at(8, 10)), refused('b1', at(8, 20), 'org_b'), row('a2', at(9, 10)), row('b2', at(9, 20), 'org_b'));
+    expect(await s.sealer.runPass()).toBe(2);
+    s.hot.table('ledger_probe').find((r) => r.id === 'b1')!.payload = '{"v":"b1"}';
+    expect(await s.sealer.runPass()).toBe(2);
+    expect(s.checkpoints().slice(2).map((c) => [c.window_start, c.tenant_id, c.kind, c.sequence, c.row_ids, c.sealed_through])).toEqual([
+      [at(8, 0), 'org_b', 'window', 0, ['b1'], at(8, 0)],
+      [at(9, 0), 'org_b', 'window', 1, ['b2'], at(9, 0)],
+    ]);
+    expect(await s.sealer.runPass()).toBe(0);
+  });
+
+  it('skips the chain whose head checkpoint is malformed, and seals the others past it', async () => {
+    const s = setup();
+    s.hot.table('ledger_probe').push(row('a1', at(8, 10)), row('b1', at(8, 20), 'org_b'));
+    expect(await s.sealer.runPass()).toBe(2);
+    s.hot.table('sys_audit_checkpoint').find((r) => r.tenant_id === 'org_b')!.root = 'not a digest';
+    s.hot.table('ledger_probe').push(row('a2', at(9, 10)), row('b2', at(9, 20), 'org_b'), row('a3', at(10, 10)));
+    expect(await s.sealer.runPass()).toBe(2);
+    expect(s.hot.table('sys_audit_checkpoint').slice(2).map((r) => checkpointBodyFromRow(r)).map((c) => [c.tenant_id, c.sequence, c.row_ids, c.sealed_through]))
+      .toEqual([['org_a', 1, ['a2'], at(9, 0)], ['org_a', 2, ['a3'], at(9, 0)]]);
+    expect(errors(s)).toEqual([expect.stringMatching(/'ledger_probe'.*chain 'org:org_b'.*root.*NOT being sealed/)]);
+  });
+
+  it('seals window-major: on a healthy backlog past the per-pass budget, every chain ends each pass at the same window, a sparse one included', async () => {
+    const s = setup();
+    s.clock.now = DAY0 + 40 * H; // windows up to 39:00 are due
+    // org_a writes every hour for 30 hours, more windows than one pass seals; org_b only at hours 0, 11, 23 and 29.
+    for (let h = 0; h < 30; h++) s.hot.table('ledger_probe').push(row(`a${h}`, at(h, 10)));
+    for (const h of [0, 11, 23, 29]) s.hot.table('ledger_probe').push(row(`b${h}`, at(h, 20), 'org_b'));
+    const newest = () => {
+      const by: Record<string, string> = {};
+      for (const c of s.checkpoints()) if (c.kind === 'window' && !(by[String(c.tenant_id)] > c.window_start)) by[String(c.tenant_id)] = c.window_start;
+      return by;
+    };
+    expect(await s.sealer.runPass()).toBe(24 + 3);
+    expect(newest()).toEqual({ org_a: at(23, 0), org_b: at(23, 0) });
+    expect(await s.sealer.runPass()).toBe(6 + 1);
+    expect(newest()).toEqual({ org_a: at(29, 0), org_b: at(29, 0) });
+    expect(s.checkpoints().filter((c) => c.kind === 'late')).toEqual([]);
+  });
+
+  it("never seals a lagging chain's rows as late: skipped where another chain sealed, it recovers into window checkpoints, while that chain's own late row is sealed late", async () => {
+    const s = setup();
+    s.hot.table('ledger_probe').push(row('y1', at(8, 10)), refused('x1', at(8, 20), 'org_x'), row('y2', at(9, 10)), row('x2', at(9, 20), 'org_x'));
+    expect(await s.sealer.runPass()).toBe(2); // org_a seals 08:00 and 09:00; org_x is skipped at 08:00
+    s.hot.table('ledger_probe').find((r) => r.id === 'x1')!.payload = '{"v":"x1"}';
+    s.hot.table('ledger_probe').push(row('y-late', at(8, 40))); // so the late pass reads the 08:00 window
+    expect(await s.sealer.runPass()).toBe(3);
+    expect(s.checkpoints().filter((c) => c.tenant_id === 'org_x').map((c) => [c.kind, c.window_start, c.sequence, c.row_ids]))
+      .toEqual([['window', at(8, 0), 0, ['x1']], ['window', at(9, 0), 1, ['x2']]]);
+    expect(s.checkpoints().filter((c) => c.kind === 'late').map((c) => [c.tenant_id, c.window_start, c.row_ids])).toEqual([['org_a', at(8, 0), ['y-late']]]);
+  });
+
+  it('still aborts the whole pass on a storage fault: no chain is skipped past it', async () => {
+    const s = setup();
+    s.hot.table('ledger_probe').push(row('a1', at(8, 10)), row('b1', at(8, 20), 'org_b'), row('a2', at(9, 10)));
+    const insert = s.engine.insert.bind(s.engine);
+    s.engine.insert = async (object, r, o) => {
+      if (object === 'sys_audit_checkpoint' && r.tenant_id === 'org_a') throw new Error('connection reset');
+      return insert(object, r, o);
+    };
+    expect(await s.sealer.runPass()).toBe(0);
+    expect(s.hot.table('sys_audit_checkpoint')).toEqual([]);
+    expect(errors(s)).toEqual([expect.stringMatching(/sealing 'ledger_probe' FAILED \(connection reset\)/)]);
+  });
+
+  it("keeps verify loud: the skipped chain's rows read unsealed and the verdict is not ok", async () => {
+    const s = setup();
+    s.hot.table('ledger_probe').push(row('a1', at(8, 10)), refused('b1', at(8, 20), 'org_b'), row('a2', at(9, 10)), row('b2', at(9, 20), 'org_b'));
+    await s.sealer.runPass();
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    expect(report.ok).toBe(false);
+    expect(report.totals).toMatchObject({ unmodified: 2, late: 2, unsealed: 2 });
+    expect(report.chains.find((c) => c.chain === 'org:org_b')?.counts).toMatchObject({ late: 2, unsealed: 2 });
   });
 });
 

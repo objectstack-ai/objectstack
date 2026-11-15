@@ -1529,10 +1529,37 @@ describe('PublishPackageDraftsResponseSchema (declares the batch publish respons
       published: [],
       failed: [],
     };
-    for (const key of ['seedApplied', 'materializeApplied', 'probes', 'commitId', 'unhiddenApps', 'unhideError', 'rebindError'] as const) {
+    for (const key of ['seedApplied', 'materializeApplied', 'probes', 'commitId', 'unhiddenApps', 'unhideError', 'rebindError', 'unregistered'] as const) {
       expect(minimal).not.toHaveProperty(key);
     }
     expect(PublishPackageDraftsResponseSchema.safeParse(minimal).success).toBe(true);
+  });
+
+  it('declares published_unregistered: the drafts landed, unregistered[] names each object the registry refused (#33277)', () => {
+    const unregistered = {
+      ...realResponse,
+      success: false,
+      outcome: 'published_unregistered',
+      published: [
+        ...realResponse.published,
+        { type: 'object', name: 'ticket', version: 'sha256:2cad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f2' },
+      ],
+      publishedCount: 3,
+      unregistered: [{ type: 'object', name: 'ticket', rule: 'object-registry-refused' }],
+    };
+    const parsed = PublishPackageDraftsResponseSchema.parse(unregistered);
+    expect(parsed).toEqual(unregistered);
+    // The rule is the declared id, not any string: an entry must say why.
+    expect(PublishPackageDraftsResponseSchema.safeParse({
+      ...unregistered,
+      unregistered: [{ type: 'object', name: 'ticket', rule: 'registry-said-no' }],
+    }).success).toBe(false);
+    expect(PublishPackageDraftsResponseSchema.safeParse({
+      ...unregistered,
+      unregistered: [{ type: 'object', name: 'ticket' }],
+    }).success).toBe(false);
+    // The vocabulary stays closed around the new value.
+    expect(PublishPackageDraftsResponseSchema.safeParse({ ...realResponse, outcome: 'partial' }).success).toBe(false);
   });
 
   it('does not fabricate any key: parse of a lean body adds nothing (byte-stability half)', () => {

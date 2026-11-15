@@ -133,6 +133,9 @@ const FAMILY: Record<string, string[]> = {
   // that writes nothing, its rewrite runner logging through a sink `--json`
   // points at stderr.
   'migrate audit-key-material': [],
+  // [#33155] The third twin over the same two tables: a dry run by default that
+  // writes nothing, its rewrite runner logging through a sink `--json` points at stderr.
+  'migrate audit-side-copies': [],
   // A dry run is its DEFAULT and the only form driven here: without `--apply`
   // it boots read-only (plugin-audit's objects registered), reads
   // `sys_comment` below the data door and writes nothing.

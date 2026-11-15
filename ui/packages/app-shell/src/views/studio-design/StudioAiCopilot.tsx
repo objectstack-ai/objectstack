@@ -102,7 +102,7 @@ export function StudioCopilotConversation({
   // PACKAGE and PRODUCT, not on this surface, so reopening the same app's design
   // chat in the full-page `/ai/build?package=…` focus view resumes THIS thread
   // (no `studio:` fork). See {@link chatConversationScope}.
-  const { conversationId, initialMessages, ensureConversation } = useChatConversation({
+  const { conversationId, initialMessages, ensureConversation, createError } = useChatConversation({
     userId: activeAgent ? userId : undefined,
     scope: activeAgent
       ? chatConversationScope({ appId: packageId, product: chatProductOfAgent(activeAgent) })
@@ -136,6 +136,7 @@ export function StudioCopilotConversation({
       initialMessages={initialMessages}
       pendingFirstMessageRef={pendingFirstMessageRef}
       ensureConversation={ensureConversation}
+      conversationCreateError={createError}
       selectedModelId={selectedModelId}
       onSelectedModelChange={setSelectedModelId}
       onSent={() => {}}

@@ -2502,6 +2502,31 @@ describe('HttpDispatcher', () => {
                 expect(trigger, JSON.stringify(outcome)).not.toHaveBeenCalled();
             }
         });
+
+        // #33277 — a batch whose drafts landed while the registry refused an
+        // object answers `published_unregistered`; it used to answer
+        // `published`, and the flip keeps following it (contract review of PR #33528).
+        it('POST /packages/:id/publish-drafts still runs the visibility flip after published_unregistered', async () => {
+            const { getMetaItems, saveMetaItem, trigger } = flipDoubles({
+                success: false, outcome: 'published_unregistered', publishedCount: 1, failedCount: 0,
+                published: [{ type: 'object', name: 'ticket', version: 'v1' }], failed: [],
+                unregistered: [{ type: 'object', name: 'ticket', rule: 'object-registry-refused' }],
+            });
+
+            const result = await dispatcher.handlePackages('/app.crm/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
+
+            expect(result.response?.status).toBe(200);
+            const data = (result.response as any)?.body?.data;
+            expect(data?.outcome).toBe('published_unregistered');
+            expect(data?.unregistered).toEqual([{ type: 'object', name: 'ticket', rule: 'object-registry-refused' }]);
+            expect(getMetaItems).toHaveBeenCalledTimes(1);
+            expect(saveMetaItem).toHaveBeenCalledWith(expect.objectContaining({ type: 'app', name: 'crm' }));
+            expect(data?.unhiddenApps).toEqual(['crm']);
+            expect(trigger).toHaveBeenCalledWith(
+                'metadata:reloaded',
+                expect.objectContaining({ changed: ['object/ticket', 'app/crm'] }),
+            );
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════

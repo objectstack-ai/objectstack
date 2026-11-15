@@ -10,7 +10,7 @@
  * (`mail-log-body-migration.ts`, {@link runLedgerCopyRewrite}), so the
  * rewrites never disagree about paging, the write's context, a sealed row
  * (amended first, or refused) or what is a failure. Dry-run by default,
- * idempotent, counts only.
+ * idempotent, counts only. Its operator door is `os migrate audit-side-copies`.
  *
  * Until it has run, the serve-time redactions drop the columns and the query
  * guards judge a query naming a carrying column against every object (`side-copy-columns.ts`).
@@ -133,12 +133,17 @@ export interface SideCopyMigrationReport {
   failures: number;
 }
 
-/** The side-copy rewrite's list, planners and words. Its command-line door is owed; until then a host drives the runners. */
+/**
+ * The side-copy rewrite's list, planners and words. Its door is `os migrate
+ * audit-side-copies`, and a redaction amendment names the rewrite by that
+ * command (`rewritten_by`), as the twins name theirs. A row amended before the
+ * door existed keeps `side-copy-migration`.
+ */
 const SIDE_COPY_REWRITE: LedgerCopyRewriteSpec = {
   objectNames: SIDE_COPY_OBJECTS,
   planAudit: planSideCopyAuditRowPatch,
   planActivity: planSideCopyActivityRowPatch,
-  migration: 'side-copy-migration',
+  migration: 'os migrate audit-side-copies',
   tag: '[side-copy-migration]',
   summary: (report, label) =>
     `[side-copy-migration] ${report.apply ? 'removed' : 'would remove'} listed columns from ${report.rewritten} of ` +

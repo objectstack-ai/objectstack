@@ -166,7 +166,12 @@ export interface ExportFilterSummary {
   omitted: number;
 }
 
-function recordedField(path: string): string {
+/**
+ * A field path as the ledger records it: the path when it is a machine-name
+ * path, else `?`. Shared with the `dataset_query` writer, which records the
+ * selection's dimension and measure names under the same rule.
+ */
+export function recordedField(path: string): string {
   return FIELD_PATH.test(path) ? path : '?';
 }
 
