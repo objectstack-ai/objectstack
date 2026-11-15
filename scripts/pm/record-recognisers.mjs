@@ -87,7 +87,7 @@ import {
   branchNameTarget,
   closingKeywordTargets,
   contractReviewHeadMatch,
-  contractReviewVerdictOf,
+  contractReviewVerdictLines,
   deliveryEvidence,
   deliveryEvidenceNote,
   latestMarkedComment,
@@ -96,9 +96,10 @@ import {
   SEAT_SIGNATURE_SESSION_SOURCE,
   stripSignatureLine,
 } from './check-half-states.mjs';
-// The fleet's one verdict reader, re-exported so the queue guard's lazy loader reaches it (the
-// low-risk skills arm lands on a record that reads PASS, #33501). ⛔ Never a second parser.
-export { contractReviewVerdictOf };
+// The fleet's one verdict reader, in its counting form, re-exported so the queue guard's lazy loader
+// reaches it: every Tier S entry lands on a record with exactly one `VERDICT:` line reading PASS
+// (#33501 for the low-risk skills arm, #33541 for every other leg). ⛔ Never a second parser.
+export { contractReviewVerdictLines };
 // The tier `isModelIdentifierToken` refuses by VALUE. IMPORTED, never restated:
 // `dispatch-gates.mjs` is the one line in `scripts/pm/**` where the model id is
 // spelled as a value, and a second value site here is the drift that let a
@@ -2286,7 +2287,11 @@ export function contractReviewBriefLines(values = {}) {
  * line under a bold first line, with no heading anywhere.
  *
  * ⛔ Not read: the verdict WORD (the file's boundary, and the corpus already
- * spells it two ways) and the ①②③ items (prose the seat reads).
+ * spells it two ways) and the ①②③ items (prose the seat reads). The queue guard
+ * reads the word on the comment this function chose, with
+ * `contractReviewVerdictLines` (re-exported above), and drops comments by
+ * untrusted authors from the threads before calling this (card #33541): both
+ * are the guard's facts, so this locator's other callers keep their reading.
  *
  * @returns {{ state: 'unreadable', gaps: string[] }
  *          | { state: 'absent', read: { pr: number, card: number } }
@@ -2379,7 +2384,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the `Served-tier:` reading — the tier that SERVED the record (#17915 · #18060 · #18174)': 27,
   '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 22,
   '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 30,
-  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 17,
+  // Raised 17 → 19 by #33541: the template record's one `VERDICT:` line read PASS by the guard, and the same record
+  // posted by an untrusted author not read — two pins, two cases.
+  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 19,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 23,
   '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
@@ -3267,9 +3274,12 @@ export async function selfTest() {
   // ⭐ The fixture record IS what `--template` tells a seat to paste, so this
   // pin also answers "is the thing we tell them to copy accepted where we tell
   // them to put it" -- in both places, on the same run.
+  // Posted the way a seat posts it: through the relay, whose login the guard's own loader assembles (#33541).
+  const PIN_RELAY = (await GUARD.loadRecordRecognisers()).trustedAuthors?.[0] ?? null;
   const PIN_RECORD = {
     id: 7701,
     created_at: '2026-09-16T10:00:00Z',
+    user: { login: PIN_RELAY },
     body: contractReviewRecordLines({ headSha: PIN_HEAD, reviewedBy: 'session_01PINSEAT' }).join('\n'),
   };
   // A Tier S path (the register's `.claude/**` row since #19133). The control
@@ -3301,6 +3311,8 @@ export async function selfTest() {
   t('⛔ CONTROL: the pin is not vacuous -- the set has two locations, not one', REVIEW_OF_RECORD_THREADS.length === 2 && stated.includes('PR') && stated.includes('card'));
   t('…and each run located the record on the thread it was posted to, not on the other one', pinRuns.every(([where, r]) => r.record?.where === where), JSON.stringify(pinRuns.map(([w, r]) => [w, r.record?.where])));
   t('…and the guard fetched exactly ONE thread per entry in the set, no more and no fewer', pinRuns.every(([, r]) => r.threadsRead.join() === `${PIN_PR},${PIN_CARD}`), JSON.stringify(pinRuns.map(([, r]) => r.threadsRead)));
+  t('⭐ #33541: the record the template prints carries exactly ONE `VERDICT:` line, and it reads PASS, so the guard that cleared it read its verdict', contractReviewVerdictLines(PIN_RECORD.body).join() === 'PASS' && pinRuns.every(([, r]) => r.record?.verdict === 'PASS'), JSON.stringify(pinRuns.map(([, r]) => r.record?.verdict)));
+  t('⛔ #33541: the same template record posted by an author outside the relay and GOVERNED_APPROVERS is not read -- refused as no record', await (async () => { const saved = PIN_RECORD.user; PIN_RECORD.user = { login: 'drive-by-commenter' }; try { const r = await pinRun('PR'); return r.verdict.exitCode !== GUARD.EXIT_CLEAR && r.record?.state === 'absent'; } finally { PIN_RECORD.user = saved; } })());
   t('⛔ CONTROL: with the record on NEITHER thread the same run is refused -- the pin can fail', await (async () => { const none = await pinRun('nowhere'); return none.verdict.exitCode !== GUARD.EXIT_CLEAR && none.record?.state === 'absent'; })());
   t('the guard prints the location in the WORDS this file owns, so a seat is told one thing', GUARD.REVIEW_OF_RECORD_LOCATION === REVIEW_OF_RECORD_LOCATION && TEMPLATE_TEXT.includes(`ONE comment on ${REVIEW_OF_RECORD_LOCATION}`));
   t('⭐ the record the guard cleared carries the at-tier `Scope:` line — the guard reads past it, unchanged (ruling record 6184805932)', PIN_RECORD.body.includes(`\nScope: ${RECORD_SCOPE_PLACEHOLDERS.hits} + ${RECORD_SCOPE_PLACEHOLDERS.cited}\n`) && readSet === THREAD_SET);
