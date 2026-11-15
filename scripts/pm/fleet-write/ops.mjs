@@ -35,8 +35,8 @@
  * organization / administration endpoint, so a payload naming one is refused
  * at the validator with zero writes — the `--self-test` of `validate.mjs` pins
  * that every path spelled here stays clear of those families and that the
- * table's one `PUT` (`pr_update_branch`, below) reaches no whole-set replace
- * of labels or assignees. The one re-run the table has re-runs a run's FAILED
+ * table's two `PUT`s (`pr_update_branch` and `conversation_lock`, below) reach
+ * no whole-set replace of labels or assignees. The one re-run the table has re-runs a run's FAILED
  * jobs alone, once, on a closed list of workflows (`run_rerun_failed`, below).
  *
  * ## The one row that moves a branch — `pr_update_branch`
@@ -76,6 +76,37 @@
  * Anything else is refused, the DELETE not sent. It lands only when the ref
  * reads back absent (`confirmMailboxBranch`): a ref already gone (the DELETE's
  * 422) is an idempotent landing, one still there FAILED.
+ *
+ * ## The two rows that lock and unlock a conversation — `conversation_lock`, `conversation_unlock`
+ *
+ * The repository is public, so any GitHub account can comment on a mailbox PR
+ * (`mailbox-open.mjs`), and a comment there reaches the subscribed seat's
+ * session. Locking the conversation leaves commenting to accounts with write
+ * access to the repository — the fleet App and the maintainers among them — and
+ * shuts everyone else out. `PUT /repos/{o}/{r}/issues/{n}/lock` with the body
+ * `{ lock_reason: CONVERSATION_LOCK_REASON }` (`resolved`, the one reason sent:
+ * the conversation is closed to outsiders, not heated, off-topic or spam) is
+ * the whole lock row; a `DELETE` of the same path, no body, the whole unlock
+ * row. Each takes one key, `issue` (a pull request's number is its issue
+ * number), and no body key the caller can widen. GitHub's permission ledger
+ * (the file cited below) lists the endpoint under `issues: write` and again
+ * under `pull_requests: write`, either one sufficing; both are literal grants
+ * on every stroke, so the rows spend `issues` and the mint widens nothing.
+ * The unlock exists so that a lock is never one-way: `mailbox-open.mjs` posts
+ * one relay comment on the conversation it has just locked, and unlocks it
+ * when that comment is refused — a locked mailbox the relay cannot write to
+ * would hear no knock (`mailbox-open.mjs` 〈Closed to outsiders〉).
+ *
+ * The fences, listed HERE only, are facts about the pull, judged by the
+ * executor on the pull's own `GET`, the last read before the write
+ * (`mailboxLockPreflight`): the number is a pull request (an issue's number
+ * answers 404 there), it is open, and it carries `pm:mailbox`. Anything else
+ * is refused, nothing sent, so a mistyped or injected number can neither lock
+ * nor unlock a real PR's or card's conversation. A label fence stops a
+ * mistake, not a hostile seat, which can add the label first. Each row lands
+ * only when the issue reads back with `locked` as asked (`confirmMailboxLock`):
+ * a write the platform refused whose conversation already reads that way is
+ * an idempotent landing, and any other read FAILED.
  *
  * ## The rows whose LATER requests read the FIRST's answer — `pr_create` with `assignees` or `labels`
  *
@@ -2867,6 +2898,8 @@ export const MAX_REF_BYTES = 255;
 export const MAILBOX_BRANCH_SHAPE = /^claude\/mailbox-[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 /** The label a mailbox PR carries — `mailbox-open.mjs` re-exports it, so it has one spelling. */
 export const MAILBOX_LABEL = 'pm:mailbox';
+/** The one `lock_reason` `conversation_lock` sends — a mailbox is closed to outsiders, not heated (header). */
+export const CONVERSATION_LOCK_REASON = 'resolved';
 /** Names per list-valued key; ten assignees is the platform's own cap, twenty labels is ours. */
 export const MAX_LABELS_PER_ACTION = 20;
 export const MAX_LOGINS_PER_ACTION = 10;
@@ -3203,7 +3236,11 @@ export function transferRemedy(source, target) {
  *                 to have landed (`requestLanded`, execute.mjs); a
  *                 `mailboxBranch` descriptor carries the pull and the branch
  *                 the executor fences before the DELETE and reads back after
- *                 it (`mailboxBranchPreflight`, execute.mjs); an
+ *                 it (`mailboxBranchPreflight`, execute.mjs); a
+ *                 `mailboxLock` descriptor carries the pull and the `locked`
+ *                 state asked for, which the executor fences before the write
+ *                 and reads back after it (`mailboxLockPreflight` /
+ *                 `confirmMailboxLock`, execute.mjs); an
  *                 `enqueueFront` descriptor carries the pull and the expected
  *                 head the executor fences, sends as `expectedHeadOid`, and
  *                 judges the queue read back against
@@ -3371,6 +3408,21 @@ export const OPS = Object.freeze({
     required: Object.freeze(['pull', 'expected_head_sha', 'cause', 'reason']),
     optional: Object.freeze([]),
     requests: (a) => [{ verb: 'POST', path: '/graphql', graphql: { mutation: 'dequeuePullRequest', query: DEQUEUE_MUTATION, pull: a.pull }, dequeue: { pull: a.pull, expectedHeadSha: a.expected_head_sha, cause: a.cause, reason: a.reason } }],
+  }),
+  // The two rows that lock and unlock a conversation — see the header. `issue` alone; the reason is the table's,
+  // never the caller's. The pull's fences are the executor's, on its own answer immediately before the write; the
+  // issue is read back `locked` as asked.
+  conversation_lock: Object.freeze({
+    permission: 'issues',
+    required: Object.freeze(['issue']),
+    optional: Object.freeze([]),
+    requests: (a, repo) => [{ verb: 'PUT', path: `${issues(repo, a.issue)}/lock`, body: { lock_reason: CONVERSATION_LOCK_REASON }, mailboxLock: { pull: a.issue, locked: true } }],
+  }),
+  conversation_unlock: Object.freeze({
+    permission: 'issues',
+    required: Object.freeze(['issue']),
+    optional: Object.freeze([]),
+    requests: (a, repo) => [{ verb: 'DELETE', path: `${issues(repo, a.issue)}/lock`, mailboxLock: { pull: a.issue, locked: false } }],
   }),
   // The one row that deletes a ref — see the header. `branch` is held to `MAILBOX_BRANCH_SHAPE` before the dispatch;
   // the pull's fences are the executor's, on its own answers immediately before the DELETE; the ref is read back absent.
