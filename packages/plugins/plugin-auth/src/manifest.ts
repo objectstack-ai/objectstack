@@ -12,6 +12,7 @@ import {
   SysAccount,
   SysApiKey,
   SysDeviceCode,
+  SysEnvironmentUserOutbox,
   SysIdpGroupMapping,
   SysInvitation,
   SysMember,
@@ -93,6 +94,9 @@ export const authIdentityObjects: any[] = [
   // The group → permission-set mapping the SCIM projection reads
   // (`scim-group-projection.ts`); written only by the platform-admin door.
   SysIdpGroupMapping,
+  // The record of each call to the environment-user host: invitations sent,
+  // cancelled and re-sent, retried by `environment-user-outbox.ts`.
+  SysEnvironmentUserOutbox,
 ];
 
 /**

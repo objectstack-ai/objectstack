@@ -191,6 +191,13 @@ import {
 } from './admin-ban-endpoints.js';
 import { engineUserBanWriter, type UserBanEngine } from './user-ban-write.js';
 import type { EnvironmentUserHostAccessor } from './environment-user-host.js';
+import {
+  registerOutboxAcceptedTrigger,
+  startEnvironmentUserOutboxWorker,
+  type EnvironmentUserOutboxEngine,
+  type EnvironmentUserOutboxWorker,
+  type OutboxHookEngine,
+} from './environment-user-outbox.js';
 
 
 /**
@@ -672,6 +679,8 @@ export class AuthPlugin implements Plugin {
 
   private options: AuthPluginOptions;
   private authManager: AuthManager | null = null;
+  /** The environment-user outbox worker: running only on a cloud-managed kernel with a host wired. */
+  private environmentUserOutbox: EnvironmentUserOutboxWorker | null = null;
   /**
    * Whether a route registration mounted direct sign-in's start door. The
    * door is mounted from the manager's setting and `/auth/config` advertises
@@ -2284,6 +2293,20 @@ export class AuthPlugin implements Plugin {
           packageId: IDP_GROUP_MAPPING_MATCH_PACKAGE_ID,
           logger: ctx.logger,
         });
+        // The environment-user outbox (`environment-user-outbox.ts`): on a
+        // cloud-managed kernel with a host wired, a pending person's
+        // invitation reads `accepted` once they sign in, and the worker
+        // retries every call the host did not take. Elsewhere no outbox row
+        // is ever written, so neither runs.
+        const environmentUserHost = this.options.environmentUserHost;
+        if (environmentUserHost && isCloudManaged() && !this.environmentUserOutbox) {
+          registerOutboxAcceptedTrigger(engine as unknown as OutboxHookEngine, { logger: ctx.logger });
+          this.environmentUserOutbox = startEnvironmentUserOutboxWorker({
+            getDataEngine: () => engine as unknown as EnvironmentUserOutboxEngine,
+            host: environmentUserHost,
+            logger: ctx.logger,
+          });
+        }
         try {
           await refreshAllMappingMatches(engine);
         } catch (e) {
@@ -3114,8 +3137,16 @@ export class AuthPlugin implements Plugin {
 
   async destroy(): Promise<void> {
     // Cleanup if needed
+    const outbox = this.environmentUserOutbox;
+    this.environmentUserOutbox = null;
+    await outbox?.stop();
     this.authManager = null;
   }
+
+  /** Wake the outbox worker for a call due at `atMs`; nothing when it is not running. */
+  private wakeEnvironmentUserOutbox = (atMs: number): void => {
+    this.environmentUserOutbox?.wakeAt(atMs);
+  };
 
   /**
    * Provision the stack's `demoStaff` (`demo-staff.ts` holds the three gates
@@ -4923,6 +4954,7 @@ export class AuthPlugin implements Plugin {
         },
         ...(this.options.environmentUserHost ? { host: this.options.environmentUserHost } : {}),
         getDataEngine: () => this.authManager!.getDataEngine(),
+        wakeOutbox: this.wakeEnvironmentUserOutbox,
         logger: ctx.logger,
       });
 
@@ -5207,6 +5239,7 @@ export class AuthPlugin implements Plugin {
           return session?.session?.activeOrganizationId ?? null;
         },
         ...(this.options.environmentUserHost ? { host: this.options.environmentUserHost } : {}),
+        wakeOutbox: this.wakeEnvironmentUserOutbox,
         logger: ctx.logger,
       });
 
@@ -5238,6 +5271,25 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/import-sso-users failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
+        }
+      });
+
+      // Remove a person who is still pending (the email-typo case) and cancel
+      // their invitation at the host. Same gate and attribution as the two
+      // doors above; logic in `pending-sso-users.ts` (`runRemoveSsoUser`).
+      rawApp.post(`${basePath}/admin/remove-sso-user`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const { runRemoveSsoUser } = await import('./pending-sso-users.js');
+          const { status, body } = await runAttributedToUser(actor, () =>
+            runRemoveSsoUser(pendingSsoUserDeps(c), actor, c.req.raw),
+          );
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/remove-sso-user failed', err);
           return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });

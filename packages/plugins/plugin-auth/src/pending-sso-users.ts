@@ -117,6 +117,16 @@ import {
   type EnvironmentUserHostOutcome,
   type EnvironmentUserHostRefused,
 } from './environment-user-host.js';
+import {
+  insertOutboxRow,
+  newOutboxId,
+  outboxDoc,
+  outboxNextAttemptAt,
+  settleOutboxAttempt,
+  supersedeOpenOutboxRows,
+  type EnvironmentUserOutboxEngine,
+  type EnvironmentUserOutboxStatus,
+} from './environment-user-outbox.js';
 
 /** The most rows one import request may carry, the identity import's own bound. */
 export const IMPORT_SSO_USERS_MAX_ROWS = 500;
@@ -144,6 +154,8 @@ export interface PendingSsoUserDeps
   /** better-auth's `addMember`, for the multi-organization join; absent when the organization plugin is off. */
   getAddMember?(): Promise<AddMemberCapableApi['addMember'] | undefined>;
   host?: EnvironmentUserHostAccessor;
+  /** Wakes the outbox worker for a call that is due again at `atMs` (`environment-user-outbox.ts`). */
+  wakeOutbox?(atMs: number): void;
   logger?: { warn(msg: string): void };
 }
 
@@ -179,8 +191,15 @@ type AddOutcome =
       manager?: ManagerOutcome;
       managerError?: string;
       host: EnvironmentUserHostOutcome;
+      invitation?: InvitationOutcome;
     }
   | { ok: false; result: EndpointResult };
+
+/** The outbox row a call was recorded in, as an answer names it. */
+interface InvitationOutcome {
+  id: string;
+  status: EnvironmentUserOutboxStatus;
+}
 
 const ADD_KEYS = new Set(['email', 'name', 'positions', 'permissionSets', 'manager']);
 const ADD_FIELD_NAMES = { positions: 'positions', permissionSets: 'permissionSets', manager: 'manager' } as const;
@@ -338,16 +357,24 @@ async function addOnePendingPerson(
     if (!isPendingSsoSource(existing.source)) {
       return { ok: false, result: fail(PENDING_SSO_REFUSAL_STATUS, PENDING_SSO_REFUSAL_CODE, PENDING_SSO_MESSAGES.alreadyExists) };
     }
-    const host = await notifyEnvironmentUserHost(
-      deps.host,
-      'added',
-      eventFor(existing.id, person.email, existing.name ?? person.name, actor, settlement),
-      deps.logger,
-    );
+    // The re-send: a fresh outbox row replaces any older invitation still waiting.
+    const event = eventFor(existing.id, person.email, existing.name ?? person.name, actor, settlement);
+    let claim: { id: string; token: string } | undefined;
+    if (deps.host) {
+      claim = { id: newOutboxId(), token: newOutboxId() };
+      await supersedeOpenOutboxRows(outboxEngine(engine), existing.id, ['added']);
+      await insertOutboxRow(outboxEngine(engine), outboxDoc(claim.id, 'added', event, { status: 'in_flight', claimToken: claim.token }));
+    }
+    const sent = await sendAdded(deps, engine, event, claim);
     // A refused re-add leaves the existing pending row as it was: this request did not write it.
-    if ('refused' in host) return { ok: false, result: hostRefusal(host) };
-    return { ok: true, userId: existing.id, alreadyPending: true, host };
+    if ('refused' in sent.host) return { ok: false, result: hostRefusal(sent.host) };
+    return { ok: true, userId: existing.id, alreadyPending: true, host: sent.host, ...(sent.invitation ? { invitation: sent.invitation } : {}) };
   }
+
+  // The outbox row is written inside the person's unit of work, held by this
+  // door (`in_flight`), so the person and the record of their invitation
+  // land together and no worker calls the host for it meanwhile.
+  const claim = deps.host ? { id: newOutboxId(), token: newOutboxId() } : undefined;
 
   const work = async (): Promise<{ userId: string; organizationId: string | null }> => {
     const inserted: unknown = await engine.insert(
@@ -380,6 +407,16 @@ async function addOnePendingPerson(
         }
       }
     }
+    if (claim) {
+      await insertOutboxRow(
+        outboxEngine(engine),
+        outboxDoc(claim.id, 'added', eventFor(userId, person.email, person.name, actor, settlement), {
+          status: 'in_flight',
+          claimToken: claim.token,
+        }),
+        await authSystemWriteContext(),
+      );
+    }
     return { userId, organizationId: membership.organizationId };
   };
 
@@ -393,12 +430,8 @@ async function addOnePendingPerson(
   }
 
   // The host, outside the unit of work. A typed refusal takes this person back out.
-  const host = await notifyEnvironmentUserHost(
-    deps.host,
-    'added',
-    eventFor(written.userId, person.email, person.name, actor, settlement),
-    deps.logger,
-  );
+  const sent = await sendAdded(deps, engine, eventFor(written.userId, person.email, person.name, actor, settlement), claim);
+  const host = sent.host;
   if ('refused' in host) {
     await takeBackPerson(deps, engine, written.userId, settlement);
     return { ok: false, result: hostRefusal(host) };
@@ -414,7 +447,71 @@ async function addOnePendingPerson(
       ...(written.organizationId ? { organizationId: written.organizationId } : {}),
     },
   });
-  return { ok: true, userId: written.userId, alreadyPending: false, organizationId: written.organizationId, host };
+  return {
+    ok: true,
+    userId: written.userId,
+    alreadyPending: false,
+    organizationId: written.organizationId,
+    host,
+    ...(sent.invitation ? { invitation: sent.invitation } : {}),
+  };
+}
+
+/** The outbox's view of the doors' engine. */
+const outboxEngine = (engine: PendingSsoUserEngine): EnvironmentUserOutboxEngine => engine as EnvironmentUserOutboxEngine;
+
+/**
+ * Tell the host a person was added, under the outbox row this door holds
+ * (`claim`), and record the outcome on that row: `sent`, `failed` for a
+ * typed refusal, or `pending` for the worker to retry. Without a host wired
+ * no row exists and the host is not called.
+ */
+async function sendAdded(
+  deps: PendingSsoUserDeps,
+  engine: PendingSsoUserEngine,
+  event: EnvironmentUserEvent,
+  claim: { id: string; token: string } | undefined,
+): Promise<{ host: EnvironmentUserHostOutcome | EnvironmentUserHostRefused; invitation?: InvitationOutcome }> {
+  const host = await notifyEnvironmentUserHost(
+    deps.host,
+    'added',
+    claim ? { ...event, deliveryId: claim.id } : event,
+    deps.logger,
+  );
+  if (!claim) return { host };
+  return { host, invitation: await settleHeld(deps, engine, claim, event, host) };
+}
+
+/**
+ * Record a held row's first attempt. A failure to record is logged: the
+ * claim then lapses and the worker sends the call again (the host can drop
+ * the repeat by its delivery id).
+ */
+async function settleHeld(
+  deps: PendingSsoUserDeps,
+  engine: PendingSsoUserEngine,
+  claim: { id: string; token: string },
+  event: EnvironmentUserEvent,
+  host: EnvironmentUserHostOutcome | EnvironmentUserHostRefused,
+): Promise<InvitationOutcome> {
+  try {
+    const status = await settleOutboxAttempt(
+      outboxEngine(engine),
+      { id: claim.id, email: event.email, kind: 'added', attempts: 0 },
+      claim.token,
+      host,
+      deps.logger,
+    );
+    if (status === 'pending') deps.wakeOutbox?.(outboxNextAttemptAt(1, Date.now()));
+    return { id: claim.id, status };
+  } catch (error) {
+    deps.logger?.warn(
+      `[AuthPlugin] the outcome of telling the environment-user host that ${event.email} was added could not be `
+        + `recorded on outbox row ${claim.id}; the worker sends it again once its claim lapses. Cause: `
+        + `${error instanceof Error ? error.message : String(error)}`,
+    );
+    return { id: claim.id, status: 'in_flight' };
+  }
 }
 
 /**
@@ -467,6 +564,7 @@ async function takeBackPerson(
   engine: PendingSsoUserEngine,
   userId: string,
   settlement: RequestSettlement,
+  alongside?: () => Promise<void>,
 ): Promise<void> {
   if (typeof engine.delete !== 'function') {
     throw new Error(`The host refused user ${userId}, and this data engine cannot take the row back out`);
@@ -478,6 +576,7 @@ async function takeBackPerson(
       await remove(object, { where: { user_id: userId }, multi: true, context });
     }
     await remove('sys_user', { where: { id: userId }, context });
+    if (alongside) await alongside();
   };
   const unit = settlement.grant?.seam ?? deps.createGrant;
   await (unit ? unit.runAtomically(work) : work());
@@ -544,6 +643,7 @@ export async function runAddSsoUser(
         ...(outcome.organizationId ? { organizationId: outcome.organizationId } : {}),
         ...(manager ? manager : {}),
         host: outcome.host,
+        ...(outcome.invitation ? { invitation: outcome.invitation } : {}),
       },
     },
   };
@@ -566,6 +666,8 @@ export interface ImportSsoUserRowResult {
   manager?: ManagerOutcome;
   managerError?: string;
   host?: EnvironmentUserHostOutcome;
+  /** The outbox row the invitation was recorded in, and its status. */
+  invitation?: InvitationOutcome;
 }
 
 /**
@@ -659,6 +761,7 @@ export async function runImportSsoUsers(
       alreadyPending: outcome.alreadyPending,
       ...(notApplied.length > 0 ? { notApplied } : {}),
       host: outcome.host,
+      ...(outcome.invitation ? { invitation: outcome.invitation } : {}),
     });
   }
 
@@ -682,4 +785,146 @@ export async function runImportSsoUsers(
       } as Record<string, unknown>,
     },
   };
+}
+
+const REMOVE_KEYS = new Set(['userId']);
+
+/**
+ * `POST /api/v1/auth/admin/remove-sso-user` — `{ userId }`. Removes a person
+ * who is still pending (the email-typo case) and cancels their invitation:
+ * the hosting rulings' "a pending row that never accepts … can be deleted,
+ * which cancels the invitation". The caller already passed the platform-admin
+ * gate.
+ *
+ * Refused for any row that is not pending (`409`): a person who has signed in
+ * is deactivated instead. The host is asked first, outside any transaction
+ * (`userRemoved`, or `userDeactivated` on a host without it), so its typed
+ * refusal leaves the person where they are. Then the person's positions,
+ * permission sets, membership and row are removed as the system, with the
+ * outbox row recording the cancellation, in one unit of work, through the
+ * engine's delete, so a record that points at the person follows its lookup's
+ * `deleteBehavior`: a `restrict` refuses the removal with the engine's own
+ * answer and nothing is removed. A host that could not be reached does not
+ * block the removal: the cancellation is queued and retried. With no host
+ * wired nothing is called and no row is written.
+ */
+export async function runRemoveSsoUser(
+  deps: PendingSsoUserDeps,
+  actor: AdminActor & EnvironmentUserActor,
+  request: Request,
+): Promise<EndpointResult> {
+  if (!deps.isCloudManaged()) {
+    return fail(PENDING_SSO_REFUSAL_STATUS, PENDING_SSO_REFUSAL_CODE, PENDING_SSO_MESSAGES.notManagedRemove);
+  }
+  const reading = await readJsonRequestBody(request);
+  if (!reading.ok) return badRequest(reading.message);
+  const body = (reading.body && typeof reading.body === 'object' ? reading.body : {}) as Record<string, unknown>;
+  const unknownKeys = Object.keys(body).filter((key) => !REMOVE_KEYS.has(key));
+  if (unknownKeys.length > 0) return badRequest(`Unknown field(s): ${unknownKeys.join(', ')}. This door takes userId.`);
+  const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
+  if (!userId) return badRequest('userId is required');
+
+  const engine = deps.getDataEngine();
+  if (!engine) return fail(503, 'SERVICE_UNAVAILABLE', 'Data engine unavailable, so no one was removed.');
+  const rows = await engine.find('sys_user', {
+    where: { id: userId },
+    fields: ['id', 'email', 'name', 'source'],
+    limit: 1,
+    context: SYSTEM_CTX,
+  });
+  const target = (Array.isArray(rows) ? rows[0] : undefined) as
+    | { id?: unknown; email?: unknown; name?: unknown; source?: unknown }
+    | undefined;
+  if (!target) return fail(404, 'RESOURCE_NOT_FOUND', 'User not found');
+  if (!isPendingSsoSource(target.source)) {
+    return fail(PENDING_SSO_REFUSAL_STATUS, PENDING_SSO_REFUSAL_CODE, PENDING_SSO_MESSAGES.removeNotPending);
+  }
+  const email = typeof target.email === 'string' ? target.email : '';
+  const name = typeof target.name === 'string' ? target.name : '';
+
+  // The host first, outside any transaction: a refusal leaves the person as they are.
+  let host: EnvironmentUserHostOutcome | undefined;
+  let event: EnvironmentUserEvent | undefined;
+  const deliveryId = newOutboxId();
+  if (deps.host) {
+    event = {
+      userId,
+      email,
+      name,
+      source: PENDING_SSO_SOURCE,
+      ...(await environmentUserAttribution(engine, actor, deps.logger)),
+      occurredAt: new Date().toISOString(),
+    };
+    const answer = await notifyEnvironmentUserHost(deps.host, 'removed', { ...event, deliveryId }, deps.logger);
+    if ('refused' in answer) return hostRefusal(answer);
+    host = answer;
+  }
+  // A row records the call whenever the host was called; `no_host` means it was not.
+  const recorded = event && host && !(!host.notified && host.reason === 'no_host') ? event : undefined;
+  const birth = host?.notified
+    ? ({ status: 'sent' } as const)
+    : ({ status: 'pending', lastError: 'The hosting organisation could not be reached, or failed to take the call.' } as const);
+
+  try {
+    await takeBackPerson(deps, engine, userId, {}, async () => {
+      if (!recorded) return;
+      const context = await authSystemWriteContext();
+      await supersedeOpenOutboxRows(outboxEngine(engine), userId, ['added', 'reactivated']);
+      await insertOutboxRow(outboxEngine(engine), outboxDoc(deliveryId, 'removed', recorded, birth), context);
+    });
+  } catch (error) {
+    // The removal did not happen. If the host was already told to cancel the
+    // invitation, the person is pending without one: send it again.
+    const reinvited = recorded ? await reinvite(deps, engine, recorded) : false;
+    const thrown = resolveThrownHttpError(error, 500);
+    const cause = thrown.status >= 500 ? INTERNAL_ERROR_MESSAGE : thrown.message;
+    return fail(
+      thrown.status,
+      thrown.code,
+      [PENDING_SSO_MESSAGES.removeRefused, cause, reinvited ? PENDING_SSO_MESSAGES.removeRefusedReinvited : '']
+        .filter(Boolean)
+        .join(' '),
+    );
+  }
+  if (recorded && birth.status === 'pending') deps.wakeOutbox?.(outboxNextAttemptAt(1, Date.now()));
+
+  return {
+    status: 200,
+    body: {
+      success: true,
+      data: {
+        userId,
+        email,
+        removed: true,
+        ...(host ? { host } : {}),
+        ...(recorded ? { invitation: { id: deliveryId, status: birth.status } } : {}),
+      },
+    },
+  };
+}
+
+/**
+ * Queue a fresh invitation for a pending person whose removal failed after
+ * the host was told to cancel theirs. Answers whether it was queued; a
+ * failure is logged at `error`: the person stays pending with no invitation.
+ */
+async function reinvite(deps: PendingSsoUserDeps, engine: PendingSsoUserEngine, event: EnvironmentUserEvent): Promise<boolean> {
+  const now = Date.now();
+  try {
+    await insertOutboxRow(
+      outboxEngine(engine),
+      outboxDoc(newOutboxId(), 'added', { ...event, occurredAt: new Date(now).toISOString() }, { status: 'queued' }, now),
+    );
+    deps.wakeOutbox?.(now);
+    return true;
+  } catch (error) {
+    const message =
+      `[AuthPlugin] removing pending user ${event.userId} failed after the hosting organisation was told to cancel `
+      + 'their invitation, and a new invitation could not be queued, so they stay pending with no invitation. '
+      + `Add them again to send one. Cause: ${error instanceof Error ? error.message : String(error)}`;
+    const logger = deps.logger as { warn(msg: string): void; error?(msg: string): void } | undefined;
+    if (logger?.error) logger.error(message);
+    else logger?.warn(message);
+    return false;
+  }
 }

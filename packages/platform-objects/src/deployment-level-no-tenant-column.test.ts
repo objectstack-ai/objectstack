@@ -13,6 +13,7 @@ import {
   SysSettingAudit,
   SysTrustedKey,
 } from './system/index.js';
+import { SysEnvironmentUserOutbox } from './identity/index.js';
 
 /**
  * [ADR-0131 D7] The deployment-level plumbing this package declares carries no
@@ -51,6 +52,8 @@ const DEPLOYMENT_LEVEL = [
   ['sys_trusted_key', SysTrustedKey],
   // [ADR-0057] The lifecycle sweeper's clock state: one row per datastore.
   ['sys_lifecycle_state', SysLifecycleState],
+  // The record of each call to the environment-user host (pending people's invitations).
+  ['sys_environment_user_outbox', SysEnvironmentUserOutbox],
 ] as const;
 
 describe('[ADR-0131 D7] deployment-level plumbing: no tenant column, platform-only reads', () => {

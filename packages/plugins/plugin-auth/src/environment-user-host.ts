@@ -2,10 +2,13 @@
 
 /**
  * The host seam for environment users: a host (the cloud, on a hosted
- * environment) is told when a person is added, deactivated or reactivated, so
- * it can forward an invitation or a removal. See `pending-sso-users.ts` for
- * the add half and `admin-ban-endpoints.ts` for the deactivate / reactivate
- * half.
+ * environment) is told when a person is added, deactivated, reactivated or,
+ * while still pending, removed, so it can forward an invitation or cancel
+ * one. See `pending-sso-users.ts` for the add and remove halves and
+ * `admin-ban-endpoints.ts` for the deactivate / reactivate half. Every call
+ * is recorded, and retried when the host did not take it, by the outbox
+ * (`environment-user-outbox.ts`): delivery is at least once, and the event's
+ * `deliveryId` lets a host drop a repeat.
  *
  * Two kinds of host failure are told apart:
  *
@@ -61,15 +64,23 @@ export interface EnvironmentUserEvent {
    * reactivation.
    */
   occurredAt: string;
+  /**
+   * The outbox row this call is recorded in (`sys_environment_user_outbox`).
+   * A call the host did not take is sent again under the same id, so a host
+   * can drop a repeat of a call it already took. Absent only on a call made
+   * outside the outbox.
+   */
+  deliveryId?: string;
 }
 
 /**
  * The host's side of the seam. `userAdded` is called after the person is
- * written; `userDeactivated` and `userReactivated` before the ban or unban is
- * written. A member that throws {@link EnvironmentUserHostRefusal} refuses
- * the operation. Any other throw refuses a deactivation (`503`) and is
- * reported on the answer for an add or a reactivation, which it never undoes
- * or blocks.
+ * written; `userDeactivated`, `userReactivated` and `userRemoved` before the
+ * ban, unban or removal is written. A member that throws
+ * {@link EnvironmentUserHostRefusal} refuses the operation. Any other throw
+ * refuses a deactivation (`503`) and is reported on the answer for an add, a
+ * reactivation or a removal, which it never undoes or blocks; the outbox
+ * retries those.
  */
 export interface EnvironmentUserHost {
   /** A person was added (or re-added while still pending) to this environment. */
@@ -78,6 +89,14 @@ export interface EnvironmentUserHost {
   userDeactivated(event: EnvironmentUserEvent): void | Promise<void>;
   /** A person was reactivated (`admin/unban-user`). */
   userReactivated(event: EnvironmentUserEvent): void | Promise<void>;
+  /**
+   * A pending person was removed (`admin/remove-sso-user`): cancel their
+   * invitation. Optional: a host without it is called on `userDeactivated`
+   * for the pending person instead, which the hosting rulings make the same
+   * thing ("deleting or deactivating a pending row cancels its cloud
+   * invitation"). A host should implement it.
+   */
+  userRemoved?(event: EnvironmentUserEvent): void | Promise<void>;
 }
 
 /**
@@ -132,13 +151,29 @@ export interface EnvironmentUserHostRefused {
   refused: { status: EnvironmentUserHostRefusalStatus; code: string; message: string };
 }
 
-export type EnvironmentUserEventKind = 'added' | 'deactivated' | 'reactivated';
+export type EnvironmentUserEventKind = 'added' | 'deactivated' | 'reactivated' | 'removed';
 
 const HOST_MEMBER: Record<EnvironmentUserEventKind, keyof EnvironmentUserHost> = {
   added: 'userAdded',
   deactivated: 'userDeactivated',
   reactivated: 'userReactivated',
+  removed: 'userRemoved',
 };
+
+/**
+ * The member `kind` calls on `host`: its own, or for a removal on a host
+ * without `userRemoved`, `userDeactivated` (a pending person's deactivation
+ * cancels the invitation by ruling, which is what a removal asks).
+ */
+function hostMember(
+  host: EnvironmentUserHost | undefined,
+  kind: EnvironmentUserEventKind,
+): ((event: EnvironmentUserEvent) => void | Promise<void>) | undefined {
+  const own = host?.[HOST_MEMBER[kind]];
+  if (typeof own === 'function') return own;
+  if (kind === 'removed' && typeof host?.userDeactivated === 'function') return host.userDeactivated;
+  return undefined;
+}
 
 /** The engine slice the actor's cloud id is read through. */
 export interface ActorCloudIdReader {
@@ -219,8 +254,8 @@ export async function notifyEnvironmentUserHost(
     );
     return { notified: false, reason: 'host_failed' };
   }
-  const member = host?.[HOST_MEMBER[kind]];
-  if (typeof member !== 'function') return { notified: false, reason: 'no_host' };
+  const member = hostMember(host, kind);
+  if (!member) return { notified: false, reason: 'no_host' };
   try {
     await member.call(host, event);
     return { notified: true };
@@ -231,7 +266,7 @@ export async function notifyEnvironmentUserHost(
     logger?.warn(
       `[AuthPlugin] the environment-user host refused or failed to take the news that user ${event.userId} was `
         + `${kind}. ${goesAhead(kind)} The answer says so. `
-        + (kind === 'added' ? 'Adding the person again while they are still pending tells the host again. ' : '')
+        + (kind === 'deactivated' ? '' : 'The call is retried. ')
         + `Cause: ${describe(error)}`,
     );
     return { notified: false, reason: 'host_failed' };
@@ -243,6 +278,8 @@ const goesAhead = (kind: EnvironmentUserEventKind): string =>
     ? 'The addition itself stands.'
     : kind === 'deactivated'
       ? 'The deactivation is refused: only the host can say whether this person may be removed.'
-      : 'The change goes ahead.';
+      : kind === 'removed'
+        ? 'The removal goes ahead.'
+        : 'The change goes ahead.';
 
 const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error));
