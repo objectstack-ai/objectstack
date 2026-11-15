@@ -5766,10 +5766,6 @@ export function selfTest() {
     t('structural: the doorbell reader is imported from the file that owns it, ⛔ never restated, and the check runs inside judgeBody on comments only', /import \{[^}]*\breadMailboxLine\b[^}]*\} from '\.\/record-recognisers\.mjs';/u.test(own) && !/function\s+readMailboxLine\b/u.test(own) && /const triageKnock = options\.mode === 'comment' \? triageContractReviewKnock\(rendered\.body\) : null;/u.test(own));
   }
 
-  // The floor, evaluated last: a battery that stops running names itself here.
-  const failed = cases.filter((c) => !c.ok);
-  for (const c of cases) console.log(`  ${c.ok ? '✓' : '✗'} ${c.name}`);
-  const declared = Object.keys(SELF_TEST_BATTERIES);
   battery('the record tier: a record naming `CONTRACT_REVIEW_TIER` is written only on a transcript `verify-review-tier.mjs` passes; another tier and a non-record comment are untouched');
   {
     const SIG = 'domain:skills#1 · os-project-manager · session_01QSeKYmhU5KEj1nukYhp1Tg';
@@ -5805,6 +5801,10 @@ export function selfTest() {
     }
   }
 
+  // The floor, evaluated last: a battery that stops running names itself here.
+  const failed = cases.filter((c) => !c.ok);
+  for (const c of cases) console.log(`  ${c.ok ? '✓' : '✗'} ${c.name}`);
+  const declared = Object.keys(SELF_TEST_BATTERIES);
   const floorFailures = [];
   const floorFailure = (text) => floorFailures.push(text);
   if (declared.length < SELF_TEST_BATTERY_FLOOR) {
