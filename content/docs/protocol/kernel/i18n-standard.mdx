@@ -1165,6 +1165,7 @@ beneath an action entry are judged the same way under either.
 | `reports.{name}` | a report's `name`, declared |
 | `hooks.{hook}` | a hook's `name`, declared |
 | `hooks.{hook}.refusals.{code}` | a code that hook's `refusals` declares |
+| `hooks.{hook}.refusals.{code}.reasons.{reason}` | a reason that code declares under `reasons` |
 | `flows.{flow}.screens.{node}` | the `id` of a `type: 'screen'` node in that flow, nodes nested in loop, parallel and try/catch regions included |
 | `flows.{flow}.screens.{node}.fields.{field}` | a `config.fields[].name` on that screen — an object-form screen (`config.objectName`) declares none, and its input labels live under `objects.{objectName}.fields` |
 

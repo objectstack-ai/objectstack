@@ -13,6 +13,12 @@ import type { SemanticMigration } from '../../types.js';
 // adds is refused at its entry. No D2 conversion: which read breaks the cycle
 // is a fact only the author holds, and a stored row is not re-judged until it
 // is published again.
+//
+// #33494: the door folds the written entry among the other packages' published
+// extensions of its target by priority (the build's fold), so it judges the
+// definition `os build` judges: a tie and an outranked entry are no longer
+// refused there, and a higher sibling's definition closing a cycle through
+// another field of the written entry is. The text below states that reading.
 export const entry: SemanticMigration = {
   id: 'object-extension-formula-cycle-refused',
   surface:
@@ -30,16 +36,18 @@ export const entry: SemanticMigration = {
     + 'such a cycle among an object\'s declared formulas only, so one an extension adds was accepted and showed only '
     + 'when records were read. It is now refused with the verdict and the sentence the object\'s own cycle gets '
     + '(`expression-invalid`; at the door `422 INVALID_METADATA`), on each member the extension adds, located at the '
-    + 'entry; a member the object declares keeps its location at the object. In `os build` one exception holds on '
-    + 'an object the stack declares: a field two packages\' extensions add at the same priority is not judged, since '
-    + 'which definition the registry serves is registration order, so a cycle through such a field is not found '
-    + 'there (on an object the stack does not declare the later entry\'s definition is judged). The publish door '
-    + 'judges the written entry\'s own definition of every field it adds, whatever priority another package\'s '
-    + 'extension adds the same field at, so it can refuse a tie, or an entry another package outranks, that `os '
-    + 'build` lets through.',
+    + 'entry; a member the object declares keeps its location at the object. The publish door folds the written '
+    + 'entry among the other packages\' published extensions of its target by priority, as `os build` folds every '
+    + 'package\'s entry, so both judge the same definition of each field: the written entry\'s where its priority '
+    + 'decides the field, another package\'s where that one outranks it (a cycle that definition closes through '
+    + 'another field of the written entry is refused on that field). One exception holds on an object the stack '
+    + 'declares (at the door, one the deployment serves): a field two packages\' extensions add at the priority that '
+    + 'decides it is not judged, since which definition the registry serves is registration order, so a cycle '
+    + 'through such a field is not found (on an object the stack does not declare the later entry\'s definition is '
+    + 'judged).',
   acceptanceCriteria:
     '`os build` reports no `expression-invalid` finding naming a formula cycle at an `objectExtensions` entry, and '
     + 'publishing each such extension again answers 200 with no such issue. Each of its formulas reads a computed '
-    + 'value on every row, save, in `os build` on a declared object, a cycle through a field two packages add at the '
-    + 'same priority, which the build does not judge.',
+    + 'value on every row, save, on a declared object, a cycle through a field two packages add at the priority that '
+    + 'decides it, which neither the build nor the door judges.',
 };

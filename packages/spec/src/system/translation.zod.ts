@@ -2047,7 +2047,8 @@ const appTranslationDataShape = () => ({
    * Hook translations keyed by hook name (`Hook.name`) — #26170, maintainer
    * ruling 6431311681 letter A.
    *
-   *   hooks.<hook_name>.refusals.<CODE>.message   (a declared refusal, `HookSchema.refusals`)
+   *   hooks.<hook_name>.refusals.<CODE>.message                      (a declared refusal, `HookSchema.refusals`)
+   *   hooks.<hook_name>.refusals.<CODE>.reasons.<REASON>.message     (a declared reason under it, #33214)
    *
    * A hook's business refusal ("A current clean version is required before
    * signing.") is the sentence a user reads most often when an app says "not
@@ -2063,16 +2064,21 @@ const appTranslationDataShape = () => ({
    * `'*'` (`HookSchema.object`); one catalogue per hook means one translation
    * per code, whatever the hook is bound to.
    *
-   * **Picked before it is served, by the body runner.** The sandboxed body
-   * runner answers a throw of a declared code with `hookRefusalMessageKey(hook,
-   * code)` (`system/i18n-resolver.ts`), read through the `i18n` service in the
-   * caller's `HookContext.session.locale` negotiated by `resolveBundleLocale`;
-   * with no locale, or no entry, the declared message is served. The message
-   * is plain text like the validation-rule message it sits beside: no `{{ }}`
-   * hole is filled, the translation replaces it whole.
+   * **Picked before it is served, by the runtime.** The hook runtime — the
+   * sandboxed body runner, and the in-process seam a `handler` runs through
+   * (#33214) — answers a throw of a declared code with
+   * `hookRefusalMessageKey(hook, code, reason?)` (`system/i18n-resolver.ts`),
+   * read through the `i18n` service in the caller's `HookContext.session.locale`
+   * negotiated by `resolveBundleLocale`; with no locale, or no entry, the
+   * declared sentence is served. The translation replaces the declared sentence
+   * whole. A sentence whose entry declares `params` is a template: the
+   * translation keeps the declared `{{ NAME }}` holes, and the runtime fills
+   * them from the throw's `params` after picking it — the flow `end` refusal's
+   * posture (translated before it is rendered). A sentence whose entry declares
+   * no `params` is plain text and nothing in it is filled.
    *
-   * `objectstack validate` refuses a key over an unknown hook, or a code the
-   * hook's `refusals` does not declare.
+   * `objectstack validate` refuses a key over an unknown hook, a code the hook's
+   * `refusals` does not declare, or a reason that code does not declare.
    */
   hooks: z.record(z.string(), strictObject({
     surface: 'this hook translation',
@@ -2087,16 +2093,27 @@ const appTranslationDataShape = () => ({
     refusals: z.record(z.string(), strictObject({
       surface: 'this hook refusal translation',
       history: TRANSLATION_HISTORY,
-      // The spellings `HookRefusalSchema` renames onto its own `message`.
-      aliases: { text: 'message', reason: 'message', description: 'message' },
+      // The spellings `HookRefusalSchema` renames onto its own `message` and `reasons`.
+      aliases: { text: 'message', reason: 'message', description: 'message', variants: 'reasons', messages: 'reasons' },
     }, {
-      // Plain text, like the declared message it translates; an empty string
-      // is the untranslated skeleton slot `os i18n extract` writes (the
-      // declared message is served).
+      // The declared message's own form — plain text, or a template over the
+      // entry's declared `params`; an empty string is the untranslated
+      // skeleton slot `os i18n extract` writes (the declared message is served).
       message: z.string().optional().describe(
         "Translated refusal message of a hook's declared refusal code — served whole in the caller's locale in "
-        + 'place of the declared message',
+        + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
       ),
+      // [#33214] A declared reason's sentence under the same code.
+      reasons: z.record(z.string(), strictObject({
+        surface: 'this hook refusal reason translation',
+        history: TRANSLATION_HISTORY,
+        aliases: { text: 'message', description: 'message' },
+      }, {
+        message: z.string().optional().describe(
+          "Translated sentence of a declared reason under a hook's refusal code — served in place of the declared "
+          + 'reason message, its {{ }} holes filled after',
+        ),
+      })).optional().describe("Reason translations keyed by the reason the code's `reasons` declares"),
     })).optional().describe("Refusal translations keyed by the code the hook's `refusals` declares"),
   })).optional().describe('Hook translations keyed by hook name'),
 

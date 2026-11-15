@@ -2289,7 +2289,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   /**
    * The dialog's payload for one row's 409, in the shape `InlineEditSaveBar`
    * builds for a record's draft: one edited field shows its own before and
-   * after, several show the record-level summary.
+   * after; several list each field (`fields`) with its column header and both
+   * values, so the dialog never prints the draft map as raw JSON.
    */
   const buildRowConflict = (
     changes: Record<string, any>,
@@ -2315,6 +2316,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       currentValue: current ? Object.fromEntries(keys.map((k) => [k, current[k]])) : undefined,
       currentVersion: err.currentVersion,
       currentRecord: current,
+      fields: keys.map((k) => ({
+        field: k,
+        label: columnHeaderOf(k),
+        pendingValue: changes[k],
+        currentValue: current ? current[k] : undefined,
+      })),
     };
   };
 

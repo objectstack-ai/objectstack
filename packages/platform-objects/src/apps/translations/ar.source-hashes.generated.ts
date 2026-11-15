@@ -84,4 +84,5 @@ export const arGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_sso_provider._actions.register_sso_provider.params.tokenEndpoint.label": "7cba958c95cef146",
   "objects.sys_sso_provider.fields.sign_out_of_idp.help": "ab8ff5fce3001c81",
   "objects.sys_sso_provider.fields.sign_out_of_idp.label": "212587b8191bb91b",
+  "objects.sys_user.fields.source.options.idp_pending": "3751093c5b65b072",
 };

@@ -4375,6 +4375,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // the metadata reads, `options` and `picklist`, go through
       // `declaresOptionsOnceServed`.
       'fieldList', 'declaredNames',
+      // [#33494] The names the door's stored extensions add (a Set of field
+      // names), read to keep the target's served copy from filling a tied
+      // name back in. Its keys are Set methods (`add`, `has`), never metadata keys.
+      'storedNames',
       // [#13935] The field-rule verdict, split into a compute half and a push
       // half so the walk can tell `check` a verdict was issued. `verdict`'s
       // keys are this helper's own `{ root, message, source }`, never metadata
