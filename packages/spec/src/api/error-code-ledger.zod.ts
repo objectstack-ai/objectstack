@@ -831,15 +831,25 @@ export const ERROR_CODE_LEDGER = {
     // declared `engines.protocol` range excludes this runtime's major
     // (`ProtocolIncompatibleError`, `protocol-handshake.ts`). Answered 422:
     // the manifest is well-formed, but it declares a range this runtime can
-    // never satisfy, and the remedy is a body change
-    // (`objectstack migrate meta --from N`). It matches this package's own
+    // never satisfy, and the remedy is a change to the package, not to the
+    // environment. It matches this package's own
     // METADATA_SCHEMA_INVALID. It is not 409, which this ledger keeps for
     // refusals from environment state (CONCURRENT_UPDATE). The two HTTP
     // doors that reach the throw, `POST /api/v1/packages` and (since #21805)
     // `POST /api/v1/marketplace/install-local`, answer the same bytes through
     // the shared `protocolIncompatibleAnswer`, carrying `requiredRange`,
-    // `rangeSource`, `protocolVersion`, `targetMajor` and `migrateCommand` in
-    // `error.details`.
+    // `rangeSource`, `protocolVersion` and `targetMajor` in `error.details`
+    // on every refusal. `migrateCommand` is present only when the chain can
+    // replay the package's metadata: `objectstack migrate meta --from N` for
+    // a `targetMajor` from the migrate-meta support floor
+    // (`MIGRATION_SUPPORT_FLOOR`, 16, ADR-0087 D3) up to the runtime's major,
+    // and the bare `objectstack migrate meta` when `targetMajor` is null. It
+    // is absent when `targetMajor` is AHEAD of the runtime (#26480), where
+    // the message names upgrading the runtime or installing a build for this
+    // runtime's protocol, and absent BELOW the floor (#33466), where
+    // `--from N` refuses and the message names installing a build for this
+    // runtime's protocol, or bringing the metadata to the floor by another
+    // path and then running `--from 16`.
     'OS_PROTOCOL_INCOMPATIBLE',
   ],
   '@objectstack/objectql': [
