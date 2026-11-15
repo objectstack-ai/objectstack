@@ -1333,7 +1333,7 @@ describe('[#32849] the bare layered read serves the pair\'s declared override of
     expect(await protocol.packagelessLayeredReadRefusal({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never), 'the door\'s step 1c refuses nothing').toBeUndefined();
     const bare = await layered('fr-FR');
     expect(layersOf(bare), 'bare `?member=fr-FR&layers=true`').toEqual(['zeta fr-FR', 'pair fr-FR', 'pair fr-FR', Z]);
-    expect(bare.effective?._packageId, '`effective` is stamped Z').toBe(Z);
+    expect(bare.effective, '`effective` is the document `?package=Z` serves').toEqual(atZ.effective);
     expect(labelOf(await protocol.getMetaItem({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never)), '`effective` is what the plain bare read serves').toBe('pair fr-FR');
     // CONTROL: X's own member is untouched by the override of Z's.
     expect(layersOf(await layered('en-US')), 'bare `?member=en-US` (UNCHANGED)').toEqual(['suitex en-US', null, 'suitex en-US', X]);
