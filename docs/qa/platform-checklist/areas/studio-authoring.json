@@ -573,7 +573,7 @@
         { "revision": 11, "date": "2026-11-02", "change": "acceptance[10] (clause, verify) re-pointed to #28355: revision 10 said a 422 INVALID_METADATA spec refusal writes no row, and #28355 now stamps one denied row per catalogued refusal at the four single-item doors (protocol-refusal-audit.ts, REFUSAL_AUDIT_CODES = NOT_OVERRIDABLE, NOT_CREATABLE, INVALID_METADATA, DESTRUCTIVE_CHANGE, stored lower-case). The clause names those four beside item_locked, metadata_conflict and the batch codes, and keeps NO_DRAFT, INVALID_REQUEST and 5xx as writing none; the verify asks for steps[7]'s 422 as exactly one denied invalid_metadata save row with the actor, and for no row from steps[12]'s 400 or a NO_DRAFT publish. acceptance[3] spells the wire code METADATA_CONFLICT and says the stale If-Match must be sent while a draft row exists. Measured at base 0a41075a through the real protocol doors with a throwaway probe (deleted): the stray-key dashboard draft save answered 422 INVALID_METADATA with one denied invalid_metadata row carrying the actor; a publish with no draft answered 404 NO_DRAFT and a rollback with no toVersion 400 INVALID_REQUEST, neither writing a row; a draft save carrying the published version as If-Match with no draft row answered 409 METADATA_CONFLICT (current is null). Stronger, not weaker: the 422 that scored a row as a FAIL now owes one. QA run #29002 clause FAIL", "ref": "#29013" },
         { "revision": 12, "date": "2026-11-04", "change": "acceptance[3].verify corrected from QA run #29890 (W5-FAIL, at 589049b0): a GET with ?mode=draft answers 400 (the read's parameters are closed; the draft read is ?state=draft), so the no-overwrite proof is the next publish serving the newer draft. Read at base f68b47ca", "ref": "#29906" },
         { "revision": 13, "date": "2026-11-13", "change": "acceptance[6].verify drops the expectation that a publish made outside Studio shows only after a reload: phase 1 of the #32592 ruling (6844196863) has usePendingDrafts read the ledger again when the tab becomes visible or gains focus, and on a poll while it stays visible, sending the tab's metadata-refresh pulse when the answer moved, so the item header line and the Changes pill follow an outside publish or draft without a reload. A hidden tab sends nothing (hiddenTabPollStop.ts). No other clause changed", "ref": "#32592" },
-        { "revision": 14, "date": "2026-11-15", "change": "steps[0] and steps[2] and fixtures.requires[1] re-pointed: the writable package needs a dependency on com.example.showcase to query showcase_task_metrics (else 409, dependency closure); the Draft chip is per item, so its absence does not mean a clean package; and a draft-only name is discarded through discard-drafts, not DELETE (QA run #33861, comment 6894395705, and QA run #33914, comment 6895723718; ledger 6896511848 of #33761 rows 163, 226 and 227; the record numbers the chip step 3). The clauses are unchanged. Read at base 895783a1", "ref": "#PENDING-33964" }
+        { "revision": 14, "date": "2026-11-15", "change": "steps[0] and steps[2] and fixtures.requires[1] re-pointed: the writable package needs a dependency on com.example.showcase to query showcase_task_metrics (else 409, dependency closure); the Draft chip is per item, so its absence does not mean a clean package; and a draft-only name is discarded through discard-drafts, not DELETE (QA run #33861, comment 6894395705, and QA run #33914, comment 6895723718; ledger 6896511848 of #33761 rows 163, 226 and 227; the record numbers the chip step 3). The clauses are unchanged. Read at base 895783a1", "ref": "#33981" }
       ]
     },
     {
@@ -946,7 +946,7 @@
           "revision": 11,
           "date": "2026-11-15",
           "change": "steps[1] and fixtures.requires[0]: record.quantity * record.unit_price is not a proven-number expression, it infers 'unknown'; record.est_hours * 1.1 infers 'number' (inferExpressionType measured at 895783a1; QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 164). The parity clause is unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     },
@@ -1485,7 +1485,7 @@
           "revision": 9,
           "date": "2026-11-15",
           "change": "steps[3]: the New dialog opens on a record trigger and refuses to save without an object, so the scratch flow picks the manual preset (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 175). The ITEM_LOCKED sentence's wording is product #33345 and is not edited here. The clauses are unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     },
@@ -1708,7 +1708,7 @@
         { "revision": 9, "date": "2026-10-26", "change": "automated.ref names the protocol-layer evidence its pin carries for acceptance[3] and negative[0] (checklist-accuracy finding a3/n0 of QA run #25815, release-18.2.0-tier1 at 6679644a, objectui pin b41ed7f68956; wave anchor #25807): the ref said the pin covered the outage clause ONLY, but its [#8924] describe asserts the ?type= misspelling refusal at the protocol layer; the api-oracle clauses still need the REST door. fixtures.requires[0] names a console built from this tree. The retired objectui-pin wording is replaced on the way (#26035 left this file to its card): objectui is imported under ui/, so the pins resolve in this checkout and the console builds from this tree with pnpm console:build. No clause is loosened", "ref": "#25848" },
         { "revision": 10, "date": "2026-11-01", "change": "negative[4] moved to source[7]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377", "ref": "#28345" },
         { "revision": 11, "date": "2026-11-08", "change": "steps[3] and steps[6] name Studio's door, /studio/PKG/metadata and /studio/PKG/metadata/_diagnostics, not /apps/APP/metadata?package=; steps[8] says a planted view's sweep entry is named after its expanded container (OBJECT.default). Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1", "ref": "#31499" },
-        { "revision": 12, "date": "2026-11-15", "change": "fixtures.knownGaps[0] recipe: the plant edits list.columns[0] (how the row is stored), the sweep reports config.columns.0, and the planted row appears within about a minute because of the cache (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 171). The clauses are unchanged. Read at base 895783a1", "ref": "#PENDING-33964" }
+        { "revision": 12, "date": "2026-11-15", "change": "fixtures.knownGaps[0] recipe: the plant edits list.columns[0] (how the row is stored), the sweep reports config.columns.0, and the planted row appears within about a minute because of the cache (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 171). The clauses are unchanged. Read at base 895783a1", "ref": "#33981" }
       ]
     },
     {
@@ -1813,7 +1813,7 @@
           "revision": 11,
           "date": "2026-11-15",
           "change": "steps[5]: the app-scoped docs route is keyed by the package id, /apps/PKG/docs; /apps/APP/… redirects there (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 162). The clause is unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     },
@@ -1930,7 +1930,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "fixtures.requires[0] makes a /tmp copy with symlinked node_modules and packages the default, since it writes nothing in the shared checkout or its .git; the linked-worktree recipe stays as the alternative (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 176). The clauses are unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     },
@@ -2354,7 +2354,7 @@
           "revision": 10,
           "date": "2026-11-15",
           "change": "steps[4]: departure (a) from the Automations pillar must use another pillar's link, since the Automations link is a no-op there (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 167; the record numbers it steps[2]). The clauses are unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     },
@@ -2558,7 +2558,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "steps[2]: the disable leg needs a publish before 'Switched off' enters the legend, since the rail reads the deployed state (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 161). The clause is unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     },
@@ -2871,7 +2871,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "steps[4] names the launch entry by what it is, the canonical boot with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 on a fresh DB, so any port does (QA run #33914, comment 6895723718; ledger 6896511848 of #33761 row 228). The clauses are unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     },
@@ -3092,7 +3092,7 @@
           "ref": "#31499"
         },
         { "revision": 6, "date": "2026-11-08", "change": "GET /api/v1/meta/_drafts re-spelled ?packageId=PKG to ?package=PKG: the drafts door now reads ?package= through the binding every /meta read uses and refuses the retired ?packageId= with 400 VALIDATION_ERROR. Not loosened: every clause still scores the same server reads", "ref": "#31490" },
-        { "revision": 7, "date": "2026-11-15", "change": "acceptance[3].verify quoted 'attempt 1/2', '2/2'; the retry log prints the structured fields attempt and maxRetries (hook-wrappers.ts). Same facts, the spelling the log has (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 169). The clause is unchanged. Read at base 895783a1", "ref": "#PENDING-33964" }
+        { "revision": 7, "date": "2026-11-15", "change": "acceptance[3].verify quoted 'attempt 1/2', '2/2'; the retry log prints the structured fields attempt and maxRetries (hook-wrappers.ts). Same facts, the spelling the log has (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 169). The clause is unchanged. Read at base 895783a1", "ref": "#33981" }
       ]
     },
     {
@@ -3392,7 +3392,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "steps[0]: the Add field type list labels the summary type 'Rollup', not 'Summary' (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 177). The clauses are unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     },
@@ -4299,7 +4299,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "steps[2] says a CHECK-only policy is saved with using '' and restricts no read, and fixtures.requires[1] asks for an app in the package so acceptance[0]'s record half can be read (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 158; the record numbers the RLS step 3). The clauses are unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     },
@@ -4572,7 +4572,7 @@
           "revision": 10,
           "date": "2026-11-15",
           "change": "the field.deleteBehavior row leaves the matrix as step 4 says: Studio's field inspector offers a deleteBehavior control (ObjectFieldInspector.tsx offeredDeleteBehaviors), recorded in fixtures.knownGaps[0]. The flow.errorHandling row names its observable: three failed runs, one per attempt, in /runs. QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 172. Variants after the removed row shift down by one. The clauses are unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     },
@@ -4928,7 +4928,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "steps[1] says Customize sends no write (the canvas re-runs a read), and steps[7] names the view's own end-user route instead of the task list, since the 'In-Progress Tasks' nav entry is a filtered slice, not the view (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 174; the record numbers the Customize step 2). The clauses are unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     },

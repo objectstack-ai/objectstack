@@ -839,7 +839,7 @@
           "revision": 7,
           "date": "2026-11-15",
           "change": "steps[4] adds a second row-scope pair on the member's own invoice (q = its QA- name). The contributor-bound member reads none of INV-1001..INV-1012, so q=INV compares two empty sets on the member side and cannot tell narrowing from a blackout (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 31). The clause is unchanged. Read at base 895783a1",
-          "ref": "#PENDING-33964"
+          "ref": "#33981"
         }
       ]
     }
