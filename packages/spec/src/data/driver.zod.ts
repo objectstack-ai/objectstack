@@ -156,6 +156,10 @@ const capRemoved = (key: string, mechanism: string) =>
  * - `transactionsUnsupported` — opt-OUT of `beginTransaction()` for a
  *   transport that inherits the method from a base class it cannot honour;
  *   the engine ANDs its negation with method presence.
+ * - `aggregationFilter` — opt-IN for a per-measure `aggregations[].filter` on
+ *   `aggregate()`: the engine ANDs it with method presence, because a driver
+ *   can carry `aggregate()` without compiling that key (and a subclass can
+ *   inherit a compiler its own transport refuses).
  *
  * Everything else IS the method: aggregate pushdown gates on
  * `typeof driver.aggregate === 'function'`, schema sync on
@@ -274,6 +278,52 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    * has today.
    */
   transactionsUnsupported: z.boolean().optional().describe('Transport cannot honour transactions even though `beginTransaction` is inherited (absence = false)'),
+
+  /**
+   * This driver's `aggregate()` evaluates a per-measure filter
+   * (`aggregations[].filter`, `AggregationNodeSchema.filter`) itself.
+   *
+   * The promise: for every filter the engine admits at that position, the
+   * driver's `aggregate()` reads, for each measure, exactly the rows of each
+   * group its filter selects (SQL `FILTER (WHERE …)` semantics: sibling
+   * measures keep the whole group, and a filter that selects no row of a group
+   * answers that function's empty-group value, `emptyGroupValueFor`), with the
+   * same answer as the engine's in-memory aggregation over the rows `find()`
+   * returns for the same `where`. The read scope and the tenant wall are the
+   * statement's `where` and stay on the whole statement; the measure filter
+   * only narrows inside it.
+   *
+   * The one latitude the promise inherits rather than closes: ordering a
+   * NON-temporal text column (`$gt` / `$lt` / `$between` on text) is the
+   * backend collation's, not promised (the comparison-operator text in
+   * `filter.zod.ts`), exactly as it is for a `where`. On a backend whose
+   * collation is not code-point order — measured: PostgreSQL with an ICU
+   * `en-US` database collation — such a measure filter can select other rows
+   * than the in-memory path, which orders by UTF-16 code units. Every other
+   * operator, and ordering on numbers, dates, datetimes and times, answers
+   * alike.
+   *
+   * What the engine does with it: `engine.aggregate` sends an aggregate whose
+   * measures carry a filter to `driver.aggregate` only when this bit is `true`
+   * AND the driver has the method; otherwise it asks `find()` for the rows and
+   * aggregates them in memory (`applyInMemoryAggregation`), which is always
+   * correct and loads the scoped row set into the process. A driver without the
+   * bit keeps that path, so declaring nothing changes nothing.
+   *
+   * Why a bit and not method presence: `aggregate()` predates this key, and a
+   * driver can implement it without compiling a measure filter (the faces that
+   * do not compile it refuse it loudly, NOT_IMPLEMENTED / 501, when reached
+   * directly). And a subclass can inherit a compiler its own transport cannot
+   * run: the libSQL remote transport answers 501 for the key, so
+   * `TursoDriver` turns the bit off in remote mode.
+   *
+   * ⛔ Not a way to say "this filter, today". It describes the driver, is read
+   * at dispatch time, and a driver that could compile only some filters should
+   * not declare it.
+   *
+   * Optional; absence means `false`, like `batchSchemaSync`.
+   */
+  aggregationFilter: z.boolean().optional().describe('`aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the engine\'s in-memory answer (absence = false: the engine aggregates filtered measures in memory)'),
 
   // ============================================================================
   // Retired capability bits (#4634, ADR-0049 enforce-or-remove) — 17.0.0

@@ -32,6 +32,7 @@ const result = DriverCapabilitiesSchema.parse(data);
 | **autonumber** | `boolean` | optional | Driver natively generates persistent autonumber/sequence values |
 | **batchSchemaSync** | `boolean` | optional | Supports batched schema sync to reduce schema DDL round-trips (absence = false) |
 | **transactionsUnsupported** | `boolean` | optional | Transport cannot honour transactions even though `beginTransaction` is inherited (absence = false) |
+| **aggregationFilter** | `boolean` | optional | `aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the engine's in-memory answer (absence = false: the engine aggregates filtered measures in memory) |
 | **create** | `never` | optional | [REMOVED] `DriverCapabilities.create` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — no code in any repository ever read it, so its value never changed which code path ran. CRUD is not optional for a driver: `create`/`find`/`findOne`/`update`/`delete` are REQUIRED `IDataDriver` methods and the engine calls them unconditionally. Delete the key. |
 | **read** | `never` | optional | [REMOVED] `DriverCapabilities.read` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — no code in any repository ever read it, so its value never changed which code path ran. CRUD is not optional for a driver: reads go through the REQUIRED `find`/`findOne`/`count` methods, called unconditionally. Delete the key. |
 | **update** | `never` | optional | [REMOVED] `DriverCapabilities.update` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — no code in any repository ever read it, so its value never changed which code path ran. CRUD is not optional for a driver: `update`/`upsert` are REQUIRED `IDataDriver` methods, called unconditionally. Delete the key. |
@@ -75,7 +76,7 @@ const result = DriverCapabilitiesSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Driver instance name |
 | **type** | `Enum<'sql' \| 'nosql' \| 'cache' \| 'search' \| 'graph' \| 'timeseries'>` | ✅ | Driver type category |
-| **capabilities** | `{ queryDateGranularity?: Record<string, boolean>; autonumber?: boolean; batchSchemaSync?: boolean; transactionsUnsupported?: boolean }` | ✅ | Driver capability flags |
+| **capabilities** | `{ queryDateGranularity?: Record<string, boolean>; autonumber?: boolean; batchSchemaSync?: boolean; transactionsUnsupported?: boolean; … }` | ✅ | Driver capability flags |
 | **connectionString** | `string` | optional | Database connection string (driver-specific format) |
 | **poolConfig** | `{ min?: number; max?: number; idleTimeoutMillis?: number; connectionTimeoutMillis?: number }` | optional | Connection pool configuration |
 
@@ -87,6 +88,7 @@ const result = DriverCapabilitiesSchema.parse(data);
 | **autonumber** | `boolean` | optional | Driver natively generates persistent autonumber/sequence values |
 | **batchSchemaSync** | `boolean` | optional | Supports batched schema sync to reduce schema DDL round-trips (absence = false) |
 | **transactionsUnsupported** | `boolean` | optional | Transport cannot honour transactions even though `beginTransaction` is inherited (absence = false) |
+| **aggregationFilter** | `boolean` | optional | `aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the engine's in-memory answer (absence = false: the engine aggregates filtered measures in memory) |
 | **create** | `never` | optional | [REMOVED] `DriverCapabilities.create` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — no code in any repository ever read it, so its value never changed which code path ran. CRUD is not optional for a driver: `create`/`find`/`findOne`/`update`/`delete` are REQUIRED `IDataDriver` methods and the engine calls them unconditionally. Delete the key. |
 | **read** | `never` | optional | [REMOVED] `DriverCapabilities.read` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — no code in any repository ever read it, so its value never changed which code path ran. CRUD is not optional for a driver: reads go through the REQUIRED `find`/`findOne`/`count` methods, called unconditionally. Delete the key. |
 | **update** | `never` | optional | [REMOVED] `DriverCapabilities.update` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — no code in any repository ever read it, so its value never changed which code path ran. CRUD is not optional for a driver: `update`/`upsert` are REQUIRED `IDataDriver` methods, called unconditionally. Delete the key. |
