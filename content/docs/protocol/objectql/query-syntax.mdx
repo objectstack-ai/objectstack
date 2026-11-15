@@ -689,13 +689,15 @@ const opportunities = await engine.find('opportunity', {
 A condition on a related record's fields beneath a relation field (`lookup`,
 `master_detail`, `user`, `tree`) is served in `where`: the engine reads the
 related object with it **as the caller**. On a read verb (`find`, `findOne`,
-`count`, `aggregate`) a single-valued relation is matched in the database: the
-related read is planned, not run, and the driver receives one statement with a
-subquery, `account IN (SELECT id FROM account WHERE <its read scope> AND
-<condition>)`, with the tenant wall on both tables — no id list, no cap.
-Otherwise (a multi-valued relation, or `update` / `delete`) the field is
-matched against the ids the related read returns (`$in`; any member when
-`multiple: true`).
+`count`, `aggregate`) a single-valued relation is matched in the database
+where that is provably the same read: the related read is planned, not run,
+and the driver receives one statement with a subquery,
+`account IN (SELECT id FROM account WHERE <its read scope> AND <condition>)` —
+no id list, no cap. The related object's read restrictions are carried into
+the subquery, or the hop falls back to reading the related ids as the caller
+and matching them with `$in`, under the cap below. Otherwise (a multi-valued
+relation, or `update` / `delete`) the field is matched against the ids the
+related read returns (`$in`; any member when `multiple: true`).
 
 Limits — up to three relationships (ADR-0071's hop limit): every key a field the
 related object declares, and a relation key may hold a condition of its own on
@@ -703,11 +705,12 @@ its related object (`{ account: { owner: { region: 'NA' } } }`), each hop read a
 the caller and nested as a subquery; no dotted key; forward only: never a parent by its children; `where`
 only: an aggregation's `filter` and `having` refuse it, `INVALID_FILTER` / 400;
 where ids are read, at most 1000 of them, refused past that,
-`INVALID_FILTER` / 400, never truncated; the subquery form needs the related
-object on the same datasource (refused `INVALID_FILTER` / 400 otherwise) and a
-driver that compiles it — the SQL drivers (every `driver-sql` dialect, Turso)
-compile it, the in-memory driver evaluates it in process, and a driver that
-compiles no subquery (MongoDB, OData) refuses the read; as the caller: the related object's row scope and field permissions
+`INVALID_FILTER` / 400, never truncated; the subquery form is taken only on
+the related object's own datasource and on a driver that compiles it — the SQL
+drivers (every `driver-sql` dialect, Turso) compile it and the in-memory driver
+evaluates it in process; a related object on another datasource, a driver that
+compiles no subquery (MongoDB, OData), and a related object whose reads an
+object-scoped middleware or an `afterFind` hook shapes keep the id read; as the caller: the related object's row scope and field permissions
 apply, so a field the caller cannot read is refused, `PERMISSION_DENIED` / 403,
 never an empty result.
 

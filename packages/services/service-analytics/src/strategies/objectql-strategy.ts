@@ -314,8 +314,8 @@ function crossObjectEchoRefused(leaf: ServedCrossObjectLeaf): Error {
   return invalidFilterError(
     `[analytics] cannot render display SQL for the cross-object filter "${leaf.member}". The query ` +
     `itself is answered by the engine, as the nested-relation condition ${nested}: it reads "${leaf.object}" as the caller, with that object's row scope and ` +
-    `field permissions, and matches "${leaf.relation}" against the ids it returns, refusing a match ` +
-    `past its cap. No statement printed here reproduces that read. Run the query itself ` +
+    `field permissions, and keeps the rows whose "${leaf.relation}" is a record that read admits. ` +
+    `No statement printed here reproduces that read. Run the query itself ` +
     `(/analytics/query) for its rows.`,
   );
 }
@@ -2298,16 +2298,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // [#20887] The echo DECLINES the nested-relation form, the way it
       // declines a cross-field comparison (#7598's echo ruling: one consistent,
       // loud answer, never a half-rendering). What runs is a read of the
-      // related object as the caller, then a match against the ids it
-      // returned; no statement this renderer can print reproduces that — a
-      // JOIN would name rows the caller's field permissions and the engine's
-      // cap never let through. `execute()` swallows the echo's refusal, so the
+      // related object as the caller, then a match against what that read
+      // admits; no statement this renderer can print reproduces that — a
+      // JOIN would name rows the caller's read restrictions on the related
+      // object never let through. `execute()` swallows the echo's refusal, so the
       // query face still answers; only the dry-run face refuses.
       throw invalidFilterError(
         `[analytics] cannot render display SQL for the nested-relation condition on "${node.member}" ` +
         `({ "${node.member}": { … } }). The query itself is answered by the engine: it reads the ` +
         `related object as the caller, with that object's row scope and field permissions, and ` +
-        `matches "${node.member}" against the ids it returns, refusing a match past its cap. No ` +
+        `keeps the rows whose "${node.member}" is a record that read admits. No ` +
         `statement printed here reproduces that read. Run the query itself (/analytics/query) for ` +
         `its rows.`,
       );

@@ -194,10 +194,11 @@ related object with the condition **as the caller** — that object's row scope 
 permissions apply, so a condition on a field the caller cannot read is refused
 (`PERMISSION_DENIED` / 403), never answered with an empty list — and then matches the
 relation field against what that read selects: on a read verb, a single-valued relation is
-one subquery inside the read's own statement (the related read is planned, not run: its
-read scope, the condition and the tenant wall become the subquery's `WHERE`, so no id list
-is read and none is capped); otherwise `$in` on the ids that read returns, any member on a
-multi-valued one (`multiple: true`). No related record matching selects no
+one subquery inside the read's own statement where that is provably the same read (the
+related read is planned, not run: its read scope and the condition become the subquery's
+`WHERE`, so no id list is read and none is capped — the related object's read restrictions
+are carried into the subquery, or the hop falls back to the id read); otherwise `$in` on the
+ids that read returns, any member on a multi-valued one (`multiple: true`). No related record matching selects no
 rows; under `$not`, a record whose relation is empty satisfies the negation.
 
 It reaches **up to three relationships** (ADR-0071's hop limit): every key must be a field
@@ -206,9 +207,10 @@ the related object declares, and a relation key may carry a condition of its own
 scope; a fourth relationship and the dotted `{ account: { 'owner.region': 'NA' } }` are
 refused. Where ids are read (a multi-valued relation, `update`, `delete`) a
 condition matching more than 1,000 related records is refused with `INVALID_FILTER` / 400
-rather than run over a cut-off list. The subquery needs the related object on the read's
-datasource and a driver that compiles it (the SQL drivers; the in-memory driver evaluates it
-in process; MongoDB and OData refuse it). For either, run the two steps
+rather than run over a cut-off list, and the id read is also what serves a related object on
+another datasource, a driver that compiles no subquery (MongoDB, OData — the SQL drivers
+compile it, the in-memory driver evaluates it in process), and a related object whose reads
+an object-scoped middleware or an `afterFind` hook shapes. Past the cap, run the two steps
 yourself — filter the related object, then match its ids:
 
 ```typescript

@@ -31,12 +31,14 @@
  *   one field-predicate check that refuses it on a direct read (the security
  *   layer's filter-oracle guard, a loud `PERMISSION_DENIED`), never answered
  *   with an empty result. There is no second copy of that rule here.
- * - **A subquery on a read verb.** On `find`, `findOne`, `count` and
- *   `aggregate` a single-valued relation is matched by one in-database
- *   subquery scoped by the related object's own planned read
- *   (`relation-semi-join.ts`): no id list, so none of the bound below.
+ * - **A subquery on a read verb, where it is provably the same read.** On
+ *   `find`, `findOne`, `count` and `aggregate` a single-valued relation is
+ *   matched by one in-database subquery scoped by the related object's own
+ *   planned read where that subquery is provably the related read's own
+ *   statement (`relation-semi-join.ts` names the conditions): no id list, so
+ *   none of the bound below. Everywhere else the ids are read.
  * - **Bounded, loudly, where ids are read** (a multi-valued relation, a write
- *   verb). At most {@link RELATION_FILTER_ID_CAP} related ids
+ *   verb, every case the subquery is not taken). At most {@link RELATION_FILTER_ID_CAP} related ids
  *   feed one condition. The read asks for one more than the cap; when it gets
  *   it, the filter is refused `INVALID_FILTER` / 400 with the two-step route in
  *   the words — ⛔ never a truncated match.
@@ -338,26 +340,5 @@ export function relationFilterCapError(site: RelationFilterSite, context: string
     + `the related object '${site.target}' (the engine's cap), so the filter was NOT applied: a cut-off `
     + `id list would silently drop matching rows. Narrow the condition, or read '${site.target}' yourself `
     + `page by page and match '${site.field}' against its ids: ${idsRoute(site.field, site.multiple)}.`,
-  );
-}
-
-/**
- * The cross-datasource refusal for a single-valued relation condition: it is
- * served as a subquery inside the read's own statement
- * (`relation-semi-join.ts`), and no driver evaluates a subquery across two
- * datasources — `INVALID_FILTER` / 400, before anything is read.
- */
-export function relationSemiJoinDatasourceError(
-  site: RelationFilterSite,
-  context: string,
-  objectDatasource: string | undefined,
-  targetDatasource: string | undefined,
-): Error {
-  return invalidFilterError(
-    `${context}: the nested-relation condition at ${site.path} is on the related object '${site.target}', `
-    + `bound to datasource '${String(targetDatasource)}', while this read's object is bound to `
-    + `'${String(objectDatasource)}'. The condition is evaluated as a subquery inside this read's own `
-    + `statement, and no driver evaluates a subquery across two datasources, so the filter was NOT applied. `
-    + `Read '${site.target}' yourself and match '${site.field}' against its ids: ${idsRoute(site.field, site.multiple)}.`,
   );
 }

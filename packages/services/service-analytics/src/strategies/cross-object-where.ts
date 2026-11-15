@@ -14,11 +14,12 @@
  * every verb `aggregate` included (`@objectstack/objectql`'s
  * `relation-filter-lowering.ts`). It reads the related object through the
  * engine's own `find`, AS THE CALLER — that object's CRUD gate, row scope and
- * field permissions apply as they do to a direct read — and matches the
- * relation field against the ids the read returns, refusing a match past its
- * cap (`RELATION_FILTER_ID_CAP`) rather than truncating it. That is "resolve the
- * parent ids first, then filter the base object with `IN`", with the security
- * rule in the one place that owns it. This module only respells the member; it
+ * field permissions apply as they do to a direct read — and keeps the rows
+ * whose relation field is a record that read admits: a subquery in the same
+ * statement where that is provably the same read, otherwise the ids the read
+ * returns, refusing a match past the cap (`RELATION_FILTER_ID_CAP`) rather
+ * than truncating it. That is "resolve the parent ids first, then filter the
+ * base object with `IN`", with the security rule in the one place that owns it. This module only respells the member; it
  * reads no data and judges no permission.
  *
  * ## What a lowered leaf means
