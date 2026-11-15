@@ -215,17 +215,19 @@ describe('removeActionsByPackage hands an emptied key back — the door reaches 
         install(A);
         install(B);
         ship(A);
-        // B's `approve_all` dispatches to `approve` (target) and asks a capability the caller lacks.
+        // B's `approve_all` asks a capability the caller lacks; its rotation is OBJECT:approve_all,
+        // OBJECT:approve (its target), then global:approve_all, the one key held under its own name.
         engine.registry.registerItem('action', {
-            name: 'approve_all', type: 'script', objectName: OBJECT, target: 'approve', requiredPermissions: ['approve_everything'],
+            name: 'approve_all', label: 'Approve all', type: 'script', objectName: OBJECT, target: 'approve', requiredPermissions: ['approve_everything'],
             body: { language: 'js', source: 'return 1;', capabilities: [] },
         } as never, 'name' as never, B);
         engine.registerAction(OBJECT, 'approve', () => 'host');
         bind(A);
-        engine.registerAction(OBJECT, 'approve_all', () => 'all', `app:${B}`);
+        engine.registerAction('global', 'approve_all', () => 'all', `app:${B}`);
         engine.registerAction('global', 'approve', () => 'global');
         engine.removeActionsByPackage(`app:${A}`);
-        // Before the hand-back the key was empty: this ran `global:approve`, which `approve_all` never reaches.
+        // Before the hand-back OBJECT:approve was empty: this ran global:approve, and approve_all
+        // reached global:approve_all, so it owned nothing the call ran.
         expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {})).result).toBe('host');
         const declaration = await resolve();
         expect(await actionHandlerOwnerRefusal(deps, { request: {} } as any, {
