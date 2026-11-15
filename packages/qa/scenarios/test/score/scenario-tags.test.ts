@@ -843,7 +843,7 @@ describe('persona grants — what the card has each persona read and write, agai
     // A delete the card applies outright is measured, even beside the confirm-gated action.
     const appliedDelete: ScenarioArtifactCard = {
       ...PROJECT,
-      run: { ...PROJECT.run, operations: PROJECT.run.operations!.map((o) => (o.id === 'drop_packing' ? { ...o, outcome: { kind: 'applied' as const } } : o)) },
+      run: { ...PROJECT.run, operations: PROJECT.run.operations!.map((o) => (o.id === 'drop_packing' ? { ...o, outcome: { kind: 'applied' as const, state: [] } } : o)) },
     };
     expect(verdicts(facts, appliedDelete)[3]).toEqual(['persona-grant:contractor:task:delete', false]);
   });
