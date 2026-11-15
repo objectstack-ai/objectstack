@@ -1,5 +1,170 @@
 # @objectstack/plugin-audit
 
+## 18.5.0
+
+### Patch Changes
+
+- 2399e39: feat(plugin-audit, rest): a query of an opted-in saved dataset writes one `dataset_query` row in `sys_audit_log` (#31797)
+  
+  Clause-②: yes (widening) — a new `sys_audit_log.action` value, `dataset_query`, with its writer; a new `AuditPlugin` option, `datasetQueryAudit` (`datasets`, `maxBatchSize`, `flushIntervalMs`); a new `recordDatasetQuery` member on the `audit` service slot; and new exports from `@objectstack/plugin-audit` (`createDatasetQueryAuditWriter`, `buildDatasetQueryAuditRow`, `DATASET_QUERY_AUDIT_ACTION` and their types). `createReadAuditBatcher` takes an optional event type parameter and an optional `overflowMessage`, both defaulting to what it did before. No door answers differently: with no dataset named, nothing is recorded or buffered.
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches the audit ledger's actions or `AuditPlugin`'s options; `content/docs/permissions/record-view-auditing.mdx` gains a "Dataset queries" section.
+  
+  **What a deployment gets.** Name saved datasets in `new AuditPlugin({ datasetQueryAudit: { datasets: [...] } })` and each query of one through `POST /analytics/dataset/query`, or through each query of its batch door, writes one run-level row: the caller (`user_id`, `actor`, `tenant_id`), the dataset's base object in `object_name`, and in `metadata` the dataset name, the package holding it (`dataset_package`, `null` for the environment's own definition; a name in `datasets` covers every holder of that name), `preview: true` when a draft definition was read, the dimensions and measures selected, the filtered field names and operators (never the values), the row count and the outcome. A report or dashboard is composed in the browser, so the row names the dataset, not a report.
+  
+  **The rules.** Off by default and opted in per saved dataset; an inline definition (the Studio preview) writes no row. A request the door refuses before the read writes no row; a query that fails after the read started writes one row with outcome `failed`, the HTTP status and the error's machine code, never the error's text. Rows are written in batches off the request path, stamped with the query's instant, and a lost batch is reported at `error` once per cause.
+- f4cafd5: fix(plugin-audit): a redaction run admits and opens each checkpoint once; a late checkpoint never lists a row another sealer already sealed; a seed whose sequence another checkpoint holds is dropped
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Redaction runs (`os migrate audit-mail-bodies`, `audit-key-material`, `audit-metadata-bodies`).** The redaction amendment writer verified a checkpoint's signature, rebuilt its root from `leaf_hashes` and opened its seed through the crypto provider once for every row the checkpoint lists. It now does each once per checkpoint per run (the hot run and the archive run are each one run) and reuses the answer for every row that checkpoint lists. With a KMS-backed provider that is one remote call per checkpoint instead of one per row. What a run decides is unchanged: a checkpoint that does not verify under a trusted signing key still refuses every row it lists, and a seed that is missing or does not open still refuses every row it sealed. A fault met while opening a checkpoint is now met once in a run and refuses every row that checkpoint lists; re-running the command tries it again.
+  
+  **The sealer.** A `late` checkpoint now re-reads its window's checkpoints once the chain's head is known, and leaves out every row a checkpoint stored in between already lists, so a row another sealer sealed while this pass ran is not listed by a second checkpoint. When a checkpoint insert is rejected and the read-back finds another checkpoint at that sequence, the seed the sealer just sealed can never be stored, so its `sys_secret` row is removed instead of being left for `os secret orphans`. A rejected insert with no row read back still keeps its seed, as before.
+  
+  `@objectstack/spec`: a source comment on the `plugin-audit` group of the platform object names now says that the package registers `sys_audit_amendment` too. No name, type or value changes.
+- 4f0a5f3: fix(plugin-audit, cli): the audit sealer skips only the chain a chain-local fault belongs to; `os serve` hands its crypto provider to an AuditPlugin the app composed with none
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **The sealer (ADR-0154 D3, S4).** A fault that belongs to one chain of a sealed object — a row a canonical rule refuses, or a malformed checkpoint of that chain (its head among them) — now skips that chain for the rest of the pass instead of stopping the whole object. Every other chain is still sealed. Each chain now resumes from its own oldest unsealed window, as `window` checkpoints, so a skipped chain catches up once its fault is fixed. No checkpoint's `sealed_through` passes a window a skipped chain leaves unsealed. The sealer reports each skipped chain once at `error`, naming the object, the chain, the fault and the window it is unsealed from, and again each hour while it lasts. A lock lapse, a signer, crypto-provider or storage fault still stops the object's pass, as before. `os audit verify` reads the skipped chain's rows in a window another chain sealed as `late` and unsealed, and fails.
+  
+  **An app-supplied AuditPlugin (ADR-0154 D2, D6).** An app that puts its own `AuditPlugin` in its stack `plugins` (to turn on `readAudit`, for example) supersedes the one `os serve` composes, and so lost the host's crypto provider: its sealer sealed nothing and said so at `error`. `os serve` now hands it the host's provider when the app composed it with no `cryptoProvider`, and keeps its sealer off on an `OS_MIGRATE_AND_EXIT=1` boot, as for the instance it composes itself. A provider the app composed is never replaced, an app's `armSealer: false` stays off, and a plugin that only carries the AuditPlugin name is never handed anything. The new `AuditPlugin.adoptHostCryptoProvider(provider, { armSealer })` is the method a host calls to do this.
+- 4e1d327: feat(cli): `os migrate audit-side-copies` runs the at-rest side-copy rewrite on the live audit tables and the archive
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Run `os migrate audit-side-copies` once after upgrading from 18.4.0 or earlier, a dry run first:**
+  
+  ```bash
+  os migrate audit-side-copies                         # dry run: counts per table and store, writes no row
+  os migrate audit-side-copies --object sys_audit_log  # only one copy table (repeatable)
+  os migrate audit-side-copies --apply                 # remove the columns (prompts; --yes skips the prompt)
+  os migrate audit-side-copies --apply --yes --json    # CI / scripts
+  ```
+  
+  The audit writer no longer copies a side-copy column (another record's field values, today an approval request's `payload_json`) into `sys_audit_log` (`new_value`, `old_value`) or `sys_activity` (both halves of `metadata`). Copies written before that still carry it. Until they are rewritten, the read-time redaction drops the column and the query guard treats a query naming it as reaching every object, so the command is cleanup, not a gate.
+  
+  - **The command.** It drives `@objectstack/plugin-audit`'s `migrateSideCopies` (the live `sys_audit_log` and `sys_activity` rows) and `migrateArchivedSideCopies` (the archive datasource `sys_audit_log` archives to). It is a dry run by default and writes only with `--apply`. Its flags are `os migrate audit-key-material`'s (`--database-url`, `--apply`, `--yes`, `--force`, `--json`) plus `--object`, which takes `sys_audit_log` or `sys_activity` and narrows the run, hot and archive, to the tables it names. Any other name is refused with `OBJECT_NOT_FOUND`, exit 1, before anything is read. The report gives, per copy table, the copies read and the copies rewritten (or to rewrite), for the hot tables and for the archive each, and never prints a value. It is idempotent: a second `--apply` rewrites nothing. A failed read or write, a sealed row it had to refuse, or an archive it could not reach exits 1, as for its twins.
+  - **The rewrite's name (`@objectstack/plugin-audit`).** A sealed row the rewrite amends (ADR-0154 D7) now records `rewritten_by: 'os migrate audit-side-copies'`, the command that rewrote it, as `audit-mail-bodies`, `audit-key-material` and `audit-metadata-bodies` record theirs. It recorded `side-copy-migration` before, a name no release shipped; a row amended under it on a pre-release build keeps it.
+- 8a8c21e: fix(platform-objects, plugin-audit)!: a member who holds `view_all_audit_log` and not `manage_platform_settings` (a separation-of-duties auditor) now finds the Audit Log entry in Setup › Diagnostics (#33224)
+  
+  Clause-②: yes (narrowing) — `GET /meta/app/setup` now serves `group_diagnostics` with the Audit Log entry (`nav_audit_logs`) to a member who holds `view_all_audit_log` without `manage_platform_settings`; before, the whole group was withheld from them. Every shipped permission set is served what it was before: `admin_full_access` holds both capabilities and still sees Sessions, Notification Events and Audit Log; `organization_admin` and the member sets hold neither and still see no Diagnostics group. One custom-set audience narrows: a set granting `manage_platform_settings` without `view_all_audit_log` is no longer served the Audit Log entry. A gate is all-of, so the entry cannot be gated on either capability.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema, accepted value or metadata type is added, removed, renamed or re-shaped. What moves is which entries of the platform's own Setup app the served app read lists for a caller, so nothing is stored for a migration to rewrite and nothing needs a tombstone. -->
+  
+  **BREAKING** for a custom permission set that grants `manage_platform_settings` without `view_all_audit_log`. Its holders were served the Setup › Diagnostics › Audit Log entry and no longer are. The Audit Log page itself is unchanged: it still opens by URL and still shows them the organization-attributed ledger rows it showed before. What to do: grant `view_all_audit_log` to that set if its holders should keep the menu entry, or open the page by URL. A third-party package that contributes an entry into `group_diagnostics` without its own `requiredPermissions` is now shown to every member who can open Setup, where before only `manage_platform_settings` holders saw it: declare `requiredPermissions` on the entry (see below).
+  
+  **What moved.** The Setup app's `group_diagnostics` slot carried `requiredPermissions: ['manage_platform_settings']`, and a group's gate prunes its whole subtree before any child is judged, so the audit entry contributed into it could never reach an auditor. The slot now carries no gate, and each entry carries its own: Sessions (`nav_sessions`) and Notification Events (`nav_notifications`) keep `manage_platform_settings`, and Audit Log is gated on `view_all_audit_log`, the ledger's own read capability.
+  
+  **If you contribute into `group_diagnostics`.** The slot no longer gates what you put in it. An entry that should stay admin-only declares `requiredPermissions` on the entry itself, as the platform's own entries now do.
+- 3eac63a: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The MCP read tools (`list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_records`) now admit a system object whose author declared `enable.aiReadable: true`, asked through a new optional bridge member `aiReadExposed` that both bridges answer with `isAiReadExposed`. Every gate after admission is unchanged (the caller's permissions, row-level security, the object's own read gates, field masking), and every write tool still refuses every `sys_*` object. `sys_approval_request` declares the key; `query_records` names the "waiting on you" filter shape.
+  
+  The member baseline `member_default` now names `sys_approval_request` read-only, so every signed-in member holds a data-door read on it; which rows is still the approvals request read gate (the submitter, a current approver, a past actor), and no write opens. That gate now answers a conjunctive `pending_approvers` `$contains` of the caller's own id with the approvals service's acting-address fold, so the console's My Pending view and an agent's "waiting on me" query find a slot addressed by email or an unstaffed position, not only one holding the user id. A `pending_approvers` predicate naming another id, or under `$or`, is read as written.
+  
+  `@objectstack/plugin-audit`: the activity and audit copies of an approval request are hardened: a ledger copy holds no value that its owner narrows per reader. New copies no longer carry the request's subject snapshot, and `migrateSideCopies` / `migrateArchivedSideCopies` rewrite the copies at rest. Both ledgers' read redactions drop it from an older copy whether or not the rewrite has run.
+  
+  **Who can query those copies narrows.** A non-system query on `sys_activity` or `sys_audit_log` that names `sys_approval_request` by equality on `object_name` and names a column holding the copy (`metadata`; `old_value`, `new_value`), as a free-text search does, is now judged against every registered object, as a query naming no object already is. A reader withheld any field of any object, an organization administrator included, is refused it (`403`) where they were answered before. The same query pinned to another object, or naming only other columns, is judged as before. This does not depend on the rewrite having run.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [1cf2a5a]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [6a36b79]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [8c88db6]
+- Updated dependencies [834d5f5]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [5ea8ce5]
+- Updated dependencies [4ace1fa]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [6e28797]
+- Updated dependencies [7adb1b5]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [cbb876c]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [8a8c21e]
+- Updated dependencies [b194618]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [6107290]
+- Updated dependencies [3c231cd]
+- Updated dependencies [489ef5f]
+- Updated dependencies [480246b]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [ea67b26]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [481f642]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [1c32f6d]
+- Updated dependencies [b8f6237]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+- Updated dependencies [0a6f193]
+  - @objectstack/spec@18.5.0
+  - @objectstack/objectql@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/types@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

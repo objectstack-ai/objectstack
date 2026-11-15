@@ -4223,6 +4223,14 @@ const zhHant = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'AI 額度還剩 {{left}}。標有 ×N 的模型消耗額度的速度是預設模型的 N 倍。',
+      confirmTitle: '切換到 {{model}}？',
+      confirmBody: '此模型每條訊息消耗的 AI 額度是預設模型的 {{multiplier}} 倍。',
+      confirmAllowance: '額度還剩 {{left}}，使用此模型會以 {{multiplier}} 倍的速度用完。',
+      confirmCancel: '取消',
+      confirmAction: '切換模型',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: '傳送訊息',
     scrollToBottom: '滾動到最新訊息',
@@ -4250,7 +4258,9 @@ const zhHant = {
     tool: {
       aggregate_data: '彙總相關資料',
       get_record: '讀取這條記錄',
+      list_datasets: '檢視指標',
       query_data: '查詢所需資料',
+      query_dataset: '按指標查詢',
       query_records: '查詢相關記錄',
       read_package_doc: '閱讀應用文件',
       search_knowledge: '在知識庫中查詢',
