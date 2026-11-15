@@ -31,7 +31,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG_DIR = resolve(HERE, '../..');
 const driverRequire = createRequire(realpathSync(join(PKG_DIR, 'node_modules/@objectstack/driver-sql/package.json')));
 
-const args = { dialect: 'sqlite', scale: 100_000, runs: 7, pgUrl: process.env.OS_BENCH_PG_URL ?? 'postgres://postgres@127.0.0.1:5432/postgres', workDir: resolve(process.env.TMPDIR ?? '/tmp', 'os-sql-perf-bench'), timeoutMs: 120_000 };
+const args = { dialect: 'sqlite', scale: 100_000, runs: 7, pgUrl: process.env.OS_BENCH_PG_URL ?? 'postgres://postgres@127.0.0.1:5432/postgres', workDir: resolve(process.env.TMPDIR ?? '/tmp', 'os-sql-perf-bench'), timeoutMs: 120_000, only: undefined };
 for (let i = 2; i < process.argv.length; i++) {
   const [flag, inline] = process.argv[i].split('=');
   const val = () => (inline !== undefined ? inline : process.argv[++i]);
@@ -41,6 +41,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (flag === '--pg-url') args.pgUrl = val();
   else if (flag === '--work-dir') args.workDir = resolve(val());
   else if (flag === '--timeout-ms') args.timeoutMs = Number(val());
+  else if (flag === '--only') args.only = val().split(','); // groups: m0 (I1–I8), r9 (I9)
   else throw new Error(`unknown argument: ${process.argv[i]}`);
 }
 
@@ -78,13 +79,62 @@ async function time(db, sql, binds) {
   await db.all(sql, binds); // warm
   const ms = [];
   let rows = 0;
+  let first;
   for (let i = 0; i < args.runs; i++) {
     const t0 = performance.now();
     const r = await db.all(sql, binds);
     ms.push(performance.now() - t0);
     rows = r.length;
+    first = r[0];
   }
-  return { ms: Math.round(median(ms) * 100) / 100, rows };
+  return { ms: Math.round(median(ms) * 100) / 100, rows, first };
+}
+
+/**
+ * I9 (R9): the sharing read scope. Today the sharing service reads the
+ * member's grants (`limit 5000`) and the engine binds every `record_id` into
+ * `id in (…)`, once for the page and once again for the total; the target folds
+ * the grants into the statement as a subquery. The "today" text is copied from
+ * the statements `bench.mjs --sql-log` captured for the member; it needs a
+ * database `bench.mjs --shares N` seeded. Each pair also compares the ANSWER
+ * (page row count, the total): a faster statement that answers differently is
+ * not a rewrite. Where the member holds more than 5000 grants the two differ by
+ * design, and the row says so.
+ */
+async function sharePairs(db, memberId) {
+  const grantsSql = 'select record_id, access_level from sys_record_share where object_name = ? and recipient_type = ? and recipient_id = ? order by id asc limit 5000';
+  const grantBinds = ['bench_account', 'user', memberId];
+  const held = (await db.all('select count(*) as n from sys_record_share where object_name = ? and recipient_type = ? and recipient_id = ?', grantBinds))[0];
+  const heldN = Number(held?.n ?? held?.count ?? 0);
+  if (heldN === 0) return { held: 0, results: [], note: 'no shares seeded: run bench.mjs --shares N at this scale first' };
+  const grants = await time(db, grantsSql, grantBinds);
+  const ids = (await db.all(grantsSql, grantBinds)).map((r) => r.record_id);
+  const inIds = `(${ids.map(() => '?').join(', ')})`;
+  const sub = '(select record_id from sys_record_share where object_name = ? and recipient_type = ? and recipient_id = ?)';
+  const scopeToday = `((owner_id = ?) or (id in ${inIds}))`;
+  const scopeTarget = `((owner_id = ?) or (id in ${sub}))`;
+  const todayBinds = [memberId, ...ids];
+  const targetBinds = [memberId, ...grantBinds];
+  const chain = (scope) => `opportunity in (select id from bench_opportunity where account in (select id from bench_account where ${scope}))`;
+  const rows = [
+    ['I9 member account page', (sc) => `select * from bench_account where ${sc} order by created_at desc, id desc limit 50`],
+    ['I9b member account total', (sc) => `select count(*) as n from bench_account where ${sc}`],
+    ['I9c member line-item page (the controlled-by-parent chain carries the share scope)', (sc) => `select * from bench_line_item where ${chain(sc)} order by created_at desc, id desc limit 50`],
+    ['I9d member line-item total', (sc) => `select count(*) as n from bench_line_item where ${chain(sc)}`],
+  ];
+  const out = [{ item: `I9r the grants read itself (${heldN} held, ${ids.length} returned), run before the page and again before the total`, today: grantsSql, todayMs: grants.ms, todayRows: grants.rows, target: '(none: folded into the statement)', targetMs: null }];
+  for (const [item, sql] of rows) {
+    const today = await time(db, sql(scopeToday), todayBinds);
+    const target = await time(db, sql(scopeTarget), targetBinds);
+    const answer = (t) => (t.first && ('n' in t.first || 'count' in t.first) ? Number(t.first.n ?? t.first.count) : t.rows);
+    const same = answer(today) === answer(target);
+    out.push({
+      item, today: sql(scopeToday).replace(inIds, `(?×${ids.length})`), target: sql(scopeTarget),
+      todayMs: today.ms, targetMs: target.ms, todayAnswer: answer(today), targetAnswer: answer(target), sameAnswer: same,
+      note: same ? undefined : `answers differ: today ${answer(today)}, target ${answer(target)} — the ${heldN - ids.length} grants past the 5000 read limit`,
+    });
+  }
+  return { held: heldN, returned: ids.length, results: out };
 }
 
 async function dropIndex(db, name, table) {
@@ -174,6 +224,16 @@ async function main() {
   ];
 
   const results = [];
+  const group = (g) => !args.only || args.only.includes(g);
+  if (group('r9')) {
+    const r9 = await sharePairs(db, memberId);
+    for (const r of r9.results) {
+      results.push(r);
+      console.log(`${r.item}\n  today ${r.todayMs} ms${r.todayAnswer !== undefined ? ` (answer ${r.todayAnswer})` : ''} · target ${r.targetMs ?? 'n/a'} ms${r.targetAnswer !== undefined ? ` (answer ${r.targetAnswer})` : ''}${r.note ? ` · ${r.note}` : ''}`);
+    }
+    if (r9.note) console.log(`I9: ${r9.note}`);
+  }
+  if (!group('m0')) return finish(db, commit, results);
   for (const p of pairs) {
     const today = p.today ? await time(db, p.today, p.binds) : null;
     const target = await time(db, p.target, p.targetBinds ?? (p.today ? p.binds : undefined));
@@ -229,15 +289,19 @@ async function main() {
   results.push({ item: 'I8c the same admin page with R4 (vacuous chain dropped)', today: adminPageR4Sql, todayMs: sortBefore.adminR4.ms, targetMs: sortAfter.adminR4.ms, target: withIndex, plans: { before: plans.before.adminR4, after: plans.after.adminR4 } });
   console.log(`I8 member page: ${sortBefore.member.ms} -> ${sortAfter.member.ms} ms; admin page (chained) ${sortBefore.admin.ms} -> ${sortAfter.admin.ms} ms; admin page with R4 ${sortBefore.adminR4.ms} -> ${sortAfter.adminR4.ms} ms`);
   for (const [k, v] of Object.entries(plans)) console.log(`  plan ${k} chained: ${v.admin}\n  plan ${k} with R4: ${v.adminR4}`);
+  return finish(db, commit, results);
+}
+
+async function finish(db, commit, results) {
   await db.close();
 
   const outDir = join(args.workDir, 'results');
   mkdirSync(outDir, { recursive: true });
-  const base = join(outDir, `micro-${args.dialect}-${args.scale}`);
+  const base = join(outDir, `micro-${args.dialect}-${args.scale}${args.only ? `-${args.only.join('-')}` : ''}`);
   const measuredAt = new Date().toISOString();
   writeFileSync(`${base}.json`, JSON.stringify({ dialect: args.dialect, scale: args.scale, runs: args.runs, commit, measuredAt, accounts, opportunities, results }, null, 2));
-  const md = [`# SQL pairs — ${args.dialect}, ${args.scale} line items (median of ${args.runs})`, '', `commit \`${commit}\` · ${measuredAt}`, '', '| item | today ms | target ms |', '|:--|--:|--:|',
-    ...results.map((r) => `| ${r.item} | ${r.todayMs ?? (r.item.startsWith('I3b') ? 'refused' : 'n/a')} | ${r.targetMs} |`)].join('\n') + '\n';
+  const md = [`# SQL pairs — ${args.dialect}, ${args.scale} line items (median of ${args.runs})`, '', `commit \`${commit}\` · ${measuredAt}${args.only ? ` · groups ${args.only.join(', ')}` : ''}`, '', '| item | today ms | target ms | answer today / target |', '|:--|--:|--:|:--|',
+    ...results.map((r) => `| ${r.item} | ${r.todayMs ?? (r.item.startsWith('I3b') ? 'refused' : 'n/a')} | ${r.targetMs ?? 'n/a'} | ${r.todayAnswer !== undefined ? `${r.todayAnswer} / ${r.targetAnswer}${r.sameAnswer ? '' : ' (differ)'}` : ''} |`)].join('\n') + '\n';
   writeFileSync(`${base}.md`, md);
   console.log(`wrote ${base}.json and ${base}.md`);
 }

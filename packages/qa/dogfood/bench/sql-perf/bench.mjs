@@ -475,7 +475,14 @@ async function bulkLoad(databaseUrl, t) {
     : (await db.raw("select tablename as table_name, indexname as index_name, indexdef as definition from pg_indexes where (tablename like 'bench_%' or tablename = 'sys_record_share') order by tablename, indexname")).rows;
   await db.destroy();
   const memberOwned = Array.from({ length: SHAPE.accounts }, (_, i) => i).filter(memberOwnsAccount).length;
-  return { orgId, adminId, memberId, indexes, shares: { seeded: args.shares, memberOwnedAccounts: memberOwned, expectedVisibleAccounts: memberOwned + shared.length } };
+  return {
+    orgId, adminId, memberId, indexes,
+    shares: {
+      seeded: args.shares, memberOwnedAccounts: memberOwned, expectedVisibleAccounts: memberOwned + shared.length,
+      firstSharedAccount: shared.length ? id.account(shared[0]) : undefined,
+      lastSharedAccount: shared.length ? id.account(shared[shared.length - 1]) : undefined,
+    },
+  };
 }
 
 async function preparePgDatabase() {
@@ -625,7 +632,8 @@ async function runScenario(server, tokens, sc) {
   let captured;
   if (args.sqlLog) {
     const c = await captureStatements(server, token, sc, body());
-    captured = { status: c.status, serverCount: c.serverCount, logged: c.statements.length, byTable: statementsByTable(c.statements), statements: c.statements };
+    const binds = c.statements.map((t) => (t.match(/\?|\$\d+/g) ?? []).length);
+    captured = { status: c.status, serverCount: c.serverCount, logged: c.statements.length, maxBinds: Math.max(0, ...binds), byTable: statementsByTable(c.statements), statements: c.statements };
     if (c.serverCount !== c.statements.length) log(`  ${sc.name} [${sc.who}] the log holds ${c.statements.length} statements, Server-Timing counted ${c.serverCount} (the difference is background work that ran during the call)`);
   }
   const samples = [];
@@ -679,7 +687,8 @@ function markdown(report) {
   lines.push(`commit \`${report.commit}\` · ${report.startedAt} · iterations ${report.iterations} (warmup ${report.warmup}) · seed ${report.seedMs} ms`);
   lines.push(`shape: ${report.shape.regions} regions · ${report.shape.products} products · ${report.shape.accounts} accounts · ${report.shape.opportunities} opportunities · ${report.shape.lineItems} line items · member owns every ${report.shape.memberEvery}th account`);
   const { shares, network, grantsCache } = report.legs;
-  lines.push(`legs: shares ${shares.seeded} (member owns ${shares.memberOwnedAccounts} accounts, expected visible ${shares.expectedVisibleAccounts}, reads ${shares.memberVisibleAccounts ?? 'n/a'}) · grants cache ${grantsCache.ttlMs}${grantsCache.bootLine ? ` (\`${grantsCache.bootLine.replace(/`/g, '')}\`)` : ''} · network ${network ? `+${network.injectedRttMs} ms RTT: select 1 direct ${network.directSelect1Ms} ms, proxied ${network.proxiedSelect1Ms} ms, ${network.proxyStats?.chunksToDb} chunks to the database` : 'none (local socket)'}`);
+  const byId = shares.firstSharedGet ? `; by id: first shared ${shares.firstSharedGet.status}, last shared ${shares.lastSharedGet.status}${shares.lastSharedGet.code ? ` ${shares.lastSharedGet.code}` : ''}` : '';
+  lines.push(`legs: shares ${shares.seeded} (member owns ${shares.memberOwnedAccounts} accounts, expected visible ${shares.expectedVisibleAccounts}, reads ${shares.memberVisibleAccounts ?? 'n/a'}${byId}) · grants cache ${grantsCache.ttlMs}${grantsCache.bootLine ? ` (\`${grantsCache.bootLine.replace(/`/g, '')}\`)` : ''} · network ${network ? `+${network.injectedRttMs} ms RTT: select 1 direct ${network.directSelect1Ms} ms, proxied ${network.proxiedSelect1Ms} ms, ${network.proxyStats?.chunksToDb} chunks to the database` : 'none (local socket)'}`);
   lines.push('');
   lines.push('| scenario | who | status | p50 ms | p95 ms | server p50 ms | db ms p50 | SQL statements | rows/total |');
   lines.push('|:--|:--|:--|--:|--:|--:|--:|--:|:--|');
@@ -693,7 +702,7 @@ function markdown(report) {
     for (const r of report.results) {
       if (!r.captured) continue;
       const parts = Object.entries(r.captured.byTable).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ×${v}`);
-      lines.push(`- ${r.name} [${r.who}]: ${r.captured.logged} logged (Server-Timing ${r.captured.serverCount}) — ${parts.join(', ')}`);
+      lines.push(`- ${r.name} [${r.who}]: ${r.captured.logged} logged (Server-Timing ${r.captured.serverCount}), at most ${r.captured.maxBinds} binds in one statement — ${parts.join(', ')}`);
     }
     lines.push('');
   }
@@ -778,6 +787,15 @@ async function main() {
       } catch (e) {
         results.push({ name: sc.name, who: sc.who, path: sc.path, status: 'unmeasured', error: String(e?.message ?? e) });
         log(`  ${sc.name} [${sc.who}] UNMEASURED: ${e?.message ?? e}`);
+      }
+    }
+    // R9: read the first and the last account shared to the member, by id. Both
+    // are granted the same way, so both should answer 200.
+    if (loaded.shares.firstSharedAccount) {
+      for (const [key, acc] of [['firstSharedGet', loaded.shares.firstSharedAccount], ['lastSharedGet', loaded.shares.lastSharedAccount]]) {
+        const r = await call(server, tokens.member, 'GET', `/data/bench_account/${acc}`);
+        loaded.shares[key] = { account: acc, status: r.status, code: r.status >= 400 ? (r.json?.code ?? r.json?.error?.code) : undefined };
+        log(`  shared account ${acc} read by the member by id: ${r.status}`);
       }
     }
     if (!args.only || args.only.includes('cascade_delete_opportunity')) {
