@@ -39,13 +39,13 @@
 - 认领后回读标签(SKILL.md 标签写四步):缺 `lease:` 或 `pm:dispatched` 即重挂;首推即开 draft PR。
 - 写码与开发期读码全经 `os-dev` 等子代理(一卡或一组耦合卡,文件面不相交)。
 - 席线程只协调,⛔ 不读 diff 与日志;ACCEPT 欠的自读(`contract-review.md`、〈路径分叉〉)除外。
+  所落 PR 欠的红检查读日志(`platform-readings.md`)派子代理读,一读兼守本条与该文。
 - 每区在开发 ≤4(`batch` 天花板内),用量走快降至 2–3;先落已建成的 PR,再开新卡。
 - 同函数互相牵连的卡合一 PR,准入照 `execution-duties.md` 折叠五门。
 - 送审:欠不欠、敲谁、档与 head 后移只照 `contract-review.md`。
 - 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 区照 `landing-operations.md` 自己落地。
 - 受管面与超 3,000 行 PR 区 ⛔ 不落,交席位;席位照 SKILL.md〈路径分叉〉①–④ 一笔交棒。
 - 席位每轮照 `execution-duties.md` 四件套行复查全部已 PASS 受管 PR,各区转来的一并在内。
-- 插队照 `landing-operations.md` 三因;⛔ 本文不改队列配置。
 - 性能卡与 PR 的提速数字只引已复审的 bench PR 读数;⛔ 不引估算或未复审的本地测量。
 - 席只裁路由(拆并延、归区);改可见行为或解读 ADR 照 SKILL.md〈升级与决策〉呈维护者。
 - 席信箱只收:待裁、待落地受管 PR、跨区冲突、阻塞、交接完成;安全照 `security-findings.md`。
