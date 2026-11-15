@@ -85,7 +85,7 @@ export default ObjectSchema.create({
     ]},
     account:     { type: 'lookup', reference: 'account', required: true },
     contact:     { type: 'lookup', reference: 'contact' },
-    assigned_to: { type: 'user' },
+    // assignee: the injected owner_id
     due_date:    { type: 'datetime' },
   },
   validations: [
