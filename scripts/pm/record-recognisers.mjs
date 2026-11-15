@@ -30,7 +30,6 @@
  *   isModelIdentifierToken   the token a refusal must never quote back
  *   REVIEW_OF_RECORD_THREADS the ONE thread set, and REVIEW_OF_RECORD_LOCATION its words
  *   unexplainedPathsBetween  the pure-regeneration test a carried record re-runs, prose arm included
- *   CARRY_DIFF_ARGV          the one argv that test lists a hop's paths with (`--no-renames`: both sides of a rename)
  *   isOutsideReviewSurface   the prose faces a head may move on and keep its record
  *   contractReviewTemplateLines / contractReviewRecordLines   what `--template` prints
  *   contractReviewBriefLines what `--brief-template` prints — the brief a seat hands its reviewer
@@ -442,6 +441,10 @@ export function regenChainToHead(pair) {
   return chain.length === 0 ? null : chain;
 }
 
+// The one argv the carry lists a hop's paths with — `--no-renames`, so a rename names BOTH sides
+// (why: `unexplainedPathsBetween` below).
+const CARRY_DIFF_ARGV = Object.freeze(['diff', '-z', '--name-only', '--no-renames']);
+
 /**
  * The ruled test on COMMITTED trees: which moved paths are explained by NONE of
  * the arms of 「every touched path is a generated artefact OR THE MERGE COMMIT'S
@@ -474,8 +477,6 @@ export function regenChainToHead(pair) {
  * the prose path and carry the record past a file that left its face. Read as
  * a delete plus an add, the SOURCE path is listed and judged like any other.
  */
-export const CARRY_DIFF_ARGV = Object.freeze(['diff', '-z', '--name-only', '--no-renames']);
-
 export function unexplainedPathsBetween(runGit, { from, to, base }) {
   const names = (a, b) => String(runGit([...CARRY_DIFF_ARGV, a, b])).split('\0').filter((p) => p !== '');
   const moved = names(from, to).filter((p) => !isOutsideReviewSurface(p));
