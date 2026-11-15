@@ -1445,7 +1445,13 @@ export const CEILINGS = new Map([
   // Two lines: the awaiting-maintainer list with each card's age, and the five disjunctions run by
   // `scripts/pm/first-touch-sweep.mjs`; the self-repair line took `+降 p3` in place. Measured delta
   // +2; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 103],
+  // Raised 103 → 104 by the same ruling of record as filing-gate.md's 82
+  // (6891082225, letter B, 「b」): the 24h flow line in the round record (issues
+  // created, closed and net; PRs merged; open p1; new cards citing a contract
+  // review), which no rule text carried. The per-PR carve-out of the
+  // ADR/skills-text line changed in place. Measured delta +1; landed count,
+  // headroom 0.
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 104],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
@@ -1550,7 +1556,14 @@ export const CEILINGS = new Map([
   // Under the 120-byte line cap they take 14 lines; the old focus-raise and
   // reach-cap lines fold into rules 8 and 2 and are deleted, so the measured
   // delta is +12. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 79],
+  // 79 → 82 (#33718): an ordinary ruled raise. The ruling of record is 6891082225
+  // (letter B, the maintainer's 「b」): keep the review default and change only
+  // the form review follow-ups take. Three lines: one checklist card per
+  // reviewed PR that later reviews append to, p3 copy and docs nits into the
+  // area's loose-ends card, and the dedupe search before a review files. The
+  // quota line (one card per defect) is untouched. Measured delta +3.
+  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 82],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
