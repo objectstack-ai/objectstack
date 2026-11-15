@@ -4930,6 +4930,7 @@ const fr = {
     disableAppNamed: "Désactiver {{name}}",
     setDefault: "Définir par défaut",
     setDefaultNamed: "Définir {{name}} par défaut",
+    alreadyDefault: "Déjà l'application par défaut",
     deleteApp: "Supprimer l'application",
     deleteAppNamed: "Supprimer {{name}}",
     confirmDelete: "Cliquez à nouveau pour confirmer la suppression",

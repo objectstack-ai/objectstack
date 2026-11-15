@@ -38,6 +38,21 @@
 import { PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import { MetadataError } from './errors.js';
 
+/**
+ * The oldest protocol major `objectstack migrate meta --from N` replays from:
+ * the value of `MIGRATION_SUPPORT_FLOOR` (`@objectstack/spec/migrations`,
+ * ADR-0087 D3), below which `--from N` refuses. {@link checkProtocolCompat}
+ * prescribes no `--from N` under it (#33031).
+ *
+ * Spelled here, not imported: that entry carries the whole migration registry
+ * (about 2.9 MB built, kept off the spec root for the same reason), and every
+ * install door and browser bundle that reaches this module would load it to
+ * read one number. `protocol-handshake.test.ts` holds the two equal, so a
+ * release-policy ruling that moves the spec's floor reds this package's tests
+ * until this copy moves with it.
+ */
+const MIGRATE_META_SUPPORT_FLOOR = 16;
+
 /** The manifest slice the handshake reads. All fields optional. */
 export interface ProtocolHandshakeManifest {
   id?: string;
@@ -101,12 +116,17 @@ export interface ProtocolIncompatibleDiagnostic {
   targetMajor: number | null;
   /**
    * The command that resolves the refusal (wired end-to-end by ADR-0087 P2),
-   * present only when there is metadata to move FORWARD: `targetMajor` is at
-   * or below the runtime's, or is not determinable. A package whose
-   * `targetMajor` is ABOVE the runtime's is ahead of it, and
-   * `migrate meta` cannot help (#26480): the member is absent and `message`
-   * names the two remedies that apply, upgrading the runtime or installing a
-   * build of the package for this runtime's protocol.
+   * present only when there is metadata to move FORWARD that the chain can
+   * replay: `targetMajor` is at or below the runtime's and at or above the
+   * chain's support floor (`MIGRATION_SUPPORT_FLOOR`, ADR-0087 D3), or is not
+   * determinable. A package whose `targetMajor` is ABOVE the runtime's is ahead
+   * of it, and `migrate meta` cannot help (#26480): the member is absent and
+   * `message` names the two remedies that apply, upgrading the runtime or
+   * installing a build of the package for this runtime's protocol. A package
+   * whose `targetMajor` is BELOW the floor is one `migrate meta --from` refuses
+   * (#33031): the member is absent and `message` names the two remedies that
+   * apply, installing a build for this runtime's protocol or bringing the
+   * metadata up to the floor by another path before `--from <floor>`.
    */
   migrateCommand?: string;
   message: string;
@@ -505,7 +525,15 @@ export function checkProtocolCompat(
   // target above this runtime's major is a package built for a newer protocol:
   // nothing here can migrate it, so the refusal names what can apply instead.
   const ahead = targetMajor !== null && targetMajor > runtimeMajor;
-  const migrateCommand = ahead
+  // [#33031] A target below the chain's support floor is one `migrate meta
+  // --from N` refuses (`MigrationFloorError`), so prescribing it hands the
+  // author a command known to fail. `--from <floor>` is no machine-actionable
+  // substitute either: it starts at the floor, so the hops below it are never
+  // replayed, yet `--write` still moves the declared range (the CLI's
+  // `planProtocolRange` presumes the floor was reached by another path). The
+  // refusal names what can apply instead, in prose, with no `migrateCommand`.
+  const belowFloor = targetMajor !== null && targetMajor < MIGRATE_META_SUPPORT_FLOOR;
+  const migrateCommand = ahead || belowFloor
     ? undefined
     : targetMajor !== null
       ? `objectstack migrate meta --from ${targetMajor}`
@@ -513,7 +541,13 @@ export function checkProtocolCompat(
   const remedy = ahead
     ? `The package is built for a newer protocol than this runtime implements. ` +
       `Upgrade the runtime to protocol ${targetMajor}, or install a build of '${packageId}' for protocol ${runtimeMajor}`
-    : `Run: ${migrateCommand}`;
+    : belowFloor
+      ? `The package is built for protocol ${targetMajor}, older than the oldest protocol ` +
+        `objectstack migrate meta replays from (${MIGRATE_META_SUPPORT_FLOOR}, ADR-0087 D3). ` +
+        `Install a build of '${packageId}' for protocol ${runtimeMajor}, or bring its metadata to ` +
+        `protocol ${MIGRATE_META_SUPPORT_FLOOR} by another path first and then migrate it with ` +
+        `objectstack migrate meta --from ${MIGRATE_META_SUPPORT_FLOOR}`
+      : `Run: ${migrateCommand}`;
   const message =
     `package '${packageId}' targets protocol ${declared.range} ` +
     `(${declared.source}) but this runtime is protocol ${protocolVersion}. ` +

@@ -2359,7 +2359,7 @@ const HISTORY_PACKAGE_SELECTOR_DESCRIPTION =
  */
 export const PACKAGE_SLOTTED_METADATA_TYPES: readonly string[] = Object.freeze([
   'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
-  'webhook', 'tool',
+  'webhook', 'tool', 'connector',
 ]);
 
 /**

@@ -329,10 +329,10 @@ describe('the narrowing — a flow holds one name per namespace (ADR-0150 D2/D9,
   const type = 'flow' as const;
   const name = 'shared_flow';
 
-  it('the switch holds flow (and the webhook, #31699 PR 2), and not the connector', () => {
+  it('the switch holds flow, the webhook (#31699 PR 2) and the connector (#31699 PR 3)', () => {
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('flow');
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('webhook');
-    expect(narrowed('connector'), 'connector').toBe(false);
+    expect(narrowed('connector'), 'connector').toBe(true);
   });
 
   it('two packages of two namespaces each install the name after the seal, and each holds its own flow', async () => {
@@ -407,30 +407,74 @@ describe('the narrowing — a flow holds one name per namespace (ADR-0150 D2/D9,
     }
   });
 
-  it.each(['connector'] as const)('CONTROL — a %s has not narrowed: a package of another namespace is still refused its name', async (other) => {
+});
+
+describe('the narrowing — a connector holds one name per namespace (ADR-0150 D2/D9, child B, #31699 PR 3)', () => {
+  const type = 'connector' as const;
+  const name = 'shared_connector';
+
+  it('[FROM refused TO admitted] two packages of two namespaces each install the name after the seal, and each holds its own connector', async () => {
+    const { registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta', { [type]: [name] }))).toBeUndefined();
+    const held = registry.listItems<{ _packageId?: string; label?: string; name?: string }>(type)
+      .filter((item) => item.name === name)
+      .map((item) => [item._packageId, marker(item)]);
+    expect(held).toEqual([['com.acme.alpha', 'alpha connector'], ['com.acme.beta', 'beta connector']]);
+  });
+
+  it('the by-name read resolves by package: each holder reads its own connector, and a read naming no package is refused 409 naming both', async () => {
+    const { registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta', { [type]: [name] }))).toBeUndefined();
+    expect(marker(registry.resolveItem(type, name, 'com.acme.alpha'))).toBe('alpha connector');
+    expect(marker(registry.resolveItem(type, name, 'com.acme.beta'))).toBe('beta connector');
+    const err = await caught(() => registry.resolveItem(type, name)) as (Refusal & { refusal?: { candidates?: Holder[] } }) | undefined;
+    expect([err?.code, err?.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+    expect(err!.refusal!.candidates).toEqual([
+      { kind: 'package', packageId: 'com.acme.alpha' },
+      { kind: 'package', packageId: 'com.acme.beta' },
+    ]);
+  });
+
+  it('a co-owner of the holder\'s namespace is still refused, and so is a package with no namespace', async () => {
     const { register } = await boot();
-    expect(await register(pkg('com.acme.alpha', { [other]: [`shared_${other}`] }))).toBeUndefined();
-    expectRefusal(
-      await register(pkg('com.acme.beta', { [other]: [`shared_${other}`] })),
-      'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_shared_${other}`,
-    );
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    expectRefusal(await register(rival(type, 'com.acme.gamma', { [type]: [name] })), 'com.acme.gamma', { kind: 'package', packageId: 'com.acme.alpha' }, `alpha_${name}`);
+    const bare = pkg('com.acme.plain', { [type]: [name] });
+    delete bare.namespace;
+    expectRefusal(await register(bare), 'com.acme.plain', { kind: 'package', packageId: 'com.acme.alpha' });
+  });
+
+  it('the cold boot of two namespaces\' holders boots with no bare-name warning, and the seal reports no clash', async () => {
+    const { registry, bareNameWarnings } = await boot([pkg('com.acme.alpha', { [type]: [name] }), pkg('com.acme.beta', { [type]: [name] })]);
+    expect(bareNameWarnings()).toEqual([]);
+    expect(registry.sealBareNameHolders().filter((c) => c.type === type)).toEqual([]);
   });
 });
 
 describe('connector — a descriptor and a provider-bound instance hold the name alike', () => {
-  it('a second package\'s provider-bound instance under a held descriptor name is refused, and the reverse', async () => {
+  const instance = (tag: string, n: string) => body('connector', n, tag, { provider: 'rest', providerConfig: { baseUrl: `https://${tag}.example` }, auth: { type: 'none' }, enabled: true });
+
+  it('a co-owner\'s provider-bound instance under a held descriptor name is refused, and the reverse', async () => {
     const { register } = await boot();
-    const instance = (tag: string) => body('connector', 'shared_conn', tag, { provider: 'rest', providerConfig: { baseUrl: `https://${tag}.example` }, auth: { type: 'none' }, enabled: true });
+    expect(await register(pkg('com.acme.alpha', { connector: ['shared_conn', 'live_conn'] }))).toBeUndefined();
+    expectRefusal(
+      await register(rival('connector', 'com.acme.beta', {}, { connectors: [instance('beta', 'shared_conn')] })),
+      'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, 'alpha_shared_conn',
+    );
+    const other = await boot();
+    expect(await other.register(pkg('com.acme.alpha', {}, { connectors: [instance('alpha', 'live_conn')] }))).toBeUndefined();
+    expectRefusal(
+      await other.register(rival('connector', 'com.acme.delta', { connector: ['live_conn'] })),
+      'com.acme.delta', { kind: 'package', packageId: 'com.acme.alpha' }, 'alpha_live_conn',
+    );
+  });
+
+  it('[#31699 PR 3] a package of another namespace holds the name beside a descriptor or an instance', async () => {
+    const { register } = await boot();
     expect(await register(pkg('com.acme.alpha', { connector: ['shared_conn'] }))).toBeUndefined();
-    expectRefusal(
-      await register(pkg('com.acme.beta', {}, { connectors: [instance('beta')] })),
-      'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, 'beta_shared_conn',
-    );
-    expect(await register(pkg('com.acme.gamma', {}, { connectors: [{ ...instance('gamma'), name: 'live_conn' }] }))).toBeUndefined();
-    expectRefusal(
-      await register(pkg('com.acme.delta', { connector: ['live_conn'] })),
-      'com.acme.delta', { kind: 'package', packageId: 'com.acme.gamma' }, 'delta_live_conn',
-    );
+    expect(await register(pkg('com.acme.beta', {}, { connectors: [instance('beta', 'shared_conn')] }))).toBeUndefined();
   });
 });
 
@@ -562,11 +606,11 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
   const member = (tag: string, n: string, locale: string) => body('email_template', n, tag, { locale });
   const ofBeta = (decl: Record<string, unknown>) => pkg('com.acme.beta', {}, decl);
 
-  it('the switch holds email_template, the flow (#31696) and webhook (#31699 PR 2), and not the connector', () => {
+  it('the switch holds email_template, the flow (#31696), the webhook (#31699 PR 2) and the connector (#31699 PR 3)', () => {
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('email_template');
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('flow');
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('webhook');
-    expect(narrowed('connector'), 'connector').toBe(false);
+    expect(narrowed('connector'), 'connector').toBe(true);
   });
 
   it('two packages of two namespaces each install the name after the seal, and each holds its own bundle', async () => {
@@ -727,14 +771,6 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
     );
   });
 
-  it.each(['connector'] as const)('CONTROL — a %s has not narrowed: a package of another namespace is still refused its name', async (other) => {
-    const { register } = await boot();
-    expect(await register(pkg('com.acme.alpha', { [other]: [`shared_${other}`] }))).toBeUndefined();
-    expectRefusal(
-      await register(pkg('com.acme.beta', { [other]: [`shared_${other}`] })),
-      'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_shared_${other}`,
-    );
-  });
 });
 
 describe('the refusal\'s reason names the consumers of the types it lists', () => {

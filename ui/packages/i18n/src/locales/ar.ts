@@ -5362,6 +5362,7 @@ const ar = {
     disableAppNamed: "تعطيل {{name}}",
     setDefault: "تعيين كافتراضي",
     setDefaultNamed: "تعيين {{name}} كافتراضي",
+    alreadyDefault: "هذا هو التطبيق الافتراضي بالفعل",
     deleteApp: "حذف التطبيق",
     deleteAppNamed: "حذف {{name}}",
     confirmDelete: "انقر مرة أخرى لتأكيد الحذف",
