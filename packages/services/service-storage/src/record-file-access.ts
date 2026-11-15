@@ -40,6 +40,7 @@ import {
   uploadSizeRefusal,
   UPLOAD_TOO_LARGE_CODE,
   UPLOAD_TOO_LARGE_STATUS,
+  type HostMaxUploadMb,
   type StorageLimitsSnapshot,
 } from './storage-limits.js';
 // The upload doors' own storage-key layout, and the download doors' link.
@@ -459,6 +460,12 @@ export interface RecordFileAccessDeps {
   getEngine(): RecordFileEngine | null;
   getStorage(): IStorageService | null;
   getLimitsSnapshot(): StorageLimitsSnapshot | undefined;
+  /**
+   * The host's upload bound (the plugin's `maxUploadMb`, already validated) —
+   * the host layer of the doors' own precedence; absent ⇒ the namespace
+   * default, else the built-in 100 MB.
+   */
+  hostMaxUploadMb?: HostMaxUploadMb;
   /** The caller-scoped attach verbs (`FileAttachmentService`). */
   attachments: {
     attachFileAs(input: AttachFileInput, context: ExecutionContext): Promise<AttachedFile>;
@@ -1393,7 +1400,9 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     // [#32747] As many files as the link takes, before anything else is judged.
     const range = this.fileRangeOf(engine, state);
     if (uploads.length < range.min || uploads.length > range.max) refuseFileCount(range, uploads.length);
-    const maxUploadBytes = resolveStorageLimits(this.deps.getLimitsSnapshot()).maxUploadBytes;
+    const maxUploadBytes = resolveStorageLimits(this.deps.getLimitsSnapshot(), {
+      maxUploadMb: this.deps.hostMaxUploadMb,
+    }).maxUploadBytes;
     for (const upload of uploads) {
       if (!nonEmptyString(upload?.filename)) refuse('VALIDATION_ERROR', 400, 'The upload names no file.');
       if (!Buffer.isBuffer(upload.data)) refuse('VALIDATION_ERROR', 400, 'The upload carries no bytes.');

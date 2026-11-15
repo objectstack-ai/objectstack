@@ -28,6 +28,7 @@ import {
   uploadSizeRefusal,
   UPLOAD_TOO_LARGE_CODE,
   UPLOAD_TOO_LARGE_STATUS,
+  type HostMaxUploadMb,
   type StorageLimitsSnapshot,
 } from './storage-limits.js';
 // The upload doors' own storage-key layout.
@@ -81,6 +82,12 @@ export interface FieldFileServiceDeps {
   getStorage(): IStorageService | null;
   /** The `storage` namespace's Limits group as last read — the upload doors' own source. */
   getLimitsSnapshot(): StorageLimitsSnapshot | undefined;
+  /**
+   * The host's upload bound (the plugin's `maxUploadMb`, already validated) —
+   * the host layer of the doors' own precedence; absent ⇒ the namespace
+   * default, else the built-in 100 MB.
+   */
+  hostMaxUploadMb?: HostMaxUploadMb;
   logger: FileReferenceLogger;
 }
 
@@ -190,7 +197,7 @@ export class FieldFileService implements IFieldFileService {
     const size = request.data.byteLength;
     const tooLarge = uploadSizeRefusal(
       size,
-      resolveStorageLimits(this.deps.getLimitsSnapshot()).maxUploadBytes,
+      resolveStorageLimits(this.deps.getLimitsSnapshot(), { maxUploadMb: this.deps.hostMaxUploadMb }).maxUploadBytes,
       (n) => `The file ${request.filename} is ${n} bytes`,
     );
     if (tooLarge !== null) refuse(UPLOAD_TOO_LARGE_CODE, UPLOAD_TOO_LARGE_STATUS, tooLarge);

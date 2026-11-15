@@ -15,16 +15,22 @@
  *  - **§2 the TTLs and the precedence.** A saved TTL is what a presigned URL
  *    and a new session carry; a saved value beats the host's option, the host's
  *    option beats the namespace default, and with no namespace bound the
- *    built-in defaults and NO size limit stand (the pre-#22283 behaviour).
+ *    built-in defaults stand — the upload bound's included.
  *  - **§3 the plugin wiring, end to end through `applySettings`.** Nothing
  *    saved ⇒ the declared defaults (100 MB, 3600 s, 86400 s) hold; a save after
  *    boot reaches the next request, while a session already issued keeps the
- *    lifetime it was issued with; `bindToSettings: false` keeps the old doors.
+ *    lifetime it was issued with; `bindToSettings: false` keeps the
+ *    constructor TTLs and the built-in upload bound.
  *  - **§4 the host door** (`mountStorageRoutes`) honours the same snapshot,
  *    because it rides the `storage` service both mounts are composed over.
+ *  - **§5 the upload bound: one precedence, and unset never means unlimited.**
+ *    Every path that sets nothing lands on the built-in 100 MB; the host
+ *    option is a layer like the TTLs'; no limit is an explicit, announced host
+ *    choice; a malformed host option refuses the boot; a saved setting still
+ *    wins; the built-in default is the manifest's.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, afterAll } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -36,7 +42,18 @@ import { registerStorageRoutes, type StorageRoutesOptions } from './storage-rout
 import { StorageServicePlugin } from './storage-service-plugin.js';
 import { SwappableStorageService } from './swappable-storage-service.js';
 import { mountStorageRoutes } from './mount-storage-routes.js';
-import { readStorageLimits, resolveStorageLimits, type StorageLimitsSnapshot } from './storage-limits.js';
+import {
+  DEFAULT_MAX_UPLOAD_MB,
+  InvalidMaxUploadMbError,
+  readStorageLimits,
+  resolveStorageLimits,
+  type StorageLimitsSnapshot,
+} from './storage-limits.js';
+import { registerStorageFamily } from './storage-routes.js';
+import { FieldFileService } from './field-file-service.js';
+import { FileAttachmentService } from './file-attachment-service.js';
+import type { UploadLinkDoor } from './record-file-access.js';
+import { storageSettingsManifest } from '@objectstack/service-settings';
 
 const BASE = '/api/v1/storage';
 const MIB = 1024 * 1024;
@@ -345,14 +362,21 @@ describe('[#22283] §1 · the upload doors refuse a file over max_upload_mb, bef
     expect(rawBody).not.toHaveBeenCalled();
   });
 
-  it('CONTROL · no settings namespace bound: no size limit at any door (the pre-#22283 behaviour)', async () => {
+  it('no settings namespace bound: the built-in 100 MB bounds the declared-size doors, never no limit', async () => {
     const { routes } = await mountDoors(undefined);
+    expectTooLarge(await call(routes, 'POST', `${BASE}/upload/presigned`, {
+      body: { filename: 'huge.bin', mimeType: 'application/octet-stream', size: 101 * MIB },
+    }));
+    expectTooLarge(await call(routes, 'POST', `${BASE}/upload/chunked`, {
+      body: { filename: 'huge.bin', mimeType: 'application/octet-stream', totalSize: 101 * MIB },
+    }));
+    // CONTROL — exactly the built-in bound is accepted at both.
     const presigned = await call(routes, 'POST', `${BASE}/upload/presigned`, {
-      body: { filename: 'huge.bin', mimeType: 'application/octet-stream', size: 1024 * MIB },
+      body: { filename: 'at.bin', mimeType: 'application/octet-stream', size: 100 * MIB },
     });
     expect(presigned.status).toBe(200);
     const started = await call(routes, 'POST', `${BASE}/upload/chunked`, {
-      body: { filename: 'huge.bin', mimeType: 'application/octet-stream', totalSize: 1024 * MIB },
+      body: { filename: 'at.bin', mimeType: 'application/octet-stream', totalSize: 100 * MIB },
     });
     expect(started.status).toBe(200);
   });
@@ -440,8 +464,8 @@ describe('a byte door holds a body with no declared length to its own bound, as 
     throw Object.assign(new Error('the host refused this body for size'), { status: 413, code: 'PAYLOAD_TOO_LARGE' });
   });
 
-  it('with no max_upload_mb, a host size refusal on the local raw PUT is not taken as the door\'s own: the door answers, as before', async () => {
-    const { adapter, routes } = await mountDoors(undefined);
+  it('with no bound (the host chose unlimited), a host size refusal on the local raw PUT is not taken as the door\'s own', async () => {
+    const { adapter, routes } = await mountDoors(undefined, { maxUploadMb: 'unlimited' });
     const presigned = await call(routes, 'POST', `${BASE}/upload/presigned`, {
       body: { filename: 'h.bin', mimeType: 'application/octet-stream', size: 10 },
     });
@@ -455,8 +479,8 @@ describe('a byte door holds a body with no declared length to its own bound, as 
     expect(upload).not.toHaveBeenCalled();
   });
 
-  it('with no max_upload_mb, a host size refusal on the chunk PUT is not taken as the door\'s own: the door answers, as before', async () => {
-    const { adapter, routes } = await mountDoors(undefined);
+  it('with no bound (the host chose unlimited), a host size refusal on the chunk PUT is not taken as the door\'s own', async () => {
+    const { adapter, routes } = await mountDoors(undefined, { maxUploadMb: 'unlimited' });
     const started = await call(routes, 'POST', `${BASE}/upload/chunked`, {
       body: { filename: 'h.bin', mimeType: 'application/octet-stream', totalSize: MIB },
     });
@@ -474,15 +498,25 @@ describe('a byte door holds a body with no declared length to its own bound, as 
     expect(uploadChunk).not.toHaveBeenCalled();
   });
 
-  it('CONTROL · with no max_upload_mb the doors state no bound, and read the whole body as before', async () => {
-    const { routes } = await mountDoors(undefined);
-    const presigned = await call(routes, 'POST', `${BASE}/upload/presigned`, {
-      body: { filename: 'n.bin', mimeType: 'application/octet-stream', size: 10 },
-    });
-    const token = String(presigned.body.data.uploadUrl).split('/_local/raw/')[1]!;
-    const read = boundedRawBody(2 * MIB);
-    expect((await call(routes, 'PUT', `${BASE}/_local/raw/:token`, { params: { token }, rawBody: read.rawBody })).status).toBe(200);
-    expect(read.asked).toEqual([undefined]);
+  it('with no max_upload_mb the doors state the built-in 100 MB bound; only an explicit host unlimited states none', async () => {
+    const tokenFrom = async (routes: Map<string, RouteHandler>) => {
+      const presigned = await call(routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'n.bin', mimeType: 'application/octet-stream', size: 10 },
+      });
+      return String(presigned.body.data.uploadUrl).split('/_local/raw/')[1]!;
+    };
+    const unset = await mountDoors(undefined);
+    const bounded = boundedRawBody(2 * MIB);
+    const token = await tokenFrom(unset.routes);
+    expect((await call(unset.routes, 'PUT', `${BASE}/_local/raw/:token`, { params: { token }, rawBody: bounded.rawBody })).status).toBe(200);
+    expect(bounded.asked).toEqual([100 * MIB]);
+
+    // CONTROL — the explicit host choice reads the whole body, stating no bound.
+    const unlimited = await mountDoors(undefined, { maxUploadMb: 'unlimited' });
+    const whole = boundedRawBody(2 * MIB);
+    const open = await tokenFrom(unlimited.routes);
+    expect((await call(unlimited.routes, 'PUT', `${BASE}/_local/raw/:token`, { params: { token: open }, rawBody: whole.rawBody })).status).toBe(200);
+    expect(whole.asked).toEqual([undefined]);
   });
 });
 
@@ -528,14 +562,20 @@ describe('[#22283] §2 · the saved TTLs reach issuance; saved > host option > n
     expect(resolveStorageLimits({ sessionTtl: dflt(86400) }, { sessionTtl: 900 }).sessionTtl).toBe(900);
     // The namespace default applies when the host said nothing.
     expect(resolveStorageLimits({ sessionTtl: dflt(7200) }, {}).sessionTtl).toBe(7200);
-    // No namespace: the host's option, else the built-in defaults, and no size limit.
+    // No namespace: the host's option, else the built-in defaults — the upload bound's included.
     expect(resolveStorageLimits(undefined, { presignedTtl: 600 })).toEqual({
       presignedTtl: 600,
       sessionTtl: 86400,
-      maxUploadBytes: undefined,
+      maxUploadBytes: 100 * MIB,
+      maxUploadLayer: 'built-in default',
     });
-    expect(resolveStorageLimits(undefined)).toEqual({ presignedTtl: 3600, sessionTtl: 86400, maxUploadBytes: undefined });
-    // The size limit comes from the namespace alone — its default included.
+    expect(resolveStorageLimits(undefined)).toEqual({
+      presignedTtl: 3600,
+      sessionTtl: 86400,
+      maxUploadBytes: 100 * MIB,
+      maxUploadLayer: 'built-in default',
+    });
+    // The size limit: the namespace default, a saved value (MB counted as MiB).
     expect(resolveStorageLimits({ maxUploadMb: dflt(100) }).maxUploadBytes).toBe(100 * MIB);
     expect(resolveStorageLimits({ maxUploadMb: saved(2.5) }).maxUploadBytes).toBe(Math.floor(2.5 * MIB));
   });
@@ -586,15 +626,16 @@ function fakeSettings(values: Record<string, unknown>, sources: Record<string, s
 
 async function bootPlugin(
   settings: ReturnType<typeof fakeSettings> | null,
-  options: { presignedTtl?: number; sessionTtl?: number; bindToSettings?: boolean } = {},
+  options: { presignedTtl?: number; sessionTtl?: number; maxUploadMb?: number | 'unlimited'; bindToSettings?: boolean } = {},
 ) {
   const { http, routes } = routeCollector();
   const services = new Map<string, unknown>([['http-server', http]]);
   if (settings) services.set('settings', settings);
   const hooks: Array<() => Promise<void> | void> = [];
   const infos: string[] = [];
+  const warns: string[] = [];
   const ctx = {
-    logger: { info: (m: string) => { infos.push(m); }, warn: () => {}, error: () => {}, debug: () => {} },
+    logger: { info: (m: string) => { infos.push(m); }, warn: (m: string) => { warns.push(m); }, error: () => {}, debug: () => {} },
     registerService: (name: string, svc: unknown) => { services.set(name, svc); },
     getService: (name: string) => {
       if (!services.has(name)) throw new Error(`service '${name}' not registered`);
@@ -610,7 +651,7 @@ async function bootPlugin(
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   for (const h of hooks) await h();
-  return { routes, infos };
+  return { routes, infos, warns, services };
 }
 
 /** Let a `void applySettings()` fired by a settings change settle. */
@@ -704,16 +745,20 @@ describe('[#22283] §3 · StorageServicePlugin reads the Limits group and its do
     expect(b.body.data.expiresIn).toBe(1200);
   });
 
-  it('CONTROL · bindToSettings: false keeps the constructor doors — no size limit, built-in TTLs', async () => {
+  it('bindToSettings: false keeps the constructor doors — built-in TTLs and the built-in 100 MB bound, the saved 1 MB unread', async () => {
     const { routes } = await bootPlugin(
       fakeSettings({ ...MANIFEST_DEFAULTS, max_upload_mb: 1 }, { max_upload_mb: 'global' }),
       { bindToSettings: false },
     );
-    const huge = await call(routes, 'POST', `${BASE}/upload/presigned`, {
-      body: { filename: 'huge.bin', mimeType: 'application/octet-stream', size: 1024 * MIB },
+    expectTooLarge(await call(routes, 'POST', `${BASE}/upload/presigned`, {
+      body: { filename: 'huge.bin', mimeType: 'application/octet-stream', size: 101 * MIB },
+    }));
+    // CONTROL — the saved 1 MB is not read: 2 MiB is under the built-in bound.
+    const within = await call(routes, 'POST', `${BASE}/upload/presigned`, {
+      body: { filename: 'two.bin', mimeType: 'application/octet-stream', size: 2 * MIB },
     });
-    expect(huge.status).toBe(200);
-    expect(huge.body.data.expiresIn).toBe(3600);
+    expect(within.status).toBe(200);
+    expect(within.body.data.expiresIn).toBe(3600);
   });
 });
 
@@ -743,5 +788,409 @@ describe('[#22283] §4 · mountStorageRoutes honours the Limits group the kernel
     expect(ok.status).toBe(200);
     // The host's option beats the namespace default.
     expect(ok.body.data.expiresIn).toBe(300);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §5 — the upload bound: one precedence, and unset never means unlimited
+// ---------------------------------------------------------------------------
+
+/** One MB over the built-in bound. */
+const OVER = 101 * MIB;
+const BUILT_IN = 100 * MIB;
+
+/** A link door that takes whatever it is handed: what the routes need to reach the upload-link byte door. */
+function acceptingLinkDoor(filesMax: number) {
+  const consumeUploadLink = vi.fn(async (_token: string, upload: { data: Buffer }) => ({ fileId: 'f-link', size: upload.data.byteLength }));
+  const consumeUploadLinkFiles = vi.fn(async () => ({ files: [] }));
+  const door = {
+    inspectUploadLink: async () => ({
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      target: 'attachments',
+      files: { min: 1, max: filesMax },
+    }),
+    consumeUploadLink,
+    consumeUploadLinkFiles,
+  } as unknown as UploadLinkDoor;
+  return { door, consumeUploadLink, consumeUploadLinkFiles };
+}
+
+/** The upload-link door over a composition with no settings bound, signed in. */
+async function mountLinkDoor(filesMax: number, opts: StorageRoutesOptions = {}) {
+  const adapter = new LocalStorageAdapter({ rootDir: await tmpRoot(), signingSecret: 'test-secret-bound' });
+  const { http, routes } = routeCollector();
+  const link = acceptingLinkDoor(filesMax);
+  registerStorageFamily(
+    http,
+    adapter,
+    new StorageMetadataStore(null),
+    { basePath: BASE, resolveSession: async () => ({ userId: 'u_link' }), ...opts } as StorageRoutesOptions,
+    undefined,
+    undefined,
+    () => link.door,
+  );
+  return { routes, ...link };
+}
+
+/** The several-file form as a transport hands it once its request-body limit refused `req.body`. */
+async function putTakenOverForm(
+  routes: Map<string, RouteHandler>,
+  rawBody: (options?: { maxBytes?: number }) => Promise<Buffer>,
+  headers: Record<string, string> = {},
+): Promise<Answer> {
+  const handler = routes.get(`PUT:${BASE}/upload-links/:token`)!;
+  const answer: Answer = { status: 200, body: undefined };
+  const res = {
+    json(data: unknown) { answer.body = data; return res; },
+    send() { return res; },
+    status(code: number) { answer.status = code; return res; },
+    header() { return res; },
+  };
+  const req: Record<string, unknown> = {
+    params: { token: 'link.token' },
+    query: {},
+    headers: { 'content-type': 'multipart/form-data; boundary=----os', 'x-upload-link-form': 'several', ...headers },
+    method: 'PUT',
+    path: `${BASE}/upload-links/:token`,
+    rawBody,
+  };
+  Object.defineProperty(req, 'body', {
+    get() {
+      throw Object.assign(new Error('over the request-body limit'), { status: 413, code: 'PAYLOAD_TOO_LARGE' });
+    },
+  });
+  await handler(req as unknown as IHttpRequest, res as unknown as IHttpResponse);
+  return answer;
+}
+
+/** An engine or store no call may reach before the size verdict: reaching it is the proof the verdict passed. */
+const unreachable = () =>
+  new Proxy({}, {
+    get() {
+      throw new Error('reached past the size verdict');
+    },
+  });
+
+/** A refusal as a thrown ADR-0112 error carries it. */
+const refusalOf = (p: Promise<unknown>) =>
+  p.then(
+    () => null,
+    (e: any) => ({ code: e?.code as string | undefined, status: e?.status as number | undefined, message: String(e?.message) }),
+  );
+
+describe('the upload bound resolves by one precedence — saved > host > manifest default > built-in — and unset is never unlimited', () => {
+  const saved = (value: number) => ({ value, authored: true });
+  const dflt = (value: number) => ({ value, authored: false });
+
+  it('every layer, by resolution: built-in when nothing is set, host over the manifest default, saved over the host', () => {
+    expect(resolveStorageLimits(undefined)).toMatchObject({ maxUploadBytes: BUILT_IN, maxUploadLayer: 'built-in default' });
+    expect(resolveStorageLimits({})).toMatchObject({ maxUploadBytes: BUILT_IN, maxUploadLayer: 'built-in default' });
+    expect(resolveStorageLimits({ maxUploadMb: dflt(100) })).toMatchObject({ maxUploadBytes: BUILT_IN, maxUploadLayer: 'manifest default' });
+    expect(resolveStorageLimits(undefined, { maxUploadMb: 5 })).toMatchObject({ maxUploadBytes: 5 * MIB, maxUploadLayer: 'host option' });
+    expect(resolveStorageLimits({ maxUploadMb: dflt(100) }, { maxUploadMb: 200 })).toMatchObject({
+      maxUploadBytes: 200 * MIB,
+      maxUploadLayer: 'host option',
+    });
+    expect(resolveStorageLimits(undefined, { maxUploadMb: 'unlimited' })).toMatchObject({
+      maxUploadBytes: undefined,
+      maxUploadLayer: 'host option',
+    });
+    // A saved setting wins over every host choice, an explicit unlimited included.
+    expect(resolveStorageLimits({ maxUploadMb: saved(2) }, { maxUploadMb: 'unlimited' })).toMatchObject({
+      maxUploadBytes: 2 * MIB,
+      maxUploadLayer: 'saved setting',
+    });
+    expect(resolveStorageLimits({ maxUploadMb: saved(2) }, { maxUploadMb: 200 }).maxUploadBytes).toBe(2 * MIB);
+  });
+
+  it('the built-in default is the settings manifest\'s declared max_upload_mb default', () => {
+    const declared = (storageSettingsManifest.specifiers as Array<{ key?: string; default?: unknown }>).find(
+      (s) => s.key === 'max_upload_mb',
+    );
+    expect(declared?.default).toBe(DEFAULT_MAX_UPLOAD_MB);
+    expect(DEFAULT_MAX_UPLOAD_MB * MIB).toBe(BUILT_IN);
+  });
+
+  describe('each unset path resolves to the built-in 100 MB', () => {
+    it('a plugin with no settings service: 101 MB refused, 100 MB accepted, and the boot line names the built-in default', async () => {
+      const { routes, infos, warns } = await bootPlugin(null);
+      expectTooLarge(await call(routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'over.bin', mimeType: 'application/octet-stream', size: OVER },
+      }));
+      expect((await call(routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'at.bin', mimeType: 'application/octet-stream', size: BUILT_IN },
+      })).status).toBe(200);
+      const line = infos.filter((m) => m.includes(`(${BUILT_IN} bytes)`));
+      expect(line).toHaveLength(1);
+      expect(line[0]).toContain('built-in default');
+      expect(warns.filter((m) => m.includes('UNLIMITED'))).toEqual([]);
+    });
+
+    it('a settings-bound plugin whose settings read fails takes the built-in bound, not no limit', async () => {
+      const settings = fakeSettings({ ...MANIFEST_DEFAULTS }, {});
+      settings.getNamespace = async () => { throw new Error('settings store unreachable'); };
+      const { routes, infos } = await bootPlugin(settings);
+      expectTooLarge(await call(routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'over.bin', mimeType: 'application/octet-stream', size: OVER },
+      }));
+      expect(infos.find((m) => m.includes(`(${BUILT_IN} bytes)`))).toContain('built-in default');
+    });
+
+    it('a saved value that is not a positive number is dropped to the host option, else the built-in bound — never to no limit', async () => {
+      const bad = () => fakeSettings({ ...MANIFEST_DEFAULTS, max_upload_mb: 'lots' }, { max_upload_mb: 'global' });
+      const builtIn = await bootPlugin(bad());
+      expectTooLarge(await call(builtIn.routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'over.bin', mimeType: 'application/octet-stream', size: OVER },
+      }));
+      expect(builtIn.warns.some((m) => m.includes("'max_upload_mb'"))).toBe(true);
+
+      const host = await bootPlugin(bad(), { maxUploadMb: 5 });
+      expectTooLarge(await call(host.routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'over.bin', mimeType: 'application/octet-stream', size: 5 * MIB + 1 },
+      }));
+    });
+
+    it('mountStorageRoutes over a bare adapter, and over an unbound plugin\'s service, refuses 101 MB', async () => {
+      for (const storage of [
+        new LocalStorageAdapter({ rootDir: await tmpRoot(), signingSecret: 'test-secret-bound' }),
+        new SwappableStorageService(new LocalStorageAdapter({ rootDir: await tmpRoot(), signingSecret: 'test-secret-bound' })),
+      ]) {
+        const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as never);
+        kernel.registerService('storage', storage);
+        const { http, routes } = routeCollector();
+        const infos: string[] = [];
+        mountStorageRoutes(http, kernel, { basePath: BASE, logger: { info: (m) => { infos.push(m); }, warn: () => {} } });
+        expectTooLarge(await call(routes, 'POST', `${BASE}/upload/presigned`, {
+          body: { filename: 'over.bin', mimeType: 'application/octet-stream', size: OVER },
+        }));
+        expect(infos.find((m) => m.includes(`(${BUILT_IN} bytes)`))).toContain('built-in default');
+      }
+    });
+  });
+
+  describe('the host option is a layer, exactly like the TTLs', () => {
+    it('on the plugin it overrides the manifest default, and a saved setting still wins over it', async () => {
+      const unsaved = await bootPlugin(fakeSettings({ ...MANIFEST_DEFAULTS }, {}), { maxUploadMb: 200 });
+      expect((await call(unsaved.routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'big.bin', mimeType: 'application/octet-stream', size: 150 * MIB },
+      })).status).toBe(200);
+      expectTooLarge(await call(unsaved.routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'over.bin', mimeType: 'application/octet-stream', size: 200 * MIB + 1 },
+      }));
+      expect(unsaved.infos.find((m) => m.includes(`(${200 * MIB} bytes)`))).toContain('host option');
+
+      const savedWins = await bootPlugin(
+        fakeSettings({ ...MANIFEST_DEFAULTS, max_upload_mb: 1 }, { max_upload_mb: 'global' }),
+        { maxUploadMb: 'unlimited' },
+      );
+      expectTooLarge(await call(savedWins.routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'a.bin', mimeType: 'application/octet-stream', size: MIB + 1 },
+      }));
+      expect(savedWins.infos.find((m) => m.includes(`(${MIB} bytes)`))).toContain('saved setting');
+      expect(savedWins.warns.filter((m) => m.includes('UNLIMITED'))).toEqual([]);
+    });
+
+    it('on mountStorageRoutes it bounds that mount\'s doors', async () => {
+      const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as never);
+      kernel.registerService('storage', new LocalStorageAdapter({ rootDir: await tmpRoot(), signingSecret: 'test-secret-bound' }));
+      const { http, routes } = routeCollector();
+      mountStorageRoutes(http, kernel, { basePath: BASE, maxUploadMb: 1, logger: { info: () => {}, warn: () => {} } });
+      expectTooLarge(await call(routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'a.bin', mimeType: 'application/octet-stream', size: MIB + 1 },
+      }));
+      expect((await call(routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'a.bin', mimeType: 'application/octet-stream', size: MIB },
+      })).status).toBe(200);
+    });
+  });
+
+  describe('no limit is an explicit host choice, honoured and announced', () => {
+    it('the plugin: maxUploadMb \'unlimited\' accepts any size, and boot says so at warn', async () => {
+      const { routes, warns, infos } = await bootPlugin(null, { maxUploadMb: 'unlimited' });
+      expect((await call(routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'huge.bin', mimeType: 'application/octet-stream', size: 1024 * MIB },
+      })).status).toBe(200);
+      const announced = warns.filter((m) => m.includes('UNLIMITED'));
+      expect(announced).toHaveLength(1);
+      expect(announced[0]).toContain("'unlimited'");
+      expect(infos.filter((m) => m.includes('upload size bound'))).toEqual([]);
+    });
+
+    it('mountStorageRoutes: maxUploadMb \'unlimited\' is announced at warn by the mount', async () => {
+      const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as never);
+      kernel.registerService('storage', new LocalStorageAdapter({ rootDir: await tmpRoot(), signingSecret: 'test-secret-bound' }));
+      const { http, routes } = routeCollector();
+      const warns: string[] = [];
+      mountStorageRoutes(http, kernel, {
+        basePath: BASE,
+        maxUploadMb: 'unlimited',
+        logger: { info: () => {}, warn: (m) => { warns.push(m); } },
+      });
+      expect(warns.filter((m) => m.includes('UNLIMITED'))).toHaveLength(1);
+      expect((await call(routes, 'POST', `${BASE}/upload/presigned`, {
+        body: { filename: 'huge.bin', mimeType: 'application/octet-stream', size: 1024 * MIB },
+      })).status).toBe(200);
+    });
+  });
+
+  it('a malformed host option refuses the boot — the plugin, the host mount and the route registrar alike', async () => {
+    const malformed: unknown[] = [0, -1, Number.NaN, Number.POSITIVE_INFINITY, '100', 'Unlimited', 'none', null, true, {}];
+    const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as never);
+    kernel.registerService('storage', new LocalStorageAdapter({ rootDir: await tmpRoot(), signingSecret: 'test-secret-bound' }));
+    for (const bad of malformed) {
+      expect(() => new StorageServicePlugin({ maxUploadMb: bad as never }), String(bad)).toThrow(InvalidMaxUploadMbError);
+      const host = routeCollector();
+      expect(() => mountStorageRoutes(host.http, kernel, { maxUploadMb: bad as never }), String(bad)).toThrow(InvalidMaxUploadMbError);
+      expect(host.routes.size).toBe(0);
+      const direct = routeCollector();
+      expect(
+        () => registerStorageRoutes(direct.http, new LocalStorageAdapter({ rootDir: tmpdir(), signingSecret: 's' }), new StorageMetadataStore(null), {
+          maxUploadMb: bad as never,
+        }),
+        String(bad),
+      ).toThrow(InvalidMaxUploadMbError);
+      expect(direct.routes.size).toBe(0);
+    }
+    // CONTROL — the two well-formed spellings construct.
+    expect(() => new StorageServicePlugin({ maxUploadMb: 0.5 })).not.toThrow();
+    expect(() => new StorageServicePlugin({ maxUploadMb: 'unlimited' })).not.toThrow();
+  });
+});
+
+describe('with no settings bound, a 101 MB body is refused at every byte door, declared or not', () => {
+  it('local raw PUT: a declared 101 MB is refused unread; an undeclared one is read under the built-in bound and refused', async () => {
+    const { adapter, routes } = await mountDoors(undefined);
+    const presigned = await call(routes, 'POST', `${BASE}/upload/presigned`, {
+      body: { filename: 'r.bin', mimeType: 'application/octet-stream', size: 10 },
+    });
+    const token = String(presigned.body.data.uploadUrl).split('/_local/raw/')[1]!;
+    const upload = vi.spyOn(adapter, 'upload');
+    const unread = vi.fn(async () => Buffer.alloc(10));
+    expectTooLarge(await call(routes, 'PUT', `${BASE}/_local/raw/:token`, {
+      params: { token },
+      headers: { 'content-length': String(OVER) },
+      rawBody: unread,
+    }));
+    expect(unread).not.toHaveBeenCalled();
+    const undeclared = boundedRawBody(OVER);
+    expectTooLarge(await call(routes, 'PUT', `${BASE}/_local/raw/:token`, { params: { token }, rawBody: undeclared.rawBody }));
+    expect(undeclared.asked).toEqual([BUILT_IN]);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('chunk PUT: a declared 101 MB chunk is refused unread; an undeclared one is read under the built-in bound and refused', async () => {
+    const { adapter, store, routes } = await mountDoors(undefined);
+    const started = await call(routes, 'POST', `${BASE}/upload/chunked`, {
+      body: { filename: 'c.bin', mimeType: 'application/octet-stream', totalSize: BUILT_IN },
+    });
+    expect(started.status).toBe(200);
+    const { uploadId, resumeToken } = started.body.data;
+    const uploadChunk = vi.spyOn(adapter, 'uploadChunk');
+    const chunk = (rawBody: (o?: { maxBytes?: number }) => Promise<Buffer>, headers: Record<string, string> = {}) =>
+      call(routes, 'PUT', `${BASE}/upload/chunked/:uploadId/chunk/:chunkIndex`, {
+        params: { uploadId, chunkIndex: '0' },
+        headers: { 'x-resume-token': resumeToken, ...headers },
+        rawBody,
+      });
+    const unread = vi.fn(async () => Buffer.alloc(10));
+    expectTooLarge(await chunk(unread, { 'content-length': String(OVER) }));
+    expect(unread).not.toHaveBeenCalled();
+    const undeclared = boundedRawBody(OVER);
+    expectTooLarge(await chunk(undeclared.rawBody));
+    expect(undeclared.asked).toEqual([BUILT_IN]);
+    expect(uploadChunk).not.toHaveBeenCalled();
+    expect((await store.getSession(uploadId))?.uploaded_size ?? 0).toBe(0);
+  });
+
+  it('upload-link PUT, one file: a declared 101 MB is refused unread; an undeclared one is read under the built-in bound and refused', async () => {
+    const { routes, consumeUploadLink } = await mountLinkDoor(1);
+    const put = (rawBody: (o?: { maxBytes?: number }) => Promise<Buffer>, headers: Record<string, string> = {}) =>
+      call(routes, 'PUT', `${BASE}/upload-links/:token`, {
+        params: { token: 'link.token' },
+        headers: { 'content-type': 'application/pdf', 'x-file-name': 'scan.pdf', ...headers },
+        rawBody,
+      });
+    const unread = vi.fn(async () => Buffer.alloc(10));
+    expectTooLarge(await put(unread, { 'content-length': String(OVER) }));
+    expect(unread).not.toHaveBeenCalled();
+    const undeclared = boundedRawBody(OVER);
+    expectTooLarge(await put(undeclared.rawBody));
+    expect(undeclared.asked).toEqual([BUILT_IN]);
+    expect(consumeUploadLink).not.toHaveBeenCalled();
+    // CONTROL — a body within the bound reaches the link.
+    expect((await put(boundedRawBody(10).rawBody)).status).toBe(200);
+    expect(consumeUploadLink).toHaveBeenCalledTimes(1);
+  });
+
+  it('upload-link PUT, the several-file form: over its form limit (each file within the built-in bound) is refused, declared or not', async () => {
+    const { routes, consumeUploadLinkFiles } = await mountLinkDoor(2);
+    const formLimit = BUILT_IN * 2 + 64 * 1024;
+    const unread = vi.fn(async () => Buffer.alloc(10));
+    expectTooLarge(await putTakenOverForm(routes, unread, { 'content-length': String(formLimit + 1) }));
+    expect(unread).not.toHaveBeenCalled();
+    const undeclared = boundedRawBody(formLimit + 1);
+    expectTooLarge(await putTakenOverForm(routes, undeclared.rawBody));
+    expect(undeclared.asked).toEqual([formLimit]);
+    expect(consumeUploadLinkFiles).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL · with the host\'s explicit unlimited, the upload-link door relays a host size refusal in its own words', async () => {
+    const { routes } = await mountLinkDoor(1, { maxUploadMb: 'unlimited' });
+    const hostRefusal = boundedRawBody(OVER);
+    const host = vi.fn(async (options?: { maxBytes?: number }) => {
+      hostRefusal.asked.push(options?.maxBytes);
+      throw Object.assign(new Error('the host refused this body for size'), { status: 413, code: 'PAYLOAD_TOO_LARGE' });
+    });
+    const answer = await call(routes, 'PUT', `${BASE}/upload-links/:token`, {
+      params: { token: 'link.token' },
+      headers: { 'content-type': 'application/pdf', 'x-file-name': 'scan.pdf' },
+      rawBody: host,
+    });
+    expect(answer.status).toBe(413);
+    expect(answer.body?.error?.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(answer.body?.error?.message).toBe('the host refused this body for size');
+    expect(hostRefusal.asked).toEqual([undefined]);
+  });
+});
+
+describe('with no settings bound, the server-side file verbs refuse a 101 MB file at the built-in bound', () => {
+  let file: Buffer | undefined;
+  const overFile = () => (file ??= Buffer.alloc(OVER));
+  afterAll(() => { file = undefined; });
+
+  it('field-files storeFile: 413 PAYLOAD_TOO_LARGE before the engine or the store is reached; the host\'s unlimited lets it through', async () => {
+    const verb = (hostMaxUploadMb?: 'unlimited') =>
+      new FieldFileService({
+        getEngine: () => unreachable() as never,
+        getStorage: () => unreachable() as never,
+        getLimitsSnapshot: () => undefined,
+        hostMaxUploadMb,
+        logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as never,
+      });
+    const input = { organizationId: 'org_a', filename: 'big.pdf', mimeType: 'application/pdf', data: overFile() };
+    expect(await refusalOf(verb().storeFile(input))).toMatchObject({ code: 'PAYLOAD_TOO_LARGE', status: 413 });
+    // CONTROL — past the size verdict, the verb reaches the engine.
+    expect((await refusalOf(verb('unlimited').storeFile(input)))?.message).toBe('reached past the size verdict');
+  });
+
+  it('file-attachments attachFile: 413 PAYLOAD_TOO_LARGE before the engine or the store is reached; the host\'s unlimited lets it through', async () => {
+    const verb = (hostMaxUploadMb?: 'unlimited') =>
+      new FileAttachmentService({
+        getEngine: () => unreachable() as never,
+        getStorage: () => unreachable() as never,
+        getLimitsSnapshot: () => undefined,
+        hostMaxUploadMb,
+        logger: { warn: () => {} },
+      });
+    const input = {
+      parentObject: 'att_case',
+      parentId: 'case_a',
+      organizationId: 'org_a',
+      filename: 'big.eml',
+      mimeType: 'message/rfc822',
+      data: overFile(),
+    };
+    expect(await refusalOf(verb().attachFile(input))).toMatchObject({ code: 'PAYLOAD_TOO_LARGE', status: 413 });
+    expect((await refusalOf(verb('unlimited').attachFile(input)))?.message).toBe('reached past the size verdict');
   });
 });

@@ -13,17 +13,18 @@
  * plugin's mount and a host's `mountStorageRoutes` mount cannot answer the
  * same question two ways.
  *
- * ## Precedence — measured from this plugin's adapter keys, and followed
+ * ## Precedence — one order, the same for all three keys
  *
  * Per key, highest first:
  *
  *  1. an AUTHORED value — an admin save or an env override (any `source`
  *     other than `'default'`);
- *  2. the HOST's option (`presignedTtl` / `sessionTtl` on the plugin's
- *     constructor, or on `mountStorageRoutes`);
+ *  2. the HOST's option (`presignedTtl` / `sessionTtl` / `maxUploadMb` on the
+ *     plugin's constructor, or on `mountStorageRoutes`);
  *  3. the cascade's DEFAULT (the manifest default, `source: 'default'`);
  *  4. the built-in default below — what a mount with no settings namespace
- *     bound (a bare kernel, `bindToSettings: false`) has always used.
+ *     bound (a bare kernel, `bindToSettings: false`, a settings read that
+ *     failed) uses.
  *
  * That is exactly how the adapter keys already behave: an authored save
  * rebuilds the adapter over the constructor's (`buildAdapterFromValues`), while
@@ -31,10 +32,15 @@
  * nobody chose does not override a host decision; a decision an admin made
  * does.
  *
- * `max_upload_mb` has no host option, so its layers are 1, 3 and 4 — and layer
- * 4 is NO limit. A mount bound to the settings namespace therefore enforces the
- * declared default (100 MB) when nothing is saved; a mount with no namespace
- * bound keeps accepting any size, as it always did.
+ * ## The upload bound is never unset
+ *
+ * `max_upload_mb` follows the same four layers, and layer 4 is
+ * {@link DEFAULT_MAX_UPLOAD_MB} — the number the manifest declares, so a mount
+ * with no settings bound enforces what a settings-bound mount enforces when
+ * nothing is saved. Unset never means unlimited: a dropped value, a settings
+ * read that failed and a mount with no namespace all land on a bound. No
+ * limit is something only a host can ask for, by name
+ * (`maxUploadMb: 'unlimited'`), and the boot line says so at `warn`.
  *
  * ## Read when used, never frozen
  *
@@ -79,14 +85,30 @@ export interface ResolvedStorageLimits {
   presignedTtl: number;
   /** Chunked upload session lifetime, in seconds. */
   sessionTtl: number;
-  /** Largest upload accepted, in bytes; `undefined` ⇒ no limit (no settings namespace bound). */
+  /**
+   * Largest upload accepted, in bytes; `undefined` ⇒ no limit, which only an
+   * explicit host `maxUploadMb: 'unlimited'` (under no saved value) resolves to.
+   */
   maxUploadBytes: number | undefined;
+  /** Which layer the upload bound came from — named by the boot line. */
+  maxUploadLayer: StorageLimitLayer;
 }
+
+/** The four layers of the precedence, as the boot line names them. */
+export type StorageLimitLayer = 'saved setting' | 'host option' | 'manifest default' | 'built-in default';
+
+/** The one spelling a host uses to ask for no upload bound. */
+export const UNLIMITED_UPLOAD = 'unlimited';
+
+/** A host's upload bound: a positive number of MB (MiB), or {@link UNLIMITED_UPLOAD}. */
+export type HostMaxUploadMb = number | typeof UNLIMITED_UPLOAD;
 
 /** The host-side layer: the options a mount was composed with. */
 export interface StorageLimitHostOptions {
   presignedTtl?: number;
   sessionTtl?: number;
+  /** Validated by {@link parseHostMaxUploadMb} before it reaches here. */
+  maxUploadMb?: HostMaxUploadMb;
 }
 
 /** Built-in presigned URL TTL (seconds) — the manifest default carries the same number. */
@@ -94,8 +116,49 @@ export const DEFAULT_PRESIGNED_TTL = 3600;
 /** Built-in upload session TTL (seconds) — the manifest default carries the same number. */
 export const DEFAULT_SESSION_TTL = 86400;
 
+/**
+ * Built-in upload bound (MB) — the manifest's declared `max_upload_mb` default,
+ * held equal to it by a drift pin (`storage-limits.test.ts`).
+ */
+export const DEFAULT_MAX_UPLOAD_MB = 100;
+
 /** Bytes in one MB of `max_upload_mb`. */
 export const BYTES_PER_UPLOAD_MB = 1024 * 1024;
+
+/** A host's `maxUploadMb` that is neither a positive number nor {@link UNLIMITED_UPLOAD}. */
+export class InvalidMaxUploadMbError extends Error {
+  constructor(where: string, raw: unknown) {
+    super(
+      `${where}: \`maxUploadMb\` is ${describeRaw(raw)}, which is not an upload bound. Pass a positive ` +
+        `number of MB (counted as MiB), or '${UNLIMITED_UPLOAD}' to accept uploads of any size. Leave it ` +
+        `out to take the storage setting, or else the built-in ${DEFAULT_MAX_UPLOAD_MB} MB.`,
+    );
+    this.name = 'InvalidMaxUploadMbError';
+  }
+}
+
+function describeRaw(raw: unknown): string {
+  if (typeof raw === 'number') return String(raw);
+  try {
+    return JSON.stringify(raw) ?? String(raw);
+  } catch {
+    return String(raw);
+  }
+}
+
+/**
+ * A host's `maxUploadMb`, strictly: absent, a finite positive NUMBER, or
+ * exactly {@link UNLIMITED_UPLOAD}. Anything else throws
+ * {@link InvalidMaxUploadMbError} — the boot is refused rather than a bound
+ * guessed. A numeric string is refused too: a host option is code, not a
+ * form post.
+ */
+export function parseHostMaxUploadMb(raw: unknown, where: string): HostMaxUploadMb | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === UNLIMITED_UPLOAD) return UNLIMITED_UPLOAD;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
+  throw new InvalidMaxUploadMbError(where, raw);
+}
 
 /** The three keys, their snapshot field, and the unit a warning names. */
 const LIMIT_KEYS = [
@@ -155,11 +218,16 @@ export function readStorageLimits(
   return snapshot;
 }
 
-function pickTtl(reading: StorageLimitReading | undefined, host: number | undefined, builtIn: number): number {
-  if (reading?.authored) return reading.value;
-  if (host !== undefined) return host;
-  if (reading) return reading.value;
-  return builtIn;
+/** One key through the four layers: the value, and the layer it came from. */
+function pickLayer<T>(
+  reading: StorageLimitReading | undefined,
+  host: T | undefined,
+  builtIn: number,
+): { value: number | T; layer: StorageLimitLayer } {
+  if (reading?.authored) return { value: reading.value, layer: 'saved setting' };
+  if (host !== undefined) return { value: host, layer: 'host option' };
+  if (reading) return { value: reading.value, layer: 'manifest default' };
+  return { value: builtIn, layer: 'built-in default' };
 }
 
 /** Resolve the limits a request is served under — see the module header for the precedence. */
@@ -167,11 +235,38 @@ export function resolveStorageLimits(
   snapshot: StorageLimitsSnapshot | undefined,
   host: StorageLimitHostOptions = {},
 ): ResolvedStorageLimits {
-  const maxMb = snapshot?.maxUploadMb?.value;
+  const upload = pickLayer(snapshot?.maxUploadMb, host.maxUploadMb, DEFAULT_MAX_UPLOAD_MB);
   return {
-    presignedTtl: pickTtl(snapshot?.presignedTtl, host.presignedTtl, DEFAULT_PRESIGNED_TTL),
-    sessionTtl: pickTtl(snapshot?.sessionTtl, host.sessionTtl, DEFAULT_SESSION_TTL),
-    maxUploadBytes: maxMb === undefined ? undefined : Math.floor(maxMb * BYTES_PER_UPLOAD_MB),
+    presignedTtl: pickLayer(snapshot?.presignedTtl, host.presignedTtl, DEFAULT_PRESIGNED_TTL).value,
+    sessionTtl: pickLayer(snapshot?.sessionTtl, host.sessionTtl, DEFAULT_SESSION_TTL).value,
+    maxUploadBytes:
+      upload.value === UNLIMITED_UPLOAD ? undefined : Math.floor(upload.value * BYTES_PER_UPLOAD_MB),
+    maxUploadLayer: upload.layer,
+  };
+}
+
+/**
+ * The boot line naming the upload bound in force and the layer it came from.
+ * `warn` when there is no bound — only an explicit host choice gets there —
+ * so a deployment that accepts any size says so where it is read.
+ */
+export function uploadBoundBootLine(
+  who: string,
+  limits: ResolvedStorageLimits,
+): { level: 'info' | 'warn'; message: string } {
+  if (limits.maxUploadBytes === undefined) {
+    return {
+      level: 'warn',
+      message:
+        `${who}: uploads are UNLIMITED — the host passed \`maxUploadMb: '${UNLIMITED_UPLOAD}'\`, so no upload ` +
+        'door bounds the size of a file. Pass a number of MB to bound them, or save `max_upload_mb` in the ' +
+        'File Storage settings, which wins over the host option.',
+    };
+  }
+  const mb = Math.round((limits.maxUploadBytes / BYTES_PER_UPLOAD_MB) * 100) / 100;
+  return {
+    level: 'info',
+    message: `${who}: upload size bound is ${mb} MB (${limits.maxUploadBytes} bytes), from the ${limits.maxUploadLayer}.`,
   };
 }
 
@@ -205,7 +300,8 @@ function uploadTooLargeMessage(measured: string, maxUploadBytes: number): string
   return (
     `${measured}, over the maximum upload size of ${mb} MB (${maxUploadBytes} bytes). ` +
     'The limit is the "Max upload size (MB)" storage setting (max_upload_mb in the storage settings), ' +
-    'which an administrator can change.'
+    'which an administrator can change; where no storage settings are bound, the host sets it with the ' +
+    'storage plugin\'s maxUploadMb option.'
   );
 }
 
@@ -214,8 +310,8 @@ function uploadTooLargeMessage(measured: string, maxUploadBytes: number): string
  * otherwise the refusal's message (sent or thrown with
  * {@link UPLOAD_TOO_LARGE_STATUS} / {@link UPLOAD_TOO_LARGE_CODE}).
  *
- * No limit (`maxUploadBytes` undefined: no settings namespace bound) admits
- * any size. `bytes` that is not a finite number cannot be judged and is
+ * No limit (`maxUploadBytes` undefined: only an explicit host
+ * `maxUploadMb: 'unlimited'`) admits any size. `bytes` that is not a finite number cannot be judged and is
  * admitted — the byte-carrying doors judge what they actually receive.
  * `measured` words the size for the message ("The declared file size is N
  * bytes"), because each door knows what it measured.
