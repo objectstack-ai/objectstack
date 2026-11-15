@@ -158,6 +158,19 @@ const CALLERS: Record<string, Classification> = {
     wiring: { file: 'packages/core/src/utils/import-runner.ts', call: 'servesReferenceTarget(p, referenceObject' },
     pin: 'packages/core/src/utils/import-runner-reference-exposure.test.ts',
   },
+  // [#33523] `mastersOf` reads which master each `master_detail` field of a served lookup target points at,
+  // so a detail cell is resolved within the row's own master. It runs only inside `servesReferenceTarget`,
+  // after the target's exposure is asked; the master's own record is read by the master column's
+  // `resolveRef`, which asks that object's exposure through the same decision.
+  'packages/core/src/utils/import-runner.ts': {
+    kind: 'executes',
+    read: "the import door's master-scoped reference resolution (a detail cell is matched within the master the same row sets)",
+    decidedIn: 'packages/core/src/utils/import-field-meta.ts',
+    also:
+      '`mastersOf` reads which object a served target\'s `master_detail` field names, inside `servesReferenceTarget` '
+      + "after the target's exposure is asked; it reads no record. The master's record is read by the master column's "
+      + 'own `resolveRef`, which asks that object through the same decision.',
+  },
   'packages/objectql/src/relation-filter-lowering.ts': {
     kind: 'decided',
     read: "the data door's nested-relation filter condition (`ObjectQL.lowerRelationConditions` reads the related object to lower it), refused rather than withheld",
