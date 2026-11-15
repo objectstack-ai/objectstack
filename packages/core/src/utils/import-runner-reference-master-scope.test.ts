@@ -77,9 +77,19 @@ const metaMap = buildFieldMetaMap({
 
 const CALLER = { userId: 'u1', tenantId: 'org1' };
 
+/** Field equality on every key; a combinator or operator is refused, never read as a field name. */
+const matches = (row: Row, where: Record<string, unknown>): boolean => {
+  for (const [k, v] of Object.entries(where)) {
+    if (k.startsWith('$')) throw new Error('fake findData: unsupported logical operator ' + k);
+    if (v !== null && typeof v === 'object') throw new Error('fake findData: unsupported operator on ' + k);
+    if (row[k] !== v) return false;
+  }
+  return true;
+};
+
 function protocol() {
   const findData = vi.fn(async (args: FindArgs) =>
-    (ROWS[args.object] ?? []).filter((r) => Object.entries(args.query!.where!).every(([f, v]) => r[f] === v)));
+    (ROWS[args.object] ?? []).filter((r) => matches(r, args.query!.where as Record<string, unknown>)));
   const getMetaItem = vi.fn(async ({ name }: { type: string; name: string }) =>
     ({ type: 'object', name, item: { name, ...DECLARATIONS[name] } }));
   const createData = vi.fn(async (a: { data: Row }) => ({ id: 'new', ...a.data }));
