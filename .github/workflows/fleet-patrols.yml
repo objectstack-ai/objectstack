@@ -1507,7 +1507,8 @@ jobs:
   #
   # A ruled row is never re-announced. Closing the card is the maintainer's
   # "every BREACH row here is ruled", so the keys on the NEWEST CLOSED card
-  # (its BREACH and already-ruled sections) are read as ruled: a later run that
+  # (its BREACH and already-ruled sections; closed within `AUDIT_HISTORY_DAYS`,
+  # and not as a duplicate) are read as ruled: a later run that
   # reads one again inside the 7-day window (a dispatch with `patrol=all`, or
   # the scheduled run's skew overlap) lists it under "Already ruled on card #N"
   # instead of as a new BREACH, and a run whose every BREACH row is ruled and
@@ -1813,19 +1814,19 @@ jobs:
             const CARRIED = " · _carried: on this card from an earlier run and not in this run's reading; it stays until this card is closed_";
             const ROW_KEY = /^- (PR #\d+|commit [0-9a-f]{7,40})\b/;
             const RULED_HEADING = '## Already ruled';
+            // The body's footer opens with this; the reader stops there too.
+            const FOOTER = 'The full sweep JSON is the `governed-merges-audit` artifact';
             const readRows = (text, headings) => {
               const rows = [];
               let unkeyed = 0;
-              // A section is its heading, a blank line, then contiguous rows: the
-              // first blank line after a row ends it (the body's footer is not a row).
+              // A section runs from its heading to the next `## ` heading or the
+              // footer, blank lines included: a row the maintainer set apart with a
+              // blank line is still read. Blank lines are never counted.
               let inSection = false;
-              let seenRow = false;
               for (const raw of String(text ?? '').split(/\r?\n/)) {
-                if (raw.startsWith('## ')) { inSection = headings.some((h) => raw.startsWith(h)); seenRow = false; continue; }
-                if (!inSection) continue;
-                if (!raw.trim()) { if (seenRow) inSection = false; continue; }
-                seenRow = true;
-                if (raw.startsWith('… and ')) continue;
+                if (raw.startsWith('## ')) { inSection = headings.some((h) => raw.startsWith(h)); continue; }
+                if (raw.startsWith(FOOTER)) { inSection = false; continue; }
+                if (!inSection || !raw.trim() || raw.startsWith('… and ')) continue;
                 const m = ROW_KEY.exec(raw);
                 if (m) rows.push({ key: m[1], line: raw.slice(2).split(CARRIED)[0].trimEnd() });
                 else unkeyed += 1;
@@ -1835,8 +1836,11 @@ jobs:
 
             // ── Ruled: the keys on the newest closed card ───────────────────────
             // Closing the card is the maintainer's word that every row on it is
-            // ruled, so a key there is never re-announced as a new BREACH.
-            const ruledCard = closed.find((i) => i.state_reason !== 'duplicate') ?? null;
+            // ruled, so a key there is never re-announced as a new BREACH. Only a
+            // card closed within AUDIT_HISTORY_DAYS counts: an older ruling cannot
+            // cover a landing this window reads, so a reused key is never hidden.
+            const ruledSince = Date.now() - Number(process.env.AUDIT_HISTORY_DAYS || 10) * 86400000;
+            const ruledCard = closed.find((i) => i.state_reason !== 'duplicate' && Date.parse(i.closed_at ?? '') >= ruledSince) ?? null;
             const ruled = new Set(ruledCard ? readRows(ruledCard.body, ['## ⛔ BREACH', RULED_HEADING]).rows.map((r) => r.key) : []);
 
             // ── Carry-forward: a refresh never drops a BREACH row ────────────────
@@ -1923,7 +1927,7 @@ jobs:
               ...(breachSection ? [breachSection] : []),
               ...(unreadSection ? [unreadSection, ''] : []),
               ...(ruledSection ? [ruledSection] : []),
-              'The full sweep JSON is the `governed-merges-audit` artifact of the run above (kept 30 days). Re-read the week by',
+              `${FOOTER} of the run above (kept 30 days). Re-read the week by`,
               'hand: `node scripts/pm/check-governed-merges.mjs --since 7d --repos objectstack` from a fresh `origin/main`.',
             ].join('\n');
 
