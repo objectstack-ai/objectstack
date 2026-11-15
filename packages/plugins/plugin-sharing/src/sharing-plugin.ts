@@ -1795,5 +1795,8 @@ function engineByIdTarget(
   const dispatch = verb === 'delete'
     ? resolveEngineDeleteDispatch(bag)
     : resolveEngineUpdateDispatch((data && typeof data === 'object' ? data : {}) as Record<string, unknown>, bag);
-  return dispatch.kind === 'by-id' ? dispatch.id : undefined;
+  if (dispatch.kind !== 'by-id') return undefined;
+  const id: unknown = dispatch.id;
+  // The engine binds a by-id write to a scalar key; anything else is no row to judge by id.
+  return typeof id === 'string' || typeof id === 'number' || typeof id === 'bigint' ? id : undefined;
 }
