@@ -23,10 +23,9 @@
 1. 席位会话坐席:座位贴存根、自有信箱(`project-forms.md`)、租约表。
    - 信箱一步恒不省:「不按旧规」也不豁免;重坐、换号或移座恒开新信箱。
 2. 每区一条项目线程,由协调者开(`coordinator.md`);复核线程照上节复核行。
-3. 维护者在每条新线程亲写一句授权行:auto mode 只认本线程维护者原话,转述与点选不算。
-   - 区线程:「本区通过复审的 PR 都可以 ready + auto-merge」
+3. 维护者在每条新席线程亲写一句授权行:auto mode 只认本线程维护者原话,转述与点选不算。
    - 席线程:「审批人批准后的 Tier H PR 你可以自主落地」
-   - 授权行只解 auto mode 的拦截,⛔ 不改 AGENTS.md 第 14 条的落地档。
+   - 授权行只解 auto mode 的拦截,⛔ 不改 AGENTS.md 第 14 条的落地档;区线程无授权行。
 4. W0:各区首小时交席位一份关/并/改级/呈裁清单,同时即开首张 p1。
    - 清单经维护者过目后落笔:定级照 SKILL.md 域车道(自分诊例外住 `triage-duties.md`)。
    - 关卡照 `execution-duties.md`:⛔ 不凭本区读数自关。
@@ -42,7 +41,7 @@
 - 每区在开发 ≤4(`batch` 天花板内),用量走快降至 2–3;先落已建成的 PR,再开新卡。
 - 同函数互相牵连的卡合一 PR,准入照 `execution-duties.md` 折叠五门。
 - 送审:欠不欠、敲谁、档与 head 后移只照 `contract-review.md`。
-- 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 区照 `landing-operations.md` 自己落地。
+- 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 照 `landing-operations.md` 自落,受拒报原文。
 - 受管面与超 3,000 行 PR 区 ⛔ 不落,交席位;席位照 SKILL.md〈路径分叉〉①–④ 一笔交棒。
 - 席位每轮照 `execution-duties.md` 四件套行复查全部已 PASS 受管 PR,各区转来的一并在内。
 - 插队照 `landing-operations.md` 三因;⛔ 本文不改队列配置。
