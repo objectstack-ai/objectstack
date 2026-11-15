@@ -435,6 +435,45 @@ describe('a byte door holds a body with no declared length to its own bound, as 
     expect((await store.getSession(uploadId))?.uploaded_size).toBe(MIB);
   });
 
+  /** A host's own size refusal: a read refused for size with no bound stated by the door. */
+  const hostSizeRefusal = vi.fn(async () => {
+    throw Object.assign(new Error('the host refused this body for size'), { status: 413, code: 'PAYLOAD_TOO_LARGE' });
+  });
+
+  it('with no max_upload_mb, a host size refusal on the local raw PUT is not taken as the door\'s own: the door answers, as before', async () => {
+    const { adapter, routes } = await mountDoors(undefined);
+    const presigned = await call(routes, 'POST', `${BASE}/upload/presigned`, {
+      body: { filename: 'h.bin', mimeType: 'application/octet-stream', size: 10 },
+    });
+    const token = String(presigned.body.data.uploadUrl).split('/_local/raw/')[1]!;
+    const upload = vi.spyOn(adapter, 'upload');
+    const answer = await call(routes, 'PUT', `${BASE}/_local/raw/:token`, { params: { token }, rawBody: hostSizeRefusal });
+    expect(answer.body?.success).toBe(false);
+    expect(answer.status).toBe(500);
+    expect(answer.body?.error?.code).toBe('INTERNAL');
+    expect(String(answer.body?.error?.message ?? '')).not.toBe('');
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('with no max_upload_mb, a host size refusal on the chunk PUT is not taken as the door\'s own: the door answers, as before', async () => {
+    const { adapter, routes } = await mountDoors(undefined);
+    const started = await call(routes, 'POST', `${BASE}/upload/chunked`, {
+      body: { filename: 'h.bin', mimeType: 'application/octet-stream', totalSize: MIB },
+    });
+    const { uploadId, resumeToken } = started.body.data;
+    const uploadChunk = vi.spyOn(adapter, 'uploadChunk');
+    const answer = await call(routes, 'PUT', `${BASE}/upload/chunked/:uploadId/chunk/:chunkIndex`, {
+      params: { uploadId, chunkIndex: '0' },
+      headers: { 'x-resume-token': resumeToken },
+      rawBody: hostSizeRefusal,
+    });
+    expect(answer.body?.success).toBe(false);
+    expect(answer.status).toBe(500);
+    expect(answer.body?.error?.code).toBe('INTERNAL');
+    expect(String(answer.body?.error?.message ?? '')).not.toBe('');
+    expect(uploadChunk).not.toHaveBeenCalled();
+  });
+
   it('CONTROL · with no max_upload_mb the doors state no bound, and read the whole body as before', async () => {
     const { routes } = await mountDoors(undefined);
     const presigned = await call(routes, 'POST', `${BASE}/upload/presigned`, {

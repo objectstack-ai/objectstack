@@ -393,6 +393,30 @@ describe.each(ADAPTERS)('IHttpRequest.rawBody({ maxBytes }) holds a body to the 
         expect(JSON.parse(answer.text)).toEqual({ success: false, error: { code: 'PAYLOAD_TOO_LARGE', message: expect.any(String) } });
     });
 
+    it.each([['a negative number', -1], ['a fraction', 1.5], ['not a number', Number.NaN]])(
+        'a maxBytes that is %s is refused by the call itself, a TypeError thrown before any promise is returned',
+        async (_label, maxBytes) => {
+            const server = make();
+            opened.push(server);
+            server.put('/bad-bound', async (req, res) => {
+                let thrown: unknown;
+                let returned: unknown;
+                try {
+                    returned = req.rawBody!({ maxBytes });
+                } catch (err) {
+                    thrown = err;
+                }
+                res.json({ success: true, data: { typeError: thrown instanceof TypeError, returnedPromise: returned instanceof Promise } });
+            });
+            await server.listen(0);
+            const res = await fetch(`http://127.0.0.1:${server.getPort()}/bad-bound`, {
+                method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: new Uint8Array(8),
+            });
+            expect(res.status).toBe(200);
+            expect(((await res.json()) as any).data).toEqual({ typeError: true, returnedPromise: false });
+        },
+    );
+
     it.each([['declared', true], ['not declared', false]])('CONTROL: exactly the bound, length %s, is read whole', async (_label, declare) => {
         const send = await start();
         const answer = await send('/door', BOUND, declare);

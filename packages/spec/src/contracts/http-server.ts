@@ -68,11 +68,16 @@ export interface IHttpRequest {
      *   buffered;
      * - exactly `maxBytes` is read whole.
      *
+     * `maxBytes` is a non-negative whole number of bytes. Any other value is
+     * the calling door's bug, never "no bound": the call itself throws a
+     * `TypeError`, before anything is read, rather than returning a promise.
+     *
      * A refusal rejects with an error carrying `status` 413 and `code`
      * `PAYLOAD_TOO_LARGE`. The door answers it with its own refusal; one that
      * lets it escape is answered 413 `PAYLOAD_TOO_LARGE`. Without `maxBytes`
      * the whole body is read, as before, so a door that has a bound passes it.
-     * Repeated calls answer the same bytes, or the same refusal.
+     * The first call reads the body; a later call answers those same bytes
+     * judged against its own `maxBytes`, or the first call's refusal.
      */
     rawBody?: (options?: { maxBytes?: number }) => Promise<Buffer>;
 

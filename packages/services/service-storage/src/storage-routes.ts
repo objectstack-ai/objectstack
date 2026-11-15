@@ -317,7 +317,8 @@ function declaredContentLength(req: IHttpRequest): number | undefined {
  * gets `maxBytes`, so a body with no declared length is counted against the
  * bound as it is read and refused once it passes it, exactly as a declared
  * length is (`IHttpRequest.rawBody`). `{ over: true }` when the read was
- * refused for passing `maxBytes`; any other failure is thrown. With no bound
+ * refused for passing the `maxBytes` this door stated; any other failure,
+ * a size refusal on a read that stated no bound included, is thrown. With no bound
  * (`max_upload_mb` unset) the whole body is read, as before.
  *
  * `null` when the request offers no raw bytes and its body is not a buffer:
@@ -332,7 +333,10 @@ async function readDoorBytes(
     try {
       return { bytes: await req.rawBody(maxBytes === undefined ? undefined : { maxBytes: Math.max(0, maxBytes) }) };
     } catch (err) {
-      if (isBodyTooLarge(err)) return { over: true };
+      // `over` is this door's own refusal, so only for a bound it stated. A
+      // size refusal from a read it stated none for is the host's, and is
+      // thrown on as before.
+      if (maxBytes !== undefined && isBodyTooLarge(err)) return { over: true };
       throw err;
     }
   }

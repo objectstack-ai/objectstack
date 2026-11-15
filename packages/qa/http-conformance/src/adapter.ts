@@ -647,9 +647,12 @@ export class NodeHttpServer implements IHttpServer {
             method,
             path,
             // The bytes of every body, a refused one included. A door's own
-            // bound (`maxBytes`) is held whether or not a length is declared,
-            // as on the standard transport; a later call answers the bytes the
-            // first read, judged against its own bound, or the first refusal.
+            // bound (`maxBytes`) is held whether or not a length is declared.
+            // A body still on the socket is held to it while it is read, as
+            // on the standard transport; a JSON or form body this adapter
+            // already read eagerly is judged against it once read. A later
+            // call answers the bytes the first read, judged against its own
+            // bound, or the first refusal.
             rawBody: (options?: { maxBytes?: number }) => {
                 const maxBytes = rawBodyMaxBytes(options);
                 rawBodyRead ??= bufferedBody ?? readBody(nodeReq, maxBytes);

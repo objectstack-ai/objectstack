@@ -2163,6 +2163,20 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
       }
     });
 
+    it('with no max_upload_mb, a host size refusal is not taken as the door\'s own: it is relayed with its own words, as before', async () => {
+      const grant = await files.createUploadLinkAs('claim', await newClaim('bound-host'), { field: 'policy' }, OWNER as never);
+      const token = tokenOf(grant.path);
+      const hostSizeRefusal = vi.fn(async () => {
+        throw Object.assign(new Error('the host refused this body for size'), { status: 413, code: 'PAYLOAD_TOO_LARGE' });
+      });
+      const answer = await putLink(token, hostSizeRefusal);
+      expect(answer._status, JSON.stringify(answer._json)).toBe(413);
+      expect(answer._json.error.code).toBe('PAYLOAD_TOO_LARGE');
+      expect(answer._json.error.message).toBe('the host refused this body for size');
+      // CONTROL — the link was not spent.
+      expect((await putLink(token, boundedRawBody(Buffer.from('%PDF-1.4 after host')).rawBody))._status).toBe(200);
+    });
+
     it('CONTROL · with no max_upload_mb the door states no bound and reads the whole body, as before', async () => {
       const grant = await files.createUploadLinkAs('claim', await newClaim('bound-none'), { field: 'policy' }, OWNER as never);
       const read = boundedRawBody(Buffer.from('%PDF-1.4 unbounded'));
