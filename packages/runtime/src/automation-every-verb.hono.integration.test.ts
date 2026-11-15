@@ -25,6 +25,14 @@ import { createDispatcherPlugin } from './dispatcher-plugin.js';
  * `405` with the verbs it serves (`automationRouteAllow`, pinned against the
  * ledger in `route-ledger.conformance.test.ts`).
  *
+ * An address is served exactly as its bare path (ADR-0150 D5), so the
+ * addressed shapes of those rows (`/automation/:ns/:name/runs`,
+ * `/automation/:ns/:name/trigger`, `/automation/trigger/:ns/:name`) are
+ * declared too, and answer the same as their bare row: an anonymous caller
+ * `401`, a signed-in one the domain's `405`. `crm` is an installed namespace
+ * holding `send_digest` (an ObjectQL registry double answering the holder
+ * table the address reads).
+ *
  * The door is read off the body, as in `actions-every-verb.hono.integration.test.ts`:
  * the dispatcher's envelope fills `error.httpStatus` and carries no
  * `error.details`; the transport's fills `error.details` and no `httpStatus`.
@@ -42,7 +50,18 @@ const ROWS = [
     ['/automation/send_digest/trigger', 'GET', 'POST'],
     ['/automation/connectors/credential-refs', 'POST', 'GET'],
     ['/automation/trigger/send_digest', 'GET', 'POST'],
+    // The addressed shapes: three segments, the namespace `crm` in front of the name.
+    ['/automation/crm/send_digest/runs', 'DELETE', 'GET'],
+    ['/automation/crm/send_digest/runs', 'POST', 'GET'],
+    ['/automation/crm/send_digest/runs', 'PUT', 'GET'],
+    ['/automation/crm/send_digest/trigger', 'GET', 'POST'],
+    ['/automation/trigger/crm/send_digest', 'GET', 'POST'],
 ] as const;
+
+/** The installed namespace the addressed rows name, and the package holding `send_digest` under it. */
+const CRM = 'com.crm.pkg';
+const NAMESPACES: Record<string, string> = { [CRM]: 'crm' };
+const HOLDERS: Record<string, string[]> = { 'flow:send_digest': [CRM] };
 
 /** Every flow name the automation double was asked to run. */
 const executed: string[] = [];
@@ -65,6 +84,18 @@ function fakeAuthPlugin(): Plugin {
                 execute: async (name: string) => {
                     executed.push(name);
                     return { success: true, output: {} };
+                },
+            });
+            // The holder table the address reads: `crm` is installed and holds `send_digest`.
+            const holdersOf = (type: string, name: string) => HOLDERS[`${type}:${name}`] ?? [];
+            ctx.registerService('objectql', {
+                registry: {
+                    getNamespaceOwners: (ns: string) => Object.keys(NAMESPACES).filter((id) => NAMESPACES[id] === ns),
+                    packageScopedHoldersOf: holdersOf,
+                    getPackageScopedItem: (type: string, name: string, packageId: string) =>
+                        (holdersOf(type, name).includes(packageId) ? { name, _packageId: packageId } : undefined),
+                    getEnvironmentScopedItem: () => undefined,
+                    getPackage: (id: string) => (NAMESPACES[id] ? { manifest: { id, namespace: NAMESPACES[id] } } : undefined),
                 },
             });
         },
@@ -190,6 +221,17 @@ describe('every verb on a two-segment /api/v1/automation path reaches the automa
             expect(status, JSON.stringify(body)).toBe(200);
             expect(executed).toEqual(['send_digest']);
         });
+
+        // ── control: the declarations hand only unserved verbs to the domain; a served verb on an address runs ──
+        for (const shape of ['/automation/crm/send_digest/trigger', '/automation/trigger/crm/send_digest']) {
+            it(`CONTROL — signed-in POST ${prefix}${shape} runs the addressed flow`, async () => {
+                executed.length = 0;
+                const { status, body } = await call('POST', `${prefix}${shape}`, true);
+
+                expect(status, JSON.stringify(body)).toBe(200);
+                expect(executed).toEqual(['send_digest']);
+            });
+        }
     }
 
     // ── the claim is narrow: a shape no mount matches stays the transport's 404 ──
