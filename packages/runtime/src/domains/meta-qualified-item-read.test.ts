@@ -1176,14 +1176,14 @@ describe('#33456 — the bare action read grafts a holder\'s envelope only at it
         } as never);
     };
     beforeEach(compose);
-    const body = (label: string, objectName: string) => ({
-        name: 'approve', label, type: 'script', objectName, target: 'approve',
+    const body = (label: string, objectName: string | undefined) => ({
+        name: 'approve', label, type: 'script', ...(objectName ? { objectName } : {}), target: 'approve',
         body: { language: 'js', source: 'return 1;', capabilities: [] },
     });
     const shipAction = (packageId: string, objectName: string) =>
         registry.registerItem('action', body(packageId.split('.').pop()!, objectName), 'name' as never, packageId);
     /** The environment's own item: the bare slot, and its active package-less row in the store. */
-    const environmentAction = (objectName: string) => {
+    const environmentAction = (objectName: string | undefined) => {
         registry.registerItem('action', body('env', objectName), 'name' as never);
         storedRows.push({ id: 'r-env', type: 'action', name: 'approve', package_id: null, state: 'active', metadata: JSON.stringify(body('env', objectName)) });
     };
@@ -1197,6 +1197,7 @@ describe('#33456 — the bare action read grafts a holder\'s envelope only at it
     for (const [shape, holder, held, other] of [
         ['mirror shape: A on `account`, the environment\'s item on `contact`', A, 'account', 'contact'],
         ['single-holder cell: B on `contact`, the environment\'s item on `account`', B, 'contact', 'account'],
+        ['object-less: A on `account`, the environment\'s item object-less', A, 'account', undefined],
     ] as const) {
         it(`${shape}: the environment's item with no package's envelope (BASE: the holder's), and \`?package=\` the holder's own`, async () => {
             for (const steps of bothOrders([() => shipAction(holder, held), () => environmentAction(other)])) {
