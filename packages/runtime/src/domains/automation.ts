@@ -3021,12 +3021,16 @@ async function unregisterAndDeleteFlow(
  *    actions) and standalone `action` items, and the metadata service's
  *    object and action listings.
  *
- * Absence and failure are told apart, as at every gate that reads an
- * authorization fact (`resolveServiceOrLoud`): a slot nothing registered is
- * absent and contributes nothing, while a slot that is wired and fails to
- * resolve throws, as a listing that throws does, and the predicate refuses
- * the start `503`. So a host that serves no declaration from any of these
- * sources finds none, and a read that did not happen admits nothing.
+ * Absence and failure are told apart on every arm, as at every gate that
+ * reads an authorization fact (`resolveServiceOrLoud`): each of the three
+ * slots (`protocol`, `objectql`, `metadata`) is resolved loud, so a slot
+ * nothing registered is absent and contributes nothing, while a slot that is
+ * wired and fails to resolve throws; and each listing (the two merged ones,
+ * the registry's two, the metadata service's objects and its standalone
+ * `action` items) is read where its throw travels. Any such throw makes the
+ * predicate refuse the start `503`. So a host that serves no declaration from
+ * any of these sources finds none, and a read that did not happen admits
+ * nothing.
  */
 async function servedActionDeclarations(
     deps: DomainHandlerDeps,
@@ -3040,16 +3044,23 @@ async function servedActionDeclarations(
         return collectActionDeclarations(deps, undefined, objects, actions);
     }
     const rows: Array<{ action: unknown; objectName: string }> = [];
-    const engine = (await deps.getObjectQL(context, envId)) as
+    // The engine slot resolved loud, as the two listing slots are: the quiet
+    // `getObjectQL` probe reads a wired slot that fails to resolve as no engine.
+    const engine = (await deps.resolveServiceOrLoud(context, 'objectql', envId)) as
         | { registry?: { listItems?: (type: string) => unknown[] } }
-        | null;
+        | undefined;
     const registry = engine?.registry;
     if (typeof registry?.listItems === 'function') {
         rows.push(...await collectActionDeclarations(deps, undefined, registry.listItems('object'), registry.listItems('action')));
     }
     const metadata = await deps.resolveServiceOrLoud(context, 'metadata', envId);
     if (typeof metadata?.listObjects === 'function' || typeof metadata?.loadMany === 'function') {
-        rows.push(...await collectActionDeclarations(deps, metadata));
+        // Both listings read HERE and handed over, so a throw of either one
+        // travels: `collectActionDeclarations` reads a throwing standalone
+        // listing it is left to read as no standalone item, by design.
+        const objects: unknown[] = typeof metadata.listObjects === 'function' ? (await metadata.listObjects()) ?? [] : [];
+        const actions: unknown[] = typeof metadata.loadMany === 'function' ? (await metadata.loadMany('action')) ?? [] : [];
+        rows.push(...await collectActionDeclarations(deps, undefined, objects, actions));
     }
     return rows;
 }

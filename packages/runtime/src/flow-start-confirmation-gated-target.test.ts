@@ -82,15 +82,17 @@ interface Harness {
     target?: string;
     /** The listing read throws; `declared` throws an error that declares its own status and code. */
     listingFails?: boolean | 'declared';
+    /** The metadata service's standalone `action` listing throws. */
+    actionListingFails?: boolean;
     /** This service slot is wired and fails to resolve (its factory throws). */
-    resolveFails?: 'protocol' | 'metadata';
+    resolveFails?: 'protocol' | 'metadata' | 'objectql';
     /** The automation service serves no `getFlow`. */
     noGetFlow?: boolean;
 }
 
 /** One user-run screen flow, the action that targets it, and the trigger routes and action door over them. */
 function makeDoors(opts: Harness = {}) {
-    const { gated = true, source = 'object', target = FLOW, listingFails = false, resolveFails, noGetFlow = false } = opts;
+    const { gated = true, source = 'object', target = FLOW, listingFails = false, actionListingFails = false, resolveFails, noGetFlow = false } = opts;
     const execute = vi.fn(async (_name: string, _context?: unknown) => ({ success: true, output: {} }));
     const getFlow = vi.fn(async (name: string) =>
         name === FLOW || name === OTHER_FLOW ? { name, type: 'screen', runAs: 'user' } : null);
@@ -133,7 +135,10 @@ function makeDoors(opts: Harness = {}) {
         load: vi.fn(async () => null),
         loadDiagnosed: vi.fn(async () => ({ data: null, degraded: false, errors: [] })),
         listObjects,
-        loadMany: vi.fn(async (type: string) => (type === 'action' ? standalone : [])),
+        loadMany: vi.fn(async (type: string) => {
+            if (type === 'action' && actionListingFails) throw new Error('standalone action listing unavailable');
+            return type === 'action' ? standalone : [];
+        }),
         getObject: vi.fn(async (n: string) => schemaOf(n)),
     };
     const getMetaItems = vi.fn(async ({ type }: { type: string }) => ({
@@ -219,7 +224,7 @@ describe('an AI service account does not start, by name, a flow that a confirmat
             expect(execute).not.toHaveBeenCalled();
         });
 
-        for (const slot of ['protocol', 'metadata'] as const) {
+        for (const slot of ['protocol', 'objectql', 'metadata'] as const) {
             it(`${route}: a '${slot}' slot that fails to resolve refuses the account's start 503 (failure is not absence), and nothing runs`, async () => {
                 const { trigger, execute } = makeDoors({ resolveFails: slot });
 
@@ -230,6 +235,16 @@ describe('an AI service account does not start, by name, a flow that a confirmat
                 expect(execute).not.toHaveBeenCalled();
             });
         }
+
+        it(`${route}: a standalone action listing that fails refuses the account's start 503 (failure is not absence), and nothing runs`, async () => {
+            const { trigger, execute } = makeDoors({ actionListingFails: true });
+
+            const answer = await trigger(route, ACCOUNT_EC);
+
+            expect(answer.status).toBe(503);
+            expect(answer.code).toBe('SERVICE_UNAVAILABLE');
+            expect(execute).not.toHaveBeenCalled();
+        });
 
         it(`${route}: the rule is asked without the flow-definition probe (a service with no getFlow)`, async () => {
             const { trigger, execute } = makeDoors({ noGetFlow: true });
@@ -253,7 +268,13 @@ describe('CONTROLS — what the confirmation-gated start rule leaves exactly as 
         });
 
         it(`${route}: a person is unchanged on a service with no getFlow, and under a failing listing slot`, async () => {
-            for (const opts of [{ noGetFlow: true }, { resolveFails: 'metadata' as const }, { listingFails: true }]) {
+            for (const opts of [
+                { noGetFlow: true },
+                { resolveFails: 'metadata' as const },
+                { resolveFails: 'objectql' as const },
+                { listingFails: true },
+                { actionListingFails: true },
+            ]) {
                 const { trigger, execute } = makeDoors(opts);
 
                 expect((await trigger(route, PERSON_EC)).status, JSON.stringify(opts)).toBe(200);
