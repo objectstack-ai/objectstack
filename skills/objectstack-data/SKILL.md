@@ -337,9 +337,7 @@ one: `draft` / `pending` / `new`), never a terminal one; keys and values are
 option `value`s, never labels.
 
 > **There is NO `unique` validation type** — uniqueness is a unique **index**
-> with its scope (ADR-0120; [rules/validation.md § Uniqueness](./rules/validation.md#uniqueness--use-unique-indexes)).
-
-See [rules/validation.md](./rules/validation.md) for all types and examples.
+> with its scope ([rules/validation.md § Uniqueness](./rules/validation.md#uniqueness--use-unique-indexes)).
 
 ### Index Patterns
 
@@ -370,13 +368,12 @@ To add fields/validations/indexes to an object you do not own, author
 `200`, range `0–999`); an extension can add but never remove, except that a new
 `label` without `pluralLabel` clears the base plural unless a tenant authored it (set both). ⛔ Not the same key
 as object-level `ownership` (the record-ownership enum
-`'user' | 'business_unit' | 'org' | 'none'`). Schema:
-`node_modules/@objectstack/spec/src/data/object.zod.ts` (`ObjectExtensionSchema`).
+`'user' | 'business_unit' | 'org' | 'none'`).
 
 **Relabel a field the owner declares with `fieldPatches` — never by redeclaring
 it in `fields`**, which takes the field over whole and cuts it off from the
-owner's upgrades. A patch carries display keys only
-(`BASE_FIELD_DISPLAY_WHITELIST`): `label`, `description`, `inlineHelpText`,
+owner's upgrades. A patch carries display keys only:
+`label`, `description`, `inlineHelpText`,
 `placeholder`, and an option's `label` keyed by its stored `value`; the type,
 values and rules stay the owner's. A key the tenant edited keeps the tenant's
 text; between two extensions the higher `priority` wins. A patch naming a field
@@ -384,7 +381,7 @@ or option value the target lacks is refused at install and by `os validate`, and
 a `picklist`-bound field's options are never patchable. Example:
 `defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } } })`.
 
-**An object an installed package ships** (ADR-0146 D10) is extended from the
+**An object an installed package ships** is extended from the
 base's paired `.custom` package (`hotcrm.custom`; **objectstack-platform**
 § Customizing an installed package), never replaced: it takes no `overrides`
 declaration. Every field the pair adds ends in `__c` (`region__c`). The suffix is
@@ -414,7 +411,7 @@ hand-writing an RLS policy (ADR-0057 D1): `own` (default) · `own_and_reports` �
 only `own` and `org` work in open source — the hierarchy-relative three need the
 paid `@objectstack/security-enterprise` plugin, **fail closed to `own`** without
 it, and `defineStack` errors unless the grant declares
-`requires: ['hierarchy-security']`. Schema: `PermissionSetSchema.objects.*`.
+`requires: ['hierarchy-security']`.
 
 ### Ownership queues — park a record for a team to claim
 
