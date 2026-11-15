@@ -24,7 +24,7 @@
 
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
@@ -35,7 +35,8 @@ const PKG_DIR = resolve(HERE, '../..');
 const OS_BIN = resolve(PKG_DIR, 'node_modules/.bin/os');
 // knex and the two database clients are driver-sql's own dependencies; resolve
 // them from there so this fixture adds no dependency to the package.
-const driverRequire = createRequire(createRequire(join(PKG_DIR, 'package.json')).resolve('@objectstack/driver-sql/package.json'));
+// (Its `exports` map does not expose `package.json`, so the workspace link is read directly.)
+const driverRequire = createRequire(realpathSync(join(PKG_DIR, 'node_modules/@objectstack/driver-sql/package.json')));
 
 // ── arguments ──────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -294,17 +295,27 @@ async function bulkLoad(databaseUrl, t) {
   const tables = ['bench_line_item', 'bench_opportunity', 'bench_account', 'bench_product', 'bench_region'];
   for (const table of tables) await db(table).del();
 
-  const batch = args.dialect === 'sqlite' ? 2000 : 1000;
+  // SQLite: one prepared statement per table inside a transaction (knex's
+  // multi-row insert compiles to a compound SELECT, which SQLite caps at 500
+  // terms). PostgreSQL: knex multi-row VALUES, 1000 rows (13k binds) a batch.
+  const sqlite = args.dialect === 'sqlite' ? new (driverRequire('better-sqlite3'))(databaseUrl.replace(/^file:/, '')) : undefined;
   async function load(table, count, row) {
     const started = Date.now();
-    await db.transaction(async (trx) => {
-      let rows = [];
-      for (let i = 0; i < count; i++) {
-        rows.push(row(i));
-        if (rows.length === batch) { await trx.batchInsert(table, rows, batch); rows = []; }
-      }
-      if (rows.length) await trx.batchInsert(table, rows, batch);
-    });
+    if (sqlite) {
+      const cols = Object.keys(row(0));
+      const stmt = sqlite.prepare(`insert into "${table}" (${cols.map((c) => `"${c}"`).join(', ')}) values (${cols.map(() => '?').join(', ')})`);
+      sqlite.transaction(() => { for (let i = 0; i < count; i++) { const o = row(i); stmt.run(cols.map((c) => o[c])); } })();
+    } else {
+      const batch = 1000;
+      await db.transaction(async (trx) => {
+        let rows = [];
+        for (let i = 0; i < count; i++) {
+          rows.push(row(i));
+          if (rows.length === batch) { await trx(table).insert(rows); rows = []; }
+        }
+        if (rows.length) await trx(table).insert(rows);
+      });
+    }
     log(`  ${table}: ${count} rows in ${Date.now() - started} ms`);
   }
   const r = rng(42);
@@ -330,7 +341,7 @@ async function bulkLoad(databaseUrl, t) {
       status: STATUSES[Math.floor(r() * STATUSES.length)],
     };
   });
-  await db.raw(args.dialect === 'sqlite' ? 'ANALYZE' : 'ANALYZE');
+  if (sqlite) { sqlite.exec('ANALYZE'); sqlite.close(); } else await db.raw('ANALYZE');
   const indexes = args.dialect === 'sqlite'
     ? await db.raw("select tbl_name as table_name, name as index_name, sql as definition from sqlite_master where type = 'index' and tbl_name like 'bench_%' order by tbl_name, name")
     : (await db.raw("select tablename as table_name, indexname as index_name, indexdef as definition from pg_indexes where tablename like 'bench_%' order by tablename, indexname")).rows;
