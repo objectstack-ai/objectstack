@@ -6529,7 +6529,7 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * export, so it is no nameable member of this class's published face.
    */
   [DETACHED_HOOK_RUN]<T>(body: () => T): T {
-    return ScopedContextFacet.detachedHookRun.call(scopedContextHost.of(this), body);
+    return (ScopedContextFacet.detachedHookRun<T>).call(scopedContextHost.of(this), body);
   }
 
   /**
