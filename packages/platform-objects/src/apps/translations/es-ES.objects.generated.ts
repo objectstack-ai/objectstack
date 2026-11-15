@@ -449,7 +449,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_session: {
     label: "Sesión",
     pluralLabel: "Sesiones",
-    description: "Sesiones de usuario activas",
+    description: "Sesiones de usuario",
     fields: {
       user_id: {
         label: "Usuario"

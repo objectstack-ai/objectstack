@@ -449,7 +449,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
   sys_session: {
     label: "Sitzung",
     pluralLabel: "Sitzungen",
-    description: "Aktive Benutzersitzungen",
+    description: "Benutzersitzungen",
     fields: {
       user_id: {
         label: "Benutzer"
