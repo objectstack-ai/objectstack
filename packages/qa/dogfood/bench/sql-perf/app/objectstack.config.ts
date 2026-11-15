@@ -31,14 +31,15 @@
  * hours. See `../README.md`.
  */
 import { defineStack } from '@objectstack/spec';
+import type { Field, ServiceObject } from '@objectstack/spec/data';
 
 const readWrite = { allowRead: true, allowCreate: true, allowEdit: true };
 
 /** One roll-up pair: a parent with `summaries` summary fields over a master-detail child. */
-function rollupPair(n: 0 | 1 | 2) {
+function rollupPair(n: 0 | 1 | 2): ServiceObject[] {
   const parent = `bench_roll${n}`;
   const child = `${parent}_item`;
-  const summaries: Record<string, unknown> = {};
+  const summaries: Record<string, Field> = {};
   if (n >= 1) {
     summaries.total_quantity = {
       type: 'summary',
