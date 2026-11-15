@@ -80,6 +80,7 @@
 
 import { operatorFacingErrorText } from '@objectstack/types';
 import { isResultSet, normalizeRows } from './seed-tenancy-backfill.js';
+import { readColumnPresence } from './read-probe.js';
 import type { IndexExec } from './partial-index-probe.js';
 import {
     OVERLAY_INDEX_NAMES,
@@ -364,6 +365,16 @@ const BEFORE_MEMBER_COLUMN: Readonly<Record<string, { columnPresenceSql: string;
 };
 
 /**
+ * The column a row scope of the shape `<column> IS NULL` reads, or `undefined`
+ * for any other scope. Read off the owning migration's own scope constant, so
+ * it cannot name a column the migration does not.
+ */
+function nullScopeColumn(rowScope: string | null): string | undefined {
+    const match = /^([A-Za-z_][A-Za-z0-9_]*) IS NULL$/.exec(rowScope ?? '');
+    return match?.[1];
+}
+
+/**
  * Run one probe.
  *
  * The presence question is asked FIRST and its refusal is read as absence — the
@@ -373,7 +384,7 @@ const BEFORE_MEMBER_COLUMN: Readonly<Record<string, { columnPresenceSql: string;
  * the actionable ones stop being read. The seam itself has already been proved
  * live by {@link SEAM_LIVENESS_SQL}, so "absent" here really is about the table.
  */
-async function runProbe(exec: IndexExec, probe: RuntimeIndexProbe): Promise<RuntimeIndexPreflight> {
+async function runProbe(exec: IndexExec, probe: RuntimeIndexProbe, client?: string): Promise<RuntimeIndexPreflight> {
     const unreadable = (detail: string): RuntimeIndexPreflight => ({
         ...probe,
         status: 'unreadable',
@@ -387,6 +398,23 @@ async function runProbe(exec: IndexExec, probe: RuntimeIndexProbe): Promise<Runt
         if (!isResultSet(await exec(probe.presenceSql))) return unreadable(SEAM_NO_ANSWER_DETAIL);
     } catch {
         return { ...probe, status: 'table-absent', groups: [] };
+    }
+
+    // A table that predates the column its row scope reads (a database an
+    // earlier release built, before the schema sync that adds the column) can
+    // run no statement over that scope. The catalog says so without a
+    // refusal, so the driver logs no raw statement fault for an answer this
+    // entry already gives; a catalog that cannot answer runs the listing as
+    // before (`readColumnPresence`).
+    const scopeColumn = nullScopeColumn(probe.rowScope);
+    if (
+        scopeColumn !== undefined &&
+        (await readColumnPresence(exec, { table: probe.table, column: scopeColumn, client })) === 'absent'
+    ) {
+        return unreadable(
+            `"${probe.table}" has no ${scopeColumn} column yet, so no index over its rows naming no package can ` +
+                'stand and the listing cannot run; the schema sync that adds the column comes first',
+        );
     }
 
     // [#22877] A table that predates the overlay key's member column is
@@ -459,7 +487,7 @@ export async function collectRuntimeIndexPreflight(
 
     const results: RuntimeIndexPreflight[] = [];
     for (const probe of probes) {
-        results.push(await runProbe(exec, probe));
+        results.push(await runProbe(exec, probe, opts.client));
     }
     return results;
 }

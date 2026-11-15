@@ -714,6 +714,9 @@ export async function stageRlsMembership(
   if (policies && policies.length > 0) await stageDeclaredMembershipKeys(this, context, policies, object);
 }
 
+/** The resolver staging in flight, per execution context (the request scope `object-membership-keys.ts` keys its memo by). */
+const RESOLVER_STAGING = new WeakMap<object, Promise<void>>();
+
 /** The registered resolver's half of {@link stageRlsMembership}: once per request. */
 async function stageResolverMembership(
   this: Pick<RlsFilterHost, 'logger' | 'rlsMembershipResolver'>,
@@ -723,11 +726,37 @@ async function stageResolverMembership(
   // One resolution per request: the same context object is threaded through
   // every object the operation touches.
   if (context.__rlsMembershipStaged) return;
-  context.__rlsMembershipStaged = true;
+  // [#33379] Operations running CONCURRENTLY on one context await the one
+  // resolution in flight — a flag set before the await let a second operation
+  // compile against a bag not filled yet (fail closed, under-filled). Only a
+  // resolution that answered is memoized: after a failure the memo is
+  // dropped, so a later operation asks again instead of inheriting an empty
+  // bag for the rest of the request; every operation that awaited the failed
+  // attempt stays closed.
+  let staging = RESOLVER_STAGING.get(context);
+  if (!staging) {
+    const settle = (answered: boolean) => {
+      RESOLVER_STAGING.delete(context);
+      if (answered) context.__rlsMembershipStaged = true;
+    };
+    staging = resolveAndStage(this.logger, this.rlsMembershipResolver, context).then(settle, (e) => {
+      settle(false);
+      throw e;
+    });
+    RESOLVER_STAGING.set(context, staging);
+  }
+  await staging;
+}
 
+/** One resolver call staged onto `context`; `false` when the resolver threw (nothing staged). */
+async function resolveAndStage(
+  logger: RlsFilterHost['logger'],
+  resolver: NonNullable<RlsFilterHost['rlsMembershipResolver']>,
+  context: any,
+): Promise<boolean> {
   let resolved: Record<string, string[]> = {};
   try {
-    resolved = (await this.rlsMembershipResolver.resolve({
+    resolved = (await resolver.resolve({
       userId: context.userId,
       tenantId: context.tenantId,
       accessible_org_ids: context.accessible_org_ids,
@@ -735,19 +764,19 @@ async function stageResolverMembership(
       permissions: context.permissions,
     })) ?? {};
   } catch (e) {
-    this.logger.warn?.(
+    logger.warn?.(
       '[security/ADR-0105] rls-membership-resolver threw — its keys stay unresolved and the ' +
         'policies referencing them will fail closed',
       { error: (e as Error)?.message },
     );
-    return;
+    return false;
   }
 
   const bag: Record<string, string[]> = { ...(context.rlsMembership ?? {}) };
   const staged: string[] = [];
   for (const [key, value] of Object.entries(resolved)) {
     if (RESERVED_RLS_MEMBERSHIP_KEYS.includes(key)) {
-      this.logger.warn?.(
+      logger.warn?.(
         '[security/ADR-0105] rls-membership-resolver tried to supply a RESERVED context key — ignored',
         { key },
       );
@@ -765,4 +794,5 @@ async function stageResolverMembership(
   // too can be withdrawn from the bag (one namespace, neither source wins).
   noteResolverStagedKeys(context, staged);
   if (Object.keys(bag).length > 0) context.rlsMembership = bag;
+  return true;
 }
