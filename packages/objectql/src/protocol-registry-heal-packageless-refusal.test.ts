@@ -161,7 +161,9 @@ describe('[#32366, ruling 6812637203 Q2] a refused package-less heal retires the
  * slot, so the non-holder's read served the deleted body and each holder's
  * read was refused with the non-holder as its candidate. Every other
  * package-slotted type already retires the row's own package slot (#33127);
- * for those only the line moves (`action` below, the CONTROL).
+ * for those only the line moves (`action` below, the CONTROL). Since #32780 a
+ * `permission` row bound to a package takes that package's own slot too, so
+ * `permission` reads as the CONTROL and `flow` alone keeps the bare-slot shape.
  *
  * The holders here are served by the metadata service only (no composite slot
  * in the registry), the shape Q2's first pin measures.
@@ -202,7 +204,7 @@ describe('[#32620, ruling 6818436831] a refused heal of a non-holder\'s row reti
 
     const holders = (order: readonly string[]) => [...order].map((id) => ({ kind: 'package', packageId: id }));
 
-    for (const type of ['flow', 'permission']) {
+    for (const type of ['flow']) {
         for (const order of [[A, B], [B, A]] as const) {
             it(`${type} (${order[0] === A ? 'alpha' : 'beta'} first): the non-holder's removed row leaves the bare slot; each holder's read answers its own item, the bare read is the 409 naming both holders, and the list shows the two holders only`, async () => {
                 const h = await boot(type, order);
@@ -229,11 +231,11 @@ describe('[#32620, ruling 6818436831] a refused heal of a non-holder\'s row reti
         }
     }
 
-    it('CONTROL — action, whose bound row takes its package\'s own slot (#33127): the holders serve as before the move, and the line says that slot was retired', async () => {
-        const h = await boot('action', [A, B]);
+    it.each(['action', 'permission'])('CONTROL — %s, whose bound row takes its package\'s own slot (#33127, #32780): the holders serve as before the move, and the line says that slot was retired', async (type) => {
+        const h = await boot(type, [A, B]);
         expect(h.bareEntry()).toBeUndefined();
 
-        await h.protocol.deleteMetaItem({ type: 'action', name: NAME, packageId: O });
+        await h.protocol.deleteMetaItem({ type, name: NAME, packageId: O });
 
         expect(h.bareEntry()).toBeUndefined();
         expect([await h.read(A), await h.read(B), await h.read(O)]).toEqual([`shipped:${A}`, `shipped:${B}`, undefined]);
