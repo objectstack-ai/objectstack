@@ -65,6 +65,11 @@
  *     denial — is a Build finding naming persona, object and verb
  *     ({@link buildDenialFindings}).
  *   - A turn that errored counts in the total and not in passed.
+ *   - Guardrails: each Run half's guardrail checks as the run graded them
+ *     (`RunHalf.guardrails`, today `guardrail:injection_as_data`), one row per
+ *     half: `pass`, `fail`, or `not measured: <reason>` — never a pass when
+ *     nothing was measured. A record from before the half was graded carries
+ *     none, and its row shows nothing (`—`; no row at all when no half has any).
  *   - Seed: rows loaded of rows sent. A refused row is shown as
  *     `⚠ seed: N refused`, and every question turn and operation that depends
  *     on it (`seedDependence` in `orchestrate.ts`) is NOT MEASURED: it counts in
@@ -106,6 +111,18 @@ export interface HalfScores {
   confirmation?: ConfirmationTally;
   /** The models the half's question and operation turns were served ({@link modelTally}). */
   models?: ModelTally;
+  /** The half's guardrail checks ({@link guardrailTally}); absent when its Run half carries none (a record from before they were graded). */
+  guardrails?: GuardrailVerdict[];
+}
+
+/** A Run half's guardrail check as the scorecard states it ({@link guardrailTally}). */
+export interface GuardrailVerdict {
+  /** The check, `guardrail:injection_as_data`. */
+  check: string;
+  /** `not measured` when the check measured nothing (`CheckResult.notMeasured`): never a pass. */
+  verdict: 'pass' | 'fail' | 'not measured';
+  /** Why it measured nothing; only on `not measured`. */
+  reason?: string;
 }
 
 /** The models a half's persona turns — every question and operation turn that ran — were served. */
@@ -289,6 +306,14 @@ export function buildDenialFindings(r: RunHalf | undefined, half: string): strin
   );
 }
 
+/** Each guardrail check the Run half graded (`RunHalf.guardrails`), as pass, fail or not measured; `undefined` when it carries none. */
+export function guardrailTally(r: RunHalf | undefined): GuardrailVerdict[] | undefined {
+  if (!r?.guardrails) return undefined;
+  return r.guardrails.map((c) =>
+    c.notMeasured !== undefined ? { check: c.check, verdict: 'not measured' as const, reason: c.notMeasured } : { check: c.check, verdict: c.pass ? ('pass' as const) : ('fail' as const) },
+  );
+}
+
 export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
   const turns = [...(r?.questions ?? []), ...(r?.operations ?? [])].flatMap((x) => (x.turn ? [x.turn] : []));
   if (turns.length === 0) return undefined;
@@ -434,6 +459,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   if (mt) first.models = mt;
   const cf = confirmationTally(m.run);
   if (cf) first.confirmation = cf;
+  const gr = guardrailTally(m.run);
+  if (gr) first.guardrails = gr;
   const out: ModeScorecard = {
     mode: m.mode,
     first,
@@ -468,6 +495,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     if (imt) it.models = imt;
     const icf = confirmationTally(m.iterate.run);
     if (icf) it.confirmation = icf;
+    const igr = guardrailTally(m.iterate.run);
+    if (igr) it.guardrails = igr;
     if (m.iterate.changeSize) it.changeSize = m.iterate.changeSize.total;
     out.iterate = it;
   }
@@ -543,6 +572,10 @@ const modelCell = (t: ModelTally | undefined): string => {
   return `${served.map(([name, n]) => `${name} ×${n}`).join(', ')}${t.mismatched ? ` ⚠ ${t.mismatched} not ${t.requested.join(' / ')}` : ''}${effort ? ` · ${effort}` : ''}`;
 };
 
+/** `guardrail:injection_as_data pass`; `guardrail:injection_as_data not measured: no turn read …`; checks joined by ` · `; `—` when the half carries none. */
+const guardrailCell = (g: readonly GuardrailVerdict[] | undefined): string =>
+  g?.length ? g.map((v) => `${v.check} ${v.verdict}${v.reason !== undefined ? `: ${v.reason}` : ''}`).join(' · ') : '—';
+
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
 export function renderScorecard(sc: CardScorecard): string {
   const lines = [
@@ -565,12 +598,14 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Run-问数', (m) => (m.first.ask ? `${cell(m.first.ask)}${m.first.ask.leaks ? ` ⚠ ${m.first.ask.leaks} leaking` : ''}` : '—'));
   row('Run-operations', (m) => opsCell(m.first));
   row('Run · model', (m) => modelCell(m.first.models));
+  if (sc.modes.some((m) => !m.skipped && m.first.guardrails)) row('Run · guardrails', (m) => guardrailCell(m.first.guardrails));
   row('Iterate · Build', (m) => buildCell(m.iterate?.build));
   row('Iterate · author', (m) => authorCell(m.iterate?.build));
   row('Iterate · Seed', (m) => seedCell(m.iterate?.seed));
   row('Iterate · Run-问数', (m) => (m.iterate?.ask ? `${cell(m.iterate.ask)}${m.iterate.ask.leaks ? ` ⚠ ${m.iterate.ask.leaks} leaking` : ''}` : '—'));
   row('Iterate · Run-operations', (m) => opsCell(m.iterate));
   row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
+  if (sc.modes.some((m) => !m.skipped && m.iterate?.guardrails)) row('Iterate · Run · guardrails', (m) => guardrailCell(m.iterate?.guardrails));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
   row('Author cost', (m) => (m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
   row('Author time', (m) => (m.authorTime === undefined || m.authorTime.turns > 0 ? authorTimeText(m.authorTime) : '—'));
