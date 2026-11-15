@@ -1,5 +1,177 @@
 # @object-ui/i18n
 
+## 18.5.0
+
+### Minor Changes
+
+- 4dbcbdd: feat(plugin-auth): with single sign-on configured, a signed-out visit can go straight to the identity provider and come back to the page it asked for
+  
+  Clause-②: yes (widening) — `/auth/config` serves a new `features.directSignIn` flag (always, `false` unless the setting is on) and, while it is on, a `localSignIn` value (`hidden` | `off`); `PUBLIC_AUTH_FEATURES` gains `directSignIn`, so `requiresFeature` accepts the new value `'directSignIn'`; `GET /api/v1/auth/sign-in/direct` answers while the setting is on. With the setting off (every existing deployment) the door is not mounted and every other answer is unchanged.
+  Metadata-protocol: added
+  
+  A deployment that signs people in through one identity provider can now skip the sign-in page. Turn it on with the auth plugin's `directSignIn` option, or with the environment:
+  
+  - `OS_AUTH_DIRECT_SIGN_IN_ENABLED` — `true` or `false` (also `1`/`0`, `on`/`off`, `yes`/`no`); wins over the option.
+  - `OS_AUTH_DIRECT_SIGN_IN_PROVIDER` — the provider to use: an `oidcProviders` entry's `providerId` or an SSO provider's `providerId`. Unnamed, the one configured provider is used; with none or several, the sign-in page is shown as before.
+  - `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH` — `hidden` (default: the password form stays reachable at `/login?local=1`) or `off` (the sign-in form offers no local way in, in any of its states: no email or phone form, no sign-up link and no break-glass link, also on an OAuth client's hand-off and when no provider can start). An unknown value refuses to boot. `off` is the page's choice only: the server's `/sign-in/email` still accepts a password.
+  
+  While it is on, a signed-out visitor to the Console sign-in page is sent through `GET /api/v1/auth/sign-in/direct?callbackURL=…` to the identity provider and comes back to the same sign-in URL, where the usual post-sign-in steps run (organization pick, OAuth and mobile hand-offs, the safe `?redirect=`). The door keeps only a same-origin path as the return address; an absolute URL, `//host`, a backslash, a control character or any of these behind percent-encoding is dropped, and the sign-in returns to the Console root. It mints nothing: it starts the identity provider's own sign-in and passes its state cookie through.
+  
+  The page never loops: an identity-provider error, a return without a session (a blocked cookie), a door that could not start, or an explicit sign-out in that tab, also one that went through the identity provider's logout and came back (the maintainer's ruling, comment 6879236460 on #33183: only a fresh signed-out visit starts on its own; `@object-ui/auth` keeps a short note in the tab's `sessionStorage` for that round trip and reads it once) shows the page with a **Continue with single sign-on** button (and the reason, where there is one) instead of starting again. A start the identity provider's sign-in rate limit refused says so (`error=direct_sign_in_rate_limited`: wait a few seconds and try again) rather than pointing at the configuration. With the setting on and its door mounted by the same reading, `/auth/config` never advertises a door that is not there. An OAuth client's hand-off (`client_id` / `redirect_uri` on the URL) keeps today's page. `/auth/config` serves `directSignIn: true` only while a provider can be started, so the page does not navigate to a door that would turn it back. API keys, bearer tokens, `/api/*` and `/mcp` are never redirected.
+
+### Patch Changes
+
+- f530d25: fix(console): a refused SSO sign-in names a domain or email refusal instead of an expired link
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` locale packs gain two keys under `auth.login.errors` (`ssoEmailDomainNotAllowed`, `ssoEmailNotAnAddress`) in all eleven shipped locales; no key is renamed or removed.
+  Metadata-protocol: none
+  
+  When single sign-on refuses to create an account, the browser lands on the Console sign-in page with the refusal code. Two codes had no sentence of their own and read as "the sign-in link expired or was already used. Please try again.", which sent people to retry a sign-in that fails the same way every time:
+  
+  - `EMAIL_DOMAIN_NOT_ALLOWED` now says no account was created because the email address is not at a domain this system accepts new accounts from, and asks the person to use their organization email or ask their administrator. Two refusals send this code to the sign-in page, and the sentence is true of both: SSO domain verification on with the email not at a domain the identity provider has proven, and the `email_domain` audience posture refusing a self-serve creation (a social sign-up included) whose email is not on the approved-domain list.
+  - `INVALID_EMAIL` (the identity provider's sign-in resolved to a value that is not an email address) now says no account was created because the sign-in service did not send a usable email address, and asks the same of the administrator.
+  
+  The `@object-ui/i18n` locale packs gain two keys under `auth.login.errors` (`ssoEmailDomainNotAllowed`, `ssoEmailNotAnAddress`) in all eleven shipped locales; no key is renamed or removed. The technical code and description stay behind the details toggle, and every other refusal code keeps its sentence.
+- f5121e8: fix(i18n): the Connect page says an AI assistant connected with an API key works with records and actions only and cannot build apps
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The API-keys section of the Connect page (`connectAgent.apiKey.body`) and the four client hints that fall back to an API key when a client offers no browser sign-in (`connectAgent.codex.hint`, `connectAgent.workbuddy.hint`, `connectAgent.doubao.hint`, `connectAgent.qwenwork.hint`) now say, in all eleven platform locales, that an assistant connected with a key works with records and actions only and cannot build apps. That is what the server does: an API key's grant never admits the authoring tools, on every deployment. The copy promises building nowhere, so it stays true on a deployment that mounts no build door. Only values of existing keys change; zh-Hant is regenerated from zh-Hans.
+- ba32e79: fix(plugin-chatbot, app-shell, i18n): the AI build chat says what really happened — the plan card follows the build, a message typed during a reply waits instead of being lost, the draft preview of an unpublished object is an empty list, build issues read in the customer's words, and the change card names objects and fields by label
+  
+  Clause-②: yes (widening) — `ChatbotEnhancedProps` (published by `@object-ui/plugin-chatbot`) gains three optional props, `resolveObjectLabel`, `resolveFieldLabel` and `resolveFieldTypeLabel`; the `@object-ui/i18n` packs gain the keys `chatbot.plan.confirmed`, `chatbot.plan.buildFailed`, `chatbot.build.issuesCount`, `chatbot.build.issuesSummary`, `chatbot.build.warningsSummary`, `chatbot.build.issuesDetails`, the count family `chatbot.build.needsAttention` (each locale's plural slots), `chatbot.composer.queued`, `chatbot.composer.queuedCancel`, `preview.unpublishedList.title` and `preview.unpublishedList.message` in all eleven shipped locales. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  - **The plan card follows the build.** It read 「已搭建」 (Built) as soon as any `apply_blueprint` call appeared after it, before anything was built. It now reads Confirmed once "Build it" is clicked, Building while that build call runs, Built only when the call's result says `drafted` or `published`, and "Not built — nothing was created" (with Build it and Adjust offered again) when the call was refused, errored, or ended with the turn and no result. An `awaiting_confirmation` answer still leaves the card pending (objectui#8343), and a build that ran is still never offered a second Build it (#432).
+  - **A message typed while a reply runs is kept.** The composer used to be disabled while the assistant answered. It stays usable: a message sent during a reply waits in a strip above the box ("Sends when the current reply finishes") and is sent, oldest first, as soon as the reply ends. Each waiting message can be cancelled, which puts its text back in the box. On a new conversation, a second message sent while the first send is still creating the conversation used to be dropped without a word; it now joins that first message, which has not left the browser yet, so both reach the agent in the first turn.
+  - **The draft preview of an unpublished object is an empty list.** In `?preview=draft`, the list read of an object that was only drafted answered `404 OBJECT_NOT_FOUND` and the list printed it. In the draft preview, a list read that the engine answers that way, for any object it has not registered (a lookup into another drafted object included), now answers an empty page, and the listed object's own empty state says records appear after publish. Any other failure, and every read outside the preview, is shown as before.
+  - **Build issues read in the customer's words.** The build card's chip reads "N to fix", and the issues block leads with one sentence saying what to do; the verification messages written for the agent sit in a closed "Technical details" section. The published badge's failed-item count ("· 2 need attention") was English in every locale; it now comes from the pack and agrees with its number.
+  - **The edit confirmation card names objects and fields by label.** The Console passes resolvers from its metadata; the card shows `Customer · Phone` and the field type's localized name, keeping the machine name in the tooltip. A name not yet in the metadata (a field the change adds) keeps its machine name.
+- 8ed2b89: fix(console): an `access_denied` sign-in return says the account has no access to this environment, with switch account and back to console
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` locale packs gain four keys under `auth.login.errors` (`ssoAccessDenied`, `ssoSwitchAccount`, `ssoBackToConsole`, `ssoSwitchAccountHint`) in all eleven shipped locales; no key is renamed or removed.
+  Metadata-protocol: none
+  
+  When the control plane's identity provider refuses an account that is not a member of the environment's organization, it sends the browser back to the environment with `error=access_denied`, and the callback lands it on the Console sign-in page. That page had no sentence for the code and said the sign-in link had expired. It now says the account you signed in with does not have access to this environment, the same refusal the provider's own page states. On an environment the control plane runs (`features.cloudManaged` with the runtime config's `cloudUrl`), it also offers that page's two actions: **Switch account**, which opens the provider's end-session door (`/api/v1/auth/oauth2/end-session` on the control plane) in a new tab so the refused account is signed out there, and **Back to console**, the control plane's console. Elsewhere it shows the sentence alone, since the code may come from a provider the page cannot address. The technical code and description stay behind the details toggle, and every other refusal code keeps its sentence.
+- a9da547: fix(console): a signed-in person whose account link is refused because the emails differ is told why on the page they land on
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` locale packs gain one key, `auth.login.errors.linkEmailMismatch`, in all eleven shipped locales; no key is renamed or removed.
+  Metadata-protocol: none
+  
+  Linking another sign-in to your account (`POST /api/v1/auth/link-social`, then the provider's round trip) is refused when the provider account's email differs from yours, and the callback redirects to the Console sign-in page with `error=email_does_not_match`. You are still signed in there, so the page sent you straight on to the console and the reason was lost: the account was simply not linked, with no word why. The sign-in page now keeps that code for the page you land on, which shows an error toast saying the account was not linked because its email address doesn't match the one on the account you're signed in with, in your language. The toast stays until you close it and is shown once. Only codes the Console has a sentence for are kept, and only as a code; nothing from the URL is shown as it came. The refusal itself is unchanged, and a signed-out visitor still reads the sign-in page's own sentence for the code they came back with.
+- 4c32b96: fix(console): Studio's home currency amount editor holds a partial pick instead of autosaving it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A record-mode currency field's home currency amount (`currencyConfig.homeAmount`) names three fields together or none: the home amount field, the document date and the rate field. The Studio field editor committed each pick on its own, so the autosave sent the field with one, then two, of the three, the server refused both (`422 INVALID_METADATA`) and "Changes not saved" showed twice before the third pick saved. Clearing the three showed the same twice. A pick that leaves one or two of the three set now stays in the editor and is not saved, with one line under the pickers naming the fields still to pick; the field saves once, when all three are set or all three are cleared. Editing a complete home amount to another complete one saves at once, as before. The rate field picker is judged against the document date on screen, picked or not yet saved. Nothing the server accepts changed.
+- 12d090d: fix(console, i18n): the default app's Set-default star on Setup → Apps says why it is disabled
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` packs gain the key `appManagement.alreadyDefault` in all eleven shipped locales. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  The star on the current default app was disabled with nothing on hover, on focus or in its accessible description. It now uses the console's disabled-reason pattern: a focusable wrapper opens "Already the default app" as a tooltip on hover and on keyboard focus, and the same sentence is the accessible description of the star. A non-default app's star is unchanged, and a write in flight still disables every star without a reason.
+- de476f1: fix(console): the fields no declared field group claims render under their own "Other" heading after the declared groups, on the record page, the record drawer and the form arms (#33229)
+  
+  Clause-②: yes (widening) — `@object-ui/i18n` adds the pack key `common.ungroupedSection` in every shipped locale ("Other" / 「其他」). Nothing is removed or renamed. `@object-ui/plugin-form` changes what its form arms draw, not its exports: the adapter that gains the heading argument (`deriveFieldGroupSections`) is internal to the package.
+  Metadata-protocol: none
+  
+  `deriveFieldGroupLayout` (`@objectstack/spec/data`, ADR-0085 §5) ends an object's grouped layout with a keyless bucket holding every visible field no declared group claims. It exists only after at least one declared group. The Console drew it with no heading, so its fields read as members of the group above it, and when that group was collapsed they looked like its hidden contents.
+  
+  - **Record page and record drawer** (`RecordDetailView`, the same view embedded in the drawer and the split pane): the bucket's primary section is a titled card headed with the translated `common.ungroupedSection`; long-form fields still drop into "More details" after it.
+  - **Forms** (`ObjectForm`, `ModalForm`, `DrawerForm`, on the no-sections field-group fallback): the bucket gets a divider row headed the same way, so the one row rule draws it as its own section.
+  - **Unchanged:** an object that declares no field groups (no grouping applies, the layout is flat, no heading is added); a page or form view that authors its own sections; the spec, which keeps the bucket keyless. The heading is a presentation default the Console owns, not an authorable key.
+- 020ce3d: fix(plugin-chatbot, i18n): the AI build chat's plan card says what its 「· 补充」 (`· suggested`) field mark means
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` packs gain the key `chatbot.plan.suggestedFieldLegend` in all eleven shipped locales. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  - On the plan card, a field the user's words did not name is drawn as a dashed chip ending in 「· 补充」 (en `· suggested`), and nothing on the card said what that meant: the chip's tooltip is the field's machine name. When at least one field on the card is suggested, the card now draws one line under its field rows: "Fields marked “suggested” were added by the AI; you didn’t ask for them." (zh-Hans 「标「补充」的字段是 AI 自行补充的，你没有要求。」). A card with no suggested field draws no such line, and the chip's tooltip still shows the machine name.
+- 6446935: fix(console): a signed-in person whose account link is refused as already linked to another user, or as unable to link, is told why on the page they land on
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` locale packs gain two keys, `auth.login.errors.linkAlreadyLinkedToOtherUser` and `auth.login.errors.linkUnableToLink`, in all eleven shipped locales; no key is renamed or removed.
+  Metadata-protocol: none
+  
+  Linking another sign-in to your account can be refused by the server for two more reasons besides a different email: the provider account is already linked to a different user here (`account_already_linked_to_different_user`), or it could not be linked at all (`unable_to_link_account`, chiefly when the sign-in service did not confirm the account's email as verified). Both send you back to the Console sign-in page, which, because you are still signed in, sent you straight on to the console with no word. Each now travels the same way as the email mismatch: the page you land on shows an error toast with its own sentence, in your language, until you close it. The sentence names no other user or email, and nothing from the URL is shown as it came. The refusals themselves are unchanged.
+- 5604aeb: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Organization invitation refusals now read in the console's language. Opening an
+  invitation link that is unknown, already used, expired or revoked shows the
+  console's own sentence instead of better-auth's "Invitation not found!" (the
+  lookup's not-found answer carries no code, so it is read by its route, its 400
+  status and the missing code, never by its English text), and that sentence now
+  says the invitation may already have been used and where an accepted
+  invitation's organization is. Inviting someone who is already a member shows a
+  translated sentence instead of "User is already a member of this organization".
+  Errors thrown by `@object-ui/auth` now also carry the HTTP `status`.
+  
+  Widening, nothing removed or narrowed: `@object-ui/i18n` gains the key
+  `organization.errors.alreadyMember` in all eleven locale packs (and rewords
+  `organization.errors.invitationNotFound`), and errors thrown by
+  `@object-ui/auth` gain a numeric `status` property beside the existing
+  `message` and `code`.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @object-ui/core@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

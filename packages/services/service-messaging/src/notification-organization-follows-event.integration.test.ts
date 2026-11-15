@@ -205,6 +205,86 @@ describe('[#32445] org:members — an emit reaches the inbox of every member of 
     });
 });
 
+/**
+ * The emitting organization on the engine's own derivation. A producer that
+ * names no organization takes the one the engine stamps on the event row
+ * (`single`, one organization), and two reads of the fan-out follow it: the
+ * `role:` audience and the recipients' preference rows. Rows stored under an
+ * organization that no longer exists are seeded through the driver, as data
+ * at rest (the engine refuses an organization delete while preference rows
+ * still name it), so only the emitting organization's rows can decide.
+ */
+describe('the event row\'s derived organization is the one role: and the preference read use', () => {
+    const PREF = { topic: 'sweep.breach', channel: 'inbox' };
+
+    async function bootEmitting(organizations: readonly string[]): Promise<ObjectQL> {
+        const ql = new ObjectQL();
+        ql.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }), true);
+        await ql.init();
+        for (const def of [SYS_ORGANIZATION, SYS_USER, SysMember, SysNotification, InboxMessage, NotificationReceipt, NotificationDelivery, NotificationPreference]) {
+            ql.registry.registerObject(def as any, '@objectstack/service-messaging');
+        }
+        await ql.syncSchemas();
+        ql.setTenancyPostureProvider(() => 'single');
+        for (const id of organizations) await ql.insert('sys_organization', { id, name: id }, SYSTEM);
+        for (const id of ['user_1', 'u_admin', 'u_member', 'u_old_admin']) await ql.insert('sys_user', { id, name: id }, SYSTEM);
+        engine = ql;
+        return ql;
+    }
+
+    /** A preference row at rest under `organization`, written through the driver. */
+    async function seedPreference(ql: ObjectQL, id: string, organization: string, enabled: boolean): Promise<void> {
+        await ql.getDriverForObject(NotificationPreference.name)!.create(NotificationPreference.name, {
+            id, user_id: 'user_1', ...PREF, enabled, organization_id: organization,
+        });
+    }
+
+    async function emitTo(ql: ObjectQL, audience: string[], organizationId?: string): Promise<string[]> {
+        const messaging = new MessagingService({ logger: silentLogger, getData: () => ql as any });
+        messaging.registerChannel(createInboxChannel({ getData: () => ql as any }));
+        await messaging.emit({ ...EMIT, audience, channels: ['inbox'], ...(organizationId !== undefined ? { organizationId } : {}) });
+        const inbox = (await ql.find(INBOX_OBJECT, { fields: ['user_id'] }, SYSTEM)) ?? [];
+        return inbox.map((r: Record<string, unknown>) => String(r.user_id)).sort();
+    }
+
+    it('role: reaches the role\'s holders in the derived organization, and no holder stored under another', async () => {
+        const ql = await bootEmitting(['org_sole']);
+        await ql.insert('sys_member', { id: 'm1', user_id: 'u_admin', organization_id: 'org_sole', role: 'admin' }, SYSTEM);
+        await ql.insert('sys_member', { id: 'm2', user_id: 'u_member', organization_id: 'org_sole', role: 'member' }, SYSTEM);
+        await ql.getDriverForObject('sys_member')!.create('sys_member', {
+            id: 'm3', user_id: 'u_old_admin', organization_id: 'org_old', role: 'admin',
+        });
+
+        expect(await emitTo(ql, ['role:admin'])).toEqual(['u_admin']);
+        expect(await organizationsOf(ql, NOTIFICATION_EVENT_OBJECT)).toEqual(['org_sole']);
+    });
+
+    it('a recipient\'s opt-out in the derived organization holds over an opt-in stored under another', async () => {
+        const ql = await bootEmitting(['org_sole']);
+        await ql.insert(NotificationPreference.name, { user_id: 'user_1', ...PREF, enabled: false }, SYSTEM);
+        await seedPreference(ql, 'p_old', 'org_old', true);
+
+        expect(await emitTo(ql, ['user_1'])).toEqual([]);
+    });
+
+    it('another organization\'s opt-out does not mute a recipient who opted out nowhere in the derived one', async () => {
+        const ql = await bootEmitting(['org_sole']);
+        await seedPreference(ql, 'p_old', 'org_old', false);
+
+        expect(await emitTo(ql, ['user_1'])).toEqual(['user_1']);
+    });
+
+    it('CONTROL: a producer-named organization is the one whose preferences decide', async () => {
+        const ql = await bootEmitting(['org_a', 'org_b']);
+        await ql.insert(NotificationPreference.name, { user_id: 'user_1', ...PREF, enabled: false, organization_id: 'org_a' }, SYSTEM);
+
+        await emitTo(ql, ['user_1'], 'org_b');
+        await emitTo(ql, ['user_1'], 'org_a');
+        // Delivered in org_b, where user_1 opted out of nothing; muted in org_a.
+        expect(await organizationsOf(ql, INBOX_OBJECT)).toEqual(['org_b']);
+    });
+});
+
 function recordingLogger() {
     const warnings: string[] = [];
     const l: any = { info: () => {}, warn: (m: unknown) => warnings.push(String(m)), error: () => {}, debug: () => {} };

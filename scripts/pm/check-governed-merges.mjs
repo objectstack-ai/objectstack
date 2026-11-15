@@ -1110,6 +1110,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { historyHorizon } from './git-history.mjs';
+import { gitFreeEnv, withoutGitEnv } from '../git-env.mjs';
 import { quoteLine, readClause2Line, readMetadataProtocolLine } from './clause2-line.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, INSTALL_FIX, reportPrerequisiteNotMet } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -2159,7 +2160,9 @@ export function readWorkflowDiff({ paths, base, head, inventoryBase = base, git,
   if (typeof head !== 'string' || head === '') return unmeasured('no head commit was named, so the workflow diff cannot be read');
   if (typeof git !== 'function') return unmeasured('no git reader was supplied');
   try {
-    const listAt = (rev, ...dirs) => git(['ls-tree', '-r', '--name-only', rev, '--', ...dirs]).split('\n').map((l) => l.trim()).filter(Boolean);
+    // ⛔ `-z`, split on NUL, never trimmed: without it git C-quotes a non-ASCII or control-character name, and
+    // the quoted spelling equals no path the row carries (enumerateRows reads its paths `-z` too).
+    const listAt = (rev, ...dirs) => git(['ls-tree', '-r', '-z', '--name-only', rev, '--', ...dirs]).split('\0').filter(Boolean);
     const show = (rev, path) => git(['show', `${rev}:${path}`]);
     let inventory = cache?.get(inventoryBase) ?? null;
     if (inventory === null) {
@@ -3111,11 +3114,13 @@ export function deriveBranchPaths({ ref, base = 'origin/main', run }) {
   // ⛔ --no-renames on purpose: with rename detection git prints ONLY the new
   // path, so a rename out of a governed path would read as ungoverned. Without
   // it the rename is a delete plus an add — the same two paths the API reports.
-  const diff = run(['diff', '--name-only', '--no-renames', mergeBase.out, refRead.out]);
+  // ⛔ `-z`, split on NUL: without it git C-quotes a path holding a non-ASCII or
+  // control character, and the quoted spelling matches no governed prefix.
+  const diff = run(['diff', '-z', '--name-only', '--no-renames', mergeBase.out, refRead.out]);
   if (!diff.ok) {
     return refuse(`\`git diff\` failed against the merge base ${mergeBase.out.slice(0, 10)} (${diff.error}).`, null);
   }
-  const paths = diff.out.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+  const paths = diff.out.split('\0').filter((l) => l !== '');
   // The SIZE limb (2026-09-18 ruling) is read off the SAME range the list is:
   // `--numstat` per file, summed, a binary row counting 0 as it does on GitHub.
   // ⚠️ `-M`, NOT `--no-renames` (#30718): the threshold's authority is GitHub's
@@ -3140,7 +3145,7 @@ export function deriveBranchPaths({ ref, base = 'origin/main', run }) {
       ref,
       refSha: refRead.out,
       mergeBase: mergeBase.out,
-      command: `git diff --name-only --no-renames ${mergeBase.out.slice(0, 10)} ${refRead.out.slice(0, 10)}`,
+      command: `git diff -z --name-only --no-renames ${mergeBase.out.slice(0, 10)} ${refRead.out.slice(0, 10)}`,
       count: paths.length,
       size,
     },
@@ -3878,12 +3883,18 @@ export function mainlineCommitsInWindow(root, ref, window, { repoId = null, log 
  * ⚠️ `-m --first-parent` on purpose, unchanged: a merge commit is read against
  * its first parent, so the whole branch's change is one row, never the
  * per-parent split `-m` alone would print.
+ *
+ * ⛔ The PATH read is `-z`, one NUL-ended `added<TAB>deleted<TAB>path` record
+ * per file (`--no-renames`, so never the three-field rename form): without it
+ * git C-quotes a path holding a non-ASCII or control character, and the quoted
+ * spelling matches no governed prefix. The SIZE read only sums the two counts,
+ * which quoting never touches.
  */
 export function commitChanges(root, sha) {
-  const out = git(root, ['diff-tree', '-r', '--no-commit-id', '--no-renames', '--numstat', '-m', '--first-parent', sha]);
+  const out = git(root, ['diff-tree', '-r', '--no-commit-id', '--no-renames', '--numstat', '-z', '-m', '--first-parent', sha]);
   const paths = [];
-  for (const line of out.split('\n')) {
-    const m = /^(?:\d+|-)\t(?:\d+|-)\t(.+)$/.exec(line);
+  for (const record of out.split('\0')) {
+    const m = /^(?:\d+|-)\t(?:\d+|-)\t([^]+)$/.exec(record);
     if (m) paths.push(m[1]);
   }
   const sized = git(root, ['diff-tree', '-r', '--no-commit-id', '-M', '--numstat', '-m', '--first-parent', sha]);
@@ -6107,7 +6118,8 @@ async function selfTest() {
     assert('closed-no-inventory-is-H', isH(tierOf(edit('timeout-minutes: 20', 'timeout-minutes: 30'), { inventory: null }), /no inventory/));
     const fakeGit = (tree) => (argv) => {
       // ls-tree honours its pathspecs (argv after `--`), as git does: the inventory's directory list is under test.
-      if (argv[0] === 'ls-tree') return Object.keys(tree[argv[3]] ?? (() => { throw new Error(`unknown revision ${argv[3]}`); })()).filter((p) => argv.slice(5).some((d) => p.startsWith(d.endsWith('/') ? d : `${d}/`))).join('\n');
+      // `-z` names come back NUL-separated, as the reader now asks for them.
+      if (argv[0] === 'ls-tree') return Object.keys(tree[argv[4]] ?? (() => { throw new Error(`unknown revision ${argv[4]}`); })()).filter((p) => argv.slice(6).some((d) => p.startsWith(d.endsWith('/') ? d : `${d}/`))).join('\0');
       const [rev, path] = argv[1].split(':');
       if (tree[rev]?.[path] === undefined) throw new Error(`fatal: path '${path}' does not exist in '${rev}'`);
       return tree[rev][path];
@@ -7676,6 +7688,7 @@ async function selfTest() {
       'scripts/pm/clause2-line.mjs',
       'scripts/import-prerequisite.mjs',
       'scripts/cli-build-prerequisite.mjs',
+      'scripts/git-env.mjs',
       'scripts/invoked-as.mjs',
     ];
     // ⛔ And the child must never spawn a child of its own. It reaches this
@@ -7965,7 +7978,7 @@ async function selfTest() {
     ['rev-parse --verify --quiet origin/main', ok40(A)],
     ['rev-parse --verify --quiet feature', ok40(B)],
     ['merge-base', ok40(M)],
-    ['diff --name-only --no-renames', { ok: true, out: 'src/a.ts\nsrc/b.ts\n', error: '' }],
+    ['diff -z --name-only --no-renames', { ok: true, out: 'src/a.ts\0src/b.ts\0', error: '' }],
     ['diff --numstat -M', { ok: true, out: '3\t1\tsrc/a.ts\n10\t0\tsrc/b.ts\n', error: '' }],
   ]) });
   assert('a-derivable-branch-answers-the-three-dot-list-from-the-merge-base',
@@ -7976,7 +7989,7 @@ async function selfTest() {
     ['rev-parse --verify --quiet origin/main', ok40(A)],
     ['rev-parse --verify --quiet feature', ok40(B)],
     ['merge-base', ok40(M)],
-    ['diff --name-only --no-renames', { ok: true, out: 'src/a.ts\n', error: '' }],
+    ['diff -z --name-only --no-renames', { ok: true, out: 'src/a.ts\0', error: '' }],
     ['diff --numstat -M', { ok: false, out: '', error: 'fatal: numstat unavailable' }],
   ]) });
   assert('a---numstat-that-does-not-read-REFUSES-the-whole-derivation-never-a-size-of-zero',
@@ -7991,14 +8004,14 @@ async function selfTest() {
       ['rev-parse --verify --quiet origin/main', ok40(A)],
       ['rev-parse --verify --quiet feature', ok40(B)],
       ['merge-base', ok40(M)],
-      ['diff --name-only --no-renames', { ok: true, out: 'src/a.ts\n', error: '' }],
+      ['diff -z --name-only --no-renames', { ok: true, out: 'src/a.ts\0', error: '' }],
       ['diff --numstat -M', { ok: true, out: '1\t1\tsrc/a.ts\n', error: '' }],
     ])(argv);
   } });
   const numstatCalls = branchCalls.filter((c) => c.includes('--numstat'));
   assert('⭐ #30718 the---branch-SIZE-read-is-rename-aware-M-and-never---no-renames-while-the-path-list-keeps---no-renames',
     numstatCalls.length === 1 && numstatCalls[0].includes(' -M ') && !numstatCalls[0].includes('--no-renames') &&
-      branchCalls.some((c) => c.startsWith('diff --name-only --no-renames')), JSON.stringify(branchCalls));
+      branchCalls.some((c) => c.startsWith('diff -z --name-only --no-renames')), JSON.stringify(branchCalls));
   const branchLine = renderDerivation(derived.derivation);
   assert('the-branch-reading-names-its-command-its-base-and-its-merge-base',
     branchLine.includes('three-dot') && branchLine.includes('--no-renames') && branchLine.includes(M.slice(0, 10)) &&
@@ -8580,7 +8593,7 @@ async function selfTest() {
       overRead.paths.join() === 'packages/blob.bin,packages/over.txt' && overRead.size.additions === LINE + 1 && overRead.size.deletions === 0 &&
         overRead.size.binaryFiles === 1 && overRead.size.files === 2,
       JSON.stringify(overRead));
-    const nameOnly = og(seed, 'diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', '-m', '--first-parent', overSha).split('\n').filter((p) => p !== '');
+    const nameOnly = og(seed, 'diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', '-z', '-m', '--first-parent', overSha).split('\0').filter((p) => p !== '');
     assert('and-its-path-list-equals-the-pre-19036-name-only-reading-byte-for-byte', JSON.stringify(overRead.paths) === JSON.stringify(nameOnly), JSON.stringify(nameOnly));
     const mergeRead = commitChanges(seed, mergeSha);
     assert('a-MERGE-commit-is-read-against-its-FIRST-parent-the-whole-branch-change',
@@ -8670,6 +8683,67 @@ async function selfTest() {
     assert('the-rename-size-fixture-could-be-built-and-run', false, String(error?.message ?? error).split('\n')[0]);
   } finally {
     rmSync(renFx, { recursive: true, force: true });
+  }
+
+  // ⛔ #33620: governed paths git would C-quote, read through REAL git with a GIT_*-free environment (gitFreeEnv):
+  // a non-ASCII name and a name holding a newline. Without `-z` each path list (--branch, the sweep's
+  // commitChanges, the workflow split's ls-tree) spells them `"skills/a/\346\226\207\346\241\243.md"` and
+  // `"skills/a/two\nlines.md"`, which match no governed prefix.
+  const quotedFx = mkdtempSync(join(tmpdir(), 'governed-merges-quoted-paths-'));
+  try {
+    const fg = (cwd, ...rest) =>
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
+        { cwd, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const repo = join(quotedFx, 'repo');
+    fg(quotedFx, 'init', '-q', repo);
+    const CJK = 'skills/a/\u6587\u6863.md';
+    const NL = 'skills/a/two\nlines.md';
+    const WFQ = `${WORKFLOWS_PREFIX}caf\u00e9.yml`;
+    const wf = (minutes) => `name: Q\non:\n  pull_request:\njobs:\n  q:\n    runs-on: ubuntu-latest\n    timeout-minutes: ${minutes}\n    steps:\n      - run: echo q\n`;
+    mkdirSync(join(repo, WORKFLOWS_PREFIX), { recursive: true });
+    writeFileSync(join(repo, WFQ), wf(10));
+    writeFileSync(join(repo, 'README.md'), 'seed\n');
+    fg(repo, 'add', '-A');
+    fg(repo, 'commit', '-qm', 'chore: seed');
+    const qBase = fg(repo, 'rev-parse', 'HEAD').trim();
+    fg(repo, 'update-ref', 'refs/remotes/origin/main', qBase);
+    fg(repo, 'checkout', '-q', '-b', 'feature');
+    mkdirSync(join(repo, 'skills/a'), { recursive: true });
+    writeFileSync(join(repo, CJK), 'wording\n');
+    writeFileSync(join(repo, NL), 'wording\n');
+    writeFileSync(join(repo, WFQ), wf(20));
+    fg(repo, 'add', '-A');
+    fg(repo, 'commit', '-qm', 'docs(skills): names git quotes (#7)');
+    const qHead = fg(repo, 'rev-parse', 'HEAD').trim();
+    const want = [CJK, NL, WFQ].sort().join('|');
+    const governedOf = (paths) => governedPathsIn(paths, SELF_REPO_ID).flatMap((surface) => surface.files).sort().join('|');
+    // The witness that the fixture exercises the quoting at all: the same list without `-z` spells no name raw.
+    const quoted = fg(repo, 'diff', '--name-only', '--no-renames', qBase, qHead).split('\n').filter(Boolean);
+    assert('⛔ #33620 CONTROL the-fixture-names-are-ones-git-C-quotes-without--z',
+      quoted.length === 3 && quoted.every((p) => p.startsWith('"')) && governedOf(quoted) === '', JSON.stringify(quoted));
+    const fRun = (argv) => {
+      try {
+        return { ok: true, out: fg(repo, ...argv).trim(), error: '' };
+      } catch (error) {
+        return { ok: false, out: '', error: String(error?.stderr || error?.message || error).trim().split('\n')[0] };
+      }
+    };
+    const qBranch = deriveBranchPaths({ ref: 'feature', run: fRun });
+    assert('⛔ #33620 --branch-reads-a-non-ASCII-and-a-newline-path-raw-and-each-is-GOVERNED',
+      qBranch.ok === true && [...qBranch.paths].sort().join('|') === want && governedOf(qBranch.paths) === want, JSON.stringify(qBranch.paths ?? qBranch));
+    const qLanded = withoutGitEnv(() => commitChanges(repo, qHead));
+    assert('⛔ #33620 the-sweep-commitChanges-reads-the-same-paths-raw-and-each-is-GOVERNED',
+      [...qLanded.paths].sort().join('|') === want && governedOf(qLanded.paths) === want && qLanded.size.files === 3, JSON.stringify(qLanded));
+    const qWorkflow = readWorkflowDiff({ paths: qBranch.paths ?? [], base: qBase, head: qHead, git: (argv) => fg(repo, ...argv) });
+    const qFile = qWorkflow.files?.[0];
+    assert('⛔ #33620 the-workflow-split-lists-a-non-ASCII-workflow-at-BOTH-commits-and-classifies-the-edit',
+      qWorkflow.measured === true && qWorkflow.files.length === 1 && qFile.path === WFQ &&
+        !qFile.reasons.some((r) => /absent at both|new workflow file|deleted workflow file/.test(r)),
+      JSON.stringify(qWorkflow));
+  } catch (error) {
+    assert('#33620 the-quoted-path-fixture-could-be-built-and-run', false, String(error?.message ?? error).split('\n')[0]);
+  } finally {
+    rmSync(quotedFx, { recursive: true, force: true });
   }
 
   // ── ⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away ──────────
