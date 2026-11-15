@@ -1180,7 +1180,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
   '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 74,
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 51,
-  '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 37,
+  '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 39,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2339,9 +2339,12 @@ export function addOnlyDiffArgv(head, revs, path) {
   return [...head, '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', `--unified=${LOW_RISK_ADD_ONLY_CONTEXT}`, ...revs, '--', `:(literal)${path}`];
 }
 
-/** A heading's text as the ruled-heading test reads it: NFKC-normalised, zero-width characters removed. Pure. */
+/**
+ * A heading's text as the ruled-heading test reads it: NFKC-normalised, default-ignorable characters (zero-width,
+ * soft hyphen) and the emphasis, code and strike markers removed, so `**Dec**ision` and ``Deci`sion` `` read `Decision`. Pure.
+ */
 function addOnlyHeadingText(text) {
-  return String(text ?? '').normalize('NFKC').replace(/[\u200b-\u200d\u2060\ufeff]/g, '');
+  return String(text ?? '').normalize('NFKC').replace(/\p{Default_Ignorable_Code_Point}/gu, '').replace(/[*_`~]/g, '');
 }
 
 /** One Markdown line stripped to its words: quote markers, list bullet, table bar, HTML tags, link brackets, emphasis, zero-width characters. Pure. */
@@ -2512,7 +2515,8 @@ export function addOnlyNoteReasons(file) {
     if (ruledLevels.length === 0) continue;
     const lead = run.lines.find((n) => newLines[n].trim() !== '');
     // The opening heading is a bare ATX line — no quote, no list marker, no setext underline below a line.
-    const opens = lead !== undefined && /^ {0,3}#{1,6}(?:[ \t]|$)/.test(newLines[lead]) && after[lead].heading && !after[lead].title && after[lead].heading.level <= Math.min(...ruledLevels);
+    // A blank line above it too, so no HTML block or paragraph above can swallow it.
+    const opens = lead !== undefined && (lead === 0 || newLines[lead - 1].trim() === '') && /^ {0,3}#{1,6}(?:[ \t]|$)/.test(newLines[lead]) && after[lead].heading && !after[lead].title && after[lead].heading.level <= Math.min(...ruledLevels);
     if (!opens) inside.push(run.lines[0]);
   }
   if (inHeader.length > 0) reasons.push(`\`${path}\` adds line ${at1(inHeader)} in the record's header block, above its first section heading`);
@@ -2521,18 +2525,21 @@ export function addOnlyNoteReasons(file) {
   const statusLines = words.filter((op) => LOW_RISK_ADD_ONLY_STATUS_LINE.test(addOnlyBareLine(op.text))).map((op) => op.new);
   // Raw HTML (a comment, a `<pre>`, an `<hN>`) can hide or re-scope existing text from a renderer; a link reference
   // definition can retarget an existing link; a setext underline below a line, or a Latin word mixed with Greek or
-  // Cyrillic letters, can fake a heading. Each is refused on an added line.
+  // Cyrillic letters, can fake a heading; a character reference (`&#105;`) can spell a word the readers here do not
+  // see. Each is refused on an added line.
   const htmlHeadings = words.filter((op) => /<!--|-->/.test(op.text) || /^ {0,3}(?:>[ ]?)*[ \t]*</.test(op.text)).map((op) => op.new);
   const linkDefs = words.filter((op) => /^ {0,3}(?:>[ ]?)*[ \t]*\[[^\]]+\]:/.test(op.text)).map((op) => op.new);
   const underlines = words.filter((op) => /^ {0,3}(?:>[ ]?)*(?:=+|-+)[ \t]*$/.test(op.text) && op.new > 0 && newLines[op.new - 1].trim() !== '').map((op) => op.new);
-  const mixed = words.filter((op) => /[A-Za-z][\u0370-\u03ff\u0400-\u052f]|[\u0370-\u03ff\u0400-\u052f][A-Za-z]|[\u200b-\u200d\u2060\ufeff]/.test(op.text)).map((op) => op.new);
+  const mixed = words.filter((op) => /[A-Za-z][\u0370-\u03ff\u0400-\u052f]|[\u0370-\u03ff\u0400-\u052f][A-Za-z]|\p{Default_Ignorable_Code_Point}/u.test(op.text)).map((op) => op.new);
+  const entities = words.filter((op) => /&#?[A-Za-z0-9]+;/.test(op.text)).map((op) => op.new);
   const ruledHeadings = words.filter((op) => ruled(after[op.new].heading)).map((op) => op.new);
   const underRuled = words.filter((op) => !ruledHeadings.includes(op.new) && after[op.new].under.some(ruled)).map((op) => op.new);
   if (statusLines.length > 0) reasons.push(`\`${path}\` adds a status line at line ${at1(statusLines)}`);
-  if (htmlHeadings.length > 0) reasons.push(`\`${path}\` adds raw HTML (a comment, a block tag or a heading) at line ${at1(htmlHeadings)}`);
+  if (htmlHeadings.length > 0) reasons.push(`\`${path}\` adds raw HTML (a comment, a block tag, an autolink or a heading) at line ${at1(htmlHeadings)}`);
   if (linkDefs.length > 0) reasons.push(`\`${path}\` adds a link reference definition at line ${at1(linkDefs)}`);
   if (underlines.length > 0) reasons.push(`\`${path}\` adds a setext underline directly below a line at line ${at1(underlines)}`);
-  if (mixed.length > 0) reasons.push(`\`${path}\` adds a zero-width character or a Latin word mixed with Greek or Cyrillic letters at line ${at1(mixed)}`);
+  if (mixed.length > 0) reasons.push(`\`${path}\` adds a zero-width or other invisible character, or a Latin word mixed with Greek or Cyrillic letters, at line ${at1(mixed)}`);
+  if (entities.length > 0) reasons.push(`\`${path}\` adds an HTML character reference (\`&…;\`) at line ${at1(entities)}`);
   if (ruledHeadings.length > 0) reasons.push(`\`${path}\` adds a heading that names the decision or the status at line ${at1(ruledHeadings)}`);
   if (underRuled.length > 0) {
     const names = [...new Set(underRuled.map((n) => after[n].under.filter(ruled).pop().text))].slice(0, 2);
@@ -9433,6 +9440,13 @@ async function selfTest() {
     assert('⛔ R2-raw-HTML-that-hides-existing-text-stays-H', H_(insertAfter(6, '<!--')) && H_([...keep(RECORD.slice(0, 7)), ['+', '<!--'], ...keep(RECORD.slice(7, 14)), ['+', '-->'], ...keep(RECORD.slice(14))]) && H_(insertAfter(6, '<pre>')) && H_(insertAfter(16, '', '<h2>Decision</h2>')));
     assert('⛔ R2-a-zero-width-or-homoglyph-Decision-heading-and-a-link-reference-definition-stay-H', H_([...keep(), ['+', ''], ['+', '## De\u200bcision'], ['+', 'We now allow X.']]) && H_([...keep(), ['+', ''], ['+', '## Decisi\u043en'], ['+', 'We now allow X.']]) && H_(insertAfter(6, '[a]: https://example.invalid/'))
       && !H_(insertAfter(6, '', 'See [the note][a] and `[x]: y` in prose.')));
+
+    // ⛔ Review round 3: a Decision heading split by inline markup, an entity or a soft hyphen; an opener with no blank line above.
+    const appendRuled = (heading) => H_([...keep(), ['+', ''], ['+', heading], ['+', 'We now allow X.']]);
+    assert('⛔ R3-a-Decision-heading-split-by-emphasis-code-an-entity-or-a-soft-hyphen-stays-H', appendRuled('## **Dec**ision') && appendRuled('## Deci`sion`') && appendRuled('## Dec&#105;sion') && appendRuled('## Deci\u00adsion') &&
+      H_([...keep(), ['+', ''], ['+', '## Notes'], ['+', 'S&#116;atus: Superseded']]) && !H_([...keep(), ['+', ''], ['+', '## **Notes**'], ['+', 'We now allow X.']]));
+    assert('⛔ R3-an-opener-with-no-blank-line-above-it-stays-H-an-autolink-says-why', H_([...keep(RECORD.slice(0, 13)), ['+', '## Notes'], ['+', 'We now also allow X.']]) && !H_([...keep(RECORD.slice(0, 13)), ['+', ''], ['+', '## Notes'], ['+', ''], ['+', 'We now also allow X.']]) &&
+      /an autolink/.test(why([ADR], read([ADR], [adrRow(patchOf(insertAfter(16, '', '<https://example.invalid/>')))]))));
 
     // The heading reader: the title scopes nothing; fences and frontmatter hide headings; setext and quoted headings count.
     const h = addOnlyHeadingReading(['---', 'title: x', '---', '# ADR: a decision record', 'top', '```', '## Decision', '```', 'after fence', 'Decision', '========', 'under setext', '> ## Status', 'under quoted']);
