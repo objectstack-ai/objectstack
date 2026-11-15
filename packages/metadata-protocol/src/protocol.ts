@@ -4292,6 +4292,10 @@ export class ObjectStackProtocolImplementation implements
      *         layer's MetadataService read reporting `degraded` with nothing
      *         in the registry to answer instead, carrying the failing loaders'
      *         messages on `cause`.
+     * @throws `PackageScopedNameRefusedError` — [#32914, ADR-0150 D3/D5] 409 /
+     *         `RESOURCE_CONFLICT`, naming no package, for a name two or more
+     *         served packages register in code: the registry's own refusal, as
+     *         {@link getMetaItem} throws it, before any layer is read.
      *
      * [#29814] `opts.withDraft` adds the `draft` layer
      * (`GetMetaItemLayeredResponseSchema.draft`): the pending draft row the
