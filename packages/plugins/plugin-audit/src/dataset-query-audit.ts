@@ -268,7 +268,7 @@ export function createDatasetQueryAuditWriter(opts: DatasetQueryAuditWriterOptio
     engine: IDataEngine,
     rows: Record<string, unknown>[],
   ): Promise<void> => {
-    await engine.insert('sys_audit_log', rows as any, { context: { isSystem: true, preserveAudit: true } } as any);
+    await engine.insert('sys_audit_log', rows, { context: { isSystem: true, preserveAudit: true } });
   };
 
   /**
