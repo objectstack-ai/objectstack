@@ -61,8 +61,12 @@ import { FLOW_CREDENTIAL_CLEARED, HTTP_SIGNING_SECRET_KEY } from '../flow-creden
  *    as written.
  *
  * All three are rendered and evaluated ONCE, before either mode, so the
- * durable outbox enqueues exactly the request the inline call would send and
- * nothing renders at delivery. Until #19939 the whole config went through the
+ * durable outbox and the inline call start from the same url, headers and
+ * body value, and nothing renders at delivery. The bytes sent can still
+ * differ: the outbox serializes the body itself (a string verbatim, no body
+ * as `{}`) and adds `Content-Type: application/json`, while the inline call
+ * JSON-encodes a body it has and sends none otherwise (see the no-outbox
+ * fallback below). Until #19939 the whole config went through the
  * single-brace `interpolate()` first; a `{…}` token is refused now, by the
  * contract parse below and, before a run starts, by `registerFlow` and
  * `objectstack validate`.
@@ -429,7 +433,7 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                 // No outbox available — degrade to a best-effort inline call,
                 // which sends the verb the outbox would have. It sends and signs
                 // its own serialization (see `sendInline`), which is the
-                // outbox's bytes for an object body only: with no body it sends
+                // outbox's bytes for a non-string body only: with no body it sends
                 // none and signs '' (the outbox sends and signs '{}'), a string
                 // body goes out JSON-encoded (the outbox sends it verbatim), and
                 // it adds no `Content-Type: application/json` (the outbox does).
