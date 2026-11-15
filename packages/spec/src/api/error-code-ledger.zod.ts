@@ -831,11 +831,13 @@ export const ERROR_CODE_LEDGER = {
     // declared `engines.protocol` range excludes this runtime's major
     // (`ProtocolIncompatibleError`, `protocol-handshake.ts`). Answered 422:
     // the manifest is well-formed, but it declares a range this runtime can
-    // never satisfy, and the remedy is a change to the package, not to the
-    // environment. It matches this package's own
-    // METADATA_SCHEMA_INVALID. It is not 409, which this ledger keeps for
-    // refusals from environment state (CONCURRENT_UPDATE). The two HTTP
-    // doors that reach the throw, `POST /api/v1/packages` and (since #21805)
+    // never satisfy, so the same body never succeeds on this runtime. The
+    // remedy is a different body (migrated metadata, or a build for this
+    // runtime's protocol), or, for a package ahead of the runtime, a runtime
+    // upgrade, which is a deployment change, not environment state. It
+    // matches this package's own METADATA_SCHEMA_INVALID. It is not 409,
+    // which this ledger keeps for refusals from environment state
+    // (CONCURRENT_UPDATE). The two HTTP doors that reach the throw, `POST /api/v1/packages` and (since #21805)
     // `POST /api/v1/marketplace/install-local`, answer the same bytes through
     // the shared `protocolIncompatibleAnswer`, carrying `requiredRange`,
     // `rangeSource`, `protocolVersion` and `targetMajor` in `error.details`
