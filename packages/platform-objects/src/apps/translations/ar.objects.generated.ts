@@ -1941,7 +1941,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "المعرّف"
       },
       identifier: {
-        label: "المعرّف",
+        label: "معرّف URI للمورد",
         help: "معرّف URI لمؤشر المورد المقدَّم في معامل resource وفق RFC 8707"
       },
       name: {
