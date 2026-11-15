@@ -4,7 +4,7 @@
 
 fix(scenarios): a write the card gives a persona that the build denies it is charged to the build, not the operation
 
-Clause-②: no
+Clause-②: yes (widening) — new exports `buildDeniesWrite` and `isWriteDenial` (`./score`, `./score/full`), `probesBuildDenial` (`.`), `buildDenialFindings` (`./runner`); new optional fields `OperationGrade.notMeasured` (`./score`, `./score/full`) and `OperationResult.buildDenial` (`./runner`)
 Metadata-protocol: none
 
 An operation declared `applied` whose agent write was refused 403 `PERMISSION_DENIED` counted as the operation's failure, even when the built app's permission set denied the persona a write the card gives it: the loss landed on the asking side for a build error.
