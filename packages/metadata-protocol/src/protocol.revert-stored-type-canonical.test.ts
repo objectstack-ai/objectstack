@@ -589,8 +589,10 @@ describe('[#9174] a refused item touches no ledger key and stops no neighbour', 
         expect(res.success).toBe(false);
         expect(storedBody(rows, 'view', 'grid')?.label).toBe('V1');
         expect(storedBody(rows, 'fields', 'a.b')?.label).toBe('V2');
+        // [#33564] The revert's own plan records the version the restore
+        // replaced (V2, version 2), so reverting the revert brings it back.
         expect(JSON.parse(String(commitLedger[0].items))).toEqual([
-            { type: 'view', name: 'grid', existedBefore: true, prevVersion: null },
+            { type: 'view', name: 'grid', existedBefore: true, prevVersion: 2 },
         ]);
     });
 });
