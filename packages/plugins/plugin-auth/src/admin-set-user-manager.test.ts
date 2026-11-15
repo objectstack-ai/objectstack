@@ -587,38 +587,112 @@ describe('set-user-manager — refusal 4: cross-organization', () => {
   });
 });
 
-describe('set-user-manager — refusal 5: the directory owns this identity', () => {
-  const provisioned = () => ({
+describe('set-user-manager — refusal 5: a SCIM directory owns this identity', () => {
+  // Maintainer ruling record 6895645364, option A: "directory wins" applies
+  // where a directory actually exists. ADR-0135 D4 stamps `idp_provisioned` on
+  // EVERY federated link without a local password, so the mark alone also
+  // covers a person who only signs in through SSO (the platform's own, or a
+  // social / enterprise OIDC provider) with no directory behind them. The
+  // refusal reads the mark AND a `sys_scim_subject` row — the predicate
+  // `scim-sso-adoption.ts` judges "held by a SCIM directory" with.
+  const people = () => ({
     sys_user: [
+      // SCIM-held: the mark and a SCIM subject.
+      { id: 'u_scim', manager_id: 'u_old', source: 'idp_provisioned' },
+      // SSO-only: the mark, no SCIM subject (a platform-SSO first sign-in).
       { id: 'u_sso', manager_id: 'u_old', source: 'idp_provisioned' },
+      // SCIM-provisioned but holding a local password: D4 leaves it env_native.
+      { id: 'u_scim_pw', manager_id: null, source: 'env_native' },
       { id: 'u_boss', manager_id: null, source: 'env_native' },
       { id: 'u_old', manager_id: null, source: 'env_native' },
     ] as Row[],
+    sys_scim_subject: [
+      { id: 'sub_1', user_id: 'u_scim' },
+      { id: 'sub_2', user_id: 'u_scim_pw' },
+    ] as Row[],
   });
 
-  it('refuses a SET on an idp_provisioned identity, naming the sync as the surface', async () => {
-    const engine = makeEngine(provisioned());
-    const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_sso', managerId: 'u_boss' }));
+  it('refuses a SET on a SCIM-held identity, naming the directory as the surface', async () => {
+    const engine = makeEngine(people());
+    const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_scim', managerId: 'u_boss' }));
 
     expect(res.status).toBe(403);
     expect(res.body.error?.code).toBe('PERMISSION_DENIED');
     expect(res.body.error?.details?.reason).toBe('idp_provisioned');
     expect(res.body.error?.message).toContain('directory');
     expect(engine.updates).toEqual([]);
+    // The verdict was read from the SCIM subject table, for this user.
+    expect(engine.reads).toContainEqual({ object: 'sys_scim_subject', where: { user_id: 'u_scim' } });
   });
 
-  it('refuses the CLEAR too — a value the next sync reverts is the shape ADR-0049 refuses', async () => {
-    const engine = makeEngine(provisioned());
-    const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_sso', managerId: null }));
+  it('refuses the CLEAR too on a SCIM-held identity — both are writes that directory owns', async () => {
+    const engine = makeEngine(people());
+    const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_scim', managerId: null }));
 
     expect(res.status).toBe(403);
     expect(res.body.error?.details?.reason).toBe('idp_provisioned');
     expect(engine.updates).toEqual([]);
   });
 
-  it('an env_native identity is unaffected — the control for the screen above', async () => {
-    const engine = makeEngine(provisioned());
-    const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_old', managerId: 'u_boss' }));
+  it('⭐ an SSO-only identity (idp_provisioned, no SCIM subject) is SET like a local one', async () => {
+    const engine = makeEngine(people());
+    const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_sso', managerId: 'u_boss' }));
+
     expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(engine.updates).toHaveLength(1);
+    expect(engine.updates[0].object).toBe('sys_user');
+    expect(engine.updates[0].data).toEqual({ id: 'u_sso', manager_id: 'u_boss' });
+  });
+
+  it('⭐ an SSO-only identity can be CLEARED as well', async () => {
+    const engine = makeEngine(people());
+    const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_sso', managerId: null }));
+
+    expect(res.status).toBe(200);
+    expect(engine.updates.map((u) => u.data)).toEqual([{ id: 'u_sso', manager_id: null }]);
+  });
+
+  it('an SSO-only identity still meets the other refusals — self-assignment is refused as for anyone', async () => {
+    const engine = makeEngine(people());
+    const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_sso', managerId: 'u_sso' }));
+
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('INVALID_FIELD');
+    expect(res.body.error?.details?.reason).toBe('self_assignment');
+    expect(engine.updates).toEqual([]);
+  });
+
+  it('an env_native identity is unaffected — even one that owns a SCIM subject (no served request becomes refused)', async () => {
+    const engine = makeEngine(people());
+    const plain = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_old', managerId: 'u_boss' }));
+    expect(plain.status).toBe(200);
+    const withPassword = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_scim_pw', managerId: 'u_boss' }));
+    expect(withPassword.status).toBe(200);
+    expect(engine.updates.map((u) => u.data.id)).toEqual(['u_old', 'u_scim_pw']);
+    // The SCIM table is not even asked for an env_native row.
+    expect(engine.reads.some((r) => r.object === 'sys_scim_subject')).toBe(false);
+  });
+
+  it('a missing sys_scim_subject table means no directory: the SSO-only link is written', async () => {
+    const engine = makeEngine(people());
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, query?: unknown) => {
+      if (object === 'sys_scim_subject') throw new Error('SQLITE_ERROR: no such table: sys_scim_subject');
+      return find(object, query);
+    };
+    const res = await runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_sso', managerId: 'u_boss' }));
+
+    expect(res.status).toBe(200);
+    expect(engine.updates.map((u) => u.data)).toEqual([{ id: 'u_sso', manager_id: 'u_boss' }]);
+  });
+
+  it('⛔ a FAILED SCIM-subject read is never read as "no directory" — it propagates and writes nothing', async () => {
+    const engine = makeEngine(people());
+    engine.failReadsOn('sys_scim_subject');
+    await expect(
+      runSetUserManager(deps(engine), ACTOR, post({ userId: 'u_sso', managerId: 'u_boss' })),
+    ).rejects.toThrow('read of sys_scim_subject failed');
+    expect(engine.updates).toEqual([]);
   });
 });
