@@ -513,18 +513,6 @@ function isNullableField(def: AnyRec): boolean {
 }
 
 /**
- * object name → set of field names that may hold `null` (#4763).
- *
- * DECLARED fields only, like {@link buildFieldTypeIndex} and for a sharper
- * reason: this index feeds a BUILD-BREAKING verdict, so adding the injected
- * columns {@link buildFieldIndex} now resolves would turn `record.created_at`
- * comparisons into errors on stacks that ship today. Nullability there is also
- * genuinely per-column and not derivable from the existence plan — the driver
- * always populates `created_at`, while `owner_id` really can be NULL — so it
- * needs the registry's column definitions, not this module's guesses. Leaving
- * them out costs coverage, never a false error.
- */
-/**
  * [#29026] A `count` / `sum` roll-up summary is always valued: zero children is
  * zero. `@objectstack/objectql`'s `summaryEmptySetValue` is the authority — the
  * engine seeds a new parent row with it at create time
@@ -583,11 +571,32 @@ interface FlowBareNames {
  * and `updated_at` unconditionally, and driver-sql creates both on every
  * table it provisions (`PLATFORM_PROVISIONED_COLUMNS`, which adds the
  * primary key `id`; the registry never injects `id` into the field map, so
- * it has no entry here). The other injected columns are stamped only when
- * there is something to stamp: a system-context insert stores `NULL` in
- * `owner_id`, `created_by`, `updated_by`, `owning_business_unit_id` and
- * `queue` (measured on the real engine), so they stay nullable. This package
- * may not import a runtime, so the two names are spelled here.
+ * it has no entry here). This package may not import a runtime, so the two
+ * names are spelled here.
+ *
+ * [#33435] Every other injected column can hold `null` where a flow or hook
+ * condition reads it, measured on the showcase over the real REST door and
+ * engine (sqlite, `single` posture), on all three ownership tiers:
+ *
+ * - `owner_id`, `created_by`, `updated_by`: a signed-in user's REST create
+ *   stamps all three, but a system-context insert stores `NULL` in each, a
+ *   system-context update leaves them so, and a seeded row keeps `created_by`
+ *   / `updated_by` `NULL` (seeds run before any user exists; the boot claims
+ *   only `owner_id`). Such rows fire record-triggered flows and every hook: a
+ *   `record.owner_id > 'a'` start condition failed the run on each system
+ *   insert ("no such overload: dyn<null> > string") and passed on the REST
+ *   create. A guest write and a queue park or release leave `owner_id` empty
+ *   by design (ADR-0138 D1, ADR-0142 D3).
+ * - `owning_business_unit_id`: nothing stamps it yet (ADR-0117 D1), so it is
+ *   `NULL` on every row, both tiers that carry it, every writer.
+ * - `queue`: `NULL` until a queue write names one (ADR-0142 D3); a REST create
+ *   naming none stores `NULL`.
+ * - `organization_id`: every stored row on driver-sql carried it, a
+ *   system-context insert included (stamped with the Default Organization;
+ *   the `isolated` posture refuses such a write with no organization, ADR-0131
+ *   D9), but a `beforeInsert` hook reads it `null` whoever writes (the driver
+ *   fills it after the hook chain), and the memory driver never stamps a
+ *   tenant column at all. Not every reachable row, so it stays nullable.
  */
 const PLATFORM_STAMPED_COLUMNS: ReadonlySet<string> = new Set(['created_at', 'updated_at']);
 
@@ -669,6 +678,17 @@ function hookReadsStampedRow(hookEvents: unknown): boolean {
     && hookEvents.every((e) => typeof e === 'string' && STAMPED_ROW_HOOK_EVENTS.has(e));
 }
 
+/**
+ * object name → set of field names that may hold `null` (#4763).
+ *
+ * The fields the objects AS READ carry, judged by their own keys
+ * ({@link isNullableField}): at `os build` the declared fields, at a runtime
+ * door the served ones, the injected system columns among them. [#33435] The
+ * flow and hook condition sites add the injected columns the objects as read
+ * do not carry ({@link buildInjectedNullableIndex}, {@link buildPreStampIndex}),
+ * so the build gives the door's verdict there; every other site judges this
+ * index alone.
+ */
 function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
   const idx = new Map<string, Set<string>>();
   for (const obj of objects) {

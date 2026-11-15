@@ -145,6 +145,16 @@ Because `record` now means the record's *state*, `record.done == true` alone is 
 on **every** update of an already-done row. If you wrote a condition under the old
 payload semantics expecting "the write that changed it", add the `previous` half.
 
+**A field that can be `null` needs a `!= null` guard before `<`, `>`, `+` and the
+rest** — CEL has no ordering or arithmetic over `null`, so the condition faults and
+the write fails. `os build` and the publish gate refuse the unguarded form. That
+holds for the columns the platform adds as well: `owner_id`, `created_by`,
+`updated_by`, `owning_business_unit_id`, `queue` and `organization_id` are `null` on
+a row a system write, a seed or a guest left them empty in, so write
+`record.owner_id != null && record.owner_id > 'a'`. `created_at` and `updated_at`
+are stamped on every stored row, except under a `beforeInsert` hook, which can run
+before the stamp and reads them as `null`.
+
 ## Elevation — `runAs`
 
 A hook's `ctx.api` runs with the context of the write that **fired** it. That is usually what you want, and it is the one thing that makes a column both *guarded* and *maintained* impossible to express: author `editable: false` (or `readonly: true`) so nobody hand-writes the column, and the hook that computes it is refused by the very same check. The guard and the legitimate writer are the same door.
