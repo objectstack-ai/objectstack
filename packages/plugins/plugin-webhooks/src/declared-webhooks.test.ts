@@ -33,6 +33,7 @@ import {
     WEBHOOK_ACTIVATION_TYPE,
     bindDeclaredWebhookNameGuard,
     declaredWebhookRefId,
+    wholeNameRefusal,
 } from './declared-webhooks.js';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { createWebhookRedeliverGuard } from './redeliver-guard.js';
@@ -772,6 +773,9 @@ describe('declared webhooks — one declaration per (package, name) slot (ADR-01
         expect(said).toHaveLength(1);
         expect(said[0][0]).toContain(`"${A}"`);
         expect(said[0][0]).toContain(`"${B}"`);
+        // [#33263] Each holder's exact address, as the departed-row line says it.
+        expect(said[0][0]).toContain('POST /api/v1/security/_activation/webhook/task_changed?package=PACKAGE.');
+        expect(said[0][0]).not.toContain('namespace>');
 
         const shippedOff = engineOver(
             registryShipping([[A, ALPHA], [B, declaredWebhook({ url: 'https://hooks.example/beta', isActive: false })]]),
@@ -784,11 +788,61 @@ describe('declared webhooks — one declaration per (package, name) slot (ADR-01
         expect(await switches(own)).toEqual([[A, true], [B, false]]);
     });
 
-    it('[D8] one holder: a row naming no package, or a package that no longer declares the name, is its switch, as before', async () => {
+    it('[D8] one holder: a row naming no package is its switch, as before; its own row wins', async () => {
         const one = (rows: any[]) => new DeclaredWebhookSource(engineOver(registryShipping([[A, ALPHA]]), { rows: { [LEDGER]: rows } }), undefined);
         expect(await switches(one([slotRow(null, false)]))).toEqual([[A, false]]);
-        expect(await switches(one([slotRow('com.acme.gone', false)]))).toEqual([[A, false]]);
-        expect(await switches(one([slotRow('com.acme.gone', false), slotRow(A, true)]))).toEqual([[A, true]]);
+        expect(await switches(one([slotRow(null, false), slotRow(A, true)]))).toEqual([[A, true]]);
+    });
+
+    /**
+     * [ADR-0150 D8, #32695] A row naming a package that no longer declares
+     * the name was that package's switch: it switches no remaining holder, in
+     * either direction, at any holder count, and is said once per name.
+     * BASE: under one holder it was read as that holder's switch (off turned
+     * a shipped-on holder off, on turned a shipped-off holder on); under two,
+     * off kept both off.
+     */
+    describe('[#32695] a departed package\'s row switches no remaining holder', () => {
+        const GONE = 'com.acme.gone';
+        const SHIPPED_OFF = declaredWebhook({ url: 'https://hooks.example/alpha', isActive: false });
+        const sourceOver = (packages: Array<[string, any]>, rows: any[], warn = vi.fn()) =>
+            new DeclaredWebhookSource(engineOver(registryShipping(packages), { rows: { [LEDGER]: rows } }), undefined, loggerWith(warn));
+
+        it('one holder: the departed row switched off leaves a shipped-on holder on; switched on leaves a shipped-off holder off', async () => {
+            expect(await switches(sourceOver([[A, ALPHA]], [slotRow(GONE, false)]))).toEqual([[A, true]]);
+            expect(await switches(sourceOver([[A, SHIPPED_OFF]], [slotRow(GONE, true)]))).toEqual([[A, false]]);
+        });
+
+        it('two holders, in both registration orders: a departed row switched off keeps neither off', async () => {
+            expect(await switches(sourceOver([[A, ALPHA], [B, BETA]], [slotRow(GONE, false)]))).toEqual([[A, true], [B, true]]);
+            expect(await switches(sourceOver([[B, BETA], [A, ALPHA]], [slotRow(GONE, false)]))).toEqual([[B, true], [A, true]]);
+        });
+
+        it('said once per name, naming the departed package and the holders, with the per-holder address', async () => {
+            const warn = vi.fn();
+            const source = sourceOver([[A, ALPHA]], [slotRow(GONE, false)], warn);
+            await source.list();
+            await source.list();
+            const said = warn.mock.calls.filter(([msg]) => String(msg).includes('no longer declares it'));
+            expect(said).toHaveLength(1);
+            expect(said[0][0]).toContain(`package "${GONE}"`);
+            expect(said[0][0]).toContain(`"${A}"`);
+            expect(said[0][0]).toContain('?package=PACKAGE');
+        });
+
+        it('two holders, a departed row and a row naming no package: each is told once (review N1)', async () => {
+            const warn = vi.fn();
+            const source = sourceOver([[A, ALPHA], [B, BETA]], [slotRow(GONE, false), slotRow(null, false)], warn);
+            await source.list();
+            await source.list();
+            expect(warn.mock.calls.filter(([msg]) => String(msg).includes('no longer declares it'))).toHaveLength(1);
+            expect(warn.mock.calls.filter(([msg]) => String(msg).includes('no holder\'s own (naming no package)'))).toHaveLength(1);
+        });
+
+        it('CONTROL beside the departed row, a row naming no package is still the one holder\'s switch, and its own row wins over both', async () => {
+            expect(await switches(sourceOver([[A, ALPHA]], [slotRow(GONE, true), slotRow(null, false)]))).toEqual([[A, false]]);
+            expect(await switches(sourceOver([[A, ALPHA]], [slotRow(GONE, false), slotRow(null, false), slotRow(A, true)]))).toEqual([[A, true]]);
+        });
     });
 
     it('[Q4] a delivery naming no package (`declared:NAME`, the CLI ceremony\'s shape): one holder judges it as before; two refuse it naming both, sent to neither', async () => {
@@ -992,25 +1046,54 @@ describe('declared webhooks — one declaration per (package, name) slot (ADR-01
                 new DeclaredWebhookSource(engineOver(registry), undefined));
             const err = await hooks.beforeInsert({ input: { data: { name: T } }, session: {} }).then(() => undefined, (e: unknown) => e);
             expect(err).toBeInstanceOf(DeclaredWebhookNameConflictError);
-            expect((err as Error).message).toContain(`POST /api/v1/security/_activation/webhook/alpha/${T} with`);
-            expect((err as Error).message).not.toContain('/beta/');
+            expect((err as Error).message).toContain(`POST /api/v1/security/_activation/webhook/${T}?package=${A} with`);
+            expect((err as Error).message).not.toContain(B);
         });
     });
 
-    // [#31699 round 2, R2-D] A remedy names the slot's namespace address.
-    it('the remedies name the namespace address: the name guard each holder\'s, the redelivery veto the slot\'s', async () => {
+    // [#31699 round 2, R2-D; #33263] A remedy names the slot's exact address,
+    // `?package=PKG`: it named the namespace address, which refuses two
+    // co-owners of one namespace (the pin below).
+    it('[FROM namespace address TO ?package=] the remedies name each holder\'s exact address: the name guard each holder\'s, the redelivery veto the slot\'s', async () => {
         const hooks: Record<string, (ctx: any) => Promise<void>> = {};
         bindDeclaredWebhookNameGuard({ registerHook: (event, handler) => { hooks[event] = handler; } },
             new DeclaredWebhookSource(twoHolders(), undefined));
         const conflict = await hooks.beforeInsert({ input: { data: { name: 'task_changed' } }, session: {} })
             .then(() => undefined, (e: unknown) => (e as Error).message);
-        expect(conflict).toContain('switch the declared ones off (POST /api/v1/security/_activation/webhook/alpha/task_changed, '
-            + 'POST /api/v1/security/_activation/webhook/beta/task_changed, each with { "enabled": false })');
+        expect(conflict).toContain(`switch the declared ones off (POST /api/v1/security/_activation/webhook/task_changed?package=${A}, `
+            + `POST /api/v1/security/_activation/webhook/task_changed?package=${B}, each with { "enabled": false })`);
 
         const engine = twoHolders({ [LEDGER]: [slotRow(A, false)] });
         const guard = createWebhookRedeliverGuard(engine as any, 'sys_webhook', new DeclaredWebhookSource(engine, undefined));
         expect(await guard({ source: 'webhook', refId: declaredWebhookRefId('task_changed', A) }))
-            .toContain('(POST /api/v1/security/_activation/webhook/alpha/task_changed with { "enabled": true })');
+            .toContain(`(POST /api/v1/security/_activation/webhook/task_changed?package=${A} with { "enabled": true })`);
+    });
+
+    // [#33263] Two co-owners of one namespace: the namespace address refuses
+    // both (`catalog-activation-door.test.ts`), so each remedy names the
+    // holder's own exact address, never the shared namespace's.
+    it('two co-owners of one namespace: the name guard names each holder\'s exact address, the redelivery veto its slot\'s', async () => {
+        const registry = new SchemaRegistry();
+        registry.logLevel = 'silent';
+        for (const id of [A, B]) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: 'shared' } as never, 'code',
+                undefined, { packageIds: [A, B] });
+            registry.registerItem('webhook', { ...(id === A ? ALPHA : BETA) }, 'name' as never, id);
+        }
+        const hooks: Record<string, (ctx: any) => Promise<void>> = {};
+        bindDeclaredWebhookNameGuard({ registerHook: (event, handler) => { hooks[event] = handler; } },
+            new DeclaredWebhookSource(engineOver(registry), undefined));
+        const conflict = await hooks.beforeInsert({ input: { data: { name: 'task_changed' } }, session: {} })
+            .then(() => undefined, (e: unknown) => (e as Error).message);
+        expect(conflict).toContain(`POST /api/v1/security/_activation/webhook/task_changed?package=${A}, `
+            + `POST /api/v1/security/_activation/webhook/task_changed?package=${B}, each with`);
+        expect(conflict).not.toContain('/shared/');
+
+        const engine = engineOver(registry, { rows: { [LEDGER]: [slotRow(B, false)] } });
+        const verdict = await createWebhookRedeliverGuard(engine as any, 'sys_webhook', new DeclaredWebhookSource(engine, undefined))(
+            { source: 'webhook', refId: declaredWebhookRefId('task_changed', B) });
+        expect(verdict).toContain(`(POST /api/v1/security/_activation/webhook/task_changed?package=${B} with { "enabled": true })`);
+        expect(verdict).not.toContain('/shared/');
     });
 
     it('CONTROL — the environment\'s own declaration keeps the bare address in both remedies', async () => {
@@ -1025,5 +1108,89 @@ describe('declared webhooks — one declaration per (package, name) slot (ADR-01
         expect(await hooks.beforeInsert({ input: { data: { name: 'task_changed' } }, session: {} })
             .then(() => undefined, (e: unknown) => (e as Error).message))
             .toContain('switch the declared one off (POST /api/v1/security/_activation/webhook/task_changed with { "enabled": false })');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// 5. A name the metadata service lists for the environment beside a package —
+//    refused WHOLE, said so at every reader (ADR-0150 D3, #33263)
+// ---------------------------------------------------------------------------
+
+/**
+ * On a host whose registry holds no webhook, the metadata service lists the
+ * environment's own declaration beside a package's of the same name. Nothing
+ * says whether the environment's is that package's customization or a webhook
+ * of its own, so the name is refused whole: neither is dispatched, and no
+ * address switches either. BASE: the bare refusal said "address it by its
+ * package", the door's `?package=` then answered 404 "no enabled package
+ * declares the name", the name guard named a namespace placeholder and the
+ * redelivery veto said the package was disabled. Each now says the one true
+ * thing and names both holders.
+ */
+describe('declared webhooks — a name the metadata service lists for the environment beside a package (ADR-0150 D3, #33263)', () => {
+    const PKG = 'com.acme.alpha';
+    const T = 'task_changed';
+    const listing = (...items: any[]) => ({ list: (type: string) => (type === 'webhook' ? items : []) });
+    const envBesidePackage = () => new DeclaredWebhookSource(
+        newEngine(),
+        listing(declaredWebhook({ url: 'https://hooks.example/env' }), { ...declaredWebhook({ url: 'https://hooks.example/pkg' }), _packageId: PKG }),
+    );
+    const refusalOf = async (source: DeclaredWebhookSource) =>
+        (await source.declaredWebhookNamed(T).then(() => undefined, (e: unknown) => e) as DeclaredWebhookAmbiguousError).refusal;
+
+    it('[FROM "address it by its package" TO "no address switches one"] the bare refusal names both holders and says neither is dispatched', async () => {
+        const source = envBesidePackage();
+        expect(await source.list()).toEqual([]);
+        const refusal = await refusalOf(source);
+        expect(refusal.candidates).toEqual([{ kind: 'environment' }, { kind: 'package', packageId: PKG }]);
+        expect(refusal.message).toContain('the environment (an item authored in this environment, bound to no package)');
+        expect(refusal.message).toContain(`package "${PKG}"`);
+        expect(refusal.message).toContain('No declaration of it is dispatched, and no address switches one');
+        expect(refusal.message).not.toContain('address it by its package');
+        expect(await wholeNameRefusal(source, T)).toEqual(refusal);
+    });
+
+    it('CONTROL — two packages the metadata service lists once each are served: the bare refusal sends the caller to each package, and no whole refusal stands', async () => {
+        const source = new DeclaredWebhookSource(newEngine(), listing(
+            { ...declaredWebhook(), _packageId: PKG }, { ...declaredWebhook(), _packageId: 'com.acme.beta' },
+        ));
+        expect((await source.list()).map((d) => d.packageId)).toEqual([PKG, 'com.acme.beta']);
+        expect((await refusalOf(source)).message).toContain('address it by its package');
+        expect(await wholeNameRefusal(source, T)).toBeUndefined();
+        expect(await wholeNameRefusal(source, 'not_declared')).toBeUndefined();
+    });
+
+    it('CONTROL — one holder listing the name twice is refused whole, saying so', async () => {
+        const source = new DeclaredWebhookSource(newEngine(), listing({ ...declaredWebhook(), _packageId: PKG }, { ...declaredWebhook(), _packageId: PKG }));
+        const refusal = await refusalOf(source);
+        expect(refusal.message).toContain('A holder that lists the name twice holds two declarations for one slot');
+        expect(refusal.message).not.toContain("the environment's own declaration");
+    });
+
+    it('[FROM namespace placeholder TO the refusal] the name guard refuses the name, saying none is dispatched and naming both holders', async () => {
+        const hooks: Record<string, (ctx: any) => Promise<void>> = {};
+        bindDeclaredWebhookNameGuard({ registerHook: (event, handler) => { hooks[event] = handler; } }, envBesidePackage());
+        const err = await hooks.beforeInsert({ input: { data: { name: T } }, session: {} }).then(() => undefined, (e: unknown) => e);
+        expect(err).toBeInstanceOf(DeclaredWebhookNameConflictError);
+        expect(err).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+        const message = (err as Error).message;
+        expect(message).toContain(`No declaration of '${T}' is dispatched, so none needs switching off`);
+        expect(message).toContain(`package "${PKG}"`);
+        expect(message).not.toContain('switch the declared');
+        expect(message).not.toContain('namespace>');
+    });
+
+    it('[FROM "the package is disabled" TO the refusal] a delivery naming the package is refused with the refusal, never as a disable', async () => {
+        const engine = newEngine();
+        const source = new DeclaredWebhookSource(engine, listing(declaredWebhook(), { ...declaredWebhook(), _packageId: PKG }));
+        const guard = createWebhookRedeliverGuard(engine as any, 'sys_webhook', source);
+        const verdict = await guard({ source: 'webhook', refId: declaredWebhookRefId(T, PKG) });
+        expect(verdict).toContain(`declared webhook '${T}' is not served, so this delivery is refused`);
+        expect(verdict).toContain('No declaration of it is dispatched');
+        expect(verdict).not.toMatch(/disabled/);
+        // The environment's own reference names no package: the ambiguity, naming both.
+        const bare = await guard({ source: 'webhook', refId: declaredWebhookRefId(T) });
+        expect(bare).toMatch(/names no package/);
+        expect(bare).toContain(`package "${PKG}"`);
     });
 });

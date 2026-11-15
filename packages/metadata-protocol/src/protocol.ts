@@ -613,7 +613,7 @@ import { ProtocolWriteGatesFacet } from './protocol-write-gates.js';
 // [#29985 codemod] The static tables of the facet above: the class's fields read them (#30147).
 import { ProtocolWriteGatesTables } from './protocol-write-gates-tables.js';
 // [#29985 codemod] Registry hydration, view expansion, write-through, object storage: the members below delegate to its facet, `ProtocolRegistryHydrationFacet`.
-import { ProtocolRegistryHydrationFacet } from './protocol-registry-hydration.js';
+import { ProtocolRegistryHydrationFacet, type ObjectRegistryRefusal } from './protocol-registry-hydration.js';
 import type { HealPackageBinding } from './protocol-heal-binding.js';
 // [#29985 codemod] Save refusals, saveMetaItem, saveConflict, migrateStoredMetadata: the members below delegate to its facet, `ProtocolSaveFacet`.
 import { ProtocolSaveFacet } from './protocol-save.js';
@@ -1753,6 +1753,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private runAuthoringGate(evt: {
         type: string; name: string; state: 'draft' | 'active'; body: unknown;
+        userTextLocales?: readonly (string | undefined)[];
     }): Promise<void> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
         const readAuthoringGates = () => this.authoringGates;
@@ -1846,6 +1847,8 @@ export class ObjectStackProtocolImplementation implements
          * round trip for a secret it still holds.
          */
         restoredCredentialPaths?: () => Promise<readonly string[]>;
+        /** [#32656] The write request's `userTextLocales`, for the findings' `userMessage`. */
+        userTextLocales?: readonly (string | undefined)[];
     }): Promise<RuntimeAuthoringIssue[]> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
         const readAuthoringChannel = () => this.authoringChannel;
@@ -6895,7 +6898,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private uninstalledNamedBaseRefusal(
         request: { type: string; name: string; packageId?: string | null },
-        how: { verb?: 'save' | 'publish'; inherited?: boolean } = {},
+        how: { verb?: 'save' | 'publish' | 'rollback'; inherited?: boolean } = {},
     ): Error | null {
         // [#25467 cut 33] The body moved to `protocol-package-scope.ts` (see `PackageScopeHost`).
         const host: ThisParameterType<typeof uninstalledNamedBaseRefusal> = {
@@ -8029,7 +8032,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /** Docblock and body: {@link ProtocolRegistryHydrationFacet.applyObjectRegistryMutation} in `protocol-registry-hydration.ts` [#29985 codemod]. */
-    private async applyObjectRegistryMutation(request: { type: string; name: string; item?: any; packageId?: string | null }): Promise<void> {
+    private async applyObjectRegistryMutation(request: { type: string; name: string; item?: any; packageId?: string | null }): Promise<ObjectRegistryRefusal | undefined> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolRegistryHydrationFacet.applyObjectRegistryMutation(protocolHost(this), request);
     }
@@ -8396,7 +8399,7 @@ export class ObjectStackProtocolImplementation implements
          * {@link HydrationOptions}.
          */
         reboundFrom?: { readonly packageId: string | null };
-    }): Promise<void> {
+    }): Promise<ObjectRegistryRefusal | undefined> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolRegistryHydrationFacet.applyRegistryWriteThrough(protocolHost(this), request);
     }
@@ -9537,6 +9540,14 @@ export class ObjectStackProtocolImplementation implements
      * construction: `saveMetaItem` refuses them outright (#5086), and the one
      * write channel they retain — `deleteMetaItem`'s legacy raw-engine branch
      * on a control-plane kernel — appends no `sys_metadata_history` row.
+     *
+     * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
+     * name two row slots hold, or one the bare plain read refuses, is refused
+     * `409` naming every holder when no package is named, and `packageId`
+     * reads that holder's versions alone: its own, plus those attributed to
+     * no package or to the environment while it is the name's only slot
+     * (`protocol-history-slots.ts`). A name one holder holds reads as before.
+     * `packageId` on any other type is refused `400 VALIDATION_ERROR`.
      */
     async historyMetaItem(request: {
         type: string;
@@ -9545,6 +9556,8 @@ export class ObjectStackProtocolImplementation implements
         limit?: number;
         /** [#22877] The bundle member whose lineage to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string;
+        /** [ADR-0150 D3/D4, #32905] The package whose versions to read; omitted, the name's (refused for two holders). */
+        packageId?: string;
     }): Promise<{ events: import('@objectstack/metadata-core').MetadataEvent[] }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.historyMetaItem(protocolHost(this), request);
@@ -9715,6 +9728,8 @@ export class ObjectStackProtocolImplementation implements
          * all address it, so the body judged is the body that goes live.
          */
         member?: string;
+        /** [#32656] The write request's `userTextLocales`, for the findings' `userMessage`. */
+        userTextLocales?: readonly (string | undefined)[];
         /** The registry question this promotion asks (`registry-question.ts`). */
         registryQuestion: RegistryQuestion;
         /** [#32396] Judge every refusal, write nothing: the answer then carries no `result`. */
@@ -9757,6 +9772,7 @@ export class ObjectStackProtocolImplementation implements
         materializeApplied?: PublishMaterializeResult;
         projectionApplied?: MutationProjectionOutcome;
         storageRefused?: RuntimeAuthoringIssue;
+        registryRefused?: RuntimeAuthoringIssue;
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.runPublishSideEffects(protocolHost(this), args);
@@ -10033,6 +10049,8 @@ export class ObjectStackProtocolImplementation implements
         message?: string;
         /** ADR-0067 — AI model that authored the turn (absent for human/CLI). */
         aiModel?: string;
+        /** [#32656] The locales the door states for the findings' user sentences (stated by the door, never read from the body; see `SaveMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly (string | undefined)[];
         /**
          * [#24253] Opt-in: fields THIS publish adds whose literal
          * `defaultValue` is written into the object's existing rows once the
@@ -10921,9 +10939,22 @@ export class ObjectStackProtocolImplementation implements
      * 409 (`VERSION_NOT_RESTORABLE`) when the target is a delete
      * tombstone (no body to bring back).
      *
-     * [#29848, ADR-0146 D8 item 2] The door names no package: it restores
-     * into the row the by-name read naming no package serves, a `.custom`
-     * pair's declared override over a row bound to its read-only base.
+     * [#29848, ADR-0146 D8 item 2] Naming no package, it restores into the
+     * row the by-name read naming no package serves, a `.custom` pair's
+     * declared override over a row bound to its read-only base.
+     *
+     * [ADR-0150 D3/D4, #32905] For a type stored per `(package, name)`, a
+     * name two row slots hold is refused `409` naming every holder when no
+     * package is named, with nothing written (so is a name the bare plain
+     * read refuses); `packageId` restores into that holder's row (its own,
+     * its pair's declared override, or the package-less row its read falls
+     * back to), and the version must be that holder's: another holder's, or
+     * one attributed to no package or to the environment while another slot
+     * holds the name, answers 404 `VERSION_NOT_FOUND`. A name one holder
+     * holds, named bare, restores any of its versions as before.
+     * `packageId` on any other type is refused `400 VALIDATION_ERROR`, and
+     * one naming no installed package where no row is stored is refused
+     * `422 WRITABLE_PACKAGE_REQUIRED` (`protocol-history-slots.ts`).
      *
      * [#32700] Then, as the save door does: the restored object's storage is
      * synced, and every stored computed field the restore makes compute
@@ -11028,6 +11059,14 @@ export class ObjectStackProtocolImplementation implements
      * next read falls through to the artifact-loaded default. Implements the
      * "Reset to factory default" semantic from ADR-0005. Whitelist is shared
      * with {@link saveMetaItem}.
+     *
+     * [#32958] A removal that hands an object back the definition beneath it
+     * (an `object_extension` that re-declared a stored computed field) fills
+     * every stored computed field it made compute something new over the
+     * object's existing rows, as
+     * the save door does (`protocol-stored-expression-fill.ts`), each reported
+     * on `advisories`, omitted when empty. An unfinished fill never fails the
+     * delete.
      */
     async deleteMetaItem(request: DeleteMetaItemRequest): Promise<{
         success: boolean;
@@ -11036,6 +11075,8 @@ export class ObjectStackProtocolImplementation implements
         seq?: number;
         /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
         projectionApplied?: MutationProjectionOutcome;
+        /** [#32958] The stored-expression fill of the object the removal changed; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-diff-delete-load.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolDiffDeleteLoadFacet.deleteMetaItem(protocolHost(this), request);
@@ -11049,6 +11090,8 @@ export class ObjectStackProtocolImplementation implements
         seq?: number;
         /** [ADR-0094] Outcome of the awaited mutation projector, when one is registered. */
         projectionApplied?: MutationProjectionOutcome;
+        /** [#32958] The stored-expression fill of the object the removal changed; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-diff-delete-load.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolDiffDeleteLoadFacet.deleteMetaItemUnaudited(protocolHost(this), request);

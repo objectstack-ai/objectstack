@@ -548,8 +548,17 @@ class ObjectPass {
 
   private async writeCheckpoint(chainKey: string, chain: ChainLeaves, start: number, kind: AuditCheckpointKind, watermark: number): Promise<void> {
     const { engine, crypto } = this.options;
-    const ordered = [...chain.leaves].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const head = await this.headOf(chainKey);
+    let leaves = chain.leaves;
+    if (kind === 'late') {
+      // N1: the window's checkpoints, re-read once this chain's head is known: a row another sealer listed
+      // since this pass read the window's lists is not sealed twice. One stored after the head was known
+      // takes a sequence at or past this one, so the unique index refuses whichever insert comes second.
+      const listed = await this.listedIn(start);
+      leaves = leaves.filter((leaf) => !listed.has(leaf.id));
+      if (leaves.length === 0) return;
+    }
+    const ordered = [...leaves].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const sequence = head ? head.sequence + 1 : 0;
     // Q6: an over-long coordinate is refused here, before anything is encrypted or written.
     const context = checkpointSeedContext(this.plan.name, chain.tenantId, sequence);
@@ -601,6 +610,9 @@ class ObjectPass {
       // never be recomputed. Unstored, the seed is an orphan for `os secret orphans`.
       const stored = await this.storedCheckpoint(chainKey, { sequence }).catch(() => undefined);
       if (stored?.seed_handle !== handle.id) {
+        // N2: another checkpoint holds this sequence, so the unique index proves this seed can never be
+        // stored: it is dropped. With no row read back, whether this insert stored is unknown, and it is kept.
+        if (stored !== undefined) await dropAuditSealSecret(engine, handle.id);
         this.heads.delete(chainKey);
         throw err;
       }
@@ -611,6 +623,14 @@ class ObjectPass {
     this.heads.set(chainKey, { sequence, digest: checkpointDigest(body) });
     this.written += 1;
     await this.deliver(body, keyId, signature);
+  }
+
+  /** The row ids the stored checkpoints of window `start` list, every chain's, as read now. */
+  private async listedIn(start: number): Promise<Set<string>> {
+    const rows = await this.checkpoints.find(AUDIT_CHECKPOINT_OBJECT, {
+      where: { sealed_object: this.plan.name, window_start: { $gte: iso(start), $lt: iso(start + AUDIT_SEAL_WINDOW_MS) } },
+    });
+    return new Set(rows.flatMap((r) => checkpointBodyFromRow(r).row_ids));
   }
 
   /** This chain's stored checkpoint matching `where`, if any. */

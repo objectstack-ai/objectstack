@@ -39,6 +39,8 @@ import {
     META_ITEM_DIFF_PARAMS,
     META_ITEM_PUBLISHED_PARAMS,
 } from './rest-server.js';
+// Paid at collection, not inside a clocked case (check-test-source-alias).
+import '@objectstack/objectql';
 import { unknownQueryParamMessage } from './query-allowlist.js';
 
 const META = '/api/v1/meta';
@@ -184,6 +186,8 @@ describe('[#23072] PRESERVATION — every name each door reads still reaches its
         expect(protocol.saveMetaItem.mock.calls[0][0]).toEqual({
             type: 'email_template', name: 'acme.welcome', item: EN, writeFace: 'meta-envelope',
             mode: 'draft', actor: 'u1', force: true, packageId: 'com.acme.mail',
+            // [#32656] Server-stated off the caller's context, never read from the wire.
+            userTextLocales: [],
         });
     });
 

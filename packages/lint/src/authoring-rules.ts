@@ -160,6 +160,8 @@ import { lintViewRefs } from './lint-view-refs.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
 import { validateEmailTemplateHoleGrammar } from './validate-email-template-hole-grammar.js';
+import { validateEmailTemplateDefaultArguments } from './validate-email-template-default-arguments.js';
+import { validateNotifyTemplateVariables } from './validate-notify-template-variables.js';
 import { validateCustomizationNamespace } from './validate-customization-namespace.js';
 import {
   lintUniqueDeclarations,
@@ -838,6 +840,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // extension draft is refused, because that batch's pending set carries no
     // extension drafts (#33152); publishing the extension first through the
     // per-item door works.
+    //
+    // [#33154] The same walk judges each `validations[]` rule the written
+    // extension adds, by the object walk's own rule pass, so a rule the
+    // registry merges onto the target is refused at this door and in the
+    // build alike (`object 'TARGET' · objectExtensions[0] · validation 'N'`).
+    // MEASURED first: 0 first-party `objectExtensions` entries carry a
+    // validation rule (examples/**, packages/**, HotCRM).
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page', 'object_extension'],
     run: (stack, ctx) =>
@@ -2725,8 +2734,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // The load it does take (~64 ms cold once, ~15 ms warm per publish
     // carrying such a rule) is the measured, adjudicated price of refusing a
     // validation rule that would otherwise ship compiled-by-nothing.
+    //
+    // [#33217] `object_extension` joins: the walk reads the `validations[]`
+    // an extension adds (the registry merges them onto the target, and every
+    // save runs them), so a regex or schema the build refuses on an extension
+    // is refused at that publish door too, same rule id, located at the entry
+    // (`object 'TARGET' · objectExtensions[0] · validation 'N'`). The target's
+    // own rules the door's live objects carry are judged in the baseline as
+    // well, so the differential charges the write with its entry's alone.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['object'],
+    runtimeTypes: ['object', 'object_extension'],
     run: (stack) => validateRuleCompilability(stack),
   },
   // #5178 — the residual half of #5029, which registering `ajv-formats` does
@@ -2751,8 +2768,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // the two judgements over one artifact stay on one side of the wall
     // (#7220's family discipline). Same lazy-ajv contract: the registered
     // format set is only enumerated once a schema actually names a format.
+    // [#33217] And it crosses on `object_extension` with its sibling, for the
+    // same reason: the shared walk reads the rules an extension adds.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['object'],
+    runtimeTypes: ['object', 'object_extension'],
     run: (stack) => validateRuleSchemaFormats(stack),
   },
   // [#25189] The email half of #25082 (ruling `6335348115`, F1 A2): a hole an
@@ -2829,6 +2848,39 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         liveUniverse: ctx.runtimeWriteType !== undefined,
         ...(ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
       }),
+  },
+  // Ruling record 6845318122 (letter B): a template default is literal text,
+  // and there is no syntax that falls back to another variable. A hole whose
+  // unquoted `default` argument reads like a variable path
+  // (`{{ person_name | default:first_name }}`) prints that text to the
+  // recipient, so it is advised at every door the hole grammar runs at — the
+  // publish door included, where it rides the save response as an advisory.
+  // Advisory: the hole renders as the grammar defines, and quoting the
+  // argument says the literal is meant.
+  {
+    name: 'validateEmailTemplateDefaultArguments',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-email-template-default-arguments.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['email_template'],
+    run: (stack) => validateEmailTemplateDefaultArguments(stack),
+  },
+  // Ruling record 6845318122 (letter B): a `notify` node that sends an email
+  // template without a variable the template declares `required` — every such
+  // send fails with MISSING_VARIABLES — is advised at validation. Advisory,
+  // not gating: a host may supply the variable through a default template
+  // context the stack does not state (the rule's module note).
+  {
+    name: 'validateNotifyTemplateVariables',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-notify-template-variables.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateNotifyTemplateVariables(stack),
   },
   // [#28473] ADR-0146 D3: a package whose `manifest.namespace` is too long to
   // have a paired customization namespace (`customizationNamespace` answers

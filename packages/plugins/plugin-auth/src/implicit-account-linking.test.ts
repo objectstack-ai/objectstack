@@ -720,3 +720,89 @@ describe('implicit link on external sign-in, end to end', () => {
     expect(refused.searchParams.get('error')).toBe(IMPLICIT_LINK_REFUSED);
   });
 });
+
+// ── Direct sign-in's round trip (`direct-sign-in.ts`) ───────────────────────
+//
+// The door's whole journey on this file's stubbed identity provider and engine:
+// the start answers 302 to the platform identity provider, its callback lands
+// on the kept path with a session, and a refused sign-in lands on the sign-in
+// page with `error` — never back on the kept path, which would start again.
+
+describe('direct sign-in: start → identity provider → callback', () => {
+  const KEPT = '/_console/login?redirect=%2Fapps%2Fcrm&direct=returned';
+
+  const start = async (manager: AuthManager, callbackURL: string) => {
+    const res = await manager.startDirectSignIn(
+      new Request(`${BASE}/api/v1/auth/sign-in/direct?callbackURL=${encodeURIComponent(callbackURL)}`),
+    );
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get('location')!);
+    expect(`${location.origin}${location.pathname}`).toBe(`${IDP}/${PLATFORM_IDP_PROVIDER_ID}/authorize`);
+    const state = location.searchParams.get('state');
+    expect(state).toBeTruthy();
+    return { state: state!, cookies: cookiesFrom(res) };
+  };
+
+  const callback = (manager: AuthManager, query: string, cookies: string[]) =>
+    manager.handleRequest(
+      new Request(`${BASE}/api/v1/auth/callback/${PLATFORM_IDP_PROVIDER_ID}?${query}`, {
+        headers: { cookie: joinCookies(cookies) },
+      }),
+    );
+
+  it('lands on the kept path, signed in', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine, { directSignIn: { provider: PLATFORM_IDP_PROVIDER_ID } });
+    const email = 'direct@example.test';
+    idpProfile[PLATFORM_IDP_PROVIDER_ID] = { sub: 'cloud-direct-1', email, email_verified: true };
+
+    const begun = await start(manager, KEPT);
+    const landed = await callback(manager, `code=code-1&state=${encodeURIComponent(begun.state)}`, begun.cookies);
+    expect(landed.status).toBe(302);
+    expect(landed.headers.get('location')).toBe(`${BASE}${KEPT}`);
+    const session = cookiesFrom(landed).find((c) => c.includes('session_token'));
+    expect(session).toBeTruthy();
+    expect(accountsOf(engine, userRow(engine, email).id, PLATFORM_IDP_PROVIDER_ID)).toHaveLength(1);
+  });
+
+  it.each(['https://evil.example/x', '//evil.example', '/\\evil.example', '/%5cevil.example', '/%2f%2fevil.example'])(
+    'a foreign return path %j lands on the Console root, never on it',
+    async (foreign) => {
+      const engine = createMemoryEngine();
+      const manager = makeManager(engine, { directSignIn: { provider: PLATFORM_IDP_PROVIDER_ID } });
+      idpProfile[PLATFORM_IDP_PROVIDER_ID] = { sub: 'cloud-direct-2', email: 'foreign@example.test', email_verified: true };
+      const begun = await start(manager, foreign);
+      const landed = await callback(manager, `code=code-1&state=${encodeURIComponent(begun.state)}`, begun.cookies);
+      expect(landed.status).toBe(302);
+      expect(landed.headers.get('location')).toBe(`${BASE}/_console/`);
+    },
+  );
+
+  it('an identity-provider error lands on the sign-in page with error, not on the kept path', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine, { directSignIn: { provider: PLATFORM_IDP_PROVIDER_ID } });
+    const begun = await start(manager, KEPT);
+    const landed = await callback(
+      manager,
+      `error=access_denied&error_description=denied&state=${encodeURIComponent(begun.state)}`,
+      begun.cookies,
+    );
+    expect(landed.status).toBe(302);
+    const location = new URL(landed.headers.get('location')!);
+    expect(`${location.origin}${location.pathname}`).toBe(`${BASE}/_console/login`);
+    expect(location.searchParams.get('error')).toBeTruthy();
+    expect(location.searchParams.get('direct')).toBeNull();
+  });
+
+  it('a sign-in the provider cannot complete (no profile) lands on the sign-in page with error', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine, { directSignIn: { provider: PLATFORM_IDP_PROVIDER_ID } });
+    // No `idpProfile` entry: the stubbed userinfo answers 401.
+    const begun = await start(manager, KEPT);
+    const landed = await callback(manager, `code=code-1&state=${encodeURIComponent(begun.state)}`, begun.cookies);
+    expect(landed.status).toBe(302);
+    const location = new URL(landed.headers.get('location')!);
+    expect(`${location.origin}${location.pathname}`).toBe(`${BASE}/_console/login`);
+    expect(location.searchParams.get('error')).toBeTruthy();
+  });
+});

@@ -20,7 +20,9 @@
  * `everyone` definition names it; an external member and an agent principal
  * gain nothing; a contribution naming another package's object is refused on
  * the real registry; the window is closed once the kernel has bootstrapped;
- * and a deployment declaring no member baseline hands the set to no one.
+ * a deployment declaring no member baseline hands the set to no one; and a
+ * host's `platformBaselineOverrides` (#33132) keeps the set at read, so a
+ * member's create is refused while the read still serves.
  * Each refusal rule on its own: `platform-baseline-sets.test.ts`.
  */
 
@@ -34,6 +36,7 @@ import type { ISecurityService, PlatformBaselineSetContribution } from '@objects
 import { mapDataError } from '@objectstack/types';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
+import type { PlatformBaselineOverrides } from './platform-baseline-sets.js';
 
 /** The platform service's package id, and the object it registers. */
 /** The members this suite drives, each one the plugin serves. */
@@ -137,7 +140,12 @@ function servicePlugin(outcomes: Record<string, Outcome>): Plugin {
   };
 }
 
-async function boot(fallbackPermissionSet: string | null, outcomes: Record<string, Outcome>, logs?: BootLogs): Promise<ObjectKernel> {
+async function boot(
+  fallbackPermissionSet: string | null,
+  outcomes: Record<string, Outcome>,
+  logs?: BootLogs,
+  platformBaselineOverrides?: PlatformBaselineOverrides,
+): Promise<ObjectKernel> {
   const kernel = new ObjectKernel({ logger: { level: 'silent' } });
   // Every plugin context logs through the kernel's one logger: the calls are
   // the record, whatever level the logger then prints at.
@@ -149,7 +157,9 @@ async function boot(fallbackPermissionSet: string | null, outcomes: Record<strin
   await kernel.use(sqliteDriverPlugin());
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(appPlugin());
-  await kernel.use(new SecurityPlugin({ defaultPermissionSets: [...defaultPermissionSets, APP_SET], fallbackPermissionSet }));
+  await kernel.use(
+    new SecurityPlugin({ defaultPermissionSets: [...defaultPermissionSets, APP_SET], fallbackPermissionSet, platformBaselineOverrides }),
+  );
   await kernel.use(servicePlugin(outcomes));
   await kernel.bootstrap();
   return kernel;
@@ -320,5 +330,67 @@ describe('a deployment that declares no member baseline (fallbackPermissionSet: 
     expect(admitted).toHaveLength(1);
     expect(admitted[0][0]).toContain('registered, and handed to no one: this deployment declares no member baseline');
     expect(admitted[0][1]).toEqual({ contributor: SERVICE, set: SERVICE_SET.name, joined: false });
+  });
+});
+
+describe('#33132 — a host keeps a contributed set at read through platformBaselineOverrides', () => {
+  let kernel: ObjectKernel;
+  let ql: ObjectQL;
+  let security: SecurityService;
+  const outcomes: Record<string, Outcome> = {};
+  const logs: BootLogs = { info: [], warn: [] };
+  let alice: Ctx;
+
+  beforeAll(async () => {
+    kernel = await boot(APP_SET.name, outcomes, logs, {
+      [SERVICE_SET.name]: { [NOTE]: 'read' },
+      // Names a set no service contributes: it withholds nothing and is said.
+      pbs_renamed_member: { [NOTE]: 'decline' },
+    });
+    ql = kernel.getService<ObjectQL>('objectql');
+    security = kernel.getService<SecurityService>('security');
+    await seedPeople(ql);
+    alice = await contextOf(ql, ALICE);
+  }, 120_000);
+
+  afterAll(async () => {
+    if (kernel) await Promise.race([kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+  }, 30_000);
+
+  it('the set still joins the baseline, and a member still reads the object', async () => {
+    expect(outcomes.own).toEqual({ joined: true });
+    const rows = (await ql.find(NOTE, { context: alice } as never)) as Array<Record<string, unknown>>;
+    expect(rows.map((r) => r.name)).toContain('seeded note');
+  });
+
+  it('a member\'s create is refused 403, and the explainer says the create is not allowed', async () => {
+    expect(await refusal(() => ql.insert(NOTE, { name: 'alice wrote this' }, { context: alice } as never), NOTE))
+      .toMatchObject({ status: 403 });
+    const decision = await security.explain({ object: NOTE, operation: 'create' }, alice);
+    expect(decision.allowed).toBe(false);
+  });
+
+  it('the catalog holds the narrowed body: read on, create off', () => {
+    const item = (ql as any).registry.getItem('permission', SERVICE_SET.name);
+    expect(item?.objects?.[NOTE]).toMatchObject({ allowRead: true, allowCreate: false });
+  });
+
+  it('the admission line says what the host narrowed', () => {
+    const admitted = logs.info.filter(([m]) => String(m).startsWith(`[security] platform baseline set '${SERVICE_SET.name}'`));
+    expect(admitted).toHaveLength(1);
+    expect(admitted[0][0]).toBe(
+      `[security] platform baseline set '${SERVICE_SET.name}' from '${SERVICE}': ${NOTE} (read) — ` +
+        'joined the member baseline every signed-in member holds through the everyone anchor.' +
+        ` The host's platformBaselineOverrides narrowed it: ${NOTE}: kept at read.`,
+    );
+    expect(admitted[0][1]).toEqual({ contributor: SERVICE, set: SERVICE_SET.name, joined: true, overridden: [`${NOTE}: kept at read`] });
+  });
+
+  it('an override no contribution matched is warned once the kernel has bootstrapped', () => {
+    const unmatched = logs.warn.filter(([m]) => String(m).includes('[security] platformBaselineOverrides names'));
+    expect(unmatched).toHaveLength(1);
+    expect(unmatched[0][0]).toContain(`'pbs_renamed_member.${NOTE}'`);
+    expect(unmatched[0][0]).toContain('withheld nothing');
+    expect(unmatched[0][1]).toEqual({ override: `pbs_renamed_member.${NOTE}` });
   });
 });

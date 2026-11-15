@@ -341,3 +341,143 @@ describe('a stored row of a two-holder name at boot, beyond the webhook (#32692)
         expect((registry.getPackageScopedItem('tool', N, A) as { label?: string } | undefined)?.label).toBe('row:alpha-custom');
     });
 });
+
+/**
+ * [#33127] Two holders of a name, each with its own stored row. Before this
+ * change the registry kept ONE bare slot per name for a stored row, so the row
+ * hydrated last took it: the other holder's slot and exact read answered its
+ * shipped item, which holder by row order. Each row bound to a
+ * holder now lives in that holder's own overlay slot, beside the holder's
+ * code artifact, so every order answers the same. The read naming no package
+ * still refuses 409 naming both holders (#32607). Every registration order,
+ * every row order.
+ */
+describe('[#33127] two holders, each with its own stored row: each row is its own holder\'s, in every order', () => {
+    const N = 'shared_thing';
+    const TYPES = ['tool', 'webhook', 'agent', 'skill'] as const;
+    const nsOf = (id: string) => id.split('.').pop()!;
+    const body = (type: string, label: string) => type === 'webhook'
+        ? { name: N, label, object: 'showcase_task', triggers: ['create'], url: `https://hooks.example/${label}` }
+        : { name: N, label, description: label };
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined); });
+    afterEach(() => { warn.mockRestore(); });
+
+    /** Boot `type` with `order` each shipping the name, then a stored row of each of `rowOwners`, in that order. */
+    async function boot(type: string, order: readonly string[], rowOwners: readonly string[]) {
+        const registry = new SchemaRegistry();
+        registry.logLevel = 'silent';
+        for (const id of order) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: nsOf(id) } as never, 'code');
+            registry.registerItem(type, body(type, `shipped-${nsOf(id)}`), 'name' as never, id);
+        }
+        const stored = rowOwners.map((id, i) => ({
+            id: `row_${i}`, type, name: N, organization_id: null, package_id: id, state: 'active', metadata: JSON.stringify(body(type, `row-${nsOf(id)}`)),
+        }));
+        const engine: any = {
+            async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
+                if (table !== 'sys_metadata') return [];
+                const where = opts?.where ?? {};
+                const found = stored.filter((r) => Object.entries(where).every(([k, v]) => v === undefined || typeof v === 'object' || (r as any)[k] === v));
+                return typeof opts?.limit === 'number' ? found.slice(0, opts.limit) : found;
+            },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                assertEngineFindOnePredicate(object, query);
+                return null;
+            },
+            registry,
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_prod');
+        const load = await protocol.loadMetaFromDb();
+        const slot = (id: string) => (registry.getPackageScopedItem(type, N, id) as { label?: string } | undefined)?.label;
+        const read = async (packageId?: string) => {
+            try {
+                return ((await protocol.getMetaItem({ type, name: N, ...(packageId ? { packageId } : {}) } as never)) as { item?: { label?: string } })?.item?.label;
+            } catch (e) {
+                const err = e as { code?: string; status?: number; refusal?: { candidates?: Array<{ packageId?: string }> } };
+                return { code: err.code, status: err.status, candidates: (err.refusal?.candidates ?? []).map((c) => c.packageId).sort() };
+            }
+        };
+        return { load, registry, slot, read };
+    }
+
+    for (const type of TYPES) {
+        for (const order of [[A, B], [B, A]] as const) {
+            for (const rowOwners of [[A, B], [B, A]] as const) {
+                it(`${type} (${nsOf(order[0])} registered first, ${nsOf(rowOwners[0])}'s row stored first): each holder's slot and exact read is its own row; the read naming no package refuses 409 naming both`, async () => {
+                    // FROM (measured on main): the row hydrated last took the
+                    // name's one bare slot, so only its holder answered its
+                    // row; the other holder's slot and exact read answered
+                    // its shipped item, which holder by row order.
+                    const { load, slot, read } = await boot(type, order, rowOwners);
+                    expect(load).toMatchObject({ loaded: 2, errors: 0 });
+                    expect([slot(A), slot(B)], 'the registry slots').toEqual(['row-alpha', 'row-beta']);
+                    expect([await read(A), await read(B)], 'the exact reads').toEqual(['row-alpha', 'row-beta']);
+                    expect(await read(), 'the read naming no package').toEqual({ code: 'RESOURCE_CONFLICT', status: 409, candidates: [A, B] });
+                });
+            }
+            it(`CONTROL — ${type} (${nsOf(order[0])} registered first): one holder's row leaves the other holder its shipped item, as before`, async () => {
+                const { slot, read } = await boot(type, order, [B]);
+                expect([slot(A), slot(B)]).toEqual(['shipped-alpha', 'row-beta']);
+                expect([await read(A), await read(B)]).toEqual(['shipped-alpha', 'row-beta']);
+            });
+        }
+        it(`CONTROL — ${type}, one holder: its own row is its slot, its exact read and its read naming no package, as before`, async () => {
+            const { slot, read } = await boot(type, [A], [A]);
+            expect([slot(A), await read(A), await read()]).toEqual(['row-alpha', 'row-alpha', 'row-alpha']);
+        });
+    }
+});
+
+/**
+ * [#32900] A module's locale member at boot: X ships `welcome` in en-US and
+ * depends on the App; the App's pair stores X's de-DE override (declaring X),
+ * and a package-less de-DE row of the same name is stored too. X's de-DE slot
+ * followed the row order (the package-less row took the one bare slot when it
+ * hydrated last). It now answers X's own pair row in both orders.
+ */
+describe('[#32900] a module\'s locale member beside a package-less row of the same locale at boot', () => {
+    const APP = 'com.acme.suite';
+    const X = 'com.acme.suitex';
+    const PAIR = `${APP}.custom`;
+    const tpl = (label: string, locale: string, extra: object = {}) => ({ name: 'welcome', label, subject: label, bodyHtml: label, locale, ...extra });
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined); });
+    afterEach(() => { warn.mockRestore(); });
+
+    async function boot(rowOrder: ReadonlyArray<'pair' | 'env'>) {
+        const registry = new SchemaRegistry();
+        registry.logLevel = 'silent';
+        registry.installPackage({ id: APP, name: APP, version: '1.0.0', type: 'app', namespace: 'suite' } as never, 'code');
+        registry.installPackage({ id: PAIR, name: PAIR, version: '1.0.0', type: 'app', namespace: 'suite_custom' } as never, 'code');
+        registry.installPackage({ id: X, name: X, version: '1.0.0', type: 'module', namespace: 'suitex', dependencies: { [APP]: '^1.0.0' } } as never, 'code');
+        registry.registerItem('email_template', tpl('suitex', 'en-US'), 'name' as never, X);
+        const rows: Record<string, unknown>[] = rowOrder.map((k, i) => k === 'pair'
+            ? { id: `r${i}`, type: 'email_template', name: 'welcome', bundle_member: 'de-DE', organization_id: null, package_id: PAIR, state: 'active', metadata: JSON.stringify(tpl('pair', 'de-DE', { overrides: { package: X } })) }
+            : { id: `r${i}`, type: 'email_template', name: 'welcome', bundle_member: 'de-DE', organization_id: null, package_id: null, state: 'active', metadata: JSON.stringify(tpl('env', 'de-DE')) });
+        const engine: any = {
+            async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
+                if (table !== 'sys_metadata') return [];
+                const found = rows.filter((r) => Object.entries(opts?.where ?? {}).every(([k, v]) => v === undefined || typeof v === 'object' || (r[k] ?? null) === v));
+                return typeof opts?.limit === 'number' ? found.slice(0, opts.limit) : found;
+            },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                assertEngineFindOnePredicate(object, query);
+                return null;
+            },
+            registry,
+        };
+        await new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_prod').loadMetaFromDb();
+        return (registry.getPackageScopedItem('email_template', 'welcome', X, 'de-DE') as { label?: string } | undefined)?.label ?? null;
+    }
+
+    for (const rowOrder of [['pair', 'env'], ['env', 'pair']] as const) {
+        it(`${rowOrder[0]} row stored first: X's de-DE slot is its own pair row`, async () => {
+            // FROM: the row hydrated last ('env' in the first order) answered X's slot.
+            expect(await boot(rowOrder)).toBe('pair');
+        });
+    }
+    it('CONTROL — the pair row alone and the package-less row alone keep their readings', async () => {
+        expect([await boot(['pair']), await boot(['env'])]).toEqual(['pair', 'env']);
+    });
+});

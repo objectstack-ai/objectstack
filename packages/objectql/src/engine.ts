@@ -761,13 +761,16 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Look up a registered function by name, with no package: the last
-   * registration of the name. [ADR-0150 D3/D4, #31700; epic seat ruling R2-C]
-   * A name two packages hold (two namespaces may each bind one) is refused,
-   * `409 RESOURCE_CONFLICT` naming every holder, never answered with one of
-   * them; a reader that knows its package resolves through
-   * {@link functionHoldersOf}.
+   * registration of the name. [ADR-0150 D3/D4, #31700, #32907; epic seat
+   * ruling R2-C] A name two holders hold — two packages (two namespaces may
+   * each bind one), or the platform (an owner-less registration) beside a
+   * package — is refused, `409 RESOURCE_CONFLICT` naming every holder, never
+   * answered with one of them, whichever registered last. [#32933] A disabled
+   * package is counted as a holder and never answered: a name only a disabled
+   * package holds answers nothing. A reader that knows its package resolves
+   * through {@link functionHoldersOf}.
    *
-   * @throws {PackageScopedNameRefusedError} for a name two packages hold.
+   * @throws {PackageScopedNameRefusedError} for a name two holders hold.
    */
   resolveFunction(name: string): HookHandler | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
@@ -780,9 +783,10 @@ export class ObjectQL implements IObjectQLEngine {
    * it"; a caller that must also report what the call did (the automation
    * engine's `script` node, feeding the #4354 run summary) needs the
    * declaration, and reading it off the same registry keeps the two from
-   * drifting. Refused alike for a name two packages hold (above).
+   * drifting. Refused alike for a name two holders hold, and answers nothing
+   * alike for a name only a disabled package holds (above).
    *
-   * @throws {PackageScopedNameRefusedError} for a name two packages hold.
+   * @throws {PackageScopedNameRefusedError} for a name two holders hold.
    */
   resolveFunctionEntry(name: string): Readonly<FunctionEntry> | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
@@ -799,7 +803,7 @@ export class ObjectQL implements IObjectQLEngine {
    * `script` node resolves through it (#32073), and `bindHooksToEngine` reads
    * a hook's own package's entry from it. `resolveFunction` and
    * `resolveFunctionEntry` answer the one last-registered entry per name, and
-   * refuse a name two packages hold (#31700).
+   * refuse a name two holders hold (#31700, #32907).
    */
   functionHoldersOf(name: string): PackageScopedHolderSource<Readonly<FunctionEntry>> {
     // [#31716] The body lives in `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
@@ -4968,6 +4972,7 @@ export class ObjectQL implements IObjectQLEngine {
       update: (...a) => this.update(...a),
       recomputeSummaries: (...a) => this.recomputeSummaries(...a),
       publishDataEvent: (...a) => this.publishDataEvent(...a),
+      validationMessageContext: (...a) => this.validationMessageContext(...a),
     };
     return restoreRecycleBinEntry.call(host, entryId, options);
   }

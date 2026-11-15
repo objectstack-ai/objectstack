@@ -6,7 +6,9 @@
  * `publicSharing.redactFields`, `indexes[].fields` — and every field name one
  * of its FIELDS names in a field-level list (`relatedListColumns`,
  * `lookupColumns`, `lookupFilters[].field`, `dependsOn`, #20432) must name a
- * field the object that list addresses actually has.
+ * field the object that list addresses actually has; so must the title pointer
+ * (`nameField` / `displayNameField`) and each `activityMilestones[].field`
+ * (#33101).
  *
  * ## The state this rule ends, measured on `origin/main` (f01adfa5c)
  *
@@ -120,6 +122,36 @@
  *    second relation, and a field computed on read, each of which would fail
  *    every recompute the same way.
  *
+ * …and, since #33101, the object-level SCALAR pointers whose reader takes the
+ * name verbatim, under the #19332 ruling above (a misspelling is refused
+ * loudly at authoring). Each is a bare `z.string()` in `ObjectSchema`, and no
+ * other rule judged one for existence: `validateRecordTitle` reports only an
+ * object with NO title (`title-unresolvable`, `warning`, CLI only), and its
+ * shared predicate grades a pointer to a missing field `synthesized`, which it
+ * never reports; `validateSemanticRoles` skips a title pointer it cannot
+ * resolve. Measured on `origin/main` (24f2f401): both misses published.
+ *
+ *  - **`nameField` / `displayNameField`** — the record's title field
+ *    (ADR-0079; `displayNameField` is the deprecated alias the parse copies
+ *    onto `nameField` when that is absent). `resolveRecordDisplayName` reads
+ *    `record[pointer]` verbatim, so a name no record carries titles every
+ *    record `Record #<id>`, and `sys_activity.record_label` is the id. The
+ *    alias is judged where it says something `nameField` does not: when the
+ *    two carry the same name (the parse's copy, or an author who wrote both
+ *    alike) the miss is reported once, at `displayNameField`, the key the
+ *    author wrote.
+ *  - **`activityMilestones[].field`** (ADR-0052 §5b.2) — the field a
+ *    milestone watches. plugin-audit's `matchMilestone` reads
+ *    `after[field]` verbatim, so a name no record carries never transitions
+ *    and the milestone never fires.
+ *
+ * Both are judged like `indexes[].fields`: verbatim (a dotted name is one name
+ * no field carries) against the authored field map PLUS the registry-injected
+ * columns, because each reader is a record key and an injected column is one
+ * (`id`, `created_at`, `owner_id` on an owned object). That is the #5378
+ * false-finding trap the earlier deferral named, answered by the same
+ * per-object injection plan skip 3 uses, so a correct name is never refused.
+ *
  * ## Which object a field-level name addresses — measured on each reader
  *
  * Not always the object that owns the field, and a rule that assumed so would
@@ -169,11 +201,12 @@
  *    field-naming position inside a built-in list view. Re-measured: a
  *    dangling `listViews.all.columns` entry already reports
  *    `list-view-field-unknown`.
- *  - **`stageField` / `nameField` / `displayNameField`** — SCALAR pointers,
- *    not lists, and the first is `validateSemanticRoles`' at `warning` while
- *    the title pair is `validateRecordTitle`'s axis. Promoting a scalar role
- *    pointer to `error` is the same judgement one key over, but it is a
- *    separate decision with its own blast radius and it is left to one.
+ *  - **`stageField`** — a SCALAR role pointer, `validateSemanticRoles`' at
+ *    `warning`. Promoting it to `error` is the same judgement one key over,
+ *    but it is a separate decision with its own blast radius and it is left
+ *    to one. (The title pair sat here until #33101 moved it in, above:
+ *    `validateRecordTitle` asks whether an object HAS a title, never whether
+ *    its pointer resolves, so no rule owned that position.)
  *  - **Whether an index column is MATERIALIZED** — a name that resolves to a
  *    virtual field (a `formula`) is judged here as existing, and the driver
  *    still skips the index at sync. `indexes[].fields[]` used to sit in this
@@ -189,10 +222,11 @@
  *    materialization question stays with the sync (#20432 step 2, the
  *    driver's half).
  *  - **`tenancy.tenantField` / `tenancy.organizationField` /
- *    `lifecycle.ttl.field` / `activityMilestones[].field`** — scalars, and
- *    the first three habitually name REGISTRY-INJECTED columns
- *    (`organization_id`, `created_at`), which is the #5378 false-finding trap;
- *    they are judgeable, but each needs its own injected-column measurement.
+ *    `lifecycle.ttl.field`** — scalars that habitually name REGISTRY-INJECTED
+ *    columns (`organization_id`, `created_at`), which is the #5378
+ *    false-finding trap; they are judgeable, but each needs its own
+ *    injected-column measurement. (`activityMilestones[].field` sat here until
+ *    #33101 measured it in, above.)
  *  - **`external.columnMap` / `external.ignoreColumns` / `systemFields`** —
  *    by their schema these are REMOTE column names and system-column registry
  *    names, not names in this object's own field map. Out by definition, not
@@ -338,6 +372,23 @@ const INDEX_POSITION = {
   prescription:
     'Fix the column name. An index column is a field of this object, or a column the platform '
     + 'injects on it (`created_at`, `organization_id`, …), spelled exactly — never a dotted path.',
+} as const;
+
+/**
+ * [#33101] The object-level SCALAR pointers, each read verbatim as a record
+ * key by its reader (see the module note): judged like an index column,
+ * against the authored field map plus the injected columns. `displayNameField`
+ * is the deprecated alias of `nameField`; the walk reports a name the two
+ * share once, at the alias.
+ */
+const TITLE_POINTER_PRESCRIPTION =
+  'Fix the name — the record title is read from this field of the object, spelled exactly; '
+  + 'a name no record carries titles every record by its id.';
+
+const MILESTONE_POSITION = {
+  prescription:
+    'Fix `field` — a milestone watches a field of this object (or a column the platform injects '
+    + 'on it), spelled exactly; a name no record carries never fires.',
 } as const;
 
 /**
@@ -740,6 +791,44 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
         });
       });
     }
+
+    // ── nameField / displayNameField — the title pointer, verbatim (#33101) ──
+    // The parse copies the alias onto `nameField` when that is absent, so a
+    // name the two share is one miss: reported once, at the alias the author
+    // wrote, and `nameField` is judged only when it says something else.
+    const nameField = nameOf(obj.nameField);
+    const displayNameField = nameOf(obj.displayNameField);
+    for (const [key, name] of [
+      ['nameField', nameField !== displayNameField ? nameField : undefined],
+      ['displayNameField', displayNameField],
+    ] as const) {
+      if (!name) continue;
+      judge({
+        against: objName,
+        name,
+        verbatim: true,
+        subject: key,
+        where: `${label} › ${key}`,
+        path: `${objPath}.${key}`,
+        prescription: TITLE_POINTER_PRESCRIPTION,
+      });
+    }
+
+    // ── activityMilestones[i].field — the watched field, verbatim (#33101) ──
+    const milestones = Array.isArray(obj.activityMilestones) ? obj.activityMilestones : [];
+    milestones.forEach((milestone, mi) => {
+      const name = isRec(milestone) ? nameOf(milestone.field) : undefined;
+      if (!name) return;
+      judge({
+        against: objName,
+        name,
+        verbatim: true,
+        subject: `activityMilestones[${mi}].field`,
+        where: `${label} › activityMilestones`,
+        path: `${objPath}.activityMilestones[${mi}].field`,
+        prescription: MILESTONE_POSITION.prescription,
+      });
+    });
 
     // ── indexes[i].fields[j] — verbatim physical column names ──
     const indexes = Array.isArray(obj.indexes) ? obj.indexes : [];

@@ -1192,10 +1192,20 @@ function MetadataResourceEditPageImpl({
   // no error state, no banner and not even a `console.error`. The picker
   // rendered as a completed, empty list and told the operator "object_name (no
   // objects detected)". See {@link usePickerLoad}.
-  const objectsState = usePickerLoad<string[]>(
+  //
+  // Each entry keeps its authored label from the SAME response, so the picker
+  // can offer the label without a second list read; `objectNames` and
+  // `objectLabels` are both derived from this one state below.
+  const objectsState = usePickerLoad<Array<{ name: string; label?: string }>>(
     React.useCallback(async () => {
-      const list = (await client.list('object')) as Array<{ name?: string }>;
-      return list.map((x) => x?.name).filter((n): n is string => !!n).sort();
+      const list = (await client.list('object')) as Array<{ name?: string; label?: unknown }>;
+      return list
+        .filter((x): x is { name: string; label?: unknown } => !!x?.name)
+        .map((x) => ({
+          name: x.name,
+          ...(typeof x.label === 'string' && x.label.trim() ? { label: x.label } : {}),
+        }))
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     }, [client]),
   );
   // Field catalog of the draft's bound/source object — fuels field-picker
@@ -1327,7 +1337,11 @@ function MetadataResourceEditPageImpl({
       // — is the one that has to declare that it binds more. Derived per type
       // here for the reason the scope is: this page edits every metadata type.
       conditionRoots: conditionRootsForMetadataType(type),
-      objectNames: objectsState,
+      objectNames: mapLoaded(objectsState, (list) => list.map((o) => o.name)),
+      objectLabels:
+        objectsState.status === 'loaded'
+          ? new Map(objectsState.data.flatMap((o) => (o.label ? [[o.name, o.label] as const] : [])))
+          : undefined,
       objectFields: mapLoaded(objectCatalogState, (catalog) => catalog.fields),
       objectActions: mapLoaded(objectCatalogState, (catalog) => catalog.actions),
       objectViews: objectViewsState,
@@ -3858,6 +3872,7 @@ function MetadataResourceEditPageImpl({
                 name={name}
                 client={client}
                 locale={locale}
+                packageId={ownerPackageId}
                 // The rollback door asks the capability and wall verdicts the
                 // save door asks, so it is offered on Save's gate
                 // (objectui#12183: a walled tenant was offered it, refused).

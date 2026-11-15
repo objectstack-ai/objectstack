@@ -494,7 +494,7 @@ describe('an email domain another provider serves is refused on register and on 
   it('direct /sso/register onto a served domain: 409 RESOURCE_CONFLICT on domain, naming the provider; nothing written', async () => {
     const s = await stage();
     await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example, acme.io' });
-    for (const domain of ['acme.example', 'ACME.IO', 'https://acme.example/', 'other.example,acme.io']) {
+    for (const domain of ['acme.example', 'ACME.IO', 'acme.example.', 'other.example,acme.io']) {
       const res = await postJson(s, '/sso/register', oidcRegister('second', domain));
       const body = (await res.json()) as any;
       expect(res.status, `${domain}: ${JSON.stringify(body)}`).toBe(409);
@@ -580,7 +580,7 @@ describe('an email domain another provider serves is refused on register and on 
     const s = await stage();
     await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
     // The list's 'eng.acme.example' does not win the exact step, so the parent's list matches it too.
-    for (const domain of ['eng.acme.example, foo.example', 'https://eng.acme.example', 'Eng.Acme.example']) {
+    for (const domain of ['eng.acme.example, foo.example', 'eng.acme.example.', 'Eng.Acme.example']) {
       const { status, body } = await register(s, 'eng-list', domain);
       expect(status, `${domain}: ${JSON.stringify(body)}`).toBe(409);
       expect(body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: PROVIDER });
@@ -764,6 +764,79 @@ describe('a domain longer than a provider holds, or than a host name, is refused
     expect(entries).toHaveLength(2);
     expect(entries[1]).toBe('acme.example');
   }, 5_000);
+});
+
+describe('[#32960] a domain entry that is not a bare host name is refused on register and on a domain edit', () => {
+  const oidcRegister = (providerId: string, domain: string) => ({
+    providerId,
+    issuer: `https://${providerId}.idp.example`,
+    domain,
+    oidcConfig: { clientId: 'cid', clientSecret: 'csecret', mapping: { email: 'email', name: 'name' } },
+  });
+  const NOT_BARE = ['https://acme.example', 'acme.example:443', 'acme.example/sso', 'user@acme.example', 'acme%2eexample'];
+
+  it('register: 400 VALIDATION_FAILED on domain naming the entry, at the direct door and the bridge; nothing written', async () => {
+    const s = await stage();
+    for (const entry of NOT_BARE) {
+      const res = await postJson(s, '/sso/register', oidcRegister('shaped', `good.example, ${entry}`));
+      const body = (await res.json()) as any;
+      expect(res.status, `${entry}: ${JSON.stringify(body)}`).toBe(400);
+      expect(body).toMatchObject({ code: 'VALIDATION_FAILED', field: 'domain', fields: [{ field: 'domain', code: 'invalid_value' }] });
+      expect(body.message, entry).toContain(`'${entry}'`);
+    }
+    const bridged = await bridge(s, 'POST', '/admin/sso/register-saml', {
+      providerId: 'shaped-saml',
+      issuer: 'https://saml.shaped.example/entity',
+      domain: 'https://acme.example',
+      entryPoint: 'https://saml.shaped.example/sso',
+      cert: certificate(),
+    });
+    const bridgedBody = (await bridged.json()) as any;
+    expect(bridged.status, JSON.stringify(bridgedBody)).toBe(400);
+    expect(JSON.stringify(bridgedBody)).toContain("'https://acme.example'");
+    expect(await rows(s, 'sys_sso_provider')).toEqual([]);
+  }, 30_000);
+
+  it('a domain edit: 400 VALIDATION_FAILED naming the entry; the stored domain stays', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+    for (const entry of NOT_BARE) {
+      const res = await postJson(s, '/sso/update-provider', { providerId: PROVIDER, domain: `acme.example, ${entry}` });
+      const body = (await res.json()) as any;
+      expect(res.status, `${entry}: ${JSON.stringify(body)}`).toBe(400);
+      expect(body).toMatchObject({ code: 'VALIDATION_FAILED', field: 'domain', fields: [{ field: 'domain', code: 'invalid_value' }] });
+      expect(body.message, entry).toContain(`'${entry}'`);
+    }
+    expect((await rows(s, 'sys_sso_provider', { provider_id: PROVIDER }))[0].domain).toBe('acme.example');
+  }, 30_000);
+
+  it('CONTROL: bare host names are stored as before, at register and at an edit', async () => {
+    const s = await stage();
+    const res = await bridge(s, 'POST', '/admin/sso/register-saml', {
+      providerId: 'bare-saml',
+      issuer: 'https://saml.bare.example/entity',
+      domain: 'Bare.Example, bücher.example',
+      entryPoint: 'https://saml.bare.example/sso',
+      cert: certificate(),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const edited = await postJson(s, '/sso/update-provider', { providerId: 'bare-saml', domain: 'bare.example., globex.io' });
+    expect(edited.status, await edited.clone().text()).toBe(200);
+    expect((await rows(s, 'sys_sso_provider', { provider_id: 'bare-saml' }))[0].domain).toBe('bare.example., globex.io');
+  }, 30_000);
+
+  it('a provider stored with a URL-shaped entry before the rule is not rewritten, and an edit that keeps no such entry passes', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'https://acme.example' });
+    // An edit that writes no domain is not judged.
+    const untouched = await postJson(s, '/sso/update-provider', { providerId: PROVIDER, oidcConfig: { scopes: ['openid', 'email'] } });
+    expect(untouched.status, await untouched.clone().text()).toBe(200);
+    expect((await rows(s, 'sys_sso_provider', { provider_id: PROVIDER }))[0].domain).toBe('https://acme.example');
+    // The correction the docs prescribe: rewrite the entry as its bare host.
+    const corrected = await postJson(s, '/sso/update-provider', { providerId: PROVIDER, domain: 'acme.example' });
+    expect(corrected.status, await corrected.clone().text()).toBe(200);
+    expect((await rows(s, 'sys_sso_provider', { provider_id: PROVIDER }))[0].domain).toBe('acme.example');
+  }, 30_000);
 });
 
 // ── 3. The edit door ────────────────────────────────────────────────────────

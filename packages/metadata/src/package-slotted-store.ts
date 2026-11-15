@@ -127,6 +127,7 @@ import {
 } from '@objectstack/core';
 import { ITEM_KEY_DISCRIMINATORS, SysMetadataObject, itemDiscriminator } from '@objectstack/metadata-core';
 import { peelStoredEnvelope } from './stored-envelope.js';
+import { PACKAGE_SLOTTED_METADATA_TYPES } from '@objectstack/spec/api';
 
 /**
  * The types whose in-memory items are stored per `(package, name)`: `api`,
@@ -138,12 +139,12 @@ import { peelStoredEnvelope } from './stored-envelope.js';
  * picklist family's `picklist`, `mapping` and `dataset` (#31700); then
  * `webhook` (#31699 PR 2), so a host with no registry lists each package's
  * declaration of one name; then `tool` (#31985, ADR-0150 child B), likewise
- * in the change that narrows it.
+ * in the change that narrows it; and last `connector` (#31699 PR 3), in the
+ * change that narrows it. The list itself is `@objectstack/spec`'s
+ * `PACKAGE_SLOTTED_METADATA_TYPES` (#32905), so a client that names a package
+ * on the history and rollback doors reads the same one; a type joins there.
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set([
-  'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
-  'webhook', 'tool',
-]);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(PACKAGE_SLOTTED_METADATA_TYPES);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';
@@ -182,8 +183,16 @@ export function boundObjectOf(data: unknown): string | undefined {
  */
 function slotIdentityOf(type: string, name: string, data: unknown): string {
   if (!OWNER_KEYED_SLOT_TYPES.has(type)) return name;
-  const owner = boundObjectOf(data);
-  return owner === undefined ? name : `${owner}${OWNER_SEPARATOR}${name}`;
+  return ownedIdentityOf(type, name, boundObjectOf(data));
+}
+
+/**
+ * [#32681] The identity of `name` bound to `owner` (an object, or `null` /
+ * `undefined` for an object-less item), for a type whose identity carries
+ * its owner ({@link slotIdentityOf}); the name for every other type.
+ */
+function ownedIdentityOf(type: string, name: string, owner: string | null | undefined): string {
+  return OWNER_KEYED_SLOT_TYPES.has(type) && typeof owner === 'string' ? `${owner}${OWNER_SEPARATOR}${name}` : name;
 }
 
 /**
@@ -338,12 +347,27 @@ export function storeSlotKey(type: string, name: string, packageId: string | nul
 /**
  * [#32246] The key of a `DatabaseLoader` row of `name` held for `packageId`:
  * one slot per `(package, name)`, whatever object an action is bound to
- * (see {@link storeRowWriteKey}). [#32540] A slot holds a row per member
+ * (a write's holders are counted per {@link storeRowSlotKey} instead,
+ * #32681). [#32540] A slot holds a row per member
  * ({@link storedRowMemberOf}): each object an action of the package is bound
  * to, as each member of a bundled type.
  */
 export function storeRowKey(name: string, packageId: string | null | undefined): string {
   return isPackageCaller(packageId) ? slotKey(packageId, name) : name;
+}
+
+/**
+ * [#32681, ADR-0150 D4] The key of a `DatabaseLoader` row of `name` held for
+ * `packageId` whose member is `member` ({@link storedRowMemberOf}), keyed as
+ * the in-memory store keys the item ({@link storeSlotKey}): an action bound
+ * to an object by its package, object and name, so its write counts the
+ * holders of that `(object, name)` ({@link storeRowWriteKey}), never the
+ * packages binding the name to other objects. Every other row: its package's
+ * slot of the name ({@link storeRowKey}).
+ */
+export function storeRowSlotKey(type: string, name: string, packageId: string | null | undefined, member: string | null | undefined): string {
+  const identity = ownedIdentityOf(type, name, member);
+  return isPackageCaller(packageId) ? slotKey(packageId, identity) : identity;
 }
 
 /**
@@ -502,10 +526,25 @@ export function bundleEntryKey(type: string, name: string, data: unknown, packag
  *    `MemoryLoader` and on `DatabaseLoader` (whose rows are one per binding
  *    since #32651, its unscoped reads one per name); `list` and the loaders'
  *    `loadManySlots` serve every binding.
+ *
+ * [#32681, ADR-0150 D4] For a type whose identity carries its owner
+ * (`action`), an entry that carries no package is the name's one holder's
+ * only when that holder binds the name to the entry's own object (or holds
+ * the object-less name, for an object-less entry) — the holders of its
+ * `(object, name)` ({@link entryIdentitiesOf}), as the store's write rule
+ * counts them ({@link storeWriteKey}). Bound to an object no package binds
+ * the name to, it is the environment's own item and keeps a key of its own.
+ * FROM the name's one holder whatever object it was bound to: beside ALPHA's
+ * `approve` on `account`, a package-less `approve` on `contact` was folded
+ * into ALPHA's entry, so the unscoped read kept one of the two rows (the one
+ * saved last), and the boot priming pass registered the `contact` row alone
+ * (in the bare slot, a read naming ALPHA then answered it) or ALPHA's alone.
+ * Under a name two or more packages hold the entry keeps a key of its own as
+ * before ({@link pluralEntryCustomizedHolders} names the holder it customizes).
  */
 export function pluralEntryKeys(
   type: string,
-  entries: ReadonlyArray<{ readonly name: unknown; readonly data: unknown; readonly packageId?: string }>,
+  entries: ReadonlyArray<{ readonly name: unknown; readonly data: unknown; readonly packageId?: string; readonly member?: string | null }>,
 ): Array<string | undefined> {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || isBundledStoreType(type)) {
     return entries.map(({ name, data, packageId }) => (typeof name !== 'string'
@@ -521,11 +560,71 @@ export function pluralEntryKeys(
     if (!held) holders.set(name, (held = new Set()));
     held.add(holder);
   });
+  const identities = OWNER_KEYED_SLOT_TYPES.has(type) ? entryIdentitiesOf(type, entries, packageOf) : undefined;
   return entries.map(({ name }, at) => {
     if (typeof name !== 'string') return undefined;
     const held = holders.get(name);
-    const holder = packageOf[at] ?? (held?.size === 1 ? [...held][0] : undefined);
+    const sole = held?.size === 1 ? [...held][0] : undefined;
+    const customizes = sole !== undefined && (identities === undefined || identities.holders.get(identities.of[at]!)?.has(sole) === true);
+    const holder = packageOf[at] ?? (customizes ? sole : undefined);
     return JSON.stringify([holder ?? null, name]);
+  });
+}
+
+/**
+ * [#32681] Each plural-read entry's identity for a type whose identity
+ * carries its owner — the row's member (`storedRowMemberOf`, its column
+ * first), else its body's object — and the packages holding each identity
+ * among the entries (`packageOf`: each entry's package, `undefined` for none).
+ */
+function entryIdentitiesOf(
+  type: string,
+  entries: ReadonlyArray<{ readonly name: unknown; readonly data: unknown; readonly member?: string | null }>,
+  packageOf: ReadonlyArray<string | undefined>,
+): { of: Array<string | undefined>; holders: Map<string, Set<string>> } {
+  const of = entries.map(({ name, data, member }) => (typeof name !== 'string'
+    ? undefined
+    : ownedIdentityOf(type, name, member !== undefined ? member : storedRowMemberOf(type, data))));
+  const holders = new Map<string, Set<string>>();
+  entries.forEach((_, at) => {
+    const holder = packageOf[at];
+    const identity = of[at];
+    if (identity === undefined || holder === undefined) return;
+    let held = holders.get(identity);
+    if (!held) holders.set(identity, (held = new Set()));
+    held.add(holder);
+  });
+  return { of, holders };
+}
+
+/**
+ * [#32681, ADR-0150 D4] Of an unscoped plural read's `entries` (and the keys
+ * {@link pluralEntryKeys} gave them), the package each entry that carries none
+ * is the customization of, as the in-memory store files it once the boot
+ * priming pass has registered the entries: an action bound to an object that
+ * exactly one package binds the name to, under a name two or more packages
+ * hold (each bound elsewhere). Such an entry keeps a key of its own in the
+ * plural read, and the pass registers it after the packages' items, so the
+ * store's write rule ({@link storeWriteKey}, by `(object, name)`) files it
+ * into that holder's slot: a read naming the holder answers it. `undefined`
+ * for every other entry — one with a package, one the plural read already
+ * folded into its holder's entry (a name one package holds, bound to that
+ * package's object), one no package or two packages hold the
+ * `(object, name)` of, and every entry of a type whose identity is its name
+ * (a name two packages hold has two holders of that identity too).
+ */
+export function pluralEntryCustomizedHolders(
+  type: string,
+  entries: ReadonlyArray<{ readonly name: unknown; readonly data: unknown; readonly packageId?: string; readonly member?: string | null }>,
+  keys: ReadonlyArray<string | undefined>,
+): Array<string | undefined> {
+  if (!OWNER_KEYED_SLOT_TYPES.has(type)) return entries.map(() => undefined);
+  const packageOf = entries.map(({ data, packageId }) => (isPackageCaller(packageId) ? packageId : storedItemPackageId(data)));
+  const identities = entryIdentitiesOf(type, entries, packageOf);
+  return entries.map(({ name }, at) => {
+    if (typeof name !== 'string' || packageOf[at] !== undefined || keys[at] !== JSON.stringify([null, name])) return undefined;
+    const held = identities.holders.get(identities.of[at]!);
+    return held?.size === 1 ? [...held][0] : undefined;
   });
 }
 
@@ -686,11 +785,24 @@ function slottedWriteKey(
 }
 
 /**
- * [#32246] {@link storeWriteKey} for a store with one slot per `(package,
- * name)` whatever object an action is bound to: `DatabaseLoader`'s rows,
- * which `sys_metadata`'s unique key `(type, name, package_id, bundle_member)`
- * holds once per package of a name and member. [#32540] The row within the
- * slot is the one of the written body's member ({@link storedRowMemberOf}).
+ * [#32246] {@link storeWriteKey} for `DatabaseLoader`'s rows, which
+ * `sys_metadata`'s unique key `(type, name, package_id, bundle_member)` holds
+ * once per package of a name and member. [#32540] The row within the slot is
+ * the one of the written body's member ({@link storedRowMemberOf}).
+ *
+ * [#32681, ADR-0150 D4] `store` is keyed by {@link storeRowSlotKey}, and the
+ * write's holders are counted over its identity as {@link storeWriteKey}
+ * counts them ({@link slotIdentityOf}): an action bound to an object by the
+ * packages binding the name to THAT object. FROM by every package holding the
+ * name, whatever object it binds it to: a package-less action bound to
+ * `account` beside one package's `account` binding and another package's
+ * `contact` one went into a package-less row (two holders), not the `account`
+ * holder's row (its customization, D4); beside one package's `contact`
+ * binding alone it went into that package's row, bound to `account`, a
+ * binding the package never declared; and a package's first `account`
+ * binding beside a package-less `account` row and another package's
+ * `contact` binding was inserted beside the package-less row instead of
+ * taking it over.
  */
 export function storeRowWriteKey(
   store: ReadonlyMap<string, unknown> | undefined,
@@ -698,7 +810,7 @@ export function storeRowWriteKey(
   name: string,
   data: unknown,
 ): { key: string; replaces: string[] } {
-  return slottedWriteKey(store, type, name, data, name, false);
+  return slottedWriteKey(store, type, name, data, slotIdentityOf(type, name, data), false);
 }
 
 /** Whether a package id names a caller with a package (not empty, not the provenance sentinel). */

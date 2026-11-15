@@ -327,6 +327,85 @@ would move a handler's own `ctx.api` writes *outside* the transaction the write
 ran in, which is a worse guarantee than the one documented here.
 </Callout>
 
+## Recipe — refuse overlapping time ranges
+
+Leave and overtime requests share one rule: two live records of the same owner
+may not cover the same time (a room or shift booking is the same rule grouped by
+the room or the shift). There is no declarative key for it, and a validation
+rule cannot see the other records, so write it as a `before*` hook on **both**
+insert and update. This is the vetted form; rename its `name` (the refusal's
+translation key follows it), its `object` and its fields:
+
+```ts
+import { defineHook } from '@objectstack/spec/data';
+
+export default defineHook({
+  name: 'leave_request_no_overlap',
+  object: 'leave_request',
+  events: ['beforeInsert', 'beforeUpdate'],
+  runAs: 'system', // count the rows the saver cannot read too
+  refusals: { OVERLAP: { message: 'This overlaps another request of yours.', status: 409 } },
+  body: {
+    language: 'js',
+    capabilities: ['api.read'],
+    source: `
+      const DATE_ONLY = false; // true when start_at / end_at are date fields: the end day is booked too
+      const r = Object.assign({}, ctx.previous, ctx.input); // update: stored row under the patch
+      const off = ['rejected', 'cancelled'];
+      if (!r.owner_id || !r.start_at || !r.end_at || off.includes(r.status)) return;
+      const where = {
+        owner_id: r.owner_id,
+        status: { $nin: off },  // fail closed: a new status counts until listed here
+        start_at: DATE_ONLY ? { $lte: r.end_at } : { $lt: r.end_at },  // datetime is half-open:
+        end_at: DATE_ONLY ? { $gte: r.start_at } : { $gt: r.start_at }, // 18:00 end, 18:00 start is no overlap
+      };
+      if (ctx.previous) where.id = { $ne: ctx.previous.id }; // not the record itself
+      if (await ctx.api.object(ctx.object).count({ where }) > 0)
+        throw Object.assign(new Error(), { code: 'OVERLAP' });
+    `,
+  },
+});
+```
+
+Each line is there for a reason:
+
+- **Merge the stored row under the patch.** On update `ctx.input` carries only
+  the fields this write changes, so a patch that moves `start_at` alone must be
+  judged with the stored `end_at`, `owner_id` and `status`.
+- **Exclude the record itself** with `id: { $ne: … }`, or every update of a
+  booking collides with its own stored row.
+- **Name the ignored statuses with `$nin` (or `$ne`), never the live ones with
+  `$in`.** A status added later then counts as live until someone decides
+  otherwise, and a row with no status counts too. A record saved in an ignored
+  status is not checked; reviving it into an overlap is refused.
+- **Half-open ranges for `datetime`.** `start < other.end && end > other.start`:
+  a booking ending at 18:00 and one starting at 18:00 do not overlap.
+- **Inclusive end days for `date` — set `DATE_ONLY`.** A one-day leave has
+  `start == end`, so the half-open test would let the same day be booked twice.
+  With `DATE_ONLY = true` the template compares with `<=` / `>=`. The flag is
+  needed because a `before*` hook sees the value as it was written: a `date`
+  field also takes a full ISO instant or a `Date`, so the spelling does not say
+  which kind the field is. The query reads each value as the day it stores.
+- **`runAs: 'system'`.** The count must see rows the saver cannot read: a
+  delegate filing for someone under private sharing, or a room booked by
+  others. Without it the hook's `ctx.api` reads as the saver (see
+  [Elevation](#elevation--runas)) and misses them. The hook only counts; the
+  write itself still runs as the saver.
+- **`ctx.api.object(ctx.object)`** counts in the object the hook fired on, so
+  the body names no object.
+- **A declared refusal.** The body throws the code alone; the saver gets the
+  catalogue's fixed sentence (translated through the key
+  `hooks.leave_request_no_overlap.refusals.OVERLAP.message`) and the caller a
+  `409` whose `declaredCode` is `OVERLAP`.
+
+Known limits — the hook does not cover these, so do not assume it does:
+
+- It reads, then the write happens: two saves at the same moment can both pass.
+- A recycle-bin restore runs no insert hook.
+- An import run with automations off skips hooks.
+- Rows of one bulk insert or bulk update do not see each other.
+- A row with no start or no end is neither checked nor counted.
+
 ## Hook Context
 
 `handler` receives a `HookContext` with these fields:

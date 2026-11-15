@@ -125,6 +125,7 @@ const ko = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "전체 {{total}}개 중 처음 {{shown}}개를 표시합니다. 필터를 좁히세요.",
     rowCeilingNoteUnknownTotal: "처음 {{shown}}개를 표시합니다. 필터를 좁히세요.",
+    ungroupedSection: "기타",
   },
   actions: {
     decisionOutput: {
@@ -2698,6 +2699,10 @@ const ko = {
     },
     login: {
       signingIn: "로그인하는 중…",
+      directSignIn: {
+        description: "조직의 싱글 사인온으로 로그인하세요.",
+        retry: "싱글 사인온으로 계속",
+      },
       ssoHandoff: "{{target}}(으)로 계속",
       devAdminHint: {
         title: "로컬 개발 인스턴스",
@@ -2719,8 +2724,18 @@ const ko = {
         ssoAccountNotInvited: "아직 이 시스템에 계정이 준비되지 않았습니다. 관리자에게 초대를 요청하세요.",
         ssoAccountNotLinked: "이 이메일을 사용하는 계정이 이미 있지만 싱글 사인온과 연결되어 있지 않습니다. 다른 방법으로 로그인하거나 관리자에게 연결을 요청하세요.",
         ssoResponseRejected: "소속 조직의 로그인 서비스가 이 시스템에서 받아들일 수 없는 응답을 보냈습니다. 관리자에게 싱글 사인온 설정을 확인해 달라고 요청하세요.",
+        ssoEmailDomainNotAllowed: "계정이 생성되지 않았습니다. 이메일 주소가 이 시스템이 새 계정을 허용하는 도메인에 속하지 않습니다. 소속 조직의 이메일을 사용하거나 관리자에게 문의하세요.",
+        ssoEmailNotAnAddress: "계정이 생성되지 않았습니다. 소속 조직의 로그인 서비스가 사용할 수 있는 이메일 주소를 보내지 않았습니다. 관리자에게 싱글 사인온 설정을 확인해 달라고 요청하세요.",
         ssoStartFromLoginPage: "로그인은 이 시스템의 로그인 페이지에서 시작해야 합니다. 여기에 회사 이메일을 입력하고 “SSO로 로그인”을 선택하세요.",
         ssoTechnicalDetails: "기술 세부 정보",
+        directSignInIncomplete: "로그인이 완료되지 않았습니다. 싱글 사인온에서 돌아왔지만 로그인되지 않았습니다. 이 브라우저에서 이 사이트의 쿠키가 허용되어 있는지 확인한 후 다시 시도하세요.",
+        directSignInUnavailable: "이 시스템의 싱글 사인온을 시작할 수 없습니다. 관리자에게 사용하는 로그인 서비스를 확인해 달라고 요청하세요.",
+        directSignInRateLimited: "방금 이 네트워크에서 너무 많은 로그인이 시작되었습니다. 몇 초 기다린 후 다시 시도하세요.",
+        ssoAccessDenied: "로그인한 계정에는 이 환경에 대한 액세스 권한이 없습니다. 액세스 권한이 있는 계정으로 로그인하거나, 이 환경 조직의 관리자에게 멤버로 추가해 달라고 요청하세요.",
+        ssoSwitchAccount: "계정 전환",
+        ssoBackToConsole: "콘솔로 돌아가기",
+        ssoSwitchAccountHint: "계정 전환을 누르면 새 탭에서 로그인 서비스가 열리고 그곳에서 로그아웃됩니다. 그런 다음 액세스 권한이 있는 계정으로 여기에서 다시 로그인하세요.",
+        linkEmailMismatch: "계정이 연결되지 않았습니다. 해당 계정의 이메일 주소가 현재 로그인한 계정의 이메일 주소와 일치하지 않습니다. 같은 이메일 주소를 사용하는 계정을 연결하세요.",
         twoFactorInvalidCode: "코드가 올바르지 않습니다. 인증 앱을 확인한 후 다시 시도하세요.",
         twoFactorInvalidBackupCode: "백업 코드가 올바르지 않거나 이미 사용되었습니다.",
         twoFactorTooManyAttempts: "잘못된 코드를 너무 많이 입력했습니다. 비밀번호로 다시 로그인하세요.",
@@ -3959,6 +3974,11 @@ const ko = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: '메시지 보내기',
     scrollToBottom: '최신 메시지로 스크롤',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "현재 응답이 끝나면 전송됩니다",
+      queuedCancel: "취소",
+    },
     answer: {
       showFull: '전체 답변 보기',
       collapse: '접기',
@@ -4052,6 +4072,9 @@ const ko = {
       countSeedData: "샘플 데이터",
       extendTarget: "기존 앱에 추가: {{app}}",
       awaitingConfirm: "확인 대기 중",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "확인됨",
+      buildFailed: "빌드되지 않음 · 아무것도 생성되지 않았습니다",
       iterateOrNew: {
         question: "이 계획은 이미 있는 앱 “{{app}}”과(와) 겹칩니다. 이 앱을 계속 개선할까요, 아니면 별도의 앱을 만들까요?",
         questionUnnamed: "이 계획은 이미 있는 앱과 겹칩니다. 그 앱을 계속 개선할까요, 아니면 별도의 앱을 만들까요?",
@@ -4062,6 +4085,7 @@ const ko = {
       objectsAndFields: "개체 및 필드",
       views: "뷰",
       suggestedField: "추가 제안",
+      suggestedFieldLegend: "'{{mark}}' 표시가 있는 필드는 AI가 추가한 것으로, 요청하지 않은 필드입니다.",
       nameField: "이름: {{field}}",
     },
     build: {
@@ -4084,6 +4108,15 @@ const ko = {
       verifying: "변경 사항 확인 중…",
       verifyStep: "{{n}}단계",
       verified: "변경 사항 확인 완료",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "수정 필요 {{count}}건",
+      issuesSummary: "이번 빌드에는 사용하기 전에 수정해야 할 부분이 있습니다. \"문제를 수정해 줘\"라고 답하면 어시스턴트가 수정합니다.",
+      warningsSummary: "앱이 빌드되었지만 확인해 볼 만한 부분이 몇 가지 있습니다. 개선하고 싶다면 어시스턴트에게 무엇인지 물어보세요.",
+      issuesDetails: "기술 세부 정보",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "확인 필요 {{count}}건",
+      needsAttention_one: "확인 필요 {{count}}건",
+      needsAttention_other: "확인 필요 {{count}}건",
       unknownPhase: "알 수 없는 빌드 단계",
       nextStepsLead: "다음으로 이렇게 말할 수 있습니다: {{steps}}",
       nextStepQuote: "“{{step}}”",
@@ -4424,6 +4457,11 @@ const ko = {
     daysAgo_other: '{{count}}일 전',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "게시하면 여기에 레코드가 표시됩니다",
+      message: "아직 게시되지 않은 개체를 미리 보고 있으므로 레코드가 없습니다. 게시하면 레코드를 추가하거나 샘플 데이터를 불러올 수 있습니다.",
+    },
     empty: {
       loadFailedTitle: '드래프트 미리보기를 불러오지 못했습니다',
       loadFailedDescription: '드래프트 오버레이를 읽을 수 없습니다. 다시 시도하거나 연결을 확인하세요.',
@@ -4756,6 +4794,7 @@ const ko = {
     disableAppNamed: "{{name}} 비활성화",
     setDefault: "기본값으로 설정",
     setDefaultNamed: "{{name}}을(를) 기본값으로 설정",
+    alreadyDefault: "이미 기본 앱입니다",
     deleteApp: "앱 삭제",
     deleteAppNamed: "{{name}} 삭제",
     confirmDelete: "삭제하려면 다시 클릭하세요",

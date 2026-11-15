@@ -70,6 +70,17 @@
  * After every write, whatever it answered, the page re-reads the list, so each
  * row shows the state the server serves. No row is patched locally ahead of
  * that read.
+ *
+ * ## A disabled star says why (ux-conventions.disabled-control-reason)
+ *
+ * The default app's Set-default star is disabled, and it gives its reason,
+ * `appManagement.alreadyDefault`, through the console's one disabled-reason
+ * pattern (`useDisabledReason` + `DisabledReasonTrigger` from
+ * `@object-ui/components`): a focusable wrapper that opens the reason as a
+ * tooltip on hover and on focus, and the reason as the accessible description
+ * of both the wrapper and the button. A write in flight (`processing`) also
+ * disables every star, but that is the page's own transient state, not a fact
+ * about the app, so it gives no reason.
  */
 
 import { useState, useCallback } from 'react';
@@ -81,6 +92,8 @@ import {
   Badge,
   Input,
   Checkbox,
+  useDisabledReason,
+  DisabledReasonTrigger,
 } from '@object-ui/components';
 import {
   Plus,
@@ -179,6 +192,46 @@ function deleteApp(meta: MetaWriteClient, app: { name: string; _packageId?: unkn
 function reason(e: unknown, unknown: string): string {
   const message = e instanceof Error ? e.message : String(e ?? '');
   return message || unknown;
+}
+
+/**
+ * The row's Set-default star. Its own component because the reason is a hook,
+ * and the rows are drawn in a loop.
+ */
+function SetDefaultStar({
+  isDefault,
+  processing,
+  title,
+  onSetDefault,
+}: {
+  isDefault: boolean;
+  processing: boolean;
+  title: string;
+  onSetDefault: () => void;
+}) {
+  const { t } = useObjectTranslation();
+  const reason = useDisabledReason(
+    isDefault,
+    t('appManagement.alreadyDefault', { defaultValue: 'Already the default app' }),
+  );
+  return (
+    <DisabledReasonTrigger reason={reason}>
+      <Button
+        variant="ghost"
+        size="icon"
+        title={t('appManagement.setDefault', { defaultValue: 'Set as default' })}
+        aria-label={t('appManagement.setDefaultNamed', {
+          defaultValue: 'Set {{name}} as default',
+          name: title,
+        })}
+        aria-describedby={reason?.id}
+        onClick={onSetDefault}
+        disabled={processing || isDefault}
+      >
+        <Star className={`h-4 w-4 ${isDefault ? 'fill-current text-yellow-500' : ''}`} />
+      </Button>
+    </DisabledReasonTrigger>
+  );
 }
 
 export function AppManagementPage() {
@@ -625,19 +678,12 @@ export function AppManagementPage() {
                     >
                       {isActive ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title={t('appManagement.setDefault', { defaultValue: 'Set as default' })}
-                      aria-label={t('appManagement.setDefaultNamed', {
-                        defaultValue: 'Set {{name}} as default',
-                        name: title,
-                      })}
-                      onClick={() => handleSetDefault(app)}
-                      disabled={processing || isDefault}
-                    >
-                      <Star className={`h-4 w-4 ${isDefault ? 'fill-current text-yellow-500' : ''}`} />
-                    </Button>
+                    <SetDefaultStar
+                      isDefault={isDefault}
+                      processing={processing}
+                      title={title}
+                      onSetDefault={() => handleSetDefault(app)}
+                    />
                     <Button
                       variant="ghost"
                       size="icon"

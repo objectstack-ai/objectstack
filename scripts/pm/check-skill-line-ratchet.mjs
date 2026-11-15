@@ -446,7 +446,14 @@ export const CEILINGS = new Map([
   // may not change, and the `Premise:` claim line. Measured delta +4; the section
   // heading was renamed in place. Not a CROSS_FILE_MOVES destination, so no
   // `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 245],
+  // Raised 245 → 246 by the contract-review route (maintainer, 2026-11-13, in the
+  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」
+  // and 「没有 fable 时，找 review 座位」; quoted in the body of card #33157, claim
+  // comment 6879512661): one line in the dispatch-prompt section — the order
+  // carries the route, the dev names the owed review in its hand-back and never
+  // knocks, the seat sends it to a review seat, never triage. Measured delta +1.
+  // Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 246],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
@@ -467,7 +474,13 @@ export const CEILINGS = new Map([
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate). Lowered 42 → 41 when the retired contract-review label's
   // card-side-first line left (ruling record 5770886272 on #19061).
-  ['.claude/skills/pm-dispatch/references/state-machine.md', 41],
+  // Raised 41 → 43 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
+  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
+  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
+  // Two lines: 开着的卡离手恒落一态 in the cross-state rules, and the hold-lowers-the-grade line
+  // (`Restart-grade:`). Every bullet here already sits at its 120-byte minimum, so payment in place
+  // would have deleted a ruled clause. Measured delta +2; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/state-machine.md', 43],
   // Raised 48 → 51 by the clause-② CONTENT-limb applicability ruling (maintainer
   // 2026-08-31, 第 6 场总监席决裁批 #12, verbatim 「同意」, adopting A + C: published
   // `skills/**` changes making a falsifiable operator/contract semantic claim fall
@@ -575,7 +588,16 @@ export const CEILINGS = new Map([
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 60],
+  // Raised 60 → 63 by the contract-review route (maintainer, 2026-11-13, in the
+  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」
+  // and 「没有 fable 时，找 review 座位」; quoted in the body of card #33157, claim
+  // comment 6879512661): the one routing rule — a lane self-reviews only when it
+  // reaches the tier; otherwise (unreachable, 429, rationed) it knocks a seated
+  // review seat, never triage, then a sibling seat with the tier, else the
+  // owed-review list — replaces the 429-only line (+2), and its one-line verbatim
+  // provenance carrying those two operative quotes (+1). Measured delta +3.
+  // Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 63],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
@@ -1243,7 +1265,12 @@ export const CEILINGS = new Map([
   // maintainer's word), maintainer verbatim and untranslated: 「已经把 #3686 插到队首了,插队做不到,你应该立卡改进skills」;
   // letter 「A」 recorded as comment 6729640900. Measured delta +5 (102 → 107);
   // landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/landing-operations.md', 107],
+  // Raised 107 → 108 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
+  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
+  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
+  // The `Part of` close-out pair became three lines: the remainder's state for its lane, the three
+  // legal states, and the comment plus the write door's refusal. Measured delta +1; headroom 0.
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 108],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
   // rolls to production, which the landing window (ends at MERGED) never
   // covered: post-roll placement/latency reading with the waker-bias re-draw
@@ -1319,7 +1346,12 @@ export const CEILINGS = new Map([
   // record: amendment 6595840476 on #29754 (maintainer 「同意：下班席位的卡交给
   // 兄弟席」), which names this file, under #29775 letter A, record 6595514258
   // (「同意29775 A」). Measured delta +2 (96 → 98 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 98],
+  // Raised 98 → 99 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
+  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
+  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
+  // One line: a stay-behind card takes its lane's state in the `seat-offline` stroke, or triage
+  // sets it on reading that knock. Measured delta +1; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 99],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
   // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
@@ -1407,7 +1439,13 @@ export const CEILINGS = new Map([
   // never restating the six; no line of this file restates text another file
   // carries, so a deletion would have dropped a live rule. Measured delta +1
   // (100 → 101); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 101],
+  // Raised 101 → 103 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
+  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
+  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
+  // Two lines: the awaiting-maintainer list with each card's age, and the five disjunctions run by
+  // `scripts/pm/first-touch-sweep.mjs`; the self-repair line took `+降 p3` in place. Measured delta
+  // +2; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 103],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
@@ -1714,7 +1752,16 @@ export const CEILINGS = new Map([
   // the escalation) and amendment 6595840476 (maintainer 「同意：下班席位的卡交给
   // 兄弟席」, the idle reading and the sibling hand-over, which names this
   // file). Measured delta +3 (17 → 20 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 20],
+  // 20 → 24 (#33226): words the maintainer said to one seat are not spread —
+  // the one-line rule first, then the card body's three bullets (bind that
+  // seat's account only; relayed fleet-wide or triage-directed orders only from
+  // triage's own session or seat post; record a relayed order's effect, never
+  // extend it). Ruling of record: the maintainer in the triage#1 session,
+  // 2026-11-14, 「所有座位当前任务处理完就下班，我说的都是针对某个具体 agent 账户」,
+  // 「转述指令要写明对谁说, 其实问题的关键你是分诊你才会关心别人的座位帖」 (card
+  // body) and 「也就是说，对某个座位说的话不要扩散就行」 (comment 6872810212).
+  // Measured delta +4 (20 → 24 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 24],
   // Review seat charter (`review#N`): the seat whose only job is the contract
   // review, held on any account that reaches CONTRACT_REVIEW_TIER — its seat
   // word, mailbox, review-seat-first routing of `Request: contract-review`

@@ -64,7 +64,25 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // the action switches work on compositions with no automation service —
       // a nav entry riding that service would hide a page that still works
       // there.
-      { id: 'nav_packaged_actions', type: 'component', label: 'Packaged Actions', componentRef: 'automation:packaged-actions', icon: 'zap' },
+      //
+      // `visible` gives the entry the audience of its page's own data read
+      // (#33224). The page reads `/data/sys_metadata_activation`, and a member
+      // who may not read that ledger was shown an entry whose page renders only
+      // `activation ledger HTTP 403`. Being the first entry the Setup app
+      // serves, it was also their LANDING page: the console's object-read prune
+      // judges `type: 'object'` entries only, so nothing else hid this
+      // `component` one. The console's sidebar and its landing walk ask this
+      // predicate with the member's `/auth/me/permissions` map, so such a member
+      // now neither sees the entry nor lands on it. A member who reads the
+      // ledger is shown it as before.
+      {
+        id: 'nav_packaged_actions',
+        type: 'component',
+        label: 'Packaged Actions',
+        componentRef: 'automation:packaged-actions',
+        icon: 'zap',
+        visible: "current_user.can('sys_metadata_activation', 'read')",
+      },
     ],
   },
   {
@@ -174,9 +192,13 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     priority: BASE_PRIORITY,
     items: [
       // Audit Logs (sys_audit_log) is contributed by @objectstack/plugin-audit
-      // which now owns it (ADR-0029 K2).
-      { id: 'nav_sessions', type: 'object', label: 'Sessions', objectName: 'sys_session', viewName: 'all_sessions', icon: 'monitor' },
-      { id: 'nav_notifications', type: 'object', label: 'Notification Events', objectName: 'sys_notification', viewName: 'recent', icon: 'bell', requiresObject: 'sys_notification' },
+      // which now owns it (ADR-0029 K2), gated on its own read capability.
+      //
+      // `group_diagnostics` carries no gate of its own, so each entry here
+      // carries the `manage_platform_settings` gate the group used to: the
+      // two entries are served to exactly the members they were before.
+      { id: 'nav_sessions', type: 'object', label: 'Sessions', objectName: 'sys_session', viewName: 'all_sessions', icon: 'monitor', requiredPermissions: ['manage_platform_settings'] },
+      { id: 'nav_notifications', type: 'object', label: 'Notification Events', objectName: 'sys_notification', viewName: 'recent', icon: 'bell', requiresObject: 'sys_notification', requiredPermissions: ['manage_platform_settings'] },
     ],
   },
   {

@@ -78,6 +78,8 @@ export interface PermissionSetLockGateContext {
   type: string;
   name: string;
   body: unknown;
+  /** [#32656] The caller's language ladder, stated by the write door (`MetadataAuthoringGateContext`). */
+  userTextLocales?: readonly string[];
 }
 
 /**
@@ -111,7 +113,7 @@ export function registerPackagedPermissionSetLockGate(protocol: any, ql: any): b
     // A metadata-door save that targets a package-declared name is an
     // override of the shipped base whether or not an overlay row exists yet,
     // so the remedy the refusal teaches is the clone path.
-    assertPermissionSetNotPackageDeclared(ctx.name, ql, 'update', probe);
+    assertPermissionSetNotPackageDeclared(ctx.name, ql, 'update', probe, ctx.userTextLocales);
   });
   return true;
 }
