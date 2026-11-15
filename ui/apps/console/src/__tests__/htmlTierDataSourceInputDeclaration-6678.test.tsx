@@ -70,9 +70,12 @@ import type { Diagnostic } from '@objectstack/sdui-parser';
 
 // The full registration graph — the same pair `dev/manifest-dump.tsx` builds the
 // published artifacts from, and the pair every live-path suite in this directory
-// reads. `list-view` and the REAL `object-grid` both arrive through it.
+// reads. The REAL `object-grid` arrives through it; `list-view` is a lazy stub
+// there, so its package is loaded here too, the way `dev/manifest-registry.ts`
+// loads it before reading the published manifest.
 import '@object-ui/components';
 import '../register-plugins';
+import '@object-ui/plugin-list';
 
 const OBJECT = 'opportunity';
 
