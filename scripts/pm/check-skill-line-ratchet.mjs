@@ -1376,12 +1376,14 @@ export const CEILINGS = new Map([
   // `ownership transferred` when done. Measured delta +1; landed count, headroom 0.
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 100],
   // Area-lease mode (any lane): dynamic partitioning at seating and at every hand-over
-  // or shift, startup with the maintainer's authorising line per thread, the in-area
-  // rules as pointers to their owning references, the cross-account hand-over on
-  // GitHub and the ownership split. Ordered by the same ruling of record as the two
-  // raises above. A NEW file, so this is an added row and no other row moves for it;
-  // set at the landed line count, headroom 0, same convention as every entry above.
-  ['.claude/skills/pm-dispatch/references/area-lease.md', 60],
+  // or shift, startup with the maintainer's authorising line per seat thread (an area
+  // thread carries none), the in-area rules as pointers to their owning references, the
+  // cross-account hand-over on GitHub and the ownership split. Ordered by the same ruling
+  // of record as the two raises above. A NEW file, so this is an added row and no other
+  // row moves for it; set at the landed line count, headroom 0, same convention as every
+  // entry above. Lowered 60 → 59 when the area-thread authorising line was removed
+  // (lowering is always legitimate); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/area-lease.md', 59],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
   // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
