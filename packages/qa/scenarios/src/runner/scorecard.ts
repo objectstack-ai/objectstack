@@ -2,7 +2,7 @@
 
 /**
  * A card's run, summarized: the per-half scorecard (Build · Run-问数 ·
- * Run-operations · Iterate), the per-tag verdicts, the two modes side by side,
+ * Run-operations · Iterate), the per-tag verdicts, the modes side by side,
  * and the run record in the `docs/qa/platform-checklist/runs/` shape (records
  * are git-ignored output, never committed — that README).
  *
@@ -76,6 +76,13 @@
  *     half: `pass`, `fail`, or `not measured: <reason>` — never a pass when
  *     nothing was measured. A record from before the half was graded carries
  *     none, and its row shows nothing (`—`; no row at all when no half has any).
+ *   - Ask mode (`--modes ask`): the Run half alone, on a verified build it was
+ *     given ({@link ModeScorecard.supplied}, its source). Its Build cells read
+ *     `supplied` — not scored, and not the `—` of a half that is missing — and
+ *     a line under the table names the build's source; its Author cost and
+ *     time read `no authoring turns`, and so do the card's lines when every
+ *     mode that ran is one. Every Run row (问数, operations, model,
+ *     guardrails, ask cost and time, the k/N table) counts it as any Run half.
  *   - Seed: rows loaded of rows sent. A refused row is shown as
  *     `⚠ seed: N refused`, and every question turn and operation that depends
  *     on it (`seedDependence` in `orchestrate.ts`) is NOT MEASURED: it counts in
@@ -212,8 +219,14 @@ export interface ModelSpend {
 export type AskSpend = Record<string, ModelSpend>;
 
 export interface ModeScorecard {
-  mode: 'scratch' | 'template';
+  mode: 'scratch' | 'template' | 'ask';
   skipped?: string;
+  /**
+   * The source of the verified build the mode ran on and did not author or
+   * score (`ModeRun.template.source`), on an ask mode that got as far as its
+   * install; absent on every other mode.
+   */
+  supplied?: string;
   first: HalfScores;
   iterate?: HalfScores & { changeSize?: number };
   /** The mode's authoring turns, build and iterate; absent on a record written before the scorecard carried it. */
@@ -536,6 +549,7 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     ],
   };
   if (m.skipped) out.skipped = m.skipped;
+  if (m.mode === 'ask' && m.template) out.supplied = m.template.source;
   if (m.iterate) {
     const it: HalfScores & { changeSize?: number } = {};
     const ib = buildTally(m.iterate.build, NO_ARTIFACT_TOTAL);
@@ -666,14 +680,22 @@ function repeatTable(sc: CardScorecard): string[] {
   ];
 }
 
+/** What a supplied build's Build cells and an ask mode's author rows read: it authored nothing, and nothing of it was scored. */
+const SUPPLIED_BUILD = 'supplied';
+const NO_AUTHORING_TURNS = 'no authoring turns';
+
+/** Did every mode that ran run on a supplied build ({@link ModeScorecard.supplied}): then the card authored nothing either. */
+const suppliedOnly = (sc: CardScorecard): boolean => sc.modes.some((m) => m.supplied !== undefined) && sc.modes.every((m) => m.supplied !== undefined || m.skipped !== undefined);
+
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
 export function renderScorecard(sc: CardScorecard): string {
+  const noAuthoring = suppliedOnly(sc);
   const lines = [
     `### \`${sc.card}\` — ${sc.counts.questions} questions (${sc.counts.questionTurns} persona turns${sc.askRepeats !== undefined && sc.askRepeats > 1 ? `, each asked ${sc.askRepeats} times` : ''}), ${sc.counts.operations} operations, ${sc.counts.personas} personas`,
     '',
     ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
-    `author cost: ${authorCostText(sc.authorCost)}`,
-    `author time: ${authorTimeText(sc.authorTime)}`,
+    `author cost: ${noAuthoring ? NO_AUTHORING_TURNS : authorCostText(sc.authorCost)}`,
+    `author time: ${noAuthoring ? NO_AUTHORING_TURNS : authorTimeText(sc.authorTime)}`,
     `ask cost: ${askCostText(sc.askSpend)}`,
     `ask time: ${askTimeText(sc.askSpend)}`,
     '',
@@ -682,8 +704,8 @@ export function renderScorecard(sc: CardScorecard): string {
     `|:---|${sc.modes.map(() => ':---').join('|')}|`,
   ];
   const row = (label: string, f: (m: ModeScorecard) => string) => lines.push(`| ${label} | ${sc.modes.map((m) => (m.skipped ? `skipped` : f(m))).join(' | ')} |`);
-  row('Build', (m) => buildCell(m.first.build));
-  row('Build · author', (m) => authorCell(m.first.build));
+  row('Build', (m) => (m.supplied !== undefined ? SUPPLIED_BUILD : buildCell(m.first.build)));
+  row('Build · author', (m) => (m.supplied !== undefined ? SUPPLIED_BUILD : authorCell(m.first.build)));
   row('Seed', (m) => seedCell(m.first.seed));
   row('Run-问数', (m) => (m.first.ask ? `${cell(m.first.ask)}${m.first.ask.leaks ? ` ⚠ ${m.first.ask.leaks} leaking` : ''}` : '—'));
   row('Run-operations', (m) => opsCell(m.first));
@@ -697,8 +719,8 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
   if (sc.modes.some((m) => !m.skipped && m.iterate?.guardrails)) row('Iterate · Run · guardrails', (m) => guardrailCell(m.iterate?.guardrails));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
-  row('Author cost', (m) => (m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
-  row('Author time', (m) => (m.authorTime === undefined || m.authorTime.turns > 0 ? authorTimeText(m.authorTime) : '—'));
+  row('Author cost', (m) => (m.supplied !== undefined ? NO_AUTHORING_TURNS : m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
+  row('Author time', (m) => (m.supplied !== undefined ? NO_AUTHORING_TURNS : m.authorTime === undefined || m.authorTime.turns > 0 ? authorTimeText(m.authorTime) : '—'));
   row('Ask cost', (m) => askCostText(m.askSpend));
   row('Ask time', (m) => askTimeText(m.askSpend));
   lines.push(...repeatTable(sc));
@@ -709,6 +731,7 @@ export function renderScorecard(sc: CardScorecard): string {
   }
   for (const m of sc.modes) {
     if (m.skipped) lines.push('', `- ${m.mode}: skipped — ${m.skipped}`);
+    if (m.supplied !== undefined) lines.push('', `- ${m.mode}: the build is supplied (${m.supplied}), installed as it is; it is not scored, and no authoring turn ran`);
     for (const f of m.findings) lines.push(`- ${m.mode} finding: ${f}`);
   }
   return lines.join('\n');
@@ -739,13 +762,16 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
     const s = sc.modes.find((x) => x.mode === m.mode)!;
     // A half that never ran because the build before it was not measured says so.
     const firstOut = m.build?.notMeasured ? `not run: the build was not measured (${m.build.notMeasured})` : undefined;
-    const iterateOut = firstOut ?? (m.iterate?.build.notMeasured ? `not run: the iterate build was not measured (${m.iterate.build.notMeasured})` : undefined);
-    const buildNote = (b: HalfScores['build']) => (b?.notMeasuredReason ? `not measured: ${b.notMeasuredReason}` : b ? cell(b) : '');
+    // An ask mode authors nothing: its Build half is the supplied build's, never scored, and it has no iterate.
+    const supplied = s.supplied !== undefined ? `${SUPPLIED_BUILD} (${s.supplied}): not scored` : undefined;
+    const noIterate = m.mode === 'ask' ? 'not run: ask mode authors no iterate' : undefined;
+    const iterateOut = firstOut ?? noIterate ?? (m.iterate?.build.notMeasured ? `not run: the iterate build was not measured (${m.iterate.build.notMeasured})` : undefined);
+    const buildNote = (b: HalfScores['build']) => supplied ?? (b?.notMeasuredReason ? `not measured: ${b.notMeasuredReason}` : b ? cell(b) : '');
     const halves: Array<[string, Tally | undefined, string | undefined, unknown[], string]> = [
       ['build', s.first.build, m.build?.error, m.build?.score ? [...m.build.score.expect.checks, ...m.build.score.tags.flatMap((t) => t.checks), ...m.build.score.agentActions, ...m.build.score.personaGrants, ...m.build.score.naming] : [], buildNote(s.first.build)],
       ['run-ask', s.first.ask, m.run?.error, m.run?.questions ?? [], s.first.ask ? cell(s.first.ask) : (firstOut ?? '')],
       ['run-operations', s.first.operations, m.run?.error, m.run?.operations ?? [], s.first.operations ? cell(s.first.operations) : (firstOut ?? '')],
-      ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? [...m.iterate.build.score.expect.checks, ...m.iterate.build.score.naming] : [], s.iterate?.build ? buildNote(s.iterate.build) : (firstOut ?? '')],
+      ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? [...m.iterate.build.score.expect.checks, ...m.iterate.build.score.naming] : [], s.iterate?.build ? buildNote(s.iterate.build) : (firstOut ?? noIterate ?? '')],
       ['iterate-run-ask', s.iterate?.ask, m.iterate?.run?.error, m.iterate?.run?.questions ?? [], s.iterate?.ask ? cell(s.iterate.ask) : (iterateOut ?? '')],
       ['iterate-run-operations', s.iterate?.operations, m.iterate?.run?.error, m.iterate?.run?.operations ?? [], s.iterate?.operations ? cell(s.iterate.operations) : (iterateOut ?? '')],
     ];
