@@ -573,6 +573,13 @@ export interface ActionConfirmationRequiredDetails {
  *    call, every gate and permission re-checked at the moment of approval. A
  *    refusal there runs nothing and is recorded on the item as `failed`.
  *
+ * The three points bind EVERY item in the in-app queue, whichever trigger
+ * queued it: an action declaring `ai.requiresConfirmation: true`, or one the
+ * destructive heuristic gates (ADR-0011's confirmation table). A pending row
+ * does not record why it was queued, and the queue has one decider rule; an
+ * administrator who is to approve as well does so through `held`, never by
+ * deciding the person's item.
+ *
  * Neither the model's own confirmation nor the caller's `confirm` counts
  * (rule 5): the item waits for the person. An approval proves what an approved
  * hand-off proves, that a signed-in session to the app answered.

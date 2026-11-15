@@ -362,6 +362,17 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
     expect(prose, 'the in-app door no longer says the model\'s own confirmation does not count').toMatch(
       /Neither the model's own confirmation nor the caller's `confirm` counts/,
     );
+    expect(prose, 'the three points no longer bind every in-app queued item, whichever trigger queued it').toMatch(
+      /The three points bind EVERY item in the in-app queue, whichever trigger queued it: an action declaring `ai\.requiresConfirmation: true`, or one the destructive heuristic gates/,
+    );
+    expect(prose, 'the contract no longer says why the in-app queue has one decider rule').toMatch(
+      /A pending row does not record why it was queued, and the queue has one decider rule/,
+    );
+    // Control: the MCP doors' reach is still the DECLARED flag alone; the
+    // in-app queue's wider reach must not leak into rule 1.
+    expect(prose, 'rule 1 lost its DECLARED-flag predicate').toMatch(
+      /`ai\.requiresConfirmation: true` \(the DECLARED flag, never the listing heuristic;/,
+    );
     expect(prose, 'the contract claims the two seams were merged').toMatch(/stay two seams; the rule that binds them is one/);
     expect(prose, 'the FROM half of the in-app door is no longer stated').toMatch(
       /The in-app door likewise runs ADR-0011's queue as documented until its implementing change ships: any holder of `ai:approve` may decide an item/,
