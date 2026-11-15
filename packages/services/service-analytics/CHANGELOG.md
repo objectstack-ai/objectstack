@@ -1,5 +1,131 @@
 # Changelog — @objectstack/service-analytics
 
+## 18.5.0
+
+### Patch Changes
+
+- 702c562: fix(service-analytics): a truncated `query_dataset` answer carries drill sidecars for the served rows only
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `query_dataset` asks the dataset query for one row past its cap so `truncated` is a fact, and serves `cap` rows. The two answer members aligned to `rows` by index, `drillRawRows` and `drillRanges`, were served untrimmed, so each held one more entry than `rows` (a `limit: 1` answer carried two `drillRawRows` entries). They are now served to the same length as `rows`, entry i beside row i, on the MCP tool and on the chat tool alike. Members that are not row-indexed (`totals`, `drillRawTotals`, `dimensionFields`, `drillScopes`, `fields`, `object`) are served as before, and an answer within the cap is unchanged.
+- bf02d33: fix(service-analytics)!: `query_dataset` refuses a selection that names no measure, as the REST dataset door does
+  
+  Clause-②: no (narrowing) — a `query_dataset` call whose `selection.measures` is empty, which answered 500 `DATABASE_ERROR` (or, with dimensions, group rows carrying no measure), is refused 400 `VALIDATION_FAILED` before anything is read, on the MCP tool and on the product AI's chat tool alike.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored shape changes. The refusal is the code, status and sentence the REST door POST /analytics/dataset/query already answers the same selection with, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller that sent `query_dataset` a selection with `measures: []`.
+  
+  FROM: the call reached the dataset query with nothing to project. The SQL driver answered `500 DATABASE_ERROR` with its own statement error, and with `dimensions` the tool served group rows carrying no measure.
+  TO: the call is refused `400 VALIDATION_FAILED`, `body.selection.measures must be a non-empty array of measure names.`, before the dataset is resolved or any row is read: the answer `POST /api/v1/analytics/dataset/query` gives the same selection. The fix for a caller: name at least one measure from the dataset, as `list_datasets` lists them.
+  
+  The check sits in the dataset-tools executor that both faces call, the MCP `query_dataset` tool and the chat tool, so one guard covers both. A selection naming a measure is served exactly as before.
+- 69c77ad: fix(service-analytics): a lookup dataset dimension serves the referenced record's name for a relationship path and for a target titled by its `nameField`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Relationship-path lookups.** A dimension whose `field` is a relationship path ending in a lookup, such as `account.owner_id`, now serves the referenced record's display name instead of its id. The label is read from the column's own field on the object the path reaches, the same object the query joins. A `select` column at the end of a path now serves its option label too, translated under that object and field. Sorting by such a dimension (`order`) sorts by the name the rows show.
+  
+  **Targets titled by `nameField`.** A lookup dimension's label is read from the target object's declared `nameField` first, then from a `name`, `title` or `label` field, then from the first text field. Before, an object titled by an `autonumber` order number with no `name`, `title` or `label` field was read through its first text field (usually the platform's ownership `queue`, empty on every row), so the id was served. A `nameField` that is a formula is still skipped, as before.
+  
+  **Unchanged.** Rows are still grouped by the stored id, so two records that share a name stay two rows. A target the API does not expose, or that the reader's row scope hides, still serves the stored id. A lookup to an object whose title is its `name` field labels as it did. The same labels reach every face of a saved dataset: `POST /api/v1/analytics/dataset/query`, the `query_dataset` AI tool and its MCP tool.
+- 24f2f40: fix(service-analytics): a dataset over a field named after a SQL keyword answers rows instead of 500
+  
+  Clause-②: yes (widening) — `POST /api/v1/analytics/dataset/query`, the `query_dataset` tool and `/api/v1/analytics/query` answer rows for a dimension, measure or filter on a base-table field whose name is a SQL keyword (`order`, `group`, `select`, …), where they answered `500 DATABASE_ERROR`. Every other statement answers the same rows; its text now writes base-table columns quoted (`"stage" = $1`), as it already did when the statement joined another table.
+  Metadata-protocol: none
+  
+  The native SQL compiler wrote a base-table column bare whenever the statement joined nothing, so a lookup dimension on a relationship field named `order` reached the database as the keyword (`near "order": syntax error`). On PostgreSQL a bare `user` is `CURRENT_USER`, so a field named `user` would have grouped every row under the database role. A plain identifier in a cube member's `sql` is now always read as a column of the base table, in every statement.
+- 498c967: feat(service-analytics): the engine-aggregate path filters on a related record's field — a one-hop dotted `where` leaf (`'order.status'`) is served as the engine's nested-relation condition instead of refused (#33335)
+  
+  Clause-②: yes (widening) — `ObjectQLStrategy` serves a query shape it refused with `400 INVALID_FIELD` ("cannot evaluate a cross-object filter … the engine cannot join in an aggregate"): a one-hop dotted member in the caller's `where` (a dataset query's `runtimeFilter`, a dashboard global filter, a widget filter). No authorable schema, export or wire shape changes, and every other answer is unchanged.
+  Metadata-protocol: none
+  
+  A dashboard over detail rows can now leave out the rows of a cancelled parent on every deployment, where before only a query the native-SQL strategy served could (a SQL datasource, with no bucketed date dimension, no federated object, and no engine-enforced read gate on any object it reads).
+  
+  **What a served leaf means.** `{ 'order.status': { $ne: 'cancelled' } }` reaches the engine as `{ order: { status: { $ne: 'cancelled' } } }`, the nested-relation condition the engine already serves in `where`: it reads the related object as the caller (its row-level security and field permissions apply) and keeps the base rows whose relationship points at a record that read returned.
+  
+  - A row with no related record, or one the caller cannot read, is not selected, whatever the operator (`$ne` and `$nin` included). To keep such rows, OR in the relationship itself: `{ $or: [{ 'order.status': { $ne: 'cancelled' } }, { order: { $null: true } }] }`.
+  - No matching related record selects no row, never the unfiltered set.
+  - A related field the caller cannot read is refused `403 PERMISSION_DENIED`; more than 1,000 matching related records are refused `400 INVALID_FILTER`, never truncated.
+  - Leaves on one relationship in one conjunction are one condition (one related record satisfies all of them).
+  - The `/analytics/sql` echo refuses such a query `400 INVALID_FILTER`, as it does the authored nested-relation form; `/analytics/query` returns its rows.
+  
+  **Still refused (`400 INVALID_FIELD`, `param: 'where'`)**, each with its reason and the native-SQL route in the message: a path of two or more relationships, a related-field leaf under `$not` (write `$ne` / `$nin` inside the leaf), a related field compared with a `{ $field }` reference, and a relationship the cube joins onto a different object than the field declares. A cross-object measure, and a related field in a dataset's own `filter` or a measure's own `filter`, stay refused as before.
+- 63fcfb5: Clause-②: no
+  Metadata-protocol: none
+  
+  The record-currency refusal on a cube measure (`INVALID_FIELD` / 400, a `sum` / `avg` / `min` / `max` over a `currencyMode: 'record'` amount the query does not group by its code) no longer advises a grouping for an amount that follows its parent's currency (`currencyField: 'MASTER_DETAIL.CODE'`). No grouping makes such an amount one currency — a dimension over the parent path groups by the parent's column, and the engine admits none either — so following that advice was refused again. The refusal now names the stored home-currency field alone. A sibling code field keeps both remedies, the home field and the grouping over the code.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [834d5f5]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/types@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes
