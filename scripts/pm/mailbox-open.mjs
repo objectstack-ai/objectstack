@@ -7,6 +7,7 @@
  *   node scripts/pm/mailbox-open.mjs --repo owner/name --seat <seat> --login <login> [--base main] [--dry-run] [--json]
  *   node scripts/pm/mailbox-open.mjs --repo owner/name --seat <seat> --login <login> --head <branch> [--dry-run]
  *   node scripts/pm/mailbox-open.mjs --repo owner/name --close <n> [--dry-run]
+ *   node scripts/pm/mailbox-open.mjs --repo owner/name --lock <n> [--dry-run]   # an already-open mailbox
  *   node scripts/pm/mailbox-open.mjs --self-test          # offline, no network, no git
  *
  * ## What a mailbox PR is, and why it is a PR
@@ -95,6 +96,46 @@
  *      a label the fleet relies on is created.
  *   ④ READ the new pull's number back off its head and print it — the number
  *      `subscribe_pr_activity` takes.
+ *   ⑤ LOCK its conversation and PROVE the relay still writes there: a second
+ *      relay stroke, `conversation_lock` on the number ④ read (`planLock`),
+ *      the pull read back `locked`, then the canary — see "Closed to
+ *      outsiders" below. The lock cannot ride ③: an action names its pull by
+ *      number, and the number exists only once ③ has answered. A lock that
+ *      fails leaves the mailbox OPEN and unlocked, and the open exits non-zero
+ *      naming the one re-send, `--lock N`.
+ *
+ * ## Closed to outsiders — `--lock <n>`
+ *
+ * The repository is public, so before ⑤ any GitHub account could comment on a
+ * mailbox, and the comment reached the subscribed seat's session as a
+ * PR-activity event: a forged knock costs the seat a read and its tokens even
+ * though `references/untrusted-text.md` makes it data, never an instruction.
+ * A locked conversation takes comments only from accounts with write access
+ * to the repository (GitHub's "locking conversations" documentation), so the
+ * relay's own knocks and the maintainers' still land and nobody else's does;
+ * the doorbell reader then counts a knock only from those authors
+ * (`record-recognisers.mjs` `readMailboxComment`). `--lock <n>` locks a
+ * mailbox opened before ⑤ existed — the one spelling of the sweep over every
+ * open mailbox. It reads the pull first and REFUSES (exit 4) unless it is an
+ * open `pm:mailbox` PR, as `--close` does; a pull that already reads `locked`
+ * is left with zero writes; otherwise one stroke of `conversation_lock`
+ * (`fleet-write/ops.mjs`), then the pull read back `locked`, or exit 3. The
+ * relay fences both lock rows on the same read itself (`ops.mjs` header).
+ *
+ * The canary. GitHub's documentation names "people with write access" and is
+ * silent on Apps, so whether the relay's App token may still COMMENT on a
+ * locked conversation is measured on every lock this file makes, never
+ * assumed: once the pull reads back locked, a third relay stroke posts ONE
+ * comment, `MAILBOX_LOCK_CANARY` above the bare footer (`planCanary`), which
+ * the relay reads back byte for byte. It is no doorbell key — its first line
+ * is not `To:` — and the doorbell reader names it a canary, never an event or
+ * a half-state (`record-recognisers.mjs` `readMailboxComment`). A canary the
+ * relay could not post means a locked mailbox would hear no knock, so the
+ * lock is taken back at once: one stroke of `conversation_unlock`, the pull
+ * read back unlocked, the mailbox open to every account as it was before
+ * this lock, and the run exits 3 saying so loudly — ⛔ lock no other mailbox
+ * until that is understood. An unlock that fails too leaves the mailbox
+ * LOCKED and perhaps deaf, and the line names the maintainer's hand.
  *
  * `--close <n>` reads the pull first and REFUSES (exit 4) unless it is open
  * and carries `pm:mailbox`, so a mistyped number can never close a real PR;
@@ -134,9 +175,10 @@
  *
  *   0   done (or a dry run printed); the PR number is printed.
  *   2   usage, or the validator refused the stroke. Nothing was sent.
- *   3   prerequisite: a read failed, `git` failed, or with-fleet refused the push.
+ *   3   prerequisite: a read failed, `git` failed, or with-fleet refused the push;
+ *       or a lock did not land, or its canary did not (the lock taken back).
  *   4   refused on the board's state: a mailbox already open (open), or the
- *       pull is not an open `pm:mailbox` PR (close). Nothing was sent.
+ *       pull is not an open `pm:mailbox` PR (close, lock). Nothing was sent.
  *   5+  the relay's own exit (`fleet-write/dispatch.mjs` ladder), passed through.
  */
 
@@ -148,7 +190,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { MAILBOX_BRANCH_SHAPE, MAILBOX_LABEL } from './fleet-write/ops.mjs';
+import { CONVERSATION_LOCK_REASON, MAILBOX_BRANCH_SHAPE, MAILBOX_LABEL, OPS } from './fleet-write/ops.mjs';
 import { validateStroke } from './fleet-write/validate.mjs';
 import { ghApi, PER_PAGE, readAllPages } from './gh-pages.mjs';
 
@@ -220,7 +262,7 @@ export const mailboxBranch = (login, seat) => `${MAILBOX_BRANCH_PREFIX}${login}/
 // ---------------------------------------------------------------------------
 
 export function parseArgs(argv) {
-  const opts = { repo: null, seat: null, login: null, head: null, base: 'main', close: null, dryRun: false, json: false, selfTest: false, help: false, errors: [] };
+  const opts = { repo: null, seat: null, login: null, head: null, base: 'main', close: null, lock: null, dryRun: false, json: false, selfTest: false, help: false, errors: [] };
   const args = [...argv];
   const value = (flag) => {
     const v = args.shift();
@@ -241,18 +283,20 @@ export function parseArgs(argv) {
     else if (a === '--login') opts.login = value(a);
     else if (a === '--head') opts.head = value(a);
     else if (a === '--base') opts.base = value(a);
-    else if (a === '--close') {
+    else if (a === '--close' || a === '--lock') {
       const v = value(a);
-      if (v !== null) opts.close = /^[1-9][0-9]*$/.test(v) ? Number(v) : NaN;
+      if (v !== null) opts[a.slice(2)] = /^[1-9][0-9]*$/.test(v) ? Number(v) : NaN;
     } else opts.errors.push(`unrecognised argument \`${a}\``);
   }
   if (opts.help || opts.selfTest) return opts;
   if (!opts.repo) opts.errors.push('--repo owner/name is required');
   else if (!REPO_SHAPE.test(opts.repo)) opts.errors.push(`--repo ${JSON.stringify(opts.repo)} is not shaped owner/name`);
-  if (opts.close !== null) {
-    if (Number.isNaN(opts.close)) opts.errors.push('--close takes a pull number');
-    if (opts.head !== null) opts.errors.push('--close takes no --head');
-    if (opts.seat !== null) opts.errors.push('--close takes no --seat');
+  if (opts.close !== null && opts.lock !== null) opts.errors.push('--close and --lock are two modes — send one');
+  else if (opts.close !== null || opts.lock !== null) {
+    const flag = opts.close !== null ? '--close' : '--lock';
+    if (Number.isNaN(opts.close ?? opts.lock)) opts.errors.push(`${flag} takes a pull number`);
+    if (opts.head !== null) opts.errors.push(`${flag} takes no --head`);
+    if (opts.seat !== null) opts.errors.push(`${flag} takes no --seat`);
   } else {
     const seat = opts.seat === null ? null : seatKey(opts.seat);
     if (!opts.seat) opts.errors.push('--seat <seat> is required to open a mailbox — the mailbox is the seat\'s, never the login\'s');
@@ -317,6 +361,50 @@ export function planClose({ repo, pull, head = null }) {
   return { kind: 'close', repo, pull, branch, actions, errors: validateStroke(repo, actions) };
 }
 
+/**
+ * The lock of a mailbox's conversation (header, step ⑤ and `--lock`): ONE `conversation_lock` action on `pull`,
+ * judged by the relay's own validator. The reason is the op table's (`CONVERSATION_LOCK_REASON`), never ours. Pure.
+ */
+export function planLock({ repo, pull }) {
+  const actions = [{ op: 'conversation_lock', issue: pull }];
+  return { kind: 'lock', repo, pull, actions, errors: validateStroke(repo, actions) };
+}
+
+/**
+ * The canary's one line (header 〈Closed to outsiders〉): posted by the relay on a conversation it has just locked,
+ * the proof that a knock still lands there. ⛔ Not a doorbell key — it opens with no `To:` — and the doorbell reader
+ * imports it to name such a row a canary, never an event or a half-state (`record-recognisers.mjs`).
+ */
+export const MAILBOX_LOCK_CANARY = 'Mailbox locked: only accounts with write access can comment here. This relay comment is the proof that a knock still lands.';
+
+/** The canary: ONE relay `comment` on `pull`, the line above the bare footer, judged by the relay's own validator. Pure. */
+export function planCanary({ repo, pull }) {
+  const actions = [{ op: 'comment', issue: pull, body: `${MAILBOX_LOCK_CANARY}\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_` }];
+  return { kind: 'canary', repo, pull, actions, errors: validateStroke(repo, actions) };
+}
+
+/** The lock taken back when its canary did not land: ONE `conversation_unlock` on `pull`, judged by the validator. Pure. */
+export function planUnlock({ repo, pull }) {
+  const actions = [{ op: 'conversation_unlock', issue: pull }];
+  return { kind: 'unlock', repo, pull, actions, errors: validateStroke(repo, actions) };
+}
+
+/**
+ * What a canary that did not land prints (header): the lock was taken back — or, when `unlocked` is false, could
+ * not be, and a maintainer unlocks by hand. Either way no other mailbox is locked until it is understood. Pure.
+ */
+export function canaryFailureText(repo, pull, unlocked) {
+  const head = `#${pull} was locked, but the relay could NOT post its canary comment there — a locked mailbox the relay cannot write to hears no knock`;
+  return unlocked
+    ? `${head}. The lock was TAKEN BACK: #${pull} reads unlocked, open to every account as before. ⛔ Lock no other mailbox on ${repo} until the refusal above is understood.`
+    : `${head}, and the unlock did not land either: #${pull} may stay LOCKED and deaf. A maintainer unlocks it by hand (the PR's "Unlock conversation"). ⛔ Lock no other mailbox on ${repo} until then.`;
+}
+
+/** The line an open or `--lock` prints when the lock did not land: the mailbox is still open to every account. Pure. */
+export function lockRemedy(repo, pull) {
+  return `#${pull} is NOT locked, so any GitHub account can still comment on it — re-send the lock alone: node scripts/pm/mailbox-open.mjs --repo ${repo} --lock ${pull}`;
+}
+
 const labelNames = (pr) => (Array.isArray(pr?.labels) ? pr.labels.map((l) => (typeof l === 'string' ? l : l?.name)) : []);
 const firstLine = (text) => String(text ?? '').split(/\r?\n/).find((l) => l.trim() !== '')?.trim() ?? '';
 
@@ -363,13 +451,16 @@ export function closeRemedy(plan) {
   return `if the stroke stopped at mailbox_branch_delete, #${plan.pull} is closed and --close refuses a re-run: once the refusal named above no longer holds, send the delete alone — node scripts/pm/fleet-write/dispatch.mjs --repo ${plan.repo} --actions-file FILE --json, FILE holding ${action}`;
 }
 
-/** Why `pr` may not be closed as a mailbox, or null when it may. Pure. */
-export function closeRefusal(pr, pull) {
+/** Why `pr` may not be closed (`verb` 'closes') or locked ('locks') as a mailbox, or null when it may. Pure. */
+export function closeRefusal(pr, pull, verb = 'closes') {
   if (!pr || typeof pr !== 'object') return `#${pull} could not be read`;
   if (pr.state !== 'open') return `#${pull} is ${pr.state}, not open`;
-  if (!labelNames(pr).includes(MAILBOX_LABEL)) return `#${pull} does not carry ${MAILBOX_LABEL} — this tool closes mailboxes only`;
+  if (!labelNames(pr).includes(MAILBOX_LABEL)) return `#${pull} does not carry ${MAILBOX_LABEL} — this tool ${verb} mailboxes only`;
   return null;
 }
+
+/** Why `pr` may not be locked as a mailbox — the same read `--close` refuses on — or null when it may. Pure. */
+export const lockRefusal = (pr, pull) => closeRefusal(pr, pull, 'locks');
 
 export function planText(plan) {
   const lines = [`mailbox-open: DRY RUN — nothing read, nothing pushed, nothing sent (${plan.repo}).`];
@@ -382,6 +473,12 @@ export function planText(plan) {
     );
     lines.push('  ③ one relay stroke (fleet-write/dispatch.mjs), the actions file below');
     lines.push(`  ④ read back the open pull on ${plan.branch} and print its number`);
+    lines.push(`  ⑤ a second relay stroke: ${JSON.stringify({ op: 'conversation_lock', issue: 'N' })} on the number ④ read, then read N back locked; then the canary — one relay comment on N; refused ⇒ conversation_unlock, read N back unlocked, exit 3`);
+  } else if (plan.kind === 'lock') {
+    lines.push(`  ① read #${plan.pull}; refuse unless it is open and carries ${MAILBOX_LABEL}; already locked ⇒ nothing sent`);
+    lines.push(`  ② one relay stroke (fleet-write/dispatch.mjs), the actions file below — lock_reason ${CONVERSATION_LOCK_REASON}, the op table's`);
+    lines.push(`  ③ read #${plan.pull} back locked`);
+    lines.push(`  ④ the canary: one relay comment on #${plan.pull} (${JSON.stringify(MAILBOX_LOCK_CANARY)}); refused ⇒ conversation_unlock, read #${plan.pull} back unlocked, exit 3`);
   } else {
     lines.push(`  ① read #${plan.pull}; refuse unless it is open and carries ${MAILBOX_LABEL}`);
     lines.push('  ② one relay stroke (fleet-write/dispatch.mjs), the actions file below — plus mailbox_branch_delete when the head read is claude/mailbox-*');
@@ -460,8 +557,59 @@ async function openLive(plan, opts) {
     return EXIT_PREREQUISITE;
   }
   console.log(`✓ mailbox #${pr.number} of ${plan.seat.key} ${pr.html_url} — subscribe_pr_activity ${plan.repo} ${pr.number}`);
-  if (opts.json) console.log(JSON.stringify({ number: pr.number, html_url: pr.html_url, repo: plan.repo, seat: plan.seat.key, branch: plan.branch }));
-  return EXIT_OK;
+  const locked = lockStroke(planLock({ repo: plan.repo, pull: pr.number }), opts);
+  if (opts.json) console.log(JSON.stringify({ number: pr.number, html_url: pr.html_url, repo: plan.repo, seat: plan.seat.key, branch: plan.branch, locked: locked === EXIT_OK }));
+  return locked;
+}
+
+/** Step ⑤ and `--lock`'s write: the stroke, then the pull read back `locked`; a failure names the re-send. */
+function lockStroke(plan, opts) {
+  if (plan.errors.length) {
+    for (const e of plan.errors) console.error(`✗ mailbox-open: the lock was REFUSED by the relay validator — ${e}`);
+    console.error(`✗ mailbox-open: ${lockRemedy(plan.repo, plan.pull)}`);
+    return EXIT_USAGE;
+  }
+  const code = sendStroke(plan, opts);
+  const back = code === EXIT_OK ? ghJson(`/repos/${plan.repo}/issues/${plan.pull}`) : null;
+  if (!(code === EXIT_OK && back?.ok && back.value?.locked === true)) {
+    console.error(`✗ mailbox-open: ${code !== EXIT_OK ? `the lock stroke exited ${code}` : `the lock stroke completed but #${plan.pull} does not read back locked${back?.ok ? '' : ` (${back?.error})`}`}. ${lockRemedy(plan.repo, plan.pull)}`);
+    return code !== EXIT_OK ? code : EXIT_PREREQUISITE;
+  }
+  console.log(`✓ mailbox #${plan.pull} locked on ${plan.repo} — comments now come from accounts with write access alone.`);
+  return canaryStroke(plan.repo, plan.pull, opts);
+}
+
+/** The canary after a landed lock (header): the comment lands, or the lock is taken back and the run exits 3. */
+function canaryStroke(repo, pull, opts) {
+  const canary = planCanary({ repo, pull });
+  if (canary.errors.length === 0 && sendStroke(canary, opts) === EXIT_OK) {
+    console.log(`✓ mailbox #${pull}: the relay's canary comment landed on the locked conversation — knocks still land.`);
+    return EXIT_OK;
+  }
+  for (const e of canary.errors) console.error(`✗ mailbox-open: the canary was REFUSED by the relay validator — ${e}`);
+  const unlock = planUnlock({ repo, pull });
+  const code = unlock.errors.length ? EXIT_USAGE : sendStroke(unlock, opts);
+  const back = code === EXIT_OK ? ghJson(`/repos/${repo}/issues/${pull}`) : null;
+  console.error(`✗✗ mailbox-open: ${canaryFailureText(repo, pull, code === EXIT_OK && back?.ok && back.value?.locked === false)}`);
+  return EXIT_PREREQUISITE;
+}
+
+async function lockLive(plan, opts) {
+  const read = ghJson(`/repos/${plan.repo}/pulls/${plan.pull}`);
+  if (!read.ok) {
+    console.error(`✗ mailbox-open: could not read #${plan.pull} — ${read.error}. Nothing was sent.`);
+    return EXIT_PREREQUISITE;
+  }
+  const refusal = lockRefusal(read.value, plan.pull);
+  if (refusal) {
+    console.error(`✗ mailbox-open: ${refusal}. Nothing was sent.`);
+    return EXIT_REFUSED;
+  }
+  if (read.value.locked === true) {
+    console.log(`✓ mailbox #${plan.pull} is already locked on ${plan.repo}. Nothing was sent.`);
+    return EXIT_OK;
+  }
+  return lockStroke(plan, opts);
 }
 
 async function closeLive(plan, opts) {
@@ -486,6 +634,7 @@ const USAGE = [
   'usage:',
   '  node scripts/pm/mailbox-open.mjs --repo owner/name --seat <LANE#N> --login <login> [--head <branch>] [--base main] [--dry-run] [--json]',
   '  node scripts/pm/mailbox-open.mjs --repo owner/name --close <n> [--dry-run]',
+  '  node scripts/pm/mailbox-open.mjs --repo owner/name --lock <n> [--dry-run]',
   '  node scripts/pm/mailbox-open.mjs --self-test',
   `  Exits: ${EXIT_OK} done · ${EXIT_USAGE} usage or refused stroke · ${EXIT_PREREQUISITE} prerequisite · ${EXIT_REFUSED} refused on board state · 5+ the relay's own exit`,
 ].join('\n');
@@ -503,7 +652,12 @@ export async function main(argv, { env = process.env } = {}) {
     return EXIT_USAGE;
   }
   const session = env.OS_FLEET_SESSION || env.CLAUDE_CODE_REMOTE_SESSION_ID || null;
-  const plan = opts.close !== null ? planClose({ repo: opts.repo, pull: opts.close }) : planOpen({ repo: opts.repo, seat: opts.seat, login: opts.login, head: opts.head, base: opts.base, session });
+  const plan =
+    opts.close !== null
+      ? planClose({ repo: opts.repo, pull: opts.close })
+      : opts.lock !== null
+        ? planLock({ repo: opts.repo, pull: opts.lock })
+        : planOpen({ repo: opts.repo, seat: opts.seat, login: opts.login, head: opts.head, base: opts.base, session });
   if (plan.errors.length) {
     for (const e of plan.errors) console.error(`✗ mailbox-open: REFUSED by the relay validator — ${e}`);
     console.error('  Nothing was sent.');
@@ -515,7 +669,7 @@ export async function main(argv, { env = process.env } = {}) {
     console.log(planText(plan));
     return EXIT_OK;
   }
-  return plan.kind === 'open' ? openLive(plan, opts) : closeLive(plan, opts);
+  return plan.kind === 'open' ? openLive(plan, opts) : plan.kind === 'lock' ? lockLive(plan, opts) : closeLive(plan, opts);
 }
 
 // ---------------------------------------------------------------------------
@@ -533,10 +687,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "finding a seat's open mailbox: by seat, never by login": 10,
   'refusing to close what is not an open mailbox': 4,
   'the ledger exclusion and the footer': 4,
-  'the CLI: dry run prints the actions file and sends nothing': 8,
+  'the CLI: dry run prints the actions file and sends nothing': 9,
   'paging: a three-page read through the loop equals the slurped array': 4,
+  'the lock: one conversation_lock action the relay validator accepts, the PUT it becomes, behind the open-mailbox read; then the canary comment, and the unlock that takes the lock back when the canary is refused': 12,
 });
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 
 async function selfTest() {
   let failed = 0;
@@ -683,6 +838,30 @@ async function selfTest() {
     t('a failed page or a non-list page is an error, never a partial list', [readAllPages('/x', { get: () => ({ ok: false, error: 'boom' }) }), readAllPages('/x', { get: () => ({ ok: true, value: { message: 'x' } }) }).ok], [{ ok: false, error: 'boom' }, false]);
   }
 
+  battery('the lock: one conversation_lock action the relay validator accepts, the PUT it becomes, behind the open-mailbox read; then the canary comment, and the unlock that takes the lock back when the canary is refused');
+  {
+    const REPO = 'objectstack-ai/objectstack';
+    const lk = planLock({ repo: REPO, pull: 32588 });
+    t('⭐ one action, conversation_lock on the pull by number, and the relay validator accepts the stroke', [lk.kind, lk.actions, lk.errors], ['lock', [{ op: 'conversation_lock', issue: 32588 }], []]);
+    t('⭐ the action shape the relay SENDS from it: one PUT of the issue lock path, its body the op table\'s one reason, the pull handed to the relay\'s own fence', OPS.conversation_lock.requests(lk.actions[0], REPO), [{ verb: 'PUT', path: `/repos/${REPO}/issues/32588/lock`, body: { lock_reason: CONVERSATION_LOCK_REASON }, mailboxLock: { pull: 32588, locked: true } }]);
+    t('…and a pull that is no positive integer is refused by that validator, nothing sent', planLock({ repo: REPO, pull: '32588' }).errors.length > 0, true);
+    t('the read it runs behind: an open pm:mailbox PR may be locked; a PR without the label, a closed one and an unreadable answer are refused', [lockRefusal(pr({}), 1), /does not carry pm:mailbox — this tool locks mailboxes only/.test(lockRefusal(pr({ labels: [{ name: 'bug' }] }), 1)), /is closed/.test(lockRefusal(pr({ state: 'closed' }), 1)), /could not be read/.test(lockRefusal(null, 1))], [null, true, true, true]);
+    const la = parseArgs(['--repo', 'o/r', '--lock', '32588']);
+    t('--lock takes a pull number and no seat; a non-number, --close beside it, a --head or a --seat is refused', [la.errors, la.lock, parseArgs(['--repo', 'o/r', '--lock', 'x']).errors.some((e) => e.includes('--lock takes a pull number')), parseArgs(['--repo', 'o/r', '--lock', '1', '--close', '2']).errors.some((e) => e.includes('two modes')), parseArgs(['--repo', 'o/r', '--lock', '1', '--head', 'h']).errors.some((e) => e.includes('--lock takes no --head')), parseArgs(['--repo', 'o/r', '--lock', '1', '--seat', 'triage']).errors.some((e) => e.includes('--lock takes no --seat'))], [[], 32588, true, true, true, true]);
+    t('a lock that did not land names the one re-send, --lock N, and says the mailbox is still open to every account', [lockRemedy(REPO, 32588).includes(`node scripts/pm/mailbox-open.mjs --repo ${REPO} --lock 32588`), /NOT locked/.test(lockRemedy(REPO, 32588))], [true, true]);
+    t('⭐ the open plan names the lock as its step ⑤, after the number is read back, and the canary after it', [/⑤ a second relay stroke: \{"op":"conversation_lock","issue":"N"\}/.test(planText(planOpen({ repo: REPO, seat: 'triage', login: 'os-bill' }))), /then the canary — one relay comment on N; refused ⇒ conversation_unlock/.test(planText(planOpen({ repo: REPO, seat: 'triage', login: 'os-bill' })))], [true, true]);
+    const cn = planCanary({ repo: REPO, pull: 32588 });
+    t('⭐ the canary: ONE relay comment on the pull, its first line the canary line, then the bare footer — and the relay validator accepts it', [cn.kind, cn.actions.length, cn.actions[0].op, cn.actions[0].issue, cn.actions[0].body.split('\n')[0], cn.actions[0].body.endsWith('\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_'), cn.errors], ['canary', 1, 'comment', 32588, MAILBOX_LOCK_CANARY, true, []]);
+    // The doorbell's own reading of this body — refused as a knock, read as the relay's canary — is pinned in
+    // record-recognisers' self-test: that module imports this one, so importing it back here would deadlock this
+    // entry's top-level await.
+    t('⛔ the canary is no doorbell key: its line opens with no `To:` and no key word, and it is one line', [/^To:/.test(MAILBOX_LOCK_CANARY), /^(?:Request|Notify):/.test(MAILBOX_LOCK_CANARY), MAILBOX_LOCK_CANARY.includes('\n')], [false, false, false]);
+    const ul = planUnlock({ repo: REPO, pull: 32588 });
+    t('⭐ the unlock: ONE conversation_unlock on the pull, accepted by the validator, and the DELETE the relay sends from it, fenced by the relay on the same pull', [ul.kind, ul.actions, ul.errors, OPS.conversation_unlock.requests(ul.actions[0], REPO)], ['unlock', [{ op: 'conversation_unlock', issue: 32588 }], [], [{ verb: 'DELETE', path: `/repos/${REPO}/issues/32588/lock`, mailboxLock: { pull: 32588, locked: false } }]]);
+    t('a canary that did not land says so loudly: the lock taken back and no other mailbox locked — or, the unlock failed too, a maintainer\'s hand named', [/could NOT post its canary/.test(canaryFailureText(REPO, 32588, true)), /TAKEN BACK/.test(canaryFailureText(REPO, 32588, true)), /Lock no other mailbox/.test(canaryFailureText(REPO, 32588, true)), /may stay LOCKED and deaf/.test(canaryFailureText(REPO, 32588, false)), /Unlock conversation/.test(canaryFailureText(REPO, 32588, false))], [true, true, true, true, true]);
+    t('the --lock plan names the canary as its step ④', /④ the canary: one relay comment on #32588/.test(planText(lk)), true);
+  }
+
   battery('the CLI: dry run prints the actions file and sends nothing');
   const cli = (args) => spawnSync(process.execPath, [SELF_PATH, ...args], { encoding: 'utf8', env: { ...process.env, PATH: '/nonexistent', OS_FLEET_SESSION: '', CLAUDE_CODE_REMOTE_SESSION_ID: '' } });
   const dry = cli(['--repo', 'objectstack-ai/objectstack', '--seat', 'domain:ui#4', '--login', 'os-bill', '--dry-run']);
@@ -697,6 +876,7 @@ async function selfTest() {
   t('close dry run exits 0 and prints both actions', [cli(['--repo', 'o/r', '--close', '7', '--dry-run']).status, (cli(['--repo', 'o/r', '--close', '7', '--dry-run']).stdout.match(/"op":/g) ?? []).length], [EXIT_OK, 2]);
   t('a usage error is exit 2 — an open with no --seat among them', [cli(['--repo', 'o/r']).status, cli(['--repo', 'o/r', '--login', 'os-bill', '--dry-run']).status], [EXIT_USAGE, EXIT_USAGE]);
   t('--help is exit 0', cli(['--help']).status, EXIT_OK);
+  t('⭐ a --lock dry run exits 0 with no gh/git on PATH and prints the one conversation_lock action', (() => { const l = cli(['--repo', 'objectstack-ai/objectstack', '--lock', '32588', '--dry-run']); let a = null; try { a = JSON.parse(l.stdout.split('--- actions file ---\n')[1] ?? ''); } catch {} return [l.status, a]; })(), [EXIT_OK, [{ op: 'conversation_lock', issue: 32588 }]]);
   t('⭐ a dry run on a --head --close will leave prints the warning once on stderr and still exits 0 with the same stroke; a claude/mailbox-* head prints none', (() => { const OPEN_H = ['--repo', 'o/r', '--seat', 'domain:skills#2', '--login', 'zhuangjianguo', '--dry-run', '--head']; const w = cli([...OPEN_H, 'claude/project-thread-a81t4h']); const m = cli([...OPEN_H, 'claude/mailbox-skills-2']); return [w.status, (w.stderr.match(/--close will LEAVE it/g) ?? []).length, w.stderr.includes('claude/mailbox-skills-2'), w.stdout.includes('"head": "claude/project-thread-a81t4h"'), m.status, /LEAVE/.test(m.stderr)]; })(), [EXIT_OK, 1, true, true, EXIT_OK, false]);
   t('an epic seat\'s dry run exits 0 and pushes its own branch; a malformed epic is exit 2', (() => { const e = cli(['--repo', 'o/r', '--seat', 'epic:#27293#1', '--login', 'sunhaolin', '--dry-run']); return [e.status, e.stdout.includes('refs/heads/mailbox/sunhaolin/epic-27293-1'), cli(['--repo', 'o/r', '--seat', 'epic:27293', '--login', 'sunhaolin', '--dry-run']).status]; })(), [EXIT_OK, true, EXIT_USAGE]);
 
