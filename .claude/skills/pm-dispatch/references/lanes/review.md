@@ -16,6 +16,6 @@
 
 ## 独立性与边界
 
-- 任一账号可坐,含派发账号;独立 = `Implemented-by:`/`Reviewed-by:` 会话相异,④ 照 contract-review.md
+- 记录恒带 `Implemented-by:`/`Reviewed-by:` 对,两会话相异;⛔ 不限账号,派发账号亦可坐。
 - ⛔ 不 merge、不 ready、不派发、不定级、不做人工地板动作;只写复核记录、认领行与门铃
 - 安全发现照 `security-findings.md`:记录只停在规则层,机制只进本席本地笔记。
