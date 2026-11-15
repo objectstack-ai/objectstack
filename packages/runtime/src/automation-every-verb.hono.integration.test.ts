@@ -222,6 +222,16 @@ describe('every verb on a two-segment /api/v1/automation path reaches the automa
             expect(executed).toEqual(['send_digest']);
         });
 
+        // ── control: a first segment that is no installed namespace is no address — declined under every verb ──
+        for (const method of ['GET', 'DELETE']) {
+            it(`CONTROL — signed-in ${method} ${prefix}/automation/no_such_ns/send_digest/runs → the dispatcher's no-route 404, never a 405`, async () => {
+                const { status, allow, body } = await call(method, `${prefix}/automation/no_such_ns/send_digest/runs`, true);
+
+                expect([status, allow]).toEqual([404, null]);
+                expect(body?.error?.code).toBe('ROUTE_NOT_FOUND');
+            });
+        }
+
         // ── control: the declarations hand only unserved verbs to the domain; a served verb on an address runs ──
         for (const shape of ['/automation/crm/send_digest/trigger', '/automation/trigger/crm/send_digest']) {
             it(`CONTROL — signed-in POST ${prefix}${shape} runs the addressed flow`, async () => {
