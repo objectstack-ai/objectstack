@@ -12,8 +12,10 @@
 
 feat(i18n): the serving layer reads `i18n.sourceLocale` as the authored label's language
 
-Clause-②: yes (widening) — `II18nService` (`@objectstack/spec/contracts`) gains an optional `getSourceLocale()` / `setSourceLocale(locale)` pair, shaped like the fallback pair; `FileI18nAdapter` and the kernel's in-memory fallback implement both.
+Clause-②: yes
 Metadata-protocol: semantic
+
+`II18nService` (`@objectstack/spec/contracts`) gains an optional `getSourceLocale()` / `setSourceLocale(locale)` pair, shaped like the fallback pair; `FileI18nAdapter` and the kernel's in-memory fallback implement both.
 
 An app authored in one language that defaults its users to another now serves its inline labels to a request in the authored language. Take `defaultLocale: 'zh-CN'`, `sourceLocale: 'en'`, English inline labels, a `zh-CN` bundle and no `fallbackLocale`:
 
