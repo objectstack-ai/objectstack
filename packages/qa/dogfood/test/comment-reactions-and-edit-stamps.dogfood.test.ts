@@ -265,16 +265,28 @@ describe('a stock member reacts to the comments they can read — member_default
     aliceId = await uid('rxs-alice@verify.test');
     bobId = await uid('rxs-bob@verify.test');
 
-    // Stock: each member resolves the two baselines and nothing else, so no
-    // reaction bit comes from anywhere but `member_default`.
-    const stock = async (token: string) => (await resolveAuthzFor(stack, token)).permissions;
+    // Stock: each member holds `member_default`, and no other set they hold —
+    // the app's baseline, or a set another package composes in — names
+    // reactions or a wildcard, so no reaction bit comes from anywhere else.
+    const otherReactionGrants = async (token: string) => {
+      const held = (await resolveAuthzFor(stack, token)).permissions;
+      const named: string[] = [];
+      for (const name of held) {
+        if (name === 'member_default') continue;
+        // A set the catalog cannot serve is unread, so it counts against arming.
+        const definition = await catalogPermissionSet(ql, name);
+        const objects = definition?.objects ?? {};
+        if (!definition || REACTION in objects || '*' in objects) named.push(name);
+      }
+      return { held, named };
+    };
     await assertArmed(
-      [aliceTok, bobTok].map((token, i) =>
+      [['alice', aliceTok], ['bob', bobTok]].map(([who, token]) =>
         armedWhen({
-          control: `${i === 0 ? 'alice' : 'bob'} holds member_default as the only set naming ${REACTION}`,
-          disarmedBy: 'a permission set beyond the two baselines (an app or fixture grant) would make a 201 its answer, not the default’s',
-          observe: () => stock(token),
-          armed: (held) => [...held].sort().join() === ['member_default', appMemberSet.name].sort().join(),
+          control: `${who} holds member_default, and no other set they hold names ${REACTION} or a wildcard`,
+          disarmedBy: 'another set naming reactions (an app or fixture grant) would make a 201 its answer, not the default\u2019s',
+          observe: () => otherReactionGrants(token),
+          armed: ({ held, named }) => held.includes('member_default') && named.length === 0,
         }),
       ),
     );
