@@ -33,6 +33,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid during collection, not inside a case's clock: the routes reach this
+// package through a dynamic import (`check:test-source-alias`).
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 
 // ---------------------------------------------------------------------------
