@@ -1812,7 +1812,16 @@ export const CEILINGS = new Map([
   // first PR. A NEW file, so this is an added row and no other row moves; set
   // at the landed line count (headroom 0, same convention as every lane
   // charter above).
-  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 30],
+  // Raised 30 → 32 by the same card's PR 2 (an ORDINARY ruled raise; no move
+  // touches this file). The text is the charter widened to the relay's two new
+  // queue doors: the jump's over-3,000-line lift (an authorised approval on the
+  // head, or carried by the maintainer's `approval_comment`) and `pr_dequeue`,
+  // which this seat may use for causes (a)(b) when the landing seat is offline,
+  // with the relay's own audit comment and read-back. The "maintainer removes
+  // it" interim section lost one line. Ruling of record: the queue card
+  // (#33647, filing gate ③), verbatim 「建议有专人来跟进队列吗？这种操作不应该等我」;
+  // its order names this widening. Measured delta +2; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 32],
   // repo:cloud lane charter: the cloud seats keep first-touch triage of the
   // cloud repo, run the first-touch sweep before they claim, set grade and
   // state when they file, and triage's daily reconciliation is the backstop;
