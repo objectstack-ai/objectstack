@@ -30,6 +30,15 @@ export interface ExportFieldMeta {
   displayField?: string;
   /** Field holds multiple values (an array), e.g. a `multiple: true` lookup. */
   multiple?: boolean;
+  /**
+   * A reference field's declared `dependsOn`, normalised: each entry names a
+   * sibling field of the same record (`field`) and the target field its value
+   * filters the candidates by (`param`; the string form uses one name for
+   * both). The record picker scopes its candidate query by it, and the
+   * import's reference resolution scopes a cell's lookup by it the same way
+   * when the row sets that sibling. Absent on a field that declares none.
+   */
+  dependsOn?: Array<{ field: string; param: string }>;
   // Every key above is a PRESENTATION key: each one is read to turn a storage
   // value into a readable cell (or a readable cell back into a storage value).
   //
@@ -83,6 +92,7 @@ export function buildFieldMetaMap(schema: unknown): Map<string, ExportFieldMeta>
 
   for (const [name, f] of entries) {
     if (!name || !f || typeof f !== 'object') continue;
+    const dependsOn = dependsOnOf(f);
     map.set(name, {
       name,
       type: typeof f.type === 'string' ? f.type : undefined,
@@ -93,7 +103,29 @@ export function buildFieldMetaMap(schema: unknown): Map<string, ExportFieldMeta>
       reference: f.reference == null || typeof f.reference === 'string' ? referenceTargetOf(f) : undefined,
       displayField: typeof f.displayField === 'string' ? f.displayField : undefined,
       multiple: f.multiple === true,
+      ...(dependsOn ? { dependsOn } : {}),
     });
   }
   return map;
+}
+
+/**
+ * A field's `dependsOn` as `{ field, param }` pairs, or `undefined` when it
+ * declares none. The spec's two spellings: a string names the same field on
+ * both sides; `{ field, param }` names the target field separately. An entry of
+ * neither shape is skipped.
+ */
+function dependsOnOf(f: { dependsOn?: unknown }): Array<{ field: string; param: string }> | undefined {
+  if (!Array.isArray(f.dependsOn)) return undefined;
+  const out: Array<{ field: string; param: string }> = [];
+  for (const entry of f.dependsOn as unknown[]) {
+    if (typeof entry === 'string' && entry) {
+      out.push({ field: entry, param: entry });
+    } else if (entry && typeof entry === 'object' && typeof (entry as { field?: unknown }).field === 'string') {
+      const { field, param } = entry as { field: string; param?: unknown };
+      if (!field) continue;
+      out.push({ field, param: typeof param === 'string' && param ? param : field });
+    }
+  }
+  return out.length > 0 ? out : undefined;
 }
