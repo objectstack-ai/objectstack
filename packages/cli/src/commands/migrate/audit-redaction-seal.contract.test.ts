@@ -9,6 +9,13 @@
 // is an EDIT that drops the option from one call, which reads as a run that
 // rewrites a sealed row unamended. A source scan, comments masked, as
 // `../serve-audit-registration.contract.test.ts` reads `serve.ts`.
+//
+// [ADR-0154 D3 amended, seat ruling 6885005594] And every rewrite run sits
+// inside the one `underAuditSealLock` call, which holds the audit seal lock for
+// an `--apply` run's whole length, on the objects the command rewrites, with the
+// operator's `--sealer-stopped`. What the hold does is pinned in plugin-audit
+// (`audit-seal/audit-seal-lock.test.ts`); here, an EDIT that moves a run out of
+// the hold, or drops the flag, reads as a run a sealer pass can seal under.
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -23,6 +30,13 @@ const COMMANDS: Record<string, readonly string[]> = {
   'audit-mail-bodies.ts': ['migrateMailLogBodyCopies', 'migrateArchivedMailLogBodyCopies'],
   'audit-key-material.ts': ['migrateKeyMaterialCopies', 'migrateArchivedKeyMaterialCopies'],
   'audit-metadata-bodies.ts': ['migrateStoredMetadataBodyCopies'],
+};
+
+/** Each command's list of the objects it rewrites, as plugin-audit exports it. */
+const REWRITTEN: Record<string, string> = {
+  'audit-mail-bodies.ts': 'MAIL_LOG_BODY_COPY_OBJECTS',
+  'audit-key-material.ts': 'KEY_MATERIAL_COPY_TABLES',
+  'audit-metadata-bodies.ts': 'STORED_METADATA_BODY_REWRITTEN_OBJECTS',
 };
 
 /** The argument text of every `name(` call in `source`, parentheses walked. */
@@ -58,8 +72,21 @@ describe('os migrate audit-* amend a sealed row first (ADR-0154 D7)', () => {
       }
     });
 
-    it(`${file}: exits non-zero when a sealed row was refused, as for a failure`, () => {
-      expect(source.match(/failures > 0 \|\| (report\.)?refused > 0\) this\.exit\(1\)/g)).toHaveLength(2);
+    it(`${file}: exits non-zero when a sealed row was refused, or the seal lock was lost, as for a failure`, () => {
+      expect(source.match(/failures > 0 \|\| (report\.)?refused > 0 \|\| lostLock\) this\.exit\(1\)/g)).toHaveLength(2);
+    });
+
+    it(`${file}: declares --sealer-stopped, the one shared flag (D3 amended, B)`, () => {
+      expect(source).toMatch(/'sealer-stopped': sealerStoppedFlag,/);
+    });
+
+    it(`${file}: runs every rewrite inside one hold of the audit seal lock, on its objects, with the flag (D3 amended, E)`, () => {
+      const holds = calls(source, 'underAuditSealLock');
+      expect(holds).toHaveLength(1);
+      const [hold] = holds;
+      expect(hold).toMatch(/\{ apply, sealerStopped: flags\['sealer-stopped'\], objects: (\w+), warn: logger\.warn \}/);
+      expect(/objects: (\w+)/.exec(hold)?.[1]).toBe(REWRITTEN[file]);
+      for (const run of runs) expect(calls(hold, run), run).toHaveLength(1);
     });
   }
 });
