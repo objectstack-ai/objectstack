@@ -137,6 +137,8 @@ import { scopedMeasureFilter, scopedMeasureKey } from './scoped-measure-key.js';
 // member as the request spelled it (see `dataset-refusal.ts`'s header for why
 // that code and not `DATASET_INVALID`).
 import { invalidMemberError } from './dataset-refusal.js';
+// [ADR-0021, ADR-0149 D1] The closed-member rule every dataset face reads.
+import { undeclaredMembersRefusal, undeclaredSelectionMembers } from './dataset-declared-members.js';
 // [#20807] A grouped dimension on a structured-JSON field is refused in
 // `ensureCube`, ahead of both strategies, naming the member the caller wrote.
 import { assertNoStructuredJsonDimension } from './structured-json-dimension-door.js';
@@ -2978,6 +2980,46 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
+   * [ADR-0021, ADR-0149 D1] Refuse a selection member the dataset does not
+   * declare — `INVALID_FIELD` / 400, before anything is read.
+   *
+   * The dataset is a declarative, closed surface: a dashboard tile, a report,
+   * `POST /analytics/dataset/query` (single and batch) and the AI tool all
+   * quote its `measures[].name` / `dimensions[].name`. This method used to
+   * mint a measure the dataset does not declare (`count`, a raw field read as
+   * its `sum`, an `<field>_sum` suffix spelling) and group by a raw field named
+   * as a dimension or time dimension, so a tile could show a number labelled
+   * as a dataset metric that the dataset never defines. The rule is
+   * {@link undeclaredSelectionMembers}, the one `query_dataset` asks; an
+   * inline dataset (a Studio draft) is judged against its own declaration.
+   * The cube door, {@link query}, is not a dataset and keeps its ad-hoc
+   * members.
+   *
+   * The refusal names the members THIS caller may use, from the catalogue's
+   * admission ({@link admitDatasetCatalogEntry}), asked only on this refusal
+   * path. A caller the admission does not admit at all is answered by the read
+   * gate the query would have asked (403, or 503 when it cannot decide), never
+   * with a member list. A declared member the caller may not read is not
+   * judged here: it still reaches the field gate (403).
+   */
+  private async assertSelectionMembersDeclared(
+    dataset: Dataset,
+    compiled: CompiledDataset,
+    selection: DatasetSelection,
+    context?: ExecutionContext,
+  ): Promise<void> {
+    const undeclared = undeclaredSelectionMembers(dataset, selection ?? ({} as DatasetSelection));
+    if (undeclared.length === 0) return;
+    const admission = await this.admitDatasetCatalogEntry(dataset, context);
+    if (!admission.admitted) {
+      const objects = this.cubeObjects(compiled.cube);
+      this.assertQueryObjectsExposed(objects);
+      await this.assertReadAdmitted(objects, context);
+    }
+    throw undeclaredMembersRefusal(dataset, undeclared, admission.admitted ? admission : undefined);
+  }
+
+  /**
    * Execute a semantic-layer dataset (ADR-0021). Compiles the dataset (saved or
    * inline draft — Studio preview) for THIS call, then runs the selection
    * through the `DatasetExecutor` with the request context so tenant/RLS
@@ -3041,6 +3083,11 @@ export class AnalyticsService implements IAnalyticsService {
     this.assertQueryObjectsExposed([dataset.object]);
     this.assertDatasetFieldsJudgeable(dataset, context);
     const compiled = this.compile(dataset);
+    // [ADR-0021, ADR-0149 D1] The selection names only the members the
+    // dataset declares, judged here — after the dataset compiled, before the
+    // draft-preview branch and before anything is read — on every face this
+    // method serves. See {@link assertSelectionMembersDeclared}.
+    await this.assertSelectionMembersDeclared(dataset, compiled, selection, context);
     this.logger.debug(`[Analytics] queryDataset "${dataset.name}" (object=${dataset.object}, include=${(dataset.include ?? []).join(',') || '—'})`);
 
     // ── ADR-0037 P3 — draft data preview ────────────────────────────────────
