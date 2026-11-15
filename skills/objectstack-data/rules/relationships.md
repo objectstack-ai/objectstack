@@ -113,6 +113,12 @@ chain hop with no master ends there under the same rule. Refused beside a
 second `master_detail` or as `readonly`/`system`; `ObjectSchema.create()` reads
 an omitted `required` as `true`.
 
+**Import names a detail within its master.** A data import's lookup cell naming a
+detail (`"Advance 30%"`) is resolved within the master the same row names
+(exactly one reference column to that master), or by the lookup's own `dependsOn`
+sibling; a tie there is `reference_ambiguous`, another master's detail
+`reference_not_found`. A row with no master cell searches the whole object.
+
 ### Many-to-Many: Junction Object
 
 ```typescript
