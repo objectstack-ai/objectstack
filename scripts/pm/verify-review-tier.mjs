@@ -96,9 +96,38 @@ export const SUB_AGENT_TOOL_SHAPES = Object.freeze([
   /^mcp__.+__\w*_triggers?$/i,
 ]);
 
+/** A connector tool's first word that sends to, starts or drives another agent, thread or session. */
+export const HAND_OFF_VERBS = Object.freeze(['send', 'message', 'start', 'fire', 'spawn', 'dispatch', 'delegate', 'interrupt']);
+/** A word naming what a hand-off reaches; under any first word but a read verb it refuses too. */
+export const HAND_OFF_TARGETS = Object.freeze(['session', 'agent', 'subagent', 'copilot', 'thread', 'trigger', 'worker']);
+/** First words that only read. */
+export const READ_VERBS = Object.freeze(['get', 'list', 'read', 'search', 'fetch', 'view', 'describe', 'query']);
+
+/**
+ * The words of a connector tool's name (`mcp__SERVER__TOOL`, the part after the last `__`), split on `_`, `-` and
+ * camelCase humps and lower-cased; null for a name that is not a connector tool. Pure.
+ */
+export function connectorToolWords(name) {
+  const m = /^mcp__.+__(.+)$/.exec(String(name ?? ''));
+  if (!m) return null;
+  return m[1].replace(/([a-z0-9])([A-Z])/g, '$1_$2').split(/[_-]+/).filter(Boolean).map((w) => w.toLowerCase());
+}
+
+/**
+ * The shapes by WORD (#33765 N-d), beside the snake_case regexes above: a connector tool whose first word is a
+ * hand-off verb in any spelling (`sendMessage`, `send-message`, `interrupt_session`), or that names a hand-off
+ * target under any first word but a read verb (`request_copilot_review`, `create_session`, `run_session`). Pure.
+ */
+export function connectorHandsOff(name) {
+  const words = connectorToolWords(name);
+  if (!words || words.length === 0) return false;
+  if (HAND_OFF_VERBS.includes(words[0])) return true;
+  return !READ_VERBS.includes(words[0]) && words.some((w) => HAND_OFF_TARGETS.includes(w) || HAND_OFF_TARGETS.includes(w.replace(/s$/, '')));
+}
+
 /** Does a `tool_use` name run or drive another agent? Exact names first, then the shapes. Pure. */
 export function handsWorkToAnotherAgent(name) {
-  return typeof name === 'string' && (SUB_AGENT_TOOLS.includes(name) || SUB_AGENT_TOOL_SHAPES.some((re) => re.test(name)));
+  return typeof name === 'string' && (SUB_AGENT_TOOLS.includes(name) || SUB_AGENT_TOOL_SHAPES.some((re) => re.test(name)) || connectorHandsOff(name));
 }
 
 /** Every string inside a value, flattened — for the notice scan of a harness `system` entry. */
@@ -266,6 +295,15 @@ function selfTest() {
       .every((n) => !judgeReviewTranscript(jl(user, calls(n))).ok));
   t('control: a connector tool that reads (a GitHub file, a thread\'s messages) and a name merely containing a verb pass',
     ['mcp__github__get_file_contents', 'mcp__hearthbot__read_thread', 'mcp__github__pull_request_read', 'SkillSearch', 'mcp__x__resend_log']
+      .every((n) => judgeReviewTranscript(jl(user, calls(n), turn(TIER))).ok));
+  t('⛔ #33765 N-d: a camelCase or hyphenated hand-off verb refuses',
+    ['mcp__x__sendMessage', 'mcp__x__send-message', 'mcp__x__startThread', 'mcp__x__fire-trigger', 'mcp__x__SendMessage']
+      .every((n) => !judgeReviewTranscript(jl(user, calls(n))).ok));
+  t('⛔ #33765 N-d: a hand-off under another verb (a copilot review, a session interrupted, created or run) refuses',
+    ['mcp__github__request_copilot_review', 'mcp__claude-code-remote__interrupt_session', 'mcp__claude-code-remote__create_session', 'mcp__x__run_session', 'mcp__x__createRemoteSession', 'mcp__x__run-agent']
+      .every((n) => !judgeReviewTranscript(jl(user, calls(n))).ok));
+  t('#33765 N-d control: a read verb before a target word, and a word that merely starts with a verb, pass',
+    ['mcp__claude-code-remote__get_session', 'mcp__claude-code-remote__list_sessions', 'mcp__hearthbot__read_thread', 'mcp__x__messages_list', 'mcp__x__sender_info', 'mcp__github__get_me']
       .every((n) => judgeReviewTranscript(jl(user, calls(n), turn(TIER))).ok));
 
   battery('refuses: the fallback notice in a harness entry, and only there');

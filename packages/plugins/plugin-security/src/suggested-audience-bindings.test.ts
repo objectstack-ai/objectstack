@@ -1163,6 +1163,25 @@ describe('[ADR-0150 D8 R3] a suggestion reads its set by its package column', ()
     expect(rows(ql).map((r: any) => r.status)).toEqual(['pending', 'pending']);
   });
 
+  it('⛔ a refused row whose column already names a package never offers the bind (it writes only a null column): the fix follows the column', async () => {
+    const ql = scopedQl();
+    rows(ql).push(row('s_stale', SUITE, 'com.example.gone'), row('s_other_column', HR, OPS));
+    for (const [id, column] of [['s_stale', 'com.example.gone'], ['s_other_column', OPS]] as const) {
+      const err = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, id).catch((e) => e);
+      expect(err, id).toBeInstanceOf(SuggestionStateError);
+      expect(err.message, id).not.toContain('--table sys_audience_binding_suggestion');
+      expect(err.message, id).toContain(`already names package "${column}"`);
+      expect(err.message, id).toContain(`enable "${column}" again if its set is the one meant, or dismiss the suggestion`);
+    }
+    // The withheld reason of an accepted row is the same sentence.
+    rows(ql).push(row('a_stale', SUITE, 'com.example.gone', 'confirmed'));
+    const derived = await readAcceptedEveryoneSets(ql);
+    expect(derived.withheld).toEqual([
+      expect.objectContaining({ packageId: SUITE, reason: expect.stringContaining('already names package "com.example.gone"') }),
+    ]);
+    expect(derived.withheld[0].reason).not.toContain('--id a_stale');
+  });
+
   it('the derivation reads an accepted row by its column, and withholds a refused one with every candidate', async () => {
     const ql = scopedQl();
     rows(ql).push(row('a_crm', CRM, CRM, 'confirmed'), row('a_suite', SUITE, null, 'confirmed'));
