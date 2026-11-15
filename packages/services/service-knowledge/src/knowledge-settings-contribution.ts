@@ -12,8 +12,8 @@
  * They now live and die with the service, the way the branding entry lives
  * with its namespace and the "Connect an AI Assistant" page with the MCP
  * capability: a deployment without this plugin serves none of them (a read or
- * write of `knowledge` answers `SETTINGS_UNKNOWN_NAMESPACE`, an `embedder_*`
- * key `SETTINGS_UNKNOWN_KEY`), and one with it serves all of them.
+ * write of `knowledge` answers `404 UNKNOWN_NAMESPACE`, a write of an
+ * `embedder_*` key `400 UNKNOWN_KEY`), and one with it serves all of them.
  *
  * Called from `KnowledgeServicePlugin.init()`, which declares the settings
  * plugin in `optionalDependencies`: the kernel inits that plugin first when it
