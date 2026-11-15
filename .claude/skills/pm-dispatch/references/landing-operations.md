@@ -10,7 +10,7 @@
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
 - 子代理起不来 ⇒ 复核缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
 - PASS ⇒ Tier S ready、auto-merge;Tier H 经 SKILL.md ③ 交棒;FAIL ⇒ 撤挂,补丁轮;⛔ 免复核不放行。
-- 落地后才见欠复核 ⇒ 按 `contract-review.md` 复审落地 head、发现立新卡,⛔ 不修已关 PR。
+- 落地后见欠复核 ⇒ 按 `contract-review.md` 复审落地 head、发现照立卡门入卡,⛔ 不修已关 PR。
 - DELIBERATE CORRECTION 红(`check-empty-changeset`)⛔ 不等维护者;确认件皆须点名每个被改 note:
 - diff 只改 release 文字或注释者:派发席 ACCEPT 确认,逐句引改前与改后,免第二次同 head 复核。
 - 其余(含改代码)照全套:同 head 达档复核 PASS 记录即确认,记录逐句判改写句。
