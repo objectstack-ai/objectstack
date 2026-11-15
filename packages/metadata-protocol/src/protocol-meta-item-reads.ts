@@ -314,27 +314,17 @@ export async function judgeBareActionRead(
  * the registry's first composite.
  *
  * Judge only: any answer the registry gives leaves the read to its layers,
- * exactly as before. The environment's own saved row still answers first:
- * when the registry refuses and the store holds an active package-less row of
- * the name, the read is left to its layers, whose step 1 serves that row.
+ * exactly as before. The environment's own item answers first where the
+ * registry holds it (its package-less bare slot: a hydrated or saved row);
+ * a package-less row only the store holds is no exemption, because the
+ * layers below do not serve it for a `doc` and would answer a holder by
+ * registration order again.
  *
  * @throws {PackageScopedNameRefusedError} two or more enabled package holders.
  */
-export async function refuseAmbiguousBareDocRead(
-    host: Pick<ProtocolHost, 'engine' | 'readItemActiveRows'>,
-    name: string,
-    member: string | undefined,
-): Promise<void> {
+export function refuseAmbiguousBareDocRead(host: Pick<ProtocolHost, 'engine'>, name: string, member: string | undefined): void {
     const registry = host.engine?.registry as { resolveItem?(type: string, name: string, caller: null, member?: string): unknown } | undefined;
-    if (typeof registry?.resolveItem !== 'function') return;
-    try {
-        registry.resolveItem('doc', name, null, member);
-    } catch (error) {
-        if (packageScopedRefusalOf(error) === undefined) throw error;
-        const rows = await host.readItemActiveRows('doc', name);
-        if ((rows ?? []).some((row) => row?.package_id === null || row?.package_id === undefined || row?.package_id === '')) return;
-        throw error;
-    }
+    if (typeof registry?.resolveItem === 'function') registry.resolveItem('doc', name, null, member);
 }
 
 /**
@@ -628,8 +618,8 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // [ADR-0150 D1 bucket 1, ruling 6893582352 option A] A `doc` name two or
     // more enabled packages hold is refused here when the read names no
     // package, naming each, before any layer is read; the environment's own
-    // saved row still answers first ({@link refuseAmbiguousBareDocRead}).
-    if (!request.packageId && request.type === 'doc') await refuseAmbiguousBareDocRead(host, request.name, member);
+    // item still answers first ({@link refuseAmbiguousBareDocRead}).
+    if (!request.packageId && request.type === 'doc') refuseAmbiguousBareDocRead(host, request.name, member);
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
             ? { item: registry.resolveItem(request.type, request.name, null, member) }

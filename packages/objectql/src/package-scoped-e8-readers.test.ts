@@ -706,16 +706,12 @@ describe('[ruling 6893582352] doc (ADR-0150 D1 bucket 1): a bare read of a name 
     expect(labelOf((await protocol.getMetaItem({ type: 'doc', name: 'shared_doc' }))?.item)).toBe('env doc');
   });
 
-  it('CONTROL — the environment\'s saved package-less row the registry does not hold still answers first at the protocol read', async () => {
+  it('a package-less row only the store holds is no exemption: its layers would not serve it, so the read is still refused', async () => {
     for (const id of [A, B]) shipDoc('shared_doc', id);
     const row = { type: 'doc', name: 'shared_doc', state: 'active', package_id: null, metadata: JSON.stringify({ name: 'shared_doc', label: 'saved doc', content: '# saved' }) };
     const engine = (protocol as unknown as { engine: { find: ReturnType<typeof vi.fn> } }).engine;
     engine.find.mockImplementation(async (object: string, query: { where?: Record<string, unknown> }) =>
       (object === 'sys_metadata' && query?.where?.name === 'shared_doc' ? [row] : []));
-    const read = await protocol.getMetaItem({ type: 'doc', name: 'shared_doc' });
-    expect(labelOf(read?.item)).toBe('saved doc');
-    // …and without it the same read is refused.
-    engine.find.mockResolvedValue([]);
     await expectRefusal(() => protocol.getMetaItem({ type: 'doc', name: 'shared_doc' }), 'ambiguous-in-environment', [A, B]);
   });
 });
