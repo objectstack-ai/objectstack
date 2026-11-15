@@ -5086,6 +5086,23 @@ const ko = {
     loading: "React 런타임을 불러오는 중…",
     error: "React 페이지 오류",
   },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "모바일 앱",
+    subtitle: "ObjectOS 모바일 앱을 이 서버에 연결합니다",
+    scanHint: "ObjectOS 모바일 앱을 열고 이 코드를 스캔하면 이 서버에 연결됩니다.",
+    qrAlt: "ObjectOS 모바일 앱을 이 서버에 연결하는 QR 코드",
+    linkLabel: "연결 링크",
+    copy: "링크 복사",
+    copied: "링크를 복사했습니다",
+    privacy: "이 코드에는 이 서버의 주소만 들어 있으며 계정 정보는 들어 있지 않습니다.",
+    loadFailed: "이 서버의 공개 주소를 읽지 못했습니다. 페이지를 새로 고친 후 다시 시도하세요.",
+    unreachableTitle: "휴대폰에서 이 서버의 주소에 접속할 수 없습니다",
+    unreachableBody: "이 서버의 주소는 {{address}}이며, 휴대폰에서 열 수 없는 로컬 또는 사설 주소이므로 코드를 표시하지 않습니다. 서버의 {{setting}}을(를) 공개 주소(예: {{example}})로 설정하고 서버를 다시 시작하세요.",
+    unpublishedTitle: "이 서버는 공개 주소를 게시하지 않습니다",
+    unpublishedBody: "코드를 표시하지 않습니다. 브라우저의 주소는 휴대폰에서 접속할 수 없는 내부 호스트일 수 있습니다. 서버의 {{setting}}을(를) 공개 주소(예: {{example}})로 설정하고 서버를 다시 시작하세요.",
+  },
 };
 
 export default ko;

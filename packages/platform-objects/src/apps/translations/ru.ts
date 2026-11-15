@@ -18,6 +18,7 @@ export const ru: TranslationData = {
         grp_account_developer: { label: 'Разработчик' },
         grp_account_ai_assistant: { label: 'ИИ-ассистент' },
         nav_account_profile: { label: 'Профиль' },
+        nav_account_mobile_app: { label: 'Мобильное приложение' },
         nav_account_notifications: { label: 'Уведомления' },
         nav_account_approvals: { label: 'Ждут моего решения' },
         nav_account_memberships: { label: 'Мои организации' },

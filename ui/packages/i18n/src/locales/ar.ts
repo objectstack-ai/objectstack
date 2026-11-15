@@ -5658,6 +5658,23 @@ const ar = {
     loading: "جارٍ تحميل بيئة تشغيل React…",
     error: "خطأ في صفحة React",
   },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "تطبيق الجوال",
+    subtitle: "اربط تطبيق ObjectOS للجوال بهذا الخادم",
+    scanHint: "افتح تطبيق ObjectOS للجوال وامسح هذا الرمز لربطه بهذا الخادم.",
+    qrAlt: "رمز QR يربط تطبيق ObjectOS للجوال بهذا الخادم",
+    linkLabel: "رابط الاتصال",
+    copy: "نسخ الرابط",
+    copied: "تم نسخ الرابط",
+    privacy: "لا يحمل الرمز سوى عنوان هذا الخادم، ولا يحمل حسابك أبدًا.",
+    loadFailed: "تعذّرت قراءة العنوان العام لهذا الخادم. أعد تحميل الصفحة للمحاولة مرة أخرى.",
+    unreachableTitle: "لا يستطيع الهاتف الوصول إلى عنوان هذا الخادم",
+    unreachableBody: "عنوان هذا الخادم هو {{address}}، وهو عنوان محلي أو خاص لا يستطيع الهاتف فتحه، لذلك لا يُعرض أي رمز. اضبط {{setting}} على الخادم على عنوانه العام، مثل {{example}}، ثم أعد تشغيله.",
+    unpublishedTitle: "لا ينشر هذا الخادم عنوانه العام",
+    unpublishedBody: "لا يُعرض أي رمز: قد يكون العنوان في متصفحك مضيفًا داخليًا لا يستطيع الهاتف الوصول إليه. اضبط {{setting}} على الخادم على عنوانه العام، مثل {{example}}، ثم أعد تشغيله.",
+  },
 };
 
 export default ar;

@@ -5089,6 +5089,23 @@ const ja = {
     loading: "React ランタイムを読み込んでいます…",
     error: "React ページのエラー",
   },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "モバイルアプリ",
+    subtitle: "ObjectOS モバイルアプリをこのサーバーに接続します",
+    scanHint: "ObjectOS モバイルアプリを開き、このコードをスキャンしてこのサーバーに接続します。",
+    qrAlt: "ObjectOS モバイルアプリをこのサーバーに接続する QR コード",
+    linkLabel: "接続リンク",
+    copy: "リンクをコピー",
+    copied: "リンクをコピーしました",
+    privacy: "このコードに含まれるのはこのサーバーのアドレスだけで、アカウント情報は含まれません。",
+    loadFailed: "このサーバーの公開アドレスを読み取れませんでした。ページを再読み込みしてもう一度お試しください。",
+    unreachableTitle: "スマートフォンからこのサーバーのアドレスに接続できません",
+    unreachableBody: "このサーバーのアドレスは {{address}} で、スマートフォンから開けないローカルまたはプライベートアドレスのため、コードは表示されません。サーバーの {{setting}} を公開アドレス（例: {{example}}）に設定し、サーバーを再起動してください。",
+    unpublishedTitle: "このサーバーは公開アドレスを公開していません",
+    unpublishedBody: "コードは表示されません。ブラウザーのアドレスは、スマートフォンから接続できない内部ホストの可能性があります。サーバーの {{setting}} を公開アドレス（例: {{example}}）に設定し、サーバーを再起動してください。",
+  },
 };
 
 export default ja;

@@ -5992,6 +5992,23 @@ const en = {
     loading: 'Loading react runtime…',
     error: 'React page error',
   },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Mobile App",
+    subtitle: "Connect the ObjectOS mobile app to this server",
+    scanHint: "Open the ObjectOS mobile app and scan this code to connect it to this server.",
+    qrAlt: "QR code that connects the ObjectOS mobile app to this server",
+    linkLabel: "Connection link",
+    copy: "Copy link",
+    copied: "Link copied",
+    privacy: "The code holds only this server's address, never your account.",
+    loadFailed: "Could not read this server's public address. Reload the page to try again.",
+    unreachableTitle: "A phone cannot reach this server's address",
+    unreachableBody: "This server's address is {{address}}, a local or private address a phone cannot open, so no code is shown. Set {{setting}} on the server to its public address, for example {{example}}, and restart it.",
+    unpublishedTitle: "This server does not publish its public address",
+    unpublishedBody: "No code is shown: the address in your browser can be an internal host a phone cannot reach. Set {{setting}} on the server to its public address, for example {{example}}, and restart it.",
+  },
 } as const;
 
 export default en;

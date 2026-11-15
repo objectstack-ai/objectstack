@@ -5225,6 +5225,23 @@ const pt = {
     loading: "Carregando o runtime do React…",
     error: "Erro na página React",
   },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Aplicativo móvel",
+    subtitle: "Conecte o aplicativo móvel ObjectOS a este servidor",
+    scanHint: "Abra o aplicativo móvel ObjectOS e escaneie este código para conectá-lo a este servidor.",
+    qrAlt: "Código QR que conecta o aplicativo móvel ObjectOS a este servidor",
+    linkLabel: "Link de conexão",
+    copy: "Copiar link",
+    copied: "Link copiado",
+    privacy: "O código contém apenas o endereço deste servidor, nunca a sua conta.",
+    loadFailed: "Não foi possível ler o endereço público deste servidor. Recarregue a página para tentar novamente.",
+    unreachableTitle: "Um celular não consegue acessar o endereço deste servidor",
+    unreachableBody: "O endereço deste servidor é {{address}}, um endereço local ou privado que um celular não consegue abrir, então nenhum código é exibido. Defina {{setting}} no servidor com o endereço público dele, por exemplo {{example}}, e reinicie-o.",
+    unpublishedTitle: "Este servidor não publica seu endereço público",
+    unpublishedBody: "Nenhum código é exibido: o endereço no seu navegador pode ser um host interno que um celular não consegue acessar. Defina {{setting}} no servidor com o endereço público dele, por exemplo {{example}}, e reinicie-o.",
+  },
 };
 
 export default pt;

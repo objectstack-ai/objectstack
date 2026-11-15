@@ -5088,6 +5088,23 @@ const de = {
     loading: "React-Laufzeit wird geladen…",
     error: "Fehler auf der React-Seite",
   },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Mobile-App",
+    subtitle: "Die ObjectOS-Mobile-App mit diesem Server verbinden",
+    scanHint: "Öffnen Sie die ObjectOS-Mobile-App und scannen Sie diesen Code, um sie mit diesem Server zu verbinden.",
+    qrAlt: "QR-Code, der die ObjectOS-Mobile-App mit diesem Server verbindet",
+    linkLabel: "Verbindungslink",
+    copy: "Link kopieren",
+    copied: "Link kopiert",
+    privacy: "Der Code enthält nur die Adresse dieses Servers, niemals Ihr Konto.",
+    loadFailed: "Die öffentliche Adresse dieses Servers konnte nicht gelesen werden. Laden Sie die Seite neu, um es erneut zu versuchen.",
+    unreachableTitle: "Ein Telefon kann die Adresse dieses Servers nicht erreichen",
+    unreachableBody: "Die Adresse dieses Servers ist {{address}}, eine lokale oder private Adresse, die ein Telefon nicht öffnen kann, daher wird kein Code angezeigt. Setzen Sie {{setting}} auf dem Server auf seine öffentliche Adresse, zum Beispiel {{example}}, und starten Sie ihn neu.",
+    unpublishedTitle: "Dieser Server veröffentlicht keine öffentliche Adresse",
+    unpublishedBody: "Es wird kein Code angezeigt: Die Adresse in Ihrem Browser kann ein interner Host sein, den ein Telefon nicht erreicht. Setzen Sie {{setting}} auf dem Server auf seine öffentliche Adresse, zum Beispiel {{example}}, und starten Sie ihn neu.",
+  },
 };
 
 export default de;

@@ -5147,6 +5147,23 @@ const zhHant = {
     loading: '正在載入 React 執行環境…',
     error: 'React 頁面錯誤',
   },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "移動應用",
+    subtitle: "將 ObjectOS 移動應用連線到此伺服器",
+    scanHint: "開啟 ObjectOS 移動應用，掃描此二維碼即可連線到此伺服器。",
+    qrAlt: "用於將 ObjectOS 移動應用連線到此伺服器的二維碼",
+    linkLabel: "連線連結",
+    copy: "複製連結",
+    copied: "連結已複製",
+    privacy: "二維碼只包含此伺服器的地址，不包含你的賬號。",
+    loadFailed: "無法讀取此伺服器的公開地址。請重新整理頁面重試。",
+    unreachableTitle: "手機無法訪問此伺服器的地址",
+    unreachableBody: "此伺服器的地址是 {{address}}，這是手機無法開啟的本機或內網地址，因此不顯示二維碼。請在伺服器上將 {{setting}} 設為它的公開地址（例如 {{example}}），然後重啟伺服器。",
+    unpublishedTitle: "此伺服器未公佈其公開地址",
+    unpublishedBody: "不顯示二維碼：瀏覽器中的地址可能是手機無法訪問的內部主機。請在伺服器上將 {{setting}} 設為它的公開地址（例如 {{example}}），然後重啟伺服器。",
+  },
 } as const;
 
 export default zhHant;
