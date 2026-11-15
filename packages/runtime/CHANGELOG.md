@@ -1,5 +1,550 @@
 # @objectstack/runtime
 
+## 18.5.0
+
+### Minor Changes
+
+- 322ded7: feat(service-automation)!: two packages of two namespaces may each declare a connector of the same name, each is materialized, connected and dispatched as its own instance, and a flow, a pull and the connection door address one by package (ADR-0150 child B, connector, the narrowing)
+  
+  Clause-②: yes (narrowing) — ten answers move for a caller that worked before. (1) The install door, `registerItem` and the cold-boot seal admit a package declaring a connector name a package of another namespace holds, FROM `422 PLUGIN_REGISTER_FAILED` naming both (a sealed boot clash warned) TO admitted; `os migrate stored-references` lists no sealed clash for it. (2) The boot of two packages' provider-bound instances of one name (the sealed clash), FROM refused naming both (`connector instance 'NAME' is not materialized`, fatal for the host's boot) TO each materialized under its package, whatever their namespaces: a pair the install door still refuses (one namespace, or a package with no namespace), which a code boot only warns about, is materialized too, and is connectable only in process (`ConnectorConnectionRequest.package`), since the namespace door answers `409` for both. (3) The bare `GET /meta/connector/NAME` of a name two packages hold is refused `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming both), where it served the first registered package's declaration, and `MetadataManager` keeps a slot per `(package, name)` for a connector (`PACKAGE_SLOTTED_STORE_TYPES`), so its bare read of such a name is refused and its unscoped plural reads answer both, where the second package's item overwrote the first's. The history and rollback doors (#33193) read the same list (`PACKAGE_SLOTTED_METADATA_TYPES`, `@objectstack/spec`, which `connector` joins): a connector's `?package=` there, FROM refused `400`, TO the addressed holder's versions; a bare connector name two packages hold, or one package's row beside the environment's (the rule every per-package type keeps), FROM served, TO refused `409` naming both. (4) A bare connector read on a metadata engine that cannot read by package is refused `501` (the protocol's fail-closed read for a narrowed type), where it served the engine's `getItem`. (5) A `connector_action` in a flow with no package (an environment-authored flow) naming a connector two packages hold, FROM not dispatched as "not registered" (`none`), or, where each holder declares only a catalog entry beside a connector a plugin registers in code under the name, dispatched to the plugin's connector, TO refused naming both. (6) A flow whose connector name resolves to a package with no live instance of it (a catalog entry, or an instance the reconcile has not registered yet), FROM dispatched to the one instance of the name (3b's fallback arm) TO not dispatched, unless the one instance is a connector a plugin registers in code, which is served as before. (7) A name only disabled packages hold, whose instance is still registered, FROM dispatched to it TO not dispatched for a caller outside those packages (a flow of the disabled package itself still reads its own instance, as before). A disabled package's own entry is removed by the next reconcile; an entry with no package of its own over such a name stays that package's instance, and is not dispatched until the package is enabled again. (8) A connector pull resolves `connectorSource.connector` from the package that holds the mapping: a name that resolves to no single instance, FROM `400 connector_not_registered` (two instances) TO `409 connector_name_refused` naming every candidate; a name that resolves to a package with no instance, FROM pulled through the one instance of the name TO `400 connector_not_registered`. (9) A declared entry with no package of its own (unstamped, or the environment's stored row) under a name two packages hold, FROM the whole name refused TO this entry alone refused naming both, and each package's own instance materialized. (10) Two declared entries of one name in a composition with no package-scoped registry are refused with a sentence that says why (one instance per name where nothing can tell two packages apart), where the duplicate sentence named the package of one of them. Widened beside them: `ConnectorConnectionRequest.package` and `ConnectorDescriptor.packageId` (`@objectstack/spec`, both optional); the namespace connection door `/api/v1/automation/connectors/:ns/:name/connection`, which answered `409` naming both for a name two packages hold, connects, reads and revokes the instance of the addressed namespace's package; `GET /api/v1/automation/connectors` lists every instance, each with its `packageId`; the connector credential listing names each package's instance with its own state.
+  Metadata-protocol: added
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored metadata changes shape: two optional members are added to two TypeScript interfaces and `connector` joins one exported list of type names, and what moves is which second package an install admits and which instance a name addresses -->
+  
+  **BREAKING** for the callers in (3) to (8). A deployment that held one connector name under two packages (sealed at boot with a warning, its boot refused) now boots both: read each declaration by its package (`?package=ID`, or `/meta/connector/NS/NAME`), connect each at its namespace address, and have an environment-authored flow name a connector one package holds. A flow that dispatched through 3b's fallback arm (6) dispatches once its own package's instance is materialized. A pull whose mapping no package holds, naming a connector two packages hold, names a mapping in one of the packages. Nothing in the workspace dispatches through (6) or (7) in a supported state: the reconcile registers a package's instance under its package, and drops a disabled package's own entry on its next run. An entry with no package of its own over a name only a disabled package holds is not dispatched while that package is disabled (7).
+  
+  The bare-name one-holder rule (`bare-name-one-holder.ts`) has narrowed for `connector`, the last covered type, from one package holder per deployment to one per namespace (ADR-0150 D2, D9): `connector` joins `NAMESPACE_SCOPED_BARE_NAME_TYPES` (`@objectstack/core`), `PACKAGE_SCOPED_READ_TYPES` (`@objectstack/objectql`) and `PACKAGE_SLOTTED_STORE_TYPES` (`@objectstack/metadata`). Still refused, with the same envelope and sentence: a co-owner of the holder's namespace, a package that declares no namespace beside any other holder, and two packages of one shareable namespace.
+  
+  - **The reconcile** (`plugin.ts`): the one-holder backstop (`refusedDeclaredConnectorNames`, and `refusedConnectorNames` in `connector-package-scope.ts`) is gone. Each provider-bound entry is the instance of its own package; an entry with no package of its own is the instance of the package its name resolves to over every holder, a disabled one included (the durable judgment), and under two holders it is refused naming both, never registered as either. Its bookkeeping (desired, materialized, degraded, credential-refusal, retry, dematerialize) and the OAuth2 grant handles are keyed by instance (`connectorInstanceKey`: the name, or `PACKAGE/NAME`), so two packages' instances of one name are materialized, degraded, retried and connected each on its own. A name repeated within one package is refused as a duplicate, naming the package. A composition with no package-scoped registry keeps one instance per name (red line 1: nothing there can tell two packages apart). A reloaded artifact supersedes the registry's entries by `(package, name)` (an unstamped item is its manifest's), so a reload of one package leaves another package's instance of the name live (an artifact with no manifest id, or a composition with no package-scoped registry, still supersedes by name, as before); the inert-descriptor audit and the credential listing judge each entry by its own instance.
+  - **Dispatch** (`engine.ts`, `resolveConnectorInstanceFor`): every caller asks the resolver over the served holders, a caller with no package included. `refused` is said with the resolver's message; `resolved` addresses exactly the holder's instance, and with none registered under it, the connector a plugin registers in code under the name (ADR-0097 §4: a plugin's connector and a declarative instance never share a name), else nothing. A name only disabled packages hold answers the same way (#31699 notes 6816295828 and 6820178514: resolve and count over the served set; a disabled package's instance is never served). A name the registry holds nothing under, or a host with no resolver, is answered by the one instance of the name, as before.
+  - **The pull** (`connector-pull.ts`): the mapping's connector is resolved from the mapping's holder package (an environment mapping: as a caller with no package) through the registry's `resolveConnectorInstanceFor`, and its origin, degraded state, provider, action and `inputSchema` are read from that instance. A registry without the member is read by the bare name, as before. New refusal reason `connector_name_refused`.
+  - **The connection door**: `ConnectorConnectionRequest.package` names the instance; the runtime's namespace address admits a connector name two packages hold to the addressed holder (`admitAutomationAddress` answers a slot for a connector as it does for a flow) and passes the package. The bare door keeps its `409` naming both. A callback completes the package its begin recorded, as before.
+  - **Descriptors**: `ConnectorDescriptor.packageId` is set for an instance a package holds; the credential listing matches each declaring entry to its own instance.
+  - **#33218 review N6** (judged, pinned): a connection row a moved declaration left stamped with its old package, once that package declares the name again beside the new holder, is that package's own again and the new holder has none. The row is not restamped: its token was obtained for the old package's connect.
+  
+  One holder: every answer is as before except (6), (7), and an unstamped entry whose holder is replaced, which is not dispatched between the change and the next reconcile (FROM the instance registered under the replaced package).
+- 53f5a4c: feat(spec,runtime): a hook written as a TypeScript `handler` can declare `refusals`, and a refusal code can hold several declared sentences with parameters
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #33658 — skills/objectstack-data/references/data-hooks.md (the "Declared refusals (`refusals`)" section teaches a sandboxed `body` only, one sentence per code, no params), skills/objectstack-i18n/SKILL.md (the `hooks.<hook>.refusals.<CODE>.message` row has no `reasons` key)
+  
+  A hook's refusal catalogue (`HookSchema.refusals`) is answered on every path the hook runs on, and an entry can hold more than one sentence (maintainer ruling 6879477573: letter A, S1, params; inside ruling 6431311681 letter A).
+  
+  - **A `handler` hook may declare `refusals`.** `defineStack`, `os validate`, `os build` and the metadata save door used to refuse `refusals` on a hook with no `js` body. They now accept it on a hook whose `handler` is an inline function or a string reference. An undeclared code that the handler's source throws literally is refused at save, at `handler`. The catalogue is answered on every path: the body `os build` lowers the handler to (as before), and the in-process handler of a source boot (`bootStack(config)`, `os serve` over a host config), plus the function a string `handler` names when the build could not lower it. Both answer with the same envelope. An error a `ctx.api` or `ctx.ql` call raised, which the handler lets through unchanged, passes through as it does on the body path. Still refused: `refusals` on a hook whose code cannot throw a code (an `expression` body, or neither a body nor a handler).
+  - **`reasons`: several sentences under one wire code.** `refusals.CODE.reasons.REASON.message`, with a snake_case reason. The hook throws `{ code, reason }`. The caller reads the reason's sentence, with the code and the status of its entry, so the wire code and the envelope are unchanged. Under a code that declares `reasons`, a reason it does not declare is refused loudly: at save where the hook's source throws it literally, otherwise at run time as a `500` naming the hook, the code and the reason. Under a code that declares no `reasons`, a thrown `reason` is not read, as before: the entry's own sentence answers. Translated through `hooks.HOOK.refusals.CODE.reasons.REASON.message`. `os i18n extract` and `os i18n check` count each declared reason, and `os validate` refuses a translation key over a reason the code does not declare (`translation-target-unknown`).
+  - **`params`: names a sentence may fill.** An entry declares `params: ['state']`, and its sentences (its `message` and each reason) may write a double-brace hole over those names. The hook throws `params: { state }`. The runtime fills the holes after it picks the translation, through the formula template engine the flow `end` refusal renders with, and only declared names are in scope. A hole over an undeclared name is refused at save. A hole holding logic, an unknown formatter, an empty hole and a `currency` formatter with no code (a hook refusal carries no default currency) are refused by `os validate`, `os compile` and the publish gate's `hook` write (`@objectstack/lint`). An entry with no `params` stays plain text and every hole in it is refused, as before. The rule is now a refinement (`dropped-refinements.baseline.json` gains `data/HookRefusal`), so the published JSON Schema no longer carries the hole pattern on `message`.
+  
+  Unchanged: a hook that declares none of the new parts answers byte-for-byte as before (pinned against the base commit's output), including one that throws a `reason` property under a code with no `reasons` (saved and answered as on `main`, pinned on both paths), and a hook that declares no `refusals` is untouched on both paths.
+  
+  New exports in `@objectstack/spec/data`: `HOOK_REFUSAL_REASON_PATTERN`, `HOOK_REFUSAL_PARAM_PATTERN`, `hookRefusalReasonsThrownIn`, `undeclaredHookRefusalReasonAtSave`, `undeclaredHookRefusalReasonAtRun`. `hookRefusalMessageKey(hook, code, reason?)` takes an optional reason.
+
+### Patch Changes
+
+- 66919b6: fix(runtime): MCP `list_actions` marks an organization action the caller's membership role does not reach `unavailable`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A plain organization member's agent was listed identity actions such as inviting a user, removing a member, editing the organization or managing its teams, and `run_action` then answered `403 PERMISSION_DENIED` from the organization endpoint each time. The actions stay listed, and for a caller whose membership role in the organization does not reach the endpoint the row now carries `unavailable: { code: 'PERMISSION_DENIED', reason }`, where the reason names the roles that do reach it (for example "needs an organization owner, admin or delegated admin"). The reach is read from the action's `target` against the `MEMBERSHIP_REACH` table in `@objectstack/spec/identity`. Owners, admins and (for invitations) delegated admins see the rows unmarked. Nothing is hidden and neither run door reads the mark, so who can run each action is unchanged. Actions judged on record ownership or on the deployment's tenancy posture (deleting an SSO provider or an OAuth application, creating an organization) are not marked. The `list_actions` tool description, the `McpActionSummary.unavailable` documentation and the served skill (with its Console mirror) now say a listed action can carry `unavailable` for the caller's role, not only for its credential.
+- 28a2f0f: fix(mcp,runtime): `describe_object` serves `readonly: true` where a write never sets the value
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `describe_object` and the `objectstack://objects/{name}` resource served each field's `readonly` from the declared flag alone, so an agent was told it could write fields whose sent value the engine drops or replaces. Both transports now also answer `readonly: true` for a runtime-owned type (`autonumber`, including a hand-written field literal with no flag), for a `formula` field, and for a stored field that declares an `expression`. On every transport, the resource included, `readonly` is judged on the field as declared, so a stored expression the caller is not shown (it names a field they cannot read) still answers `true`, and the expression itself stays hidden. An ordinary field still answers `readonly: false`, and a declared `readonly` still answers `true`.
+  
+  `readonly` is the schema's answer, not the caller's field edit permission: a field the caller may read but not edit still answers `readonly: false`, and a write naming it is refused as before. The tool description now says so, and it also says that a `defaultValue` may be a token the server resolves (`NOW()`, `current_user`) or an expression object, so an agent omits the field instead of copying the value.
+- d635599: fix(metadata-protocol)!: a name two enabled packages hold only as stored rows is refused by the plain read, never served by save order (ADR-0150 D3, #32607)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no skill and no doc teaches what the read naming no package answers for a name only stored rows of several packages hold (`skills/**` and `content/docs/**` grepped: the `ambiguous-in-environment` mentions are about flow, queue and permission-set references, not `/meta` reads); the refusal's own sentence names the `?package=` remedy.
+  
+  <!-- adr-0087: registered two-row-holders-bare-read-refused -->
+  
+  **BREAKING** answer narrowing at the `/meta` bare item reads: a name that two or more enabled packages hold only as stored rows, and that no package ships in code, answers 409 `RESOURCE_CONFLICT` naming each of them, where the plain read and `/published` served one of the rows. `/layers` already refused it.
+  
+  The row-aware served-holder judgment that a disabled holder brings in (#32354) now also judges, on the item read, a name with no disabled holder. The holders are judged at one grain, the packages the item's active stored rows are bound to at the member the read addresses, as the read itself binds them, and never united with the registry's holders of the name (with no shipper the registry knows a row-only name through one bare slot, the row written or hydrated last). Two or more of them are refused as the by-name read refuses two package holders (`ambiguous-in-environment`). One holder reads as before. It applies to a type the registry reads by package, when no enabled package ships the name in code at any member, and when no package-less row or environment item of the name is stored.
+  
+  **Every moved answer, before → after.** Both transports (`RestServer` and the runtime `HttpDispatcher`), both registration orders, both save orders, and on the runtime dispatcher before and after a reboot. First-party count 0: no first-party app saves one name into two packages' stored rows.
+  
+  Narrowing:
+  
+  - Bare `GET /meta/:type/:name`: 200 with the row saved first → 409 `RESOURCE_CONFLICT` naming each holder, with `details.candidates`.
+  - Bare `GET /meta/:type/:name/published`: 200 with a row (on `RestServer` the row saved first; on the runtime dispatcher the same package in every save order) → 409 `RESOURCE_CONFLICT` naming each holder.
+  - The execution face (`getMetaItemForExecution`) of the same name: the row saved first → the same refusal.
+  
+  **Not moved.** Bare `GET /meta/:type/:name/layers` keeps its 409 `RESOURCE_CONFLICT`, the package-less writes' own refusal naming the same holders with its `?package=` prescription (#28337), on both transports: each transport's layered chain (`RestServer`'s and the runtime `HttpDispatcher`'s) reads the plain read first to find a disabled owner, and now leaves that read's refusal of row holders, and only that refusal (the protocol marks it), to the package-less refusal step, rethrowing every other refusal as before (two code holders, with or without a stored row each, and two row holders beside a disabled one, keep the plain read's refusal). `?package=` naming either holder serves that holder's row. A name one package holds as a stored row is served as before. A row the reads decline (a shipped flow name's undeclared row, a sealed managed name's row) and a row of a customization pair of another package the rows or the registry name make no holder here, as they make none beside a disabled holder (#32354), so they never turn one holder into a refusal: a package's row beside its pair's undeclared row is one holder in either save order, and no door names the pair. A dependent's added member over a base that holds the name only as a stored row (`email_template`: the base's `en-US` row, the dependent's `fr-FR` row) is the dependent's alone at that member (#28802): the plain read, `/layers` and the execution face at `fr-FR` keep serving the dependent's row. A name an enabled package ships in code at any member (for a bundled type such as `email_template`, a base shipping `en-US` beside another package's `fr-FR` row: the package-less `fr-FR` read keeps its answer), or one with a package-less row or an environment item, is judged as before. The paired customization addresses (`?package=HOLDER.custom`), which after a reboot follow the registry's one bare slot, are unchanged here (#32662 carries them).
+- 548f8ff: feat(metadata-protocol): a metadata write's advisories and refusals come back in the caller's language
+  
+  Clause-②: yes (widening) — `SaveMetaItemRequestSchema` and `PublishMetaItemRequestSchema` gain an optional, server-stated `userTextLocales` member (at most two locale codes; the doors build these requests member by member, so a wire body never sets it, like `client`), and `ExecutionContextSchema` gains an optional `workspaceLocale`. The batch publish body (`PublishPackageDraftsRequestSchema`) is unchanged; its door states the locales to the protocol call directly. Nothing that was accepted before is refused now; a request that states no locales composes in `en`, and a finding whose rule has no user sentence carries no `userMessage`, exactly as before.
+  Metadata-protocol: added
+  Skills-docs: none — `skills/**` and `content/docs/**` teach what a metadata author writes; `userTextLocales` and `workspaceLocale` are stated by the server from the caller's request and workspace, never authored or sent by a client, so no taught sentence moves. The generated reference pages (`content/docs/references/**`) are regenerated.
+  
+  Ruling C on #32440: the producer of a finding writes its user-facing sentence in the request's language, else the workspace's default language, else English, and every client shows it as received. The authoring rules already carry a sentence in twelve languages for most findings (#32790); this change composes it on the server:
+  
+  - Every `/meta` save, single-item publish and package publish now fills `userMessage` on each advisory, and on each issue of a 422 refusal, for a rule that has a user sentence. `rule`, `message`, `hint`, `path` and `where` are unchanged.
+  - The door states the two languages it resolved: the request's own (its `Accept-Language` header or `locale` query) and the workspace default. The execution context used to fold them into one `locale`, so a request in a language the platform has no text in fell straight to English; it now carries the workspace default on its own as `workspaceLocale`, and the core helper `userTextLocalesOf(ctx)` reads the pair in order.
+  - The REST server and the runtime dispatcher both state them, for saves, publishes and package publishes.
+  
+  Not in this change: the refusal sentences written outside the authoring rules (the packaged permission-set lock, the permission middleware's denials) move onto the same ladder in a follow-up PR on #32656.
+- 6718884: feat(storage,mcp): an upload link for a file field of a record not yet created, so an agent can create a record whose file field is required
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `create_upload_link` takes no `recordId` when it names a `field`: the link names the object and the file field only, and its answer carries `fileIds`, the id the upload is stored under. The user opens the link signed in and uploads; the agent then calls `create_record` with the field set to `fileIds[0]`. An expense line with a required e-invoice is created in two agent calls and one upload, and the field's `required` rule is unchanged.
+  
+  Minting such a link asks the object's create permission for the user, and the field must be writable for them and not read-only; an attachments link still needs its record. The upload is checked against the field's `accept` and `maxSize` before the link is spent. The stored file is bound to the uploading user, the object and the field for one hour: until a record holds it, only that user's own write, into that field of that object, may use it, and within the hour no second record may take it while the first holds it. The uploader's write into another field or object, or after the hour, is refused at the field with the reason; another user's or a system write is refused as a file they cannot open. Once the hour has passed with a record holding it, or once a record lets it go, it is judged as any other record's file. Before the upload, the id takes no write but the uploader's, which is refused as an upload that never completed. Until a record has held the file, only its uploader may download it. The page the link opens says the file was received, and tells the user to go back to the assistant.
+  
+  `fileIds` is an array so that a link for several files can answer several ids without a new key. Hosts whose storage service predates this keep `recordId` required on the tool, and the agent skill teaches the no-record form only where the host serves it.
+- d3ceb1d: fix(runtime)!: the action activation door answers a name two packages hold with `409` naming both, as the execution door does, instead of `404` "has no declaration"
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  BREAKING, for `POST /api/v1/actions/_activation/OBJECT/NAME` (body `{ "enabled": true | false }`) where two packages each declare an action `NAME` on that route's key — both object-less (`OBJECT` = `global`), or both bound to `OBJECT`:
+  
+  - FROM: `404 RESOURCE_NOT_FOUND`, "Action 'NAME' on 'OBJECT' has no declaration — there is nothing to switch off" (or "on").
+  - TO: `409 RESOURCE_CONFLICT`, the declaration reading's refusal, naming every holder in the message and in `error.details.candidates` (each with its `packageId`). The execution door `POST /api/v1/actions/OBJECT/NAME` already answers this name with the same refusal.
+  
+  In both directions nothing is written to the activation ledger, as before. The declaration reading refused the name, and the activation door read that refusal as "no declaration", so it reported an ambiguity as an absence (ADR-0150 D3: ambiguity is reported, never answered as absence).
+  
+  Unchanged: a name one package declares switches off and on with its ledger row naming that package; a name nothing declares answers `404` "has no declaration"; one package's action bound to two objects answers the activation door's own `409` naming both objects.
+  
+  The fix for a caller: read the `409` as "two packages hold this name", not as a missing action. The ledger addresses an action by its name, so this door switches the name again once one package holds it; before this change the same request answered `404` and switched nothing either.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key, export, field or stored body changes; the change is the status of a refusal the activation door already made, now answered as the execution door answers the same name; a caller holding two packages' action of one name must choose which package's action to switch, which no conversion can choose for them -->
+- 5e250a6: feat(storage,mcp): one upload link takes several files on a multi-file field
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A link `create_upload_link` makes for a file field declared `multiple: true` now takes several files in its one use: the user picks up to 10 on the link's page and sends them together, and each file gets its own file id. "Here are my three invoices" is one link and one pick instead of three. A single-file field link and an attachments link take one file, as before.
+  
+  On a multi-file field's link, one send spends the link once, and every file in it, however many the send carries, is checked before that: the workspace's maximum upload size, and the field's own `accept` and `maxSize`. One file the field cannot take, or more than 10 files (`400` `VALIDATION_ERROR`), refuses the whole send, stores nothing and leaves the link usable. After that the field gains all the files in one write, or none: a failure storing any of them, or the record's write refusing (a pending approval's lock, say), discards every file of the send, so the record shows what it held before and no file of the send is left.
+  
+  For a record not yet created, `create_upload_link` takes `count` (how many files, up to 10) with a multi-file field, and answers that many `fileIds` at once; the user picks exactly that many, and the agent creates the record with the field set to `fileIds`. Each id keeps the rules a single upload's id has: only that user's own write, into that field of that object, in one record, within an hour of the upload. Before the upload, every write naming one of the ids is refused, the uploader's own included, and nothing serves it.
+  
+  The link's page takes several files where the link does, in every language it is served in. The send is one form (`multipart/form-data`, marked by the header `x-upload-link-form: several`) carrying `count` and `file0` … `fileN-1`, and only a link that takes several files reads it. Any other body, on any link (a multipart one without that header included), is the file itself, whatever its content type, under the same limit and with the same checks as before. Every successful answer now also carries `fileIds`.
+- b22be27: fix(mcp): `validate_expression` gives the publish gate's own verdict at a `validation` or `formula` site, every pass the gate runs there included
+  
+  Clause-②: no (narrowing) — the MCP `validate_expression` tool now answers `ok: false` (or a warning) for a validation rule or formula field the publish gate already refuses (or warns on). The gate's acceptance set does not change, and no existing exported type or signature changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is in an advisory tool's verdict, never in what an author may write: every expression it now refuses, the publish gate already refused, so no stored metadata and no consumer code has anything to rewrite -->
+  
+  **BREAKING** verdict narrowing of the MCP `validate_expression` tool (`@objectstack/mcp`), at `site: 'validation'` and `site: 'formula'`.
+  
+  The tool promises the verdict the publish gate gives the rule, but it ran the shared expression validator and nothing else, so it answered `ok: true` for rules the gate then refused at publish, and the refusal first met a person there. It now also runs the gate's own passes at those two sites, through `judgeAuthoredSiteExpression` (`@objectstack/lint`), which runs the gate's walk itself over the object definitions the caller is served:
+  
+  - at both sites: a read through a reference to a field the target object does not declare (`record.balance.nope`), and a read through a reference into a stored-metadata table;
+  - at a `validation` site: a nullable field used without a null guard (`record.days > 3` with `days` neither required nor defaulted), and a read of `parent`, which a `validations[]` rule never binds;
+  - a warning at both sites: a read of an injected system column an external object has no storage behind (`record.owner_id` on an ADR-0015 `external` object).
+  
+  Each finding is the gate's sentence, at the gate's severity. A rule the gate accepts answers exactly as before. A hop target follows the same system-object fence as `describe_object`. A `flow_condition` and a `template` are not judged by this change: the tool's verdict there is unchanged. A sentence that names the rule names it `this rule`, since the tool is handed the condition and not the rule it will sit on.
+  
+  - `@objectstack/mcp`: `McpDataBridge` gains the optional `servedObjectDefinitionOf(name)`, the object definition as the caller is served it (the read `describeObject` projects), handed to the gate and rendered to nobody. A bridge without it answers the shared validator's verdict alone, as before. The served `SKILL.md` line and the tool description name what the tool now refuses. `@objectstack/lint` moves from a development dependency to a dependency, loaded on the first call that judges a rule or formula field, never at module load.
+  - `@objectstack/lint`: exports `judgeAuthoredSiteExpression` and `authoredExpressionHopTargets`. The gate's verdicts are unchanged: its walk gains one internal option, off its package entries, that only this entry passes.
+  - `@objectstack/runtime`: the HTTP MCP bridge serves `servedObjectDefinitionOf`, the same caller's object `describeObject` reads (ADR-0106 D1).
+  - `@object-ui/console`: the downloadable `SKILL.md` mirror carries the same line.
+- c05c0c7: fix(runtime): on a multi-kernel host, a same-origin `type: 'api'` action run by a REST or MCP request placed only by its scoped URL forwards into the environment the request ran in
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The forward is placed where the request ran, at every door.** A same-origin `type: 'api'` action forwards into the host's raw app, which places the forwarded request as it places any request. A request placed by its bound hostname or by its `X-Environment-Id` carries that signal into its forward. A request placed only by its scoped URL (`POST /environments/:env/actions/:object/:action`, or `run_action` on `/environments/:env/mcp`) did not, because the forward targets the action's own path: on a shared origin with no hostname binding the forward landed in no environment, and its target answered a member who may run the action `401`. On a host with a `kernel-resolver`, the forward from the REST, MCP and `dispatchAction` doors now carries the environment the resolver placed the request in as `X-Environment-Id`, replacing any `X-Environment-Id` the caller sent. A request placed in no environment, or in `platform` (the control plane), and every request on a host with no `kernel-resolver`, forwards exactly as before.
+- 5ea8ce5: fix(objectql, runtime)!: a function's bare-name read is refused naming both when the platform and a package hold the name, and answers nothing for a name only a disabled package holds (ADR-0150 D4)
+  
+  Clause-②: no (narrowing) — two engine function reads that name no package stop answering: `ObjectQL#resolveFunction` / `resolveFunctionEntry` refuse `409 RESOURCE_CONFLICT`, naming both, a name the platform (an owner-less registration) and a package hold, where they answered whichever registered last or, after another holder left, nothing; and they, with `resolvePackageScopedFunction` for a caller with no package (a flow `script` node of an environment-authored flow), answer nothing for a name only a disabled package holds, where they answered its function. Nothing that was refused is now answered, and no export is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored row changes shape: what moves is which engine function a read that names no package answers, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a caller of `ObjectQL#resolveFunction` / `resolveFunctionEntry` (or a flow `script` node of an environment-authored flow) naming a function that host code or a plugin registers under no package and an installed package also registers: the call is now refused, naming both. Address the function by its package (`resolvePackageScopedFunction` with the caller's package, or a packaged flow), or rename one of the two. A caller naming a function only a disabled package registers now gets no function; enable the package to get it back.
+  
+  The engine keeps every holder of a function name: each package that registered one, and the platform for a registration under no package. A read that names no package resolves it by ADR-0150 D3 over those holders.
+  
+  - **The platform beside a package.** The bare read refused a name two packages hold, but counted packages only, so with the platform and one package it answered the last registration: the package's function if the package registered last, the platform's if the platform did, and nothing once a third package that registered last had left. It is now refused like two packages are, `409 RESOURCE_CONFLICT` with reason `ambiguous-in-environment`, naming the package and the platform, in every registration order. The package-scoped read with no caller package already refused it; the two reads now agree.
+  - **A disabled package.** A disabled package is still counted as a holder, so a name it makes ambiguous stays refused, naming it (ruling 6824698376: a disable never turns a refusal into an answer). It is no longer answered: a name only a disabled package holds answers nothing to a read that names no package, and answers again once the package is enabled. A reader naming the package itself (a flow of that package) still resolves its own function, and the hook binder's bind after the seal and the cold-boot seal still count the disabled package as a holder.
+  - **The runtime's re-bind** (`bindAppArtifactHandlers`, when a re-bind moves a function off a package) puts back the functions that package keeps from the package's own holder entry instead of the bare read. The bare read now refuses a name the platform holds beside the package, which would have aborted the re-bind's teardown, and answers nothing for a disabled package, which would have dropped the owner spelling the package held a kept function by.
+  
+  Not changed: a name one enabled package holds, or only the platform holds, answers its function as before; a name two packages hold stays refused naming both; a reader that names its package resolves as before.
+- 0c2aeb9: fix(runtime)!: the action route answers by who holds the name on the route, and the environment's exact address answers its own item
+  
+  Clause-②: yes (narrowing) — narrowed: the bare route `/api/v1/actions/lead/NAME`, where a disabled package's action owns `lead` (bound to it, or object-less) and the environment's own action of that name is on `lead` too, answered the environment's action when exactly one enabled package held the name on another object; it now answers no declaration there, as it already did with none or two. With an enabled package on another object and a disabled package's object-less action, the same route answered the environment's action or no declaration by registration order; it now answers no declaration in both orders. Widened: a served package's own route answers its own action beside the environment's or the platform's item on another object, and beside a disabled co-holder (was no declaration, or the environment's object-less item); and `/api/v1/actions/_env/OBJECT/NAME` answers the environment's own action while a package holds the name (was `404`).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answers are the runtime `/actions` route's declaration for a name several holders share, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for one composition only: an action name held by a disabled package on an object (or with no object), by the environment's own action on that object, and by exactly one enabled package on another object. The route `/api/v1/actions/OBJECT/NAME` used to serve the environment's action there. It now answers that the action has no declaration, the answer it already gave when no enabled package, or two, held the name elsewhere. A disabled package that still binds the route is a holder there, so the route does not hand its call to another holder's declaration.
+  
+  The route now decides from the holders of the name on the route itself: the items bound to the routed object, else the ones with no object. The protocol's by-name read cannot see the routed object, so its answer depended on which holders sat on other objects and on registration order. In order:
+  
+  1. No enabled package's action is on the route and a disabled package's is: no declaration.
+  2. The environment's own action is on the route: that action, with no package (ADR-0150 D3: the environment's own declaration answers first on one owner key).
+  3. Exactly one enabled package's action is on the route and no platform action is there: that package's own action, read at its exact address and served with no package. A disabled co-holder, and the environment's or the platform's action on another object, do not change it.
+  
+  Every other composition answers as before: one holder alone, two enabled packages on the route (refused naming both), the platform's action on the routed object, and every call that names its package. A store read that fails answers `503`, not a declaration.
+  
+  The environment's exact address `/api/v1/actions/_env/OBJECT/NAME` answers the environment's own action whatever the other holders. The merged action listing leaves the environment's action out when a package holds the same name, so the address answered `404`. A package-less action with no row in the environment's store is the platform's and still answers `404` there.
+  
+  Not changed: the registry keeps one package-less action per name, so a platform action and the environment's own action of one name replace each other, and the later registration stays. That rule is the registry's and is tracked separately.
+  
+  What to do: nothing, unless a call relied on the environment's action answering a route that a disabled package's action still binds. Enable that package, or remove its action, or address the environment's action at `/api/v1/actions/_env/OBJECT/NAME`.
+- 1f8ce6e: fix(runtime,plugin-security): the declared-webhook activation door switches one of two holders the namespace address cannot tell apart, and the upgrade report names every withheld holder
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two holders of one declared webhook name that the namespace address cannot tell apart, two packages co-owning one namespace or a package that declares no namespace beside another holder, are both dispatched, but neither could be switched: `POST /api/v1/security/_activation/webhook/NAME` and `.../webhook/NS/NAME` both answered `409` naming both. The bare address now takes `?package=PKG`, the exact qualifier `/meta` reads, and switches exactly PKG's declaration, writing PKG's own activation row and no other.
+  
+  - FROM `400 VALIDATION_ERROR` (unknown query parameter) TO `200` writing PKG's row, `data.packageId` = PKG, for `POST /security/_activation/webhook/NAME?package=PKG` when PKG declares NAME and is enabled.
+  - A PKG that does not serve NAME (a disabled package included) answers `409 RESOURCE_CONFLICT` naming the holders that do, or `404` when no enabled package declares it. Nothing is written.
+  - `package` is the only query parameter of the bare webhook address; the namespace address takes none, and an empty or repeated `package` is `400`, as on the permission-set door.
+  
+  The upgrade-impact report's withheld-webhook finding now reports each holder of the name, a disabled second holder included: FROM one finding (the holder the bare artifact lookup answered) TO one finding per holder. Its log lines name each finding's switch, `POST /api/v1/security/_activation/webhook/NAME?package=PKG`, where they named the namespace address. A withheld-webhook finding whose package is disabled is marked `packageDisabled: true` (an added optional field), and the line says to enable that package first: its address answers `409` until then.
+  
+  The `webhook` liveness ledger's `name` evidence (`@objectstack/spec`, text only) names one slot per served `(package, name)` holder and its `declared:PKG/NAME` reference.
+- a752057: fix(runtime)!: an action authored in the environment and bound to an object a package ships is the environment's action, listed once by MCP `list_actions` with no namespace and run by its face
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  BREAKING, in three places, for an action the environment authored (no `?package=`) on an object a package ships:
+  
+  1. MCP `run_action` with that package's `namespace` answers `RESOURCE_NOT_FOUND` (404) for such an action, as it does for any name that package does not hold. Before, it ran it.
+  2. `POST /actions/NAMESPACE/OBJECT/NAME` with that package's namespace answers the same 404. Before, it ran it.
+  3. A flow action of that kind whose `target` flow name TWO packages hold answers `RESOURCE_CONFLICT` (409) naming both holders, on its face, its bare name and `/actions/_env/OBJECT/NAME`. The action has no package (ADR-0150 D3), so its target is read by the no-package rule. Before, it was the object's package's action and ran that package's flow.
+  
+  - FROM (1, 2): `run_action { actionName: NAME, objectName: OBJECT, namespace: PACKAGE_NAMESPACE }`, or `POST /actions/PACKAGE_NAMESPACE/OBJECT/NAME`.
+  - TO (1, 2): the face `list_actions` lists for it (`OBJECT-NAME`), the bare name with its `objectName`, or `POST /actions/_env/OBJECT/NAME`.
+  - FROM (3): an environment-authored flow action on a packaged object whose `target` names a flow two packages hold.
+  - TO (3): bind the action with `?package=` to a writable package whose own flow, or whose one dependency's flow, is meant, or point its `target` at a flow name one package holds.
+  
+  The protocol's merged listings serve an action an administrator saved with no `?package=` twice: on its own in the `action` listing, and inside the served object's `actions` in the `object` listing, where the registry attaches it. Neither copy carries a package. The action collector filed it under the package that ships the object, so the ADR-0150 D4 dedupe, which keys on the holder, kept both copies. `list_actions` then listed the action twice, once under a namespace that never shipped it, and refused its face `OBJECT-NAME` as derived for two actions, so `run_action` on that face answered 404.
+  
+  A copy found inside an object's `actions` that carries no package stamp and is tenant-authored (`_provenance: 'org'`) is now filed under no package, in the collector and in `actionDeclaringPackage`. It lists once, with no namespace, and its face runs it. Unchanged: an action a package ships on its own object lists once under that package's namespace; an action authored with `?package=` lists once under that package's namespace; the environment's action still runs by its bare name and at `/actions/_env/OBJECT/NAME`; a flow action of that kind whose target flow name ONE package holds still runs that flow.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key, export, field or stored body changes; the refusals are of an address that named a package which never held the action, and of a flow target two packages hold read for a caller with no package; the caller's fix is to call the environment's action by its face, its bare name or the _env address, or to bind the action or its target to one package, which no conversion can choose for them -->
+- 1bed853: fix(runtime): MCP `list_actions` marks a confirmation-gated action `unavailable` for an AI service account
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An AI service account (an agent principal acting for itself, with no person it acts for) never confirms an action for itself, so `run_action` refuses it `428 ACTION_CONFIRMATION_REQUIRED` on every action declaring `ai.requiresConfirmation: true`, whatever the call sends. `list_actions` used to show that action to the account with no `unavailable` marker, so a headless agent planned a call that could never run. The row now carries `unavailable` with the refusal's own code and sentence ("a person runs this action"). The marker follows the declared flag only, not the listing's destructive heuristic. Where the forward-credential refusal also applies, the row carries the confirmation refusal, the one `run_action` answers first. A person, a delegated agent and the system context see the listing unchanged. The `McpActionSummary.unavailable` documentation in `@objectstack/mcp` names the new case and its code.
+- 218b012: fix(runtime,cli): `GET /api/v1/ready` reports whether the boot seed has landed, and `os serve` prints the seed result its banner promised
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The inline boot seed can still be writing after the kernel runs: past its budget (`OS_INLINE_SEED_BUDGET_MS`, default 8 s) it continues in the background, and a seed that waits for demo accounts or seed files starts after `kernel:ready`. `/health` and `/ready` answered ready the whole time, and the settle was announced only on the `os serve` IPC channel (`objectstack:seed-settled`), so a script, e2e suite or health check in another process could not tell when the seed rows were there.
+  
+  - **`/ready`.** When the app declares seed data, the 200 body now carries `seed`: `"pending"` while any source is still writing, then `"settled"`, or `"failed"` when a source dropped a record, dropped a reference from a written row, or installed no rows (the same verdict the IPC message calls `ok: false`). A multi-tenant or `skipSeedData` boot runs no inline seed and reads `"settled"`. The status code is unchanged, so a replica stays in rotation while it seeds. An app with no seed data gets exactly the body it got before. To wait for the seed from another process, poll `/api/v1/ready` until `seed` is not `"pending"`.
+  - **`os serve` / `os dev`.** When the ready banner printed `⚠ Seeds:   pending` and "its result prints after this banner", the result now prints, once, when the seed settles: `Seeds:   settled — crm 162 rows`. Before, a clean seed printed nothing, because the seeder's completion lines are logged at `info`, below the default level. A seed that settled before the banner is reported in the banner as before, and nothing more prints.
+- 467ec26: fix(plugin-webhooks, runtime): declared-webhook remedies name each holder's exact address, and a name refused whole is refused at every address naming both holders
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Remedy text and refusals for declared webhooks (ADR-0150 D2/D3/D5/D8):
+  
+  | Where | FROM | TO |
+  |:---|:---|:---|
+  | Name guard (`sys_webhook` create or rename onto a declared name) | names `POST /api/v1/security/_activation/webhook/NS/NAME` per holder, which answers `409` for two co-owners of one namespace and does not exist for a package that declares no namespace | names `POST /api/v1/security/_activation/webhook/NAME?package=PACKAGE` per holder, which switches exactly that holder |
+  | Redelivery veto, switched-off declared webhook | `switch it on (POST .../webhook/NS/NAME ...)` | `switch it on (POST .../webhook/NAME?package=PACKAGE ...)` |
+  | Dispatcher warning, a declared webhook withheld by a `sys_webhook` row | namespace address per holder | `?package=PACKAGE` address per holder |
+  | Dispatcher warning, a row naming no package under two holders | `.../webhook/<namespace>/NAME` | `.../webhook/NAME?package=PACKAGE`, as the departed-package warning already said |
+  | Metadata service lists the environment's declaration beside a package's (no registry item): bare refusal sentence | "Nothing picks one of them: address it by its package." | says neither declaration is dispatched and no address switches one, names both holders, and says to remove or rename declarations |
+  | Same state, `POST .../webhook/NAME?package=PACKAGE` and `POST .../webhook/NS/NAME` | `404` "no enabled package declares the name" | `409 RESOURCE_CONFLICT`, the refusal above, `candidates` naming the environment and the package; nothing written |
+  | Same state, name guard | names a `<namespace>` placeholder address | says no declaration of the name is dispatched and quotes the refusal |
+  | Same state, redelivery of a `declared:PACKAGE/NAME` delivery | "the package is disabled ... Enable the package" | refused with the refusal, naming both holders |
+  | `?package=` or namespace address when the reader serves no slot and the bare read fails | `404` | `503 SERVICE_UNAVAILABLE`, nothing written |
+  | Upgrade impact report, withheld-webhook line and `packageDisabled` doc | a disabled package's address "answers 409" | refuses the switch: `404` while the package is the name's only holder, `409` naming the other holders while another package declares it |
+  
+  A name that one package, or two packages each once, declare through the metadata service is unchanged: each served holder is switched at its own `?package=` address. A disabled sole holder still answers `404` at its address.
+  
+  No action is needed. Operators who scripted the namespace address keep it working where it worked; the `?package=PACKAGE` address the messages now name works for every package holder.
+- 8f9eb3d: feat(metadata-protocol, spec): a package publish whose runtime registry refused an object answers `published_unregistered` and names the object, instead of `published`
+  
+  Clause-②: yes (widening) — `PublishPackageDraftsResponseSchema.outcome` gains the value `published_unregistered`, and the response gains the optional member `unregistered[]`. Every other answer is byte-identical: a publish the registry takes whole still answers `published` with `success: true` and no `unregistered` key.
+  Metadata-protocol: semantic
+  
+  The authorable-surface shard gains `api/PublishPackageDraftsResponse:unregistered`, and the same server event answers `outcome` / `success` differently; ADR-0087 entry `18.publish-drafts-outcome-published-unregistered`.
+  
+  **What answers differently.** `POST /api/v1/packages/:id/publish-drafts` (and the protocol's `publishPackageDrafts`, and `client.packages.publishDrafts()`) used to answer `outcome: 'published'` and `success: true` when the runtime registry refused one of the objects it had just made live. The object carried the `object-registry-refused` warning on its `published[]` element, but a caller that read `success` or `outcome` saw a clean publish, and a seed load or data read right after it answered `OBJECT_NOT_FOUND`. The same publish now answers:
+  
+  - `outcome: 'published_unregistered'` and `success: false` (`success` is still exactly `outcome === 'published'`);
+  - `unregistered: [{ type: 'object', name, rule: 'object-registry-refused' }]`, one entry per refused object, in publish order;
+  - everything else as before: the drafts landed and stay live, so every object is still in `published[]` (the refused one still carries its warning), `failed[]` is empty, and the commit, seeds, probes and receipts are as they were.
+  
+  **What to do.** Handle the new value wherever you branch on the batch publish answer. Do not treat it as "nothing landed": the metadata is live. Do not seed or read an object `unregistered[]` names until it is registered: publish it again, which re-runs the registration, or restart, which registers every stored object.
+  
+  **The console.** Studio's publish, the package sheet, Home's *Publish all* and the AI chat card read `published_unregistered` as they read the `published` answer the server gave for this before: the refused object's warning reaches the author through the client, and none of them reports the publish as failed.
+  
+  **Unchanged on purpose.** The REST door's app visibility flip (ADR-0045 §3) still runs after this outcome, as it ran after the `published` answer this used to be. The single-item doors (`publishMetaItem`, a publish-mode save) still answer success with the warning on their `advisories`.
+- e3f0cfd: fix(runtime): the package install and enable routes announce `metadata:reloaded`, so a package they bring into service is re-read without a restart
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /api/v1/packages` and `PATCH /api/v1/packages/:id/enable` registered a package or put it back into service, but announced nothing to the running kernel. The `metadata:reloaded` subscribers therefore missed both routes until the next restart. One of them is `plugin-security`'s `renamedFrom` carry, so the holders of a position the package renamed stayed on the old name. The other subscribers are the automation engine's flow re-sync and the authored hooks, actions and translations. Both routes now announce `metadata:reloaded` with `changed: ['app/ID']`, the same spelling the marketplace install-local route uses, once the registry holds the package. The install route announces every install that lands, including one whose `enableOnInstall` switch is refused. The enable route announces only when the package was disabled, because enabling a package that is already enabled changes nothing it serves. A subscriber failure does not fail the request: the route still answers as before, and the failure is logged once at `warn` with the restart that repairs it.
+- 67725f1: fix(driver-sql, runtime): a boot the organization-ownership guard refuses no longer drops a telemetry shard, and the refusal names a complete apply command
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **A refused boot drops no rotation shard.** The organization-ownership guard judges the database after the engine's schema sync has run. That sync also ran the Rotator for every object that declares `lifecycle.storage: { strategy: 'rotation' }` (`sys_activity` among them), and it DROPPED each shard older than the `shards × unit` window. So a database restored from a dump more than one window old lost those shards and their rows on the boot that then refused to serve it, before the ceremony that boot asked for had run. The same drop ran on every one-shot CLI boot, which arms no lifecycle sweep.
+  
+  - FROM: `SqlDriver#initObjects` (schema sync) created the current shard, dropped the expired ones and rebuilt the read view over the rest.
+  - TO: schema sync creates the current shard and drops none. An expired shard stays in the read view, its columns synced with the rest. `SqlDriver#rotateShards`, the entry point the lifecycle sweep calls, is the only caller that drops expired shards. On a served boot the first sweep drops them, as before (`DEFAULT_LIFECYCLE_INITIAL_DELAY_MS` after start, or one sweep interval later when the store was swept within the interval). So a shard outlives its window by at most one sweep interval, the tolerance the sweep's own schedule already has.
+  - What to know: with lifecycle enforcement switched off (`OS_LIFECYCLE_DISABLED=1`, or `lifecycle: { enabled: false }` on the ObjectQL plugin) no sweep runs, so expired shards are no longer dropped at boot either and stay readable. Switch enforcement back on, or call the `lifecycle` service's `sweep()`, to drop them.
+  
+  **The refusal's apply command is complete.** Every organization-ownership refusal now names the apply as `os migrate organization-ownership --apply --plan-file PLAN --backup-taken --out REPORT`, the same prefix as before (`--dev`, `--database-url`, the exported auth secret, the driver and token variables). Run without `--out`, the apply wrote its report into the directory it was run from.
+- 06b5669: fix(runtime,service-automation)!: the flow doors and the connector address judge the served holders of a name two packages hold, so a disabled holder's slot answers no bare name (ADR-0150 D3, #33386)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are door and run reads under a reversible package state: no stored row, slot key, run key or dispatch key changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller of a flow or connector name that two packages hold while one of them is disabled. A disabled package holds no name (ADR-0150 D3). Until now the `/automation` by-name doors, the flow action and endpoint, the start admission's record-read walk and the engine's bare entries still counted a disabled holder for such a name. They now count only the packages that serve it. With no holder disabled, every answer is unchanged. Measured over a real `SchemaRegistry` (its `disablePackage`), in both registration orders. Packages CRM and HR each hold the flow `convert` and the connector `mail`, one engine slot or instance each, and CRM is disabled:
+  
+  - A bare name with no package (`POST /automation/convert/trigger`, `GET /automation/convert`, the run doors, `GET /automation/connectors/mail/connection`, the engine's `execute`, `getFlow` and `toggleFlow`) was refused 409 naming CRM and HR. It is now served from HR's slot or instance.
+  - A flow action, a subflow call or a walk read from a package whose closure holds both was refused 409 naming both. It now reaches HR's flow (widening).
+  - CRM's own flow action, or a subflow call from CRM's own flow, ran CRM's flow. It now gets no flow (not found), and never HR's.
+  - A package that reaches the name only through CRM ran CRM's flow. It is now refused 409 `outside-closure` naming HR. A package that reaches neither holder is refused naming HR only (before: both).
+  - An address naming CRM (`/automation/crm/convert/…`, `/automation/trigger/crm/convert`) ran CRM's slot. It is now refused 409 `not-held-by-qualifier` naming HR. `/automation/connectors/crm/mail/connection` reached the service, which answered 404; it is now refused 409 naming HR, and the service is not asked.
+  - `_env` or another namespace (`/automation/_env/convert/…`, `/automation/connectors/ops/mail/connection`) was refused 409 naming both. It is now refused naming HR only.
+  - The definition writes (`PUT`, `DELETE`, clone) at an address naming CRM, at `_env` or at a third namespace were refused 409 naming both. They are now refused 409 naming HR only. With both disabled, such a write at an address answers 404.
+  - With CRM and HR both disabled, no door and no run reaches a flow. An address answers 404. The bare name and `_env` answer as for a flow the engine does not hold.
+  
+  **Not moved.** HR's own address and HR's own callers answer as before. The durable coordinates stay judged over every holder, served or not: the engine's slot keys, a run's key, the schedule dispatch key (`flowDispatchHolder`), the credential channel's scoping, the subflow guards' arming verdicts, and which slot a run row is filed under. A disable is reversible, so it re-points no slot. A run filed under CRM's slot key is no served holder's: the run doors answer it as a run nobody holds, and it is never read or acted on as HR's. A definition write (`PUT`, `DELETE`, clone) at HR's own address keeps its 409 naming every holder; a bare definition write is refused by the metadata store over its stored rows, as before. A name only one package holds is judged as before.
+  
+  **Deferred:** amendment 3's trigger binding (a runtime-disabled holder's trigger still fires its slot, as on main) → #33748.
+  
+  **No migration.** No schema key, stored row, slot key, run key or dispatch key changes, so there is nothing to rewrite: the answers that move follow a reversible package state.
+  
+  The fix for a caller: re-enable the package, or address the served holder by its namespace.
+- c43bffd: fix(runtime): disabling or uninstalling a package through the runtime's package routes withdraws its flows at once (#33527)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `PATCH /packages/:id/disable` and `DELETE /packages/:id` now announce `metadata:reloaded` with `{ changed: ['app/ID'] }` once the registry has taken the package out of service. This is the spelling the install and enable routes and the marketplace install-local uninstall already use. Every subscriber of that event re-reads a registry that no longer serves the package. The automation engine withdraws the package's flows and unbinds their record and schedule triggers, and the authored hooks, actions and translations re-sync.
+  
+  Before this change, a disabled package's record-triggered flow stayed bound in the automation engine. It kept running on every matching record write until the process restarted, while `GET /meta/flow` no longer listed it. An uninstalled package's flow was withdrawn only by the asynchronous sync of its deleted metadata rows, so a write made right after the `DELETE` answered could still run it.
+  
+  A disable of a package that is already disabled announces nothing, and neither does an uninstall the running registry did not withdraw. A failed announce never changes either route's answer: it is logged once at `warn`, naming the restart that repairs it.
+- ea67b26: fix(cloud-connection, runtime, objectql)!: an install-local uninstall withdraws the package's action handlers and body hooks from the running engine, so a call that names no package is served by the one remaining holder at once instead of after a restart
+  
+  Clause-②: yes (narrowing) — `ObjectQL#removeActionsByPackage` now hands a key it empties in the slot a call that names no package reads back to the entry another owner still holds under it in its own slot. On `ObjectQL#removePackage`, on the binder's re-bind that drops a package body of a multi-package artifact, and on the authored-action resync's teardown (`removeActionsByPackage('metadata-service')`), the action doors (`POST /api/v1/actions/OBJECT/NAME/ID`, MCP `run_action`) now reach that handed-back entry. Before, they reached the next entry their handler-key rotation held (`OBJECT`, then `global`, then `*`, per handler-key candidate), and answered "not found" only when none was held. The owner gates of the reached entry move with it, so a call that was served can now be refused `403 PERMISSION_DENIED`, `409 ACTION_DISABLED` or `503`. The install-local uninstall the card reports is widening only: a bare call that answered `409 RESOURCE_CONFLICT`, naming the uninstalled package as one of two owners, now answers with the one remaining holder's handler. `@objectstack/runtime` gains the export `unbindAppArtifactHandlers` and the type `AppArtifactHandlerUnbinding`.
+  Metadata-protocol: none
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped, and no stored row changes: what moves is which in-memory handler entry a call that names no package reaches after a live removal, which is the entry a restart already reaches, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** for a call that names no package, on a key that `removePackage`, a re-bind that drops a body, or the authored-action resync empties while another owner (host code, a plugin, a package or the environment) still holds a handler under it. The emptied key now resolves to that remaining holder's entry, so the call runs that handler, and that entry's owners' gates (403 / 409 `ACTION_DISABLED` / 503) can answer where the door's rotation used to fall through to a later entry and serve it. This is what a restart of the same process already answers. No data migration or heal is needed: nothing persisted changes. The install-local uninstall the card reports is unaffected, because the uninstalled package's handler stayed bound there and the key never emptied.
+  
+  **The defect.** `DELETE /api/v1/marketplace/install-local/:manifestId` withdrew the package from the registry and left every handler its install had bound on the engine under `app:<manifestId>`: script-action handlers, body hooks and bundle functions. With two packages each holding an action of one name on one object, a call that names no package kept being refused as ambiguous until the runtime restarted, and the uninstalled package's body hooks kept firing.
+  
+  **The fix.**
+  
+  - `@objectstack/runtime`: `unbindAppArtifactHandlers(ql, appId, { logger, source })` is the inverse of `bindAppArtifactHandlers`. It removes the actions, hooks and functions of the package's owner and of every owner the package's last bind on that engine recorded (a multi-package artifact's bodies), releases those owners' bare-name function claims, and forgets the bind record, so a later install binds as a first bind. Another package's handlers, host code and the environment's authored-action handlers are untouched. Jobs keep leaving through the `runtime.package-jobs` uninstall cleanup.
+  - `@objectstack/cloud-connection`: the uninstall door calls it right after the registry withdrawal, and not when the registry refuses the withdrawal (the package stays loaded then). A runtime that has no such export is warned with the remedy, as the install door already warns for a runtime with no binder.
+  - `@objectstack/objectql`: `removeActionsByPackage` hands a key back to the owner that still holds a handler for it. Each owner keeps its handler in its own package slot, but the slot a call that names no package runs held only the last registration. Removing that registration emptied the key, so the engine's bare `executeAction` answered "not found" while another owner still held a handler. The key now takes back the entry another coordinate's slot holds: the last coordinate holding the key in the order the slots were created, which is not always the last registration of this key. That choice matters where the bare-call rule runs one owner while others hold the key: host code or a plugin beside one package on an object-bound key, and two shared owners with no package (host code beside a plugin, or two plugins). When the earlier-created slot registered this key last, the hand-back runs the other holder's handler where a restart runs the last registration. While two or more packages still hold the key, the bare call is refused naming them as before.
+  
+  **Not changed.** `PATCH /api/v1/packages/:id/disable` leaves a disabled package's handlers in place, and the bare-call rule already counts no disabled package as an owner. `DELETE /api/v1/packages/:id` (the protocol's `deletePackage`) does not call this unbind, so it is unchanged.
+- 1e358cc: fix(mcp): `describe_object` no longer lists the hidden `__search` search companion, on either MCP transport
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Where pinyin search is on, the registry serves an object with the hidden `__search` companion column beside its display field. `describe_object` described every served field, so it offered an agent that column (as `readonly` and `system`), while no caller may read, write or name it: a record never echoes it, a `$searchFields` override naming it is refused, and `validate_expression` answers `unknown-field` for a read of it.
+  
+  `describe_object` now leaves the companion out on both transports: the HTTP bridge in `@objectstack/runtime`, and the stdio bridge and the `objectstack://objects/{name}` resource in `@objectstack/mcp`. Both skip it by the protocol's one constant, `SEARCH_COMPANION_FIELD` from `@objectstack/spec/data`. Every other field is listed as before, the injected system columns such as `organization_id` and `created_at` included.
+- 3eac63a: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The MCP read tools (`list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_records`) now admit a system object whose author declared `enable.aiReadable: true`, asked through a new optional bridge member `aiReadExposed` that both bridges answer with `isAiReadExposed`. Every gate after admission is unchanged (the caller's permissions, row-level security, the object's own read gates, field masking), and every write tool still refuses every `sys_*` object. `sys_approval_request` declares the key; `query_records` names the "waiting on you" filter shape.
+  
+  The member baseline `member_default` now names `sys_approval_request` read-only, so every signed-in member holds a data-door read on it; which rows is still the approvals request read gate (the submitter, a current approver, a past actor), and no write opens. That gate now answers a conjunctive `pending_approvers` `$contains` of the caller's own id with the approvals service's acting-address fold, so the console's My Pending view and an agent's "waiting on me" query find a slot addressed by email or an unstaffed position, not only one holding the user id. A `pending_approvers` predicate naming another id, or under `$or`, is read as written.
+  
+  `@objectstack/plugin-audit`: the activity and audit copies of an approval request are hardened: a ledger copy holds no value that its owner narrows per reader. New copies no longer carry the request's subject snapshot, and `migrateSideCopies` / `migrateArchivedSideCopies` rewrite the copies at rest. Both ledgers' read redactions drop it from an older copy whether or not the rewrite has run.
+  
+  **Who can query those copies narrows.** A non-system query on `sys_activity` or `sys_audit_log` that names `sys_approval_request` by equality on `object_name` and names a column holding the copy (`metadata`; `old_value`, `new_value`), as a free-text search does, is now judged against every registered object, as a query naming no object already is. A reader withheld any field of any object, an organization administrator included, is refused it (`403`) where they were answered before. The same query pinned to another object, or naming only other columns, is judged as before. This does not depend on the rewrite having run.
+- Updated dependencies [f229dfd]
+- Updated dependencies [0b89b33]
+- Updated dependencies [322ded7]
+- Updated dependencies [2399e39]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [4aceae5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [7c36f52]
+- Updated dependencies [1cf2a5a]
+- Updated dependencies [3c44a97]
+- Updated dependencies [605d712]
+- Updated dependencies [3269cab]
+- Updated dependencies [02f55c5]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [df67557]
+- Updated dependencies [128b657]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [d635599]
+- Updated dependencies [8403725]
+- Updated dependencies [4e4b587]
+- Updated dependencies [a1e0402]
+- Updated dependencies [548f8ff]
+- Updated dependencies [103eb7b]
+- Updated dependencies [dd966fc]
+- Updated dependencies [fc283d6]
+- Updated dependencies [0e9ff94]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [46a2ecf]
+- Updated dependencies [4bba8b8]
+- Updated dependencies [8c88db6]
+- Updated dependencies [834d5f5]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [9673030]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a83c366]
+- Updated dependencies [5c005e0]
+- Updated dependencies [dd4ce50]
+- Updated dependencies [6e4a203]
+- Updated dependencies [796e9d4]
+- Updated dependencies [c09320d]
+- Updated dependencies [a1604ce]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [5ea8ce5]
+- Updated dependencies [e0ce1b5]
+- Updated dependencies [4ace1fa]
+- Updated dependencies [534e115]
+- Updated dependencies [61ed314]
+- Updated dependencies [3c42e63]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [3825f57]
+- Updated dependencies [9317833]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [b4c8461]
+- Updated dependencies [01d206d]
+- Updated dependencies [01d206d]
+- Updated dependencies [bd439f1]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [6e28797]
+- Updated dependencies [7adb1b5]
+- Updated dependencies [86c18df]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [d4cfbfb]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [728be58]
+- Updated dependencies [4c15268]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [26b5994]
+- Updated dependencies [28c9b42]
+- Updated dependencies [8835532]
+- Updated dependencies [505a239]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [9f736f2]
+- Updated dependencies [6e1ab9b]
+- Updated dependencies [cbb876c]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [7e2eadd]
+- Updated dependencies [47a3b95]
+- Updated dependencies [d4fbb4d]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [a2be78d]
+- Updated dependencies [4a0c480]
+- Updated dependencies [a674877]
+- Updated dependencies [df9fe94]
+- Updated dependencies [467ec26]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [b95d915]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [03dc626]
+- Updated dependencies [babd5d4]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [67725f1]
+- Updated dependencies [a27d88d]
+- Updated dependencies [d01f514]
+- Updated dependencies [b392ff7]
+- Updated dependencies [6107290]
+- Updated dependencies [c92ae14]
+- Updated dependencies [489ef5f]
+- Updated dependencies [480246b]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [ea67b26]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [1c25b50]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [1c32f6d]
+- Updated dependencies [b8f6237]
+- Updated dependencies [dd291b8]
+- Updated dependencies [c94a4da]
+- Updated dependencies [e997113]
+- Updated dependencies [3eac63a]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+- Updated dependencies [1e889b1]
+- Updated dependencies [d7e1a5a]
+- Updated dependencies [de5eb08]
+- Updated dependencies [0a6f193]
+  - @objectstack/spec@18.5.0
+  - @objectstack/objectql@18.5.0
+  - @objectstack/metadata-protocol@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/metadata@18.5.0
+  - @objectstack/rest@18.5.0
+  - @objectstack/plugin-auth@18.5.0
+  - @objectstack/lint@18.5.0
+  - @objectstack/plugin-security@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/formula@18.5.0
+  - @objectstack/driver-sql@18.5.0
+  - @objectstack/driver-memory@18.5.0
+  - @objectstack/driver-sqlite-wasm@18.5.0
+  - @objectstack/driver-turso@18.5.0
+  - @objectstack/observability@18.5.0
+  - @objectstack/service-cluster@18.5.0
+  - @objectstack/service-datasource@18.5.0
+  - @objectstack/service-i18n@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

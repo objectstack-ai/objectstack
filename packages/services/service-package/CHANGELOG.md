@@ -1,5 +1,93 @@
 # @objectstack/service-package
 
+## 18.5.0
+
+### Patch Changes
+
+- 9562643: fix(service-package): after a restart the package registry serves the manifest written last, including a rollback re-install of an older version and several writes within one second (#33084)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_packages` keeps one row per `(id, version)`. The package service's "latest" reads (`get(id)`, `list()`, and through `list()` the boot's hydration, which is what a restart serves) picked the row with the greatest `created_at`. An overwrite keeps a row's `created_at`, and the stamp has whole-second precision, so a rollback re-install (1.0.0, then 2.0.0, then 1.0.0 again) was served live as 1.0.0 and as 2.0.0 after a restart, and three writes within one second came back as the first of them.
+  
+  - The latest reads now pick by `updated_at`, which every write sets, insert or update.
+  - A publish binds `updated_at` as `YYYY-MM-DD HH:MM:SS.mmm` UTC. Within one process the stamp always moves forward: when the clock has not advanced since the previous write, it is one millisecond after that write's stamp. `created_at` keeps its `YYYY-MM-DD HH:MM:SS` form and its meaning (when the `(id, version)` row was first written), so the unmanaged-copy record that ties to it is unchanged.
+  - No migration. Rows written before this carry a whole-second `updated_at` that every earlier overwrite also refreshed, so a stored rollback written at least a second after the version it rolls back is picked correctly as it stands. A whole-second stamp sorts before every millisecond stamp of the same second. Stored rows that already tie on their second stay ambiguous, and so do writes from two processes whose clocks disagree: the forward step is per process. The table DDL and `idx_packages_latest` are unchanged.
+  - `PackageRecord.updated_at` is still a string; values written from now on carry milliseconds.
+- 426bb46: fix(service-package): a restart serves a package's stored `installedAt` / `updatedAt`, not the boot time (#33535)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `sys_packages` boot hydration re-installed every stored row through the registry's install, which stamps `installedAt` and `updatedAt` with the moment it runs, so after each restart `GET /api/v1/packages/:id` answered the boot time for both. The hydrate now carries the row's `created_at` (the installed version's first write) as `installedAt` and its `updated_at` (its last write) as `updatedAt`. `created_at` is stored to the whole second, so the install time comes back at that precision; `updated_at` keeps its milliseconds. A package installed in the running process still stamps the moment of its install, and a row whose stamp is not readable keeps the registry's own, as before. The wire shape is unchanged.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [8c88db6]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [6e28797]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/metadata-core@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

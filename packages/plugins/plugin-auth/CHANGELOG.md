@@ -1,5 +1,344 @@
 # Changelog
 
+## 18.5.0
+
+### Minor Changes
+
+- 68cb68e: feat(plugin-auth): an SSO provider can sign the person out of the company sign-in too, per provider and off by default
+  
+  Clause-②: yes (widening) — `sys_sso_provider` gains a `sign_out_of_idp` column (boolean, default false), `/sso/register` and `/sso/update-provider` accept a `signOutOfIdp` member, the Edit Sign-In Options action gains its param, the Register SAML Provider and Edit SAML Settings actions gain an optional `logoutUrl`, and `/sso/saml2/sp/slo/:providerId` and `/sso/saml2/logout/:providerId` answer for a provider whose switch is on. Nothing that was served before is refused now; with the switch off (every existing provider) sign-out answers exactly as before.
+  Metadata-protocol: added
+  
+  Each SSO provider has a new sign-in option, **Sign Out of the Company Sign-In Too**. It is off by default, and a change is recorded in the audit log like the other sign-in options (`trackHistory`). With it on, signing out of the platform also ends the person's session at the identity provider:
+  
+  - **SAML** through single logout. Sign-out answers `{ success, url, redirect }` with the identity provider's logout URL carrying a LogoutRequest for the session that signed in, and the platform session ends. The identity provider's logout address is the new **IdP Logout URL** on Register SAML Provider and Edit SAML Settings, stored in the provider's SAML configuration as its single logout service (no new column). The provider's single logout endpoint opens only while the switch is on, and a logout message from the identity provider is accepted only when it is signed; a signed logout request ends only the session it names.
+  - **OIDC** through an RP-initiated logout redirect. Sign-out answers `{ success, url, redirect }` with the provider's `end_session_endpoint`, carrying the ID token of that sign-in as `id_token_hint`, the `client_id`, a `post_logout_redirect_uri` when the sign-out's `callbackURL` is on a trusted origin, and the sign-out's `state`. The endpoint is read from the provider's discovery document when the switch is saved on, and kept in its stored OIDC configuration.
+  
+  Saving the switch on is refused `400 VALIDATION_FAILED` on `signOutOfIdp` for a provider that cannot honour it: a SAML provider with no IdP Logout URL, or an OIDC provider whose discovery document cannot be read or names no `end_session_endpoint` on a trusted origin. Saving it off is never refused. A sign-out through the SAML single logout writes the same logout audit row as `/sign-out`.
+  
+  Not in this change: the Console sign-out following the answered `url`, and any form item the Edit Sign-In Options form does not render by itself, are a later Console change. A session started before the switch was turned on signs out of the platform only.
+- 4dbcbdd: feat(plugin-auth): with single sign-on configured, a signed-out visit can go straight to the identity provider and come back to the page it asked for
+  
+  Clause-②: yes (widening) — `/auth/config` serves a new `features.directSignIn` flag (always, `false` unless the setting is on) and, while it is on, a `localSignIn` value (`hidden` | `off`); `PUBLIC_AUTH_FEATURES` gains `directSignIn`, so `requiresFeature` accepts the new value `'directSignIn'`; `GET /api/v1/auth/sign-in/direct` answers while the setting is on. With the setting off (every existing deployment) the door is not mounted and every other answer is unchanged.
+  Metadata-protocol: added
+  
+  A deployment that signs people in through one identity provider can now skip the sign-in page. Turn it on with the auth plugin's `directSignIn` option, or with the environment:
+  
+  - `OS_AUTH_DIRECT_SIGN_IN_ENABLED` — `true` or `false` (also `1`/`0`, `on`/`off`, `yes`/`no`); wins over the option.
+  - `OS_AUTH_DIRECT_SIGN_IN_PROVIDER` — the provider to use: an `oidcProviders` entry's `providerId` or an SSO provider's `providerId`. Unnamed, the one configured provider is used; with none or several, the sign-in page is shown as before.
+  - `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH` — `hidden` (default: the password form stays reachable at `/login?local=1`) or `off` (the sign-in form offers no local way in, in any of its states: no email or phone form, no sign-up link and no break-glass link, also on an OAuth client's hand-off and when no provider can start). An unknown value refuses to boot. `off` is the page's choice only: the server's `/sign-in/email` still accepts a password.
+  
+  While it is on, a signed-out visitor to the Console sign-in page is sent through `GET /api/v1/auth/sign-in/direct?callbackURL=…` to the identity provider and comes back to the same sign-in URL, where the usual post-sign-in steps run (organization pick, OAuth and mobile hand-offs, the safe `?redirect=`). The door keeps only a same-origin path as the return address; an absolute URL, `//host`, a backslash, a control character or any of these behind percent-encoding is dropped, and the sign-in returns to the Console root. It mints nothing: it starts the identity provider's own sign-in and passes its state cookie through.
+  
+  The page never loops: an identity-provider error, a return without a session (a blocked cookie), a door that could not start, or an explicit sign-out in that tab, also one that went through the identity provider's logout and came back (the maintainer's ruling, comment 6879236460 on #33183: only a fresh signed-out visit starts on its own; `@object-ui/auth` keeps a short note in the tab's `sessionStorage` for that round trip and reads it once) shows the page with a **Continue with single sign-on** button (and the reason, where there is one) instead of starting again. A start the identity provider's sign-in rate limit refused says so (`error=direct_sign_in_rate_limited`: wait a few seconds and try again) rather than pointing at the configuration. With the setting on and its door mounted by the same reading, `/auth/config` never advertises a door that is not there. An OAuth client's hand-off (`client_id` / `redirect_uri` on the URL) keeps today's page. `/auth/config` serves `directSignIn: true` only while a provider can be started, so the page does not navigate to a door that would turn it back. API keys, bearer tokens, `/api/*` and `/mcp` are never redirected.
+
+### Patch Changes
+
+- 4aceae5: fix(plugin-auth): an unconfigured auth origin now ends on the port the HTTP server actually bound
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  With no auth base URL configured (`objectstack dev -p 0`, or a dev server that moved off a busy port), the auth origin used to stay on the requested port, `http://localhost:0` or `http://localhost:3000`, while the server listened on another one. Invite links, sign-in and password-reset mail then pointed at a port nothing served. The port is now read on `kernel:listening`, after the transport has bound it. A better-auth instance that a `kernel:ready` hook had already built on the old origin, such as the development admin seed's, is discarded and rebuilt on the bound origin at its next use. A configured base URL, `http://localhost` included, is still kept exactly as written.
+- 30e364e: fix(auth)!: with SSO-only mode on, the server gives an IdP-provisioned user no local password at any door; a platform administrator may still set their own
+  
+  Clause-②: yes (narrowing) — narrowed: with SSO-only mode on (`ssoOnlyMode`, or `OS_AUTH_SSO_ONLY=true`), the four doors that write a local password, `POST /set-initial-password`, `POST /admin/set-user-password`, `POST /reset-password` and `POST /phone-number/reset-password`, answer `409 RESOURCE_CONFLICT` to a user whose `sys_user.source` is `idp_provisioned`, where they set the password; and the two reset doors answer `503 SERVICE_UNAVAILABLE` when the reset record they would judge cannot be read. Widened: two public members, `AuthManager#isSsoOnlyMode()` (the read of the SSO-only switch the manager already resolves) and the optional `ssoOnlyMode?(): boolean` on `AdminUserEndpointDeps`. No first-party composition in this repository turns SSO-only mode on.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches SSO-only mode or these four doors; `content/docs/permissions/authentication.mdx` gains the rule in this change, and `content/docs/deployment/self-hosting.mdx` names SSO-only mode only for the missing-credential log level, which does not move.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: `ssoOnlyMode` keeps its key, type and default, and only its description changes. The moved answers are runtime refusals at four auth doors under a deployment switch, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment already running with SSO-only mode on: a user the identity provider provisioned can no longer be given a local password at `POST /set-initial-password`, by an administrator at `POST /admin/set-user-password` (the Set Password action on a user), or through `POST /reset-password` (the emailed link) or `POST /phone-number/reset-password` (the texted code). Each answers `409 RESOURCE_CONFLICT` with a message that names SSO-only mode, and writes nothing. The one exception keeps break-glass reachable: a platform administrator setting their own local password. An administrator setting one for another IdP-provisioned user, another administrator included, is refused. The reset doors judge only a reset token or code they would accept, so any other request answers as before; when the reset record cannot be read they fail closed with `503 SERVICE_UNAVAILABLE`.
+  
+  Unchanged: SSO-only mode off; environment-native users at every door; a local password a user already holds (it still signs in, and `/change-password` still changes it); the cloud-managed rules, which answer first on a cloud-managed environment; and the guards that keep the last local password and the last administrator.
+  
+  What to do: nothing, unless an IdP-provisioned user relies on setting or resetting a local password while SSO-only mode is on. Such a user signs in through the identity provider instead. A platform administrator can still set their own break-glass password. A deployment that needs a managed user to hold a local password turns SSO-only mode off.
+  
+  `@objectstack/spec`: the `ssoOnlyMode` description says what the server now enforces. No key, value or export changes.
+- 7c36f52: fix(plugin-auth): a directory deactivation suspends the AI service accounts the person is accountable for, and a re-activation resumes none
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **The rule.** Deactivating a person through SCIM (`active: false`), or deleting one (`DELETE /Users/{id}`), suspends every AI service account whose accountable owner is that person, in every organization. The suspension is the ban the owner-left rule already writes, with its own reason, `Accountable owner deactivated by the directory`, so it reads apart from `Accountable owner left the organization`. Nothing is revoked: the account's keys are refused while it is suspended and work again after a resume. An account already suspended keeps its own reason.
+  
+  **Resume.** A re-activation lifts the person's ban only, so the accounts stay suspended. `POST /api/v1/auth/service-account/resume` answers `409 RESOURCE_CONFLICT` while the accountable owner is still deactivated by the directory. Once the owner is re-activated, or a new owner is named (`set-owner`), an administrator of the account's organization or a platform administrator resumes it.
+  
+  **Unchanged.** An administrator's own ban of the owner leaves the owner's accounts as they are. The person's local password is not changed by this release.
+  
+  **If the suspension does not finish.** The deactivation still lands: the person is disabled and the SCIM request succeeds. The server logs one `error` line naming the person, how many accounts were and were not suspended, and the remedy (suspend each account whose `accountable_user_id` is that person). The next SCIM write that leaves the person inactive runs the suspension again.
+- 3c44a97: fix(auth)!: an unmapped SAML sign-in reads the standard email and name claims before the NameID, and an SSO provider creates an account only for an email address
+  
+  Clause-②: yes (narrowing) — narrowed: a new account a SAML or OIDC sign-in would create through an `@better-auth/sso` provider is refused `403 INVALID_EMAIL` (`error=INVALID_EMAIL` on the sign-in's error redirect) when the email the sign-in resolved to is not an email address, with SSO domain verification off as well as on, where it was created with that value as its email. Widened: for each SAML attribute-mapping member a provider leaves unset, the sign-in first reads the standard claim the assertion carries (`http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress`, `givenname`, `surname`, `name`), where it read only `email` / `givenName` / `surname` / `displayName` and the NameID. No first-party composition in this repository registers a SAML or OIDC provider.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the SAML attribute mapping or SSO account creation; `content/docs/permissions/sso.mdx` gains both rules in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped, and no stored row changes: the provider's stored mapping is read as before, the added claims are read at sign-in only, and the moved answer is a runtime refusal at account creation, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment whose SAML or OIDC provider resolves a person to a value that is not an email address: such a sign-in no longer creates an account. The common case is an identity provider that sends no email attribute, so the sign-in fell back to an opaque persistent or transient NameID (Microsoft Entra ID's IdP-initiated sign-in is one), or an OIDC mapping that names a claim holding a user name. With SSO domain verification on, such a value was already refused `EMAIL_DOMAIN_NOT_ALLOWED`, and still is. Also moved: for a SAML provider with no email mapping set whose assertion carries both a plain `email` attribute and the standard `emailaddress` claim, the standard claim now takes precedence, so where the two differ a new account is created at the claim's address rather than the `email` attribute's (an existing account still signs in by its account key).
+  
+  Unchanged: an account that already exists signs in as before, whatever its email; linking; and every account creation that is not through an SSO provider.
+  
+  What to do: nothing, unless a provider's users are created with a value that is not an address. For such a provider, map its email attribute (SAML) or claim (OIDC) to the one that carries the user's address.
+  
+  The standard claims: Microsoft Entra ID and AD FS send them by default, and neither sends an `email` attribute, so an Entra ID provider with nothing mapped keyed its users on the NameID, an email-format user principal name when the sign-in started from the sign-in page and an opaque persistent id when it started from the identity provider's app portal. Both entries now resolve to the address in the `emailaddress` claim, so the second entry never creates another account: it finds the account the first one made and is refused `account_not_linked`, creating nothing, until that account is linked to it. A member an administrator mapped is always read as mapped, and a provider that sends `email` and none of these claims signs in exactly as before. A provider that encrypts its assertions reads only what it maps.
+- e0ce1b5: feat(plugin-auth): `organizationDeleteGate`, a host check asked by the organization delete admission
+  
+  Clause-②: yes (widening) — a new optional `AuthManagerOptions` / `AuthPluginOptions` member, `organizationDeleteGate`, and its two exported types, `OrganizationDeleteGateRequest` and `OrganizationDeleteGateRefusal`. Unset, every answer of `POST /organization/delete` is unchanged.
+  Metadata-protocol: none
+  
+  A host that must refuse an organization delete for its own reasons (the cloud control plane: a subscription that will charge again, environments that remain) sets `organizationDeleteGate`. It is asked once per delete, from the delete admission in better-auth's `hooks.before`, with the `organizationId` better-auth parsed from the JSON body (a body it does not parse is answered its `415` without asking), the caller (`userId`, `activeOrganizationId`, `impersonatedBy`) and the request's `Accept-Language`. It runs after the auth mount's gates (a request the IP allow-list refuses never reaches it) and after the platform's own refusals (`403 PERMISSION_DENIED` on the Default Organization's last administrator, `409 DELETE_RESTRICTED` while records remain, `503` on a failed read), and before better-auth's first write.
+  
+  - Answering `undefined` or `null` lets the delete go ahead.
+  - A refusal (`{ status, body }`, `status` 400–499, `body.code` and `body.message` required) is answered unchanged, status and body, and nothing is deleted.
+  - Fail-closed: a check that throws, or answers anything else, is answered `503 SERVICE_UNAVAILABLE` naming the option, and nothing is deleted. The host's error text is not sent to the client.
+  
+  The option is read per call, so a value an `auth:configure` handler sets is the one asked. A host that parsed the request body ahead of the auth mount to make this check can drop that reader and use the option.
+- 3c42e63: fix(plugin-auth)!: an SSO provider's domain list takes bare host names only, and every rule that reads it reads each entry the same way
+  
+  Clause-②: yes (narrowing) — narrowed: `POST /sso/register`, `POST /sso/update-provider` and the bridges that re-dispatch to them (`POST /admin/sso/register`, `POST /admin/sso/register-saml`, the edit bridge) now answer `400 VALIDATION_FAILED` on `domain` (`fields[0].code: 'invalid_value'`, the message naming the entry) for a `domain` value holding an entry that is not a bare host name (a URL, a port, a path, a user part, an escape, a dot run), where they stored it; and SCIM's adoption of an existing SSO account no longer reads an entry or an address that only folds into a host (full-width letters, for one) as a domain. Widened: SCIM adoption now reads an entry and an address in their one spelling, so an entry with a root dot (`acme.com.`) and the Unicode and punycode forms of an internationalised name (`bücher.de`, `xn--bcher-kva.de`) name the same domain, as the account rule already read them. New exports from the module `sso-account-at-proven-domain.ts`: `ssoDomainEntryHost`, `ssoDomainEntryHosts`, `ssoDomainEntryNotBare`.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the SSO provider domain list; `content/docs/permissions/sso.mdx` gains the rule and how to correct a stored entry in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: `sys_sso_provider.domain` keeps its type and length. The refusal is a runtime validation at the provider register and edit doors; stored rows are not rewritten, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an administrator who registers or edits an SSO provider with a domain entry written as a URL or with a port or path (`https://acme.com`, `acme.com:443`): it is refused with `400 VALIDATION_FAILED` naming the entry, and nothing is saved. Such an entry was stored before and then proved nothing at sign-in under SSO domain verification.
+  
+  Unchanged: providers already stored (not re-checked or rewritten until a request writes their domain); an edit that writes no domain; the one-provider-per-domain claim rule, which still reads a stored entry of another provider as before.
+  
+  What to do: write each domain as a bare host name, separated by commas (`https://acme.com` becomes `acme.com`). For a provider already holding such an entry, send the bare host names as `domain` to `POST /api/v1/auth/sso/update-provider` (no console action edits a provider's domain) and verify the domain again.
+- b4c8461: fix(plugin-auth): a browser refused at `/oauth2/authorize` by the environment-access gate is sent back to the environment, or shown a readable page, instead of a raw JSON 403
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When the host's `oidcAuthorizeGate` refuses a signed-in account at `/oauth2/authorize` (an account that is not a member of the environment's organization), the answer now depends on who is asking. The refusal itself, and who it applies to, are unchanged.
+  
+  - A browser navigating to the URL (`Sec-Fetch-Dest: document`, or `Accept: text/html` with no Fetch Metadata), when the request's `redirect_uri` is registered for the client exactly as written: `302` to that `redirect_uri` with `error=access_denied`, `error_description`, the request's `state` and `iss` (RFC 6749 §4.1.2.1, RFC 9207). The environment's own sign-in page then shows the refusal.
+  - A browser navigating to the URL with no such `redirect_uri` (none sent, one the client never registered, a disabled client, or a loopback URI on a port other than the registered one): a `403` HTML page that names the signed-in account and offers "Switch account" (the provider's `/oauth2/end-session`) and "Back to console". An unregistered `redirect_uri` is never followed.
+  - Every other caller, including the Console's own post-sign-in `fetch` (`Accept: application/json`), a bearer API client and a bare `curl`: the same `403` with `code: ENV_ACCESS_DENIED` and the same message as before.
+  
+  A request with no signed-in account is still not judged, and still goes to the provider's sign-in page.
+- d4cfbfb: fix(plugin-auth)!: the last platform administrator can no longer switch `admin_full_access` off when nobody could switch it back on
+  
+  Clause-②: yes (narrowing) — a write to `sys_metadata_activation` that switches the `admin_full_access` permission set off (`POST /security/_activation/permission/admin_full_access` with `{"enabled":false}`, or the same ledger row inserted or updated off) is now refused 403 `PERMISSION_DENIED` when it would leave no unbanned platform administrator, even though an organization owner or admin is still standing. Before, the guard counted that owner and let the write land.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) — nothing stored or authorable moves; a refused write is the whole change -->
+  
+  **BREAKING** for a deployment whose platform administrators all hold their standing through the Default Organization's `admin_full_access` grants (the stock `single` deployment with no `OS_PLATFORM_OWNER_EMAIL`): switching that permission set off is now refused. Switching it off ends every grant-anchored platform administrator at once, and the only door that switches it back on asks for `manage_metadata`, which an organization owner or admin does not hold, so a landed switch-off left the deployment with no in-product way back (a re-seed or database surgery). What to do: if the set really must be switched off, first declare a platform owner in `OS_PLATFORM_OWNER_EMAIL` (a verified address); that owner keeps `manage_metadata` and can switch the set back on. Under a walled posture the set anchors nobody, and nothing changes there. Every other last-admin-guard verdict is unchanged. (#33082)
+- cbb876c: feat(auth)!: a managed environment adds pending, SSO-only people with their positions, permission sets and manager, and ban works without the admin plugin
+  
+  Clause-②: yes (narrowing) — narrowed: ban works without the admin plugin — `admin/ban-user` now works without the admin plugin, and a banned row is refused a session, with the admin plugin's own `403 BANNED_USER` answer; both ban doors answered `501 NOT_IMPLEMENTED` there. Widened: two doors, `POST /admin/add-sso-user` and `POST /admin/import-sso-users` (cloud-managed environments only; `409 RESOURCE_CONFLICT` elsewhere); the `idp_pending` value of `sys_user.source`, which every password door and every session refuses; the auth plugin's optional `environmentUserHost` option; `AuthManager#isAdminPluginMounted()`; the exports of `pending-sso-marker`, `environment-user-host` and `pending-sso-users`; and, re-exported from the package root, the helpers `bindUserToSoleOrganization`, `writeAdminAudit`, `joinCurrentOrganization` and `multiOrgCreationJoinsCurrentOrganization`, the class `CreationRefused`, the type `AdminAuditDecisions` (with its `user.admin_added_pending` event), `SetInitialPasswordOptions` (the optional third argument of `runSetInitialPassword`) and the optional `getBanWriter`, `host`, `getDataEngine` and `logger` members of `AdminBanEndpointDeps`. The cloud-managed refusals of `create-user`, `import-users` and the invitation doors point to Setup → Users.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the admin user doors, the ban doors or the cloud-managed refusals; `content/docs/permissions/authentication.mdx` gains the two doors, the pending state, the host option and the ban change in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key or metadata type is added, removed, renamed or re-shaped. `sys_user.source` gains one select option, `idp_pending`, which no existing row carries; the narrowed answer is a runtime refusal at session creation for a row already marked banned, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment that runs without the better-auth admin plugin (`auth.plugins.admin` off, and SCIM off): `admin/ban-user` now works without the admin plugin, and a banned row is refused a session, with the admin plugin's own `403 BANNED_USER` code and sentence. `admin/unban-user` lifts the ban there too. A ban with an expiry that has passed is lifted at the next sign-in, as the admin plugin does. A deployment with the admin plugin on answers exactly as before: the plugin still decides.
+  
+  Unchanged: the admin plugin's own ban enforcement where it is mounted; `create-user` and `import-users` off a managed environment; every row whose `source` is `env_native` or `idp_provisioned`.
+  
+  What to do: before upgrading a deployment that runs without the admin plugin, list the users whose `sys_user.banned` is true, platform administrators first, and unban every one who should keep signing in: turn the admin plugin on (`auth.plugins.admin`), call `POST /admin/unban-user` for each, then turn it off again. A banned sole platform administrator cannot reach `admin/unban-user` after the upgrade. After it, a user who should not be banned is unbanned with `POST /admin/unban-user`.
+  
+  New on a cloud-managed environment (`OS_CLOUD_MANAGED=1`): a platform administrator adds a person ahead of their first sign-in with `POST /admin/add-sso-user` (email, name, and optionally positions, permission sets and the manager's email address), or many with `POST /admin/import-sso-users` (CSV or rows, at most 500, a result per row, a bad row failing alone). The person is stored with `sys_user.source` = `idp_pending`: no password, refused by `set-user-password`, `set-initial-password`, `reset-password` and `phone-number/reset-password`, and refused a session on every channel, until their first sign-in through the platform identity provider attaches to the row and moves it to `idp_provisioned`. Positions, permission sets and the manager apply from the moment the person is added. Adding a person who is still pending again re-tells the host and changes nothing else; positions, permission sets or a manager sent with it are named on the answer as `notApplied`. A host passed as `environmentUserHost` is told after a person is added, and asked before a person is deactivated (`ban-user`) or reactivated (`unban-user`), never inside a transaction; the event names the administrator, the administrator at the keyboard on an impersonation session (`impersonatedBy`), and the administrator's cloud user id from their linked `objectstack-cloud` account. A host may refuse with `EnvironmentUserHostRefusal` (`409` or `403`, such as `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED`): the door answers with it, a refused deactivation or reactivation writes nothing, and a refused add takes that person back out (one import row fails alone). Any other host failure refuses a deactivation (`503`, nothing written), and never undoes an add or a reactivation, whose answer says so on the row.
+  
+  `@objectstack/platform-objects`: `sys_user.source` gains the option `idp_pending` ("Pending SSO Sign-In").
+- 633d8c4: feat(plugin-auth): the organization's pending-invitation limit is a host setting, `OS_ORG_INVITATION_LIMIT`, that can be turned off
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization could hold at most 100 pending invitations: the auth library refuses the next one with `403 INVITATION_LIMIT_REACHED` when no limit is configured, and nothing configured one. A host can now set it with `OS_ORG_INVITATION_LIMIT`: a positive integer is the limit, and `off`, `unlimited` or `none` removes it, for a host that invites people in bulk. Unset, `0` or an unparsable value keeps today's limit of 100, so a deployment that sets nothing behaves exactly as before. `@objectstack/types` adds `resolveOrgInvitationLimit()` beside `resolveOrgMembershipLimit()`.
+- 7e2eadd: fix(plugin-auth)!: the Register SSO Provider bridge takes every endpoint `/sso/register` takes, so an identity provider whose token endpoint is on another host (Google) registers; the domain-verification answer carries the provider's registered domain
+  
+  Clause-②: yes (narrowing) — narrowed, all on `POST /api/v1/auth/admin/sso/request-domain-verification`: a `domain` in the request body is no longer read, so a caller that named one now gets the record name and `domain` of the provider's registered domain instead of the one it named; a provider whose registered domain names no host name, or holds an entry that names none, now answers `400 DOMAIN_VERIFICATION_FAILED` where it answered `200` with a token (verify-domain refuses such a provider with `INVALID_DOMAIN` anyway); and the door now reads the provider back through `GET /sso/get-provider`, so a non-2xx answer to that read is returned as `DOMAIN_VERIFICATION_FAILED` with the read's status where the door answered `200`. Widened: `POST /api/v1/auth/admin/sso/register` now accepts `tokenEndpoint`, `jwksEndpoint` and `authorizationEndpoint` beside `discoveryEndpoint` and `userInfoEndpoint` (a form that names none of them sends the body it sent before), and the `request-domain-verification` answer gains `dnsRecords`.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the SSO admin bridges; `content/docs/permissions/sso.mdx` is updated in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The narrowed answers are runtime answers of one admin bridge door; nothing stored is rewritten, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **Registering an identity provider whose endpoints sit on other hosts.** `/sso/register` trusts an endpoint the discovery document names only when it is on the issuer's host or the registration names it. Google's discovery document names its token endpoint on `oauth2.googleapis.com`, its key set on `www.googleapis.com` and its userinfo endpoint on `openidconnect.googleapis.com`, so a Google registration is refused until each is named. The Register SSO Provider bridge (`POST /api/v1/auth/admin/sso/register`) took only `discoveryEndpoint` and `userInfoEndpoint` and dropped the rest, so on a host where only the bridge is reachable such a provider could never be registered, although the refusal told the admin to name `tokenEndpoint`. The bridge now takes `authorizationEndpoint`, `tokenEndpoint`, `jwksEndpoint`, `userInfoEndpoint` and `discoveryEndpoint`, each as a field of the same name, and sends each to `oidcConfig`. The refusal now says which bridge field names the endpoint it refused.
+  
+  **Where the domain-verification record goes.** `POST /api/v1/auth/admin/sso/request-domain-verification` answered `domain: ""` and a bare record label when the request body named no `domain`, and placed the record under whatever domain the body named. Verification looks for the record only under the provider's registered domain, so the answer now reads that domain back from the provider and places the record there: `domain` is the provider's registered domain and `dnsRecordName` the full name under it. A `domain` in the request body is no longer read. A provider listing several domains (`acme.com, acme.org`) is verified only when the record is published under each of them, so `dnsRecords` lists one `{ domain, type, name, value }` per listed domain and `dnsRecordName` names all of them, comma-separated.
+  
+  **BREAKING** for a caller of `POST /api/v1/auth/admin/sso/request-domain-verification`: the `domain` in the request body is ignored and the record is placed under the provider's registered domain; a provider whose registered domain list holds an entry naming no host name is answered `400 DOMAIN_VERIFICATION_FAILED`; a failed read of the provider is answered with that read's status. What to do: nothing for the Setup dialog. A script that passed `domain` should read the answer's `domain` and `dnsRecords`; a provider refused with `400` gets its domain rewritten to bare host names through `POST /api/v1/auth/sso/update-provider`.
+- d4fbb4d: fix(deps)!: hono moves to ^4.13.16 and @hono/node-server to ^2.1.6, the releases that fix seven public advisories; a request path holding a backslash is answered 400
+  
+  Clause-②: yes (narrowing) — `@hono/node-server` 2.1.6 answers `400 Bad Request` to a request whose path (the part before `?`) holds a backslash, before any route runs. Up to 2.1.5 the backslash was rewritten to `/` and the request reached the route that path names. A backslash after `?` is query data and answers as before. One more edge moves in the same transport: a streamed response whose body stream errors within its first two reads used to be sent as a truncated `200`, and is now a `500` (`text/plain`) with the socket closed. Of ours, only a raw stream passthrough (the AI and MCP stream results) can meet it; the SSE path and the adapter's stream writer never error their stream. No other status, header, body or error text of ours moves; the request-body limit (`413 PAYLOAD_TOO_LARGE`) answers as before.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` and no page under `content/docs/**` teaches request-path spelling at the HTTP door; the moved answer is the transport refusing a malformed request line.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type, stored row or export is added, removed, renamed or re-shaped. What moves is the Node transport refusing a request line whose path holds a backslash, so there is nothing for an author or an operator to migrate. -->
+  
+  **BREAKING** for a client that sends a backslash inside a URL path, such as `GET /api/v1/data\account`: the Node server now answers `400 Bad Request` where it used to route the request as `/api/v1/data/account`. Browsers and WHATWG-URL clients (`fetch`, undici) already turn a backslash into `/` before sending; other clients, `curl` among them, send it as written and meet this. Send the path with `/`.
+  
+  The fixed advisories: `hono` GHSA-3gg2-335m-rxc6, GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-4m76-xfj5-7975 and GHSA-h7mg-cq63-vhpq (fixed in 4.13.16); `@hono/node-server` GHSA-jpvv-r467-5p4w and GHSA-qv5m-9pm6-hqp3 (fixed in 2.1.6). The declared ranges move so that a downstream install, which never sees this workspace's overrides, lands on the fixed releases too. The `@objectstack/hono` peer range on `hono` stays `^4.12.8`.
+- a2be78d: fix(plugin-auth): a SCIM bearer write that carries a Cookie and no Origin is no longer refused 403 `MISSING_OR_NULL_ORIGIN`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  better-auth's origin check requires an `Origin` (or `Referer`) whenever a request carries any Cookie, and `AuthManager.handleRequest` used to forward the Cookie into it on `/scim/v2/*`. An identity provider that keeps a cookie jar, or sits behind an edge cookie (`__cf_bm`) or a sticky-session load-balancer cookie, was therefore answered 403 `MISSING_OR_NULL_ORIGIN` on every `POST /Users` and every `PATCH … active:false`: it could neither provision nor deprovision a user.
+  
+  SCIM authenticates by the `Authorization: Bearer` credential alone and its writes are attributed to the verified connection, so a Cookie carries no authority on that path. `handleRequest` now drops the Cookie from a `/scim/v2/*` request that carries a bearer, before better-auth sees it. No check is relaxed: every other route, and a `/scim/v2/*` request with no bearer, still reaches the origin check with its Cookie and is still refused without an `Origin`. A deployment that strips the Cookie in front of the server for this reason can drop that strip once it runs this release.
+- 03dc626: fix(plugin-auth): warn at boot about each stored SSO provider whose domain list holds an entry that names no domain
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Register and edit refuse a `domain` entry that is not a bare host name (a URL, a port, a path, a user part), and every rule that reads a provider's domain list (the SSO account rule and SCIM adoption) reads such an entry as naming no domain. A `sys_sso_provider` row saved before that refusal may still hold one, such as `https://acme.com`. It is not rewritten, and until now nothing said so: the provider looked configured while no address was at a domain it had proven.
+  
+  At `kernel:ready` the plugin now reads every stored provider once, as the system, and logs one warning per provider holding such an entry, naming its `provider_id` and each entry the register refusal would refuse. The warning reads only: no row is written. A provider whose entries are all bare host names is not named, and a host with no data engine, no `sys_sso_provider` object or a failed read boots unchanged.
+  
+  **Fix:** send the bare host names as `domain` to `POST /api/v1/auth/sso/update-provider` (`https://acme.com` becomes `acme.com`), then verify the domain again, since writing the list clears the verified flag.
+- babd5d4: fix(plugin-auth): `POST /api/v1/auth/admin/create-user` reports the membership the store holds for the new account
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `membershipCreated`, in the answer and in the `user.admin_created` audit row, now says the new account holds a membership after the call, whichever writer made the row during this creation. The account did not exist before the call, so any membership it holds was made by this creation.
+  
+  - Single-org posture: the `user.create.after` membership reconciler (the default-organization join) binds the new user while the account is being created, so the endpoint's own reconcile finds the row and yields. That used to answer `membershipCreated: false` next to the `organizationId` while `sys_member` held the row; it now answers `true`. When the endpoint inserts the row itself it answers `true`, as before.
+  - Multi-org (walled) posture: a row already in the administrator's current organization is still respected (no second add-member), and is now reported as `membershipCreated: true` for the same reason.
+  - Unchanged: under `membershipPolicy: 'invite-only'` on the single-org posture the answer and audit row carry no `organizationId` and `membershipCreated: false`, and no `sys_member` row is written. A bind that fails, finds no target organization, or meets an AI service account still answers `false`.
+- a27d88d: fix(auth)!: under direct sign-in's local sign-in path `off`, the last identity provider is the last way in; the door's landings on the sign-in page keep its `?redirect=`
+  
+  Clause-②: yes (narrowing) — narrowed: with direct sign-in on and its local sign-in path `off` (`directSignIn.localSignIn: 'off'`, or `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=off`), `POST /api/v1/auth/sso/delete-provider` on the last identity provider answers `409 DELETE_RESTRICTED` and deletes nothing while email and password is switched on, where it deleted the row; email and password, and phone sign-in, no longer count as a way in there, because the sign-in page does not offer them. Widened: module exports (not on the package entry) `pageOffersLocalSignIn`, `pageOffersEmailPassword` and `carriedRedirect`, an optional `localSignIn` on `SignInMethodConfigView.features`, and an `asThePageOffers` option on `otherSignInMethods`. The refusal under `off` answers with a new message, the copy key `enterpriseSsoLocalOff`, in all 11 locales.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches direct sign-in, the provider delete or the boot report; `content/docs/permissions/sso.mdx` gains the rule in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answer is a runtime refusal at one auth door under a deployment switch, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment running direct sign-in with the local sign-in path `off`: Setup's **Delete SSO Provider** on the last identity provider is refused `409 DELETE_RESTRICTED` (nothing deleted) unless another way in the sign-in page offers remains (another identity provider row, a social or OIDC provider with a client ID and secret, or a host sign-in handoff), even with email and password switched on, and even with phone sign-in switched on. Before, the delete went through and the sign-in page then showed "No sign-in method is available". A boot in that state now reports at error under `no_sign_in_method_at_boot`.
+  
+  Unchanged: the local sign-in path `hidden` (the default) and direct sign-in off, where email and password and phone sign-in count as before; the server's own password sign-in, which `off` never changed.
+  
+  What to do: nothing, unless you delete the last identity provider under `off`. Register another identity provider first, or set `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden` (with email and password sign-in on) and restart.
+  
+  Also fixed: the direct sign-in door hands the identity provider a sign-in page error address that keeps the page's `?redirect=`, and its own landing on the sign-in page (no provider to start, a refused or rate-limited start) keeps it too. A `?redirect=` that is not a same-origin path is dropped, by the return path's own rule.
+- 480246b: fix(auth)!: a SAML provider keys its accounts on a stable attribute (Entra ID's object id by default), so a sign-in from the app and one from the IdP's portal reach one account
+  
+  Clause-②: yes (narrowing) — widened: the Register SAML Provider form and its bridge (`POST /api/v1/auth/admin/sso/register-saml`) take an optional `mapAccountKey`, the assertion attribute a provider keys its accounts on, stored as the provider's `mapping.extraFields.accountKey`; with none named, a Microsoft Entra ID provider (IdP Entity ID on `sts.windows.net` or `login.microsoftonline.com`) keys on `http://schemas.microsoft.com/identity/claims/objectidentifier` when the assertion carries it, so an IdP-initiated entry after an SP-initiated one (or the other way round) signs in to the same account where it was refused `account_not_linked`. Narrowed: on such a provider a new account's key is that value instead of the NameID, and an account made before this change keeps its NameID key, which a sign-in no longer looks up directly: a sign-in that resolves to the account's email and carries its NameID still signs in to it, but one whose email changed at the IdP no longer reaches it (a new user is made where the provider allows JIT, otherwise the sign-in is refused); and a SAML sign-in whose verified assertion does not carry the account-key value read from the posted one is refused `INVALID_REQUEST`. No first-party composition in this repository registers a SAML provider.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches SAML account keys or the SSO register form; `content/docs/permissions/sso.mdx` gains the rule in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: the new form parameter is an action parameter of a platform object stored inside the provider's existing SAML mapping, existing account rows are deliberately not rewritten (maintainer ruling: the stable key applies to new sign-ins only), and the moved answers are runtime sign-in outcomes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment with a Microsoft Entra ID SAML provider that already has accounts: those accounts stay keyed on the NameID they were made with (they are not rewritten), and a sign-in now looks an account up by the object id, so it reaches one of them only through the account's email. Measured on the real stack for an account made from the sign-in page (keyed on the user principal name):
+  
+  - the same entry again (same NameID, same email) still signs in to it;
+  - the other entry (the IdP's portal, another NameID) is refused `account_not_linked` by the linking rule, as before this change, so for such an account the two entries do not yet reach one account;
+  - after the person's email changed at the IdP (same NameID), the sign-in no longer reaches it: where the provider allows JIT a new user is made, keyed on the object id; otherwise the sign-in is refused `SELF_REGISTRATION_CLOSED`. Before this change that sign-in signed in to the old account.
+  
+  A provider that is not Entra ID and names no account-key attribute is unchanged.
+  
+  Unchanged: every OIDC provider; a SAML provider that is not Entra ID and names no attribute; linking across providers and to a password account (an existing account at the same address is still judged by the linking rule); and a sign-in whose assertion does not carry the key attribute, which is keyed on its NameID as before.
+  
+  What to do: nothing for a new provider. For a provider whose IdP is not Entra ID and whose NameID differs between sign-in-page and portal entries, name a stable per-person attribute in `mapAccountKey` when registering it.
+- de5eb08: fix(plugin-auth)!: with SSO domain verification on, an SSO sign-in links to an existing account, or changes its email address, only at a domain the provider has proven
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches SSO domain verification, account linking or an address change through an SSO provider; `content/docs/permissions/sso.mdx` ("Domain verification (opt-in)") states the rule.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: sys_sso_provider and sys_user keep their columns, and no stored row changes shape. The rule is judged when an SSO sign-in reaches an account, so there is nothing at rest for a metadata migration to rewrite and no tombstone. -->
+  
+  **BREAKING** — with SSO domain verification on (`OS_SSO_DOMAIN_VERIFICATION=true` or `plugins.ssoDomainVerification`), the rule that already decides account creation (an account reached through a provider holds an email address only at a domain that provider has proven) now also decides the two other ways an SSO sign-in (SAML or OIDC) reaches an account:
+  
+  - **An implicit link.** A sign-in that links to an account that already exists is admitted only when the asserted email address is at one of the provider's listed, verified domains, matched exactly. Two cases, kept apart: an address at a domain the provider does not list at all was already not linked and is still refused as before, with the same answer; an address at a subdomain of a listed domain that is not itself listed and verified was linked before and is now refused with `EMAIL_DOMAIN_NOT_ALLOWED`.
+  - **An address change.** A later sign-in that would change the stored email address of an account the provider is already linked to (the provider is set to update the account from what the identity provider asserts) is admitted only when the new address is at one of those domains. A sign-in that would not change the stored address is not judged: one asserting the account's own address, and one through a provider that does not update the account (every SAML provider, and an OIDC provider without that update setting, which the platform's own provider registration never turns on).
+  - A refusal under this rule is `EMAIL_DOMAIN_NOT_ALLOWED`, the code creation already answers: the sign-in redirects to the error page with `error=EMAIL_DOMAIN_NOT_ALLOWED`, no link is written, no session is issued, and the stored address is unchanged. A provider that cannot be read refuses.
+  - Unchanged: environments with verification off; sign-ins that would not change the stored address; explicit links from account settings; sign-ins through the cloud identity provider and enterprise OAuth providers.
+  
+  **Who moves.**
+  
+  - A deployment with verification on, whose people already hold local accounts at a subdomain of a domain its provider lists (for example `eng.acme.com` under a provider listing `acme.com`), lists that subdomain on the provider and verifies it before those people first sign in through the provider. Accounts at a domain the provider does not list at all were not linked before either; nothing moves for them.
+  - A deployment with verification on, whose provider updates accounts from what its identity provider asserts and whose people move to a new email domain, lists the new domain on the provider and verifies it before the move.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [2399e39]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [d635599]
+- Updated dependencies [6a36b79]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [834d5f5]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [118d37a]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [4ace1fa]
+- Updated dependencies [534e115]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [cbb876c]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [8a8c21e]
+- Updated dependencies [b194618]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [3c231cd]
+- Updated dependencies [489ef5f]
+- Updated dependencies [480246b]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [481f642]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [8d523b5]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/rest@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/service-messaging@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes
