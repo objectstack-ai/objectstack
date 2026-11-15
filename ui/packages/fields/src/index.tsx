@@ -575,7 +575,9 @@ function isPlainObjectValue(value: unknown): value is Record<string, unknown> {
 import { resolveFieldCurrency, summaryDeclaresCurrency } from './currency.js';
 export { withFollowedParentObject, FOLLOWED_PARENT_OBJECT_KEY } from './currency.js';
 import { HomeAmountHint } from './widgets/CurrencyField.js';
-export { resolveFieldCurrency };
+// `summaryDeclaresCurrency` is the cell's own test for drawing a roll-up as
+// money; the grid footer formats the same field's total by it.
+export { resolveFieldCurrency, summaryDeclaresCurrency };
 
 /**
  * `formatCurrency` lives beside `formatNumberFieldValue` in
