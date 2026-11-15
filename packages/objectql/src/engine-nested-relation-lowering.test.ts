@@ -590,8 +590,8 @@ describe('[#33626] the semi-join falls back to the id read wherever it is not pr
     await readsOf(engine, rec);
     expect(noService(warned)).toEqual([]);
     // CONTROL an ordinary ADR-0139 leaf asks the service, and so reports its absence — once.
-    await engine.find(OBJECT, { where: { owner: { $in: ReadableIds.of(OWNER) } } } as any);
-    await engine.find(OBJECT, { where: { owner: { $in: ReadableIds.of(OWNER) } } } as any);
+    await engine.find(OBJECT, { where: { owner: { $in: ReadableIds.of(OWNER) } } });
+    await engine.find(OBJECT, { where: { owner: { $in: ReadableIds.of(OWNER) } } });
     expect(noService(warned)).toHaveLength(1);
   });
 

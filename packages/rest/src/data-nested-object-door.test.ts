@@ -547,7 +547,7 @@ for (const cell of CELLS) {
       /** The two-step route as the caller, hop by hop — what the id read answers. */
       const twoStep = async (hops: number): Promise<string[]> => {
         const ids = async (object: string, where: FilterCondition) =>
-          (await engine.find(object, { where, fields: ['id'], context: CALLER_B } as any)).map((r: any) => r.id);
+          (await engine.find(object, { where, fields: ['id'], context: CALLER_B })).map((r: any) => r.id);
         const regions = await ids(TEN_REGION, { name: 'NA' });
         if (hops === 1) return (await ids(TEN_CASE, { region: { $in: regions } })).sort();
         const accounts = await ids(TEN_ACCOUNT, { region: { $in: regions } });
@@ -556,16 +556,16 @@ for (const cell of CELLS) {
       };
 
       it('CONTROL the region read is walled: tenant B reads its own NA region only', async () => {
-        const regions = await engine.find(TEN_REGION, { where: { name: 'NA' }, context: CALLER_B } as any);
+        const regions = await engine.find(TEN_REGION, { where: { name: 'NA' }, context: CALLER_B });
         expect(regions.map((r: any) => r.id)).toEqual(['tr_b']);
       });
 
       for (const [name, where] of TEN_HOPS) {
         it(`${name}: only tenant B's case, exactly the two-step route's answer — on find and count`, async () => {
-          const got = (await engine.find(TEN_CASE, { where, context: CALLER_B } as any)).map((r: any) => r.id).sort();
+          const got = (await engine.find(TEN_CASE, { where, context: CALLER_B })).map((r: any) => r.id).sort();
           expect(got, name).toEqual(['tk_b']);
           expect(got, `two-step parity, ${name}`).toEqual(await twoStep(name === 'one hop' ? 1 : 3));
-          expect(await engine.count(TEN_CASE, { where, context: CALLER_B } as any), `count, ${name}`).toBe(1);
+          expect(await engine.count(TEN_CASE, { where, context: CALLER_B }), `count, ${name}`).toBe(1);
         });
       }
 
@@ -574,7 +574,7 @@ for (const cell of CELLS) {
         engine.registerHook('afterFind', hook, { object: TEN_REGION, packageId: 'test.ten-region-rule' });
         try {
           for (const [name, where] of TEN_HOPS) {
-            const got = (await engine.find(TEN_CASE, { where, context: CALLER_B } as any)).map((r: any) => r.id).sort();
+            const got = (await engine.find(TEN_CASE, { where, context: CALLER_B })).map((r: any) => r.id).sort();
             expect(got, name).toEqual([]);
             expect(got, `two-step parity, ${name}`).toEqual(await twoStep(name === 'one hop' ? 1 : 3));
           }
