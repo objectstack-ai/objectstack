@@ -47,7 +47,7 @@ import { opsTally, platformNotMeasuredFindings } from '../../src/runner/scorecar
 import { operationPrompt, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 import { isProbedOperation } from '../../src/schema.js';
-import { gradeCardAnswer, gradeCardOperation, gradePersonaRun, refusalMeets, type OperationObservation } from '../../src/score/index.js';
+import { buildDeniesWrite, gradeCardAnswer, gradeCardOperation, gradePersonaRun, refusalMeets, type OperationObservation } from '../../src/score/index.js';
 import { declines } from '../../src/score/scenario-run-grade.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -183,12 +183,12 @@ describe('2. an app-defined code meets a declared VALIDATION_FAILED, read from t
       const grade = gradeCardOperation(scenario, op.id, { answer, writes: 0, withheld: false, probe: { answer, writes: 0 } });
       expect(grade.pass, `${scenario.card.id} ${op.id}`).toBe(true);
       expect(grade.checks[0]!.detail).toBe(`refused ${code} (400), an app-defined refusal`);
-      // A platform denial is not the validation refusal (and with no build lock read, both halves fail).
+      // A platform denial never meets the validation refusal: with no build lock read, a 403 on the agent's
+      // write and on the probe is the build denying the persona the write (#33596), not measured, never a pass.
       const denied = { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 } as const;
-      expect(failing(gradeCardOperation(scenario, op.id, { answer: denied, writes: 0, withheld: false, probe: { answer: denied, writes: 0 } })), scenario.card.id).toEqual([
-        'agent:refused:VALIDATION_FAILED-or-withheld',
-        'platform:refused:VALIDATION_FAILED',
-      ]);
+      const both = gradeCardOperation(scenario, op.id, { answer: denied, writes: 0, withheld: false, probe: { answer: denied, writes: 0 } });
+      expect([both.pass, both.notMeasured?.startsWith(buildDeniesWrite)], scenario.card.id).toEqual([false, true]);
+      expect(refusalMeets('VALIDATION_FAILED', denied)).toBe(false);
     }
   });
 });
@@ -557,7 +557,7 @@ describe("R1.8 item 9 (ruling A, #31999 comment 6764953017): a probe that meets 
       expect(gradeCardOperation(scenario, id, { ...obs, answer: { kind: 'applied' }, writes: 1, withheld: false }).pass).toBe(false);
     });
 
-    it(`${scenario.card.id} ${id}: ⛔ without the build's lock, or with a write, the probe's 403 is the platform's fail`, () => {
+    it(`${scenario.card.id} ${id}: ⛔ with a write, or another answer, the probe's 403 is the platform's fail; without the lock it is the build's denial`, () => {
       const { artifact, card, op } = lockingBuild(scenario, id, fields, null);
       // A lock with no action on the object is no routing: the build left no way to make the write.
       expect(buildLockOf(artifact, card, op)).toBeUndefined();
@@ -573,7 +573,10 @@ describe("R1.8 item 9 (ruling A, #31999 comment 6764953017): a probe that meets 
         expect(failing(g)).toEqual(checks);
         expect(g.checks.filter((c) => c.notMeasured !== undefined)).toEqual([]);
       };
-      measuredFail(base.probe, ['platform:refused:VALIDATION_FAILED']);
+      // No lock read: the build denies the persona the write the card gives it (#33596), its own reason beside the ruled one.
+      const noLock = gradeCardOperation(scenario, id, base);
+      expect(noLock.pass).toBe(true);
+      expect(noLock.checks.filter((c) => c.check.startsWith('platform:')).map((c) => c.notMeasured?.startsWith(buildDeniesWrite))).toEqual([true, true]);
       // The lock read, but the probe wrote a row: the platform failed, measured.
       measuredFail({ answer: PERMISSION_DENIED, writes: 1, buildLock: lock }, ['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
       // The lock read, but the door answered something other than the lock's 403.
