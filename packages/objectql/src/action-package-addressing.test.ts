@@ -323,3 +323,90 @@ describe('ADR-0150 D4 — a package-less action customizes only the holder whose
     expect(registry.getEnvironmentScopedItem('mapping', 'feed')).toBeUndefined();
   });
 });
+
+/**
+ * [ADR-0150 D4] An action is identified by `(owner, owning object, name)`: the
+ * platform's package-less action bound to `lead` and the environment's
+ * object-less action of the same name are two items under two keys. The
+ * registry keeps both, in either registration order, and each owner key reads
+ * its own; one key keeps one item, the later registration.
+ */
+describe('ADR-0150 D4 — the registry keeps one package-less action per owner key', () => {
+  /** Code the host or a plugin registers with no package. */
+  const platform = (name: string, objectName?: string) =>
+    registry.registerItem('action', {
+      name, label: `platform ${objectName ?? 'global'}`, type: 'script',
+      body: { language: 'js', source: 'return 1;', capabilities: [] },
+      ...(objectName ? { objectName } : {}),
+    }, 'name' as never);
+  const fresh = () => {
+    registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+  };
+  const bothOrders = (first: () => unknown, second: () => unknown): Array<[string, () => void]> => [
+    ['registered in order', () => { first(); second(); }],
+    ['registered in reverse', () => { second(); first(); }],
+  ];
+  const labels = (items: unknown[]) => items.map((i) => (i as { label?: string }).label).sort();
+  const onKey = (objectName: string) => label(resolve(objectName, 'approve'));
+
+  it('the platform\'s action bound to `lead` and the environment\'s object-less one are both kept, each on its own key', () => {
+    for (const [order, register] of bothOrders(() => platform('approve', 'lead'), () => authored('approve'))) {
+      fresh();
+      register();
+      expect(labels(registry.listItems('action')), order).toEqual(['env global', 'platform lead']);
+      expect(labels(registry.getEnvironmentScopedActions('approve')), order).toEqual(['env global', 'platform lead']);
+      expect([onKey('lead'), onKey('contact'), onKey('global')], order).toEqual(['platform lead', 'env global', 'env global']);
+    }
+  });
+
+  it('beside a package holder on another object, each package-less action still reads on its own key', () => {
+    for (const [order, register] of bothOrders(() => platform('approve', 'lead'), () => authored('approve'))) {
+      fresh();
+      install(A);
+      ship('approve', A, 'account');
+      register();
+      expect([onKey('lead'), onKey('account'), onKey('contact')], order).toEqual(['platform lead', 'alpha account', 'env global']);
+    }
+  });
+
+  it('the environment\'s item bound to `lead` registered after the platform\'s on `lead` takes that key', () => {
+    fresh();
+    platform('approve', 'lead');
+    authored('approve', 'lead');
+    expect(labels(registry.listItems('action'))).toEqual(['env lead']);
+    expect(onKey('lead')).toBe('env lead');
+  });
+
+  it('a stored row saved again on another key replaces the name\'s stored row and keeps the platform\'s item', () => {
+    fresh();
+    platform('approve', 'lead');
+    authored('approve', 'contact');
+    authored('approve');
+    expect(labels(registry.listItems('action'))).toEqual(['env global', 'platform lead']);
+  });
+
+  it('the stored row\'s removal retires the stored row, never the platform\'s item, in either registration order', () => {
+    for (const [order, register] of bothOrders(() => platform('approve', 'lead'), () => authored('approve'))) {
+      fresh();
+      register();
+      expect(registry.removeOverlayEntry('action', 'approve'), order).toBe(true);
+      expect(labels(registry.listItems('action')), order).toEqual(['platform lead']);
+      expect(registry.getItem<{ label?: string }>('action', 'approve')?.label, order).toBe('platform lead');
+    }
+  });
+
+  it('CONTROL — one package-less action is one item, and re-registering its key replaces it', () => {
+    fresh();
+    platform('approve', 'lead');
+    platform('approve', 'lead');
+    expect(labels(registry.listItems('action'))).toEqual(['platform lead']);
+    expect([onKey('lead'), onKey('contact')]).toEqual(['platform lead', undefined]);
+    fresh();
+    authored('approve');
+    expect(labels(registry.listItems('action'))).toEqual(['env global']);
+    expect([onKey('lead'), onKey('contact')]).toEqual(['env global', 'env global']);
+    expect(registry.removeOverlayEntry('action', 'approve')).toBe(true);
+    expect(registry.listItems('action')).toEqual([]);
+  });
+});

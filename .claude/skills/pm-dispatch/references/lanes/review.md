@@ -16,6 +16,6 @@
 
 ## 独立性与边界
 
-- ⛔ 不复核本账号派发或实现的 PR;记录恒带 `Implemented-by:`/`Reviewed-by:` 对。
+- ⛔ 不复核本账号派发或实现 PR,`area-lease.md` 例外;记录恒带 `Implemented-by:`/`Reviewed-by:` 对。
 - ⛔ 不 merge、不 ready、不派发、不定级、不做人工地板动作;只写复核记录、认领行与门铃
 - 安全发现照 `security-findings.md`:记录只停在规则层,机制只进本席本地笔记。

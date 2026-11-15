@@ -38,8 +38,8 @@
   `~/.claude/projects/*/<id>.jsonl`;`verify-review-tier.mjs` 拒即重跑 ⛔ 不改档名。
 - ④ 设计判断欠 schema、governed 规则文本、收窄三面:逐 `hits` 文件判改动对所引代码与
   验收场景是否成立,ADR 另判首个消费者与执行计划;①–④ 合称完整复核,余面同形无 ④。
-- 实质 head 各欠一轮完整复核,发现逐条定 must-fix/should-fix/nit(无碍正确性与契约);有前两级才
-  由同一复核者 delta 复核修复;仅 nit 即终轮,nit 记接受的偏差、转 PR 后续卡或只改散文面。
+- 实质 head 各欠一轮完整复核,发现逐条定 must-fix/should-fix/nit(无碍正确与契约);有前两级才由
+  原复核者 delta 复核;仅 nit 即终轮,记接受的偏差、转后续卡(`filing-gate.md`)或只改散文面。
 - 另记作者:PR `user.login` 非 `objectstack-fleet[bot]` ⇒ ③ 注点名该 login(脱中继写),落地前读。
 - ③ 恒查(席位自读同):SQL 可下推处新增 id 物化或应用内 join 而无因由 ⇒ 记发现(AGENTS.md)。
 - 简报从 `record-recognisers.mjs --brief-template` 起稿:只读条款与输入集内建,⛔ 不删 ⛔ 行。
@@ -48,7 +48,7 @@
 - 卡线程隔离子代理照上落现 head 记录并贴简报 ⇒ 席核简报、`Scope:` 与独立性对后采纳,
   ACCEPT 点名其评论 id;`Scope:` 窄于 `hits` 不采纳;席的补缺记录只管缺口,⛔ 不单充 head 记录。
 - 轮次报告设复审清单专节,与呈裁清单同为强制审计。
-- 请审/求批与落地前检两条,过则 S 入队、H 等人批:① 现 head 同形达档 PASS 在案,无前两级。
+- 请审/求批与落地前检,过则 S 入队、H 等人批:① 现 head 末条同形达档 PASS,无未闭前两级。
 - head 后移例外:纯重生成或只动散文面原记录续管,落 `Regen-provenance:` 行;余移或现 head 落 FAIL
   而已挂 auto-merge ⇒ 派发席读到即照 AGENTS.md disarm 句撤挂,FAIL 记录点名欠撤挂;重挂照 ①。
 - ② PR check 全绿,⛔ 非 required 子集;例外:merge-base 同签名的红不计、按设计而红见 SKILL.md。
