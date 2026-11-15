@@ -56,6 +56,7 @@ import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVe
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { StoredObjectExtension } from '@objectstack/lint/runtime';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -239,6 +240,56 @@ export function objectExtensionWriteFold(
     const target = typeof extend === 'string' && extend !== '' ? extend : name;
     if (typeof target !== 'string' || target === '') return undefined;
     return { options: { withoutExtensionsOf: packageId }, target };
+}
+
+/**
+ * [#33494] The OTHER packages' published extensions of an `object_extension`
+ * write's target, as the registry holds them: each `extend` contribution
+ * (`getObjectContributors`) of a package other than `writtenPackage`, with its
+ * package, its merge priority and its fields, in the registry's own order
+ * (ascending priority, equal priorities in registration order). A disabled
+ * package's is left out, as every served fold withholds it
+ * (`isPackageDisabled`). The target as served carries their fields as plain
+ * fields with no priority; the gate folds the written entry among these by
+ * priority instead (`objectsAsServed` in `@objectstack/lint`, the build's own
+ * fold), so it judges the definition the build judges. `[]` for a registry
+ * that cannot answer (a metadata-only host, a test double): the write is then
+ * judged over the target as served, as before.
+ */
+export function otherPackagesExtensionsOf(
+    registry: unknown,
+    target: string,
+    writtenPackage: string,
+): StoredObjectExtension[] {
+    const reg = registry as {
+        getObjectContributors?: (fqn: string) => readonly unknown[];
+        isPackageDisabled?: (packageId?: string) => boolean;
+    } | null | undefined;
+    if (typeof reg?.getObjectContributors !== 'function') return [];
+    const disabled = (packageId: string | undefined): boolean =>
+        typeof reg.isPackageDisabled === 'function' && reg.isPackageDisabled(packageId) === true;
+    const out: StoredObjectExtension[] = [];
+    try {
+        for (const contributor of reg.getObjectContributors(target)) {
+            if (contributor === null || typeof contributor !== 'object') continue;
+            const c = contributor as { ownership?: unknown; packageId?: unknown; priority?: unknown; definition?: unknown };
+            if (c.ownership !== 'extend') continue;
+            const packageId = typeof c.packageId === 'string' ? c.packageId : undefined;
+            if (packageId === writtenPackage || disabled(packageId)) continue;
+            const definition = c.definition !== null && typeof c.definition === 'object'
+                ? c.definition as { fields?: unknown }
+                : {};
+            out.push({
+                extend: target,
+                ...(typeof c.priority === 'number' ? { priority: c.priority } : {}),
+                fields: definition.fields,
+                ...(packageId !== undefined ? { packageId } : {}),
+            });
+        }
+    } catch {
+        return [];
+    }
+    return out;
 }
 
 /**
@@ -562,6 +613,13 @@ export async function judgeRuntimeAuthoringRules(
         ? packagedRuleCopyRefusalOf(this.engine, evt.name, evt.body)
         : undefined;
 
+    // [#33494] On an `object_extension` write, the target's other packages'
+    // published extensions with their priorities: the gate folds the written
+    // entry among them as the build does (see {@link otherPackagesExtensionsOf}).
+    const storedObjectExtensions = extensionWrite !== undefined
+        ? otherPackagesExtensionsOf(this.engine.registry, extensionWrite.target, extensionWrite.options.withoutExtensionsOf)
+        : undefined;
+
     const verdict = evaluateRuntimeAuthoringGate({
         type: singular,
         name: evt.name,
@@ -594,6 +652,8 @@ export async function judgeRuntimeAuthoringRules(
         ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
         // [#28448] With it the gate refuses a rule copy that changes what the package owns.
         ...(packagedRuleCopyRefusal !== undefined ? { packagedRuleCopyRefusal } : {}),
+        // [#33494] With them the extension walk folds the written entry by priority.
+        ...(storedObjectExtensions !== undefined ? { storedObjectExtensions } : {}),
     });
     return verdict;
 }

@@ -172,6 +172,7 @@ import {
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { UserTextParams } from './finding-user-text.js';
+import type { StoredObjectExtension } from './object-graph.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -356,6 +357,15 @@ export interface AuthoringRuleContext {
    * platform names, a platform-prefixed name advised at `warning`) applies.
    */
   runtimeWriteType?: string;
+  /**
+   * [#33494] Set by the runtime gate on an `object_extension` write only: the
+   * written entry's target's other packages' published extensions, as the
+   * host's registry holds them. Read by one rule, `validateStackExpressions`,
+   * whose extension walk folds the written entry among them by priority (the
+   * build's own fold, `objectsAsServed`), so the door judges the definition
+   * the build judges (`StackExpressionOptions.storedObjectExtensions`).
+   */
+  storedObjectExtensions?: readonly StoredObjectExtension[];
   /**
    * [#32666] Set by the runtime gate on its SUBJECT pass only, which judges
    * the subject collections it withholds from every other pass
@@ -850,7 +860,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page', 'object_extension'],
     run: (stack, ctx) =>
-      runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
+      runStackExpressionPasses(stack, {
+        runtimeWriteType: ctx.runtimeWriteType,
+        ...(ctx.storedObjectExtensions !== undefined ? { storedObjectExtensions: ctx.storedObjectExtensions } : {}),
+      }).map((i) => ({
         severity: i.severity ?? 'error',
         // [#32529, #32554] The stored-expression input member names its own
         // two ids; every other finding of the pass is `expression-invalid`.

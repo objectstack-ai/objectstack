@@ -76,6 +76,7 @@ import {
 import { isSystemObject } from './validate-security-posture.js';
 import { membershipKeyOwnersOf } from './validate-membership-key-declarations.js';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { StoredObjectExtension } from './object-graph.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -1421,6 +1422,18 @@ export function runRuntimeAuthoringRules(args: {
    * Omitted, the subject differential uses `context.objects`.
    */
   subjectObjects?: readonly unknown[];
+  /**
+   * [#33494] On an `object_extension` write: the written entry's target's
+   * OTHER packages' published extensions, as the host's registry holds them
+   * (package, priority, fields), disabled packages left out. `context.objects`
+   * carries their fields on the target as plain fields with no priority; with
+   * these the expression rule folds the written entry among them by priority,
+   * the build's own fold, so it judges the definition the build judges.
+   * Handed to the rules as `AuthoringRuleContext.storedObjectExtensions`, the
+   * same value in every pass. Read on no other write type; omitted, the door
+   * folds the written entry over the target as served, as before.
+   */
+  storedObjectExtensions?: readonly StoredObjectExtension[];
 }): RuntimeGateResult {
   const rules = runtimeAuthoringRulesFor(args.type);
   const empty: RuntimeGateResult = { errors: [], advisories: [], rulesRun: [] };
@@ -1482,6 +1495,11 @@ export function runRuntimeAuthoringRules(args: {
     // still owned. The same value in every pass, so it moves no baseline.
     ...(args.rlsMembershipResolverKeys !== undefined
       ? { membershipKeyOwners: membershipKeyOwnersOf(args.context?.objects, args.rlsMembershipResolverKeys) }
+      : {}),
+    // [#33494] Stated on an extension write only; the same value in every
+    // pass, so it moves no baseline (the baseline carries no written entry).
+    ...(args.type === 'object_extension' && args.storedObjectExtensions !== undefined
+      ? { storedObjectExtensions: args.storedObjectExtensions }
       : {}),
   };
   const added = addedFindings(rules, snapshots, ctx, args.type, args.item);
