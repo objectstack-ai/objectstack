@@ -23,7 +23,9 @@
  * CONTROL: a row that opens (the default drawer, an authored `page`) keeps
  * its link and its Open item. objectstack#33548: an authored `none` row opens
  * nothing on a ⌘, Ctrl or middle click either; a row that opens still does. The bare data page (`ObjectDataPage`) routes
- * its own row clicks, so its list-only face is pinned too.
+ * its own row clicks, so its list-only face is pinned too. objectstack#33549:
+ * a view authored `navigation.preventNavigation: true` resolves the same way
+ * whatever its mode, with the same `drawer` view minus the flag as CONTROL.
  *
  * The record body is not what this file reads, so `RecordDetailView` is a
  * null sink.
