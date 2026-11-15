@@ -22,8 +22,10 @@ import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SETUP_APP, SETUP_NAV_CONTRIBUTIONS } from '@objectstack/platform-objects';
+import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import {
   SettingsServicePlugin,
+  registerSettingsRoutes,
   aiEmbedderSettingsSpecifiers,
   aiTestEmbedderActionHandler,
   knowledgeTestActionHandler,
@@ -127,5 +129,67 @@ describe('#33933 — knowledge settings are contributed by the mounted knowledge
     expect(knowledgeEntries(bare.registered)).toHaveLength(0);
     // Non-vacuity: the bare tree is a real Setup tree with its AI entry.
     expect(configurationEntries(bare.registered).some((i) => i.id === 'nav_settings_ai')).toBe(true);
+  });
+});
+
+class MockHttp implements IHttpServer {
+  routes = new Map<string, RouteHandler>();
+  private add(method: string, path: string, handler: RouteHandler) {
+    this.routes.set(`${method} ${path}`, handler);
+  }
+  get(path: string, h: RouteHandler) { this.add('GET', path, h); return this as any; }
+  post(path: string, h: RouteHandler) { this.add('POST', path, h); return this as any; }
+  put(path: string, h: RouteHandler) { this.add('PUT', path, h); return this as any; }
+  delete(path: string, h: RouteHandler) { this.add('DELETE', path, h); return this as any; }
+  patch(path: string, h: RouteHandler) { this.add('PATCH', path, h); return this as any; }
+  use() { return this as any; }
+  listen() { return Promise.resolve(); }
+  close() { return Promise.resolve(); }
+  getInstance() { return null; }
+}
+
+async function post(http: MockHttp, namespace: string, actionId: string, body: unknown) {
+  const req = { params: { namespace, actionId }, query: {}, body, headers: {}, method: 'POST', path: '/' } as IHttpRequest;
+  const state: { status: number; body?: any } = { status: 200 };
+  const res = {
+    json: (data: unknown) => { state.body = data; },
+    send: () => {},
+    status: (code: number) => { state.status = code; return res; },
+    header: () => res,
+  } as unknown as IHttpResponse;
+  await http.routes.get('POST /api/settings/:namespace/:actionId')!(req, res);
+  return state;
+}
+
+/**
+ * The two buttons #24769 measured, at the HTTP door — moved here from
+ * `@objectstack/service-settings`' `settings-default-action-handlers.pin.test.ts`
+ * with #33933, because the composition that serves them is now the one that
+ * mounts the knowledge service.
+ */
+describe('[#24769] the two buttons the knowledge service contributes, at the HTTP door', async () => {
+  // A platform admin: both namespaces gate reads and writes (and so actions) on
+  // `manage_platform_settings`.
+  const admin = () => ({ enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' });
+  const { settings } = await boot(true);
+  const http = new MockHttp();
+  registerSettingsRoutes(http, settings, { contextFromRequest: admin });
+
+  it('POST /api/settings/ai/test_embedder is answered by the embedder check (200, not 400)', async () => {
+    const answer = await post(http, 'ai', 'test_embedder', {
+      values: { embedder_provider: 'openai', embedder_api_key: 'sk-test', embedder_model: 'text-embedding-3-small' },
+    });
+    expect(answer.status).toBe(200);
+    expect(answer.body?.data?.ok).toBe(true);
+    expect(answer.body?.data?.message).toContain('text-embedding-3-small');
+  });
+
+  it('POST /api/settings/knowledge/test is answered by the adapter check (200, not 400)', async () => {
+    const answer = await post(http, 'knowledge', 'test', {
+      values: { adapter: 'ragflow', ragflow_base_url: 'http://localhost:9380', ragflow_api_key: 'k' },
+    });
+    expect(answer.status).toBe(200);
+    expect(answer.body?.data?.ok).toBe(true);
+    expect(answer.body?.data?.message).toContain('localhost:9380');
   });
 });
