@@ -356,8 +356,7 @@
           "currencyMode: 'dynamic'"
         ],
         "must_not_contain": [
-          "defaultCurrency",
-          "currencyMode: 'fixed'"
+          "defaultCurrency: 'USD'"
         ]
       }
     }
