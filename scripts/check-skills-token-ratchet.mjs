@@ -940,7 +940,23 @@ export const CEILINGS = new Map([
   // objectstack-ai/cloud#3659, letter A, maintainer 「A」 (ruling comment
   // 6682024726); raise path the 2026-10-27 ruling 「A:先削重复,余额按实测提高」
   // (ruling record 6513306068).
-  ['skills/objectstack-data/rules/relationships.md', 4127],
+  // 4127 -> 4232: the roll-up section tells the builder to resolve a
+  // `security-rollup-source-unreadable` warning before finishing (grant the
+  // child read, or mask the parent summary on the set, View All / Modify All on
+  // the parent removed first), with one worked `client_viewer` example proven
+  // against the lint rule. PAID DOWN FIRST — two restatements cut from the
+  // same section, each keeping a home: the `procurement_receipt` /
+  // `received_amount` filtered-sum example (the section's code block shows
+  // `function: 'sum'` beside `filter: { status: 'received' }`, and the
+  // three-counts sentence carries "one child, several totals") and the
+  // "a child moving in or out of the predicate recomputes the parent" sentence
+  // (the section's opening: recomputed whenever a child is inserted, updated
+  // or deleted). Arithmetic in bytes against `main`'s 16444 (4111 tokens, 16
+  // under the old ceiling): -239 cut, +720 added -> 16925 (+481 net) ->
+  // ceil(16925 / 4) = 4232; the ceiling moves +105, pinned AT the measurement.
+  // Raise path the 2026-10-27 ruling 「A:先削重复,余额按实测提高」 (ruling record
+  // 6513306068), quoted verbatim and untranslated in the PR body.
+  ['skills/objectstack-data/rules/relationships.md', 4232],
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
@@ -1069,7 +1085,13 @@ export const CEILINGS = new Map([
   // file restates another). Maintainer ruling 2026-10-27 on the decision card
   // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A, verbatim and
   // untranslated: 「A:先削重复,余额按实测提高」.
-  ['skills/objectstack-query/rules/filters.md', 2482],
+  // 2482 -> 2473: re-locked AT the measurement after the no-value ordering
+  // rule (a null or absent column fails `$gt` / `$gte` / `$lt` / `$lte` /
+  // `$between`) was paid in-file by two restatements: the case-sensitivity
+  // paragraph (home: SKILL.md, String Operators) and a second `$between` Date
+  // example (home: the operator table's `$between` row). Arithmetic in bytes:
+  // 9925 -> 9892 (-33 net) -> ceil(9892 / 4) = 2473; headroom 0 tokens.
+  ['skills/objectstack-query/rules/filters.md', 2473],
   ['skills/objectstack-query/rules/pagination.md', 1382],
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.

@@ -36,10 +36,15 @@ function visibleOf(def: { actions?: unknown }, name: string): string {
 }
 
 /** The verdict, or the fault spelled out so a faulting predicate fails loudly. */
-function offered(source: string, record: Record<string, unknown>, user: Principal = ADMIN): boolean | string {
+function offered(
+  source: string,
+  record: Record<string, unknown>,
+  user: Principal = ADMIN,
+  features: Record<string, unknown> = FEATURES,
+): boolean | string {
   const r = celEngine.evaluate(
     { dialect: 'cel', source },
-    { record, extra: { current_user: user, user, ctx: { user }, features: FEATURES } },
+    { record, extra: { current_user: user, user, ctx: { user }, features } },
   );
   if (!r.ok) return `FAULT ${r.error.message.split('\n')[0].trim()}`;
   return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
@@ -75,6 +80,68 @@ describe('sys_user Ban / Unban switch with `banned`', () => {
       expect(offered(ban, { banned }, MEMBER)).toBe(false);
       expect(offered(unban, { banned }, MEMBER)).toBe(false);
     }
+  });
+});
+
+/**
+ * Ban / Unban are offered on a kernel WITHOUT the better-auth admin plugin:
+ * their doors (plugin-auth `admin/ban-user` / `admin/unban-user`) are mounted
+ * and enforce the ban there too, so `features.admin` off, the flag every such
+ * kernel serves, managed or not, hides neither. The actions whose doors still
+ * need the plugin keep their `requiresFeature: 'admin'` gate.
+ */
+describe('sys_user Ban / Unban are offered without the admin plugin', () => {
+  const ban = visibleOf(SysUser, 'ban_user');
+  const unban = visibleOf(SysUser, 'unban_user');
+  /** What a kernel without the plugin serves: unmanaged (self-hosted) and managed (a Free or Team environment). */
+  const WITHOUT_PLUGIN = [
+    { admin: false, apiKey: true, cloudManaged: false },
+    { admin: false, apiKey: true, cloudManaged: true },
+  ];
+
+  it('a user who is not banned is offered Ban and a banned one Unban, managed or not', () => {
+    for (const features of WITHOUT_PLUGIN) {
+      const where = JSON.stringify(features);
+      expect(offered(ban, { banned: false }, ADMIN, features), where).toBe(true);
+      expect(offered(unban, { banned: false }, ADMIN, features), where).toBe(false);
+      expect(offered(unban, { banned: true }, ADMIN, features), where).toBe(true);
+      expect(offered(ban, { banned: true }, ADMIN, features), where).toBe(false);
+    }
+  });
+
+  it('the standing leg stays: a caller without it is offered neither with the plugin off', () => {
+    for (const features of WITHOUT_PLUGIN) {
+      for (const banned of [true, false]) {
+        expect(offered(ban, { banned }, MEMBER, features)).toBe(false);
+        expect(offered(unban, { banned }, MEMBER, features)).toBe(false);
+      }
+    }
+  });
+
+  // CONTROL: the admin-plugin-only actions. Each row is one its predicate
+  // otherwise offers, so the flag alone decides.
+  const PLUGIN_ONLY: ReadonlyArray<[string, Record<string, unknown>]> = [
+    ['unlock_user', { locked_until: '2999-01-01T00:00:00.000Z', two_factor_enabled: true }],
+    ['create_user', {}],
+    ['set_user_password', { source: 'env_native' }],
+    ['impersonate_user', {}],
+  ];
+
+  it('CONTROL: exactly the admin-plugin-only actions still read `features.admin`', () => {
+    const gated = ((SysUser.actions ?? []) as Array<Record<string, unknown>>)
+      .filter((a) => {
+        const raw = a.visible;
+        const source = typeof raw === 'string' ? raw : (raw as { source?: unknown } | undefined)?.source;
+        return typeof source === 'string' && /\bfeatures\.admin\b/.test(source);
+      })
+      .map((a) => a.name);
+    expect(gated).toEqual(PLUGIN_ONLY.map(([name]) => name));
+  });
+
+  it.each(PLUGIN_ONLY)('CONTROL: %s stays hidden without the plugin and is offered with it', (name, row) => {
+    const source = visibleOf(SysUser, name);
+    expect(offered(source, row, ADMIN, { admin: false, apiKey: true, cloudManaged: false })).toBe(false);
+    expect(offered(source, row, ADMIN, { admin: true, apiKey: true, cloudManaged: false })).toBe(true);
   });
 });
 
