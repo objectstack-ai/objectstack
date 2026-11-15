@@ -1922,6 +1922,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.revert-commit-honest-outcome.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.revert-commit-honest-outcome.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.revert-commit-honest-outcome.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.revert-stored-type-canonical.test.ts",
       "verb": "delete",
       "pinned": 1

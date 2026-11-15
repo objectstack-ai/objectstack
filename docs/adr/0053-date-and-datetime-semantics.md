@@ -1,6 +1,6 @@
 # ADR-0053: `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone
 
-**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994). **Extended (2026-09-07, addendum D-F1..D-F3):** the READ side takes the same canon — every `@objectstack/driver-sql` record read door ~~but `findWithWindowFunctions` (#16609)~~ presents `Field.datetime` values and the builtin `created_at` / `updated_at` audit stamps as the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text on every dialect, folded at the driver's read boundary with the client parsers untouched; those doors never hand out a JS `Date` for those columns, save an Invalid `Date`, which has no canonical text and passes through unchanged (#13973, maintainer ruling B1 narrow, 2026-09-02). **Corrected 2026-09-08 (#16609 / PR #16716):** that exception is gone — `findWithWindowFunctions` now routes each row through the same `formatOutput` pass, so those two column classes present as the same canonical text there, with the window ALIAS columns carved out (a computed alias wins the key and its value stays raw). D-F1 rules those two classes and no more: the other presentations that pass applies at that door are #16609's contract, not this ADR's. **Amended (2026-09-30, D-D1, #5930):** the bare-day upper bound is applied once, by one shared `FilterCondition → FilterCondition` lowering in `@objectstack/spec/data` (never the package root entry), at the seams that already run the shared comparand doors — after the doors and after filter-token resolution — instead of at each comparison emitter; drivers receive the lowered filter, and each face keeps its own copy only until its deletion card lands. D-A1 and D-E3 are kept, D-E3 now structural (maintainer ruling 「5930 v18 启动」, 2026-09-30, recorded on #5930 as comment 5902355785).
+**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994). **Extended (2026-09-07, addendum D-F1..D-F3):** the READ side takes the same canon — every `@objectstack/driver-sql` record read door ~~but `findWithWindowFunctions` (#16609)~~ presents `Field.datetime` values and the builtin `created_at` / `updated_at` audit stamps as the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text on every dialect, folded at the driver's read boundary with the client parsers untouched; those doors never hand out a JS `Date` for those columns, save an Invalid `Date`, which has no canonical text and passes through unchanged (#13973, maintainer ruling B1 narrow, 2026-09-02). **Corrected 2026-09-08 (#16609 / PR #16716):** that exception is gone — `findWithWindowFunctions` now routes each row through the same `formatOutput` pass, so those two column classes present as the same canonical text there, with the window ALIAS columns carved out (a computed alias wins the key and its value stays raw). D-F1 rules those two classes and no more: the other presentations that pass applies at that door are #16609's contract, not this ADR's. **Amended (2026-09-30, D-D1, #5930):** the bare-day upper bound is applied once, by one shared `FilterCondition → FilterCondition` lowering in `@objectstack/spec/data` (never the package root entry), at the seams that already run the shared comparand doors — after the doors and after filter-token resolution — instead of at each comparison emitter; drivers receive the lowered filter, and each face keeps its own copy only until its deletion card lands. D-A1 and D-E3 are kept, D-E3 now structural (maintainer ruling 「5930 v18 启动」, 2026-09-30, recorded on #5930 as comment 5902355785). **Amended (2026-11-15, Phase 2 D2, #33756 for #33697):** a driver that declares zone-aware bucketing may bucket a non-UTC reference timezone in the database instead of in memory — PostgreSQL, DST-correct; SQLite keeps DST zones in memory; parity with the in-memory buckets is the acceptance rule; the code is #33697 (maintainer ruling 「PG 在库里算，修订 ADR」, 2026-11-15, recorded on #33697; the note under D2).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0032](./0032-unified-expression-layer.md) (unified expression layer — CEL dialect, `today()`/`daysFromNow()`), [ADR-0014](./0014-record-form-field-type.md) (field types)
 **Consumers**: `@objectstack/spec` (`Field.date`/`Field.datetime`), `@objectstack/driver-sql` (`coerceFilterValue`, `formatInput`/`formatOutput`, `dateFields`/`datetimeFields`), `@objectstack/formula` (`stdlib` time functions, `cel-engine` hydration), `@object-ui/core` (`FormulaFunctions`, the client-evaluated `TODAY()`; addendum D-G1), `@objectstack/objectql` (`applyFormulaPlan`), schedule/cron executors, report/analytics date bucketing, `sys-user-preference.timezone`.
@@ -292,6 +292,88 @@ aggregations pull more rows. Mitigate by keeping the DB-side UTC fast path when 
 reference tz is unset or `'UTC'`, still pushing the date-range *filter* to the DB and
 only bucketing in memory, and revisiting a Postgres-only pushdown later if a real
 workload needs it. Ship correct-and-uniform first.
+
+> **Amended (2026-11-15, [#33756](https://github.com/objectstack-ai/objectstack/issues/33756)
+> for [#33697](https://github.com/objectstack-ai/objectstack/issues/33697)) — a driver that
+> declares zone-aware bucketing buckets a non-UTC reference timezone in the database.**
+> Provenance: the maintainer's ruling on the seat decision card of 2026-11-15, recorded on
+> #33697, verbatim: 「PG 在库里算，修订 ADR」. The paragraph above is left as written; this
+> note replaces its "do not emit `date_trunc … AT TIME ZONE`" rule and the *Accepted cost* for
+> a driver that declares the capability below, and keeps both for every driver that does not.
+> The revisit the paragraph left open ("if a real workload needs it") is the one the ruling
+> takes: most users are not in UTC (Asia/Taipei, for one), so every daily or monthly chart
+> of theirs pulled the whole scoped row set into the application, and #33697 measured the
+> zone-aware SQL bucket on its 1M-row `analytics_month_tz` bench at PostgreSQL 429 → 40 ms.
+> It is also AGENTS.md Prime Directive 5's rule (SQL first; no slower path kept for parity).
+>
+> - **What decides is a declared driver capability, not the dialect name.** A driver declares
+>   that it buckets an instant in a named IANA zone, DST-correct; `engine.aggregate` then
+>   pushes a non-UTC date bucket down to it, and it does not for a driver that does not
+>   declare it. No such capability exists in `packages/spec` today: `supports.queryDateGranularity`
+>   (`DriverCapabilitiesSchema`) declares per-granularity bucketing, which the engine reads as
+>   UTC-only, and `packages/objectql/src/engine-delete-and-aggregate.ts` forces the in-memory
+>   path whenever `timezone` is set, is not `'UTC'`, and a `groupBy` item carries a
+>   `dateGranularity`. Its shape and spelling are #33697's, under the bar
+>   `DriverCapabilitiesSchema`'s docblock sets for a new bit (it arrives with the engine reader
+>   that dispatches on it, in the same change). A bit is the right carrier here because method
+>   presence cannot carry the signal: one `SqlDriver` class serves PostgreSQL and SQLite.
+> - **PostgreSQL** declares it. The instant is read in the reference zone before it is
+>   truncated and labelled — `date_trunc(unit, (col)::timestamptz AT TIME ZONE tz)`, or,
+>   equivalently for the label, today's UTC arm of `buildDateBucketExpr`
+>   (`to_char((col)::timestamptz AT TIME ZONE 'UTC', fmt)`) with `tz` in place of `'UTC'` — so
+>   a day, week, month, quarter or year starts at the zone's local midnight, on either side of
+>   a DST change. The `::timestamptz` cast is part of the rule: on a zone-less `timestamp`,
+>   `col AT TIME ZONE tz` converts the other way (it reads the value as wall time in `tz` and
+>   answers an instant), so the two spellings are equal only on a `timestamptz`. The labels stay the
+>   vocabulary `bucketDateKey` (`@objectstack/core`) writes (`2026`, `2026-Q2`, `2026-06`,
+>   `2026-06-15`, `2026-W23`). The zone reaches the statement as a bound value, never spliced
+>   into the SQL text: `timezone` is a free string in the query contract.
+> - **SQLite** does not declare it for a zone with DST: it has no timezone database, so those
+>   buckets stay in the in-memory aggregate. A fixed-offset zone may be bucketed in SQL only
+>   if the code PR measures its buckets equal to the in-memory ones (#33697 measured that path
+>   at 198 → 71 ms). "Fixed-offset" is the zone's history in the tz database over the instants
+>   being bucketed, not its offset today.
+> - **Every other driver keeps today's path** until it declares the capability under the same
+>   parity rule: memory and MongoDB keep the in-memory aggregate for a non-UTC zone, and MySQL,
+>   Oracle and the Turso remote transport declare nothing here.
+> - **`Field.date` is untouched.** A timezone-naive calendar day is never zone-shifted (#24618):
+>   the native arm keeps its calendar-day expression under every zone, as the in-memory path
+>   does. Only an instant column takes the zone.
+> - **Only the runtime's resolved IANA zone name is pushed down, never the raw string.**
+>   `timezone` is an unvalidated string, and the two sides read other spellings differently,
+>   some of them silently (measured on Node 22): a zone `Intl` cannot resolve (`Bogus/Zone`,
+>   the POSIX form `UTC+8`) throws there, and the in-memory path then reads UTC
+>   (`calendarPartsInTzOrUtc`), where PostgreSQL rejects the name or, for `UTC+8`, reads it as
+>   POSIX; an offset string such as `+08:00` is east of UTC in `Intl` and west of it under
+>   PostgreSQL's POSIX reading in `AT TIME ZONE`; and an abbreviation resolves in `Intl` to a
+>   zone with DST (`CST` to `America/Chicago`, `CET` to `Europe/Brussels`) where PostgreSQL
+>   reads it as a fixed offset, an hour apart in summer. The test is therefore: resolve the
+>   string through the runtime (the `resolvedOptions().timeZone` of an `Intl.DateTimeFormat`
+>   built with it); if that throws, or the resolved name is not an area/location name (it
+>   contains no `/`: an offset such as `+08:00`, or an abbreviation such as `CET` or `EST`,
+>   which older tz data still resolves to itself), keep the in-memory path, which answers it
+>   as it does today; otherwise push down the resolved canonical name. So `CST` goes down as
+>   `America/Chicago`, the zone the in-memory path already reads it as: the rule is that the
+>   database answers what the in-memory path answers. Membership in
+>   `Intl.supportedValuesOf('timeZone')` is not the test: it refuses every link name, such as
+>   `US/Eastern`, which resolves to `America/New_York`.
+> - **Parity is the acceptance rule.** In-database buckets equal the in-memory buckets
+>   (`applyInMemoryAggregation`, the side `checkDateBucketParity` in `@objectstack/verify`
+>   reads) for a DST zone across both DST boundaries — Europe/Berlin in March and in October —
+>   and for Asia/Taipei. The fixtures also carry a `Field.date` column under a zone WEST of UTC
+>   (America/New_York): a calendar day wrongly read as an instant at UTC midnight lands on the
+>   previous day only there, so an east-of-UTC zone cannot catch that defect. This turns the
+>   risk the paragraph above named (different bucket boundaries per driver for the same data)
+>   into a test that fails, instead of a reason not to push down. One residual is recorded
+>   here, not closed: the database's tz data and the Node runtime's ICU tz data are two copies,
+>   so a zone whose rules changed between their versions can bucket differently near the
+>   changed instants, and a name that exists in one copy but not the other shows as a query the
+>   database rejects.
+> - **Security does not move.** The read scope and the tenant wall stay in the aggregate's
+>   `WHERE`: both paths take the AST `composeReadableIdsAtBoundary` returns and the same driver
+>   options, and only the bucketing expression changes. The other reasons the engine takes the
+>   in-memory path (a granularity the driver does not declare, a per-aggregation `filter`) are
+>   unchanged.
 
 **D3 — wire report schedules onto the existing `CronJobAdapter`; do not delete the
 fields.** `sys-report-schedule.object.ts` documents `cron_expression` as "reserved

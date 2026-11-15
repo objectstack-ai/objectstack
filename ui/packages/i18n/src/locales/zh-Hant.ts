@@ -2803,6 +2803,7 @@ const zhHant = {
         directSignInIncomplete: "登入沒有完成：你從單點登入返回時仍未登入。請確認瀏覽器允許本站點的 Cookie，然後重試。",
         directSignInUnavailable: "無法為本系統發起單點登入。請聯絡管理員檢查本系統使用的登入服務。",
         directSignInRateLimited: "剛剛從此網路發起的登入過多。請等待幾秒後再試。",
+        networkNotAllowed: "本系統不允許從你當前的網路登入。請從允許的網路（例如組織的辦公網路或 VPN）連線，或聯絡管理員。",
         ssoAccessDenied: "你登入所用的賬號無權訪問本系統。請使用有權訪問的賬號登入，或請本系統所屬組織的管理員將你新增為成員。",
         ssoSwitchAccount: "切換賬號",
         ssoBackToConsole: "返回控制台",
@@ -4223,6 +4224,14 @@ const zhHant = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'AI 額度還剩 {{left}}。標有 ×N 的模型消耗額度的速度是預設模型的 N 倍。',
+      confirmTitle: '切換到 {{model}}？',
+      confirmBody: '此模型每條訊息消耗的 AI 額度是預設模型的 {{multiplier}} 倍。',
+      confirmAllowance: '額度還剩 {{left}}，使用此模型會以 {{multiplier}} 倍的速度用完。',
+      confirmCancel: '取消',
+      confirmAction: '切換模型',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: '傳送訊息',
     scrollToBottom: '滾動到最新訊息',
@@ -4246,11 +4255,16 @@ const zhHant = {
       aggregations: '彙總',
       records: '記錄',
       visibleToYou: '僅包含你可見的記錄',
+      dataset: '資料集',
+      metrics: '指標',
+      noAddedFilter: '未在資料集定義之外新增篩選條件',
     },
     tool: {
       aggregate_data: '彙總相關資料',
       get_record: '讀取這條記錄',
+      list_datasets: '檢視指標',
       query_data: '查詢所需資料',
+      query_dataset: '按指標查詢',
       query_records: '查詢相關記錄',
       read_package_doc: '閱讀應用文件',
       search_knowledge: '在知識庫中查詢',

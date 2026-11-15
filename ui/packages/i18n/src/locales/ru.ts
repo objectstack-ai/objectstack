@@ -2876,6 +2876,7 @@ const ru = {
         directSignInIncomplete: "Вход не завершён: вы вернулись после единого входа, но не вошли в систему. Убедитесь, что этот браузер разрешает файлы cookie для этого сайта, и повторите попытку.",
         directSignInUnavailable: "Не удалось начать единый вход в эту систему. Попросите администратора проверить, какую службу входа она использует.",
         directSignInRateLimited: "Только что из этой сети было начато слишком много входов. Подождите несколько секунд и повторите попытку.",
+        networkNotAllowed: "Эта система не разрешает вход из вашей сети. Подключитесь из разрешённой сети (например, офисной сети или VPN вашей организации) или обратитесь к администратору.",
         ssoAccessDenied: "У учётной записи, с которой вы вошли, нет доступа к этой среде. Войдите с учётной записью, у которой есть доступ, или попросите администратора организации этой среды добавить вас в участники.",
         ssoSwitchAccount: "Сменить учётную запись",
         ssoBackToConsole: "Вернуться в консоль",
@@ -4154,6 +4155,14 @@ const ru = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'Осталось {{left}} лимита ИИ. Модель с пометкой ×N расходует его в N раз быстрее, чем модель по умолчанию.',
+      confirmTitle: 'Переключиться на {{model}}?',
+      confirmBody: 'Каждое сообщение этой модели расходует в {{multiplier}} раз больше лимита ИИ, чем сообщение модели по умолчанию.',
+      confirmAllowance: 'Осталось {{left}}, и с этой моделью лимит закончится в {{multiplier}} раз быстрее.',
+      confirmCancel: 'Отмена',
+      confirmAction: 'Сменить модель',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Отправить сообщение',
     scrollToBottom: 'Перейти к последнему сообщению',
@@ -4177,11 +4186,16 @@ const ru = {
       aggregations: 'Агрегаты',
       records: 'Записи',
       visibleToYou: 'Только записи, которые вам доступны',
+      dataset: 'Набор данных',
+      metrics: 'Метрики',
+      noAddedFilter: 'Без фильтров сверх определения набора данных',
     },
     tool: {
       aggregate_data: "Агрегировать данные",
       get_record: "Прочитать запись",
+      list_datasets: "Посмотреть доступные метрики",
       query_data: "Запросить нужные данные",
+      query_dataset: "Запросить данные по метрике",
       query_records: "Найти нужные записи",
       read_package_doc: "Прочитать руководство приложения",
       search_knowledge: "Поискать в базе знаний",

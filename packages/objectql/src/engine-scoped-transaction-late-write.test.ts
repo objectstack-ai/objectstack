@@ -194,3 +194,148 @@ describe('#22855 — un-awaited work does not keep a finished unit\'s handle', (
     expect(driver.creates).toMatchObject([{ object: 'note', transaction: { trx: expect.any(Number) } }]);
   });
 });
+
+/**
+ * An `async: true` after-hook's work runs outside the write's unit, whoever
+ * opened it. The write door opens a unit of its own when the object has a
+ * blocking `after*` hook that can abort (#22782): adding such a hook beside an
+ * `async` one used to enrol the async hook's `ctx.api` writes in that unit,
+ * because the async hook starts while the unit is still open and reads it
+ * ambiently. The unit then committed under them and the writes failed with
+ * "Transaction query already complete".
+ *
+ * The blocking leg waits until the async hook's write has reached the driver,
+ * as a blocking hook doing real work lets it, and that statement runs behind
+ * the unit's commit: the order the real failure took is fixed, not raced.
+ */
+async function makeUpdateEngine(legs: { blocking?: boolean; secondAsync?: boolean; asyncLeg?: boolean; ownUnit?: boolean } = {}) {
+  const log = () => {};
+  const engine = new ObjectQL({ logger: { debug: log, info: log, warn: log, error: log } } as any);
+  const driver = makeDriver();
+  let reached!: () => void;
+  const noteReached = new Promise<void>((r) => { reached = r; });
+  let landed!: () => void;
+  const commitLanded = new Promise<void>((r) => { landed = r; });
+  const commit = driver.commit;
+  driver.commit = async (h: object) => { await commit(h); landed(); };
+  // The async hook's statement, issued on the handle of a unit open when the
+  // hook started, runs once that unit's commit has landed: a knex query queued
+  // on the unit's connection behind its COMMIT. Outside any unit, or in a unit
+  // the hook opened itself, it runs at once.
+  let openAtDispatch = new Set<object>();
+  const create = driver.create.bind(driver);
+  driver.create = async (o: string, data: Record<string, unknown>, options: any) => {
+    if (o === 'note' && data.name === 'drafted') {
+      reached();
+      if (openAtDispatch.has(options?.transaction)) await commitLanded;
+    }
+    return create(o, data, options);
+  };
+  engine.registerDriver(driver, true);
+  await engine.init();
+  engine.registry.registerObject(obj('rec') as any, '__test__');
+  engine.registry.registerObject(obj('note') as any, '__test__');
+  const outcomes: string[] = [];
+  let report!: (outcome: string) => void;
+  const drafted = new Promise<string>((r) => { report = r; });
+  const draftNote = {
+    name: 'draft_note', object: 'rec', events: ['afterUpdate'], async: true, runAs: 'system', onError: 'log',
+    handler: async (ctx: any) => {
+      openAtDispatch = new Set(driver.begun);
+      try {
+        if (legs.ownUnit) {
+          await ctx.api.transaction(async (tx: any) => { await tx.object('note').insert({ name: 'drafted' }); });
+        } else {
+          await ctx.api.object('note').insert({ name: 'drafted' });
+        }
+        report('stored');
+      } catch (e) {
+        report((e as Error).message);
+      }
+    },
+  } as unknown as Hook;
+  const blockingLeg = {
+    name: 'blocking_leg', object: 'rec', events: ['afterUpdate'], priority: 400,
+    handler: async (ctx: any) => {
+      await ctx.api.object('note').insert({ name: 'blocking' });
+      await Promise.race([noteReached, new Promise((r) => setTimeout(r, 200))]);
+      outcomes.push('blocking ran');
+    },
+  } as unknown as Hook;
+  const secondAsync = { ...blockingLeg, name: 'second_async', async: true, onError: 'log' } as unknown as Hook;
+  const hooks = [
+    ...(legs.asyncLeg === false ? [] : [draftNote]),
+    ...(legs.blocking ? [blockingLeg] : []),
+    ...(legs.secondAsync ? [secondAsync] : []),
+  ];
+  bindHooksToEngine(engine, hooks, { packageId: 'app:t' });
+  const api = new ScopedContext({ isSystem: true } as any, engine as any);
+  await api.object('rec').insert({ id: 'r1', name: 'r1' });
+  driver.creates.length = 0;
+  return { engine, driver, api, drafted, outcomes };
+}
+
+/** Each `note` create the driver saw: did it run outside any unit? */
+const noteUnenrolled = (driver: any) =>
+  driver.creates.filter((c: any) => c.object === 'note').map((c: any) => c.transaction === undefined);
+
+describe('an async after-hook beside a blocking one writes outside the door\'s unit', () => {
+  it('a blocking afterUpdate beside an async one: the async hook\'s write is stored, on its own connection', async () => {
+    const { driver, api, drafted, outcomes } = await makeUpdateEngine({ blocking: true });
+    await api.object('rec').updateById('r1', { name: 'accepted' });
+    expect(outcomes).toEqual(['blocking ran']);
+    expect(await drafted).toBe('stored');
+    // The door still opened its unit for the blocking leg, and that leg's write is the unit's.
+    expect(driver.begun).toHaveLength(1);
+    expect(noteUnenrolled(driver).sort()).toEqual([false, true]);
+    expect(driver.rowsOf('note').map((r: any) => r.name).sort()).toEqual(['blocking', 'drafted']);
+  });
+
+  it('inside a caller\'s ctx.api.transaction, the write threaded through the unit\'s own context: the async hook\'s write is stored outside it', async () => {
+    const { driver, api, drafted } = await makeUpdateEngine();
+    await api.transaction(async (tx) => { await tx.object('rec').updateById('r1', { name: 'accepted' }); });
+    expect(await drafted).toBe('stored');
+    expect(driver.begun).toHaveLength(1);
+    expect(noteUnenrolled(driver)).toEqual([true]);
+  });
+
+  it('inside a caller\'s engine transaction(), the write enrolled only ambiently: the async hook\'s write is stored outside it', async () => {
+    const { engine, driver, api, drafted } = await makeUpdateEngine();
+    await engine.transaction(async () => { await api.object('rec').updateById('r1', { name: 'accepted' }); });
+    expect(await drafted).toBe('stored');
+    expect(driver.begun).toHaveLength(1);
+    expect(noteUnenrolled(driver)).toEqual([true]);
+  });
+
+  it('a unit the async hook opens itself is its own: its write is enrolled in it and stored', async () => {
+    const { driver, api, drafted } = await makeUpdateEngine({ ownUnit: true });
+    await api.object('rec').updateById('r1', { name: 'accepted' });
+    expect(await drafted).toBe('stored');
+    expect(driver.begun).toHaveLength(1);
+    expect(noteUnenrolled(driver)).toEqual([false]);
+  });
+
+  it('CONTROL async only: no unit, the write is stored outside any, unchanged', async () => {
+    const { driver, api, drafted } = await makeUpdateEngine();
+    await api.object('rec').updateById('r1', { name: 'accepted' });
+    expect(await drafted).toBe('stored');
+    expect(driver.begun).toHaveLength(0);
+    expect(noteUnenrolled(driver)).toEqual([true]);
+    expect(driver.rowsOf('note')).toMatchObject([{ name: 'drafted' }]);
+  });
+
+  it('CONTROL the second leg async too: no unit, both writes stored, unchanged', async () => {
+    const { driver, api, drafted } = await makeUpdateEngine({ secondAsync: true });
+    await api.object('rec').updateById('r1', { name: 'accepted' });
+    expect(await drafted).toBe('stored');
+    expect(driver.begun).toHaveLength(0);
+  });
+
+  it('CONTROL blocking only: its write joins the door\'s unit, unchanged', async () => {
+    const { driver, api, outcomes } = await makeUpdateEngine({ blocking: true, asyncLeg: false });
+    await api.object('rec').updateById('r1', { name: 'accepted' });
+    expect(outcomes).toEqual(['blocking ran']);
+    expect(driver.begun).toHaveLength(1);
+    expect(noteUnenrolled(driver)).toEqual([false]);
+  });
+});

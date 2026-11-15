@@ -235,7 +235,7 @@ The response is the `UpdateDataResponse` envelope: `{ object, id, record }`.
 
 **`DELETE /api/v1/data/task/tsk_01HQ4A7B9D3F5G8J2K4L`**
 
-Permanently deletes a record.
+Deletes a record. A business record goes to the recycle bin: it can be restored with `POST /api/v1/data/task/recycle-bin/{entryId}/restore` until the deployment's retention ends (30 days by default). A record of a platform object (`sys_`, `cloud_`, `ai_`), or any record on a deployment with no recycle bin, is deleted for good.
 
 ### Request
 
@@ -243,13 +243,14 @@ No request body.
 
 ### Response — `200 OK`
 
-The response is the `DeleteDataResponse` envelope: `{ object, id, success }`.
+The response is the `DeleteDataResponse` envelope: `{ object, id, success }`, plus `recycleBinEntryId` when the recycle bin kept the record. A response without it was a permanent delete.
 
 ```json
 {
   "object": "task",
   "id": "tsk_01HQ4A7B9D3F5G8J2K4L",
-  "success": true
+  "success": true,
+  "recycleBinEntryId": "rbe_01HQ4A7C2E5H8K1M3P5R"
 }
 ```
 

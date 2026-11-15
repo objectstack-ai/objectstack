@@ -2755,6 +2755,13 @@ function hasRev(root, rev) {
  * against the merge-base holds only what the pull request itself changes.
  * `commits` keeps the range's first-parent commit count for the header line.
  *
+ * ⛔ Both path reads are `-z`, split on NUL. Without it git C-quotes a path
+ * holding a non-ASCII byte, a quote or a control character
+ * (`"skills/x/\346\226\207.md"`), and the quoted spelling matches no
+ * governed prefix: the queue would not see that governed file at all. `-z`
+ * prints every path raw, the same spelling `catalogFilesOf` and the
+ * carried-head read already take.
+ *
  * `runGit(args)` is the seam the self-test drives; production passes none and
  * reads the checkout at `root`.
  */
@@ -2776,8 +2783,8 @@ export function enumerateRows(root, baseSha, headSha, fallbackPull = null, { eve
         subject: commits[0].subject,
         pr: fallbackPull,
         commits: commits.length,
-        paths: readGit(['diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', baseSha, headSha])
-          .split('\n')
+        paths: readGit(['diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', '-z', baseSha, headSha])
+          .split('\0')
           .filter((p) => p !== ''),
       },
     ];
@@ -2788,8 +2795,8 @@ export function enumerateRows(root, baseSha, headSha, fallbackPull = null, { eve
     // commit; in a multi-PR group `head_ref` names the LAST PR, and applying
     // it to an earlier commit attributes a governed diff to the wrong PR.
     pr: pullNumberFromSubject(commit.subject) ?? (commits.length === 1 ? fallbackPull : null),
-    paths: readGit(['diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', '-m', '--first-parent', commit.sha])
-      .split('\n')
+    paths: readGit(['diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', '-z', '-m', '--first-parent', commit.sha])
+      .split('\0')
       .filter((p) => p !== ''),
   }));
 }
@@ -3621,8 +3628,8 @@ export async function selfTest() {
     const fake = (args) => {
       reads.push(args.join(' '));
       if (args[0] === 'log') return log.map(([sha, subject]) => `${sha}\t${subject}`).join('\n') + '\n';
-      if (args[0] === 'diff-tree' && args.includes('--first-parent')) return (perCommit[args[args.length - 1]] ?? []).join('\n') + '\n';
-      if (args[0] === 'diff-tree') return net.join('\n') + '\n';
+      if (args[0] === 'diff-tree' && args.includes('--first-parent')) return (perCommit[args[args.length - 1]] ?? []).map((p) => `${p}\0`).join('');
+      if (args[0] === 'diff-tree') return net.map((p) => `${p}\0`).join('');
       throw new Error(`unexpected git read: ${args.join(' ')}`);
     };
     return { fake, reads };
@@ -3668,7 +3675,7 @@ export async function selfTest() {
     );
     assert(
       'and-it-reads-the-net-diff-base-to-head-never-a-per-commit-first-parent-diff',
-      g.reads.some((r) => r === `diff-tree -r --no-commit-id --no-renames --name-only ${EB} ${MERGED_HEAD}`) && !g.reads.some((r) => r.includes('--first-parent') && r.startsWith('diff-tree')),
+      g.reads.some((r) => r === `diff-tree -r --no-commit-id --no-renames --name-only -z ${EB} ${MERGED_HEAD}`) && !g.reads.some((r) => r.includes('--first-parent') && r.startsWith('diff-tree')),
       g.reads.join(' | '),
     );
     assert('and-the-header-still-counts-the-ranges-three-commits', commitsInRange(prRows) === 3, String(commitsInRange(prRows)));
@@ -3680,6 +3687,45 @@ export async function selfTest() {
       JSON.stringify(queueRows.map((r) => [r.sha.slice(0, 1), r.pr, r.paths.length])),
     );
     assert('and-an-empty-pull_request-range-is-no-rows', enumerateRows('/w', EB, EB, 1, { event: EVENT_PULL_REQUEST, runGit: enumGit([], {}, []).fake }).length === 0);
+    // ⛔ A governed path git would C-quote, read through REAL git (gitFreeEnv): a non-ASCII name and a name holding a
+    // newline. Without `-z` the first prints as `"skills/a/\346\226\207\346\241\243.md"` and the second as
+    // `"skills/a/two\nlines.md"`, quoted spellings that match no governed prefix, so the queue never saw the file.
+    const quotedDir = mkdtempSync(join(tmpdir(), 'guard-quoted-paths-'));
+    try {
+      const g = (args) =>
+        execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...args], {
+          cwd: quotedDir,
+          encoding: 'utf8',
+          env: gitFreeEnv(),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      const CJK = 'skills/a/\u6587\u6863.md';
+      const NL = 'skills/a/two\nlines.md';
+      g(['init', '-q']);
+      writeFileSync(join(quotedDir, 'README.md'), 'seed\n');
+      g(['add', '-A']);
+      g(['commit', '-q', '-m', 'seed']);
+      const qBase = g(['rev-parse', 'HEAD']).trim();
+      mkdirSync(join(quotedDir, 'skills/a'), { recursive: true });
+      writeFileSync(join(quotedDir, CJK), 'wording\n');
+      writeFileSync(join(quotedDir, NL), 'wording\n');
+      g(['add', '-A']);
+      g(['commit', '-q', '-m', 'docs(skills): two names git quotes (#7)']);
+      const qHead = g(['rev-parse', 'HEAD']).trim();
+      const want = [CJK, NL].sort().join('|');
+      // The witness that the fixture exercises the quoting at all: the same read without `-z` spells neither name raw.
+      const quoted = g(['diff-tree', '-r', '--no-commit-id', '--no-renames', '--name-only', qBase, qHead]).split('\n').filter(Boolean);
+      assert('⛔ CONTROL the-fixture-names-are-ones-git-C-quotes-without--z', quoted.length === 2 && quoted.every((p) => p.startsWith('"')) && governedPathsIn(quoted, REPO).length === 0, JSON.stringify(quoted));
+      const qQueue = enumerateRows(quotedDir, qBase, qHead, null, { event: EVENT_MERGE_GROUP, runGit: g });
+      const qEntry = decomposeGovernedWork(qQueue, REPO).governed[0];
+      assert('⛔ #33620-merge_group-reads-a-non-ASCII-and-a-newline-path-raw-and-each-is-GOVERNED', qQueue.length === 1 && [...qQueue[0].paths].sort().join('|') === want && qEntry?.pr === 7 && [...qEntry.paths].sort().join('|') === want, JSON.stringify(qQueue));
+      const qPull = enumerateRows(quotedDir, qBase, qHead, 7, { event: EVENT_PULL_REQUEST, runGit: g });
+      assert('⛔ #33620-pull_request-reads-the-same-two-paths-raw-and-each-is-GOVERNED', qPull.length === 1 && [...qPull[0].paths].sort().join('|') === want && [...decomposeGovernedWork(qPull, REPO).governed[0].paths].sort().join('|') === want, JSON.stringify(qPull));
+      const qStatus = catalogFilesOf(qEntry, g);
+      assert('#33620-the-arm-status-read-spells-each-path-as-the-path-walk-does-so-every-path-has-its-row', qStatus.measured === true && qStatus.files.map((f) => f.path).sort().join('|') === want, JSON.stringify(qStatus));
+    } finally {
+      rmSync(quotedDir, { recursive: true, force: true });
+    }
   }
 
   // ── the verdict table, both events ────────────────────────────────────────
@@ -3741,7 +3787,7 @@ export async function selfTest() {
     const ISSUE_ONLY = '5'.repeat(40);
     const fake = (args) => {
       if (args[0] === 'log') return `${ISSUE_ONLY}\tfix(pm): the main-line script reads the lock slot (#25770)\n`;
-      if (args[0] === 'diff-tree') return 'AGENTS.md\n';
+      if (args[0] === 'diff-tree') return 'AGENTS.md\0';
       throw new Error(args.join(' '));
     };
     const issueRows = enumerateRows('/w', 'b'.repeat(40), ISSUE_ONLY, 25965, { event: EVENT_PULL_REQUEST, runGit: fake });
@@ -5948,10 +5994,10 @@ export async function selfTest() {
         return `${P}\n`;
       }
       if (argv[0] === 'ls-tree') {
-        const tree = trees.get(argv[3]);
-        if (!tree) throw new Error(`fatal: not a tree object: ${argv[3]}`);
-        const dirs = argv.slice(5).map((d) => (d.endsWith('/') ? d : `${d}/`));
-        return Object.keys(tree).filter((p) => dirs.some((d) => p.startsWith(d))).join('\n');
+        const tree = trees.get(argv[4]);
+        if (!tree) throw new Error(`fatal: not a tree object: ${argv[4]}`);
+        const dirs = argv.slice(6).map((d) => (d.endsWith('/') ? d : `${d}/`));
+        return Object.keys(tree).filter((p) => dirs.some((d) => p.startsWith(d))).join('\0');
       }
       if (argv[0] === 'show') {
         const at = argv[1].indexOf(':');
@@ -5969,7 +6015,7 @@ export async function selfTest() {
     const mgRows = attachWorkflowReadings([row(7, [WF_PATH], S_SHA), row(8, [WF_PATH], H_SHA), row(9, ['AGENTS.md'], '7'.repeat(40))], { event: EVENT_MERGE_GROUP, mergeBase: M, runGit: fakeGit(mgCalls) });
     assert('the-merge_group-leg-reads-each-commit-against-its-FIRST-PARENT', mgRows[0].workflowDiff?.base === P && mgCalls.includes(`rev-parse --verify ${S_SHA}^1`) && mgCalls.includes(`rev-parse --verify ${H_SHA}^1`), mgCalls.join(' | '));
     assert('⛔ an-added-permissions-key-read-end-to-end-is-Tier-H', decomposeGovernedWork([mgRows[1]], REPO).governed[0].tier === TIER_H && mgRows[1].workflowDiff.files[0].reasons.length > 0);
-    assert('the-inventory-of-the-merge-base-is-read-ONCE-per-run', mgCalls.filter((c) => c === `ls-tree -r --name-only ${M} -- .github/workflows .github/actions`).length === 1, mgCalls.join(' | '));
+    assert('the-inventory-of-the-merge-base-is-read-ONCE-per-run', mgCalls.filter((c) => c === `ls-tree -r -z --name-only ${M} -- .github/workflows .github/actions`).length === 1, mgCalls.join(' | '));
     assert('a-row-with-no-workflow-path-is-passed-through-untouched', mgRows[2].workflowDiff === undefined && !mgCalls.some((c) => c.includes('7'.repeat(40))));
     const [unparented] = attachWorkflowReadings([row(7, [WF_PATH], S_SHA)], { event: EVENT_MERGE_GROUP, mergeBase: M, runGit: fakeGit([], { parentThrows: true }) });
     assert('⛔ a-first-parent-git-cannot-resolve-is-UNMEASURED-and-Tier-H', unparented.workflowDiff?.measured === false && /first parent/.test(unparented.workflowDiff.reason) && decomposeGovernedWork([unparented], REPO).governed[0].tier === TIER_H, JSON.stringify(unparented.workflowDiff));

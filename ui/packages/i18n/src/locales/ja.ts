@@ -2733,6 +2733,7 @@ const ja = {
         directSignInIncomplete: "サインインが完了しませんでした。シングルサインオンから戻りましたが、サインインされていません。このブラウザーでこのサイトの Cookie が許可されているか確認して、もう一度お試しください。",
         directSignInUnavailable: "このシステムのシングルサインオンを開始できませんでした。使用しているサインインサービスの確認を管理者に依頼してください。",
         directSignInRateLimited: "このネットワークから短時間に多くのサインインが開始されました。数秒待ってから、もう一度お試しください。",
+        networkNotAllowed: "このシステムは、現在のネットワークからのサインインを許可していません。許可されたネットワーク（組織のオフィスネットワークや VPN など）から接続するか、管理者に問い合わせてください。",
         ssoAccessDenied: "サインインしたアカウントには、この環境へのアクセス権がありません。アクセス権のあるアカウントでサインインするか、この環境の組織の管理者にメンバーとして追加するよう依頼してください。",
         ssoSwitchAccount: "アカウントを切り替える",
         ssoBackToConsole: "コンソールに戻る",
@@ -3977,6 +3978,14 @@ const ja = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'AI 利用枠の残りは {{left}} です。×N と表示されたモデルは、既定のモデルの N 倍の速さで利用枠を消費します。',
+      confirmTitle: '{{model}} に切り替えますか？',
+      confirmBody: 'このモデルでは、1 件のメッセージで既定のモデルの {{multiplier}} 倍の AI 利用枠を消費します。',
+      confirmAllowance: '残りは {{left}} で、このモデルでは {{multiplier}} 倍の速さで使い切ります。',
+      confirmCancel: 'キャンセル',
+      confirmAction: 'モデルを切り替え',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'メッセージを送信',
     scrollToBottom: '最新のメッセージまでスクロール',
@@ -4000,11 +4009,16 @@ const ja = {
       aggregations: '集計',
       records: 'レコード',
       visibleToYou: 'あなたが閲覧できるレコードのみ',
+      dataset: 'データセット',
+      metrics: '指標',
+      noAddedFilter: 'データセットの定義に追加されたフィルターなし',
     },
     tool: {
       aggregate_data: "関連データを集計する",
       get_record: "このレコードを読み込む",
+      list_datasets: "利用できる指標を確認する",
       query_data: "必要なデータを照会する",
+      query_dataset: "指標で照会する",
       query_records: "該当するレコードを探す",
       read_package_doc: "アプリのガイドを読む",
       search_knowledge: "ナレッジベースで調べる",

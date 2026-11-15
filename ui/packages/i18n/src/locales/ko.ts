@@ -2731,6 +2731,7 @@ const ko = {
         directSignInIncomplete: "로그인이 완료되지 않았습니다. 싱글 사인온에서 돌아왔지만 로그인되지 않았습니다. 이 브라우저에서 이 사이트의 쿠키가 허용되어 있는지 확인한 후 다시 시도하세요.",
         directSignInUnavailable: "이 시스템의 싱글 사인온을 시작할 수 없습니다. 관리자에게 사용하는 로그인 서비스를 확인해 달라고 요청하세요.",
         directSignInRateLimited: "방금 이 네트워크에서 너무 많은 로그인이 시작되었습니다. 몇 초 기다린 후 다시 시도하세요.",
+        networkNotAllowed: "이 시스템은 현재 네트워크에서의 로그인을 허용하지 않습니다. 허용된 네트워크(예: 조직의 사무실 네트워크나 VPN)에서 접속하거나 관리자에게 문의하세요.",
         ssoAccessDenied: "로그인한 계정에는 이 환경에 대한 액세스 권한이 없습니다. 액세스 권한이 있는 계정으로 로그인하거나, 이 환경 조직의 관리자에게 멤버로 추가해 달라고 요청하세요.",
         ssoSwitchAccount: "계정 전환",
         ssoBackToConsole: "콘솔로 돌아가기",
@@ -3974,6 +3975,14 @@ const ko = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'AI 사용 한도가 {{left}} 남았습니다. ×N으로 표시된 모델은 기본 모델보다 N배 빠르게 한도를 사용합니다.',
+      confirmTitle: '{{model}}(으)로 전환할까요?',
+      confirmBody: '이 모델은 메시지 하나에 기본 모델의 {{multiplier}}배만큼 AI 사용 한도를 사용합니다.',
+      confirmAllowance: '{{left}} 남았으며, 이 모델에서는 {{multiplier}}배 빠르게 소진됩니다.',
+      confirmCancel: '취소',
+      confirmAction: '모델 전환',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: '메시지 보내기',
     scrollToBottom: '최신 메시지로 스크롤',
@@ -3997,11 +4006,16 @@ const ko = {
       aggregations: '집계',
       records: '레코드',
       visibleToYou: '내가 볼 수 있는 레코드만',
+      dataset: '데이터셋',
+      metrics: '지표',
+      noAddedFilter: '데이터셋 정의에 추가된 필터 없음',
     },
     tool: {
       aggregate_data: "관련 데이터 집계하기",
       get_record: "이 레코드 읽기",
+      list_datasets: "사용 가능한 지표 확인하기",
       query_data: "필요한 데이터 조회하기",
+      query_dataset: "지표로 조회하기",
       query_records: "해당 레코드 찾기",
       read_package_doc: "앱 안내서 읽기",
       search_knowledge: "지식 베이스에서 찾아보기",

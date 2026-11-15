@@ -84,6 +84,8 @@ import { flowStartRefusal, isAiServiceAccount } from '../flow-start-admission.js
 import {
     apiForwardCredentialKind,
     callData,
+    collectActionDeclarations,
+    readMergedItems,
     refuseUnreadableFlowStartRecords,
     type FlowStartRecordKeys,
 } from '../action-execution.js';
@@ -3013,6 +3015,108 @@ async function unregisterAndDeleteFlow(
 }
 
 /**
+ * [ADR-0151 D3 rule 3] One service slot rule 2b reads its declarations from,
+ * resolved to the instance the same request's `/actions` door reads, in every
+ * host shape. The rule, as this function holds it: a read failure refuses the
+ * start when no leg of that door's order answers the name; where a later leg
+ * answers, the start is judged on that instance, as the `/actions` door would
+ * serve it. The smallest composition of the two resolvers that exist:
+ *
+ *  1. `resolveService`, the order every `/actions` read uses (`getObjectQL`
+ *     included): the request's own kernel first on a host that routes a
+ *     request to a kernel of its own, then the host kernel's scoped factory,
+ *     then its singletons. An instance it answers is the door's instance,
+ *     whichever leg answers it, a leg that did not resolve before it included.
+ *  2. Only on a miss, `resolveServiceOrLoud` classifies it: a name nothing
+ *     registered (or a scoped registration with no instance in this scope) is
+ *     absent, `undefined`; any other rejection is re-raised. The quiet probe
+ *     absorbs every rejection, so a miss there is absence or a failure it
+ *     swallowed, and this step is what tells the two apart. Its own order
+ *     (the host's scoped leg first) never decides WHICH instance is read: it
+ *     is asked only when step 1 found none.
+ *
+ * Scoped by the request's environment, as the door's reads are: unscoped, a
+ * scoped registration is a fault to the classifier.
+ *
+ * Per-leg loud resolution (a wired slot that fails on an earlier step refuses
+ * even when a later step answers) is a shared resolver change for every
+ * dispatcher door, tracked by the security lane; it is not in this function.
+ */
+async function resolveSlotAsActionsDoorReads(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    name: 'protocol' | 'objectql' | 'metadata',
+): Promise<any> {
+    const served = await deps.resolveService(context, name, context?.environmentId);
+    if (served != null) return served;
+    return deps.resolveServiceOrLoud(context, name, context?.environmentId);
+}
+
+/**
+ * [ADR-0151 D3 rule 3] The action declarations the request's environment
+ * serves: what flow start admission's rule 2b reads, for an AI service
+ * account only, to find an action that targets the flow and declares
+ * `ai.requiresConfirmation: true` (`../flow-start-admission.ts`). Every row is
+ * a `collectActionDeclarations` row, from these sources:
+ *
+ *  - where the `protocol` slot serves the merged listings (`getMetaItems`), its
+ *    merged object and action listings alone — the reading the addressed
+ *    `/actions` door, the bare door's holder rule and the MCP bridge make;
+ *  - otherwise every source the bare `/actions` door resolves a declaration
+ *    from on such a host: the ObjectQL registry's objects (their embedded
+ *    actions) and standalone `action` items, and the metadata service's
+ *    object and action listings.
+ *
+ * Each of the three slots (`protocol`, `objectql`, `metadata`) is the
+ * instance the same request's `/actions` door reads, in every host shape
+ * ({@link resolveSlotAsActionsDoorReads}: the request's own kernel first). A
+ * slot nothing registered is absent and contributes nothing; a slot that no
+ * leg of that door's order answers, because a leg failed to resolve it,
+ * throws; and where a later leg answers the name, that instance is read, as
+ * the `/actions` door would serve it. Each listing (the two merged ones, the
+ * registry's two, the metadata service's objects and its standalone `action`
+ * items) is read where its throw travels. Any such throw makes the predicate
+ * refuse the start `503`. So a host that serves no declaration from any of
+ * these sources finds none, and a read failure that reaches this function as
+ * a throw admits nothing. A source that answers a failed read of its own
+ * without throwing is not told apart here: the metadata service's plural
+ * listing reports a loader that failed and answers the other loaders' rows,
+ * and those rows are what is judged.
+ */
+async function servedActionDeclarations(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<Array<{ action: unknown; objectName: string }>> {
+    const protocol = await resolveSlotAsActionsDoorReads(deps, context, 'protocol');
+    if (typeof protocol?.getMetaItems === 'function') {
+        const objects = await readMergedItems(protocol, 'object');
+        const actions = await readMergedItems(protocol, 'action');
+        return collectActionDeclarations(deps, undefined, objects, actions);
+    }
+    const rows: Array<{ action: unknown; objectName: string }> = [];
+    // The engine the `/actions` door's `getObjectQL` reads. A slot that no step
+    // of that door's order answers, because a step failed to resolve it, throws,
+    // which that probe does not; where a later step answers, that engine is read.
+    const engine = (await resolveSlotAsActionsDoorReads(deps, context, 'objectql')) as
+        | { registry?: { listItems?: (type: string) => unknown[] } }
+        | undefined;
+    const registry = engine?.registry;
+    if (typeof registry?.listItems === 'function') {
+        rows.push(...await collectActionDeclarations(deps, undefined, registry.listItems('object'), registry.listItems('action')));
+    }
+    const metadata = await resolveSlotAsActionsDoorReads(deps, context, 'metadata');
+    if (typeof metadata?.listObjects === 'function' || typeof metadata?.loadMany === 'function') {
+        // Both listings read HERE and handed over, so a throw of either one
+        // travels: `collectActionDeclarations` reads a throwing standalone
+        // listing it is left to read as no standalone item, by design.
+        const objects: unknown[] = typeof metadata.listObjects === 'function' ? (await metadata.listObjects()) ?? [] : [];
+        const actions: unknown[] = typeof metadata.loadMany === 'function' ? (await metadata.loadMany('action')) ?? [] : [];
+        rows.push(...await collectActionDeclarations(deps, undefined, objects, actions));
+    }
+    return rows;
+}
+
+/**
  * [#9378] The ONE mapper both trigger doors answer through — `POST
  * /:name/trigger` and the legacy `POST /trigger/:name`, which
  * `client.automation.trigger()` calls. Extracted rather than written twice:
@@ -3144,12 +3248,24 @@ async function respondToFlowTrigger(
     // account is therefore refused an elevated (`runAs: 'system'`) flow at
     // this route, and told where the opt-in stands: an `ai.exposed` action
     // that targets the flow, run through `/actions` or MCP `run_action`.
-    const startRefusal = await flowStartRefusal(automationService, flowName, context?.executionContext, { aiExposed: false });
+    //
+    // [ADR-0151 D3 rule 3] And the confirmation an action declares travels
+    // with what it starts: this door states the environment's action
+    // declarations (`servedActionDeclarations`), so an account's start of a
+    // flow that a confirmation-gated action targets is refused with the action
+    // door's own `428`, whatever the request carries. A declaration read that
+    // fails is refused by the predicate itself, a flat `503`, and nothing runs.
+    const startRefusal = await flowStartRefusal(automationService, flowName, context?.executionContext, {
+        aiExposed: false,
+        actionDeclarations: () => servedActionDeclarations(deps, context),
+    });
     if (startRefusal) {
+        const details = 'details' in startRefusal ? startRefusal.details : undefined;
         return {
             handled: true,
             response: deps.error(startRefusal.message, startRefusal.status, {
                 code: startRefusal.code,
+                ...(details ?? {}),
             }),
         };
     }

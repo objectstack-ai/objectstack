@@ -65,6 +65,7 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.hook.fields.condition.label": "bfcca3fe6f93b90c",
   "metadataForms.hook.fields.description.label": "779a4342c8eb6707",
   "metadataForms.hook.fields.refusals.message.label": "2af15199795c25b9",
+  "metadataForms.hook.fields.refusals.reasons.message.label": "2af15199795c25b9",
   "metadataForms.hook.label": "248bb1cdc692252d",
   "metadataForms.object.fields.description.label": "779a4342c8eb6707",
   "metadataForms.object.fields.fields.description.label": "779a4342c8eb6707",
@@ -251,5 +252,6 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_sso_provider.fields.sign_out_of_idp.help": "ab8ff5fce3001c81",
   "objects.sys_sso_provider.fields.sign_out_of_idp.label": "212587b8191bb91b",
   "objects.sys_two_factor.fields.secret.label": "03cb32e33fa5cc45",
+  "objects.sys_user._actions.import_sso_users.params.csv.label": "bfb77802b66a9222",
   "objects.sys_user.fields.source.options.idp_pending": "3751093c5b65b072",
 };

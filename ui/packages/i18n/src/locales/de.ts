@@ -2731,6 +2731,7 @@ const de = {
         directSignInIncomplete: "Die Anmeldung wurde nicht abgeschlossen: Sie sind vom Single Sign-on zurückgekehrt, ohne angemeldet zu sein. Prüfen Sie, ob dieser Browser Cookies für diese Website zulässt, und versuchen Sie es erneut.",
         directSignInUnavailable: "Das Single Sign-on für dieses System konnte nicht gestartet werden. Bitten Sie Ihren Administrator, den verwendeten Anmeldedienst zu prüfen.",
         directSignInRateLimited: "Von diesem Netzwerk wurden gerade zu viele Anmeldungen gestartet. Warten Sie ein paar Sekunden und versuchen Sie es dann erneut.",
+        networkNotAllowed: "Dieses System erlaubt keine Anmeldung aus Ihrem Netzwerk. Verbinden Sie sich über ein zugelassenes Netzwerk (zum Beispiel das Büronetz oder VPN Ihrer Organisation), oder wenden Sie sich an Ihren Administrator.",
         ssoAccessDenied: "Das Konto, mit dem Sie sich angemeldet haben, hat keinen Zugriff auf diese Umgebung. Melden Sie sich mit einem Konto an, das Zugriff hat, oder bitten Sie einen Administrator der Organisation dieser Umgebung, Sie als Mitglied hinzuzufügen.",
         ssoSwitchAccount: "Konto wechseln",
         ssoBackToConsole: "Zurück zur Konsole",
@@ -3975,6 +3976,14 @@ const de = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: '{{left}} deines KI-Kontingents sind noch übrig. Ein mit ×N markiertes Modell verbraucht es N-mal so schnell wie das Standardmodell.',
+      confirmTitle: 'Zu {{model}} wechseln?',
+      confirmBody: 'Jede Nachricht mit diesem Modell verbraucht {{multiplier}}-mal so viel KI-Kontingent wie eine mit dem Standardmodell.',
+      confirmAllowance: 'Davon sind noch {{left}} übrig, und mit diesem Modell ist es {{multiplier}}-mal so schnell aufgebraucht.',
+      confirmCancel: 'Abbrechen',
+      confirmAction: 'Modell wechseln',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Nachricht senden',
     scrollToBottom: 'Zur neuesten Nachricht scrollen',
@@ -3998,11 +4007,16 @@ const de = {
       aggregations: 'Aggregationen',
       records: 'Datensätze',
       visibleToYou: 'Nur Datensätze, die Sie sehen können',
+      dataset: 'Datenset',
+      metrics: 'Kennzahlen',
+      noAddedFilter: 'Kein zusätzlicher Filter zur Datenset-Definition',
     },
     tool: {
       aggregate_data: "Die Daten zusammenfassen",
       get_record: "Den Datensatz lesen",
+      list_datasets: "Die verfügbaren Kennzahlen ansehen",
       query_data: "Die benötigten Daten abfragen",
+      query_dataset: "Über eine Kennzahl abfragen",
       query_records: "Passende Datensätze suchen",
       read_package_doc: "Die Anleitung der App lesen",
       search_knowledge: "In der Wissensdatenbank nachsehen",

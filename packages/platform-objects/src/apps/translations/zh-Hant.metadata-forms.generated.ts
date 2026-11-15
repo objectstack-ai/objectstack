@@ -971,11 +971,23 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "refusals.message": {
         label: "提示語",
-        helpText: "內文丟擲此錯誤碼時使用者讀到的句子——純文字，不含預留位置"
+        helpText: "內文丟擲此錯誤碼時使用者讀到的句子。純文字；若該條目宣告了參數，則 {{ name }} 預留位置填入一個已宣告的參數"
       },
       "refusals.status": {
         label: "狀態碼",
         helpText: "拒絕的 HTTP 狀態碼（400–499）。不填：400"
+      },
+      "refusals.reasons": {
+        label: "原因",
+        helpText: "同一錯誤碼下的更多句子，以內文在錯誤碼旁丟擲的 snake_case 原因為鍵（{ code, reason }）。線上的錯誤碼和狀態碼仍取本條目的；未在此宣告的原因會被拒絕。不填：丟擲的原因不被讀取"
+      },
+      "refusals.reasons.message": {
+        label: "提示語",
+        helpText: "內文在此錯誤碼下丟擲此原因時使用者讀到的句子。其中的 {{ }} 預留位置遵循本條目的參數"
+      },
+      "refusals.params": {
+        label: "參數",
+        helpText: "句子可填入的名稱（例如 state）：內文丟擲 { code, params: { state } }，{{ state }} 預留位置即顯示該值。不填：句子為純文字"
       },
       handler: {
         label: "處理器",

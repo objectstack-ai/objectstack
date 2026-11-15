@@ -3,6 +3,7 @@
 **Status**: Accepted — implemented (2026-06-04)
 **Authors**: HotCRM (objectstack-ai/hotcrm) — surfaced the requirement; design finalised in framework
 **Consumers**: `@objectstack/service-ai` (the bridge), `@objectstack/spec` (ui.action, contracts.ai-service), every app that ships actions
+**Amended** (2026-11-15, [#33689](https://github.com/objectstack-ai/objectstack/issues/33689)): a dated note under [Confirmation](#confirmation-hitl-approval-queue) records who confirms a declared-gated action on an AI door. The status line above is left as it is.
 
 ---
 
@@ -233,6 +234,52 @@ asking; an action the user can't invoke simply isn't offered.
 | `ai.requiresConfirmation: true` on a safe action | treated as destructive (gated) |
 | `ai.requiresConfirmation: false` on a destructive action | exposed & direct-run — **author asserts safe** (bridge logs a warning) |
 | not destructive | direct-run |
+
+> **Amendment note (2026-11-15, [#33689](https://github.com/objectstack-ai/objectstack/issues/33689) — PR #33725, `1e65a389`): who confirms a declared-gated action on an AI door.**
+> Ruled by the account owner on objectstack-ai/cloud#3826 (「3826 照建议（征询版）」, phase 1, card 1 of its
+> item-6 chain) and amended on #33689 (「我开始重新接受你说的主流方案，就是推送到客户的手机端」,
+> 「比如最简单的我可以先推送到邮件」). The contract is the docblock of
+> `packages/spec/src/contracts/ai-service.ts#AI_ACTION_CONFIRMATION_CAPABILITY`; it is the record, and this note
+> points at it without restating every case.
+>
+> - **Why.** On the MCP doors the confirmation of an action declaring `ai.requiresConfirmation: true` was the
+>   caller's own `confirm: true`, which nothing could check. Measured on published 18.4.0, an agent sent it itself on
+>   an irreversible action in 2 of 6 runs. The gate made forgetting loud; it did not prove a person.
+> - **Which calls.** An action whose author declared `ai.requiresConfirmation: true` (the declared flag, not the
+>   destructive heuristic of the table above), called through the MCP `run_action` tool, or through `resume_run` for
+>   the candidate action it would run, by any caller acting for a person, on an OAuth token or an API key.
+> - **How the person is asked, in order, after every admission gate and before anything runs.** (1) **Elicit**: one
+>   MCP `elicitation/create` in form mode, when the client advertised `elicitation` at `initialize` and the door can
+>   carry the request. (2) **Hand off**, otherwise: the call goes to the host's pending-confirmation service
+>   (`packages/spec/src/contracts/ai-service.ts#IActionConfirmationService`, registered under
+>   `packages/spec/src/contracts/ai-service.ts#ACTION_CONFIRMATION_SERVICE`) and the caller is answered
+>   `status: 'pending_confirmation'` with a pending id. Only the person the call ran as approves or rejects it in the
+>   app; an approved action runs as that person with every gate and permission re-checked, and a handed-off
+>   `resume_run` resumes its parked run rather than starting one. The approve and reject doors take a person's
+>   signed-in session to the app and nothing else. (3) **Refuse** only when the host registers no such service:
+>   `428 ACTION_CONFIRMATION_REQUIRED` with `details.reason: 'no_confirmation_service'`.
+> - **The caller's `confirm` never counts** on such a call, in any of the three steps.
+> - **What an answer proves.** An elicited `accept` proves that the client answered, and an approved hand-off that a
+>   signed-in session to the app answered. Neither proves a human; each is as strong as what it takes to give it.
+> - **Bounds.** The MCP `delete_record` and `delete_records` gates keep reading `confirm: true` until a decision moves
+>   them, and REST `/actions` stays outside the gate for a person.
+> - **The in-app assistant door: the same rule, its own channel.** Ruling-ref: Leehom 2026-11-15T11:10:57Z,
+>   「B 同一规则，两套流程暂留」 (record `6893484458` on #33689). The core rules bind every AI door, the in-app
+>   assistant included: neither the caller's nor the model's own confirmation counts; only the person the call ran
+>   as decides; the deciding doors take a signed-in session only; and an approved action runs as that person, with
+>   every gate and permission re-checked. The in-app door keeps its own channel, the pending-approval card and inbox
+>   this ADR describes in [Invocation flow](#4-invocation-flow) and the table above, and `IAIService`'s pending
+>   members stay. Merging the two seams was not ruled. The contract at `1e65a389` names the two MCP tools only; the
+>   in-app door's three changes (who decides, which credential may decide, and as whom the approved action runs,
+>   today the pre-registered bypass dispatcher) land through #33808, the cloud approve and reject routes are aligned
+>   through #33809, and the seam merge is #33806.
+> - **When it binds.** The contract ships in `@objectstack/spec/contracts` from the release that carries `1e65a389`.
+>   The doors implement it in the next card of the chain. Until that change ships, every door gates on the member as
+>   before (`packages/runtime/src/action-execution.ts#actionConfirmationRefusal`), and the addendum's sentence below
+>   that a C action is refused "until the call carries `confirm: true`" stays the description of the running code.
+> - **Unchanged.** The opt-in and its default-off exposure; the addendum's H, C and E buckets and its rule that a C
+>   action's confirmation is never relaxed (what changes is who confirms it, not whether it is asked); and the AI
+>   service account's refusal, ADR-0151 D3 rule 3, which its own note of the same date records.
 
 ---
 

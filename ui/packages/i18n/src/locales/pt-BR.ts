@@ -2796,6 +2796,7 @@ const pt = {
         directSignInIncomplete: "O login não foi concluído: você voltou do login único sem estar conectado. Verifique se este navegador permite cookies para este site e tente novamente.",
         directSignInUnavailable: "Não foi possível iniciar o login único para este sistema. Peça ao seu administrador para verificar qual serviço de login ele usa.",
         directSignInRateLimited: "Muitos logins foram iniciados a partir desta rede agora há pouco. Aguarde alguns segundos e tente novamente.",
+        networkNotAllowed: "Este sistema não permite entrar a partir da sua rede. Conecte-se de uma rede permitida (por exemplo, a rede do escritório ou a VPN da sua organização) ou fale com o administrador.",
         ssoAccessDenied: "A conta com a qual você entrou não tem acesso a este ambiente. Entre com uma conta que tenha acesso ou peça a um administrador da organização deste ambiente para adicionar você como membro.",
         ssoSwitchAccount: "Trocar de conta",
         ssoBackToConsole: "Voltar ao console",
@@ -4055,6 +4056,14 @@ const pt = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'Resta {{left}} da sua cota de IA. Um modelo marcado com ×N a consome N vezes mais rápido que o modelo padrão.',
+      confirmTitle: 'Mudar para {{model}}?',
+      confirmBody: 'Cada mensagem neste modelo consome {{multiplier}} vezes mais cota de IA do que uma no modelo padrão.',
+      confirmAllowance: 'Resta {{left}}, e neste modelo ela acaba {{multiplier}} vezes mais rápido.',
+      confirmCancel: 'Cancelar',
+      confirmAction: 'Mudar de modelo',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Enviar mensagem',
     scrollToBottom: 'Ir para a mensagem mais recente',
@@ -4078,11 +4087,16 @@ const pt = {
       aggregations: 'Agregações',
       records: 'Registros',
       visibleToYou: 'Somente os registros que você pode ver',
+      dataset: 'Conjunto de dados',
+      metrics: 'Métricas',
+      noAddedFilter: 'Nenhum filtro adicionado à definição do conjunto de dados',
     },
     tool: {
       aggregate_data: "Resumir os dados",
       get_record: "Ler o registro",
+      list_datasets: "Ver as métricas disponíveis",
       query_data: "Consultar os dados necessários",
+      query_dataset: "Consultar por métrica",
       query_records: "Buscar os registros",
       read_package_doc: "Ler o guia do aplicativo",
       search_knowledge: "Consultar a base de conhecimento",
