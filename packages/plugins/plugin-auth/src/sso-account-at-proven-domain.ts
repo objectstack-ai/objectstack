@@ -51,7 +51,7 @@
  * The same rule holds for the two other ways an SSO sign-in reaches an
  * account, judged with this module's reading at the same gate in
  * `implicit-account-linking.ts`: an implicit link to an existing account, and
- * a later sign-in that asserts an address other than the account's own.
+ * a later sign-in that would change a linked account's stored address.
  *
  * ## Fail closed
  *

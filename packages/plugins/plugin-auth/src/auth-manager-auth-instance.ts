@@ -356,9 +356,9 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // for an email address at a domain it has proven
       // (`sso-account-at-proven-domain.ts`). Judged first, on its own: no
       // posture, invitation or JIT toggle relaxes it, and the audience gate
-      // must admit as well. The same rule holds when an SSO sign-in links to
-      // an existing account, or asserts an address other than the linked
-      // account's own (`implicit-account-linking.ts`, rule 4).
+      // must admit as well. The same rule holds when an SSO sign-in links
+      // implicitly to an existing account, or would change a linked account's
+      // stored address (`implicit-account-linking.ts`, rule 4).
       validateUserInfo: async (data: any, ctx: any) => {
         this.idpLocale.stage(data, ctx);
         const provenDomain = {

@@ -369,9 +369,9 @@ What verification decides, with it on:
   new address is at one of the provider's listed, verified domains. A sign-in
   that would not change the stored address is not re-checked: one that asserts
   the account's own address, and one through a provider that does not update
-  the account (every SAML provider, and an OIDC provider whose update setting
-  is off), signs in as before. An explicit link from account settings is
-  unchanged.
+  the account (every SAML provider, and an OIDC provider without that update
+  setting, which the platform's own provider registration never turns on),
+  signs in as before. An explicit link from account settings is unchanged.
 
 So if your people first sign in with addresses at a subdomain or at another
 domain, list each such domain on the provider as a bare host name and verify it.
