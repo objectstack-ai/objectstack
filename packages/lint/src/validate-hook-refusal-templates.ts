@@ -14,7 +14,7 @@
  * all, to the person the hook refused. This pass is the compile half the
  * action copy slots already have (`validate-action-copy-templates.ts`): each
  * sentence is compiled as the `template` it is (`validateExpression('template',
- * …)`), and an empty hole is named.
+ * …)`), which names logic, an unknown formatter and an empty hole.
  *
  * And one rule that is the hook refusal's own: a `{{ amount | currency }}` hole
  * with no argument formats in the organization's default currency, which a
@@ -58,15 +58,6 @@ function currencyWithoutCode(holeText: string, inner: string): string | undefine
   );
 }
 
-/** The refusal of an empty hole, or `undefined`. */
-function emptyHole(holeText: string, inner: string, params: readonly string[]): string | undefined {
-  if (inner.trim().length > 0) return undefined;
-  return (
-    `\`${holeText}\` names nothing, so the sentence would be served with its braces. Name one of the entry's `
-    + `params (${params.map((p) => `\`${p}\``).join(', ')}) in the hole, or remove it.`
-  );
-}
-
 /**
  * The findings for every hook refusal sentence of `stack` whose entry declares
  * `params` (see the module header).
@@ -93,7 +84,7 @@ export function hookRefusalTemplateIssues(stack: AnyRec): ExprIssue[] {
           issues.push({ where, message, source, severity: 'error' });
         };
         for (const m of text.matchAll(HOLE)) {
-          const refusal = emptyHole(m[0], m[1]!, params) ?? currencyWithoutCode(m[0], m[1]!);
+          const refusal = currencyWithoutCode(m[0], m[1]!);
           if (refusal !== undefined) refuse(refusal, m[0]);
         }
         for (const e of validateExpression('template', text).errors) refuse(e.message, e.source);
