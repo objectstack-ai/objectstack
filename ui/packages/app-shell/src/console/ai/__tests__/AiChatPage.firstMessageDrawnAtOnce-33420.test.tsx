@@ -425,7 +425,10 @@ async function settle(ms = 50): Promise<void> {
 /** Navigates the mounted page, as a click on another conversation does. */
 let navigateTo: ((path: string) => void) | undefined;
 function Navigator(): null {
-  navigateTo = useNavigate();
+  const navigate = useNavigate();
+  React.useEffect(() => {
+    navigateTo = navigate;
+  }, [navigate]);
   return null;
 }
 
