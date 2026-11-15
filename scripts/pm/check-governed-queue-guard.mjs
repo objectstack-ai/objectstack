@@ -6244,7 +6244,7 @@ export async function selfTest() {
     const keep = (lines) => lines.map((t) => [' ', t]);
     const NOTE = patchOf([...keep(RECORD), ['+', ''], ['+', '## Amendment notes'], ['+', ''], ['+', '> **Note (2026-11-15).** The refusal names its code.']]);
     const REMOVED = patchOf([...keep(RECORD.slice(0, 10)), ['-', 'Refuse it.'], ['+', 'Refuse it loudly.'], ...keep(RECORD.slice(11))]);
-    const STATUS = patchOf([...keep(RECORD.slice(0, 3)), ['+', '**Status**: Superseded by ADR-0200'], ...keep(RECORD.slice(3))]);
+    const STATUS = patchOf([...keep(RECORD.slice(0, 3)), ['+', '**Status**: Superseded by ADR-0154'], ...keep(RECORD.slice(3))]);
     const UNDER = patchOf([...keep(RECORD.slice(0, 11)), ['+', '> **Note.** It also logs.'], ...keep(RECORD.slice(11))]);
     const rawOf = (rows) => rows.map(([st, mode, p, oldMode = '100644']) => `:${oldMode} ${mode} ${'1'.repeat(40)} ${'2'.repeat(40)} ${st}\0${p}\0`).join('');
     // `diff-tree --raw` names the status; `diff-tree -p` the commit's diff of the one ADR path; anything else throws, as git does.

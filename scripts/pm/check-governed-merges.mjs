@@ -9379,12 +9379,12 @@ async function selfTest() {
     const edited = patchOf([...keep(RECORD.slice(0, 12)), ['-', 'Refuse it.'], ['+', 'Refuse it loudly.'], ...keep(RECORD.slice(13))]);
     assert('⛔ ROW-2-a-removed-or-edited-line-stays-H', tier([ADR], read([ADR], [adrRow(edited)])) === GOVERNED_TIER_H && /removes 1 line/.test(why([ADR], read([ADR], [adrRow(edited)]))) && tier([ADR], read([ADR], [adrRow(patchOf([...keep(RECORD.slice(0, 16)), ['-', 'Some.']]))])) === GOVERNED_TIER_H);
     // ⛔ Row 3: a changed Status — and an ADDED status line in any spelling, with no removal at all.
-    const restatus = patchOf([...keep(RECORD.slice(0, 2)), ['-', RECORD[2]], ['+', '**Status**: Superseded by ADR-0200'], ...keep(RECORD.slice(3))]);
+    const restatus = patchOf([...keep(RECORD.slice(0, 2)), ['-', RECORD[2]], ['+', '**Status**: Superseded by ADR-0154'], ...keep(RECORD.slice(3))]);
     assert('⛔ ROW-3-a-changed-Status-line-stays-H', tier([ADR], read([ADR], [adrRow(restatus)])) === GOVERNED_TIER_H && /removes 1 line/.test(why([ADR], read([ADR], [adrRow(restatus)]))));
     assert('⛔ an-added-Status-line-bold-bulleted-quoted-tabled-or-in-frontmatter-spelling-stays-H-even-with-no-removal',
       ['**Status**: Amended (2026-11-15)', '- **Status:** Accepted', '> Status: Superseded', '| **Status** | Deprecated |', 'status: superseded'].every((l) => tier([ADR], read([ADR], [adrRow(patchOf(insertAfter(3, l)))])) === GOVERNED_TIER_H) &&
       // In a section that rules nothing too, every spelling the review found: a dash, a link, HTML, a zero-width lead, `Superseded by`.
-      ['**Status** — Superseded', '[Status](#x): Superseded', '<b>Status</b>: Superseded', '\u200bStatus: Superseded', '**Superseded by**: ADR-0200', 'Deprecated: yes'].every((l) => /adds a status line/.test(why([ADR], read([ADR], [adrRow(patchOf(insertAfter(16, '', l)))])))));
+      ['**Status** — Superseded', '[Status](#x): Superseded', '<b>Status</b>: Superseded', '\u200bStatus: Superseded', '**Superseded by**: ADR-0154', 'Deprecated: yes'].every((l) => /adds a status line/.test(why([ADR], read([ADR], [adrRow(patchOf(insertAfter(16, '', l)))])))));
     // ⛔ Row 4: a line under a Decision heading — nested sub-headings, a blank line and a Decision heading of one's own included.
     assert('⛔ ROW-4-a-line-under-a-Decision-heading-stays-H', tier([ADR], read([ADR], [adrRow(patchOf(insertAfter(12, '', '> **Note.** D1 now also logs.')))])) === GOVERNED_TIER_H && /under `?D1 — refuse`?|under .*Decision/.test(why([ADR], read([ADR], [adrRow(patchOf(insertAfter(12, '', '> **Note.** D1 now also logs.')))]))));
     assert('⛔ a-blank-line-under-Decision-a-new-Decision-heading-or-a-Status-section-stays-H',
