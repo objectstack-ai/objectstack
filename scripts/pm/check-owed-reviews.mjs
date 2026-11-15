@@ -66,7 +66,10 @@
  *   review seat the review seats (`review#N`) against the same posts: `seated`
  *              (and which), `barred` (every seated one sits on this PR's own
  *              implementing or dispatching account — `lanes/review.md` 独立性;
- *              a barred seat is never named), `unjudged` (seated ones, but the
+ *              a barred seat is never named; `area-lease.md` lets the maintainer's
+ *              own word in that seat's review thread seat it anyway, a word this
+ *              GitHub-only reader cannot see, so the bar stands here and the
+ *              report says so beside every barred seat), `unjudged` (seated ones, but the
  *              card's comments could not be read, so the dispatching account
  *              is unknown and none is printed as free), `stood-down`,
  *              `absent`, `unknown` (roster unread).
@@ -292,7 +295,10 @@ export function reviewSeatsOf(seats, ownAccounts = new Set()) {
   const seatedRows = rows.filter((s) => s.status === 'seated');
   // The card's comments could not be read: the dispatching account is unknown, so no seated seat is printed as free.
   if (ownAccounts === null && seatedRows.length > 0) return { state: 'unjudged', seated: seatedRows.map(name).sort(), barred: [] };
-  // `lanes/review.md` 独立性: a review seat never reviews a PR its own account dispatched or implemented.
+  // `lanes/review.md` 独立性: a review seat never reviews a PR its own account dispatched or implemented —
+  // except one seated by the maintainer's own word in its review thread (`area-lease.md`). That word lives in
+  // a project thread, not on GitHub, so this reader cannot see it: it bars every same-account seat (erring toward
+  // over-barring, never waving a review through) and the report names the exception (AREA_LEASE_BAR_NOTE).
   const isBarred = (s) => typeof s.account === 'string' && ownAccounts !== null && ownAccounts.has(s.account.toLowerCase());
   const seated = seatedRows.filter((s) => !isBarred(s)).map(name).sort();
   const barred = seatedRows.filter(isBarred).map(name).sort();
@@ -493,6 +499,20 @@ function holdText(hold) {
   return hold.state;
 }
 
+/**
+ * The note every report carries beside a barred review seat. `area-lease.md` lets the maintainer's own word
+ * in a review thread seat a review seat on the PR's own account; that word is not on GitHub, so this reader
+ * keeps the seat barred and says what it cannot see. ⛔ Never a reading that frees the seat. Pure constant.
+ */
+export const AREA_LEASE_BAR_NOTE = 'barred = a review seat on this PR\'s own account (`lanes/review.md` 独立性). '
+  + 'Under area-lease mode (`area-lease.md`) the maintainer may seat one anyway by their own word in that seat\'s review thread; '
+  + 'this tool reads GitHub only and cannot see that word, so the seat stays barred here — read the review thread before taking it.';
+
+/** The report's notes, by what its rows show: the area-lease note once when any row bars a review seat. Pure. */
+export function reportNotes(rows) {
+  return (Array.isArray(rows) ? rows : []).some((r) => (r?.reviewBarred?.length ?? 0) > 0) ? [AREA_LEASE_BAR_NOTE] : [];
+}
+
 /** The printed report. Pure. */
 export function renderReport(rows, { repo, now, read, gaps }) {
   const count = (s) => rows.filter((r) => r.status === s).length;
@@ -510,6 +530,8 @@ export function renderReport(rows, { repo, now, read, gaps }) {
       ...listed.map((r) => `  - #${r.pr} held by ${r.hold.session} since ${r.hold.at ?? '?'} (${holdAge(r.hold)}) until ${r.hold.until}`),
     );
   }
+  const notes = reportNotes(rows);
+  if (notes.length > 0) lines.push('', ...notes.map((n) => `⚖️ ${n}`));
   if (gaps.length > 0) {
     lines.push('', `⚠️ sweep INCOMPLETE — ${gaps.length} read(s) failed; the rows above are not the whole answer:`, ...gaps.map((g) => `  - ${g}`));
   }
@@ -599,7 +621,7 @@ export function main(argv, { get = ghApi, log = console.log, error = console.err
   const snapshot = readSnapshot({ repo: opts.repo, board: opts.board, get });
   const rows = owedReviewRows(snapshot, { now });
   const read = { pulls: snapshot.pulls.length, drafts: snapshot.pulls.filter((p) => p.draft === true).length };
-  if (opts.json) log(JSON.stringify({ repo: opts.repo, now: new Date(now).toISOString(), read, gaps: snapshot.gaps, rows }, null, 2));
+  if (opts.json) log(JSON.stringify({ repo: opts.repo, now: new Date(now).toISOString(), read, gaps: snapshot.gaps, notes: reportNotes(rows), rows }, null, 2));
   else for (const line of renderReport(rows, { repo: opts.repo, now, read, gaps: snapshot.gaps })) log(line);
   return EXIT_OK;
 }
@@ -618,7 +640,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the record: on this head (by whom, as stated), on an earlier head, none, unjudged': 13,
   'the triggers: (a) hand-off or label the same round, (b) a full round, (c) the lane seat': 10,
   // 10 → 14 → 16: S2 and S4 of PR #29967's contract review — a review seat on the PR's own account is barred (`lanes/review.md` 独立性); an unread card thread leaves the bar unjudged.
-  'review-seat first: a seated review seat takes before the lane, the lane joins after a further round, and takes alone while none is seated': 16,
+  // 16 → 17 (#34003): the area-lease exception is named beside a barred seat, which stays barred — the maintainer's word is off GitHub.
+  'review-seat first: a seated review seat takes before the lane, the lane joins after a further round, and takes alone while none is seated': 17,
   'a live claim holds the head and a record settles it; a lapsed claim holds nothing': 6,
   'the live instance: two Tier H drafts with a hand-off on the current head list as TAKE under (a)': 4,
   'the live read: every read through one reader; a failed read is INCOMPLETE, never clean': 6,
@@ -748,6 +771,7 @@ export function selfTest() {
   t('S2: the lane seat gone and the only review seat barred ⇒ the lane\'s next seat; a review seat with no account on its post is never barred', rv({ body: ATTR, headCommittedAt: fresh }, [{ lane: REVIEW_LANE, seat: 1, status: 'seated', account: 'os-support-ai' }]).taker === "the domain:ui seat next on duty (review seat review#1 is on this PR's own account)" && rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, [...SEATED, { lane: REVIEW_LANE, seat: 1, status: 'seated', account: null }]).taker === 'a review seat (review#1) first');
   t('⭐ S4: the card\'s comments unreadable ⇒ own accounts null, the bar UNJUDGED: a seated review seat is named with the caveat, never as free, and the lane seat beside it; with no seated review seat the states read as before', (() => { const unread = { card: 25922, cardComments: null, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }; const r = rv(unread, OWN); const gone = rv({ card: 25922, cardComments: null, headCommittedAt: fresh }, [{ lane: REVIEW_LANE, seat: 1, status: 'seated', account: 'os-support-ai' }]); return ownAccountsOf({ card: 25922, cardComments: null }) === null && ownAccountsOf({ card: null, cardComments: [] }).size === 0 && r.reviewSeat === 'unjudged' && r.reviewSeats.join() === 'review#1' && r.reviewBarred.length === 0 && r.taker === "a review seat (review#1) unless on this PR's own account (card comments unread), or the domain:ui seat" && gone.taker === "a review seat (review#1) unless on this PR's own account (card comments unread), or the domain:ui seat next on duty" && rv(unread, SEATED).reviewSeat === 'absent' && rv(unread, [...SEATED, { lane: REVIEW_LANE, seat: 1, status: 'paused' }]).reviewSeat === 'stood-down' && renderRow(r).includes('review seat unjudged review#1'); })());
   t('S4: a readable but empty comment thread on the card, or no card at all, judges the bar — the attribution login alone bars', rv({ card: 25922, cardComments: [], body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN).reviewSeat === 'barred' && rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN).reviewSeat === 'barred');
+  t('⛔ area-lease: a same-account seat the maintainer may have seated in its review thread STAYS barred — that word is off GitHub — and the report names the exception once; no barred seat, no note', (() => { const barred = [rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN), { ...rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN), pr: 27137 }]; const free = [rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] })]; const report = (rows) => renderReport(rows, { repo: DEFAULT_REPO, now: NOW, read: { pulls: rows.length, drafts: rows.length }, gaps: [] }); const notes = report(barred).filter((l) => l.includes('area-lease.md')); return barred.every((r) => r.reviewSeat === 'barred' && r.reviewSeats.length === 0 && r.taker === "the domain:ui seat (review seat review#1 is on this PR's own account)") && notes.length === 1 && notes[0] === `⚖️ ${AREA_LEASE_BAR_NOTE}` && reportNotes(barred).length === 1 && reportNotes(free).length === 0 && !report(free).some((l) => l.includes('area-lease.md')); })());
   t('the printed row carries the review-seat reading and the taker', renderRow(rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] })).includes(`review seat seated review#1,review#2 → (a) label · take: ${BOTH} first`) && renderRow(rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, SEATED)).includes('review seat absent → (a) label · take: the domain:ui seat (no review seat seated)'));
 
   battery('a live claim holds the head and a record settles it; a lapsed claim holds nothing');
