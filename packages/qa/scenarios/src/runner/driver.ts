@@ -26,6 +26,9 @@
  *     contract (the package README states it).
  *   - {@link RecordedDriver} replays turns recorded earlier, so the runner's
  *     own tests (and a re-grade of an old run) need no model and no network.
+ *     It re-sends each turn's recorded writes to the booted app through the
+ *     runner's door ({@link AskTask.callTool}), so an operation reads back
+ *     what the recorded run wrote.
  *
  * {@link RecordingDriver} wraps a live driver and writes every turn it sees to
  * a recording the replay driver reads back.
@@ -37,8 +40,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { SCENARIO_TIERS, type ScenarioTier } from '../schema.js';
+import { flowRefusalOf } from '../score/scenario-run-grade.js';
+import type { ToolAnswer } from './app.js';
 import { noResult, runTurnProcess } from './drivers/process.js';
-import { parseStreamJson, type ParsedTurn } from './transcript.js';
+import { WRITE_TOOLS } from './observe.js';
+import { parseStreamJson, refusalCodeOf, type ParsedTurn, type RunnerToolCall } from './transcript.js';
 
 /** Which run step a turn belongs to; the replay key is built from it. */
 export interface StepRef {
@@ -66,6 +72,13 @@ export interface AskTask extends StepRef {
   prompt: string;
   /** The booted app's MCP endpoint and the persona's API key. */
   mcp: { url: string; apiKey: string };
+  /**
+   * The runner's own door to the booted app as this turn's persona: one MCP
+   * `tools/call` with the persona's key (`AppHarness.callTool`). The replay
+   * driver re-sends the turn's recorded writes through it; a live driver
+   * ignores it. Absent ⇒ a replay re-reads the turn and sends nothing.
+   */
+  callTool?: (tool: string, args: Record<string, unknown>) => Promise<ToolAnswer>;
 }
 
 export interface AuthorResult {
@@ -95,6 +108,10 @@ export interface DriverInfo {
   authorModel?: string;
   /** The model the live driver asks for on a question or operation turn (`--model` / `--ask-model`); absent ⇒ the login's default. */
   askModel?: string;
+  /** The effort level the live driver asks for on an authoring turn (`--effort` / `--author-effort`); absent ⇒ the CLI's default effort. */
+  authorEffort?: string;
+  /** The effort level the live driver asks for on a question or operation turn (`--effort` / `--ask-effort`); absent ⇒ the CLI's default effort. */
+  askEffort?: string;
 }
 
 export interface AgentDriver {
@@ -120,6 +137,18 @@ export class ApiBillingRefusedError extends Error {
   }
 }
 
+/**
+ * The `claude` CLI's own effort setting. Read in Claude Code 2.1.325's own
+ * code (the CLI reports no served effort to measure it by): when it is set, it
+ * wins over the `--effort` flag, so a turn the runner asks for
+ * one effort would run at another while its record named the first. The live
+ * driver therefore reads it once from the caller's environment (as the effort
+ * when no effort flag is given), passes the effort as `--effort`, and removes
+ * the variable from every turn's environment. `unset` and `auto` mean the
+ * CLI's default effort, as the CLI reads them.
+ */
+export const CLAUDE_EFFORT_ENV = 'CLAUDE_CODE_EFFORT_LEVEL';
+
 /** The child environment: the caller's, with every API-billing variable removed. */
 export function subscriptionOnlyEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const out = { ...env };
@@ -137,6 +166,43 @@ export function assertSubscriptionLogin(env: NodeJS.ProcessEnv, authStatus: unkn
   const method = typeof s.authMethod === 'string' ? s.authMethod : 'unknown';
   if (/api[_-]?key/i.test(method)) throw new ApiBillingRefusedError(`\`claude auth status\` reports an API-key login (${method})`);
   return method;
+}
+
+/**
+ * The effort levels a `claude` CLI accepts, read off its own `--help`: the
+ * parenthesised list in the `--effort` entry (Claude Code 2.1.325 prints
+ * `--effort <level>  Effort level for the current session (low, medium, high,
+ * xhigh, max)`, the list wrapped onto the next line). `undefined` ⇒ the help
+ * has no `--effort` entry, or the entry names no list. Pure over its input.
+ */
+export function effortLevelsFromHelp(help: string): string[] | undefined {
+  const lines = help.split('\n');
+  const at = lines.findIndex((l) => /^\s*--effort\b/.test(l));
+  if (at === -1) return undefined;
+  const entry = [lines[at]!];
+  for (const l of lines.slice(at + 1)) {
+    if (l.trim() === '' || /^\s*-/.test(l)) break;
+    entry.push(l);
+  }
+  const list = /\(([a-z]+(?:\s*,\s*[a-z]+)*)\)/i.exec(entry.join(' '));
+  return list ? list[1]!.split(',').map((x) => x.trim()) : undefined;
+}
+
+/**
+ * Refuse an effort level the CLI would not take. Measured on Claude Code
+ * 2.1.325: an unknown `--effort` value is not an error — the CLI warns on
+ * stderr, runs the turn at its default effort and exits 0 — so a misspelt
+ * level would put a level on the record that no turn ran at. Each entry of
+ * `wanted` is a level and where it came from (a flag, or the variable), for
+ * the message.
+ */
+function assertEffortLevels(levels: string[] | undefined, wanted: ReadonlyArray<readonly [string, string]>, cli = 'the `claude` CLI'): void {
+  if (wanted.length === 0) return;
+  const named = wanted.map(([, from]) => from).join(', ');
+  if (levels === undefined) throw new Error(`${named}: ${cli} lists no \`--effort\` levels in its \`--help\`, so it cannot be asked for an effort; update Claude Code, or run without an effort flag`);
+  for (const [level, from] of wanted) {
+    if (!levels.includes(level)) throw new Error(`${from} takes one of the levels ${cli} accepts (${levels.join(', ')}), not \`${level}\``);
+  }
 }
 
 /**
@@ -179,6 +245,12 @@ export interface ClaudeCodeDriverOptions {
   authorModel?: string;
   /** The model for a question or operation turn, in place of {@link model}. */
   askModel?: string;
+  /** The effort level passed as `--effort` on every turn; else the caller's {@link CLAUDE_EFFORT_ENV}; else none, the CLI's default. */
+  effort?: string;
+  /** The effort level for an authoring turn (build and iterate), in place of {@link effort}. */
+  authorEffort?: string;
+  /** The effort level for a question or operation turn, in place of {@link effort}. */
+  askEffort?: string;
 }
 
 /** `claude-sonnet-4-5-20250929[1m]` → `['claude', 'sonnet', '4', '5', '20250929']`: the name's parts, the context-size suffix dropped. */
@@ -252,6 +324,27 @@ export class ClaudeCodeDriver implements AgentDriver {
       /* refused below as "no login" */
     }
     this.authMethod = assertSubscriptionLogin(process.env, parsed);
+    // An effort the CLI does not list would run at its default effort while the record named it.
+    const wanted: Array<readonly [string, string]> = [];
+    if (this.authorEffort !== undefined) wanted.push([this.authorEffort, opts.authorEffort !== undefined ? '--author-effort' : opts.effort !== undefined ? '--effort' : CLAUDE_EFFORT_ENV]);
+    if (this.askEffort !== undefined) wanted.push([this.askEffort, opts.askEffort !== undefined ? '--ask-effort' : opts.effort !== undefined ? '--effort' : CLAUDE_EFFORT_ENV]);
+    if (wanted.length) {
+      const help = spawnSync(this.bin, ['--help'], { encoding: 'utf8', env: this.turnEnv() });
+      assertEffortLevels(effortLevelsFromHelp(help.stdout ?? ''), wanted, `\`${this.bin}\` ${this.version}`);
+    }
+  }
+
+  /** The effort the caller's environment sets for the CLI ({@link CLAUDE_EFFORT_ENV}); `unset` / `auto` / empty ⇒ none. */
+  private get envEffort(): string | undefined {
+    const raw = process.env[CLAUDE_EFFORT_ENV]?.trim().toLowerCase();
+    return raw === undefined || raw === '' || raw === 'unset' || raw === 'auto' ? undefined : raw;
+  }
+
+  /** A turn's environment: no API-billing variable, and no {@link CLAUDE_EFFORT_ENV} to override the `--effort` the turn passes. */
+  private turnEnv(): NodeJS.ProcessEnv {
+    const env = subscriptionOnlyEnv();
+    delete env[CLAUDE_EFFORT_ENV];
+    return env;
   }
 
   private get authorTimeoutMs(): number {
@@ -274,6 +367,14 @@ export class ClaudeCodeDriver implements AgentDriver {
     return this.opts.askModel ?? this.opts.model;
   }
 
+  private get authorEffort(): string | undefined {
+    return this.opts.authorEffort ?? this.opts.effort ?? this.envEffort;
+  }
+
+  private get askEffort(): string | undefined {
+    return this.opts.askEffort ?? this.opts.effort ?? this.envEffort;
+  }
+
   info(): DriverInfo {
     return {
       driver: 'claude-code-cli',
@@ -285,12 +386,15 @@ export class ClaudeCodeDriver implements AgentDriver {
       askMaxTurns: this.askMaxTurns,
       ...(this.authorModel ? { authorModel: this.authorModel } : {}),
       ...(this.askModel ? { askModel: this.askModel } : {}),
+      ...(this.authorEffort ? { authorEffort: this.authorEffort } : {}),
+      ...(this.askEffort ? { askEffort: this.askEffort } : {}),
     };
   }
 
-  private base(maxTurns: number, model: string | undefined): string[] {
+  private base(maxTurns: number, model: string | undefined, effort: string | undefined): string[] {
     const a = ['--output-format', 'stream-json', '--verbose', '--max-turns', String(maxTurns)];
     if (model) a.push('--model', model);
+    if (effort) a.push('--effort', effort);
     return a;
   }
 
@@ -300,16 +404,17 @@ export class ClaudeCodeDriver implements AgentDriver {
     try {
       const maxTurns = this.authorMaxTurns(task.tier);
       const model = this.authorModel;
+      const effort = this.authorEffort;
       const args = [
         '-p',
-        ...this.base(maxTurns, model),
+        ...this.base(maxTurns, model, effort),
         '--mcp-config', empty, '--strict-mcp-config',
         '--permission-mode', 'acceptEdits',
         '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'Skill',
       ];
-      const run = await runTurnProcess(this.bin, args, { cwd: task.cwd, input: task.prompt, timeoutMs: this.authorTimeoutMs, env: subscriptionOnlyEnv() });
+      const run = await runTurnProcess(this.bin, args, { cwd: task.cwd, input: task.prompt, timeoutMs: this.authorTimeoutMs, env: this.turnEnv() });
       const turn = parseStreamJson(run.stdout);
-      turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}) };
+      turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}), ...(effort ? { requestedEffort: effort } : {}) };
       if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return { turn, files: snapshotSources(task.cwd) };
     } finally {
@@ -330,10 +435,11 @@ export class ClaudeCodeDriver implements AgentDriver {
     try {
       const maxTurns = this.askMaxTurns;
       const model = this.askModel;
-      const args = ['-p', ...this.base(maxTurns, model), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
-      const run = await runTurnProcess(this.bin, args, { cwd: dir, input: task.prompt, timeoutMs: this.opts.askTimeoutMs ?? 5 * 60_000, env: subscriptionOnlyEnv() });
+      const effort = this.askEffort;
+      const args = ['-p', ...this.base(maxTurns, model, effort), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
+      const run = await runTurnProcess(this.bin, args, { cwd: dir, input: task.prompt, timeoutMs: this.opts.askTimeoutMs ?? 5 * 60_000, env: this.turnEnv() });
       const turn = parseStreamJson(run.stdout);
-      turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}) };
+      turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}), ...(effort ? { requestedEffort: effort } : {}) };
       if (turn.meta.resultSubtype === undefined) turn.meta.resultSubtype = noResult(run.process);
       return turn;
     } finally {
@@ -359,8 +465,76 @@ export class MissingRecordingError extends Error {
   }
 }
 
-/** Replays a {@link Recording}. A step it has no turn for is a loud error, never an empty turn. */
+/**
+ * A replayed turn whose recorded writes the booted app did not answer as it
+ * answered the recorded run, or that the recording cannot re-send faithfully.
+ * What the turn's operation reads back then measures the replay, not the
+ * agent: the runner records it NOT MEASURED with {@link reason}, never a fail.
+ */
+export class ReplayNotFaithfulError extends Error {
+  constructor(
+    readonly key: string,
+    /** Why, naming each write call that broke the replay. */
+    readonly reason: string,
+    /** The recorded turn, as the run saw it. */
+    readonly turn: ParsedTurn,
+  ) {
+    super(`the replay of \`${key}\` is not faithful: ${reason}`);
+    this.name = 'ReplayNotFaithfulError';
+  }
+}
+
+/** The calls of a recorded turn to the app's write doors, in recorded order (reads are never re-sent). */
+const recordedWrites = (turn: ParsedTurn): RunnerToolCall[] => turn.toolCalls.filter((c) => (WRITE_TOOLS as readonly string[]).includes(c.name));
+
+/** How a write door answered, as a replay compares it: `applied`, or the refusal it carried (rule 3 of `observe.ts`). */
+function answerOutcome(output: unknown, isError: boolean): string {
+  const code = refusalCodeOf(output);
+  if (code !== undefined) return `refused ${code}`;
+  if (flowRefusalOf(output) !== undefined) return 'refused by its flow';
+  return isError ? 'refused without a code' : 'applied';
+}
+
+/** The id an applied create answered (`{ id }`), when its output carries one. */
+function createdIdOf(output: unknown): string | undefined {
+  if (typeof output !== 'string') return undefined;
+  try {
+    const v: unknown = JSON.parse(output);
+    const id = typeof v === 'object' && v !== null ? (v as Record<string, unknown>).id : undefined;
+    return typeof id === 'string' && id !== '' ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `value` with every string equal to a recorded id replaced by the id the replay's app gave that row. */
+function remapIds(value: unknown, ids: ReadonlyMap<string, string>): unknown {
+  if (typeof value === 'string') return ids.get(value) ?? value;
+  if (Array.isArray(value)) return value.map((v) => remapIds(v, ids));
+  if (typeof value === 'object' && value !== null) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, remapIds(v, ids)]));
+  return value;
+}
+
+/**
+ * Replays a {@link Recording}. A step it has no turn for is a loud error, never an empty turn.
+ *
+ * A question or operation turn's recorded writes (`create_record`,
+ * `update_record`, `delete_record`, `run_action` through the app's MCP door)
+ * are re-sent to the freshly booted app, in recorded order, as the turn's
+ * persona ({@link AskTask.callTool}), before the turn is handed back: the
+ * runner's read-back then finds what the recorded run wrote. Reads are never
+ * re-sent. A refused write is re-sent too, and must be refused again with the
+ * same code. A row the recorded run created is known to the replay's app
+ * under a new id, so a later write naming the recorded id is sent with the
+ * new one. The replay is not faithful, and the turn's grade measures nothing
+ * ({@link ReplayNotFaithfulError}), when a recorded write has no recorded
+ * answer (nothing is re-sent for that turn: whether it ran is unknown), or
+ * when the app answers a re-sent write otherwise than it answered the run.
+ */
 export class RecordedDriver implements AgentDriver {
+  /** Recorded id → the id the replay's app gave the same created row. */
+  private readonly ids = new Map<string, string>();
+
   constructor(
     private readonly recording: Recording,
     private readonly source = '(in memory)',
@@ -402,6 +576,37 @@ export class RecordedDriver implements AgentDriver {
     const key = stepKey(task);
     const turn = this.recording.turns[key];
     if (!turn) throw new MissingRecordingError(key);
+    const writes = recordedWrites(turn);
+    if (writes.length === 0 || task.callTool === undefined) return turn;
+    const unanswered = writes.filter((c) => c.output === undefined);
+    if (unanswered.length > 0) {
+      const names = unanswered.map((c) => `\`${c.name}\``).join(', ');
+      throw new ReplayNotFaithfulError(key, `the recording holds no answer to ${names} (the turn was cut short), so whether it wrote is unknown; nothing was re-sent`, turn);
+    }
+    const broken: string[] = [];
+    for (const c of writes) {
+      const input = (typeof c.input === 'object' && c.input !== null && !Array.isArray(c.input) ? c.input : {}) as Record<string, unknown>;
+      const target = typeof input.objectName === 'string' ? ` on ${input.objectName}` : '';
+      const recorded = answerOutcome(c.output, c.isError === true);
+      let replayed: string;
+      let answer: ToolAnswer | undefined;
+      try {
+        answer = await task.callTool(c.name, remapIds(input, this.ids) as Record<string, unknown>);
+        replayed = answerOutcome(answer.output, answer.isError);
+      } catch (e) {
+        replayed = `not sent (${e instanceof Error ? e.message : String(e)})`;
+      }
+      if (replayed !== recorded) {
+        broken.push(`\`${c.name}\`${target} was ${recorded} in the recorded run and ${replayed} on replay`);
+        continue;
+      }
+      if (c.name === 'create_record' && recorded === 'applied') {
+        const was = createdIdOf(c.output);
+        const now = createdIdOf(answer?.output);
+        if (was !== undefined && now !== undefined && was !== now) this.ids.set(was, now);
+      }
+    }
+    if (broken.length > 0) throw new ReplayNotFaithfulError(key, `the booted app answered a re-sent write otherwise than the recorded run: ${broken.join('; ')}`, turn);
     return turn;
   }
 }

@@ -57,6 +57,16 @@ export type {
     InstallRenameRefusal,
     InstallRenameRefusalReason,
 } from './marketplace-install-declared-renames.js';
+// [#33724] The NOT NULL relax a package install owes its own declarations
+// (`storage: { notNull: false }`): the install door calls it after its schema
+// sync, and so can a host's own install door, with the same data engine.
+export { declaredNullableColumns, relaxInstallDeclaredNotNull } from './marketplace-install-declared-relaxations.js';
+export type {
+    InstallRelaxDriver,
+    InstallRelaxEngine,
+    InstallRelaxEntry,
+    InstallRelaxReport,
+} from './marketplace-install-declared-relaxations.js';
 // cloud ADR-0007 step ⑤ — the local desired-state ledger, exported as a first-class
 // seam so hosts/reconcilers can read the same ledger without going through HTTP.
 export {

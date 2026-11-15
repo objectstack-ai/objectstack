@@ -1533,6 +1533,39 @@ export async function applyPublishedColumnChanges(this: Pick<SchemaSyncHost, 'ap
 }
 
 /**
+ * [#33724] Is this drift entry a relax the install of a package applies? The
+ * `needs_confirm` relax of a NOT NULL column whose field declares `storage: {
+ * notNull: false }` in words — the entry {@link isPublishedColumnChange} selects
+ * for a publish — and only on a column the caller names: the ones the
+ * installing package's own declaration says so for.
+ */
+function isInstallRelaxation(d: ManagedDriftEntry, fields: Record<string, any> | undefined, columns: ReadonlySet<string>): boolean {
+  return d.op.type === 'relax_not_null' && d.category === 'needs_confirm'
+    && columns.has(d.op.column) && fields?.[d.op.column]?.storage?.notNull === false;
+}
+
+/** The body of `SqlDriver#relaxDeclaredNotNull`; the method's docblock there is its contract. */
+export async function relaxDeclaredNotNull(this: Pick<SchemaSyncHost, 'applyMigrationEntries' | 'deferredDdl' | 'detectManagedDrift' | 'logger'>, obj: { name: string; fields?: Record<string, any>; indexes?: any[] }, columns: Iterable<string>, opts: { packageId?: string } = {}): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
+  // A deferred-DDL driver (`os migrate plan`) runs no schema work.
+  if (this.deferredDdl) return { applied: [], skipped: [] };
+  const named = new Set(columns);
+  if (named.size === 0) return { applied: [], skipped: [] };
+  // Through the public doors, as {@link applyPublishedColumnChanges} reads and
+  // applies: a face that applies over another transport answers for itself.
+  const drift = await this.detectManagedDrift([obj]);
+  const changes = drift.filter((d) => isInstallRelaxation(d, obj.fields, named));
+  if (changes.length === 0) return { applied: [], skipped: [] };
+  const result = await this.applyMigrationEntries(changes, { allowDestructive: false });
+  const by = opts.packageId ? `the install of package '${opts.packageId}'` : 'the package install';
+  for (const d of result.applied) {
+    const line = `[schema-drift] ${by} applied ${d.op.type} on ${d.table}.${d.column ?? ''}`;
+    if (this.logger.info) this.logger.info(line);
+    else this.logger.warn(line);
+  }
+  return result;
+}
+
+/**
  * The body of `SqlDriver#applyMigrationEntries`; the method's docblock there is
  * its contract.
  *

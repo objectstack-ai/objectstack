@@ -34,6 +34,7 @@ import {
   elementDataSourceBlock,
   resolveAffordance,
   servedObjectPluralLabel,
+  toPredicateRecord,
   type ElementDataSourceConfig,
 } from '@object-ui/core';
 import type { RecordRelatedListComponentProps } from '@object-ui/types';
@@ -293,11 +294,19 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
   // What the un-cast read carries, and what it still does NOT refuse, is
   // re-derived every run by `record-related-list.relationshipValueFieldUncast-9475.test.tsx`
   // rather than written down here (AGENTS.md #9).
+  //
+  // The value is the parent's STORED one (objectstack#33609). The record page
+  // and a `parentDataSource` binding read the parent with every relation
+  // `$expand`ed, so a relation named here (e.g. an order's `selected_plan`,
+  // keying the plan's lines) arrives as the related record, and the list
+  // filtered by that object: a refused filter, no rows. Collapsed through core's
+  // one rule for "a relation's value is its stored id" (`toPredicateRecord`, over
+  // the parent's own field definitions); a non-relation field passes through.
   const relationshipValueField: string = schema.relationshipValueField || 'id';
   const parentLinkValue: string | number | null =
     relationshipValueField === 'id'
       ? ((ctx?.recordId ?? null) as string | number | null)
-      : ((ctx?.data as any)?.[relationshipValueField] ?? null);
+      : ((toPredicateRecord(ctx?.data as Record<string, unknown> | null | undefined, ctx?.objectSchema?.fields) as any)?.[relationshipValueField] ?? null);
 
   const relatedActions = useRelatedRecordActions();
   // The list's own filter, resolved the way `RelatedList` resolves it for its

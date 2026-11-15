@@ -211,7 +211,9 @@ export interface EmitInput {
      * Tenant stamp for sudo/background paths so RLS matches recipients. Also
      * the emitting organization the audience resolves in: `role:` scopes to
      * it (absent, to the organization stored on the event row, else nobody),
-     * and `org:members` names its members — nobody when this is absent.
+     * and `org:members` names its members — nobody when this is absent. The
+     * recipients' preferences are read in the same organization `role:`
+     * resolves in.
      */
     readonly organizationId?: string;
     /** Channels to fan out to. Defaults to `['inbox']` (always on). */
@@ -1443,10 +1445,16 @@ export class MessagingService {
 
         // 3b) Preference filter (ADR-0030 P2): drop the (recipient × channel)
         //     pairs the user muted. Mandatory topics bypass; fail-open on error.
+        //     Read in the emitting organization, the same `owned` one `role:`
+        //     resolves in at step 3: preference rows are per organization, and
+        //     a read with no organization term runs unscoped under the system
+        //     opt-in, so another organization's row could decide this one's
+        //     delivery. With no organization from the producer or the event
+        //     row the read stays unscoped, as before.
         const payload = input.payload ?? {};
         const targets = await this.preferences.filter(recipients, channels, {
             topic: input.topic,
-            organizationId: input.organizationId,
+            organizationId: owned.organizationId,
             severity: input.severity,
         });
         if (targets.length === 0) {
@@ -1522,7 +1530,11 @@ export class MessagingService {
         const out: string[] = [];
         for (const spec of specs) {
             const organizationId = isRoleAudience(spec) ? roleOrganization : producerOrganization;
-            out.push(...await this.resolver.resolve(spec, { organizationId }));
+            // A one-entry list, never the bare spec: the resolver reads a list
+            // entry by entry, so an entry here is read exactly as the
+            // single-call branch above reads it (an entry that is itself a
+            // list is skipped there, and would be expanded if passed bare).
+            out.push(...await this.resolver.resolve([spec], { organizationId }));
         }
         return [...new Set(out)];
     }

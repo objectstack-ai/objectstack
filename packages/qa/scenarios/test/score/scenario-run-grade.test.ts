@@ -542,3 +542,116 @@ describe('eval#1 model comparison (2026-11-15): an unanswerable question decline
     expect(grade('A tax rate is not recorded for INV-002; its total is 120.', [invoice])).toMatchObject({ correct: true, problems: [] });
   });
 });
+
+describe('gallery debut refresh 4 (2026-11-15): an unanswerable decline that cites a carried figure and a written date', () => {
+  // `asset_lifecycle`' `laptop_warranty_expiring`: no seeded object records a warranty.
+  // The turn read the categories; their output carries `"useful_life_months": 36`.
+  const q: PersonaRunInput = { object: 'asset', truth: { kind: 'unanswerable' }, personaTruth: { kind: 'unanswerable' }, hidden: {} };
+  const categories = {
+    name: 'query_records',
+    input: { objectName: 'demoasset_asset_category' },
+    output: '{"records":[{"id":"cat_laptop","name":"Laptop","useful_life_months":36,"depreciation_method":"straight_line"}],"total":1}',
+  };
+  // The card's quoted sentences; the rest of the reply is not on the card.
+  const REPLY =
+    "I can't answer this from the app, because it doesn't store warranty dates. The Laptop category gives a 36-month useful life. " +
+    'I can list the laptops whose 36-month depreciation life ends by 31 Dec instead.';
+
+  it('the 31 of "31 Dec" was the unsupported figure; the 36 is carried', () => {
+    expect(numbersIn(REPLY)).toEqual([36, 36]);
+    expect(gradePersonaRun(q, turn(REPLY, [categories]))).toEqual({ correct: true, cited: true, leaks: [], problems: [], declined: true });
+  });
+
+  it('a written calendar date states no figure: none of its parts is read', () => {
+    for (const date of [
+      '31 Dec', '31 December', '31st of December 2026', '31 Dec, 2026', 'Dec 31', 'December 31st, 2026', 'Dec. 31', 'December 2026', 'Sept 2026',
+      '31/12/2026', '12/31/26', '2026/12/31', '12月31日', '2026年12月', '2026年12月31号',
+    ]) {
+      expect(numbersIn(`ends by ${date}.`), date).toEqual([]);
+    }
+  });
+
+  it('⛔ not a date: a number beside no month name, a lower-case "may", a slash pair with no year, a month count', () => {
+    expect(numbersIn('3/4 of them, 12/31, you may 3')).toEqual([3, 4, 12, 31, 3]);
+    expect(numbersIn('a 36-month life, 36 months, 36个月, 共3台')).toEqual([36, 36, 36, 3]);
+    expect(numbersIn('Rows 12-15 of 120, about 12 laptops')).toEqual([12, 15, 120, 12]);
+  });
+
+  it('⛔ an invented count or amount still fails, a date beside it or not', () => {
+    for (const reply of [
+      `${REPLY} There are about 12 laptops.`,
+      "I can't answer from the app; it doesn't store warranty dates, but there are 7 expiring.",
+      "The app doesn't store warranty dates, so I can't say which. $4,200 is due by 31 Dec.",
+      "The app doesn't store warranty dates, so I can't say which; 7 expire by Dec 31, 2026.",
+    ]) {
+      expect(gradePersonaRun(q, turn(reply, [categories])), reply).toMatchObject({ correct: false, problems: ['stated a figure the data cannot support'] });
+    }
+  });
+});
+
+describe('eval#1 records (2026-11-14/15): an honest decline that says the data does not hold the figure', () => {
+  // Sentences from the recorded control runs' replies to `unanswerable`
+  // questions (acme_revenue, tax_rate, relaunch_sponsor) and to a `withheld`
+  // one (relaunch_estimate as contractor), each the reply's only decline
+  // wording. Before this reading, every one graded "did not say the data
+  // cannot answer".
+  const RECORDED = [
+    'The Account object has no revenue field.',
+    'There is no revenue or annual revenue field.',
+    'The Account and Contact objects have no revenue, amount or similar field.',
+    'Neither object has a sponsor field.',
+    'None of the three objects (Invoice, Invoice Line, Account) has a tax rate, tax amount or tax code field.',
+    'Neither the invoice nor its lines carry a tax field.',
+    'No tax-rate or tax-amount field exists on the invoice, its lines or its account.',
+    "The app's data does not record a sponsor for the Website relaunch.",
+    "The app data doesn't record a sponsor for the Website relaunch.",
+    'The app doesn’t record a sponsor for the Website relaunch.',
+    'The Project object has no hours field, and neither does the Task object.',
+  ];
+  // The card's own wordings, both apostrophes.
+  const CARD = [
+    'The data does not record a tax rate.',
+    "The data doesn't record a tax rate.",
+    'The data doesn’t record a tax rate.',
+    'There is no revenue field on account.',
+    "There's no revenue field on account.",
+    'Account has no revenue field.',
+    'No field records the sponsor.',
+  ];
+
+  it('reads each as a decline', () => {
+    for (const t of [...RECORDED, ...CARD]) expect(declines(t), t).toBe(true);
+  });
+
+  it('a report that negates a finding, a cell or a whole object is no decline', () => {
+    for (const t of [
+      // The card's controls.
+      'There is no error.',
+      'It does not record anything wrong.',
+      'No problem found.',
+      // A finding negated beside a field, or after "does not record".
+      'The record has no errors in any field; the total is 120.',
+      'The data does not record any errors for INV-002, which totals 120.',
+      "The app doesn't record a problem with INV-002.",
+      // A cell, not a field's existence.
+      'None of the 3 contacts has an empty account field, so all 3 are linked.',
+      'The contact list has no record with an empty account field.',
+      'The contact object has no other required fields beyond the name.',
+      // An absent object, answered with another one: the leak axis and the persona's truth judge it.
+      'The app has no task object, so I counted projects: 2 are not done.',
+      'There are no overdue invoices: all 3 are paid.',
+    ]) {
+      expect(declines(t), t).toBe(false);
+    }
+  });
+
+  it('grades a recorded relaunch_sponsor reply correct on an unanswerable truth', () => {
+    const q: PersonaRunInput = { object: 'project', truth: { kind: 'unanswerable' }, personaTruth: { kind: 'unanswerable' }, hidden: {} };
+    // haiku, 2026-11-15, confirm rep1, its first paragraph verbatim.
+    const reply =
+      "The app data doesn't record a sponsor for the Website relaunch. The Project object has no sponsor field, and the Task object has only an assignee, not a sponsor.";
+    expect(gradePersonaRun(q, turn(reply))).toEqual({ correct: true, cited: true, leaks: [], problems: [], declined: true });
+    // A guess beside it is still not correct.
+    expect(gradePersonaRun(q, turn(`${reply} It is probably Ana, who owns 3 projects.`)).problems).toEqual(['stated a figure the data cannot support']);
+  });
+});

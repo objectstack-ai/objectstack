@@ -933,22 +933,21 @@ describe('#31696 [R3] every record of a run follows its key when the name become
 });
 
 /**
- * [#32183, ADR-0150 D3; epic ruling R4-G] The engine reads every holder of a
- * name two slots hold, a disabled package's included, so a disable moves no
- * run's answer: the slot table's `heldByMany`, the shared name's refusal and
- * the shared branch of `resolveFlowKey` answer as `main` does, where the
- * registry's holder read did not yet leave a disabled package out. The
- * served judgment of the run doors is #32670's.
+ * [ADR-0150 D3, #33386; seat ruling 6884403301] The engine's bare entries and
+ * a run's calls judge the SERVED holders of a name two slots hold: a disabled
+ * package holds no name. The slot table stays keyed over every holder
+ * (`heldByMany`, amendment 7): a disable re-points no slot, it only moves
+ * which slot a bare name or a call reaches — the one served holder's; two
+ * served holders are refused naming them only; none is no flow. A caller
+ * flow whose own package holds the name and is disabled gets no flow, never
+ * a closure holder's (amendment 4). Replaces the R4-G parity pin.
  *
  * Two states, as a disable reaches the engine: a runtime disable (both slots
  * stay armed: `disablePackage` unregisters nothing from the engine), and a
  * boot disable (only the enabled holder's flows are armed, the registry holds
- * both). Pinned as parity: for every non-empty disabled set, in both
- * registration orders, the bare execute and a subflow call from a caller flow
- * of each package answer what they answer with the same flows armed and
- * nothing disabled. The CONTROL says what that answer is.
+ * both).
  */
-describe('[#32183] a disable moves no run of a name two slots hold: the engine reads every holder (R4-G)', () => {
+describe('[#33386] a run of a name two slots hold judges the served holders', () => {
     const OPS = 'com.acme.ops';
     const BOTH = 'com.acme.both';
     const NONE = 'com.acme.none';
@@ -989,8 +988,8 @@ describe('[#32183] a disable moves no run of a name two slots hold: the engine r
     }
 
     /** The bare execute's answer, and each armed caller flow's. */
-    async function answersOf(unarmed: readonly string[]): Promise<Record<string, unknown>> {
-        const out: Record<string, unknown> = {};
+    async function answersOf(unarmed: readonly string[]): Promise<Record<string, { success: boolean; error?: string; ran: string[] }>> {
+        const out: Record<string, { success: boolean; error?: string; ran: string[] }> = {};
         const run = async (name: string) => {
             ran = [];
             const result = await engine.execute(name);
@@ -1002,28 +1001,51 @@ describe('[#32183] a disable moves no run of a name two slots hold: the engine r
     }
 
     const ORDERS = [[P1, P2], [P2, P1]];
-    const cases = (sets: readonly (readonly string[])[]) =>
-        ORDERS.flatMap((order) => sets.map((disabled) => [order.join(' then '), disabled.join(' and '), order, disabled] as const));
+    const ranOnly = (tag: string) => ({ success: true, ran: [tag] });
+    const refusedNaming = (answer: { success: boolean; error?: string; ran: string[] }, served: string, off: string) => {
+        expect(answer).toMatchObject({ success: false, ran: [] });
+        expect(String(answer.error)).toContain(served);
+        expect(String(answer.error)).not.toContain(off);
+    };
 
-    it.each(cases([[P1], [P2], [P1, P2]]))(
-        'runtime disable, registered %s, %s disabled: every run answers as with nothing disabled',
-        async (_o, _d, order, disabled) => {
-            setUp(order, [], []);
-            const before = await answersOf([]);
-            setUp(order, [], disabled);
-            expect(await answersOf([])).toEqual(before);
-        },
-    );
+    describe.each(ORDERS.map((order) => [order.join(' then '), order] as const))('registered %s', (_o, order) => {
+        it.each([[P1, P2], [P2, P1]])('runtime disable, %s disabled: the bare name and a closure holding both run the served holder; the disabled holder\'s own call gets no flow', async (off, on) => {
+            setUp(order, [], [off]);
+            const answers = await answersOf([]);
+            expect(answers.bare).toMatchObject(ranOnly(tagOf(on)));
+            expect(answers[goOf(BOTH)]).toMatchObject(ranOnly(tagOf(on)));
+            expect(answers[goOf(on)]).toMatchObject(ranOnly(tagOf(on)));
+            expect(answers[goOf(off)]).toMatchObject({ success: false, ran: [] });
+            if (off === P1) refusedNaming(answers[goOf(OPS)], P2, P1);
+            else expect(answers[goOf(OPS)]).toMatchObject(ranOnly('alpha'));
+            refusedNaming(answers[goOf(NONE)], on, off);
+            // The engine's other bare entries move with execute (amendment 9); the slots do not move (amendment 7).
+            expect((await engine.getFlow('f'))?.nodes?.find((n: any) => n.type === 'mark')?.config?.tag).toBe(tagOf(on));
+            expect(engine.flowSlotKey(off, 'f')).toBe(`${off}/f`);
+            expect(engine.flowSlotKey(on, 'f')).toBe(`${on}/f`);
+            expect(engine.flowDispatchHolder('f')).toMatchObject({ claimBare: false });
+        });
 
-    it.each(cases([[P1], [P2]]))(
-        'boot disable, registered %s, %s disabled (its flows not armed): every run answers as with the same flows armed and nothing disabled',
-        async (_o, _d, order, disabled) => {
-            setUp(order, disabled, []);
-            const before = await answersOf(disabled);
-            setUp(order, disabled, disabled);
-            expect(await answersOf(disabled)).toEqual(before);
-        },
-    );
+        it('runtime disable, both disabled: no run reaches a flow, and the slots stay keyed', async () => {
+            setUp(order, [], [P1, P2]);
+            const answers = await answersOf([]);
+            expect(answers.bare).toEqual({ success: false, error: "Flow 'f' not found", ran: [] });
+            for (const id of CALLERS) expect(answers[goOf(id)], goOf(id)).toMatchObject({ success: false, ran: [] });
+            expect(await engine.getFlow('f')).toBeNull();
+            await expect(engine.toggleFlow('f', false)).rejects.toThrow("Flow 'f' not found");
+            expect(engine.flowSlotKey(P1, 'f')).toBe(`${P1}/f`);
+            expect(engine.flowDispatchHolder('f')).toMatchObject({ claimBare: false });
+        });
+
+        it.each([[P1, P2], [P2, P1]])('boot disable, %s disabled (its flows not armed): the bare name runs the served holder', async (off, on) => {
+            setUp(order, [off], [off]);
+            const answers = await answersOf([off]);
+            expect(answers.bare).toMatchObject(ranOnly(tagOf(on)));
+            expect(answers[goOf(on)]).toMatchObject(ranOnly(tagOf(on)));
+            expect(answers[goOf(BOTH)]).toMatchObject(ranOnly(tagOf(on)));
+            refusedNaming(answers[goOf(NONE)], on, off);
+        });
+    });
 
     it('CONTROL — both slots armed, nothing disabled: what `main` answers', async () => {
         setUp([P1, P2], [], []);

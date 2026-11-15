@@ -40,9 +40,12 @@ import {
 } from '@objectstack/metadata-core/testing';
 import {
   OBJECT_SCHEMA_MASK_DISABLE_ENV,
+  applyInjectedSystemColumns,
   assertEngineUpdateDispatch,
   type ObjectSchemaReadDelegateSource,
 } from '@objectstack/metadata-core';
+import { SEARCH_COMPANION_FIELD } from '@objectstack/spec/data';
+import { provisionSearchCompanion } from '@objectstack/objectql/core';
 import { callerObjectView, createStdioDataBridge, stdioObjectView } from './stdio-data-bridge.js';
 import { registerObjectTools } from './mcp-http-tools.js';
 import { MCPServerPlugin } from './plugin.js';
@@ -719,5 +722,69 @@ describe('stdio describe_object and the objects resource judge readonly on the D
 
   it('the tool and the resource answer the member the same fields', async () => {
     expect((await describeOverResource()).json.fields).toEqual((await describeOverStdio()).json.fields);
+  });
+});
+
+describe('stdio describe_object and the objects resource never list the hidden search companion', () => {
+  // A field-scoped search object as the registry serves it with pinyin search
+  // on: the injected system columns, and the companion the engine stamps
+  // beside the display field (`provisionSearchCompanion`, the producer's own
+  // function, not a transcription of its output). The companion is a column
+  // no caller may read, write or name, so the door that offers an agent a
+  // field to use does not list it. The HTTP twin is pinned on a real engine in
+  // `packages/runtime/src/domains/mcp-object-schema-mask.test.ts`.
+  const CONTACT = 'sc_contact';
+  const served = () => provisionSearchCompanion(applyInjectedSystemColumns({
+    name: CONTACT,
+    label: 'Contact',
+    fields: {
+      name: { type: 'text', label: 'Name', required: true },
+      email: { type: 'email', label: 'Email' },
+    },
+  }));
+  const metadataService = () => ({
+    listObjects: vi.fn(async () => [served()]),
+    getObject: vi.fn(async (name: string) => (name === CONTACT ? served() : undefined)),
+  }) as unknown as IMetadataService;
+  const KEPT = ['name', 'email', 'created_at', 'updated_at', 'organization_id'];
+  const namesOf = (described: any): string[] => described.fields.map((f: any) => f.name);
+
+  it('precondition: the served object carries the companion', () => {
+    expect(Object.keys(served().fields)).toContain(SEARCH_COMPANION_FIELD);
+  });
+
+  it('describe_object over stdio', async () => {
+    const bridge = createStdioDataBridge({
+      engine: {} as unknown as IDataEngine,
+      metadataService: metadataService(),
+      resolvePrincipal: async () => ({ userId: 'u_member' }) as unknown as ExecutionContext,
+    });
+    expect(Object.keys((await bridge.servedObjectDefinitionOf!(CONTACT))!.fields as object)).toContain(SEARCH_COMPANION_FIELD);
+    const server = new McpServer({ name: 'pin', version: '0' });
+    registerObjectTools(server, bridge);
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: 'pin', version: '0' });
+    await client.connect(clientSide);
+    try {
+      const res = (await client.callTool({ name: 'describe_object', arguments: { objectName: CONTACT } })) as {
+        isError?: boolean;
+        content: Array<{ text: string }>;
+      };
+      expect(res.isError === true).toBe(false);
+      const names = namesOf(JSON.parse(res.content[0]!.text));
+      expect(names).not.toContain(SEARCH_COMPANION_FIELD);
+      expect(names).toEqual(expect.arrayContaining(KEPT));
+      expect(res.content[0]!.text).not.toContain(SEARCH_COMPANION_FIELD);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('the objectstack://objects/{name} resource', async () => {
+    const result = await buildObjectSchemaResource(metadataService(), CONTACT);
+    const text = result.contents[0]!.text;
+    expect(namesOf(JSON.parse(text))).toEqual(expect.arrayContaining(KEPT));
+    expect(text).not.toContain(SEARCH_COMPANION_FIELD);
   });
 });

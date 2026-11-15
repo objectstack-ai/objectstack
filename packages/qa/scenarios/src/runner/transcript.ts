@@ -64,6 +64,13 @@ export interface TurnProcess {
    * model it was served is the stream's own `meta.model`.
    */
   requestedModel?: string;
+  /**
+   * The effort level the turn asked for (`--effort` / `--author-effort` /
+   * `--ask-effort`): the `claude` CLI's `--effort`, or an external command's
+   * `limits.effort`. Absent ⇒ none, the CLI's default effort. No stream reports
+   * the effort a turn was served, so this is the only effort on the record.
+   */
+  requestedEffort?: string;
   /** The end of what the CLI wrote to stderr (at most 2,000 characters). */
   stderrTail?: string;
   /** The process could not be started or fed its prompt (`spawn ENOENT`, `write EPIPE`). */
