@@ -39,6 +39,7 @@
     "@libsql/client": "^0.18.0",
     "@objectstack/core": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/observability": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "nanoid": "^6.0.1",
     "zod": "^4.6.6"

@@ -99,10 +99,32 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
   return unwrapEnvelope(await res.json()) as T;
 }
 
-const jsonHeaders = (): HeadersInit => ({
-  'Content-Type': 'application/json',
-  Accept: 'application/json',
-});
+/**
+ * Headers for every `/api/settings` call, carrying the session's UI language
+ * as `Accept-Language`.
+ *
+ * The server composes copy per request from that header (`requestLocaleOf` in
+ * `service-settings`' `settings-routes.ts` reads its top tag): the Localization
+ * page's currency-lock banner, write refusals, action verdicts. Left to the
+ * browser, that copy comes back in the browser's language instead of the one
+ * the rest of the page is in.
+ *
+ * The language is read from `<html lang>`, the one source the console's
+ * authenticated fetch (`createAuthenticatedFetch` in `@object-ui/auth`) reads
+ * for the metadata and data calls: the i18n provider keeps it in step with the
+ * language switcher, so a switch reaches the next settings call too. ⛔ Don't
+ * read the language any other way here; the two stamps must agree. When it is
+ * empty the header is left out and the browser's own goes, as before.
+ */
+const jsonHeaders = (): HeadersInit => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  const lang = typeof document !== 'undefined' ? document.documentElement.lang : '';
+  if (lang) headers['Accept-Language'] = lang;
+  return headers;
+};
 
 /**
  * The env-locked key named by a `SETTINGS_LOCKED` error, read from whichever

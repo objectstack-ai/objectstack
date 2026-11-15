@@ -1840,6 +1840,13 @@ export class AutomationServicePlugin implements Plugin {
      * starts is answered by that one run, which re-reads the whole declaration.
      */
     private connectorMutationReconcilePending = false;
+    /**
+     * [#33839] The inert-descriptor set the last audit found (sorted names,
+     * JSON), `undefined` before the first audit. The audit warns only when the
+     * set differs from it, so the two audits one publish runs (its mutation
+     * signal's and its `metadata:reloaded`'s) say it once.
+     */
+    private lastInertDescriptorAudit: string | undefined;
     /** [#21725] The `onMetadataMutation` subscription (flows, and connectors since #28002); dropped at destroy. */
     private unsubscribeFlowMutations?: () => void;
 
@@ -3222,18 +3229,27 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
-     * Descriptor-only contract audit (#2612) — warn, once per boot/reload,
-     * about declarative `connectors:` entries that declare actions but have no
-     * runtime registration (see {@link findInertDeclaredConnectors}). Reads the
-     * same declaration the reconcile does ({@link readDeclaredConnectorItems}),
-     * so the warning describes the stack as it is NOW rather than as it booted
+     * Descriptor-only contract audit (#2612) — warn about declarative
+     * `connectors:` entries that declare actions but have no runtime
+     * registration (see {@link findInertDeclaredConnectors}). Reads the same
+     * declaration the reconcile does ({@link readDeclaredConnectorItems}), so
+     * the warning describes the stack as it is NOW rather than as it booted
      * (#7742). Best-effort: with nothing declared there is nothing to audit.
+     *
+     * [#33839] Runs wherever a declaration change reconciles: at boot, on
+     * `metadata:reloaded`, and on a connector metadata mutation — a direct
+     * active save raises only the last. It warns when the inert set differs
+     * from the one the previous audit found, naming the whole set, so one
+     * change is said once however many of those signals report it.
      */
     private async auditDeclaredConnectors(ctx: PluginContext): Promise<void> {
-        if (!this.engine) return;
-        // Both call sites are post-boot hooks (`kernel:ready`, `metadata:reloaded`).
+        if (!this.engine || this.destroyed) return;
+        // Every call site runs post-boot (`kernel:ready`, `metadata:reloaded`, the mutation reconcile).
         const declared = await this.readDeclaredConnectorItems(ctx, { post: true });
-        if (!declared || declared.length === 0) return;
+        if (!declared || declared.length === 0) {
+            this.lastInertDescriptorAudit = JSON.stringify([]);
+            return;
+        }
         // [#31699 PR 3] Live is judged per entry, as a dispatch would read it:
         // the entry's own package's caller is served an instance (a plugin's
         // connector of the name, or the package's own). Two packages may each
@@ -3247,7 +3263,10 @@ export class AutomationServicePlugin implements Plugin {
             return engine.resolveConnectorInstanceFor(name, connectorInstancePackage(resolve, entry)).status !== 'instance';
         });
         const inert = findInertDeclaredConnectors(unserved, new Set());
-        if (inert.length === 0) return;
+        const audited = JSON.stringify([...inert].sort());
+        const unchanged = audited === this.lastInertDescriptorAudit;
+        this.lastInertDescriptorAudit = audited;
+        if (inert.length === 0 || unchanged) return;
         ctx.logger.warn(
             `[Automation] ${inert.length} declarative connector(s) declare actions but are not registered ` +
                 `in the connector registry — the connector_action node cannot dispatch them: ${inert.join(', ')}. ` +
@@ -6304,6 +6323,12 @@ export class AutomationServicePlugin implements Plugin {
      * finds every signature unchanged and leaves the instances alone.
      * Coalesced: a reconcile queued and not yet started answers every
      * connector mutation reported before it starts.
+     *
+     * [#33839] Then the descriptor audit `metadata:reloaded` runs, on the same
+     * queue so it judges the registry this reconcile left: a catalog
+     * descriptor saved active is reported as inert without waiting for a
+     * publish or a restart, and a publish's second audit stays quiet
+     * ({@link auditDeclaredConnectors}).
      */
     private queueConnectorMutationReconcile(ctx: PluginContext): void {
         if (this.connectorMutationReconcilePending) return;
@@ -6311,6 +6336,7 @@ export class AutomationServicePlugin implements Plugin {
         void this.onReconcileQueue(async () => {
             this.connectorMutationReconcilePending = false;
             await this.reconcileDeclaredConnectors(ctx, { fatal: false });
+            await this.auditDeclaredConnectors(ctx);
         }).catch((err) => {
             ctx.logger.warn(
                 '[Automation] reconciling the connectors after a connector metadata change failed; '

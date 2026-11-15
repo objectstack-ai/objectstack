@@ -108,6 +108,34 @@
   `--driver recorded:FILE` handed back the recorded turn and sent nothing, so the freshly booted app never received the agent's writes: every `applied` operation read back no row and failed on replay ("0 row(s) read back"), and the operations half of a re-scored run was false fails.
   
   The replay now re-sends a turn's recorded writes (`create_record`, `update_record`, `delete_record`, `run_action`) to the booted app, in recorded order, as the turn's persona, through the runner's own MCP door, before the runner reads the operation back. Reads are never re-sent. A recorded refused write is re-sent too and must meet the same refusal again. A row the recorded run created gets a new id in the replayed app, and a later recorded write naming the old id is sent with the new one. When the app answers a re-sent write otherwise than it answered the recorded run, or a recorded write has no recorded answer (the turn was cut short, so whether it wrote is unknown, and nothing of that turn is re-sent), the turn's question or operation is not measured, with the call named in the reason, never a fail. Live drivers are unchanged.
+- f8f35db: feat(scenarios): `--effort` (and `--author-effort` / `--ask-effort`) reaches `claude --effort`, and every turn records the effort it asked for
+  
+  Clause-②: yes (widening) — new CLI flags `--effort`, `--author-effort` and `--ask-effort` on `objectstack-scenarios run` / `run-scenarios`; new exports `CLAUDE_EFFORT_ENV` and `effortLevelsFromHelp` (`./runner`); new optional fields `ClaudeCodeDriverOptions.effort` / `authorEffort` / `askEffort`, `ExternalDriverOptions.effort` / `authorEffort` / `askEffort`, `DriverInfo.authorEffort` / `askEffort`, `ExternalLimits.effort`, `TurnProcess.requestedEffort`, `TurnSummary.requestedEffort` and `HalfScores.build.author.requestedEffort`, and the field `ModelTally.requestedEfforts` (all `./runner`)
+  Metadata-protocol: none
+  
+  Until now the runner passed no effort, so every turn ran at the CLI's default and neither the run record nor the scorecard could say which effort produced a score.
+  
+  `--effort LEVEL` passes `claude --effort LEVEL` on every live turn; `--author-effort` and `--ask-effort` set the authoring turns and the question and operation turns apart, each in place of `--effort`, as the model flags do. The levels are the CLI's own, read off its `--help` when an effort is asked for (Claude Code 2.1.325: `low`, `medium`, `high`, `xhigh`, `max`); a level the CLI does not list is refused before any card runs, because the CLI itself only warns about an unknown level and runs the turn at its default effort.
+  
+  `CLAUDE_CODE_EFFORT_LEVEL`, which the CLI lets win over `--effort`, no longer reaches a turn: with no effort flag, the runner passes its level as `--effort` (`auto` and `unset` still mean the default), so the record names the effort that ran.
+  
+  Every turn records the effort it asked for (`requestedEffort`); the CLI reports no served effort. The scorecard shows the effort beside the served model on the author rows and the `Run · model` rows, and the record's driver states `authorEffort` and `askEffort`. `--driver external:` passes the level to the command as `limits.effort`; `--driver codex` and `--driver recorded:` refuse the three flags (`codex exec` has no effort flag; a replay re-reads each turn as it was recorded).
+- e0775f7: fix(scenarios): a card's dates move onto the day it runs, so its "today" agrees with the app's real clock
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A card fixes its "today" (`asOf`) and every prompt states it, but the app the run boots stamps `created_at` and `updated_at` with the real clock. A run weeks after `asOf` showed the agent seeded rows "created" after the day it was told was today. Agents stopped to ask about the mismatch, and correct operations failed.
+  
+  Before each card runs, `run-scenarios` now moves the card's dates by one whole-day delta, `run date − asOf`. The delta applies to `asOf`, every ISO date under `run` and `iterate` (seed rows, truth filters, operation values and expected post-states), and the dates an operation's or question's `ask` writes in its text (ISO dates, English `[Weekday] D Month`, Chinese `M 月 D 日(周X)`, with weekday names written again). The truths are computed again over the moved seed, so the prompt's "today", the seeded rows, the record timestamps and the grader's expectations agree. Intervals between the card's dates are kept exactly. A `calendar` window (`this_month`, `previous_month`) is read around the moved today. The card files are not changed, and a card without `asOf` runs as before.
+- 4b5024d: fix(scenarios): the run grader reads a written calendar date ("31 Dec") as no figure
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An unanswerable question passes when the agent declines and every number it writes is carried by a tool output of the turn. The number reader skipped ISO dates only, so a decline that offered to list laptops "whose 36-month depreciation life ends by 31 Dec" read `31` as a figure no output carried, and a correct reply failed with "stated a figure the data cannot support".
+  
+  The reader now skips a written calendar date the way it skips an ISO date: a day and a month name in either order (`31 Dec`, `Dec 31, 2026`), a month name with its year (`December 2026`), a slash date with its year (`31/12/2026`), and a Chinese date (`12月31日`, `2026年12月`). A month name is read only capitalised, a slash pair with no year (`3/4`) stays a figure, and a number beside no month is still read, so an invented count or amount ("about 12 laptops", "$4,200 due by 31 Dec") still fails.
 - Updated dependencies [f229dfd]
 - Updated dependencies [322ded7]
 - Updated dependencies [f4cafd5]
