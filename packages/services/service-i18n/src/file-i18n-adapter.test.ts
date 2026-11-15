@@ -66,6 +66,28 @@ describe('FileI18nAdapter', () => {
     });
   });
 
+  // #33634 — the declared source locale is readable, so the serving layer can
+  // hand the document translators the authored label's language.
+  describe('getSourceLocale / setSourceLocale', () => {
+    it('reports undefined until told, never derived from defaultLocale', () => {
+      const i18n = new FileI18nAdapter({ defaultLocale: 'zh-CN', fallbackLocale: 'zh-CN' });
+      expect(i18n.getSourceLocale()).toBeUndefined();
+      i18n.setSourceLocale('en');
+      expect(i18n.getSourceLocale()).toBe('en');
+      expect(i18n.getDefaultLocale()).toBe('zh-CN');
+    });
+
+    it('changes no t() lookup', () => {
+      const i18n = new FileI18nAdapter({ defaultLocale: 'zh-CN', fallbackLocale: 'zh-CN' });
+      i18n.loadTranslations('zh-CN', { objects: { account: { label: '客户' } } });
+      i18n.loadTranslations('en', {});
+      const before = i18n.t('objects.account.label', 'en');
+      i18n.setSourceLocale('en');
+      expect(i18n.t('objects.account.label', 'en')).toBe(before);
+      expect(before).toBe('客户');
+    });
+  });
+
   it('should return empty translations for unknown locale', () => {
     const i18n = new FileI18nAdapter();
     expect(i18n.getTranslations('fr')).toEqual({});
