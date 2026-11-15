@@ -4982,7 +4982,7 @@
       "title": "A permission set travels as (package, name) from the grant to every request's evaluation: the execution context carries permissionSetAddresses, the evaluator reads each set at its holder, the activation ledger switches a set off per holder, and an OAuth client acting for a user carries none",
       "since": "v18.4",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -4992,19 +4992,17 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket and the permission set qa_a_reader (read on qa_a_ticket, nothing else); qa_b declares one object and no permission set",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket and the permission set qa_a_reader (read on qa_a_ticket, nothing else); qa_b declares the object qa_b_note and a permission set of the same name, qa_a_reader (read on qa_b_note, nothing else): one name, two holders in two namespaces. The install door admits the second holder, because two packages whose declared namespaces differ, neither of them a shareable platform namespace, do not meet (packages/core/src/permission-set-holders.ts#permissionSetHoldersMeet, ADR-0150 D2/D9); acceptance[5] scores both installs",
           "a boot on a file database, as platform-core.activation-ledger-row-contract boots, because two steps stop the server and write the ledger directly",
-          "a member M (any signed-up person) granted qa_a_reader as admin with POST /api/v1/data/sys_user_permission_set {\"user_id\": M, \"permission_set\": \"qa_a_reader\"}; the grant door stamps permission_set_package (access-security.permission-set-package-resolution); one qa_a_ticket record owned by M (create it as admin with owner_id set to M). qa_a_ticket's declared sharingModel decides who reads a row; on a private object M reads only rows M owns, so a record the admin owns reads as 0 rows for M though the qa_a_reader grant holds"
-        ],
-        "knownGaps": [
-          "two packages each shipping qa_a_reader is not reachable through install today (#32027's own note), so the cases this change exists for (one name, two holders, each grant reaching only its own) are held by packages/plugins/plugin-security/src/permission-set-address.test.ts, not driven live"
+          "a member M (any signed-up person) granted com.qa.addr-a's qa_a_reader as admin with POST /api/v1/data/sys_user_permission_set {\"user_id\": M, \"permission_set\": \"qa_a_reader\", \"permission_set_package\": \"com.qa.addr-a\"}: with two holders the grant names its package, which it then holds alone (packages/plugins/plugin-security/src/grant-permission-set-name.ts; access-security.permission-set-package-resolution), and the same POST without the package is refused (acceptance[5]); one qa_a_ticket record owned by M (create it as admin with owner_id set to M). qa_a_ticket's declared sharingModel decides who reads a row; on a private object M reads only rows M owns, so a record the admin owns reads as 0 rows for M though the qa_a_reader grant holds"
         ]
       },
       "steps": [
         "as M: GET /api/v1/auth/me/permissions and GET /api/v1/data/qa_a_ticket. As admin: POST /api/v1/security/explain {\"userId\": M, \"object\": \"qa_a_ticket\", \"operation\": \"read\"}, and read M's grant row (GET /api/v1/data/sys_user_permission_set) for its permission_set_package",
-        "stop the server. In the database file, INSERT one sys_metadata_activation row: metadata_type 'permission', package_id 'com.qa.addr-b', name 'qa_a_reader', active false, with a fresh id and the audit columns as an existing row carries them. com.qa.addr-b holds no qa_a_reader, so the row's package_id is a stale column: it names no holder of the name. Restart and repeat step 1. Then stop, DELETE that row, restart and repeat step 1",
-        "as admin: POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": false}; read the row it wrote (GET /api/v1/data/sys_metadata_activation); repeat step 1",
-        "stop the server; UPDATE that row's package_id to NULL (a package-less row, the shape an earlier release wrote); restart and repeat step 1. Then POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": true} and repeat step 1 once more"
+        "stop the server. In the database file, INSERT one sys_metadata_activation row: metadata_type 'permission', package_id 'com.qa.addr-gone', name 'qa_a_reader', active false, with a fresh id and the audit columns as an existing row carries them. No installed package has the id com.qa.addr-gone, so the row's package_id is a stale column: it names no holder of the name. Restart and repeat step 1. Then stop, DELETE that row, restart and repeat step 1",
+        "as admin: POST /api/v1/security/_activation/permission/qa_a_reader {\"enabled\": false}, naming no package, and read the ledger (GET /api/v1/data/sys_metadata_activation). Then POST /api/v1/security/_activation/permission/qa_a_reader?package=com.qa.addr-a {\"enabled\": false}; read the row it wrote; repeat step 1",
+        "stop the server; UPDATE that row's package_id to NULL (a package-less row, the shape an earlier release wrote); restart and repeat step 1. Then POST /api/v1/security/_activation/permission/qa_a_reader?package=com.qa.addr-a {\"enabled\": true} and read the ledger. Then stop, DELETE the package-less row, restart and repeat step 1 once more",
+        "as admin: POST /api/v1/security/_activation/permission/qa_a_reader?package=com.qa.addr-b {\"enabled\": false}; read the ledger; repeat step 1. Then POST the same address with {\"enabled\": true}"
       ],
       "acceptance": [
         {
@@ -5014,38 +5012,51 @@
           "evidence": "the effective-permissions body, the data read and the grant row"
         },
         {
-          "clause": "a ledger row whose package_id names a package holding no set of the name is a stale column: it switches off the holder the name resolves to, never nothing; a real second holder's row switching nothing off for M's is the pin's case",
+          "clause": "a ledger row whose package_id names a package holding no set of the name is a stale column: it switches the name off, never nothing, and with two holders it switches off every holder of the name",
           "oracle": "api",
-          "verify": "after step 2's restart M no longer lists qa_a_reader, the data read no longer returns the record (record its status), and explain carries qa_a_reader 'held — deactivated': the ledger reads a stale package_id by the D3 rule with no caller and keeps disabling the holder that rule answers, here com.qa.addr-a, and a holder outside the stale package's namespace is switched off too, because a switch-off is never read as none (packages/core/src/security/resolve-authz-context.ts#ledgerRowHolders, #31698). After the row is deleted and the server restarted, step 1's answers are back. The case this clause first meant, a real second holder of the name whose row switches nothing off for M's, is not reachable through install (knownGaps): score it from packages/plugins/plugin-security/src/permission-set-address.test.ts, 'a holder of a grant the user does not hold switches nothing off for the one they do', which reports ≥1 test and 0 failed at the run subject sha (packages/core/src/security/resolve-authz-context.ts#permissionSetSwitchedOff, per holder since #32027)",
-          "evidence": "the three answers after the restart and after the delete, and the pin file's vitest summary line with the subject sha"
+          "verify": "after step 2's restart M no longer lists qa_a_reader, the data read no longer returns the record (record its status), and explain carries qa_a_reader 'held — deactivated': the ledger reads a stale package_id by the D3 rule with no caller, and with two holders that rule picks none, so the row switches off every holder of the name, com.qa.addr-a's included, because a switch-off is never read as none (packages/core/src/security/resolve-authz-context.ts#ledgerRowHolders, #31698). After the row is deleted and the server restarted, step 1's answers are back. While such a row stands the door refuses to switch any holder back on (packages/runtime/src/domains/permission-set-package-doors.test.ts, 'a row naming a package that no longer serves the name keeps both holders off too')",
+          "evidence": "the three answers after the restart and after the delete"
         },
         {
-          "clause": "the holder's own row switches the set off, and explain names it deactivated",
+          "clause": "the holder's own row switches the set off, and explain names it deactivated; the door switches a holder only by its package, because the bare name has two",
           "oracle": "api",
-          "verify": "the door's row carries package_id com.qa.addr-a and active false; M's effective permissions no longer list qa_a_reader and the data read no longer returns the record (record its status); explain's principal layer carries the contributor {kind: 'permission_set', name: 'qa_a_reader', via: 'held — deactivated', state: 'deactivated'} (packages/plugins/plugin-security/src/explain-engine.ts, which judges dropped grants per holder)",
-          "evidence": "the ledger row and the three answers"
+          "verify": "the bare POST answers 409 RESOURCE_CONFLICT, its error.details.candidates naming com.qa.addr-a and com.qa.addr-b, and the ledger holds no qa_a_reader row after it (packages/runtime/src/domains/catalog-activation.ts, the ?package= qualifier). The ?package=com.qa.addr-a POST answers 200, and its row carries package_id com.qa.addr-a and active false. M's effective permissions no longer list qa_a_reader and the data read no longer returns the record (record its status); explain's principal layer carries the contributor {kind: 'permission_set', name: 'qa_a_reader', via: 'held — deactivated', state: 'deactivated'} (packages/plugins/plugin-security/src/explain-engine.ts, which judges dropped grants per holder)",
+          "evidence": "the 409 body, the two ledger reads and the three answers"
         },
         {
-          "clause": "a package-less row switches every holder of the name off, and re-enabling restores the grant",
+          "clause": "a package-less row switches every holder of the name off, and no holder's own switch outvotes it: switching com.qa.addr-a back on is refused until that row is deleted",
           "oracle": "api",
-          "verify": "with package_id NULL, step 1's answers are those of the previous clause (packages/core/src/security/resolve-authz-context.ts#readDisabledCatalogNames); after {\"enabled\": true} M lists qa_a_reader again and reads the record",
-          "evidence": "both sets of answers"
+          "verify": "with package_id NULL, step 1's answers are those of the previous clause (packages/core/src/security/resolve-authz-context.ts#readDisabledCatalogNames: a row naming no package, on a name two packages hold, switches every holder off). The ?package=com.qa.addr-a {\"enabled\": true} POST answers 409 RESOURCE_CONFLICT naming the row that names no package, and the ledger read after it is unchanged: nothing was written. After that row is deleted and the server restarted, M lists qa_a_reader again and reads the record",
+          "evidence": "both sets of answers, the 409 body and the ledger reads"
         },
         {
           "clause": "an OAuth client acting for a user carries no address; an AI service account carries its own",
           "oracle": "test",
           "verify": "packages/core/src/security/assemble-execution-context.ts#assembleExecutionContext sets permissionSetAddresses to undefined on the OAuth agent arm: its permissions are the scope-derived ceiling names, which resolve by D3 with no caller, as #32027's comment on the line states. The AI service account (ADR-0151) is the account arm, not that one, and carries authz.permissionSetAddresses. ⚠️ No pin tells the arms apart: assemble-execution-context.test.ts's 'decided but not yet filled' case asserts the agent context has no key, but its authz fixture carries no addresses either. Score this clause from the source reading and say so in the run record (FOLLOW-UPS §16b)",
           "evidence": "the source lines read, and the run record's note"
+        },
+        {
+          "clause": "a second package of another namespace holds the same name: both install, a grant naming no package is refused naming both holders, and the grant naming com.qa.addr-a holds that package's set alone",
+          "oracle": "api",
+          "verify": "qa_b's install succeeds beside qa_a's (packages/core/src/permission-set-holders.ts#permissionSetHoldersMeet). As admin, POST /api/v1/data/sys_user_permission_set {\"user_id\": M, \"permission_set\": \"qa_a_reader\"} answers 409 RESOURCE_CONFLICT, its error.details.candidates naming com.qa.addr-a and com.qa.addr-b, and writes no row (packages/plugins/plugin-security/src/grant-permission-set-name.ts; packages/rest/src/data-package-scoped-refusal-candidates.test.ts). The fixture's grant naming com.qa.addr-a lands, and in step 1 M reads the qa_a_ticket record while GET /api/v1/data/qa_b_note returns M no row (record its status)",
+          "evidence": "the two install answers, the refused and the landed grant, and M's two reads"
+        },
+        {
+          "clause": "a real second holder's row switches only that holder off: M's set keeps granting",
+          "oracle": "api",
+          "verify": "after step 5's switch-off the ledger row carries package_id com.qa.addr-b and active false, and M still lists qa_a_reader, still reads the record, and explain carries no deactivated contributor for qa_a_reader: the ledger is judged per holder (packages/core/src/security/resolve-authz-context.ts#permissionSetSwitchedOff, per holder since #32027). The same case is pinned in packages/plugins/plugin-security/src/permission-set-address.test.ts, 'a holder of a grant the user does not hold switches nothing off for the one they do'",
+          "evidence": "the ledger row and the three answers"
         }
       ],
       "negative": [
-        "the stale row of step 2 leaving M's set granting is a FAIL: a row naming a package that holds no set of the name is read by the D3 rule, never as no switch-off. A real second holder's row switching M's set off is a FAIL too (the pin's case): the ledger is judged per holder",
-        "⛔ leaving step 2's foreign row in place before step 3 makes the door switch that row instead of writing com.qa.addr-a's: setActive finds its row by (metadata_type, name) (packages/core/src/utils/metadata-activation-store.ts, FOLLOW-UPS §16b). That is a fixture error, never a verdict on this item"
+        "the stale row of step 2 leaving M's set granting is a FAIL: a row naming a package that holds no set of the name is read by the D3 rule, never as no switch-off. A real second holder's row switching M's set off (step 5) is a FAIL too: the ledger is judged per holder",
+        "⛔ leaving step 2's stale row in place before step 3 keeps every holder off whatever the door then writes: with two holders the door never re-addresses such a row, each holder writing its own (packages/runtime/src/domains/catalog-activation.ts#PERMISSION_LEDGER_ADDRESSING), so step 3's answers would be the stale row's. That is a fixture error, never a verdict on this item",
+        "a grant or an activation switch naming qa_a_reader without a package answering 200 is a FAIL: with two holders the bare name picks none (ADR-0150 D3), so the write would land on a holder nobody named"
       ],
       "traps": ["cache-staleness", "wrong-persona"],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-security/src/permission-set-address.test.ts and packages/core/src/security/request-execution-context.test.ts; no live spec drives the ledger per holder"
+        "ref": "packages/plugins/plugin-security/src/permission-set-address.test.ts and packages/core/src/security/request-execution-context.test.ts; for the two-holder doors packages/runtime/src/domains/permission-set-package-doors.test.ts (the activation door), packages/plugins/plugin-security/src/grant-permission-set-package.test.ts (the grant door) and packages/objectql/src/protocol-permission-set-name-registry-reading.test.ts (the install door admitting a second namespace's holder); no live spec drives the ledger per holder"
       },
       "source": [
         "packages/core/src/security/assemble-execution-context.ts#assembleExecutionContext (permissionSetAddresses: agent ? undefined : authz.permissionSetAddresses)",
@@ -5054,7 +5065,9 @@
         "packages/plugins/plugin-security/src/permission-evaluator.ts#permissionSetRequestsFor (the evaluator reads each set at its address)",
         "packages/plugins/plugin-security/src/explain-engine.ts (dropped grants per holder)",
         "packages/spec/src/kernel/execution-context.zod.ts#PermissionSetAddressSchema (declared by #31978)",
-        "#32027 (part of #31971), #31698 (permission-set family narrowing, open)"
+        "#32027 (part of #31971), #31698 (the permission-set family's narrowing to the namespace)",
+        "packages/core/src/permission-set-holders.ts#permissionSetHoldersMeet (two packages of two namespaces may each hold one set name)",
+        "packages/runtime/src/domains/catalog-activation.ts#PERMISSION_LEDGER_ADDRESSING (the activation door's ?package= qualifier and one ledger row per holder)"
       ],
       "history": [
         {
@@ -5080,6 +5093,12 @@
           "date": "2026-11-15",
           "change": "fixtures.requires[2] says the qa_a_ticket record is owned by M: on a private scratch object a row the admin owns reads 0 rows for M, which hides the grant the item reads (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 24). No clause changed. Read at base bc6b7ffd",
           "ref": "#34016"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "knownGaps[0] closed: since the permission-set narrowing (#31698, ADR-0150 D2/D9) two packages of two namespaces each install a set of one name (packages/core/src/permission-set-holders.ts#permissionSetHoldersMeet), so the two-holder case is driven live. qa_b now ships its own qa_a_reader, and the fixture's grant names its package. steps[1]'s stale column names a package id nothing installs; steps[2] meets the bare door's 409 first and switches com.qa.addr-a's own row by ?package=; steps[3]'s re-enable is refused 409 while the package-less row stands, and the row is deleted instead (acceptance[3] rewritten). New steps[4] with acceptance[6] drives a real second holder's row, until now scored from the pin only; new acceptance[5] scores both installs and the refused bare grant. negative[1] rewritten: the permission ledger is addressed by (package, name). Read at main 159757ab, and measured there: the four pins (permission-set-address 24 tests, grant-permission-set-package 25, permission-set-package-doors 40, protocol-permission-set-name-registry-reading 18, 0 failed) and a throwaway resolver probe (on a name two packages hold, a stale row naming an unknown package, or an installed package holding no set, switches the granted holder off; a real second holder's row does not). Seat scope addition 6897734692 on card #33969",
+          "ref": "#PENDING-33969"
         }
       ]
     },
