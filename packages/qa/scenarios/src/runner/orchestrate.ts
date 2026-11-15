@@ -6,8 +6,9 @@
  *   scratch   scaffold → the agent builds from the card prompt → `os validate`,
  *             `os build`, `os verify` (opt-in proofs from the tags) → score the
  *             artifact → boot, seed, one user + key per persona → the Run half
- *             (every question as every persona it names, every operation as
- *             its persona, each over the app's own MCP, and a probed
+ *             (every question as every persona it names, `askRepeats` times
+ *             each, every operation once as its persona, each over the app's
+ *             own MCP, and a probed
  *             operation's declared write — the validation operation's and
  *             each permission overstep's — re-sent by the runner itself as
  *             that persona, `observeProbe`; an `applied` operation's too
@@ -92,6 +93,13 @@ export interface RunOptions {
   templateArtifact?: unknown;
   /** The dev admin the runner signs in as (`os dev --fresh` seeds it). */
   admin: { email: string; password: string };
+  /**
+   * How many times each (question, persona) turn is asked on the same booted
+   * app (`--ask-repeats`), each ask a fresh agent session; default 1.
+   * Operations are never repeated: they write, and a second run would act on
+   * the rows the first one changed.
+   */
+  askRepeats?: number;
 }
 
 // ── The record of one card ──────────────────────────────────────────────────
@@ -164,6 +172,12 @@ export interface BuildHalf {
 export interface QuestionResult {
   question: string;
   persona: string | null;
+  /**
+   * Which ask of the turn this is, counted from 1, when the run asked each
+   * question turn more than once ({@link RunOptions.askRepeats}); every ask
+   * keeps its own grade. Absent when the run asked once.
+   */
+  repeat?: number;
   /**
    * Why this turn measures nothing: it was not asked, because its expected
    * answer changes without the rows the seed could not load ({@link seedDependence});
@@ -258,6 +272,12 @@ export interface CardRun {
   title: CardTitle;
   capabilities: string[];
   counts: { questions: number; questionTurns: number; operations: number; personas: number };
+  /**
+   * How many times each question turn was asked ({@link RunOptions.askRepeats}),
+   * when more than once; absent ⇒ once. Outside `counts`, whose shape a record
+   * reader may hold exact.
+   */
+  askRepeats?: number;
   modes: ModeRun[];
 }
 
@@ -300,6 +320,11 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).sli
 
 /** Why a replayed turn measures nothing ({@link ReplayNotFaithfulError}): what its read-back would grade is the replay's, not the agent's. */
 const replayNotFaithful = (e: ReplayNotFaithfulError): string => `the replay is not faithful: ${e.reason}`.slice(0, 2000);
+
+/** Refuse an ask count that is not a whole number above 0 ({@link RunOptions.askRepeats}). */
+function assertAskRepeats(n: number): void {
+  if (!Number.isInteger(n) || n < 1) throw new RangeError(`askRepeats takes a whole number of asks above 0, not ${String(n)}`);
+}
 
 /** `60 min`, `0.5 min`: a timeout as the not-measured reason states it. */
 export const minutesText = (ms: number): string => `${Number((ms / 60_000).toFixed(2))} min`;
@@ -743,6 +768,14 @@ export async function seedApp(
  * Seed, personas, every question and every operation, against one booted app.
  * `built` is the artifact the app serves, whose required lookups decide which
  * side of a reference cycle the seed's second pass sets ({@link seedApp}).
+ *
+ * Each (question, persona) turn is asked `askRepeats` times in a row
+ * ({@link RunOptions.askRepeats}), every ask a fresh driver call under its own
+ * replay key ({@link StepRef.repeat}) and graded on its own; the first ask's
+ * key is the one a single ask has. Every question is asked before any
+ * operation writes, so each ask reads the same rows. A turn the seed takes out
+ * ({@link seedDependence}) is not measured at every ask alike. Operations run
+ * once. The guardrails are graded over every turn that ran, each ask included.
  */
 export async function runHalf(
   scenario: LoadedScenario,
@@ -751,7 +784,9 @@ export async function runHalf(
   ref: Pick<StepRef, 'card' | 'mode' | 'phase'>,
   objectLabels?: Record<string, string[]>,
   built?: unknown,
+  askRepeats = 1,
 ): Promise<RunHalf> {
+  assertAskRepeats(askRepeats);
   const { card } = scenario;
   const half: RunHalf = { personas: [], seed: { inserted: 0, refused: [] }, questions: [], operations: [] };
   const accounts: PersonaAccount[] = [];
@@ -782,29 +817,31 @@ export async function runHalf(
     for (const q of card.run.questions) {
       for (const persona of [null, ...(q.personas ?? [])]) {
         if (persona === null && q.personas?.length) continue; // a persona-scoped question is asked as its personas
-        const res: QuestionResult = { question: q.id, persona };
         const notMeasured = dependence.question(q, persona);
-        if (notMeasured) {
-          half.questions.push({ ...res, notMeasured });
-          continue;
+        for (let repeat = 1; repeat <= askRepeats; repeat++) {
+          const res: QuestionResult = { question: q.id, persona, ...(askRepeats > 1 ? { repeat } : {}) };
+          if (notMeasured) {
+            half.questions.push({ ...res, notMeasured });
+            continue;
+          }
+          try {
+            const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), ...(repeat > 1 ? { repeat } : {}), prompt: questionPrompt(scenario, q.id), ...doorOf(persona) });
+            turns.push({ step: q.id, ...(persona ? { persona } : {}), turn });
+            res.turn = summarize(turn);
+            res.grade = gradeCardAnswer(scenario, {
+              question: q.id,
+              ...(persona ? { persona, hidden: { values: hiddenValues(scenario, persona) } } : {}),
+              ...(objectLabels ? { objectLabels } : {}),
+              turn,
+            });
+          } catch (e) {
+            if (e instanceof ReplayNotFaithfulError) {
+              res.turn = summarize(e.turn);
+              res.notMeasured = replayNotFaithful(e);
+            } else res.error = errText(e);
+          }
+          half.questions.push(res);
         }
-        try {
-          const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), prompt: questionPrompt(scenario, q.id), ...doorOf(persona) });
-          turns.push({ step: q.id, ...(persona ? { persona } : {}), turn });
-          res.turn = summarize(turn);
-          res.grade = gradeCardAnswer(scenario, {
-            question: q.id,
-            ...(persona ? { persona, hidden: { values: hiddenValues(scenario, persona) } } : {}),
-            ...(objectLabels ? { objectLabels } : {}),
-            turn,
-          });
-        } catch (e) {
-          if (e instanceof ReplayNotFaithfulError) {
-            res.turn = summarize(e.turn);
-            res.notMeasured = replayNotFaithful(e);
-          } else res.error = errText(e);
-        }
-        half.questions.push(res);
       }
     }
 
@@ -939,7 +976,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   // A build whose authoring turn did not finish is not measured: no seed, no Run, no iterate on it.
   if (mode.build.notMeasured) return { mode };
   const builtArtifact = ops.readArtifact(dir);
-  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact));
+  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats));
 
   const iterated = iteratedScenario(scenario);
   const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card), tier: card.tier })).turn, iterated);
@@ -950,7 +987,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const after = ops.readArtifact(dir);
   mode.iterate = { build, ...(builtArtifact !== undefined && after !== undefined ? { changeSize: changeSize(builtArtifact, after) } : {}) };
   if (opts.iterateRun !== false && after !== undefined) {
-    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after));
+    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats));
     if (run) mode.iterate.run = run;
   }
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -1006,7 +1043,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     const served = withoutItems(after, baseline);
     scoreInto(build, scenario, iterated, served);
     mode.iterate = { build, changeSize: changeSize(before, after) };
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served);
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats);
   });
   return mode;
 }
@@ -1014,12 +1051,15 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
 /** Run one card in the requested modes. */
 export async function runCard(scenario: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions): Promise<CardRun> {
   const { card } = scenario;
+  const askRepeats = opts.askRepeats ?? 1;
+  assertAskRepeats(askRepeats);
   const questionTurns = card.run.questions.reduce((n, q) => n + (q.personas?.length ? q.personas.length : 1), 0);
   const out: CardRun = {
     card: card.id,
     title: card.title,
     capabilities: card.capabilities,
     counts: { questions: card.run.questions.length, questionTurns, operations: card.run.operations.length, personas: card.run.personas.length },
+    ...(askRepeats > 1 ? { askRepeats } : {}),
     modes: [],
   };
   let verified: { artifact: unknown; source: string } | undefined =
