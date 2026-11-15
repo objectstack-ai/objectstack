@@ -9,6 +9,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { PackageScopedNameRefusedError, packageScopedRefusalMessage } from '@objectstack/core';
+// Paid during collection, not inside a case's clocked window: the route
+// source reaches `@objectstack/objectql` through a dynamic import.
+import '@objectstack/objectql';
 import { RestServer } from './rest-server';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
