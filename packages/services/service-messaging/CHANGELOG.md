@@ -32,6 +32,14 @@
   A `role:NAME` audience now resolves in the emitting organization: the organization the producer passed to `emit()`, else the one stored on the notification's own event row, which is the organization its delivery, inbox and receipt rows already carry. It reaches the holders of that role in that organization and in no other. When neither the producer nor the stored event row names an organization, `role:` reaches nobody: 0 recipients and a warning naming the remedy (pass `organizationId` to `emit()`), the same answer `org:members` gives without an organization. Every other selector is unchanged: `org:members` still resolves with the organization the producer passed, and nobody when it passed none. Emits that name their organization resolve as before.
   
   Who moves: a producer whose `role:` audience has no organization anywhere — none passed to `emit()` and none stored on the event row — now reaches no one, with a warning. Pass the organization to `emit()`, or run the flow that carries the `notify` node in the organization whose members it addresses.
+- 2673f59: Clause-②: no
+  Metadata-protocol: none
+  
+  `MessagingService.emit` reads the recipients' notification preferences in the emitting organization, the same one a `role:` audience resolves in: the organization the producer names, else the one stored on the notification's event row. A producer that named no organization used to read the preference rows with no organization term, under the system opt-in, so a row stored under another organization could mute a recipient or override their opt-out. With no organization from either the producer or the event row, the read is unchanged.
+  
+  Who moves: an emit whose producer names no organization, on an install where the engine stamps the event row (`single`, one organization) and preference rows are stored under another organization. Every emit that names its organization is unchanged.
+  
+  Also: when `role:` and the other selectors resolve in different organizations, an audience entry that is itself a list is skipped, as it already was when they agree; it was expanded before. No typed audience is affected.
 - Updated dependencies [f229dfd]
 - Updated dependencies [322ded7]
 - Updated dependencies [f4cafd5]

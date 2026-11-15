@@ -26,6 +26,7 @@ import {
     type OverlayMemberBackfillEngine,
 } from './overlay-index.js';
 import type { IndexExec } from './partial-index-probe.js';
+import { ensureOverlayIndex } from '../protocol-overlay-index.js';
 
 /**
  * `sys_metadata` — overlay uniqueness survives a failed tightening (#6418).
@@ -845,5 +846,122 @@ describe('sys_metadata overlay key — an action\'s bound object in `bundle_memb
             update: async (_table: string, data: Record<string, unknown>) => { updates.push(data); return {}; },
         } as unknown as OverlayMemberBackfillEngine);
         expect(updates, 'the backfill leaves an action row\'s member to its writer').toEqual([]);
+    });
+});
+
+/**
+ * The PostgreSQL arm reaches the overlay index too.
+ *
+ * On PostgreSQL the declared `idx_sys_metadata_overlay_active` is a UNIQUE
+ * CONSTRAINT (knex's `table.unique()`), so `DROP INDEX` on it is refused with
+ * 2BP01 and `CREATE UNIQUE INDEX IF NOT EXISTS` under the held name is a no-op.
+ * `probeThenReplaceIndex` frees such a name and confirms the rebuild by reading
+ * the definition back — but only when the caller passes the table and the
+ * client name. The other two callers did; this one did not, so the NULL-distinct
+ * constraint stayed and the step answered `created`.
+ *
+ * The double below answers the way PostgreSQL does for exactly the statements
+ * the migration issues: a constraint-held name refuses `DROP INDEX` and is
+ * freed only by `ALTER TABLE … DROP CONSTRAINT`, a held name makes `CREATE …
+ * IF NOT EXISTS` a no-op, and `pg_get_indexdef` reads back whatever the name
+ * holds. The live cell is `identity-index.live-postgres.test.ts`.
+ */
+describe('sys_metadata overlay index — the PostgreSQL arm is taken (constraint-held name)', () => {
+    const ACTIVE = OVERLAY_INDEX_NAMES.active;
+    const DECLARED_DEF = 'CREATE UNIQUE INDEX idx_sys_metadata_overlay_active ON public.sys_metadata USING btree (type, name, package_id, bundle_member)';
+
+    function pgDouble() {
+        const statements: string[] = [];
+        /** name → definition; a `constraint` entry can only be dropped as one. */
+        const held = new Map<string, { def: string; constraint: boolean }>();
+        held.set(ACTIVE, { def: DECLARED_DEF, constraint: true });
+        const exec: IndexExec = async (sql: string) => {
+            statements.push(sql);
+            let m = /^ALTER TABLE sys_metadata DROP CONSTRAINT IF EXISTS (\S+)$/.exec(sql);
+            if (m) {
+                if (held.get(m[1]!)?.constraint) held.delete(m[1]!);
+                return { rows: [] };
+            }
+            m = /^DROP INDEX IF EXISTS (\S+)$/.exec(sql);
+            if (m) {
+                if (held.get(m[1]!)?.constraint) {
+                    throw Object.assign(
+                        new Error(`cannot drop index ${m[1]} because constraint ${m[1]} on table sys_metadata requires it`),
+                        { code: '2BP01' },
+                    );
+                }
+                held.delete(m[1]!);
+                return { rows: [] };
+            }
+            m = /^CREATE UNIQUE INDEX IF NOT EXISTS (\S+) ON (.*)$/.exec(sql);
+            if (m) {
+                if (!held.has(m[1]!)) held.set(m[1]!, { def: `CREATE UNIQUE INDEX ${m[1]} ON public.${m[2]}`, constraint: false });
+                return { rows: [] };
+            }
+            m = /^SELECT pg_get_indexdef\(to_regclass\('"(\S+)"'\)\) AS indexdef$/.exec(sql);
+            if (m) return { rows: [{ indexdef: held.get(m[1]!)?.def ?? null }] };
+            throw new Error(`statement the double does not model: ${sql}`);
+        };
+        return { exec, statements, held };
+    }
+
+    it('frees the constraint-held name and lands the partial NULL-safe key, quietly', async () => {
+        const { exec, statements, held } = pgDouble();
+        const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+        const result = await ensureMetadataOverlayIndexes(exec, logger, { client: 'pg' });
+
+        expect(result.active).toEqual({ status: 'created', fallback: 'not-attempted' });
+        expect(result.draft).toEqual({ status: 'created', fallback: 'not-attempted' });
+        expect(statements).toContain(`ALTER TABLE sys_metadata DROP CONSTRAINT IF EXISTS ${ACTIVE}`);
+        expect(held.get(ACTIVE)).toEqual({ def: `CREATE UNIQUE INDEX ${ACTIVE} ON public.sys_metadata (${overlayIndexKeyParts().join(', ')}) WHERE state = 'active'`, constraint: false });
+        expect(logger.error).not.toHaveBeenCalled();
+        expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('the boot call site resolves the client off the driver and hands the read-back its result', async () => {
+        const { exec, statements, held } = pgDouble();
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+            const host = {
+                engine: { driver: { execute: (sql: string) => exec(sql), config: { client: 'pg' } } },
+                ensureOverlayMembersBackfilled: async () => undefined,
+                overlayIndexEnsured: false,
+            };
+            await ensureOverlayIndex.call(host as any);
+
+            expect(statements).toContain(`ALTER TABLE sys_metadata DROP CONSTRAINT IF EXISTS ${ACTIVE}`);
+            expect(held.get(ACTIVE)?.constraint).toBe(false);
+            expect(held.get(ACTIVE)?.def).toContain("WHERE state = 'active'");
+            expect(errorSpy).not.toHaveBeenCalled();
+            expect(warnSpy).not.toHaveBeenCalled();
+        } finally {
+            errorSpy.mockRestore();
+            warnSpy.mockRestore();
+        }
+    });
+
+    it('a name the drop cannot free is reported as NOT enforced (ADR-0120 D4), never as created', async () => {
+        const { exec, held } = pgDouble();
+        // Something depends on the constraint, so the constraint drop is refused
+        // too; the `IF NOT EXISTS` create is then a no-op under the held name.
+        const refusing: IndexExec = async (sql: string) => {
+            if (sql.startsWith('ALTER TABLE sys_metadata DROP CONSTRAINT')) {
+                throw Object.assign(new Error(`cannot drop constraint ${ACTIVE} on table sys_metadata because other objects depend on it`), { code: '2BP01' });
+            }
+            return exec(sql);
+        };
+        const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+        const result = await ensureOverlayStateIndex(refusing, 'active', logger, { client: 'pg' });
+
+        expect(result.status).toBe('failed');
+        expect(result.detail).toContain('cannot drop constraint');
+        expect(held.get(ACTIVE)).toEqual({ def: DECLARED_DEF, constraint: true });
+        expect(logger.error).toHaveBeenCalledTimes(1);
+        const msg = String(logger.error.mock.calls[0]![0]);
+        expect(msg).toContain(`[metadata-protocol] could not rebuild '${ACTIVE}'`);
+        expect(msg).toContain('the existing index is unchanged');
     });
 });

@@ -86,7 +86,7 @@ re-reads every row.
 | | Measured |
 | :--- | :--- |
 | Source | Version Packages pull request #33097 at head `25559f43`, one commit on `main` at `b76df9a6`, and the one changeset `main` gained after it, at `1e65a389`. 335 first-parent commits after 18.4.0's version commit `181ad7d445` |
-| Changesets consumed | 284, every changeset in `.changeset/` at `1e65a389`. The 283 at `b76df9a6` are entries in the 122 CHANGELOG sections the pull request writes: 110 `## 18.5.0` sections, and 12 of private packages at their own versions |
+| Changesets consumed | 284, every changeset in `.changeset/` at `1e65a389`. *Erratum: the version commit consumed 283, and eleven changesets it left in `.changeset/` shipped with no CHANGELOG line; see [the erratum](#erratum).* The 283 at `b76df9a6` are entries in the 122 CHANGELOG sections the pull request writes: 110 `## 18.5.0` sections, and 12 of private packages at their own versions |
 | Levels | 39 entries graded `minor`, 245 `patch`, none `major` |
 | Declared breaking | 67: 24 `minor`, 43 `patch`. 45 under 需手动处理 and 22 under 自动迁移. Every one of the 62 commits since 18.4.0 whose subject carries a `!` has its changeset among them |
 | Packages | 110 publish at 18.5.0: 75 `@objectstack/*`, `create-objectstack` and 34 `@object-ui/*`, the same set as 18.4.0. `@object-ui/app-shell` takes `18.4.1` and stays private |
@@ -96,6 +96,75 @@ re-reads every row.
 No tag, npm version, Docker image or GitHub Release for 18.5.0 exists yet.
 The 18.5.0 sweep (#33761) was still running, and none of its results are on
 this page.
+
+## Erratum — eleven changes 18.5.0 shipped with no CHANGELOG line [#erratum]
+
+*Erratum, 2026-11-15.* The version commit `b914e724` (#33097) consumed 283
+changesets, not 284. Eleven changesets landed on `main` after the Version
+Packages pull request's branch point `b76df9a6` and before it merged. Their
+commits are ancestors of `b914e724`, so their code is in the published 18.5.0
+packages, but the version commit left their files in `.changeset/`, and no
+18.5.0 CHANGELOG named them. Each entry has since been added to its package's
+`## 18.5.0` section (`@object-ui/app-shell`'s `## 18.4.1`), under its own
+commit, and the eleven files are deleted, so the next release does not list
+them as new. One of them, `1e65a389` (#33725), is already on this page, under
+[自动迁移](#migrated-for-you) ("Announced, not yet at any door"); the counts on
+this page include it and none of the other ten.
+
+**Breaking: `os audit verify` fails on a row two checkpoints list**
+(`ac0b9a5`, #33637).
+
+- **From → to.** The 18.4.0 `os audit verify` passed a chain in which two
+  checkpoints list the same row id. 18.5.0 reports it as a chain fault of the
+  new kind `listed_twice`, naming the checkpoint and the rows, and exits `1`.
+  The second listing holds nothing for that row. An 18.4.0 sealer could write
+  such a chain when two of its late sealings overlapped: two replicas with no
+  cluster service, whose lock is in-process only, or a lease that lapsed. A
+  chain one sealer wrote at a time is not affected.
+- **What to do.** Run `os audit verify` after the upgrade and read every fault
+  it names. No tolerance and no repair ships for `listed_twice`, so a chain an
+  overlapping 18.4.0 sealer wrote keeps failing the run; keep the report
+  (`--json`, or the proof bundle `--out` writes) as the record of why. The
+  18.5.0 sealer writes no new one: a late checkpoint leaves out every row a
+  checkpoint stored meanwhile already lists (`f4cafd5`).
+- **The checkpoints change shape.** A window now seals into checkpoints of at
+  most 10,000 rows each, whose signed body carries `part_index` and
+  `final_part`, stored in two new nullable columns of `sys_audit_checkpoint`.
+  An 18.4.0 verifier fails the signature of every checkpoint that carries
+  them, and the next checkpoint an 18.4.0 sealer writes is a `link` fault:
+  roll back to 18.4.0 only before 18.5.0 seals its first checkpoint.
+
+**The other nine**, one line each from the changeset:
+
+- Setup → Users on a cloud-managed environment offers a platform
+  administrator **Add User** and **Import Users** again, each adding a pending
+  person who signs in through the hosting organisation's identity provider
+  (`2e1e3b9`, #33755)
+- A related list keyed by a parent lookup (`relationshipValueField`) no longer
+  makes the record page fail with "Couldn't load this record", and it filters
+  by the lookup's stored id (`fbe349f`, #33780)
+- `MessagingService.emit` reads the recipients' notification preferences in
+  the emitting organization, so for an emit whose producer names no
+  organization a preference row stored under another organization no longer
+  mutes a recipient or overrides their opt-out (`2673f59`, #33779)
+- The AI model picker shows each model's cost multiplier (`×N`) when
+  `GET /api/v1/ai/models` sends one, notes the allowance left, and asks once
+  before a pick at ×20 or above; until the AI service fills the multiplier,
+  the picker looks as it did (`0feb5ff`, #33746)
+- A managed install or upgrade of a package relaxes the NOT NULL column of a
+  field its own body now declares `storage: { notNull: false }`;
+  `SqlDriver.relaxDeclaredNotNull` and `@objectstack/cloud-connection`'s
+  `relaxInstallDeclaredNotNull` are new (`e302d32`, #33769)
+- `objectstack-scenarios run` takes `--effort`, `--author-effort` and
+  `--ask-effort`, passed to `claude --effort`, and every turn records the
+  effort it asked for (`f8f35db`, #33767)
+- `run-scenarios` moves a card's dates onto the day it runs, so its "today"
+  agrees with the app's clock (`e0775f7`, #33776)
+- The run grader reads a written calendar date (`31 Dec`, `12月31日`) as no
+  figure (`4b5024d`, #33797)
+- `@objectstack/skills`: the automation skill says an email-template hole's
+  `default:` argument is literal text, and the administrator guide says an
+  in-app message that reached nobody is refused `409`/`503` (`81371e1`, #33355)
 
 ---
 

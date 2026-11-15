@@ -45,10 +45,19 @@ const { ADAPTER, METADATA, SERVED_OBJECTS } = vi.hoisted(() => {
     { name: 'sys_audit_log', label: '审计日志' },
   ]) as readonly unknown[];
   return {
+    // objectstack#33864 — `crm_account` is readable through the adapter, so
+    // its record can be named; every other object answers no definition and
+    // no rows (the actor lookup's `sys_user` included).
     ADAPTER: {
-      find: async () => ({ data: [], total: 0 }),
+      find: async (objectName: string) =>
+        objectName === 'crm_account'
+          ? { data: [{ id: 'acc_1', name: 'Acme Corp' }], total: 1 }
+          : { data: [], total: 0 },
       findOne: async () => null,
-      getObjectSchema: async () => undefined,
+      getObjectSchema: async (objectName: string) =>
+        objectName === 'crm_account'
+          ? { name: 'crm_account', label: '客户', nameField: 'name', fields: { name: { type: 'text', label: 'Name' } } }
+          : undefined,
     },
     SERVED_OBJECTS,
     // Mutable per test: the served objects.
@@ -165,5 +174,34 @@ describe('AuditLogPage — the Object column and drawer show the served object l
     const options = (await screen.findAllByRole('option')).map((o) => o.textContent);
     expect(options).toContain('客户 (crm_account)');
     expect(options).toContain('crm_blank');
+  });
+});
+
+/** The Record cell's text, by row. */
+function recordCells(): string[] {
+  return bodyRows().map((row) => row.querySelectorAll('td')[3]?.textContent ?? '');
+}
+
+/**
+ * objectstack#33864 — the Record column names the audited record by its
+ * display name (`ux-conventions.labels-over-machine-names`), read through the
+ * grid's batched `referenceVia` pointer resolver (`record_id` is the id half
+ * of the pair `object_name` types). The raw id stays the cell's tooltip.
+ */
+describe('AuditLogPage — the Record column names the audited record (objectstack#33864)', () => {
+  it("shows a readable record's display name, the raw id as its tooltip", async () => {
+    renderPage();
+    await waitFor(() => expect(recordCells()[0]).toBe('Acme Corp'));
+    const cell = bodyRows()[0]!.querySelectorAll('td')[3]!;
+    expect(cell.querySelector('[data-record-pointer="readable"]')).toHaveAttribute('title', 'acc_1');
+    expect(recordCells()[0]).not.toContain('acc_1');
+  });
+
+  it('CONTROL: a record no read answers reads as unavailable, never as a bare id; a row with no record shows the dash', async () => {
+    renderPage();
+    await waitFor(() => expect(recordCells()[1]).toBe('nightly_widget · record unavailable'));
+    const cell = bodyRows()[1]!.querySelectorAll('td')[3]!;
+    expect(cell.querySelector('[data-record-pointer="unreadable"]')).toHaveAttribute('title', 'wid_1');
+    expect(recordCells()[3]).toBe('—');
   });
 });

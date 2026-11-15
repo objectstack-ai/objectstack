@@ -2053,6 +2053,15 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   // `warnOnError: true`), so a broken predicate hides its button here exactly
   // as it does on the other surfaces, and says so once.
   const headerPredicateFields = headerObjectSchema?.fields;
+  // The record this header is ABOUT has not arrived yet: a record is bound (the
+  // host named its id) and its row is still absent — `RecordContextValue.data`
+  // is "undefined while loading", and the record page hands `null` until its
+  // read answers. That is its own state, not an empty record: an empty record
+  // makes every `record.<field>` predicate fault, which is an authoring error
+  // only when the key is missing from a record that DID load. A header with no
+  // record bound at all (no context, or no id) keeps evaluating as before, so a
+  // `record.*` predicate there still faults and says so.
+  const headerRecordPending = ctx != null && ctx.recordId != null && ctx.data == null;
   const headerPredicateScope = React.useMemo(() => {
     const scopeUser = (predicateScope as any)?.user;
     // Relation fields bind as the FOREIGN KEY the server stores, not as the
@@ -2104,17 +2113,27 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
    *     share `visible`'s `false`, which on this key means ENABLED — so
    *     `disabled: !current_user.can(…)` left the action pressable until the
    *     payload arrived, the one leg of this surface that failed open.
+   *
+   * While the record is PENDING (see `headerRecordPending`) nothing is
+   * evaluated: every predicate answers its `fallback` and reports nothing.
+   * Evaluating then meant evaluating against an empty record, where every
+   * `record.<field>` faults with "No such key" — and the fault report, which
+   * is warn-once per (label, predicate), told the author to "check the field
+   * names" of a field the object has, on every load, before the record it
+   * names had arrived. The predicate runs, and reports, once the record does.
    */
   const evalHeaderPredicate = React.useCallback(
     (pred: unknown, label: string, fallback: boolean): boolean =>
-      evalRowPredicate(pred as never, ctx?.data ?? {}, {
-        fallback,
-        scope: headerPredicateScope,
-        fields: headerPredicateFields,
-        warnOnError: true,
-        label,
-      }),
-    [ctx?.data, headerPredicateScope, headerPredicateFields],
+      headerRecordPending
+        ? fallback
+        : evalRowPredicate(pred as never, ctx?.data ?? {}, {
+          fallback,
+          scope: headerPredicateScope,
+          fields: headerPredicateFields,
+          warnOnError: true,
+          label,
+        }),
+    [ctx?.data, headerRecordPending, headerPredicateScope, headerPredicateFields],
   );
 
   const headerActionPlan = React.useMemo<{ actions: any[]; authoredKeys: ReadonlySet<string> }>(() => {
@@ -2557,6 +2576,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     const disabledReasonFor = (action: any): string | undefined => {
       const key = (action?.name || action?.id || '') as string;
       if (key === '' || !authoredHeaderActionKeys.has(key)) return undefined;
+      // A pending record answers `disabled`'s fallback (closed), which is not
+      // a fact about the record — so it is not explained as one.
+      if (headerRecordPending) return undefined;
       if (!resolveDisabled(action?.disabled, action?.name ?? action?.id)) return undefined;
       const declared = typeof action?.disabledReason === 'string' ? action.disabledReason : '';
       return declared.trim() !== ''
