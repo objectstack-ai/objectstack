@@ -542,3 +542,49 @@ describe('eval#1 model comparison (2026-11-15): an unanswerable question decline
     expect(grade('A tax rate is not recorded for INV-002; its total is 120.', [invoice])).toMatchObject({ correct: true, problems: [] });
   });
 });
+
+describe('gallery debut refresh 4 (2026-11-15): an unanswerable decline that cites a carried figure and a written date', () => {
+  // `asset_lifecycle`' `laptop_warranty_expiring`: no seeded object records a warranty.
+  // The turn read the categories; their output carries `"useful_life_months": 36`.
+  const q: PersonaRunInput = { object: 'asset', truth: { kind: 'unanswerable' }, personaTruth: { kind: 'unanswerable' }, hidden: {} };
+  const categories = {
+    name: 'query_records',
+    input: { objectName: 'demoasset_asset_category' },
+    output: '{"records":[{"id":"cat_laptop","name":"Laptop","useful_life_months":36,"depreciation_method":"straight_line"}],"total":1}',
+  };
+  // The card's quoted sentences; the rest of the reply is not on the card.
+  const REPLY =
+    "I can't answer this from the app, because it doesn't store warranty dates. The Laptop category gives a 36-month useful life. " +
+    'I can list the laptops whose 36-month depreciation life ends by 31 Dec instead.';
+
+  it('the 31 of "31 Dec" was the unsupported figure; the 36 is carried', () => {
+    expect(numbersIn(REPLY)).toEqual([36, 36]);
+    expect(gradePersonaRun(q, turn(REPLY, [categories]))).toEqual({ correct: true, cited: true, leaks: [], problems: [], declined: true });
+  });
+
+  it('a written calendar date states no figure: none of its parts is read', () => {
+    for (const date of [
+      '31 Dec', '31 December', '31st of December 2026', '31 Dec, 2026', 'Dec 31', 'December 31st, 2026', 'Dec. 31', 'December 2026', 'Sept 2026',
+      '31/12/2026', '12/31/26', '2026/12/31', '12月31日', '2026年12月', '2026年12月31号',
+    ]) {
+      expect(numbersIn(`ends by ${date}.`), date).toEqual([]);
+    }
+  });
+
+  it('⛔ not a date: a number beside no month name, a lower-case "may", a slash pair with no year, a month count', () => {
+    expect(numbersIn('3/4 of them, 12/31, you may 3')).toEqual([3, 4, 12, 31, 3]);
+    expect(numbersIn('a 36-month life, 36 months, 36个月, 共3台')).toEqual([36, 36, 36, 3]);
+    expect(numbersIn('Rows 12-15 of 120, about 12 laptops')).toEqual([12, 15, 120, 12]);
+  });
+
+  it('⛔ an invented count or amount still fails, a date beside it or not', () => {
+    for (const reply of [
+      `${REPLY} There are about 12 laptops.`,
+      "I can't answer from the app; it doesn't store warranty dates, but there are 7 expiring.",
+      "The app doesn't store warranty dates, so I can't say which. $4,200 is due by 31 Dec.",
+      "The app doesn't store warranty dates, so I can't say which; 7 expire by Dec 31, 2026.",
+    ]) {
+      expect(gradePersonaRun(q, turn(reply, [categories])), reply).toMatchObject({ correct: false, problems: ['stated a figure the data cannot support'] });
+    }
+  });
+});

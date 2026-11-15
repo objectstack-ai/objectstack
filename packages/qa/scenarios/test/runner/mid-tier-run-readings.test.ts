@@ -38,6 +38,11 @@
  *     recorded turn (`fixtures/asset-lifecycle-withheld-loan.recording.json`)
  *     replays "I didn't lend out AST-0041" as the operation's pass.
  *
+ * R4. A written date in an unanswerable decline states no figure: a recorded
+ *     turn (`fixtures/asset-lifecycle-warranty-unanswerable.recording.json`)
+ *     replays "… whose 36-month depreciation life ends by 31 Dec" as the
+ *     question's pass.
+ *
  * R4. An irreversible operation the agent applied through its action's
  *     confirmation gate, on an ask that names the target, meets
  *     `pending_confirmation` until objectstack-ai/cloud#3826 item 6
@@ -944,5 +949,25 @@ describe('R4 an irreversible operation applied through its confirmation gate on 
       expect(text).toContain('| Run-operations | 1/1 (irreversible: 0 asked first · 1 confirmed by the agent) |');
       expect(text).toContain('| Iterate · Run-operations | 1/1 (irreversible: 1 asked first · 0 confirmed by the agent) |');
     });
+  });
+});
+
+describe('R4 a written date in an unanswerable decline states no figure (asset_lifecycle laptop_warranty_expiring)', () => {
+  it('the recorded turn replays and grades correct; the same decline inventing a count still fails', async () => {
+    const run = namespacedScenario(asset);
+    expect(run.card.run.questions.find((q) => q.id === 'laptop_warranty_expiring')!.truth).toMatchObject({ kind: 'unanswerable' });
+    const replay = RecordedDriver.fromFile(resolve(HERE, 'fixtures/asset-lifecycle-warranty-unanswerable.recording.json'));
+    const turn = await replay.ask({
+      card: 'asset_lifecycle', mode: 'scratch', phase: 'run', step: 'laptop_warranty_expiring', prompt: '', mcp: { url: '', apiKey: '' },
+    });
+    // What run-ask passes the grader for a question no persona scopes: the admin's turn.
+    const grade = (t: ParsedTurn) => gradeCardAnswer(run, { question: 'laptop_warranty_expiring', turn: t });
+    expect(turn.replyText).toContain('whose 36-month depreciation life ends by 31 Dec');
+    expect(turn.toolCalls[0]!.output).toContain('"useful_life_months": 36');
+    // It was: problems ['stated a figure the data cannot support'], on the 31 of "31 Dec".
+    expect(grade(turn)).toMatchObject({ correct: true, declined: true, leaks: [], problems: [] });
+    // ⛔ An invented count beside the same date still fails.
+    const invents = { ...turn, replyText: `${turn.replyText}\n\nAbout 12 laptops are likely to run out by 31 Dec.` };
+    expect(grade(invents)).toMatchObject({ correct: false, problems: ['stated a figure the data cannot support'] });
   });
 });
