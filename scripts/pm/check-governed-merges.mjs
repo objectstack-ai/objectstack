@@ -476,9 +476,10 @@
  *
  * Modelled as the workflows split is: the `skills-catalog` and
  * `ui-skills-catalog` rows KEEP `tier: H` — every path-only reader (`--test`,
- * `--branch`, the CODEOWNERS mirror, the prose gate, the relay's review plan)
- * answers exactly as before, and the approvers are still summoned — and carry
- * `lowRisk`, scoped to objectstack. A READING of the pull request
+ * `--branch`, the CODEOWNERS mirror, the prose gate) answers exactly as before —
+ * and carry `lowRisk`, scoped to objectstack. The relay's review plan is not
+ * path-only from #33540: `governedReviewPlan` (`scripts/pm/fleet-write/execute.mjs`)
+ * reads the arm with its readers. A READING of the pull request
  * (`lowRiskArmVerdict`: every changed path, the body, the label names, the
  * timeline, the fork predicate and the changesets read at the head) moves them
  * to Tier S only when ALL hold:
