@@ -25,7 +25,7 @@ import { lazyPage } from '../../../services/lazyPage.js';
  * Studio `en` string namespace, and the JSON-schema field reader in the
  * console's eager closure, on every route.
  */
-const DatasourceResourcePage = lazyPage('datasources', () =>
+const DatasourceResourcePage = lazyPage<{ type: string }>('datasources', () =>
   import('./DatasourceResourcePage.js').then((m) => m.DatasourceResourcePage),
 );
 
