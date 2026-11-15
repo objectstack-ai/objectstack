@@ -6099,7 +6099,7 @@
       "title": "Write-time value judgement on v18: picking an option whose stored visibleWhen cannot be evaluated is refused (reason unevaluable), an import with createMissingOptions keeps an unmatched select value while a later PATCH sending it back is refused, an import dry run admits exactly what the write admits, and a malformed element in a multi-valued lookup is refused with its index",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -6123,7 +6123,7 @@
         {
           "clause": "option-visibility enforcement, kept options, dry-run parity and multi-reference element shape — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -6176,6 +6176,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin that scores acceptance[1]–[4] at the REST data and import doors (#26573 slice 1); the objectql pins stay acceptance[0]'s. No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -6184,7 +6190,7 @@
       "title": "Write semantics changed on v18: a warning-severity validation hit comes back in the 2xx write answer as warnings[], a blocking after* hook abort rolls the whole write back, a `tree` field (with or without an explicit reference) honours its deleteBehavior, and a cascade delete is distinguishable to the child hook",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -6208,7 +6214,7 @@
         {
           "clause": "advisory write answer, after-hook rollback, tree delete semantics and the cascade signal — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -6260,6 +6266,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the HTTP pins for acceptance[1], acceptance[2] and negative[0] (#26573 slice 1): the new write-answer-warnings-rest dogfood file reads the REST PATCH body, and the existing hook-after-abort-rollback dogfood file already refused the aborting create over REST and read the store back, which revision 2 had not named. acceptance[3] is unchanged. No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -6268,7 +6280,7 @@
       "title": "Discussion on v18: reactions are their own records (sys_comment_reaction — 201 with user_id forced, duplicate 409, unreadable comment 403, no update, no deleting another member's), the retired sys_comment.reactions column is refused, a comment edit is platform-stamped, and milestone activity is withheld whole from a reader missing a watched field",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -6294,7 +6306,7 @@
         {
           "clause": "reaction records, retired column, edit stamps and milestone redaction — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -6358,6 +6370,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[2] names the door. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1): the runtime permission set is a PUT /api/v1/meta/permission/NAME carrying sys_comment allowRead and the four sys_comment_reaction grants (200), bound by a sys_user_permission_set row, and the run measured that sequence working. Read at base a0f865491d: permission is a runtime-creatable metadata type (packages/spec/src/kernel/metadata-plugin.zod.ts, allowRuntimeCreate). No clause changed",
           "ref": "#27438"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -6366,7 +6384,7 @@
       "title": "Defaults that changed meaning on v18 (ADR-0087 D3 18.* entries): an omitted list-view page size is 50 (was 25), an omitted editInline means editable in place, an autonumber with no `unique` is unique per organization, and a field-heavy form opens as a bounded modal on desktop",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -6395,7 +6413,7 @@
         {
           "clause": "the semantic defaults at the spec layer — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -6467,6 +6485,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[0] and [2] and steps[0] corrected. From QA run #27438 (W3-C2b, at c4c515ad), with QA run #27481's shared-tree boot note (W3-C1); wave anchor #27377, wave-3 accuracy slice S1. No stock showcase object holds more than 50 rows on a fresh boot (showcase_task has 11), so the 50-row check needs seeded rows, which the run supplied with 50 showcase_task POSTs; the item now says to seed before counting. A fresh database is not needed, so requires[0] takes any own-port boot, and it names `objectstack dev --fresh --no-compile -p PORT` for runners sharing one tree, because `pnpm dev -- --fresh` compiles dist/objectstack.json into it (packages/cli/src/commands/dev.ts, --no-compile). Read at base a0f865491d. No clause changed",
           "ref": "#27438"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -6885,7 +6909,7 @@
       "title": "An action's param dialog runs its declared preflight read: the panel moves from loading to ready with the declared fields, a seeded param is drawn read-only from the answer and submitted as it, and a failed read draws the error panel, leaves the seed empty and holds Confirm",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -6939,7 +6963,7 @@
         {
           "clause": "the pins pass at the run subject sha: waiting for the params a URL reads, the stale answer dropped, the seed cleared on a URL change, refused and unbound blocks never read, and the panel's field labels resolved from the bundle",
           "oracle": "test",
-          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "verify": "run each file in automated.ref with its package's vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); each reports ≥1 test and 0 failed",
           "evidence": "the vitest summary line per file, with the subject sha"
         }
       ],
@@ -6982,6 +7006,12 @@
           "date": "2026-11-15",
           "change": "steps[0] says where the action draws: QA run #33861 met the two probe actions under the record header's ⋯ overflow as menuitems, because the header already carried three inline actions (ledger row 126). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
           "ref": "#33990"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "acceptance[4].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },

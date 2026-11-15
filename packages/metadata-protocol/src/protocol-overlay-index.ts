@@ -28,7 +28,7 @@
  * not move.
  */
 
-import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
+import { driverCanRunSql, resolveDriverClientName, resolveDriverExec } from './migrations/driver-exec.js';
 import { backfillOverlayBundleMembers, ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -71,14 +71,19 @@ export async function ensureOverlayIndex(this: Pick<OverlayIndexHost, 'engine' |
         // capability-checked above, and when it offers neither surface it is
         // the migration that classifies and reports the failure — an early
         // return here would put that back into the silent `catch` below.
-        const exec = async (sql: string): Promise<void> => {
+        // The seam hands the statement's result back: PostgreSQL's arm of the
+        // migration reads the rebuilt index's definition back through it, and
+        // a seam that answered nothing would fail that read-back every boot.
+        const exec = async (sql: string): Promise<unknown> => {
             if (!resolved) throw new Error('driver has neither raw nor execute');
-            await resolved(sql);
+            return resolved(sql);
         };
         // `console` satisfies the logger surface structurally; this class
         // carries no injected logger, and its own diagnostics go to
-        // `console.warn` throughout (see `emitMetadataMutation`).
-        await ensureMetadataOverlayIndexes(exec, console);
+        // `console.warn` throughout (see `emitMetadataMutation`). The client
+        // name selects the dialect arm: on PostgreSQL the declared name is held
+        // by a constraint that only that arm can free.
+        await ensureMetadataOverlayIndexes(exec, console, { client: resolveDriverClientName(driver) });
     } catch {
         // A boot must never fail over an index. Note this arm is now only
         // reachable for driver RESOLUTION failures: every DDL failure past
