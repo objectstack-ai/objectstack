@@ -10,7 +10,7 @@
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
 - 子代理起不来 ⇒ 复核缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
 - PASS ⇒ Tier S ready、auto-merge;Tier H 经 SKILL.md ③ 交棒;FAIL ⇒ 撤挂,补丁轮;⛔ 免复核不放行。
-- 落地后才见欠复核 ⇒ 按 `contract-review.md` 复审落地 head、发现立新卡,⛔ 不修已关 PR。
+- 落地后见欠复核 ⇒ 按 `contract-review.md` 复审落地 head、发现照立卡门入卡,⛔ 不修已关 PR。
 - DELIBERATE CORRECTION 红(`check-empty-changeset`)⛔ 不等维护者;确认件皆须点名每个被改 note:
 - diff 只改 release 文字或注释者:派发席 ACCEPT 确认,逐句引改前与改后,免第二次同 head 复核。
 - 其余(含改代码)照全套:同 head 达档复核 PASS 记录即确认,记录逐句判改写句。
@@ -34,7 +34,11 @@
 - (a) 它带着正把**他人** PR 踢出队列的签名之修复;(b) 它是他车道 PR/卡具名前置
   (`Blocked-by`/串行行),该线经维护者或账户主人定为最高优先;(c) 账户主人点名要它插队。
 - 送出前先在 PR 贴审计评论点名字母与依据;一笔一 PR,同仓同时至多一个插队者在队。
-- 中继另拒 draft、head 已移与 AGENTS.md §7 三类;读回非队首即 FAILED,⛔ 不重发,报维护者。
+- 中继另拒 draft、head 已移、受管面与发版 PR;读回非队首即 FAILED,⛔ 不重发,报维护者。
+- 逾 3,000 行须授权批准在现 head,或维护者非席位签名评论点名现 head 承接(`approval_comment`)。
+- 出队(中继 `pr_dequeue`)限三因:(a) 与基座冲突;(b) 自身改动致队列构建红,三事实判非 flake;
+  (c) PR 正文签名尾行之席以签名评论自请。审计评论在先,回读离队且仍开未合才落地。
+- 谁入队谁看护:冲突或自因被踢 ⇒ 一轮巡查内出队修复再入队;他人 flake 照四分支重投。
 - PR 侧红(非队列)同在本窗口处置:义务与三步只住 `platform-readings.md`「红检查先读日志」。
 - 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
 - PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
