@@ -552,7 +552,7 @@
       "title": "Flow copy is translatable on v18: a flow refusal message and a paused screen's title/description resolve in the caller's Accept-Language with holes filled, `os i18n extract` scaffolds the refusal / screen / option keys, a translated screen title is judged by the {{ }} text-slot rule, and a host translation bundle overrides a platform key in either load order",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -577,7 +577,7 @@
         {
           "clause": "flow refusal / screen translation, extract scaffolding, translated text-slot rule and host override — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -639,6 +639,12 @@
           "date": "2026-11-15",
           "change": "verify-text correction, no clause change. acceptance[2].verify names the toast keys, flows.FLOW.successMessage and flows.FLOW.errorMessage, extracted only from a flow that authors them. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
           "ref": "#33984"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },

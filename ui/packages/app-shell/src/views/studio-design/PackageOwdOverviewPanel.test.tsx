@@ -19,7 +19,8 @@ import React from 'react';
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { t } from '../metadata-admin/i18n';
+import { MetadataCtx, type MetadataContextValue } from '@object-ui/react';
+import { t, tFormat } from '../metadata-admin/i18n';
 import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel';
 
 const en = (key: string) => t(key, 'en-US');
@@ -156,7 +157,56 @@ describe('PackageOwdOverviewPanel — controlled_by_parent', () => {
     renderPanel(freshServer());
     await screen.findByTestId('owd-row-crm_case');
     const master = screen.getByTestId('owd-master-crm_case');
-    expect(master.textContent).toMatch(/crm_account/);
+    // objectstack#33864 — the master is named by its label, not its name.
+    expect(master.textContent).toBe(tFormat('engine.studio.owd.byParent', 'en-US', { master: 'Account' }));
+  });
+});
+
+/**
+ * objectstack#33864 — "By parent → …" names the master object by its label
+ * (`ux-conventions.labels-over-machine-names`): this package's own object as
+ * the table reads it, else the served object's label, else the machine name.
+ */
+describe('PackageOwdOverviewPanel — the master is named by its label (objectstack#33864)', () => {
+  function servedObjects(objects: unknown[]): MetadataContextValue {
+    return {
+      apps: [],
+      objects,
+      dashboards: [],
+      reports: [],
+      pages: [],
+      loading: false,
+      error: null,
+      refresh: async () => {},
+      invalidate: () => {},
+      ensureType: async () => [],
+      getItem: async () => null,
+      getItemsByType: () => [],
+      getTypeStatus: () => 'ready',
+    };
+  }
+  const byParent = (master: string) => tFormat('engine.studio.owd.byParent', 'en-US', { master });
+
+  /** A package that holds only the detail: its master lives in another package. */
+  function detailOnly(): Server {
+    const server = freshServer();
+    delete server.objects.crm_account;
+    return server;
+  }
+
+  // This package's own master is pinned by 'shows the master link' above.
+  it("a master outside this package reads as the served object's label", async () => {
+    render(
+      <MetadataCtx.Provider value={servedObjects([{ name: 'crm_account', label: 'Customer Account' }])}>
+        <PackageOwdOverviewPanel client={makeClient(detailOnly())} packageId="com.example.showcase" locale="en-US" />
+      </MetadataCtx.Provider>,
+    );
+    expect(await screen.findByTestId('owd-master-crm_case')).toHaveTextContent(byParent('Customer Account'));
+  });
+
+  it('CONTROL: a master no read can label is named by its machine name', async () => {
+    renderPanel(detailOnly());
+    expect(await screen.findByTestId('owd-master-crm_case')).toHaveTextContent(byParent('crm_account'));
   });
 });
 
