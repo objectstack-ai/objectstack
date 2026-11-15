@@ -16,6 +16,9 @@
  * re-rendered from that patch to read what the author sees.
  */
 
+// The source loads this lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 
