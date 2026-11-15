@@ -16,7 +16,7 @@
  * Deterministic: no model call, no network (the cost ruling on cloud#3600).
  */
 
-import { readableRows, type LoadedScenario } from '../loader.js';
+import type { LoadedScenario } from '../loader.js';
 import { isProbedOperation, scenarioNamespace } from '../schema.js';
 import { askNamesTarget, gradeOperation, type OperationGrade, type OperationObservation } from './scenario-operation-grade.js';
 import { gradePersonaRun, type FigureReading, type HiddenScope, type PersonaRunGrade, type ReadableRow, type RunTranscript } from './scenario-run-grade.js';
@@ -135,7 +135,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
   const hidden: HiddenScope = { ...answer.hidden };
   let personaTruth = truth;
   let inScopeFigures: readonly number[] | undefined;
-  let rows: ReadableRow[] | undefined;
+  let readableRows: readonly ReadableRow[] | undefined;
   if (answer.persona !== undefined) {
     const persona = card.run.personas.find((p) => p.id === answer.persona);
     if (!persona) throw new RangeError(`${card.id}: no persona \`${answer.persona}\``);
@@ -147,7 +147,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
     for (const f of persona.hidden.fields ?? []) (fields[f.object] ??= []).push(f.field);
     hidden.fields = fields;
     inScopeFigures = scenario.scopeFigures[q.id]?.[persona.id];
-    rows = readableRows(card, persona.id);
+    readableRows = scenario.readableRows[persona.id];
   }
 
   return gradePersonaRun(
@@ -160,7 +160,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
       ...(answer.tol !== undefined ? { tol: answer.tol } : {}),
       reading: figureReadingOf(card, q),
       ...(inScopeFigures ? { inScopeFigures } : {}),
-      ...(rows ? { readableRows: rows } : {}),
+      ...(readableRows ? { readableRows } : {}),
     },
     answer.turn,
   );

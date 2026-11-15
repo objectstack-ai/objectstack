@@ -77,6 +77,16 @@ export interface LoadedScenario {
    * of these equals it (`gradePersonaRun`'s `inScopeFigures`).
    */
   scopeFigures: Record<string, Record<string, number[]>>;
+  /**
+   * Persona id → every seed row that persona may read, of every object it is
+   * not hidden from: the row's `name` when the persona may read that field,
+   * and each number it holds in a field the persona may read; a row with
+   * neither is left out. A withheld count tied to the question's object on a
+   * line that names one of these rows is that row's own figure ("Website
+   * relaunch: 3 tasks" read off a project's readable task count), not the
+   * withheld one (`gradePersonaRun`'s `readableRows`).
+   */
+  readableRows: Record<string, ReadableRow[]>;
 }
 
 export interface LoadResult {
@@ -216,7 +226,8 @@ function loadOne(file: string, options: LoadOptions): { card?: LoadedScenario; r
   const card = parsed.data;
   const computed = checkCard(card, basename(file, '.json'), options, refuse);
   if (refusals.length > 0) return { refusals, code: card.code };
-  return { card: { file, card, ...computed }, refusals, code: card.code };
+  const readable = Object.fromEntries(card.run.personas.map((p) => [p.id, rowsReadableBy(card, p)]));
+  return { card: { file, card, ...computed, readableRows: readable }, refusals, code: card.code };
 }
 
 type Refuse = (path: IssuePath, message: string) => void;
@@ -285,21 +296,9 @@ export function readableNumbers(card: ScenarioCard, personaId: string): Set<numb
   return out;
 }
 
-/**
- * Every seed row persona `personaId` may read, of every object it is not
- * hidden from, as the leak grader reads it (`gradePersonaRun`'s
- * `readableRows`): the row's `name` when the persona may read that field, and
- * each number it holds in a field the persona may read. A row with neither is
- * left out. Empty for a persona the card does not list.
- *
- * A withheld count tied to the question's object on a line that names one of
- * these rows is that row's figure ("Website relaunch: 3 tasks" read off a
- * project's readable task count), not the withheld one.
- */
-export function readableRows(card: ScenarioCard, personaId: string): ReadableRow[] {
+/** {@link LoadedScenario.readableRows} for one persona. */
+function rowsReadableBy(card: ScenarioCard, p: Persona): ReadableRow[] {
   const out: ReadableRow[] = [];
-  const p = card.run.personas.find((x) => x.id === personaId);
-  if (p === undefined) return out;
   const { inScope } = seedReader(card, card.run.seed);
   const hiddenObjects = new Set(p.hidden.objects ?? []);
   for (const [object, rows] of Object.entries(card.run.seed)) {
