@@ -115,10 +115,17 @@ const PAGE = {
   ],
 };
 
-/** The object registry each case serves: with the reaction object, without it, or listing nothing. */
+/**
+ * The object registry each case serves: with the reaction object, without it
+ * (a framework that predates it, whose `sys_comment` still declares the
+ * `reactions` column, objectstack#33521), or listing nothing.
+ */
 const REGISTRY = {
   present: [...OBJECTS, { name: REACTION, label: 'Comment Reaction' }],
-  absent: OBJECTS,
+  absent: [
+    ...OBJECTS,
+    { name: 'sys_comment', label: 'Comment', fields: { reactions: { type: 'textarea', label: 'Reactions' } } },
+  ],
   empty: [] as unknown[],
 };
 

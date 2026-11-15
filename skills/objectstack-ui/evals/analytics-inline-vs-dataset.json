@@ -5,7 +5,7 @@
     {
       "id": 1,
       "prompt": "On the sales dashboard add widgets that all report the certified 'revenue' metric (sum of amount): by region, by month, and a KPI total. Emit the metadata.",
-      "expected_output": "Defines the metric ONCE (defineDataset: an amount_sum measure, region and a month-granularity date dimension); each widget binds it and selects dimensions/values BY NAME — never an inline per-widget aggregate (object/valueField/aggregate was removed, ADR-0021).",
+      "expected_output": "Defines the metric ONCE (defineDataset: an amount_sum measure, region and a month-granularity date dimension); each widget names it in `dataset` and selects dimensions/values BY NAME — never an inline per-widget aggregate (object/valueField/aggregate was removed, ADR-0021).",
       "files": [],
       "assertions": {
         "must_contain": ["defineDataset", "dataset", "dimensions", "values"],
