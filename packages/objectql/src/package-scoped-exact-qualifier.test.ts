@@ -1277,6 +1277,97 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
 });
 
 /**
+ * [#32849, ADR-0146 D8 item 2, ADR-0150 D4] The bare LAYERED read of an
+ * addition's own member whose declared override the App's pair stores. X
+ * ships `welcome` (`en-US`), the addition Z on X ships its `fr-FR`, and a row
+ * of the App's pair declares `overrides.package` Z for `fr-FR`. The plain read
+ * naming no package serves that override since the bare member read's fix
+ * (`declaredMemberOverrideAddressOf`); the layered read is "what `getMetaItem`
+ * would return" as `effective`, so it reads the member at Z too.
+ *
+ * BASE (measured on `claude/area-E1-32622` e516f353, this fixture, before the
+ * change): bare `getMetaItemLayered({ member: 'fr-FR' })` answered `code`
+ * and `effective` `zeta fr-FR` with `overlay` null in both install orders,
+ * while `?package=Z` answered `effective` `pair fr-FR` and the plain bare read
+ * `pair fr-FR`; the door's step 1c (`packagelessLayeredReadRefusal`) refused
+ * nothing.
+ */
+describe('[#32849] the bare layered read serves the pair\'s declared override of an addition Z\'s own locale as `effective`, as `?package=Z` does', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Z = 'com.acme.zeta';
+  const PAIR = `${APP}.custom`;
+  const moduleOf = (id: string, dependencies: Record<string, string>) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!, dependencies,
+  }) as never;
+  const installZ = () => registry.installPackage(moduleOf(Z, { [APP]: '^1.0.0', [X]: '^1.0.0' }), 'code');
+  const tpl = (locale: string, packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale,
+    subject: `${packageId.split('.').pop()} ${locale}`, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  /** A row of the App's pair for `fr-FR`; an active one is hydrated as the boot lays it. */
+  const pairRow = (over: Record<string, unknown> = {}, state: 'active' | 'draft' = 'active') => {
+    const body = { name: 'welcome', label: state === 'draft' ? 'pair fr-FR draft' : 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', ...over };
+    rows.push({ id: `row_fr_${state}`, type: 'email_template', name: 'welcome', state, package_id: PAIR, bundle_member: 'fr-FR', metadata: JSON.stringify(body) });
+    if (state === 'active') registry.registerItem('email_template', { ...body, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+  };
+  type Layers = { code?: { label?: string } | null; overlay?: { label?: string } | null; effective?: { label?: string; _packageId?: string } | null; draft?: { label?: string } | null; packageId?: string };
+  const layered = (member: string, packageId?: string, withDraft = false) => protocol.getMetaItemLayered({
+    type: 'email_template', name: 'welcome', member, ...(packageId ? { packageId } : {}),
+  } as never, { withDraft } as never) as Promise<Layers>;
+  const layersOf = (a: Layers) => [a.code?.label ?? null, a.overlay?.label ?? null, a.effective?.label ?? null, a.packageId];
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(moduleOf(X, { [APP]: '^1.0.0' }), 'code');
+    registry.installPackage(manifest(PAIR), 'code');
+  });
+
+  it.each([
+    ['addition installed first', () => { installZ(); tpl('en-US', X); tpl('fr-FR', Z); pairRow({ overrides: { package: Z } }); }],
+    ['row stored first', () => { tpl('en-US', X); pairRow({ overrides: { package: Z } }); installZ(); tpl('fr-FR', Z); }],
+  ] as const)('the bare layered read of `fr-FR` answers Z\'s layers with the override as `effective` (%s; BASE: `effective` `zeta fr-FR`, no overlay)', async (_order, arrange) => {
+    arrange();
+    const atZ = await layered('fr-FR', Z);
+    expect(layersOf(atZ), 'CONTROL: `?package=Z&member=fr-FR&layers=true` (UNCHANGED)').toEqual(['zeta fr-FR', 'pair fr-FR', 'pair fr-FR', Z]);
+    expect(await protocol.packagelessLayeredReadRefusal({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never), 'the door\'s step 1c refuses nothing').toBeUndefined();
+    const bare = await layered('fr-FR');
+    expect(layersOf(bare), 'bare `?member=fr-FR&layers=true`').toEqual(['zeta fr-FR', 'pair fr-FR', 'pair fr-FR', Z]);
+    expect(bare.effective?._packageId, '`effective` is stamped Z').toBe(Z);
+    expect(labelOf(await protocol.getMetaItem({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never)), '`effective` is what the plain bare read serves').toBe('pair fr-FR');
+    // CONTROL: X's own member is untouched by the override of Z's.
+    expect(layersOf(await layered('en-US')), 'bare `?member=en-US` (UNCHANGED)').toEqual(['suitex en-US', null, 'suitex en-US', X]);
+  });
+
+  it('the draft layer stays the strict draft read\'s, which the arm does not move: the pair\'s pending draft of `fr-FR` (UNCHANGED; at Z\'s address it is no draft)', async () => {
+    installZ(); tpl('en-US', X); tpl('fr-FR', Z);
+    pairRow({ overrides: { package: Z } });
+    pairRow({ overrides: { package: Z } }, 'draft');
+    const strictDraft = labelOf(await protocol.getMetaItem({ type: 'email_template', name: 'welcome', member: 'fr-FR', state: 'draft' } as never));
+    expect(strictDraft, 'the plain bare strict draft read').toBe('pair fr-FR draft');
+    const bare = await layered('fr-FR', undefined, true);
+    expect([bare.effective?.label, bare.draft?.label ?? null], 'bare `?member=fr-FR&layers=true` with drafts').toEqual(['pair fr-FR', strictDraft]);
+    expect((await layered('fr-FR', Z, true)).draft ?? null, 'CONTROL: `?package=Z` reads no draft there (UNCHANGED)').toBeNull();
+  });
+
+  it.each([
+    ['no row stored', () => { installZ(); tpl('en-US', X); tpl('fr-FR', Z); }],
+    ['an undeclared pair row of the locale', () => { installZ(); tpl('en-US', X); tpl('fr-FR', Z); pairRow(); }],
+  ] as const)('CONTROL — no override of Z declared (%s): the bare layered read answers Z\'s own `fr-FR` and no overlay (UNCHANGED)', async (_order, arrange) => {
+    arrange();
+    expect(layersOf(await layered('fr-FR'))).toEqual(['zeta fr-FR', null, 'zeta fr-FR', Z]);
+  });
+
+  it('CONTROL — the row declares X (the #32606 shape): the bare layered read is not moved to Z, and keeps its refusal naming both (UNCHANGED)', async () => {
+    installZ(); tpl('en-US', X); tpl('fr-FR', Z);
+    pairRow({ overrides: { package: X } });
+    const err = await refusalOf(() => layered('fr-FR'));
+    expect([err.code, err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()])
+      .toEqual(['RESOURCE_CONFLICT', 409, [X, Z].sort()]);
+  });
+});
+
+/**
  * [#32183, epic rulings R4-B and R4-B2] A name only a disabled package holds,
  * read at an address that neither holds it nor is a pair of a holder (a
  * sibling module of the App), at a member only the App's customization pair
