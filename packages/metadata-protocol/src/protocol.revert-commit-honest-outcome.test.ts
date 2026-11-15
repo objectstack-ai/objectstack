@@ -616,3 +616,133 @@ describe('[#33851] revertCommit reports a non-object write-through fault in fail
         });
     }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// §4 [#33851] A removed item whose registry heal stops is a failed item too
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The soft-remove limb heals the registry after it removes the row
+// (`restoreArtifactRegistryView`). A throw that stopped the heal was logged at
+// `error` and not read, so the revert answered `{ success: true, action:
+// 'removed' }` while the registry could still serve the removed row (measured
+// on this harness before the fix). The heal now answers its stop, and the
+// revert reports the item as §1 and §3 report theirs. The heal's `error` line
+// is unchanged, and every other caller ignores the answer: the delete, save
+// and publish controls answer what they answered before.
+//
+// So does a row still stored under another package that the heal registers
+// again and the registry refuses.
+
+/** The non-object cases whose heal walks the overlay tiers (an extension resyncs instead). */
+const HEAL_CASES = NON_OBJECT_CASES.filter((c) => c.verb === 'registerItem');
+
+/** Saved once, by the commit under revert: the revert soft-removes it. */
+async function nonObjectCreatedByTheCommit(c: NonObjectCase) {
+    const rig = await makeHydratingProtocol(c);
+    await rig.protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('First'), packageId: PKG });
+    recordApply(rig.commits, 'c1', [{ type: c.type, name: c.name, existedBefore: false, prevVersion: null }]);
+    return rig;
+}
+
+/** The registry's tier-1 verbs throwing, which stops the heal's walk at its outer catch. */
+function healStops(engine: any, type: string) {
+    engine.registry.removePackageOverlaySlots = () => { throw REFUSAL(type); };
+    engine.registry.removeRuntimeShadow = () => { throw REFUSAL(type); };
+}
+
+const healStoppedLine = (c: NonObjectCase) =>
+    `[Protocol] the registry heal after the removal of ${c.type} '${c.name}' stopped: The registry is sealed for ${c.type} entries.`;
+
+describe('[#33851] revertCommit reports a removed item whose registry heal stops in failed[]', () => {
+    for (const c of HEAL_CASES) {
+        describe(c.type, () => {
+            it('control: a clean soft-remove reverts it and answers success', async () => {
+                const { protocol, rows } = await nonObjectCreatedByTheCommit(c);
+
+                const res = await protocol.revertCommit({ commitId: 'c1', packageId: PKG });
+
+                expect(res).toMatchObject({ success: true, revertedCount: 1, failedCount: 0, failed: [] });
+                expect(res.reverted).toEqual([{ type: c.type, name: c.name, action: 'removed' }]);
+                expect(storedLabelOf(rows, c)).toBeUndefined();
+            });
+
+            it('a heal that stops: failed[], the removed row and the code named, success false, the error line kept', async () => {
+                const { protocol, rows, commits, engine } = await nonObjectCreatedByTheCommit(c);
+                const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+                healStops(engine, c.type);
+
+                const res = await protocol.revertCommit({ commitId: 'c1', packageId: PKG });
+
+                expect(res.success).toBe(false);
+                expect(res.reverted).toEqual([]);
+                expect(res.failedCount).toBe(1);
+                expect(res.failed[0]).toMatchObject({ type: c.type, name: c.name, code: 'NOT_OVERRIDABLE' });
+                expect(res.failed[0].error).toContain('its row was removed from sys_metadata');
+                expect(res.failed[0].error).toContain('may still serve the removed row');
+                expect(res.failed[0].error).toContain(`The registry is sealed for ${c.type} entries.`);
+                expect(error.mock.calls.some((a) => String(a[0]).startsWith(healStoppedLine(c)))).toBe(true);
+                // The row is gone, and the revert's own commit records it.
+                expect(storedLabelOf(rows, c)).toBeUndefined();
+                expect(JSON.parse(revertsOf(commits, 'c1')[0].items)).toHaveLength(1);
+            });
+
+            it('control: a delete under the same fault answers as before, the stop only logged', async () => {
+                const { protocol, rows, engine } = await makeHydratingProtocol(c);
+                await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('First'), packageId: PKG });
+                const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+                healStops(engine, c.type);
+
+                const res = await protocol.deleteMetaItem({ type: c.type, name: c.name, packageId: PKG });
+
+                expect(res.success).toBe(true);
+                expect(storedLabelOf(rows, c)).toBeUndefined();
+                expect(error.mock.calls.some((a) => String(a[0]).startsWith(healStoppedLine(c)))).toBe(true);
+            });
+
+            it('control: a save and a publish under the same fault answer as before', async () => {
+                const { protocol, rows, engine } = await makeHydratingProtocol(c);
+                vi.spyOn(console, 'error').mockImplementation(() => {});
+                healStops(engine, c.type);
+
+                const saved = await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('First'), packageId: PKG });
+                await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('Draft'), packageId: PKG, mode: 'draft' });
+                const published = await protocol.publishMetaItem({ type: c.type, name: c.name, packageId: PKG });
+
+                expect(saved.success).toBe(true);
+                expect(saved.advisories ?? []).toEqual([]);
+                expect(published.success).toBe(true);
+                expect(published.advisories ?? []).toEqual([]);
+                expect(storedLabelOf(rows, c)).toBe('Draft');
+            });
+        });
+    }
+
+    it('a row still stored under another package that the registry refuses: failed[], success false', async () => {
+        // An `action`: a type two packages may each hold a row of under one name.
+        const c: NonObjectCase = {
+            type: 'action', name: 'close_ticket', verb: 'registerItem', labelOf: (body) => body.label,
+            body: (label) => ({ name: 'close_ticket', label, type: 'url', target: 'https://example.com/close' }),
+        };
+        const OTHER = 'app.other';
+        const { protocol, rows, commits, engine } = await makeHydratingProtocol(c);
+        engine.registry.getPackage = (id: string) => (id === PKG || id === OTHER ? { manifest: { id } } : undefined);
+        await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('Other'), packageId: OTHER });
+        await protocol.saveMetaItem({ type: c.type, name: c.name, item: c.body('First'), packageId: PKG });
+        recordApply(commits, 'c1', [{ type: c.type, name: c.name, existedBefore: false, prevVersion: null }]);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        engine.registry.registerItem = () => { throw REFUSAL(c.type); };
+
+        const res = await protocol.revertCommit({ commitId: 'c1', packageId: PKG });
+
+        expect(res.success).toBe(false);
+        expect(res.failed[0]).toMatchObject({ type: c.type, name: c.name, code: 'NOT_OVERRIDABLE' });
+        expect(res.failed[0].error).toContain('its row was removed from sys_metadata');
+        // Non-vacuity: the stop is the remaining row's write-through fault, not
+        // the walk's outer catch.
+        expect(warn.mock.calls.map((a) => String(a[0]))).toContain(writeThroughWarnLine(c));
+        expect(error.mock.calls.some((a) => String(a[0]).startsWith(healStoppedLine(c)))).toBe(false);
+        // The other package's row stays stored.
+        expect(storedLabelOf(rows, c)).toBe('Other');
+    });
+});

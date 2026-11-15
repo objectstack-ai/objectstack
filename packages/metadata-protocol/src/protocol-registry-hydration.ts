@@ -1733,6 +1733,15 @@ export class ProtocolRegistryHydrationFacet {
      * naming no package answers the store's refusal, naming every holder. So it
      * does for a row bound to a non-holder of the name whose pair relation names
      * zero or several bases (epic ruling 6818436831, #32620).
+     *
+     * [#33851] What it answers: the walk's stop ({@link RegistryHealStop}),
+     * when a throw stopped it (the logged stop above) or the registry refused or
+     * faulted on a row still stored (the step that registers it again);
+     * otherwise `undefined`, a designed outcome included (a refused baseline
+     * read that retires the entry, a degraded read that keeps it). Only
+     * `revertCommit` reads it, and reports the item in `failed[]`; every other
+     * caller ignores it, so a delete, a publish undo and a peer's convergence
+     * answer what they answered before.
      */
     static async restoreArtifactRegistryView(host: Pick<ProtocolHost, 'anotherPackageShips' | 'applyRegistryWriteThrough' | 'convertStoredItem' | 'engine' | 'findEnvironmentRows' | 'isArtifactBacked' | 'isUnservedSealedOverlay' | 'readItemFromMetadataService' | 'reconcileViewExpansions' | 'registryTakesStoredRows' | 'resyncStoredObjectExtensions' | 'rethrowUnlessMetadataStoreUnprovisioned'>, type: string,
             name: string,
@@ -1754,7 +1763,7 @@ export class ProtocolRegistryHydrationFacet {
              * rows are still stored and served, so their registry entries stay.
              * No effect for a type with no members.
              */
-            member?: string,): Promise<void> {
+            member?: string,): Promise<RegistryHealStop | undefined> {
         // [#6780] ADR-0005 — the plain-key entry belongs to the env-wide row,
         // so only an env-wide removal may heal (or retire) it.
         if (organizationId !== null && organizationId !== undefined) return;
@@ -1894,16 +1903,22 @@ export class ProtocolRegistryHydrationFacet {
                         }
                     }
                 }
+                // [#33851] A remaining row the registry does not take is the
+                // heal's stop too: the first refusal or fault is answered, after
+                // every row has been tried.
+                let refused: RegistryHealStop | undefined;
                 for (const row of remainingRows) {
-                    await host.applyRegistryWriteThrough({
+                    const refusal = await host.applyRegistryWriteThrough({
                         type: canonical,
                         name,
                         item: host.convertStoredItem(String(row.type ?? canonical), storedRowDocument(row)),
                         packageId: boundPackageOf(row.package_id) ?? null,
                         organizationId: null,
+                        answerFaults: true,
                     });
+                    refused ??= refusal;
                 }
-                return;
+                return refused;
             }
             if (healed) return;
 
@@ -2073,7 +2088,10 @@ export class ProtocolRegistryHydrationFacet {
             // [#32366] Best-effort, never silent: the delete has committed and
             // is not failed here, and what stopped the walk is said once.
             console.error(registryHealStoppedMessage(type, name, error));
+            // [#33851] …and answered: `revertCommit` reports it per item.
+            return { error };
         }
+        return undefined;
     }
 
     /**
@@ -2477,6 +2495,17 @@ export function objectStorageSyncRefusedNotice(name: string, err: unknown): Runt
  * shape too, to a caller that asked ({@link RegistryWriteThroughRequest.answerFaults}).
  */
 export interface ObjectRegistryRefusal {
+    readonly error: unknown;
+}
+
+/**
+ * [#33851] What {@link ProtocolRegistryHydrationFacet.restoreArtifactRegistryView}
+ * answers when its walk stopped (a throw, logged at `error` as before) or a row
+ * still stored was refused by the registry: the thrown or refused value, whole.
+ * The row removal is already committed; this is the fact the heal used to keep
+ * to its log line.
+ */
+export interface RegistryHealStop {
     readonly error: unknown;
 }
 
