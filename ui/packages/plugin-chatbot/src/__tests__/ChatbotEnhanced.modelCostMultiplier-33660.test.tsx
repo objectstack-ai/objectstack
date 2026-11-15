@@ -157,7 +157,7 @@ describe('ChatbotEnhanced — the model picker shows each model’s cost multipl
 
   it.each([
     ['falls below ×20', 5],
-    ['loses its multiplier', undefined],
+    ['is withdrawn', undefined],
   ])('a model whose multiplier %s while asked is dropped: the question closes and nothing is written', async (_case, next) => {
     const { onModelChange, trigger, relist } = mount();
     await pick(trigger(), 'Expert');
