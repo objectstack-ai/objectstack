@@ -500,6 +500,42 @@ which does accept an object's own field as an ad-hoc dimension without the datas
 declaring it; `widget-dimension-unknown` is what holds the line for authored
 dashboards.
 
+### Filtering on a Related Record's Field
+
+A dotted `relationship.field` filter — a global filter's `field`, a widget's
+`filter`, or a dataset query's `runtimeFilter` — filters the base rows by a field
+of the record they point at, such as leaving out the plan lines of cancelled
+orders with `{ 'order.status': { $ne: 'cancelled' } }`. The analytics service
+evaluates it on one of two paths, and the path decides how deep it may reach:
+
+| Path | When it serves the query | Depth |
+| :--- | :--- | :--- |
+| Native SQL | A SQL datasource (SQLite, PostgreSQL, MySQL, SQL Server, Turso), unless the query buckets a date by granularity, reads a federated object, or reads an object with an engine-enforced read gate (an engine middleware, or a `controlled_by_parent` read scope) | Every hop, as a `LEFT JOIN` per relationship |
+| Engine aggregate | Every query the native SQL path does not serve | One relationship |
+
+On the engine-aggregate path the filter reads the related object **as the
+caller**, with that object's row-level security and field permissions, and keeps
+the base rows whose relationship points at a record it returned:
+
+- A row with no related record, or one the caller cannot read, is **not
+  selected**, whatever the operator, `$ne` and `$nin` included. To keep such
+  rows, add the relationship itself as another branch:
+  `{ $or: [{ 'order.status': { $ne: 'cancelled' } }, { order: { $null: true } }] }`.
+- When no related record matches, the widget shows **no rows**, never the
+  unfiltered set.
+- A related field the caller cannot read is refused (`403 PERMISSION_DENIED`), as
+  filtering on it directly would be.
+- More than 1,000 matching related records are refused (`400 INVALID_FILTER`),
+  never truncated. Narrow the related condition.
+- These are refused (`400 INVALID_FIELD`) rather than answered differently: a
+  path of two or more relationships (`line.plan.order.status`), a related-field
+  condition under `$not` (write `$ne` / `$nin` inside the condition instead), and
+  a related field compared with another field (`$field`).
+
+A related field in a **dataset's own** `filter`, or in a **measure's** own
+`filter`, is still evaluated only on the native SQL path; the engine-aggregate
+path refuses it (`400 INVALID_FIELD`) rather than count rows it cannot join.
+
 ### Date Filter Defaults
 
 A `type: 'date'` filter's `defaultValue` must be a value the dashboard can

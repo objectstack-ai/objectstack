@@ -24,10 +24,11 @@ import { summarizeRun } from './run-summary.js';
 import { withDroppedFields } from './run-dropped-fields.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 // The values below (`AutomationEngine` for its public static
-// `MAX_NODE_REENTRIES`) are read only inside the function bodies, at call time,
+// `MAX_NODE_REENTRIES`, and `activeMsAtPause`) are read only inside the function bodies, at call time,
 // never while a module is evaluating, so the import cycle with ./engine.js is
 // safe under ESM live bindings; the tsup bundle is one file and has no cycle.
 import {
+    activeMsAtPause,
     AutomationEngine,
     buildRunTrigger,
     DEFAULT_BRANCH_LABEL,
@@ -1361,6 +1362,8 @@ export async function executeWithoutRetry(
                 startedAt,
                 completedAt: new Date().toISOString(),
                 durationMs,
+                // [#32284] A retry attempt is an initial execution: it never paused.
+                waitMs: 0,
                 trigger: buildRunTrigger(context),
                 steps,
                 output,
@@ -1421,7 +1424,7 @@ export async function executeWithoutRetry(
         if (isRefusalSignal(err)) {
             return this.finishRefusedRun({
                 runId, flowName, flowVersion: flow.version,
-                startedAt, durationMs: Date.now() - startTime,
+                startedAt, durationMs: Date.now() - startTime, waitMs: 0,
                 steps, flow, variables,
                 refusalMessage: err.message, context,
             });
@@ -1468,6 +1471,8 @@ export async function executeWithoutRetry(
         // method returns — the only id `resume()` can be called with.
         if (isSuspendSignal(err)) {
             const durationMs = Date.now() - startTime;
+            // [#32284] This attempt's first pause — see `execute()`'s.
+            const waitMs = 0;
             // #7639 — ONE snapshot expression feeding BOTH consumers: the
             // continuation the run will resume from, and the `paused` log
             // entry run-detail serves. Same object, so what an operator
@@ -1485,6 +1490,7 @@ export async function executeWithoutRetry(
                 context: runContext,
                 startedAt,
                 startTime,
+                activeMs: activeMsAtPause(durationMs, waitMs),
                 correlation: err.correlation,
                 screen: err.screen,
             });
@@ -1495,6 +1501,7 @@ export async function executeWithoutRetry(
                 status: 'paused',
                 startedAt,
                 durationMs,
+                waitMs,
                 trigger: buildRunTrigger(context),
                 steps,
                 variables: variablesSnapshot,
@@ -1539,6 +1546,7 @@ export async function executeWithoutRetry(
             startedAt,
             completedAt: new Date().toISOString(),
             durationMs,
+            waitMs: 0,
             trigger: buildRunTrigger(context),
             steps,
             error: errorMessage,

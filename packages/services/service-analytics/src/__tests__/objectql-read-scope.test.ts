@@ -251,7 +251,10 @@ describe('ObjectQLStrategy — OUT-OF-ENVELOPE cross-object is fail-closed (#365
     expect(reached).toBe(false);
   });
 
-  it('rejects a cross-object FILTER', async () => {
+  it('rejects a cross-object FILTER it cannot serve exactly (under $not)', async () => {
+    // [#33335] A one-hop leaf is served now, as the engine's nested-relation
+    // condition (pinned in `crossobject-conjunct-refusal.test.ts`); a negated
+    // one stays out of the envelope, fail-closed before the engine.
     const svc = svcFor({
       name: 'xobj_filter', label: 'X-obj filter', object: 'opportunity', include: ['account'],
       dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
@@ -259,10 +262,10 @@ describe('ObjectQLStrategy — OUT-OF-ENVELOPE cross-object is fail-closed (#365
     });
     await expect(
       svc.query(
-        { cube: 'xobj_filter', dimensions: ['stage'], measures: ['revenue'], where: { 'account.region': 'West' } },
+        { cube: 'xobj_filter', dimensions: ['stage'], measures: ['revenue'], where: { $not: { 'account.region': 'West' } } },
         ctxA,
       ),
-    ).rejects.toThrow(/cannot evaluate a cross-object filter/);
+    ).rejects.toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'account.region', param: 'where' });
     expect(reached).toBe(false);
   });
 

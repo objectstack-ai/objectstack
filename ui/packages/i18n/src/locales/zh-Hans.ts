@@ -2796,6 +2796,8 @@ const zh = {
         ssoAccountNotInvited: "你的账号尚未在本系统中开通。请联系管理员邀请你。",
         ssoAccountNotLinked: "本系统中已有使用你邮箱的账号，但它尚未关联单点登录。请改用其他方式登录，或请管理员为你关联。",
         ssoResponseRejected: "你所在组织的登录服务返回了本系统无法接受的响应。请联系管理员检查单点登录配置。",
+        ssoEmailDomainNotAllowed: "未创建账号：你的邮箱不属于本系统接受新账号的域名。请使用你的组织邮箱，或联系管理员。",
+        ssoEmailNotAnAddress: "未创建账号：你所在组织的登录服务没有提供可用的邮箱地址。请联系管理员检查单点登录配置。",
         ssoStartFromLoginPage: "登录需要从本系统的登录页发起。请在此输入你的工作邮箱，然后选择“使用 SSO 登录”。",
         ssoTechnicalDetails: "技术详情",
         directSignInIncomplete: "登录没有完成：你从单点登录返回时仍未登录。请确认浏览器允许本站点的 Cookie，然后重试。",
@@ -4332,6 +4334,7 @@ const zh = {
       objectsAndFields: '对象与字段',
       views: '视图',
       suggestedField: '补充',
+      suggestedFieldLegend: '标「{{mark}}」的字段是 AI 自行补充的，你没有要求。',
       nameField: '名称：{{field}}',
     },
     build: {

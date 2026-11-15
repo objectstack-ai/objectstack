@@ -2790,6 +2790,8 @@ const fr = {
         ssoAccountNotInvited: "Votre compte n'est pas encore configuré sur ce système. Demandez à votre administrateur de vous inviter.",
         ssoAccountNotLinked: "Un compte associé à votre adresse e-mail existe déjà ici, mais il n'est pas relié à l'authentification unique. Connectez-vous autrement ou demandez à votre administrateur de le relier.",
         ssoResponseRejected: "Le service de connexion de votre organisation a envoyé une réponse que ce système n'a pas pu accepter. Demandez à votre administrateur de vérifier la configuration de l'authentification unique.",
+        ssoEmailDomainNotAllowed: "Aucun compte n'a été créé : votre adresse e-mail n'appartient pas à un domaine pour lequel ce système accepte de nouveaux comptes. Utilisez l'adresse e-mail de votre organisation ou contactez votre administrateur.",
+        ssoEmailNotAnAddress: "Aucun compte n'a été créé. Le service de connexion de votre organisation n'a pas envoyé d'adresse e-mail utilisable pour vous. Demandez à votre administrateur de vérifier la configuration de l'authentification unique.",
         ssoStartFromLoginPage: "La connexion doit commencer sur la page de connexion de ce système. Saisissez ici votre adresse e-mail professionnelle et choisissez « Se connecter avec le SSO ».",
         ssoTechnicalDetails: "Détails techniques",
         directSignInIncomplete: "La connexion n'a pas abouti : vous êtes revenu de l'authentification unique sans être connecté. Vérifiez que ce navigateur autorise les cookies pour ce site, puis réessayez.",
@@ -4169,6 +4171,7 @@ const fr = {
       objectsAndFields: "Objets et champs",
       views: "Vues",
       suggestedField: "suggéré",
+      suggestedFieldLegend: "Les champs marqués « {{mark}} » ont été ajoutés par l’IA ; vous ne les avez pas demandés.",
       nameField: "Nom : {{field}}",
     },
     build: {

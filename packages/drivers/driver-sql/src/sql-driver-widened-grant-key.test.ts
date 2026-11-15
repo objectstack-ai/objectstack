@@ -31,12 +31,18 @@
  *    on the upgrade dogfoods' 18.0 and 18.0.0 fixtures first (#32164);
  *  - the narrower key carried by a #11627 hash shadow (MySQL, MariaDB), plain
  *    or NULL-safe, certified or not, guard or none: KEPT, nothing offered,
- *    never an orphan `drop_index` (pure functions; no live MySQL here).
+ *    never an orphan `drop_index` (pure functions);
+ *  - the guard as MySQL 8 builds it, a functional key part over the driver's
+ *    hash-shadow digest scoped by `permission_set_package IS NULL`, stands for
+ *    the partial index: one SAFE replace of a plain narrower key (pure
+ *    functions, and the live MySQL cell with the statement `metadata-protocol`
+ *    runs there).
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { SqlDriver } from './index.js';
 import { asPre18TenantColumn } from './pre-18-tenant-column.testkit.js';
+import { MYSQL_CELL, declareDialectCell } from './live-dialect-matrix.testkit.js';
 import {
   buildIndexName,
   diffManagedIndexes,
@@ -387,5 +393,134 @@ describe('the narrower key carried by a hash shadow (MySQL, MariaDB) — pure fu
   it('CONTROL: the same key built plain (not shadow-carried) is still the one SAFE replace once the guard stands', () => {
     const plainNarrow: PhysicalIndex = { name: LEGACY, columns: NARROW, unique: true };
     expect(diff([plainNarrow, wide, guard], true).map((e) => [e.op.type, e.category])).toEqual([['replace_unique_index', 'safe']]);
+  });
+});
+
+// ── MySQL 8's spelling of the guard: a functional key part ────────────────────
+
+/**
+ * What MySQL 8.0.46 stores (`information_schema.STATISTICS.EXPRESSION`) for the
+ * guard `buildUserPermissionSetPackagelessIndexSql('mysql2')` builds, measured
+ * (the live cell below asserts it again).
+ */
+const MYSQL_GUARD_EXPR =
+  '(case when (`permission_set_package` is null) then ' +
+  'unhex(sha2(concat(`user_id`,0x1f,`permission_set`,0x1f,`organization_id`),256)) end)';
+/** `buildUserPermissionSetPackagelessIndexSql('mysql2')` in metadata-protocol, verbatim. */
+const MYSQL_GUARD_SQL =
+  `CREATE UNIQUE INDEX ${GUARD_NAME} ON ${GRANTS} ` +
+  '((CASE WHEN permission_set_package IS NULL THEN unhex(sha2(concat(user_id, 0x1f, permission_set, 0x1f, organization_id), 256)) END))';
+
+describe('the guard as a MySQL 8 functional key part — pure functions', () => {
+  const NARROW = ['user_id', 'permission_set', 'organization_id'];
+  const WIDE = ['user_id', 'permission_set', 'permission_set_package', 'organization_id'];
+  const LEGACY = buildIndexName(GRANTS, NARROW, true);
+  const WIDE_NAME = buildIndexName(GRANTS, WIDE, true);
+  const columns = new Set(['id', ...WIDE]);
+  const fields = grants(NEW_INDEXES)[0].fields;
+  const wide: PhysicalIndex = { name: WIDE_NAME, columns: WIDE, unique: true };
+  const functional = (expression = MYSQL_GUARD_EXPR): PhysicalIndex => ({ name: GUARD_NAME, columns: [], unique: true, expressions: [expression] });
+  const diff = (physical: PhysicalIndex[]) =>
+    diffManagedIndexes({
+      table: GRANTS,
+      expected: [{ name: WIDE_NAME, columns: WIDE, unique: true }],
+      legacy: legacyUniqueReplacements({
+        table: GRANTS, fields, tenantField: 'organization_id', physicalColumns: columns, declaredIndexes: NEW_INDEXES, physical,
+      }),
+      physical,
+      tenantField: 'organization_id',
+      tenantKeyCertified: true,
+    });
+
+  it('beside a plain narrower key: one SAFE replace, and the guard draws no entry', () => {
+    const plainNarrow: PhysicalIndex = { name: LEGACY, columns: NARROW, unique: true };
+    const entries = diff([plainNarrow, wide, functional()]);
+    expect(entries.map((e) => [e.op.type, e.category])).toEqual([['replace_unique_index', 'safe']]);
+    expect(entries[0].op).toMatchObject({ dropIndexNames: [LEGACY], createIndexName: WIDE_NAME });
+  });
+
+  it('CONTROL: the same digest over the key columns in another order is no guard — KEPT, nothing offered', () => {
+    const plainNarrow: PhysicalIndex = { name: LEGACY, columns: NARROW, unique: true };
+    const reordered = MYSQL_GUARD_EXPR.replace('`user_id`,0x1f,`permission_set`', '`permission_set`,0x1f,`user_id`');
+    expect(reordered).not.toBe(MYSQL_GUARD_EXPR);
+    expect(diff([plainNarrow, wide, functional(reordered)])).toEqual([]);
+  });
+
+  it('a narrower key carried by a hash shadow stays KEPT beside it, as beside the partial guard', () => {
+    const carrier: PhysicalIndex = {
+      name: LEGACY,
+      columns: [hashShadowColumnFor(LEGACY)],
+      unique: true,
+      shadowKey: NARROW.map((column) => ({ column, nullSafe: false })),
+    };
+    expect(diff([carrier, wide, functional()])).toEqual([]);
+  });
+});
+
+declareDialectCell(MYSQL_CELL, 'grant key widened by its package column on MySQL 8 (#32164)', (cell) => {
+  describe('the grant key widened by its package column on an upgraded MySQL 8 database', () => {
+    let live: SqlDriver | undefined;
+    afterEach(async () => {
+      await live?.execute(`drop table if exists ${GRANTS}`).catch(() => {});
+      await live?.disconnect().catch(() => {});
+      live = undefined;
+    });
+
+    // Keyed text as the platform object declares it, so the old key is a plain
+    // key over varchar columns (a TEXT key part would be shadow-carried, which
+    // the arm keeps whatever the guard: pinned above).
+    const keyedGrants = (indexes: unknown[]) => [{
+      name: GRANTS,
+      fields: {
+        user_id: { type: 'text', required: true, maxLength: 255 },
+        permission_set: { type: 'text', required: true, maxLength: 100 },
+        permission_set_package: { type: 'text', maxLength: 255 },
+        organization_id: { type: 'text', maxLength: 255 },
+      },
+      indexes,
+    }];
+    const drift = async () => ((await live!.detectManagedDrift()) as any[]).filter((e) => e.table === GRANTS);
+    const lands = async (id: string, pkg: string | null): Promise<boolean> => {
+      try {
+        await (live as any).knex(GRANTS).insert({ id, user_id: 'u1', permission_set: 'sales_rep', permission_set_package: pkg, organization_id: 'org_1' });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    it('with the functional guard: one SAFE replace, applied; re-plan empty; two packages admitted, a second package-less grant refused', async (ctx) => {
+      live = new SqlDriver(cell.config());
+      (live as any).logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+      const k = (live as any).knex;
+      const [[version]] = await k.raw('SELECT VERSION() AS v');
+      // MariaDB has no functional key part (its guard is a row-scoped shadow).
+      if (/mariadb/i.test(String(version?.v))) ctx.skip();
+      await live.execute(`drop table if exists ${GRANTS}`);
+      await live.initObjects(keyedGrants(OLD_INDEXES) as any);
+      await live.initObjects(keyedGrants(NEW_INDEXES) as any);
+      const legacy = buildIndexName(GRANTS, ['user_id', 'permission_set', 'organization_id'], true);
+      // Without the guard the old key is KEPT: nothing offered.
+      expect((await drift()).filter((e) => String(e.op.type).endsWith('_index'))).toEqual([]);
+
+      await live.execute(MYSQL_GUARD_SQL);
+      const [stored] = await k.raw(
+        'SELECT EXPRESSION AS e FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?',
+        [GRANTS, GUARD_NAME],
+      );
+      expect(stored.map((r: any) => r.e)).toEqual([MYSQL_GUARD_EXPR]);
+
+      const plan = await drift();
+      expect(plan.map((e) => [e.op.type, e.category])).toEqual([['replace_unique_index', 'safe']]);
+      expect(plan[0].op).toMatchObject({ dropIndexNames: [legacy] });
+      const { applied, skipped } = await live.applyMigrationEntries(plan);
+      expect([applied.length, skipped]).toEqual([1, []]);
+      expect(await drift()).toEqual([]);
+      expect(await lands('n1', null)).toBe(true);
+      expect(await lands('n2', null)).toBe(false);
+      expect(await lands('p1', 'com.acme.crm')).toBe(true);
+      expect(await lands('p2', 'com.acme.hr')).toBe(true);
+      expect(await lands('p3', 'com.acme.crm')).toBe(false);
+    });
   });
 });

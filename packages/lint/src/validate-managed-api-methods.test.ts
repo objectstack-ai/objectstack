@@ -129,6 +129,19 @@ describe('[#22161] one-line verdicts — object/managed-api-method-unaffordable'
     expect(f.message).not.toContain('sys_environment');
   });
 
+  // [ADR-0153 D4/D5] `userActions` cannot open a write on `synced` (the parse
+  // refuses it), so the verdict does not prescribe it; the platform-bucket
+  // case above is the control that keeps today's sentence.
+  it('on a synced object, the verdict says userActions cannot open a write, never "needs userActions"', () => {
+    const [f] = validateManagedApiMethods({
+      objects: [{ name: 'erp_order_copy', managedBy: 'synced', enable: { apiMethods: ['get', 'create', 'update'] } }],
+    });
+    expect(f.message).toBe(
+      "`enable.apiMethods` advertises [create, update], which `managedBy: 'synced'` refuses, and "
+        + '`userActions` cannot open a write there, so the registry strips them',
+    );
+  });
+
   it('`os explain` carries what the verdict no longer says', () => {
     const entry = explainRule(MANAGED_API_METHOD_UNAFFORDABLE);
     expect(entry, 'no `os explain object/managed-api-method-unaffordable` entry').toBeDefined();
@@ -141,6 +154,8 @@ describe('[#22161] one-line verdicts — object/managed-api-method-unaffordable'
       'One finding per object, not per verb',
       'ADR-0092 D4',
       'Reads are never affordance-gated',
+      'ADR-0153 D4',
+      'ADR-0153 D5',
     ]) {
       expect(text, `explanation names ${fact}`).toContain(fact);
     }
@@ -192,6 +207,16 @@ describe('[#22161] one-line fix — object/managed-api-method-unaffordable', () 
       'Remove [create, update, upsert, delete, purge] from `enable.apiMethods`, or add ' +
         '`userActions: { create: true, edit: true, delete: true }` once a guard enforces the write',
     );
+  });
+
+  it('on a synced object, the fix line offers only the removal and a declared action', () => {
+    const [f] = validateManagedApiMethods({
+      objects: [{ name: 'erp_order_copy', managedBy: 'synced', enable: { apiMethods: Object.keys(MANAGED_WRITE_VERB_AFFORDANCE) } }],
+    });
+    expect(f!.hint).toBe(
+      'Remove [create, update, upsert, delete, purge] from `enable.apiMethods`, and send writes through a declared action',
+    );
+    expect(f!.hint).not.toContain('userActions');
   });
 
   it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
