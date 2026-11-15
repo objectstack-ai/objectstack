@@ -533,3 +533,20 @@ export function registerOutboxAcceptedTrigger(engine: OutboxHookEngine, opts: { 
   }
   engine.registerHook('afterUpdate', onUpdate, { object: 'sys_user', packageId: OUTBOX_ACCEPTED_PACKAGE_ID });
 }
+
+/**
+ * Boot the outbox at `kernel:ready`: the accepted trigger and the worker,
+ * both only on a cloud-managed kernel with a host wired. Elsewhere no door
+ * writes a row (the doors answer `no_host`, or refuse off a managed
+ * environment), so there is nothing to mark or retry, and this answers
+ * `undefined` without touching the engine.
+ */
+export function bootEnvironmentUserOutbox(
+  engine: OutboxHookEngine,
+  opts: { host: EnvironmentUserHostAccessor | undefined; isCloudManaged(): boolean; logger?: OutboxLogger },
+): EnvironmentUserOutboxWorker | undefined {
+  const host = opts.host;
+  if (!host || !opts.isCloudManaged()) return undefined;
+  registerOutboxAcceptedTrigger(engine, { logger: opts.logger });
+  return startEnvironmentUserOutboxWorker({ getDataEngine: () => engine, host, logger: opts.logger });
+}

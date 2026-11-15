@@ -192,9 +192,7 @@ import {
 import { engineUserBanWriter, type UserBanEngine } from './user-ban-write.js';
 import type { EnvironmentUserHostAccessor } from './environment-user-host.js';
 import {
-  registerOutboxAcceptedTrigger,
-  startEnvironmentUserOutboxWorker,
-  type EnvironmentUserOutboxEngine,
+  bootEnvironmentUserOutbox,
   type EnvironmentUserOutboxWorker,
   type OutboxHookEngine,
 } from './environment-user-outbox.js';
@@ -2298,12 +2296,10 @@ export class AuthPlugin implements Plugin {
         // invitation reads `accepted` once they sign in, and the worker
         // retries every call the host did not take. Elsewhere no outbox row
         // is ever written, so neither runs.
-        const environmentUserHost = this.options.environmentUserHost;
-        if (environmentUserHost && isCloudManaged() && !this.environmentUserOutbox) {
-          registerOutboxAcceptedTrigger(engine as unknown as OutboxHookEngine, { logger: ctx.logger });
-          this.environmentUserOutbox = startEnvironmentUserOutboxWorker({
-            getDataEngine: () => engine as unknown as EnvironmentUserOutboxEngine,
-            host: environmentUserHost,
+        if (!this.environmentUserOutbox) {
+          this.environmentUserOutbox = bootEnvironmentUserOutbox(engine as unknown as OutboxHookEngine, {
+            host: this.options.environmentUserHost,
+            isCloudManaged,
             logger: ctx.logger,
           });
         }

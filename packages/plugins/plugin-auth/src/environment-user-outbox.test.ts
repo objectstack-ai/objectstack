@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import {
+  bootEnvironmentUserOutbox,
   claimOutboxRow,
   ENVIRONMENT_USER_OUTBOX_OBJECT,
   environmentUserOutboxNextDueAt,
@@ -279,5 +280,34 @@ describe('an invitation reads accepted once the person signs in', () => {
     h.engine.update = () => Promise.reject(new Error('store down'));
     await expect(h.fire({ id: 'usr_p', data: { source: 'idp_provisioned' } })).resolves.toBeUndefined();
     expect(h.logger.warn).toHaveBeenCalledOnce();
+  });
+});
+
+describe('the outbox boots only on a cloud-managed kernel with a host wired', () => {
+  function bootHarness() {
+    const engine = createMemoryEngine() as any;
+    const hooks: string[] = [];
+    engine.registerHook = (event: string, _handler: unknown, options?: { object?: string }) =>
+      void hooks.push(`${event}:${options?.object}`);
+    const host: EnvironmentUserHost = { userAdded: () => {}, userDeactivated: () => {}, userReactivated: () => {} };
+    return { engine, hooks, host };
+  }
+
+  it('starts the worker and registers the accepted trigger when the kernel is cloud-managed and a host is wired', async () => {
+    const h = bootHarness();
+    const worker = bootEnvironmentUserOutbox(h.engine, { host: () => h.host, isCloudManaged: () => true });
+    try {
+      expect(worker).toBeDefined();
+      expect(h.hooks).toEqual(['afterUpdate:sys_user']);
+    } finally {
+      await worker?.stop();
+    }
+  });
+
+  it('does nothing off a cloud-managed kernel, even with a host wired, or with no host', () => {
+    const h = bootHarness();
+    expect(bootEnvironmentUserOutbox(h.engine, { host: () => h.host, isCloudManaged: () => false })).toBeUndefined();
+    expect(bootEnvironmentUserOutbox(h.engine, { host: undefined, isCloudManaged: () => true })).toBeUndefined();
+    expect(h.hooks).toEqual([]);
   });
 });
