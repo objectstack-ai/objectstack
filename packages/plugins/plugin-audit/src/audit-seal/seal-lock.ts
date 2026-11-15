@@ -59,6 +59,14 @@ export const AUDIT_SEAL_PG_LOCK_KEY = databaseSessionLockPgKey(AUDIT_SEAL_LOCK_N
  */
 export const AUDIT_SEAL_LOCK_WAIT_MS = 10 * 60_000;
 
+/**
+ * The three rewrites that hold the lock, spelled as an operator types them, for
+ * the lines that tell an operator what else may hold it. Each is a full
+ * command id, so `check:cli-command-ids` holds every one to a real command.
+ */
+export const AUDIT_SEAL_LOCK_REWRITE_COMMANDS =
+  '`os migrate audit-key-material`, `os migrate audit-mail-bodies` or `os migrate audit-metadata-bodies`';
+
 /** The engine surface a hold reads: which objects are sealed, and where each one's rows live. */
 export interface AuditSealLockEngine {
   registry: { getAllObjects(): ReadonlyArray<{ name: string; lifecycle?: unknown }> };
@@ -135,13 +143,13 @@ export async function holdAuditSealLock(engine: AuditSealLockEngine, options: Au
         name: AUDIT_SEAL_LOCK_NAME,
         waitMs,
         onWait: () => options.warn(
-          `A sealer pass or another \`os migrate audit-*\` run holds the audit seal lock on ${where}; ` +
+          `A sealer pass or another run of ${AUDIT_SEAL_LOCK_REWRITE_COMMANDS} holds the audit seal lock on ${where}; ` +
             `waiting up to ${Math.ceil(waitMs / 1000)} s for it to finish…`,
         ),
         refuse: () => new Error(
-          `Refusing to rewrite ${named(objects)}: a sealer pass or another \`os migrate audit-*\` run still held the ` +
-            `audit seal lock ('${AUDIT_SEAL_LOCK_NAME}') on ${where} after ${waitMs} ms, so this run changed nothing. ` +
-            'Run it again once that has finished.',
+          `Refusing to rewrite ${named(objects)}: a sealer pass or another run of ${AUDIT_SEAL_LOCK_REWRITE_COMMANDS} ` +
+            `still held the audit seal lock ('${AUDIT_SEAL_LOCK_NAME}') on ${where} after ${waitMs} ms, so this run ` +
+            'changed nothing. Run it again once that has finished.',
         ),
       });
       if (lock) held.push({ objects, lock });

@@ -42,7 +42,12 @@ import {
   type CheckpointSignedBody,
 } from './signed-body.js';
 import { dropAuditSealSecret, writeAuditSealSecret, type SealStorageDriver, type SealStorageEngine } from './signer.js';
-import { AUDIT_SEAL_LOCK_NAME, trySealPassLocks, type AuditSealPassLocks } from './seal-lock.js';
+import {
+  AUDIT_SEAL_LOCK_NAME,
+  AUDIT_SEAL_LOCK_REWRITE_COMMANDS,
+  trySealPassLocks,
+  type AuditSealPassLocks,
+} from './seal-lock.js';
 
 /**
  * ADR-0154 D3 — the sealer: after a settle lag, one window at a time, under
@@ -475,8 +480,9 @@ export class AuditSealer {
     this.reported.set('seal-lock-held', this.now());
     this.options.logger.info(
       `AuditSealer: the audit seal lock ('${AUDIT_SEAL_LOCK_NAME}') on the database of ` +
-        `${objects.map((o) => `'${o}'`).join(', ')} is held by another session — an \`os migrate audit-*\` run, or ` +
-        'another server\'s sealer pass — so this pass is skipped and seals nothing until it lets go; each pass tries again.',
+        `${objects.map((o) => `'${o}'`).join(', ')} is held by another session — a run of ` +
+        `${AUDIT_SEAL_LOCK_REWRITE_COMMANDS}, or another server's sealer pass — so this pass is skipped and seals ` +
+        'nothing until it lets go; each pass tries again.',
     );
   }
 }
