@@ -24,6 +24,7 @@ function matches(row: Row, where: Record<string, unknown> = {}): boolean {
       if ('$gte' in ops && !((value as number) >= (comparable(ops.$gte) as number))) return false;
       if ('$gt' in ops && !((value as number) > (comparable(ops.$gt) as number))) return false;
       if ('$lt' in ops && !((value as number) < (comparable(ops.$lt) as number))) return false;
+      if ('$in' in ops && !(ops.$in as unknown[]).some((v) => comparable(v) === value)) return false;
       return true;
     }
     return value === comparable(cond);
