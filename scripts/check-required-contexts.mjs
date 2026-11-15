@@ -509,7 +509,7 @@ export const REQUIRED_CONTEXTS = [
  * ── Instruction surfaces (#9491) ─────────────────────────────────────────────
  *
  * The same context literals are OPERATIVE PROSE outside the workflows: the
- * instruction files that tell a review seat which check-runs to confirm before
+ * instruction files that tell an L1 reviewer which check-runs to confirm before
  * flipping a PR ready / arming auto-merge / enqueuing it. #9325's rename moved
  * lint.yml and this registry in one PR (the pin above forces that), while
  * AGENTS.md was carried along BY HAND and the pm-dispatch review checklist was
@@ -640,7 +640,7 @@ export const INSTRUCTION_SURFACES = [
     ],
   },
   {
-    // The review seat's gate-clearance step: confirm both jobs' `conclusion`
+    // The L1 reviewer's gate-clearance step: confirm both jobs' `conclusion`
     // before flipping ready / arming / enqueuing. It names these two as the
     // required FLOOR a reviewer confirms by hand — its own next line sends the
     // seat to `true-green.md` for the rest — so it does NOT state the set and

@@ -3974,7 +3974,7 @@ const USAGE = [
   `  recommendation naming one — is REFUSED when it carries no \`${DECISION_FACET_MARKER}\` marker outside code; the`,
   '  refusal prints the four-facet block it owes. Card bodies and every other route are untouched.',
   '  A mailbox comment whose `To:` is a triage seat and whose key is `Request: contract-review` is REFUSED, whether',
-  '  or not the key line spells its template: a lane without the review tier knocks a review seat, then a sibling',
+  '  or not the key line spells its template: a lane without the review tier knocks an L2 seat, then a sibling',
   '  seat with the tier — never triage.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
   '',
@@ -5770,7 +5770,7 @@ export function selfTest() {
     t('⭐ a MALFORMED knock to triage is refused too — no reason, a bare PR number, a second line: the reader\'s unreadable reading still names the key and the seat', [`Request: contract-review · PR #26766 · head ${HEAD}`, 'Request: contract-review · 26766 · rationed', `Request: contract-review · PR #26766 · head ${HEAD} · rationed\nbecause fable is short today`].every((key) => { const r = judged('triage#1', key); return !r.ok && r.text.includes('`To: triage#1`'); }) && judged('review#1', `Request: contract-review · PR #26766 · head ${HEAD}`).ok);
     t('a bare `To: triage` reads as `triage#1` (the doorbell reader\'s seat spelling) and is refused the same way', !judged('triage').ok && !judged('Triage#2').ok);
     t('⭐ the same knock addressed to an L2 seat passes — under its lane word `l2-review` and under the old spelling `review`', judged('l2-review#1').ok && judged('l2-review#2').ok && judged('review#1').ok && judged('review#2').ok);
-    t('…and to a sibling lane seat, the fallback while no review seat is seated', judged('domain:server#2').ok);
+    t('…and to a sibling lane seat, the fallback while no L2 seat is seated', judged('domain:server#2').ok);
     t('⛔ every other key to triage is untouched: `Request: urgent-triage` and `Request: triage` pass', judged('triage#1', 'Request: urgent-triage · #26766 · main red on Test Core').ok && judged('triage#1', 'Request: triage · #26766 · which lane takes it').ok);
     t('⛔ a card BODY is untouched — the check is a comment\'s, as a knock is a comment on a mailbox PR', judgeBody(KNOCK('triage#1'), { mode: 'body' }, NOW_MS).ok);
     t('⛔ the refusal\'s own words (the seat it echoes aside) carry no tracker number and no HTML comment — a runtime string an author is shown', /#\d/u.test(triageContractReviewKnockText({ to: 'SEAT' })) === false && triageContractReviewKnockText({ to: 'SEAT' }).includes('<!--') === false);
