@@ -13,6 +13,7 @@
 - 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
 - 每日看板与轮次记录列「待维护者」:当前里程碑已清的专题,注小结贴否;读数非门禁。
 - 「待维护者」另逐张列 open `needs-user-decision` 与 `pm:awaiting-maintainer` 卡,注入态以来卡龄。
+- 轮次记录每 3 小时报 24h 流量:卡新建/关闭/净增、合并 PR 数、open p1、引契约复核新卡数。
 - 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`domain:*`);② `pm:queue` 无 `domain:*`(仅多车道仓);
 - ③ `domain:*` 无 pm-state;④ `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
@@ -70,7 +71,7 @@
 - 跨层功能点(≥2 层)立父单带 `area:*`+`tracking`+清单项级,逐层子单按 `Blocked-by:` 排。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
 - 改作者可写面(种类非 `none` 或带 `(narrowing)`)的卡,首触 done-when 写 skills + docs + eval 三项。
-- ADR/技能文本的携带注记 ⛔ 不挂实施卡:ADR 由落地席合并后立卡,余各立 `domain:skills` 卡。
+- ADR/技能文本携带注记 ⛔ 不挂实施卡:ADR 由落地席合并后立卡,余每 PR 一 `domain:skills` 卡。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
 - 同文件同机制 = 同一发现,不分车道即并:证据搬先卡,后卡经中继 `issue_patch` 关 `duplicate`。
 - 同族发现并入收口卡,不开单点卡;在飞(assignee/open PR)永不并,`Blocked-by:` 不派;完工查过期。

@@ -85,6 +85,7 @@ import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { saveRegistryQuestion } from './registry-question.js';
+import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
 import { BatchRowHealError, canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, undoOutcomeForLog, type WrittenBatchRow } from './batch-object-registration.js';
 
 export class ProtocolSaveFacet {
@@ -1253,6 +1254,23 @@ export class ProtocolSaveFacet {
                     await host.saveWriteBinding(singularType, request, mode),
                 );
                 if (extensionRefusal) throw extensionRefusal;
+                // [ADR-0144 D2 and D6, amended; #33593 ruling R1] …and, published
+                // on a face that makes the one body live at once, the follow door
+                // the same face asks of an `object` body: the extension judged as
+                // its object will be served, with this body in its package's
+                // slot. The registry answers no verdict for an object nothing
+                // serves yet, and none before the cold boot sealed it.
+                const registry = host.engine?.registry as { objectRegistrationRefusal?: (schema: unknown, packageId: string | undefined, ownership: string, options: { againstRegistry?: boolean }) => Error | null } | undefined;
+                if (singularType === OBJECT_EXTENSION_TYPE
+                    && saveRegistryQuestion({ mode, writeFace: request.writeFace }) === 'against-registry'
+                    && typeof registry?.objectRegistrationRefusal === 'function') {
+                    const binding = await host.saveWriteBinding(singularType, request, mode);
+                    if (binding) {
+                        const { extend, priority: _priority, ...contribution } = registrableObjectExtension(request.item);
+                        const followRefusal = registry.objectRegistrationRefusal({ ...contribution, name: extend }, binding, 'extend', { againstRegistry: true });
+                        if (followRefusal) throw followRefusal;
+                    }
+                }
             }
             // [harden] …and a permission set whose NAME another owner already
             // holds, with `NAMESPACE_CONFLICT` / 422: a set's name is its

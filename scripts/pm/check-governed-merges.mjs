@@ -1168,7 +1168,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
   '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 74,
-  '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 38,
+  '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 51,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -4421,7 +4421,7 @@ export function pullSizeFrom(head) {
 export const ARM_READER_SOURCE = './check-governed-queue-guard.mjs';
 
 /** The guard exports the arm leg reads with. A missing one is NOT MEASURED, never a second parser here. */
-export const ARM_READER_EXPORTS = Object.freeze(['decomposeGovernedWork', 'readLowRiskTier', 'landsOnLowRiskArm', 'recordAuthorTrusted', 'authorizedApprovalVerdict', 'enqueuerFromTimeline', 'authorizedEnqueueVerdict', 'loadRecordRecognisers', 'recordVerdict', 'lowRiskRecordVerdict', 'makePullReader', 'makeReviewReader', 'makeCommentReader', 'makeTimelineReader']);
+export const ARM_READER_EXPORTS = Object.freeze(['decomposeGovernedWork', 'readLowRiskTier', 'landsOnLowRiskArm', 'recordAuthorTrusted', 'ignoredAuthorLines', 'authorizedApprovalVerdict', 'enqueuerFromTimeline', 'authorizedEnqueueVerdict', 'loadRecordRecognisers', 'recordVerdict', 'lowRiskRecordVerdict', 'makePullReader', 'makeReviewReader', 'makeCommentReader', 'makeTimelineReader']);
 
 /** Load the guard's readers and the record recognisers once per run. Never throws: a failed load is the reason. */
 export async function loadArmReaders(load = (specifier) => import(specifier)) {
@@ -4446,6 +4446,15 @@ export async function loadArmReaders(load = (specifier) => import(specifier)) {
  * comments by an author the guard trusts (`recordAuthorTrusted`, #33711 S3), created AND last edited at or before
  * it (#33711 N4). The record's head is the landed commit's only
  * when GitHub's `merge_commit_sha` is that commit (#33711 S2).
+ * #33729: a review dismissed AFTER the landing is read in the state it had when the queue read it (the timeline's
+ * `review_dismissed` event names it, N8); a git read the arm needed that failed, or a fork predicate not measured, is
+ * `not-measured`, never `tier-h` (N5); a trusted comment edited after the landing is named only when it is the row
+ * the record leg would have read had it not been edited, on every BREACH reason (N9, N10); a recogniser set with no
+ * trusted-author list is `not-measured` (N11), and the comments the author binding dropped are counted in the
+ * guard's own words (`ignoredAuthorLines`, N11).
+ * The carry test's `baseRef` is the landed commit's first parent (N6): between it and the merge group's base lie
+ * only the squash commits of entries ahead in the same group, which no queued head contains, so `git merge-base`
+ * of either base with a head names the same commit and the carry reads the same.
  * States: `pass` (an arm landing on a same-head at-tier PASS record), `breach` (an arm landing without one, or
  * whose pull did not land as this commit), `cleared` (the arm read S, but an authorized approval or enqueue
  * cleared it first: the maintainer's merge), `tier-h` (the arm read H: the maintainer's merge), `not-measured`
@@ -4470,9 +4479,23 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
     return unmeasured(`${pull ? 'its timeline' : 'its pull request'} could not be read (${why(error)})`);
   }
   const head = { number: entry.pr, body: pull.body, labels: pull.labels, fork: pull.fork, head: { ref: pull.headRef } };
-  guard.readLowRiskTier(work, repo, head, { timeline: { measured: true, reason: null, events }, runGit });
+  // N5: every git read the arm takes is recorded when it throws. The guard folds such a read into Tier H with a
+  // reason (fail closed in the queue), but here an H read on a failed read cannot say whether the queue read S.
+  const gitFailures = [];
+  const armGit = (argv) => {
+    try {
+      return runGit(argv);
+    } catch (error) {
+      gitFailures.push({ argv, why: why(error) });
+      throw error;
+    }
+  };
+  guard.readLowRiskTier(work, repo, head, { timeline: { measured: true, reason: null, events }, runGit: armGit });
   if (!guard.landsOnLowRiskArm(work)) {
-    return { state: 'tier-h', headSha, reasons: work.surfaces.find((s) => s?.lowRiskVerdict)?.lowRiskVerdict?.reasons ?? [] };
+    const reasons = work.surfaces.find((s) => s?.lowRiskVerdict)?.lowRiskVerdict?.reasons ?? [];
+    const unread = armReadsNotMeasured(gitFailures, pull.fork, runGit);
+    if (unread.length > 0) return unmeasured(`the low-risk arm could not read ${unread.join('; ')}, so its Tier H cannot say how the queue read it (arm: ${reasons.join('; ') || 'no reason recorded'})`);
+    return { state: 'tier-h', headSha, reasons };
   }
   if (sizeLimbFires(entry.size)) return { state: 'tier-h', headSha, reasons: [`the landed diff crosses the ${HUMAN_MERGE_LINE_THRESHOLD}-line human-merge line`] };
   // S2: the record's head is tied to THIS commit only through the pull's own merge. A pull GitHub says is not
@@ -4494,29 +4517,40 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
   } catch (error) {
     return unmeasured(`its reviews could not be read (${why(error)})`);
   }
-  const approval = guard.authorizedApprovalVerdict(reviews.filter((r) => before(r?.submitted_at)), headSha);
+  const approval = guard.authorizedApprovalVerdict(reviewsAsLanded(reviews.filter((r) => before(r?.submitted_at)), events, landed), headSha);
   if (approval.state === 'approved') return { state: 'cleared', by: 'review', who: approval.approvers, headSha };
   const enqueue = guard.authorizedEnqueueVerdict(guard.enqueuerFromTimeline(events.filter((e) => before(e?.created_at))));
   if (enqueue.state === 'authorized') return { state: 'cleared', by: 'enqueue', who: [enqueue.login], headSha };
   if (recognisers?.available !== true) return unmeasured(recognisers?.reason ?? 'the record recognisers were not loaded');
+  // N11: no trusted-author list is a reading that is missing, not a thread with no record in it.
+  if (!Array.isArray(recognisers.trustedAuthors) || recognisers.trustedAuthors.length === 0) {
+    return unmeasured('the record recognisers carry no trusted-author list, so no comment can be read as a record');
+  }
   const card = recognisers.deliveredCard(head);
   let baseRef = null;
   try {
     baseRef = String(runGit(['rev-parse', '--verify', `${entry.sha}^1`])).trim() || null;
   } catch { /* a carried record then reads unreadable, never stands */ }
   const pair = { pr: entry.pr, card: card.card, headSha, runGit, baseRef, paths: work.paths, repo };
-  const editedAfter = [];
+  // The same threads with the rows edited after the landing put back: what the record leg would have read had
+  // nobody edited them. Only ever read to NAME a dropped row (N9, N10), never to decide a state.
+  const unedited = { ...pair };
+  const editedAfter = new Map();
+  const ignoredAuthors = [];
   for (const thread of recognisers.threads) {
     const number = pair[thread.number];
     try {
       const rows = number === null || number === undefined ? [] : await fetchers.fetchComments(number);
       // The guard's AUTHOR binding (#33687, #33711 S3) first: a row its author does not earn is dropped, as the queue
       // drops it, so it can neither be the record nor shadow one. Then a row counts only when it existed, unedited
-      // since, when the commit landed; a missing time never counts. A trusted row edited after it is named (N7).
+      // since, when the commit landed; a missing time never counts. A trusted row edited after it is noted (N7).
+      const existedAt = (r) => Date.parse(r?.created_at ?? '') <= landed;
       const trusted = rows.filter((r) => guard.recordAuthorTrusted(r, recognisers.trustedAuthors));
-      const existed = trusted.filter((r) => Date.parse(r?.created_at ?? '') <= landed);
+      for (const r of rows) if (!trusted.includes(r) && existedAt(r)) ignoredAuthors.push(String(r?.user?.login ?? '(unreadable author)'));
+      const existed = trusted.filter(existedAt);
       pair[thread.rows] = existed.filter((r) => Date.parse(r?.updated_at ?? r?.created_at ?? '') <= landed);
-      for (const r of existed) if (!pair[thread.rows].includes(r)) editedAfter.push(`${thread.where} comment ${r?.id ?? '(no id)'}`);
+      unedited[thread.rows] = existed;
+      for (const r of existed) if (!pair[thread.rows].includes(r) && r?.id != null) editedAfter.set(r.id, `${thread.where} comment ${r.id}`);
     } catch (error) {
       return unmeasured(`${thread.where} #${number}'s comment thread could not be read (${why(error)})`);
     }
@@ -4525,13 +4559,65 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
   const record = guard.lowRiskRecordVerdict(guard.recordVerdict({ pair, recognisers, cardNote }), pair, recognisers);
   if (record.state === 'unreadable') return unmeasured(record.reason);
   const found = { where: record.where ?? null, id: record.id ?? null, at: record.at ?? null, cardNote };
-  if (record.state === 'stands') return { state: 'pass', headSha, record: found };
-  const edited = editedAfter.length > 0 ? `; ${editedAfter.join(', ')} was edited after the landing, so it does not count` : '';
-  const reason = record.state === 'absent' ? `no \`## Contract review\` record on its head (${record.readSummary})${edited}`
+  const ignored = guard.ignoredAuthorLines({ ignoredAuthors }).map((line) => line.trim());
+  if (record.state === 'stands') return { state: 'pass', headSha, record: found, ...(ignored.length > 0 ? { ignored } : {}) };
+  // N9, N10: the edit is named on every BREACH reason, and only for the row the record leg would have read.
+  let edited = '';
+  if (editedAfter.size > 0) {
+    try {
+      const would = guard.recordVerdict({ pair: unedited, recognisers, cardNote });
+      if (would?.id != null && editedAfter.has(would.id)) edited = `; ${editedAfter.get(would.id)} was edited after the landing, so it does not count (it is the record this leg would otherwise have read)`;
+    } catch { /* a name only; the BREACH stands without it */ }
+  }
+  const reason = (record.state === 'absent' ? `no \`## Contract review\` record on its head (${record.readSummary})`
     : record.state === 'below-tier' ? 'its record does not stand at the tier its face owes'
       : record.state === 'unsigned' ? 'its record names no reviewer'
-        : `its record does not read PASS (${record.verdictReason ?? record.state})`;
-  return { state: 'breach', headSha, reason, record: found };
+        : `its record does not read PASS (${record.verdictReason ?? record.state})`) + edited;
+  return { state: 'breach', headSha, reason, record: found, ...(ignored.length > 0 ? { ignored } : {}) };
+}
+
+/**
+ * The reviews as they stood when the commit landed (#33729 N8): a review GitHub now reads DISMISSED, whose
+ * dismissal the timeline dates at or after the landing, is put back in the state the timeline's `review_dismissed`
+ * event names (`dismissed_review.state`). A dismissal with no such event, no review id or no readable time stays
+ * DISMISSED: toward BREACH, never toward cleared. Pure.
+ */
+export function reviewsAsLanded(reviews, events, landed) {
+  const restored = new Map();
+  for (const e of Array.isArray(events) ? events : []) {
+    if (e?.event !== 'review_dismissed') continue;
+    const at = Date.parse(e?.created_at ?? '');
+    const id = e?.dismissed_review?.review_id;
+    const state = e?.dismissed_review?.state;
+    if (Number.isNaN(at) || at < landed || id == null || typeof state !== 'string' || state === '') continue;
+    restored.set(id, state.toUpperCase());
+  }
+  return (Array.isArray(reviews) ? reviews : []).map((r) =>
+    String(r?.state ?? '').toUpperCase() === 'DISMISSED' && restored.has(r?.id) ? { ...r, state: restored.get(r.id) } : r);
+}
+
+/**
+ * The arm's inputs that were NOT measured (#33729 N5): each git read that threw, and the fork predicate when the
+ * pull read did not measure it. One exception, read rather than assumed: `git show SHA:PATH` throws for a changeset
+ * the commit deleted, and the arm reads that H on its own ("not read at the head"). A `git ls-tree` of that path at
+ * that commit answering nothing proves the deletion, so it is a measured H; any other answer, or a throw, is unread.
+ * Pure but for `runGit`.
+ */
+export function armReadsNotMeasured(gitFailures, fork, runGit) {
+  const unread = [];
+  for (const { argv, why } of Array.isArray(gitFailures) ? gitFailures : []) {
+    const shown = argv?.[0] === 'show' ? /^([0-9a-f]{7,40}):(.+)$/.exec(String(argv[1] ?? '')) : null;
+    if (shown) {
+      let listed = null;
+      try {
+        listed = String(runGit(['ls-tree', '-z', '--name-only', shown[1], '--', shown[2]]));
+      } catch { /* unread */ }
+      if (listed === '') continue;
+    }
+    unread.push(`\`git ${(argv ?? []).slice(0, 2).join(' ')}\` (${why})`);
+  }
+  if (!fork || fork.measured !== true) unread.push('its head repository (the fork predicate)');
+  return unread;
 }
 
 /** The arm cell under a sweep row, or ''. Pure. */
@@ -4539,11 +4625,13 @@ export function armCell(entry) {
   const a = entry?.arm;
   if (!a) return '';
   const head = a.headSha ? ` on head ${String(a.headSha).slice(0, 12)}` : '';
-  if (a.state === 'pass') return `\n      ✅ low-risk arm landing${head}: same-head at-tier PASS record ${a.record?.where ?? ''} comment ${a.record?.id ?? '(no id)'}`;
-  if (a.state === 'breach') return `\n      ⛔ BREACH — low-risk arm landing${head} WITHOUT a same-head at-tier PASS record: ${a.reason}`;
+  const ignored = (a.ignored ?? []).map((line) => `\n         ${line}`).join('');
+  if (a.state === 'pass') return `\n      ✅ low-risk arm landing${head}: same-head at-tier PASS record ${a.record?.where ?? ''} comment ${a.record?.id ?? '(no id)'}${ignored}`;
+  if (a.state === 'breach') return `\n      ⛔ BREACH — low-risk arm landing${head} WITHOUT a same-head at-tier PASS record: ${a.reason}${ignored}`;
   if (a.state === 'cleared') return `\n      low-risk arm: Tier S${head}, cleared by an authorized ${a.by === 'review' ? 'approval' : 'enqueue'} (${(a.who ?? []).join(', ')}) before the record leg — the maintainer's merge`;
   if (a.state === 'not-measured') return `\n      ⚠️  low-risk arm NOT MEASURED${head} — ${a.reason}; listed here, unjudged`;
-  return `\n      low-risk arm: Tier H${head} — ${(a.reasons ?? []).slice(0, 2).join('; ') || 'no reason recorded'}`;
+  const reasons = a.reasons ?? [];
+  return `\n      low-risk arm: Tier H${head} — ${reasons.slice(0, 2).join('; ') || 'no reason recorded'}${reasons.length > 2 ? ` (+${reasons.length - 2} more)` : ''}`;
 }
 
 /**
@@ -8913,8 +9001,8 @@ async function selfTest() {
     });
     const entryOf = (paths = [SK, CS], size = null) => classifyCommit({ sha: LANDED, date: '2026-11-15T04:30:00Z', subject: 'docs(skills): wording (#70)' }, paths, OS, size);
     const LANDING = { mergedAt: MERGED_AT, mergeCommitSha: LANDED };
-    const run = async ({ prRows = [record()], cardRows = [], pull = {}, throws = null, paths = [SK, CS], size = null, rd = readers, attribution = LANDING, reviews = [], events = [] } = {}) => readArmLanding(entryOf(paths, size), {
-      paths, repo: 'objectstack', readers: rd, runGit, attribution,
+    const run = async ({ prRows = [record()], cardRows = [], pull = {}, throws = null, paths = [SK, CS], size = null, rd = readers, attribution = LANDING, reviews = [], events = [], git = runGit } = {}) => readArmLanding(entryOf(paths, size), {
+      paths, repo: 'objectstack', readers: rd, runGit: git, attribution,
       fetchers: {
         fetchPull: async () => { if (throws === 'pull') throw new Error('HTTP 502'); return { sha: HEAD, body: BODY, labels: [], fork: { measured: true, isFork: false, headRepo: 'o/r', baseRepo: 'o/r' }, headRef: 'claude/project-thread-x', ...pull }; },
         fetchReviews: async () => { if (throws === 'reviews') throw new Error('HTTP 502'); return reviews; },
@@ -8978,6 +9066,48 @@ async function selfTest() {
     assert('⛔ readers-that-did-not-load-are-NOT-MEASURED', await unmeasured({ rd: { available: false, reason: 'no guard' } }, /no guard/) === true);
     assert('no-catalog-row-or-no-PR-number-is-no-arm-reading', (await run({ paths: ['AGENTS.md'] })) === null &&
       (await readArmLanding({ ...entryOf(), pr: null }, { paths: [SK], repo: 'objectstack', readers, fetchers: {}, runGit })) === null);
+
+    // #33729 N5: a git read the arm needed that failed, or a fork predicate not measured, is NOT MEASURED, never Tier H.
+    const gitWith = (over) => (args) => (over(args) ?? runGit(args));
+    assert('⛔ #33729-N5-an-unread-diff-tree-status-is-NOT-MEASURED-not-tier-h', await unmeasured({ git: gitWith((a) => { if (a[0] === 'diff-tree') throw new Error('fatal: bad object'); }) }, /could not read `git diff-tree.*bad object.*so its Tier H cannot say how the queue read it/) === true);
+    assert('⛔ #33729-N5-an-unread-changeset-the-commit-still-holds-is-NOT-MEASURED', await unmeasured({ git: gitWith((a) => {
+      if (a[0] === 'show') throw new Error('fatal: unable to read');
+      if (a[0] === 'ls-tree') return `${CS}\0`;
+    }) }, /could not read `git show/) === true);
+    assert('⛔ #33729-N5-a-fork-predicate-not-measured-is-NOT-MEASURED', await unmeasured({ pull: { fork: { measured: false, isFork: false } } }, /the fork predicate/) === true);
+    assert('#33729-N5-control-a-changeset-the-commit-DELETED-is-a-measured-Tier-H-not-a-read-failure', await tierH({ git: gitWith((a) => {
+      if (a[0] === 'diff-tree') return `:100644 100644 ${'1'.repeat(40)} ${'2'.repeat(40)} M\0${SK}\0:100644 000000 ${'3'.repeat(40)} ${'0'.repeat(40)} D\0${CS}\0`;
+      if (a[0] === 'show') throw new Error(`fatal: path '${CS}' does not exist in '${LANDED}'`);
+      if (a[0] === 'ls-tree') return '';
+    }) }, /was not read at the head/) === true);
+    assert('#33729-N5-a-tier-h-cell-says-how-many-reasons-it-did-not-print', armCell({ arm: { state: 'tier-h', reasons: ['a', 'b', 'c', 'd'] } }).endsWith('a; b (+2 more)') && armCell({ arm: { state: 'tier-h', reasons: ['a', 'b'] } }).endsWith('a; b'));
+    // #33729 N8: an authorized approval the queue read, dismissed after the landing, still clears it.
+    const DISMISSED = (at, state = 'approved') => [...QUEUED('objectstack-fleet[bot]'), { event: 'review_dismissed', created_at: at, dismissed_review: { review_id: 1, state } }];
+    const dismissedReview = { ...APPROVED('os-zhuang'), state: 'DISMISSED' };
+    assert('⭐ #33729-N8-an-authorized-approval-DISMISSED-after-the-landing-still-clears-it', await cleared({ prRows: [], reviews: [dismissedReview], events: DISMISSED('2026-11-15T06:00:00Z') }, 'review') === true);
+    assert('⛔ #33729-N8-a-dismissal-BEFORE-the-landing-or-with-no-event-clears-nothing',
+      await breach({ prRows: [], reviews: [dismissedReview], events: DISMISSED('2026-11-15T04:50:00Z') }, /no `## Contract review` record/) === true &&
+      await breach({ prRows: [], reviews: [dismissedReview], events: QUEUED('objectstack-fleet[bot]') }, /no `## Contract review` record/) === true &&
+      await breach({ prRows: [], reviews: [dismissedReview], events: DISMISSED('2026-11-15T06:00:00Z', 'changes_requested') }, /no `## Contract review` record/) === true);
+    // #33729 N9, N10: the edited row is named on every BREACH reason, and only when it is the row the record leg would have read.
+    assert('⛔ #33729-N9-an-edited-PASS-beside-an-older-FAIL-is-named-on-the-not-PASS-reason', await breach({ prRows: [record({ verdict: '**VERDICT: FAIL**', at: '2026-11-15T03:00:00Z' }), { ...record({ id: 902 }), updated_at: '2026-11-15T06:00:00Z' }] }, /does not read PASS .*PR comment 902 was edited after the landing/) === true);
+    assert('#33729-N10-a-claim-edited-after-the-landing-is-not-named-as-if-it-were-a-record', await (async () => {
+      const v = await run({ prRows: [{ id: 950, created_at: '2026-11-15T04:00:00Z', updated_at: '2026-11-15T06:00:00Z', user: { login: RELAY }, body: 'Claim: PM loop' }] });
+      return v?.state === 'breach' && /no `## Contract review` record/.test(v.reason) && !v.reason.includes('950') && !v.reason.includes('edited') ? true : JSON.stringify(v);
+    })() === true);
+    assert('#33729-N10-one-edited-record-beside-an-edited-claim-names-the-record-alone', await (async () => {
+      const v = await run({ prRows: [{ ...record(), updated_at: '2026-11-15T06:00:00Z' }, { id: 950, created_at: '2026-11-15T04:00:00Z', updated_at: '2026-11-15T06:00:00Z', user: { login: RELAY }, body: 'Claim: PM loop' }] });
+      return v?.state === 'breach' && v.reason.includes('PR comment 900 was edited') && !v.reason.includes('950') ? true : JSON.stringify(v);
+    })() === true);
+    // #33729 N11: the record leg's own half of the author binding.
+    assert('⛔ #33729-N11-a-recogniser-set-that-is-not-available-is-NOT-MEASURED', await unmeasured({ rd: { ...readers, recognisers: { available: false, reason: 'recognisers did not load' } } }, /recognisers did not load/) === true);
+    assert('⛔ #33729-N11-a-recogniser-set-with-no-trusted-author-list-is-NOT-MEASURED-never-trust-everyone', await unmeasured({ rd: { ...readers, recognisers: { ...readers.recognisers, trustedAuthors: null } } }, /no trusted-author list/) === true &&
+      await unmeasured({ rd: { ...readers, recognisers: { ...readers.recognisers, trustedAuthors: [] } } }, /no trusted-author list/) === true);
+    assert('#33729-N11-an-untrusted-PASS-says-its-author-was-not-read-in-the-guards-words', await (async () => {
+      const v = await run({ prRows: [record({ by: 'some-commenter' })] });
+      const cell = armCell({ arm: v });
+      return v?.state === 'breach' && v.ignored?.length === 1 && cell.includes('some-commenter') && cell.includes('#33541') ? true : JSON.stringify(v);
+    })() === true);
 
     const at = (e, arm) => ({ ...e, attribution: { mergedBy: 'os-zhuang', mergedAt: MERGED_AT, title: 't', size: null }, attributionChannel: 'env-token', arm });
     const human = at(classifyCommit({ sha: 'e'.repeat(40), date: MERGED_AT, subject: 'docs(adr): x (#71)' }, ['docs/adr/0001-x.md'], OS), undefined);

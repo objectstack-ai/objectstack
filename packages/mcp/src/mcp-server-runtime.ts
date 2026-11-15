@@ -59,7 +59,7 @@ import { z } from 'zod';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
-import { RUNTIME_OWNED_FIELD_TYPES, isVirtualSearchField } from '@objectstack/spec/data';
+import { RUNTIME_OWNED_FIELD_TYPES, SEARCH_COMPANION_FIELD, isVirtualSearchField } from '@objectstack/spec/data';
 
 /**
  * Configuration for the MCP Server Runtime.
@@ -124,6 +124,13 @@ interface ServedFieldDef {
  * — ⛔ never its condition, pattern or transition table: the rule's message is
  * what a refused write answers with, and its expression is server policy.
  *
+ * ⛔ Never the hidden search companion (`SEARCH_COMPANION_FIELD`), which the
+ * registry serves beside the display field where pinyin search is on: no
+ * caller may read, write or name it (a record never echoes it, a
+ * `$searchFields` override naming it is refused, `validate_expression`
+ * answers `unknown-field`), so the door that offers an agent a field to use
+ * does not list it. The HTTP twin skips it by the same constant.
+ *
  * One projection for this package's two readers of it: the stdio bridge's
  * `describeObject` (`stdio-data-bridge.ts`) and the `objectstack://objects/{name}`
  * resource ({@link buildObjectSchemaResource}), each handing it the object as
@@ -140,7 +147,7 @@ export function describeServedObject(def: ServedObjectDef, declared: ServedObjec
   return {
     name: def.name,
     label: def.label ?? def.name,
-    fields: Object.entries(def.fields ?? {}).map(([key, f]) => ({
+    fields: Object.entries(def.fields ?? {}).filter(([key]) => key !== SEARCH_COMPANION_FIELD).map(([key, f]) => ({
       name: key,
       type: f?.type,
       label: f?.label ?? key,

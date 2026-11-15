@@ -309,6 +309,13 @@ Replaces both the `member_default` builtin-set fallback and ADR-0056 D7's defaul
 > `isDefault`, and an accepted suggestion edits that definition instead of inserting a row — and a
 > package-declared capability lives in the registry. D5's rules stand.
 
+> **Note (2026-11-14, ruling of record 6879388034 on #33010) — removing a row one owns is not a
+> delete bit.** A member withdrawing a row they own is served by an own-row delete door,
+> authorized because the row's owner column names the caller — not by `allowDelete` on a set
+> bound to `everyone`. The storage service's `DELETE /api/v1/attachments/:id`, over
+> `sys_attachment.uploaded_by`, is one such door: a member removes an attachment they uploaded
+> and no other. The attachment member grant still carries read and create only.
+
 ### D6 — Explain engine is P0; access-matrix snapshots gate publishes
 
 A contract `explain(principal, operation, object, record?) → decision + granting path` (which
