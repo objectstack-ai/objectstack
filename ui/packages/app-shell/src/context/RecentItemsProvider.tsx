@@ -38,6 +38,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useAuth } from '@object-ui/auth';
+import type { DataSource } from '@object-ui/types';
 import {
   createDebouncedFlush,
   scopedKey,
@@ -379,4 +380,39 @@ export function useRecentItems(): RecentItemsContextValue {
     };
   }
   return ctx;
+}
+
+/**
+ * The id a record's recent entry is kept under — the one the record page
+ * writes: `record:OBJECT:RECORD_ID`, by the object's machine name.
+ */
+function recordRecentItemId(objectName: string, recordId: string): string {
+  return `record:${objectName}:${recordId}`;
+}
+
+/** The part of a data source this module reads: its mutation events. */
+type MutationSource = Pick<DataSource, 'onMutation'>;
+
+/**
+ * Drops a record from the recents the moment `dataSource` reports it deleted,
+ * so neither the command palette nor Home's "recently accessed" offers a
+ * record that is gone. One subscription, to the data source's mutation bus,
+ * covers every delete door that reports its record — the record page's
+ * header, a list row, an action — with no call at each of them.
+ *
+ * Undoing the delete restores the record; the visit that follows records it
+ * again, the way any visit does. A delete event that names no record (a bulk
+ * delete reports only its object) drops nothing: nothing in it says which.
+ *
+ * Mount it once, under the data source and inside a {@link RecentItemsProvider}.
+ */
+export function useDropDeletedRecordsFromRecents(dataSource: MutationSource | null | undefined): void {
+  const { removeRecentItem } = useRecentItems();
+  useEffect(() => {
+    if (typeof dataSource?.onMutation !== 'function') return;
+    return dataSource.onMutation(event => {
+      if (event.type !== 'delete' || event.id == null || !event.resource) return;
+      removeRecentItem(recordRecentItemId(event.resource, event.id));
+    });
+  }, [dataSource, removeRecentItem]);
 }
