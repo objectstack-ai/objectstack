@@ -21,3 +21,7 @@ other reader keeps the whole chain and sees exactly what it saw before. That inc
 any restricted hop, a reader with View All on the detail only, and a plain member. An optional master
 keeps its leaf. Under walled tenancy a tenant admin's master scope is the tenant wall, so nothing is
 dropped there.
+
+Writes are unchanged. Every read a write makes while it runs keeps the chain: the security checks on a
+predicate or by-id update or delete, and a hook's reads. An orphan therefore stays outside every
+write, exactly as before.
