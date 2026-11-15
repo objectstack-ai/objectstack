@@ -492,6 +492,8 @@ describe('a client the IP allow-list refuses lands on the sign-in page, and the 
       ['/api/v1/auth/get-session', {}],
       ['/api/v1/auth/sign-in/social', { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: JSON.stringify({ provider: PLATFORM_IDP }) }],
       [DOOR, { method: 'POST' }],
+      // Only the door's exact path is the navigation that lands on the page: a trailing slash is not it.
+      [`${DOOR}/${RETURN}`, {}],
     ] as const) {
       const res = await fromPeer(app, path, OUTSIDE, init as RequestInit);
       expect(res.status, path).toBe(403);

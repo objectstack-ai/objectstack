@@ -490,6 +490,18 @@ describe('the auth settings save keeps a way to sign in', () => {
     expect(googleOn(manager)).toBe(true);
   });
 
+  it('under the local sign-in path off, the email and password key is never refused, even with no other way in configured', async () => {
+    // Nothing else is in force: no Google, no identity provider, no social or OIDC provider, no handoff.
+    const { settings, manager } = await boot({ pluginOptions: { directSignIn: { localSignIn: 'off' } } });
+    expect(manager.getPublicConfig().features.localSignIn).toBe('off');
+    expect(googleOn(manager)).toBe(false);
+    expect(passwordOn(manager)).toBe(true);
+    await settings.setMany('auth', { email_password_enabled: false });
+    await vi.waitFor(() => expect(passwordOn(manager)).toBe(false));
+    await settings.setMany('auth', { email_password_enabled: true });
+    await vi.waitFor(() => expect(passwordOn(manager)).toBe(true));
+  });
+
   it('CONTROL: with the local sign-in path hidden, the same Google change goes through while email and password is on', async () => {
     const { settings, manager } = await boot({ pluginOptions: { directSignIn: { localSignIn: 'hidden' } } });
     expect(manager.getPublicConfig().features.localSignIn).toBe('hidden');
@@ -942,6 +954,19 @@ describe('the floor judges a provider delete and a boot by what it can read (#30
     });
     // The email and password key is never refused under off, on or off.
     await expect(save(deps({ config: GOOGLE_ONLY_OFF }), { email_password_enabled: false })).resolves.toBeUndefined();
+    // ...also with nothing else in force (no Google, no row, no social or OIDC provider, no handoff).
+    const NOTHING_ELSE_OFF: SignInMethodConfigView = {
+      emailPassword: { enabled: true },
+      socialProviders: [],
+      features: { sso: false, phoneNumber: true, localSignIn: 'off' },
+    };
+    await expect(save(deps({ config: NOTHING_ELSE_OFF }), { email_password_enabled: false })).resolves.toBeUndefined();
+    // CONTROL: with the path hidden (and phone off), the same save is refused in the email copy.
+    await expect(
+      save(deps({ config: { ...NOTHING_ELSE_OFF, features: { sso: false, phoneNumber: false, localSignIn: 'hidden' } } }), {
+        email_password_enabled: false,
+      }),
+    ).resolves.toMatchObject({ constraint: { lastSignInMethod: 'email_password' } });
     // The exits under off.
     for (const d of [
       deps({ config: { ...GOOGLE_ONLY_OFF, socialProviders: [...GOOGLE_ONLY_OFF.socialProviders!, { id: 'github', type: 'social' }] } }),

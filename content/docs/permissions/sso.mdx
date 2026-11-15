@@ -826,6 +826,13 @@ button (and the reason, where there is one), instead of starting again when:
   starts from one address in a few seconds). It redirects to
   `/login?error=direct_sign_in_rate_limited`, the page asks the visitor to
   wait a few seconds and try again, and the `warn` line names `rate_limited`;
+- the [IP allow-list](/docs/permissions/authentication) refuses the
+  visitor's network. The door is not exempt from the allow-list: a browser
+  `GET` of the door from a refused address starts nothing and is redirected
+  to `/login?error=IP_NOT_ALLOWED` (keeping a same-origin `?redirect=`)
+  instead of the `403` body, the page says sign-in is not allowed from this
+  network, and every other auth request from that address is still refused
+  `403 IP_NOT_ALLOWED`;
 - the person just signed out in that tab. Often the identity provider's
   session outlives the platform's, so starting again would sign them straight
   back in. When the provider ends its own session too (an OIDC provider whose
