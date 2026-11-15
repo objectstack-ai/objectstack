@@ -219,8 +219,8 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
   the remedy.
 - **A computed operand is a value, never a query operator**: a string, number,
   bigint, boolean or date, or at an `$in` / `$nin` / `$between` comparand a list
-  of them with no empty entry. Anything else fails the node as a guard before the
-  query runs. Make the expression evaluate to the compared value (for a record,
+  of them with no empty entry. Anything else fails the node as a guard.
+  Make the expression evaluate to the compared value (for a record,
   its `id`), and write conditions in the filter itself.
 
 ---
