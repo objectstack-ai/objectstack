@@ -44,7 +44,9 @@
  *     (a turn with no model field refuses: a turn nobody can attribute is not a turn at the tier);
  *   - every `requestedModel`, every `advisorModel` and every `model` attachment present names the same value;
  *   - no assistant turn calls a tool that runs or drives ANOTHER agent (`SUB_AGENT_TOOLS`): that agent's turns
- *     live in its own file, so this one cannot show them at the tier — the sub-agent's transcript is the evidence;
+ *     live in its own file, so this one cannot show them at the tier, nor which agent served the review — the
+ *     evidence is the transcript of the agent that RAN the review, one that ran no other (a seat that reviewed
+ *     in-seat while it ran unrelated agents passes the review's own sub-agent file, or reviews in a fresh agent);
  *   - no `system` entry carries the fallback notice.
  *
  * Model values are compared EXACTLY. A context-window suffix on an id would refuse an at-tier run, which fails
@@ -127,7 +129,7 @@ export function judgeReviewTranscript(text, tier = CONTRACT_REVIEW_TIER) {
       const content = Array.isArray(entry.message?.content) ? entry.message.content : [];
       const spawn = content.find((c) => c?.type === 'tool_use' && SUB_AGENT_TOOLS.includes(c?.name));
       if (spawn) {
-        return { ok: false, reason: `${at} calls ${spawn.name}, so part of this run happened in another agent whose turns are not in this file — pass that agent's own transcript` };
+        return { ok: false, reason: `${at} calls ${spawn.name}, so this file cannot show which agent served the review, and part of the run is in a file this one does not name — pass the transcript of the agent that ran the review, one that called no other agent: a review sub-agent's own output file, or a session that reviewed without running any other agent` };
       }
     } else if (entry.type === 'attachment' && entry.attachment?.type === 'model') {
       if (entry.attachment?.identity?.modelId !== tier) {
@@ -169,7 +171,7 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'passes: every turn at the tier': 4,
   'refuses: a turn, a request or an identity off the tier': 5,
-  'refuses: an advisor off the tier, and a run that hands work to another agent': 6,
+  'refuses: an advisor off the tier, and a run that hands work to another agent': 7,
   'refuses: the fallback notice in a harness entry, and only there': 3,
   'refuses: no model field, empty, unparseable or unreadable': 6,
   'output: no model identifier and no path in any verdict line': 2,
@@ -229,6 +231,10 @@ function selfTest() {
   t('⛔ a review that spawns a sub-agent refuses: its turns are in another file (a nested reviewer)', !judgeReviewTranscript(jl(user, calls('Agent'), turn(TIER))).ok);
   t('⛔ a SESSION transcript that delegated its review refuses, whatever served the sub-agent', !judgeReviewTranscript(session(turn(TIER), calls('Agent'), turn(TIER))).ok);
   t('⛔ the older spawn name, a workflow and a message to a running agent refuse too', ['Task', 'Workflow', 'SendMessage'].every((n) => !judgeReviewTranscript(jl(user, calls(n))).ok));
+  t('the refusal names the REVIEWING agent\'s transcript, not the spawned one (a seat that reviewed in-seat beside unrelated agents)', (() => {
+    const v = judgeReviewTranscript(session(calls('Agent'), turn(TIER)));
+    return !v.ok && v.reason.includes('the transcript of the agent that ran the review') && !v.reason.includes("that agent's own transcript");
+  })());
   t('a tool that runs in this agent (Read, Bash) passes', judgeReviewTranscript(jl(user, calls('Read'), calls('Bash'))).ok);
 
   battery('refuses: the fallback notice in a harness entry, and only there');
