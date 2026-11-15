@@ -30,6 +30,7 @@ import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@obj
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import {
   DIRECT_SIGN_IN_ENV,
+  DIRECT_SIGN_IN_NETWORK_REFUSED,
   DIRECT_SIGN_IN_QUERY_PARAMS,
   DIRECT_SIGN_IN_RATE_LIMITED,
   DIRECT_SIGN_IN_UNAVAILABLE,
@@ -358,7 +359,7 @@ afterEach(() => {
   }
 });
 
-function mount(directSignIn?: { provider?: string; localSignIn?: 'hidden' | 'off' }) {
+function mount(directSignIn?: { provider?: string; localSignIn?: 'hidden' | 'off' }, extra: Record<string, unknown> = {}) {
   const app = new Hono();
   const ctx = {
     registerService: vi.fn(),
@@ -384,6 +385,7 @@ function mount(directSignIn?: { provider?: string; localSignIn?: 'hidden' | 'off
       },
     ],
     ...(directSignIn ? { directSignIn } : {}),
+    ...extra,
   };
   const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const plugin = new AuthPlugin(options as any);
@@ -449,6 +451,69 @@ describe('the mounted start door (setting on)', () => {
       expect(res.status, path).not.toBe(302);
       expect(res.headers.get('location'), path).toBeNull();
     }
+  });
+});
+
+// ── The IP allow-list in front of the door (ADR-0069 D5) ─────────────────────
+
+describe('a client the IP allow-list refuses lands on the sign-in page, and the door still starts nothing for it', () => {
+  /** Documentation ranges (RFC 5737): one allowed, one not. */
+  const RANGE = '203.0.113.0/24';
+  const INSIDE = '203.0.113.7';
+  const OUTSIDE = '198.51.100.9';
+  const fromPeer = (app: Hono, path: string, peer: string, init: RequestInit = {}) =>
+    app.request(`${ORIGIN}${path}`, init, { incoming: { socket: { remoteAddress: peer } } });
+  const DOOR = '/api/v1/auth/sign-in/direct';
+  const RETURN = `?callbackURL=${encodeURIComponent('/_console/login?redirect=%2Fapps%2Fcrm&direct=returned')}`;
+
+  it('a blocked navigation to the door answers 302 to /login?error=IP_NOT_ALLOWED with the page\'s ?redirect= kept, and no vendor state', async () => {
+    const { app } = mount({ provider: PLATFORM_IDP }, { allowedIpRanges: [RANGE] });
+    const res = await fromPeer(app, `${DOOR}${RETURN}`, OUTSIDE);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(
+      `${ORIGIN}/_console/login?error=${DIRECT_SIGN_IN_NETWORK_REFUSED}&redirect=%2Fapps%2Fcrm`,
+    );
+    expect(res.headers.getSetCookie()).toEqual([]);
+
+    // No ?redirect= on the page, or a foreign one: the bare landing with the code.
+    for (const query of ['', `?callbackURL=${encodeURIComponent('/_console/login?redirect=https%3A%2F%2Fevil.test')}`]) {
+      const bare = await fromPeer(app, `${DOOR}${query}`, OUTSIDE);
+      expect(bare.status).toBe(302);
+      expect(bare.headers.get('location')).toBe(`${ORIGIN}/_console/login?error=${DIRECT_SIGN_IN_NETWORK_REFUSED}`);
+    }
+  });
+
+  it('the page it lands on can still read /auth/config, which says direct sign-in is on, while every sign-in door stays refused 403', async () => {
+    const { app } = mount({ provider: PLATFORM_IDP }, { allowedIpRanges: [RANGE] });
+    const cfg = await fromPeer(app, '/api/v1/auth/config', OUTSIDE);
+    expect(cfg.status).toBe(200);
+    expect((await cfg.json()).data.features.directSignIn).toBe(true);
+    for (const [path, init] of [
+      ['/api/v1/auth/get-session', {}],
+      ['/api/v1/auth/sign-in/social', { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: JSON.stringify({ provider: PLATFORM_IDP }) }],
+      [DOOR, { method: 'POST' }],
+    ] as const) {
+      const res = await fromPeer(app, path, OUTSIDE, init as RequestInit);
+      expect(res.status, path).toBe(403);
+      expect((await res.json()).error.code, path).toBe('IP_NOT_ALLOWED');
+    }
+  });
+
+  it('CONTROL: an allowed client still starts the identity provider through the door', async () => {
+    const { app } = mount({ provider: PLATFORM_IDP }, { allowedIpRanges: [RANGE] });
+    const res = await fromPeer(app, `${DOOR}${RETURN}`, INSIDE);
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get('location')!);
+    expect(`${location.origin}${location.pathname}`).toBe(`${IDP}/${PLATFORM_IDP}/authorize`);
+    expect(res.headers.getSetCookie().length).toBeGreaterThan(0);
+  });
+
+  it('CONTROL: with direct sign-in off (no door), the same blocked request is the 403 body as before', async () => {
+    const { app } = mount(undefined, { allowedIpRanges: [RANGE] });
+    const res = await fromPeer(app, `${DOOR}${RETURN}`, OUTSIDE);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe('IP_NOT_ALLOWED');
+    expect(res.headers.get('location')).toBeNull();
   });
 });
 
