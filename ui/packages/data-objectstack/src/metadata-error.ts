@@ -49,12 +49,18 @@ export function extractIssues(e: unknown): MetadataValidationIssue[] {
 /**
  * One issue → a single field-anchored line: `• fields.amount.type — Required`.
  *
+ * The text after the dash is the issue's `userMessage` when the producer sent
+ * one — its sentence for the person who saved, already in their language, so it
+ * replaces the developer-facing English `message` — else the `message`. The
+ * path is a locator, not prose, and leads both.
+ *
  * Exported so a caller that formats a LIST of failures — `app-shell`'s publish
  * formatter, whose `failed[]` entries carry their own `issues` — writes each
  * issue in this same grammar instead of keeping a second copy of it.
  */
 export function formatMetadataIssue(i: MetadataValidationIssue): string {
-  return `• ${i.path && i.path.length > 0 ? i.path : '(root)'} — ${i.message}`;
+  const text = typeof i.userMessage === 'string' && i.userMessage.trim() !== '' ? i.userMessage : i.message;
+  return `• ${i.path && i.path.length > 0 ? i.path : '(root)'} — ${text}`;
 }
 
 /**
