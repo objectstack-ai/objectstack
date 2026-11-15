@@ -3008,14 +3008,17 @@ async function unregisterAndDeleteFlow(
 
 /**
  * [ADR-0151 D3 rule 3] One service slot rule 2b reads its declarations from,
- * resolved to the instance the same request's `/actions` door reads, and loud
- * on failure. No one helper gives both, so this is the smallest composition of
- * the two that exist:
+ * resolved to the instance the same request's `/actions` door reads, in every
+ * host shape. The rule, as this function holds it: a read failure refuses the
+ * start when no leg of that door's order answers the name; where a later leg
+ * answers, the start is judged on that instance, as the `/actions` door would
+ * serve it. The smallest composition of the two resolvers that exist:
  *
  *  1. `resolveService`, the order every `/actions` read uses (`getObjectQL`
  *     included): the request's own kernel first on a host that routes a
  *     request to a kernel of its own, then the host kernel's scoped factory,
- *     then its singletons. An instance it answers is the door's instance.
+ *     then its singletons. An instance it answers is the door's instance,
+ *     whichever leg answers it, a leg that did not resolve before it included.
  *  2. Only on a miss, `resolveServiceOrLoud` classifies it: a name nothing
  *     registered (or a scoped registration with no instance in this scope) is
  *     absent, `undefined`; any other rejection is re-raised. The quiet probe
@@ -3054,10 +3057,11 @@ async function resolveSlotAsActionsDoorReads(
  *
  * Each of the three slots (`protocol`, `objectql`, `metadata`) is the
  * instance the same request's `/actions` door reads, in every host shape
- * ({@link resolveSlotAsActionsDoorReads}: the request's own kernel first),
- * and absence and failure are told apart on every arm: a slot nothing
- * registered is absent and contributes nothing, while a slot that is wired
- * and fails to resolve throws; and each listing (the two merged ones, the
+ * ({@link resolveSlotAsActionsDoorReads}: the request's own kernel first). A
+ * slot nothing registered is absent and contributes nothing; a slot that no
+ * leg of that door's order answers, because a leg failed to resolve it,
+ * throws; and where a later leg answers the name, that instance is read, as
+ * the `/actions` door would serve it. Each listing (the two merged ones, the
  * registry's two, the metadata service's objects and its standalone `action`
  * items) is read where its throw travels. Any such throw makes the predicate
  * refuse the start `503`. So a host that serves no declaration from any of

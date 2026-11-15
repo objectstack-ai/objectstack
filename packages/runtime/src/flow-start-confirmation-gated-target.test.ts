@@ -410,6 +410,19 @@ describe('the declarations are read from the services the request\'s own /action
         expectConfirmationRefusal(await start(new HttpDispatcher(host as never), { kernel: env, environmentId: ENV_ID }), automation.execute);
     });
 
+    it('kernel-resolver host: where the request\'s own kernel fails to resolve the slot and the host kernel answers it, the start is judged on the host instance, as the /actions door would serve it', async () => {
+        const host = bareKernel();
+        host.registerService('protocol', protocolServing(true));
+        const env = bareKernel();
+        const automation = automationService();
+        env.registerService('automation', automation);
+        env.registerServiceFactory('protocol', () => { throw new Error('environment protocol factory failed'); });
+        // The request's own slot is wired and fails, not absent: the case is not vacuous.
+        await expect(env.getServiceAsync('protocol')).rejects.toThrow('environment protocol factory failed');
+
+        expectConfirmationRefusal(await start(new HttpDispatcher(host as never), { kernel: env, environmentId: ENV_ID }), automation.execute);
+    });
+
     it('kernel-resolver host: a shape that merely lacks every source gains no 503 — the account starts the flow', async () => {
         const host = bareKernel();
         const env = bareKernel();
