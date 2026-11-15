@@ -35,11 +35,44 @@ export { HTTP_SIGNATURE_HEADER as SIGNATURE_HEADER, signHttpBody as signBody };
 /**
  * Whether a request of this method goes out with no body at all. `fetch`
  * refuses a GET or HEAD request that carries one (any one, `''` included), so
- * a delivery of either verb is sent bodyless whatever its payload, and signed
- * as such. The inline `http` node arm sends the same: no body for a GET.
+ * a delivery of either verb is sent bodyless and signed as such. The inline
+ * `http` node arm sends the same: no body for a GET.
  */
 export function isBodylessMethod(method: string | undefined): boolean {
     return method !== undefined && /^(GET|HEAD)$/i.test(method);
+}
+
+/**
+ * Whether a payload stands for "no body": absent, `null`, or an empty plain
+ * object — what a durable `http` node with no `body` enqueues (`body ?? {}`).
+ * Anything else is bytes a receiver would be sent.
+ */
+function isNoBodyPayload(payload: unknown): boolean {
+    if (payload === undefined || payload === null) return true;
+    if (typeof payload !== 'object' || Array.isArray(payload)) return false;
+    const proto = Object.getPrototypeOf(payload);
+    return (proto === Object.prototype || proto === null) && Object.keys(payload).length === 0;
+}
+
+/**
+ * Why a delivery of this method cannot carry this payload, or `undefined` when
+ * it can. A GET or HEAD sends no body, so a payload that is a real body would
+ * be dropped while the row records success. The outbox refuses it instead.
+ */
+export function bodylessPayloadRefusal(method: string | undefined, payload: unknown): string | undefined {
+    if (!isBodylessMethod(method) || isNoBodyPayload(payload)) return undefined;
+    const verb = method!.toUpperCase();
+    return `a ${verb} delivery is sent with no body, and this one carries a payload, which would be `
+        + `dropped. Use POST or PUT to send the payload, or drop the body to send a bodyless ${verb}.`;
+}
+
+/**
+ * Refuse, at enqueue, a GET or HEAD delivery whose payload is a real body
+ * (see {@link bodylessPayloadRefusal}). Both outboxes call it before they sign.
+ */
+export function assertBodylessPayloadAdmitted(input: { method?: string; payload: unknown }): void {
+    const refusal = bodylessPayloadRefusal(input.method, input.payload);
+    if (refusal !== undefined) throw new Error(`IHttpOutbox.enqueue: ${refusal}`);
 }
 
 /**
@@ -53,10 +86,11 @@ export function isBodylessMethod(method: string | undefined): boolean {
  * produced — so signing at enqueue and sending after a reload agree byte for
  * byte. `http-signature-at-rest.integration.test.ts` pins that.
  *
- * A bodyless method ({@link isBodylessMethod}) sends no body, so its bytes are
- * the empty string — what the published scheme signs for a request with no
- * body — whatever the payload holds. Pass the delivery's `method` wherever the
- * body is signed, or the signature covers bytes that are never sent.
+ * A GET or HEAD sends no body, so its bytes are the empty string — what the
+ * published scheme signs for a request with no body. The outbox admits such a
+ * delivery only with no payload, so nothing is dropped. Pass the delivery's
+ * `method` wherever the body is signed, or the signature covers bytes that
+ * are never sent.
  */
 export function deliveryBody(payload: unknown, method?: string): string {
     if (isBodylessMethod(method)) return '';
@@ -71,7 +105,7 @@ export type FetchImpl = (
     init: {
         method: string;
         headers: Record<string, string>;
-        /** Absent for a bodyless method ({@link isBodylessMethod}). */
+        /** Absent for a GET or HEAD delivery, which is sent with no body. */
         body?: string;
         signal: AbortSignal;
     },
@@ -106,6 +140,12 @@ export async function sendOnce(
     fetchImpl: FetchImpl,
 ): Promise<HttpAttemptOutcome> {
     const method = delivery.method ?? 'POST';
+    // A row enqueued before the enqueue refusal (or redelivered from then) can
+    // still hold a GET or HEAD with a real payload: fail it, never drop it.
+    const refusal = bodylessPayloadRefusal(method, delivery.payload);
+    if (refusal !== undefined) {
+        return { success: false, retriable: false, error: refusal, durationMs: 0 };
+    }
     // The bytes the enqueue-time signature covers. A GET or HEAD sends none.
     const body = deliveryBody(delivery.payload, method);
     const bodyless = isBodylessMethod(method);

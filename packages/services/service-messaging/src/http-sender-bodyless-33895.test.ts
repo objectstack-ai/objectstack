@@ -11,7 +11,8 @@ import { SqlHttpOutbox } from './sql-http-outbox.js';
 import { HttpDelivery } from './objects/http-delivery.object.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 import { HttpDispatcher } from './http-dispatcher.js';
-import { deliveryBody, type FetchImpl } from './http-sender.js';
+import { deliveryBody, sendOnce, type FetchImpl } from './http-sender.js';
+import type { HttpDelivery as HttpDeliveryRow } from './http-outbox.js';
 
 /**
  * A GET or HEAD delivery goes out of the HTTP outbox with no body, and its
@@ -22,6 +23,10 @@ import { deliveryBody, type FetchImpl } from './http-sender.js';
  * durable `http` node with no body — and `fetch` refuses a GET or HEAD that
  * carries any body, so the dispatcher retried a transport failure until the
  * delivery was dead. It also signed `'{}'`, bytes no receiver would see.
+ *
+ * The outbox never drops bytes to make that work: a GET or HEAD whose payload
+ * is a real body (anything but absent, `null` or the node's empty `{}`) is
+ * refused at enqueue, and a row that still holds one fails at send.
  */
 
 const SECRET = 'bodyless-secret';
@@ -111,8 +116,8 @@ describe('HTTP outbox — a GET or HEAD delivery sends no body and signs what it
     });
 
     it('the signed bytes follow the method: empty for GET/HEAD, the payload otherwise', () => {
-        expect(deliveryBody({ a: 1 }, 'GET')).toBe('');
-        expect(deliveryBody('raw', 'head')).toBe('');
+        expect(deliveryBody({}, 'GET')).toBe('');
+        expect(deliveryBody(undefined, 'head')).toBe('');
         expect(deliveryBody({ a: 1 }, 'POST')).toBe('{"a":1}');
         expect(deliveryBody({ a: 1 })).toBe('{"a":1}');
         expect(deliveryBody('raw', 'PUT')).toBe('raw');
@@ -201,5 +206,73 @@ describe('SqlHttpOutbox — the production outbox signs a GET or HEAD over what 
         expect(row!.status).toBe('success');
         await engine.destroy();
         engine = undefined;
+    });
+});
+
+const REFUSAL = /a (GET|HEAD) delivery is sent with no body, and this one carries a payload.*Use POST or PUT/;
+
+function bodyInput(method: string, payload: unknown, dedupKey = `r-${method}`) {
+    return { source: 'flow', refId: 'node_1', dedupKey, url: 'https://receiver.test/hook', method, signingSecret: SECRET, payload };
+}
+
+describe('HTTP outbox — a GET or HEAD with a real body is refused, never sent without it', () => {
+    it.each([
+        ['GET', { a: 1 }],
+        ['HEAD', 'raw'],
+        ['get', [1]],
+        ['GET', ''],
+    ])('MemoryHttpOutbox refuses %s with payload %j at enqueue and writes no row', async (method, payload) => {
+        const outbox = new MemoryHttpOutbox();
+        await expect(outbox.enqueue(bodyInput(method, payload))).rejects.toThrow(REFUSAL);
+        expect(await outbox.list()).toHaveLength(0);
+    });
+
+    it.each([undefined, null, {}])('MemoryHttpOutbox admits a GET whose payload is the no-body value %j', async (payload) => {
+        const outbox = new MemoryHttpOutbox();
+        await outbox.enqueue(bodyInput('GET', payload));
+        expect(await outbox.list()).toHaveLength(1);
+    });
+
+    it('CONTROL: a POST with the same payload is admitted', async () => {
+        const outbox = new MemoryHttpOutbox();
+        await outbox.enqueue(bodyInput('POST', { a: 1 }));
+        expect(await outbox.list()).toHaveLength(1);
+    });
+
+    it('a stored GET row that still holds a real payload fails at send without calling fetch, and is not retried', async () => {
+        const { impl, calls } = recordingFetch();
+        const row = {
+            id: 'row_1', source: 'webhook', refId: 'wh_1', dedupKey: 'k', url: 'https://receiver.test/hook',
+            method: 'GET', payload: { object: 'crm_order', recordId: 'o1' }, status: 'pending', attempts: 0,
+            createdAt: 0, updatedAt: 0,
+        } as unknown as HttpDeliveryRow;
+
+        const outcome = await sendOnce(row, impl);
+
+        expect(calls).toHaveLength(0);
+        expect(outcome.success).toBe(false);
+        expect(outcome).toMatchObject({ retriable: false });
+        expect((outcome as { error?: string }).error).toMatch(REFUSAL);
+    });
+
+    it('SqlHttpOutbox on sqlite refuses a GET with a real body at enqueue and stores no row', async () => {
+        const engine = new ObjectQL();
+        engine.registerDriver(
+            new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
+            true,
+        );
+        await engine.init();
+        engine.registry.registerObject(HttpDelivery as any, '@objectstack/service-messaging');
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine);
+        try {
+            const outbox = new SqlHttpOutbox(engine as any, { partitionCount: 1 });
+            await expect(outbox.enqueue(bodyInput('GET', { a: 1 }))).rejects.toThrow(REFUSAL);
+            expect(await outbox.list()).toHaveLength(0);
+            await outbox.enqueue(bodyInput('GET', {}, 'admitted'));
+            expect(await outbox.list()).toHaveLength(1);
+        } finally {
+            await engine.destroy();
+        }
     });
 });

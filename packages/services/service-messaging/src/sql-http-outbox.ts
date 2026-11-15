@@ -13,7 +13,7 @@ import {
     dispatcherAckOptions,
     dispatcherSweepOptions,
 } from './outbox-dispatcher-scope.js';
-import { deliveryBody, signBody } from './http-sender.js';
+import { assertBodylessPayloadAdmitted, deliveryBody, signBody } from './http-sender.js';
 import {
     HttpAckError,
     HttpRedeliverError,
@@ -135,6 +135,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
 
     async enqueue(input: EnqueueHttpInput): Promise<string> {
         assertEnqueueDeliverable(input);
+        assertBodylessPayloadAdmitted(input);
         return this.insert(input, {
             // Sign here, store only the signature (#7722). The body is decided
             // at enqueue and replayed byte-for-byte by every retry, so one HMAC
