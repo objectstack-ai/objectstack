@@ -246,7 +246,8 @@ npx @objectstack/scenarios help                                      # the comma
   is logged in with an API key (the cost ruling on cloud#3600), and the record states the driver, the login, the
   authoring timeout and the turn caps. Every turn records its process: elapsed time, the turn cap it ran under
   (`--max-turns`), and for a turn that did not finish its exit code or signal, whether the runner's timeout killed it,
-  and the end of its stderr. `RecordedDriver` replays a recording, and refuses the live-driver limits and models below;
+  and the end of its stderr. It also records the duration the CLI itself states on its result line, when it states one
+  (`reportedDurationMs` from `duration_ms`, `reportedApiDurationMs` from `duration_api_ms`). `RecordedDriver` replays a recording, and refuses the live-driver limits and models below;
   its record keeps the driver of the recording (`replayOf`). It re-sends each turn's recorded writes to the booted app,
   in recorded order, as the turn's persona, before the read-back (reads are never re-sent; a refused write must be
   refused again; a row the run created is named by its new id); a turn the app answers otherwise, or one whose write
@@ -275,7 +276,19 @@ npx @objectstack/scenarios help                                      # the comma
   command, its `inputTokens` and `outputTokens`; a turn that reported none records none, never a zero. The scorecard's
   `author cost` line (the card) and `Author cost` row (each mode) sum the authoring turns' costs, build and iterate,
   only when every authoring turn that ran reported one (`$0.84 over 3 author turns`); otherwise they read `not reported`,
-  never a partial sum. `--driver codex` reports no cost, so its runs read `not reported`.
+  never a partial sum. The `ask cost` line and `Ask cost` row do the same for the persona turns (every question and
+  operation turn that ran, the Run half's and the iterate's), per served model: `claude-haiku-5-5: $0.31 over 28 ask
+  turns`, or `claude-haiku-5-5: not reported (27 of 28 ask turns reported a cost)`. `--driver codex` reports no cost,
+  so its runs read `not reported`.
+- **Time** (`scorecard.ts`): every turn records its wall-clock time by the runner's own clock (`elapsedMs`: the
+  driver's process, spawn to exit, for `claude`, `codex` and `external:` alike; a replay re-reads the recorded run's).
+  The `author time` line and `Author time` row sum the authoring turns' times (`30m 00s over 3 author turns`), and the
+  `ask time` line and `Ask time` row the persona turns' per served model (`claude-haiku-5-5: 6m 12s over 28 ask
+  turns`), per mode and for the card. A sum is stated only when every counted turn was timed; otherwise the cell says
+  how many were not (`2 of 28 ask turns not timed`), never a smaller sum and never a zero. A turn with no process on its
+  record (a replay of a recording made before the runner kept one) is not timed. The CLI's own duration stays on each
+  turn in the record, beside the runner's clock; the rows sum the runner's clock only. A scorecard written before
+  these rows reads `not recorded` in them.
 - **Turn caps** (`driver.ts`): an authoring turn, build and iterate alike, may take `DEFAULT_AUTHOR_MAX_TURNS` by the
   card's `tier` — `control` 80, `starter` 300, `delivery` 600 — unless `--author-max-turns N` sets one cap for every
   card; a question or operation turn takes 12 unless `--ask-max-turns N` says otherwise. The cap guards a looping turn
@@ -494,7 +507,9 @@ the directory you run from. For anything more, write a wrapper script.
   never a zero. A figure of another shape (a string, `null`, a negative cost, a fractional count) is
   `invalid-output(…)`. Each turn in the record (`cardRun`) carries the figures its command reported. The scorecard's
   `author cost` line and `Author cost` row, and the gallery page's `- Author cost` line, sum the authoring turns'
-  (build and iterate) costs only when every authoring turn reported one; otherwise they read `not reported`. Adding
+  (build and iterate) costs only when every authoring turn reported one; otherwise they read `not reported`; the `ask
+  cost` line and `Ask cost` row sum the question and operation turns' costs per served model under the same rule. The
+  runner times every call itself (`elapsedMs`, the command's process), so a command reports no duration. Adding
   these optional keys kept the contract name `objectstack-scenario-driver/1`; a runner built before them refuses an
   answer that carries one, so a command that must also serve such a runner leaves them out.
 - **Exit codes**: 0 with an answer of that shape is the turn. Any other end is a failed turn with a named reason,
