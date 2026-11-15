@@ -260,7 +260,7 @@
           "revision": 9,
           "date": "2026-11-15",
           "change": "verify-text correction, no clause change. acceptance[3].verify: the early retry at kernel-ready is timing-dependent, so it MAY appear; both rounds of the 18.5.0 sweep read no early retry and a 5 s / 10 s / 20 s / 40 s ladder, which passes as the doubling ladder from the 5 s base. Read from source at base 895783a1. Source records: QA records #33829 (comment 6893937847) and #33910 (comment 6895587997) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },
@@ -433,7 +433,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "step-text correction, no clause change. steps[1] names which layer answers: on a compiling `os dev` / `os build` boot the compile-time bundler (bundle-connector-spec-files.ts) refuses a bad ref first in its own wording, and the runtime loader texts the clauses quote appear only when the loaded artifact still carries a path string. Read from source at base 895783a1. Source records: QA records #33829 (comment 6893937847) and #33910 (comment 6895587997) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },
@@ -615,7 +615,7 @@
           "revision": 7,
           "date": "2026-11-15",
           "change": "verify- and step-text correction, no clause change. acceptance[1].verify and evidence: the declarative mark is read from the datalist option labels in the DOM after the field screenshot, as acceptance[0] rev 5 did, since a headless screenshot cannot show a native datalist open. steps[1]: an env-wide scratch flow opens at /_console/studio/~org/automations?surface=flow:NAME; the Setup metadata route redirects to the JSON form view, which has no picker. Source records: QA record #33853 (comment 6894307378) and QA record #33914 (comment 6895723718) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },
@@ -823,7 +823,7 @@
           "revision": 17,
           "date": "2026-11-15",
           "change": "step- and negative-text correction, no clause change. negative[1]: the data door refuses an unknown trigger value, so the drift guard is reachable only from a planted legacy row. steps[6]: hold the 409 probe's row non-terminal with a 503 receiver, since a retryable row can turn terminal between the read and the redeliver. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ],
       "enumSource": {
@@ -2147,7 +2147,7 @@
           "revision": 10,
           "date": "2026-11-15",
           "change": "fixture-text correction, no clause change. fixtures.requires[0]: a minimal scratch project for the os build door must declare sharingModel, or security-owd-unset stops the build before the credential check. Source records: QA record #33909 (comment 6895587997) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },
@@ -2445,7 +2445,7 @@
           "revision": 9,
           "date": "2026-11-15",
           "change": "step-text correction, no clause change. steps[5]: the server-side twin import lands as showcase_custom_orders in com.example.showcase.custom while the UI import lands package-less, so the twin's cleanup names ?package=. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },
@@ -2692,7 +2692,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "step-text correction, no clause change. steps[1]: the restart's info line depends on load order (app-artifact-handlers.ts, the branches after jobKeyFor): qa_a binding first prints the 'is also declared' line again, and the 'keeps its package-scoped identity' line prints only with no in-process holder of the bare name. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },
@@ -3189,7 +3189,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "fixture-text correction, no clause change. fixtures.knownGaps[2] CLOSED: the scratch boots were booted by QA runs #33853 and #33914 and every quoted line printed verbatim. Source records: QA record #33853 (comment 6894307378) and QA record #33914 (comment 6895723718) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     }

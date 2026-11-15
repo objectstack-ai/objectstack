@@ -94,7 +94,7 @@
         { "revision": 6, "date": "2026-10-31", "change": "steps[4] and steps[5] said 'open the bell'. QA run #27441 asked that the surface be named. The steps now name the top-bar bell's inbox popover, Notifications tab (InboxPopover.tsx). They also name the second door: the Home page's notifications card opens a row through the same openInboxNotification, which marks it read before following the link (HomePage.tsx). Since #27447 and #27653, opening a row from Home spends the read before step 6 captures it. No clause changed. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6490438726", "ref": "#27441" },
         { "revision": 7, "date": "2026-11-04", "change": "steps[4] corrected from QA run #29890 (W5-FAIL, at 589049b0): a member recipient's inbox popover has no Activity tab; InboxPopover.tsx draws it only while activity.readable. Read at base f68b47ca", "ref": "#29906" },
         { "revision": 8, "date": "2026-11-08", "change": "steps[4] no longer says a member recipient's popover has no Activity tab: a contributor-bound member's popover drew one. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1", "ref": "#31499" },
-        { "revision": 9, "date": "2026-11-15", "change": "step-text correction, no clause change. steps[1]: the language switcher stores the platform locale tag 'zh-Hans', not 'zh-CN'; both spellings resolve to the zh bundle. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#PENDING-33966" }
+        { "revision": 9, "date": "2026-11-15", "change": "step-text correction, no clause change. steps[1]: the language switcher stores the platform locale tag 'zh-Hans', not 'zh-CN'; both spellings resolve to the zh bundle. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#33984" }
       ]
     },
     {
@@ -177,7 +177,7 @@
         { "revision": 6, "date": "2026-10-16", "change": "knownGaps[0], fixtures.requires[0], steps[2], acceptance[0] (clause, verify), negative[0] and source re-pointed (checklist-accuracy notes 2 and 3 of QA run #23951, wave #23878). The clause-0 premise was wrong: the Studio object editor's strings come from objectui's metadata-admin catalogue (designer.object.* in packages/app-shell/src/views/metadata-admin/i18n.ts, ObjectDefaultInspector.tsx), not the served metadataForms group — #23951 read 标识、显示名与分类 / 显示名 where the group carries …分类标签 / 显示名称 — so the clause passed on its verify text while naming the wrong source, and negative[0] judged residual English against the wrong bundle. Both now name the catalogue that feeds the surface. The frozen debt count is 414, not 451 (scripts/i18n-coverage-baseline.json). Not loosened: a zh session still FAILS on any English string the feeding bundle translates, and on any raw dotted key", "ref": "#24036" },
         { "revision": 7, "date": "2026-10-26", "change": "steps[2] names the metadata-admin catalogue at its path under ui/ instead of 'at the .objectui-sha pin': the objectui pin is retired and the console builds from this tree (pnpm console:build). Wording only, left to this file's card by #26035; the catalogue still carries 基础信息 / 标识、显示名与分类", "ref": "#25842" },
         { "revision": 8, "date": "2026-11-03", "change": "acceptance[2] (clause, oracle, verify, evidence) and steps[3] read the relative date where it is drawn now, and acceptance[1] and negative[0] carry the authored-override exception. Relative dates: the #25884 ruling paints the absolute face in a grid column and the relative phrase as the cell's tooltip (DateCellRenderer, inGridColumn, ui/packages/fields/src/index.tsx), so QA run #29672 read 10月28日 painted with title 6天前 (en: Oct 28, 6 days ago) and scored the clause FAIL as stale spec; the card names it acceptance[3], the run's one-based number. The clause now reads the tooltip, as a dom read of the title attribute, in both directions; the locale-following phrase it asks for is unchanged. Mixed language (the addendum, 6593917345, from #29675 closed not planned): the run counted Account (Success Overlay) on a zh-CN Studio as a fail, but it is the showcase's code-shipped objectExtensions label (examples/app-showcase/src/data/extensions/account.extension.ts), and ADR-0029 D9.2a makes an explicit override beat the packaged catalog in every locale (translateObject; the i18n-resolver.test.ts case \"a code-shipped extension's scalars beat the catalog\", and packages/rest/src/meta-object-i18n-explicit-override.test.ts). A bundle-translated string drawn English with no override is still the FAIL. Read at base 339f63da30. Card #29679, from QA run #29672", "ref": "#29679" },
-        { "revision": 9, "date": "2026-11-15", "change": "fixture- and step-text correction, no clause change. fixtures.requires[0] and steps[2]: the designer.object.* strings now live in ui/packages/i18n/src/namespaces/studio/zh.ts. steps[1] names the 设置 tab, since the object surface opens on 记录. fixtures.knownGaps[0]: the showcase's coverage baseline reads 317, not 414. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#PENDING-33966" }
+        { "revision": 9, "date": "2026-11-15", "change": "fixture- and step-text correction, no clause change. fixtures.requires[0] and steps[2]: the designer.object.* strings now live in ui/packages/i18n/src/namespaces/studio/zh.ts. steps[1] names the 设置 tab, since the object surface opens on 记录. fixtures.knownGaps[0]: the showcase's coverage baseline reads 317, not 414. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#33984" }
       ]
     },
     {
@@ -367,7 +367,7 @@
           "revision": 15,
           "date": "2026-11-15",
           "change": "verify-, step- and fixture-text correction, no clause change. acceptance[2].verify: the showcase's coverage baseline reads 317, not 414. fixtures.knownGaps[3]: the revoke confirm has now been driven live. steps[18]: the task record page draws no activity timeline; the feed is read on the inbox popover's 活动动态 tab or GET /api/v1/data/sys_activity. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },
@@ -544,7 +544,7 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: the i18n build lane — drift gate, undeclared-key gate, ratchet, and their provable red paths", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "step 4 was a no-op as written: 'perturb one committed bundle VALUE' is green by design under merge mode, where the committed file is its own baseline. Reworded to the STRUCTURAL perturbation (remove/rename a KEY) that actually bites, split into a do/don't pair, with the #7640 symlink-farm technique that drives it without touching a repo file; the drift-bites clause and both negatives are reconciled so a green value edit can no longer be read (or filed) as a gate defect", "ref": "#7686" },
-        { "revision": 3, "date": "2026-11-15", "change": "step-text correction, no clause change. steps[3]: the config walk does not follow symlinked directories, so the symlink farm needs real directories along each packages/**/scripts path. Read from source at base 895783a1. Source records: QA record #33829 (comment 6893937847) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#PENDING-33966" }
+        { "revision": 3, "date": "2026-11-15", "change": "step-text correction, no clause change. steps[3]: the config walk does not follow symlinked directories, so the symlink farm needs real directories along each packages/**/scripts path. Read from source at base 895783a1. Source records: QA record #33829 (comment 6893937847) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#33984" }
       ]
     },
     {
@@ -638,7 +638,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "verify-text correction, no clause change. acceptance[2].verify names the toast keys, flows.FLOW.successMessage and flows.FLOW.errorMessage, extracted only from a flow that authors them. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },

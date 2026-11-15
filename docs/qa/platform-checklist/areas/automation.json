@@ -576,7 +576,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "step-text correction, no clause change. steps[6] names the duplicate door's body {targetPackageId}, without which it answers 400 before the 422 the step cites. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },
@@ -776,7 +776,7 @@
           "revision": 16,
           "date": "2026-11-15",
           "change": "step-text correction, no clause change. steps[6]: the webhook body must carry project, since the flow maps it as optional while showcase_task requires it and create_record fails 'Project is required' without it. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) and QA record #33914 (comment 6895723718) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ],
       "enumSource": {
@@ -935,7 +935,7 @@
           "ref": "#25807"
         },
         { "revision": 10, "date": "2026-10-31", "change": "fixtures.requires[1] says how to fire the time_relative variant inside a run. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the stock sweep runs daily at 08:00 UTC, so the variant had to be fired on a fast clone, and the fixture line named only the scheduled-work switch. Re-read at base 488b3ed0: examples/app-showcase/src/automation/flows/index.ts TaskDueReminderFlow (no schedule on its start config), packages/spec/src/automation/time-relative-trigger.zod.ts (omitting schedule means daily at 08:00 UTC; schedule is a sibling of timeRelative). No clause changed", "ref": "#27409" },
-        { "revision": 11, "date": "2026-11-15", "change": "fixture-text correction, no clause change. fixtures.requires[1]: the fast clone's writable package must reach showcase_task; com.example.showcase.custom takes it, and a fresh scratch package is refused 422 outside its dependency closure. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#PENDING-33966" }
+        { "revision": 11, "date": "2026-11-15", "change": "fixture-text correction, no clause change. fixtures.requires[1]: the fast clone's writable package must reach showcase_task; com.example.showcase.custom takes it, and a fresh scratch package is refused 422 outside its dependency closure. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966", "ref": "#33984" }
       ]
     },
     {
@@ -2352,7 +2352,7 @@
           "revision": 13,
           "date": "2026-11-15",
           "change": "clause wording corrected, not narrowed. acceptance[1]: the dropped keys are judged on the clone response and the stored definition; a later GET of the copy decorates _packageId naming the copy's own holder, which is a read decoration, not a key carried from the source. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },
@@ -2549,7 +2549,7 @@
           "revision": 13,
           "date": "2026-11-15",
           "change": "clause wording corrected, not narrowed, and verify-text correction. acceptance[1] (clause and verify): a pair-added flow carries the rail row mark 'Added' (engine.customizationMark.added); 'In com.example.showcase.custom' is the opened copy's header chip. acceptance[0].verify names the entry's visible gate, current_user.can('sys_metadata_activation', 'read') (setup-nav.contributions.ts). Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },
@@ -3081,7 +3081,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "step-text correction, no clause change. steps[5]: decide the override run's pending request before the next budget change on the same project, or the later runs read failed DUPLICATE_REQUEST (QA run #33853 saw it on the runs acceptance[3] and acceptance[4] read). Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
-          "ref": "#PENDING-33966"
+          "ref": "#33984"
         }
       ]
     },
