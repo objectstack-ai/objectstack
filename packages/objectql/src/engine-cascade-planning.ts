@@ -50,8 +50,10 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 import { ORGANIZATION_OBJECT, resolveTenantFieldName } from './tenancy/system-write-organization.js';
 import { isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 import {
-  cascadeMemberKey, cascadeSetAdd, cascadeSetHas, declaredMultiValued, deleteWalkTargetOf, statesDeleteSemantics,
+  CascadeBatchNarrowed, cascadeMemberKey, cascadeSetAdd, cascadeSetHas, declaredMultiValued, deleteWalkTargetOf,
+  statesDeleteSemantics,
 } from './engine-top-level.js';
+import { isExternalDriverFloor } from './external-driver-floor.js';
 import type { CascadeDeleteSet } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
@@ -856,7 +858,7 @@ export class CascadePlanningFacet {
    * a `restrict` and a `set_null` consider only rows OUTSIDE it, and a row the
    * walk has already entered is not cascaded into again.
    */
-  static async walkReferencingRelations(this: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'cascadeRelationBehavior' | 'delete' | 'deleteRestrictedError' | 'fileReferenceCheckElevation' | 'isTenantColumnSetNull' | 'logger' | 'probeReferencingRowsOfSet' | 'referenceProbeFilter' | 'refuseOrganizationDeleteWhileOwned' | 'update'>, object: string, ids: ReadonlyArray<string | number>, context: ExecutionContext | undefined, objects: ServiceObject[], cascadeSet: CascadeDeleteSet): Promise<void> {
+  static async walkReferencingRelations(this: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'cascadeRelationBehavior' | 'delete' | 'deleteRestrictedError' | 'fileReferenceCheckElevation' | 'getDriver' | 'isTenantColumnSetNull' | 'logger' | 'probeReferencingRowsOfSet' | 'referenceProbeFilter' | 'refuseOrganizationDeleteWhileOwned' | 'update'>, object: string, ids: ReadonlyArray<string | number>, context: ExecutionContext | undefined, objects: ServiceObject[], cascadeSet: CascadeDeleteSet): Promise<void> {
     // Entered before the first nested `delete()` can come back here: every
     // record of the set, so one member's cascade never deletes another.
     for (const id of ids) cascadeSetAdd(cascadeSet.entered, object, id);
@@ -994,6 +996,11 @@ export class CascadePlanningFacet {
         const clearedKey = cascadeMemberKey(childName, fieldName);
         let cleared = cascadeSet.cleared.get(clearedKey);
         if (!cleared) { cleared = new Set(); cascadeSet.cleared.set(clearedKey, cleared); }
+        // [ruling 6893661036, F1] The `cascade` dependents of this relation,
+        // across every record of the set, in the walk's order: deleted after
+        // the loop, a chunk at a time ({@link deleteCascadedChildren}).
+        const cascaded: Array<string | number> = [];
+        const cascadedSeen = new Set<string>();
         for (const id of ids) {
           let behavior: string = relationBehavior;
           let dependents = referencing.get(String(id)) ?? [];
@@ -1092,23 +1099,11 @@ export class CascadePlanningFacet {
               // Either way this cascade removes it once, and re-entering would
               // loop forever on the first and answer 404 on the second.
               if (cascadeSetHas(cascadeSet.entered, childName, depId)) continue;
-              // Recurse via the public delete so the child's own cascade,
-              // hooks and events fire.
-              //
-              // [#23221] Inside a token naming exactly this child, which that
-              // delete claims and projects onto the DECLARED
-              // `HookContext.referentialCascadeDelete` (see
-              // claimReferentialCascadeDelete): on the real request path the
-              // caller's context reaches the child unchanged, so without it a
-              // freeze guard cannot tell this delete from a hand delete of the
-              // same row. The context is passed as before, by reference and
-              // unmarked — see `cascadeIssuedDeletes` for why the marker is not
-              // a context key. A grandchild is issued by the child's own walk,
-              // inside a token of its own.
-              await this.cascadeIssuedDeletes.run(
-                { object: childName, id: String(depId), claimed: false },
-                () => this.delete(childName, { where: { id: depId }, context } as any),
-              );
+              // [ruling 6893661036, F1] Collected, not deleted here: the
+              // relation's dependents go after this loop, a chunk at a time.
+              if (cascadedSeen.has(String(depId))) continue;
+              cascadedSeen.add(String(depId));
+              cascaded.push(depId);
             } else {
               // [#3023] Clear the FK as an engine-internal referential-integrity
               // write, tagged so plugin-security's ownership-anchor guard (#3004)
@@ -1182,6 +1177,7 @@ export class CascadePlanningFacet {
           // [#27004] Every row outside the set has had `id` cleared from it.
           cleared.add(String(id));
         }
+        if (cascaded.length > 0) await deleteCascadedChildren(this, childName, cascaded, context, cascadeSet);
       }
     }
   }
@@ -1403,5 +1399,69 @@ export class CascadePlanningFacet {
       if (count > 0) counts.push({ object: childName, count });
     }
     return counts;
+  }
+}
+
+/**
+ * [ruling 6893661036, option F1] Delete the `cascade` dependents of one
+ * relation: one predicate delete per {@link REFERENCE_PROBE_BATCH} children,
+ * `where: { id: { $in: chunk } }` with `multi: true`, through the public
+ * `delete()`. So the chunk runs every child's `beforeDelete`, then ONE set
+ * delete, then the `afterDelete`s, each context on the per-row shape a
+ * predicate delete has always had (ADR-0058 Addendum II): `dispatch.mode`
+ * `'per-row'`, `input.options.multi` set, `previous` the child's own row.
+ * Before this, every child was its own by-id delete (`dispatch.mode`
+ * `'record'`), its hooks interleaved with its siblings' deletes.
+ *
+ * Inside a token naming exactly the chunk's ids, which that delete claims
+ * and projects onto the DECLARED `HookContext.referentialCascadeDelete`
+ * (see claimReferentialCascadeDelete), so every per-row context carries the
+ * marker, as every by-id child delete did [#23221]. The context is passed
+ * by reference and unmarked; a grandchild is issued by the chunk's own walk
+ * (the predicate arm's `cascadeDeleteRelations`, joining this set), inside a
+ * token of its own.
+ *
+ * A chunk keeps today's by-id deletes, one per child, inside a by-id token
+ * each, when:
+ *   - the child's driver has no `deleteMany` (or is a floored external
+ *     driver, which refuses a predicate write): the in-process path it has;
+ *   - the batch's caller-scoped read misses a child it was asked for
+ *     (`CascadeBatchNarrowed`, thrown before any hook or write): a by-id
+ *     delete of that child refuses where a predicate one would skip it, and
+ *     the refusal rolls the whole cascade back (ruling 6893104201 point 2).
+ * So one cascade can show both shapes.
+ */
+async function deleteCascadedChildren(host: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'delete' | 'getDriver'>, childName: string, dependents: ReadonlyArray<string | number>, context: ExecutionContext | undefined, cascadeSet: CascadeDeleteSet): Promise<void> {
+  const driver = host.getDriver(childName) as { deleteMany?: unknown };
+  const batchable = typeof driver?.deleteMany === 'function' && !isExternalDriverFloor(driver as any);
+  const batchSize = ObjectQL.REFERENCE_PROBE_BATCH;
+  for (let i = 0; i < dependents.length; i += batchSize) {
+    // [#22305] An earlier chunk's own cascade may have entered a member.
+    const chunk = dependents.slice(i, i + batchSize).filter((depId) => !cascadeSetHas(cascadeSet.entered, childName, depId));
+    if (chunk.length === 0) continue;
+    if (batchable) {
+      try {
+        await host.cascadeIssuedDeletes.run(
+          { object: childName, ids: new Set(chunk.map((depId) => String(depId))), claimed: false },
+          () => host.delete(childName, { where: { id: { $in: chunk } }, multi: true, context } as any),
+        );
+        // The predicate arm walks a child's own relations only when one
+        // points at it; entered either way, so a second path to the same row
+        // never deletes it again.
+        for (const depId of chunk) cascadeSetAdd(cascadeSet.entered, childName, depId);
+        continue;
+      } catch (e) {
+        if (!(e instanceof CascadeBatchNarrowed)) throw e;
+      }
+    }
+    for (const depId of chunk) {
+      if (cascadeSetHas(cascadeSet.entered, childName, depId)) continue;
+      // Recurse via the public delete so the child's own cascade, hooks and
+      // events fire, inside a token naming exactly this child [#23221].
+      await host.cascadeIssuedDeletes.run(
+        { object: childName, id: String(depId), claimed: false },
+        () => host.delete(childName, { where: { id: depId }, context } as any),
+      );
+    }
   }
 }
