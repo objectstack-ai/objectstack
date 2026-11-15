@@ -4071,6 +4071,18 @@ export const REPO_ROOT_WALK_SPELLINGS = [
     label: 'a walk whose DEFAULT PARAMETER is the repo-root binding',
     re: /[({,]\s*[A-Za-z_$][\w$]*\s*=\s*(?:REPO_ROOT|REPO_ROOT_DIR|ROOT_DIR)\s*[,)}]/,
   },
+  {
+    // `git grep` searches the tracked corpus by default — the same population
+    // limb A enumerates, read in one call (`check-adr-anchors`'s citation scan,
+    // #34086). Held to the execFile shape, `'git'` then an argv array whose
+    // element is `'grep'`, because a bare `'grep'` is also the system grep run
+    // over one named file (`check-skill-compatibility-version`), which reads
+    // no tree. Like every limb this is necessary, not sufficient: a pathspec
+    // after the pattern narrows the search, and the declaration's reason is
+    // where a reader judges that.
+    label: 'a `git grep` search of the tracked corpus',
+    re: /['"`]git['"`]\s*,\s*\[[^\]]*?['"`]grep['"`]/,
+  },
 ];
 
 /**
