@@ -630,8 +630,8 @@ field: the written entry's where its priority decides the field (a name the
 target already serves included), another package's where that one outranks it.
 On a declared object neither judges a field two packages add at the priority
 that decides it. A field the entry adds under a label the target already shows,
-the platform's `owner_id` included, is refused as `field-label-duplicate`
-(#33644), judged on the target as it will be served after the write, so only a
+the platform's `owner_id` included, or under the label of another field of the
+same entry, is refused as `field-label-duplicate` (#33644), judged on the target as it will be served after the write, so only a
 clash the entry creates is charged: not one the target already carried, nor
 what is left of one after the entry took a field out of it.
 

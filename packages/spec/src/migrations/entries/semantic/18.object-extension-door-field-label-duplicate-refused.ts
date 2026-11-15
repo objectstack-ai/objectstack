@@ -7,7 +7,8 @@ import type { SemanticMigration } from '../../types.js';
 // judged `object` writes only, so an extension published at runtime (Studio's
 // add-field on a `.custom` pair, `PUT /api/v1/meta/object_extension/TARGET`,
 // an MCP or AI author) could add a field under a label the object it extends
-// already shows, `owner_id` included. It now asks the same question there. No
+// already shows, `owner_id` included, or two fields of its own under one
+// label. It now asks the same question there. No
 // D2 conversion: which field keeps the label is the author's choice and is
 // not recorded anywhere, and a stored row is not re-judged until it is
 // published again.
@@ -16,11 +17,13 @@ export const entry: SemanticMigration = {
   surface:
     'an `object_extension` item published at runtime (Studio\'s add-field on a `.custom` pair, '
     + '`PUT /api/v1/meta/object_extension/TARGET`, the MCP and AI authoring doors) whose `fields` add a visible '
-    + 'field under a label the extended object already shows, as written or in a locale a reader is served, '
+    + 'field under a label the extended object already shows, or under the label of another field of the same '
+    + 'extension, as written or in a locale a reader is served, '
     + 'e.g. `{ extend: \'crm_ticket\', fields: { assignee__c: { type: \'user\', label: \'负责人\' } } }` beside the '
     + 'injected `owner_id`, which a `zh-CN` reader is served as 负责人.',
   replacement:
-    'Give the extension\'s field its own label, set `hidden: true` on it, or drop it and use the field the object '
+    'Give the extension\'s field a label of its own (one neither the object nor another field of the extension '
+    + 'shows), set `hidden: true` on it, or drop it and use the field the object '
     + 'already shows (the platform\'s `owner_id` for an owner). The door compares the labels as written and as the '
     + 'platform translates its own columns (`owner_id` reads 负责人 to a `zh-CN` reader); it reads no translation '
     + 'bundle, so a bundle edit neither raises nor clears a refusal there (`os build` and `os validate` judge the '

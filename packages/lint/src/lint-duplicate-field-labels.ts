@@ -67,7 +67,8 @@
  * An extension published at runtime (Studio's add-field on a `.custom` pair,
  * the `/meta` doors, an MCP or AI author) adds fields to an object it does not
  * own, so it can add one under a label the target already shows, `owner_id`
- * included. The door hands the gate the written entry as the stack's only
+ * included, or two of its own fields under one label the target does not
+ * show; both are refused. The door hands the gate the written entry as the stack's only
  * `objectExtensions` member and the live objects as the registry serves them,
  * the target without the written package's own stored extension (which the
  * write replaces), so the fold below judges the target as it will be served
@@ -85,7 +86,7 @@
  * fewer fields than the baseline's and would otherwise read as new. The door
  * carries no `translations`, so it compares the authored labels and the
  * platform's own translations of its columns only; a clash a translation
- * bundle creates is the build's to find.
+ * bundle creates is the build's to find, and the hint offers no bundle.
  */
 
 import {
@@ -96,6 +97,7 @@ import {
 } from '@objectstack/spec/system';
 import { stripInjectedSystemColumns } from '@objectstack/metadata-core';
 import {
+  objectExtensionsByTarget,
   objectsAsServed,
   objectsWithoutTiedFields,
   recordsOf,
@@ -269,9 +271,13 @@ export function duplicateFieldLabelFindings(
   // On an extension write, each target as served WITHOUT the written entry:
   // the same objects and stored extensions, no `objectExtensions` of the
   // stack's own. Index-aligned with `declared` (the fold maps one to one).
+  // Read only for the objects the written entry extends: any other object's
+  // clashes are the same before and after the write, and the gate's
+  // differential already leaves them uncharged.
   const before = extensionWrite
     ? objectsWithoutTiedFields(objectsAsServed({ objects: stack.objects }, stored))
     : undefined;
+  const writtenTargets = extensionWrite ? new Set(objectExtensionsByTarget(stack).keys()) : undefined;
 
   declared.forEach((obj, i) => {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
@@ -279,7 +285,8 @@ export function duplicateFieldLabelFindings(
 
     const bundle = fieldBundleFor(stack, objectName);
     const { injectedNames, passes: candidatePasses } = clashPassesOf(obj, objectName, served[i], bundle);
-    const beforePasses = before ? clashPassesOf(obj, objectName, before[i], bundle).passes : undefined;
+    const beforePasses =
+      before && writtenTargets?.has(objectName) ? clashPassesOf(obj, objectName, before[i], bundle).passes : undefined;
 
     // group key (sorted field names + label) → the passes it clashes in.
     const groups = new Map<string, { names: string[]; label: string; passes: string[] }>();
@@ -323,7 +330,10 @@ export function duplicateFieldLabelFindings(
             : ''),
         hint:
           'Give each visible field its own label' +
-          (authored ? '' : ' (in the translation bundle too, for a locale only a translation clashes in)') +
+          // The extension door reads no translation bundle (the clash it finds
+          // in a locale is the platform's own translation), so its hint
+          // offers none: a bundle is judged at `os build` / `os validate`.
+          (authored || extensionWrite ? '' : ' (in the translation bundle too, for a locale only a translation clashes in)') +
           ', or set `hidden: true` on the one readers should not see, or drop the duplicate field' +
           (injected.length > 0
             ? ` and use the platform's ${quoteList(injected)} instead of declaring a second field for the same thing.`

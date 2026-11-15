@@ -703,6 +703,32 @@ describe('the object_extension door refuses an extension that adds a field under
     expect(errs[0]!.message).toContain("object \"xl_ticket\" shows fields 'subject' and 'topic' under one label \"Subject\", so");
   });
 
+  it('⭐ LIT — an extension whose own two fields share a label the target does not show is REFUSED, naming both fields', () => {
+    const item = ext({ a__c: { type: 'number', label: 'Region' }, b__c: { type: 'text', label: 'Region' } });
+    expect(TARGET.fields).not.toHaveProperty('region');
+    const result = gateExtension(item);
+    const errs = labelErrors(result);
+    expect(errs, JSON.stringify(result.errors)).toHaveLength(1);
+    expect(errs[0]!.path).toBe('objects.xl_ticket.fields');
+    expect(errs[0]!.message).toContain("object \"xl_ticket\" shows fields 'a__c' and 'b__c' under one label \"Region\", so");
+    expect(atBuild({ objects: [TARGET], objectExtensions: [item] })).toEqual([errs[0]!.message]);
+    // The control: the same two fields under labels of their own publish.
+    const own = gateExtension(ext({ a__c: { type: 'number', label: 'Region' }, b__c: { type: 'text', label: 'Region code' } }));
+    expect(labelErrors(own), JSON.stringify(own.errors)).toEqual([]);
+  });
+
+  it('the door\'s hint offers no translation bundle for a clash only a locale shows (the door reads none); the build\'s still does', () => {
+    const item = ext({ assignee: { type: 'user', label: '负责人' } });
+    const errs = labelErrors(gateExtension(item));
+    expect(errs).toHaveLength(1);
+    expect(errs[0]!.message).toContain('when read in locale zh-CN');
+    expect(errs[0]!.hint).not.toContain('translation bundle');
+    expect(errs[0]!.hint).toContain('Give each visible field its own label');
+    const build = lintDuplicateFieldLabels({ objects: [TARGET], objectExtensions: [item] });
+    expect(build).toHaveLength(1);
+    expect(build[0]!.hint).toContain('(in the translation bundle too, for a locale only a translation clashes in)');
+  });
+
   it('an unrelated extension write (a label of its own, or the clashing field hidden) is not charged (the controls)', () => {
     for (const item of [
       ext({ escalation_level: { type: 'number', label: 'Escalation Level' } }),
