@@ -126,6 +126,7 @@ import {
     evaluateCondition,
     seedDeclaredVariables,
     seedRunVariables,
+    startConditionHolds,
     executeWithoutRetry,
     type runUserOf,
 } from './dag-traversal.js';
@@ -2943,6 +2944,13 @@ export class AutomationEngine implements IAutomationService {
     /** [#31696] Slot keys whose trigger decline ({@link activateFlowTrigger}) has been said. */
     private readonly sharedSlotTriggerWarned = new Set<string>();
     /**
+     * [ADR-0150 D3, #33748] The slots (`PACKAGE/NAME`) whose trigger fired
+     * while their package was disabled, and whose skipped dispatch has been
+     * said ({@link triggerRun}). A slot leaves the set when it dispatches
+     * again, so the next disable is said again.
+     */
+    private readonly disabledHolderDispatchSaid = new Set<string>();
+    /**
      * [#31696] Where each key a slot change moved off went, for a run still
      * in flight under its start key ({@link flowKeyNow}). A key moved onto
      * drops its own entry, so the chain never loops.
@@ -4413,6 +4421,13 @@ export class AutomationEngine implements IAutomationService {
      * released (an event the trigger took before the release landed) fires
      * nothing (`undefined`): the binding under its new key fires it once. A
      * slot of an unshared name runs through {@link execute}, as before.
+     *
+     * [ADR-0150 D3, #33748; seat ruling 6884403301, amendment 3] A slot of a
+     * name two packages hold whose package is disabled is not dispatched: no
+     * flow, no run, never another slot's. Asked when the trigger fires, not
+     * when it was armed: a runtime disable leaves the slot armed (a disable is
+     * reversible and moves no key, amendment 7), so the slot dispatches again
+     * the moment its package is enabled, with no re-arm.
      */
     private triggerRun(armedKey: string): (ctx: AutomationContext) => Promise<AutomationResult | undefined> {
         const slot = this.flowSlots.slot(armedKey);
@@ -4424,6 +4439,26 @@ export class AutomationEngine implements IAutomationService {
                 return undefined;
             }
             if (!slot || !this.flowSlots.isShared(slot.name)) return this.execute(key, ctx);
+            if (slot.packageId !== null) {
+                const said = qualifiedFlowKey(slot.packageId, slot.name);
+                if (this.isDisabledHolderSlot(slot.name, slot.packageId)) {
+                    // Said once per slot while its package stays disabled, at
+                    // `info`: the skip IS the package switch working, and
+                    // nothing that claims to be persisted is lost.
+                    if (!this.disabledHolderDispatchSaid.has(said)) {
+                        this.disabledHolderDispatchSaid.add(said);
+                        this.logger.info(
+                            `Trigger fired flow '${slot.name}' of package '${slot.packageId}', which is disabled — `
+                                + 'the flow was not run, no other package\'s flow of the name was run in its place, '
+                                + 'and no run-history row records it. It runs on its trigger again once the package '
+                                + 'is enabled.',
+                            { flow: slot.name, package: slot.packageId, slot: key },
+                        );
+                    }
+                    return undefined;
+                }
+                this.disabledHolderDispatchSaid.delete(said);
+            }
             // A trigger seeds `params.flowName` with the key it was armed
             // under; the run reads its flow's name there, never a slot key.
             const params = ctx.params as Record<string, unknown> | undefined;
@@ -5286,6 +5321,25 @@ export class AutomationEngine implements IAutomationService {
         const resolved = this.resolveFlowKey(name, null);
         if ('refusal' in resolved) throw new PackageScopedNameRefusedError(resolved.refusal);
         return 'key' in resolved ? resolved.key : undefined;
+    }
+
+    /**
+     * [ADR-0150 D3, #33748; seat ruling 6884403301, amendment 3] Is the slot
+     * `(packageId, name)` held by a package that is disabled now? Asked of
+     * the one resolver ({@link flowNameResolver}), with that package as the
+     * caller: its own holding answers on the served read, and the run's read
+     * (`servedCaller`) answers `not-found` for it only while the package is
+     * disabled (amendment 4's caller-first rule). Both readings are needed:
+     * `not-found` alone would also cover a slot whose package the registry
+     * does not hold at all, which this question does not judge. No resolver
+     * attached: nothing is disabled here.
+     */
+    private isDisabledHolderSlot(name: string, packageId: string): boolean {
+        const resolver = this.flowNameResolver;
+        if (resolver === undefined) return false;
+        const held = resolver(name, packageId);
+        if (held?.status !== 'resolved' || held.via !== 'own') return false;
+        return resolver(name, packageId, { servedCaller: true })?.status === 'not-found';
     }
 
     /** [#31696] The package of the slot `key` files, or `undefined` (a package-less slot, or none). */
@@ -7714,20 +7768,18 @@ export class AutomationEngine implements IAutomationService {
             // trigger — owns evaluating it, so every trigger type (record-change,
             // schedule, …) and a manual `execute()` share one gate. Plain-string
             // conditions are routed through CEL so bare field references resolve.
-            const startCondition = (startNode.config as Record<string, unknown> | undefined)?.condition as
-                | string
-                | { dialect?: string; source?: string; ast?: unknown }
-                | undefined;
-            if (startCondition !== undefined && startCondition !== null && startCondition !== '') {
-                const condExpr =
-                    typeof startCondition === 'string' ? { dialect: 'cel', source: startCondition } : startCondition;
-                if (!this.evaluateCondition(condExpr, variables, runContext)) {
-                    this.logger.debug(`Flow '${flowName}' skipped: start condition not met`);
-                    // `flowLabel` rides even here, unlike `successMessage` /
-                    // `summary`: it names the flow, it claims no work done, and
-                    // this answer reaches a runner as a 200 like any other.
-                    return { success: true, output: { skipped: true, reason: 'condition_not_met' }, flowLabel: flow.label };
-                }
+            //
+            // The evaluator is shared with `executeWithoutRetry`, which re-runs
+            // this gate on every retry attempt: a condition that throws here
+            // is a fault the catch below hands to the error strategy, and
+            // under `strategy: 'retry'` each later attempt evaluates it again
+            // rather than running the nodes ungated (see `startConditionHolds`).
+            if (!startConditionHolds.call(this, startNode, variables, runContext)) {
+                this.logger.debug(`Flow '${flowName}' skipped: start condition not met`);
+                // `flowLabel` rides even here, unlike `successMessage` /
+                // `summary`: it names the flow, it claims no work done, and
+                // this answer reaches a runner as a 200 like any other.
+                return { success: true, output: { skipped: true, reason: 'condition_not_met' }, flowLabel: flow.label };
             }
 
             // Re-entrancy loop guard (see `activeRecordFlows`). Breaks the SAME
@@ -11497,6 +11549,7 @@ export class AutomationEngine implements IAutomationService {
             nextRunId: (...a) => this.nextRunId(...a),
             seedRunVariables: (...a) => this.seedRunVariables(...a),
             resolveRunContext: (...a) => this.resolveRunContext(...a),
+            evaluateCondition: (...a) => this.evaluateCondition(...a),
             validateNodeInputSchemas: (...a) => this.validateNodeInputSchemas(...a),
             executeNode: (...a) => this.executeNode(...a),
             recordLog: (...a) => this.recordLog(...a),

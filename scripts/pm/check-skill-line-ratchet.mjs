@@ -418,7 +418,12 @@ export const CEILINGS = new Map([
   // also the one lane-wide line saying the mode is open to any lane past the split
   // threshold (cheaper than a line in each `lanes/*.md`). Measured delta +1; landed
   // count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 320],
+  // Raised 320 → 321 by the repo:objectstack lane (#33959; an ORDINARY ruled raise; ruling of
+  // record: the maintainer, 2026-11-15, verbatim 「是否考虑开一个全仓调度车道，按照你现在的执行的方案。」 ·
+  // 「就是仓库名」, quoted in that card's body, filing gate ③): one 域车道 row naming
+  // `references/lanes/objectstack.md`. No existing row can carry it (the security · review · eval
+  // row is 1 B under its 341 B pin). Measured delta +1; landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 321],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -1376,12 +1381,40 @@ export const CEILINGS = new Map([
   // `ownership transferred` when done. Measured delta +1; landed count, headroom 0.
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 100],
   // Area-lease mode (any lane): dynamic partitioning at seating and at every hand-over
-  // or shift, startup with the maintainer's authorising line per thread, the in-area
-  // rules as pointers to their owning references, the cross-account hand-over on
-  // GitHub and the ownership split. Ordered by the same ruling of record as the two
-  // raises above. A NEW file, so this is an added row and no other row moves for it;
-  // set at the landed line count, headroom 0, same convention as every entry above.
-  ['.claude/skills/pm-dispatch/references/area-lease.md', 60],
+  // or shift, startup with the maintainer's authorising line per seat thread (an area
+  // thread carries none), the in-area rules as pointers to their owning references, the
+  // cross-account hand-over on GitHub and the ownership split. Ordered by the same ruling
+  // of record as the two raises above. A NEW file, so this is an added row and no other
+  // row moves for it; set at the landed line count, headroom 0, same convention as every
+  // entry above. Lowered 60 → 59 when the area-thread authorising line was removed
+  // (lowering is always legitimate); landed count, headroom 0.
+  // Raised 59 → 71 on top of that baseline by three ORDINARY ruled raises, measured
+  // against the 59-line file on main: +12 in all, landed count, headroom 0.
+  // (a) +8, the area-mode rules; ruling of record: the maintainer, 2026-11-15, verbatim:
+  // 「写仓库」, approving the coordinator's proposal to write the day's area-mode rules into
+  // the repo; quoted in the body of card #33907 (filing gate ③), claim comment 6895484790:
+  // the pre-claim three checks recorded in the claim, the declaration self-check, analysed
+  // cross-lane cards staying in lane, re-splitting a backed-up area, contract-tier review
+  // of batched Chinese decisions, landing within ten minutes. The dated eight-area example
+  // was deleted to pay part of it.
+  // (b) +1, the area self-review rule; ruling of record: the maintainer, 2026-11-15T16:06Z,
+  // decision card, verbatim: 「50 行内由区自审」, recorded in comment 6897821873 on card
+  // #34007: a PR of at most 50 changed lines that edits only text or tests and declares
+  // `Clause-②: no` with no other contract face is self-reviewed by its area against
+  // review-checklist.md; every other PR goes to the seat's review thread.
+  // (c) +3, the area throughput and cost rules; ruling of record: the maintainer,
+  // 2026-11-15T16:08Z, verbatim: 「同意他的建议：每区先开 2 个开发代理，上一个 PR 进了合并队列
+  // 再领下一张卡；不单独做 p3；只复审已经变绿、不再改的提交；线程 effort 用 high。」, recorded in
+  // the same comment 6897821873: the final-green-head review line, the contract-record line
+  // (contract-review.md's head-move exception; a same patch-id main merge keeps only the
+  // thread's ACCEPT) and the cost line; the 2-dev merge-queue gate and the p3 ride-along
+  // replace the old lines in place. The dev line is then reworded in place, +0, by the
+  // maintainer's 2026-11-15T16:56Z ruling, verbatim: 「建议每区3个，你通过降低开发节约token没有意义啊」
+  // · 「我要尽快处理」, recorded in comment 6898023768 on #34007 (superseding the 2-dev cap):
+  // each area keeps 3 devs running with a freed slot refilled at once, the queue gate per
+  // slot, a PR waiting on a person (Tier H or a decision) frees its slot, and the cost line
+  // saves tokens without cutting devs.
+  ['.claude/skills/pm-dispatch/references/area-lease.md', 71],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
   // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
@@ -1866,6 +1899,12 @@ export const CEILINGS = new Map([
   // row and no other row moves; set at the landed line count (headroom 0,
   // same convention as every lane charter above).
   ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 28],
+  // repo:objectstack lane charter: the whole-repo dispatch lane, several seats on several
+  // accounts, each running area-lease mode and splitting areas through the lease tables on
+  // their seat posts (#33959; ruling of record: the maintainer, 2026-11-15, verbatim in that
+  // card's body). A NEW file, so this is an added row and no other row moves; set at the landed
+  // line count (headroom 0, same convention as every lane charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 35],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -2697,6 +2736,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/review.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/qa.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/queue.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 0],
   ['.claude/agents/os-dev.md', 0],

@@ -37,10 +37,14 @@
  *   head       the current head and the minutes it has waited: since its commit's
  *              committer date, or since the pull request was opened when that is
  *              later (a head committed long before its PR existed has not waited).
- *   record     `current` (a record on this head — PASS / FAIL as the record's
- *              VERDICT line states it, and by whom), `stale` (the newest record
- *              names an earlier head: the delta re-review stays with that
- *              reviewer), `none`, or `unjudged` (the read could not be made).
+ *   record     `current` (a record on this head — PASS / FAIL as its one
+ *              VERDICT line states it, `unstated` with none, `ambiguous` with
+ *              two or more, and by whom), `stale` (the newest record names an
+ *              earlier head: the delta re-review stays with that reviewer),
+ *              `none`, or `unjudged` (the read could not be made). Read as the
+ *              queue guard reads it: only comments by the relay or an account
+ *              in `GOVERNED_APPROVERS`, and the verdict lines counted, never
+ *              the first match (card #33705).
  *   hand-off   the newest `Contract-review-handoff:` line, as `contractReviewHandoff`
  *              reads it: `handed` (it names the current head, and the seat it hands
  *              to: `review#N` or `domain:<lane>#N`), `stale`, `absent`, `unreadable`
@@ -62,7 +66,10 @@
  *   review seat the review seats (`review#N`) against the same posts: `seated`
  *              (and which), `barred` (every seated one sits on this PR's own
  *              implementing or dispatching account — `lanes/review.md` 独立性;
- *              a barred seat is never named), `unjudged` (seated ones, but the
+ *              a barred seat is never named; `area-lease.md` lets the maintainer's
+ *              own word in that seat's review thread seat it anyway, a word this
+ *              GitHub-only reader cannot see, so the bar stands here and the
+ *              report says so once whenever any row bars a seat), `unjudged` (seated ones, but the
  *              card's comments could not be read, so the dispatching account
  *              is unknown and none is printed as free), `stood-down`,
  *              `absent`, `unknown` (roster unread).
@@ -98,8 +105,10 @@
 import process from 'node:process';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { CLAIM_COMMENT_MARKER, CONTRACT_REVIEW_HEADING_MARKER, latestMarkedComment, markerMatches, readSignatureLine } from './check-half-states.mjs';
+import { CLAIM_COMMENT_MARKER, CONTRACT_REVIEW_HEADING_MARKER, contractReviewVerdictLines, latestMarkedComment, markerMatches, readSignatureLine } from './check-half-states.mjs';
 import { repoIdForSlug } from './check-governed-merges.mjs';
+import { GOVERNED_APPROVERS, recordAuthorTrusted, recordTrustedAuthors } from './check-governed-queue-guard.mjs';
+import { FLEET_BOT_LOGIN } from './check-handover.mjs';
 import { readClause2Line } from './clause2-line.mjs';
 import { parseSeat } from './fleet-roster.mjs';
 import { ghApi, readAllPages } from './gh-pages.mjs';
@@ -131,7 +140,14 @@ export const REVIEW_LANE = 'review';
 export const LANE_JOINS_AFTER_ROUNDS = 2;
 
 const REPO_SHAPE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const VERDICT_LINE = /^[ \t>]*(?:\*\*)?VERDICT:[ \t]*(PASS|FAIL)\b/im;
+/**
+ * Who may post a record this list reads: the queue guard's own author binding (card #33705) — the
+ * relay's identity and `GOVERNED_APPROVERS`, assembled by the guard's `recordTrustedAuthors` and
+ * asked with its `recordAuthorTrusted`, ⛔ never a second login list. A comment by anyone else is
+ * not read, so it is never the record and never shadows one: on a public repository anyone can
+ * post a body shaped like a record, and the guard refuses to land on it.
+ */
+export const RECORD_AUTHORS = recordTrustedAuthors(FLEET_BOT_LOGIN);
 const labelNames = (x) => (Array.isArray(x?.labels) ? x.labels.map((l) => (typeof l === 'string' ? l : l?.name)).filter(Boolean) : []);
 
 // ---------------------------------------------------------------------------
@@ -206,36 +222,53 @@ export function reviewedByOf(body) {
   return null;
 }
 
-/** PASS / FAIL as the record's own `VERDICT:` line states it — a display, never a judgment. Pure. */
+/**
+ * The record's verdict as the queue guard reads it (card #33705): the word of its ONE `VERDICT:`
+ * line, counted by the fleet's reader `contractReviewVerdictLines` — `unstated` with none (a
+ * heading-inline or bare word alone included), `ambiguous` with two or more (a quoted earlier
+ * verdict, a FAIL appended under a PASS), which the guard refuses because a record states exactly
+ * one. ⛔ Never the first match. A display, never a judgment. Pure.
+ */
 export function verdictOf(body) {
-  return VERDICT_LINE.exec(String(body ?? ''))?.[1] ?? 'unstated';
+  const words = contractReviewVerdictLines(body);
+  if (words.length === 0) return 'unstated';
+  return words.length === 1 ? words[0] : 'ambiguous';
 }
 
 /**
  * The record on this head, or the newest one on another head, or none. Pure
  * over the threads. `locateReviewOfRecord` decides "on this head" — the queue
  * guard's own reading; it is handed no git reader, so a `Regen-provenance:`
- * carry is `unjudged` here rather than guessed.
+ * carry is `unjudged` here rather than guessed. As the guard does, a comment
+ * whose author `trusted` does not hold is dropped from both threads BEFORE the
+ * locator reads them (card #33705); `ignored` counts the drops.
  */
-export function recordReading(pull) {
+export function recordReading(pull, trusted = RECORD_AUTHORS) {
+  let ignored = 0;
+  const kept = (rows) => {
+    if (!Array.isArray(rows)) return rows;
+    const out = rows.filter((row) => recordAuthorTrusted(row, trusted));
+    ignored += rows.length - out.length;
+    return out;
+  };
   const pair = {
     pr: pull.number,
     card: pull.card ?? null,
     headSha: pull.head?.sha ?? null,
-    prComments: pull.comments,
-    cardComments: pull.card === null || pull.card === undefined ? [] : pull.cardComments,
+    prComments: kept(pull.comments),
+    cardComments: pull.card === null || pull.card === undefined ? [] : kept(pull.cardComments),
   };
   const located = locateReviewOfRecord(pair);
-  if (located.state === 'unreadable') return { state: 'unjudged', gaps: located.gaps };
+  if (located.state === 'unreadable') return { state: 'unjudged', gaps: located.gaps, ignored };
   const rows = [...(Array.isArray(pair.prComments) ? pair.prComments : []), ...(Array.isArray(pair.cardComments) ? pair.cardComments : [])];
   if (located.state === 'found' || located.state === 'unsigned') {
     const row = rows.find((r) => (r?.id ?? null) === located.id) ?? null;
-    return { state: 'current', id: located.id, where: located.where, by: reviewedByOf(row?.body), verdict: verdictOf(row?.body), signed: located.state === 'found' };
+    return { state: 'current', id: located.id, where: located.where, by: reviewedByOf(row?.body), verdict: verdictOf(row?.body), signed: located.state === 'found', ignored };
   }
   const newest = latestMarkedComment(rows, CONTRACT_REVIEW_HEADING_MARKER);
-  if (!newest) return { state: 'none' };
+  if (!newest) return { state: 'none', ignored };
   const row = rows[newest.index];
-  return { state: 'stale', id: row?.id ?? null, by: reviewedByOf(row?.body), verdict: verdictOf(row?.body) };
+  return { state: 'stale', id: row?.id ?? null, by: reviewedByOf(row?.body), verdict: verdictOf(row?.body), ignored };
 }
 
 /**
@@ -262,7 +295,10 @@ export function reviewSeatsOf(seats, ownAccounts = new Set()) {
   const seatedRows = rows.filter((s) => s.status === 'seated');
   // The card's comments could not be read: the dispatching account is unknown, so no seated seat is printed as free.
   if (ownAccounts === null && seatedRows.length > 0) return { state: 'unjudged', seated: seatedRows.map(name).sort(), barred: [] };
-  // `lanes/review.md` 独立性: a review seat never reviews a PR its own account dispatched or implemented.
+  // `lanes/review.md` 独立性: a review seat never reviews a PR its own account dispatched or implemented —
+  // except one seated by the maintainer's own word in its review thread (`area-lease.md`). That word lives in
+  // a project thread, not on GitHub, so this reader cannot see it: it bars every same-account seat (erring toward
+  // over-barring, never waving a review through) and the report names the exception (AREA_LEASE_BAR_NOTE).
   const isBarred = (s) => typeof s.account === 'string' && ownAccounts !== null && ownAccounts.has(s.account.toLowerCase());
   const seated = seatedRows.filter((s) => !isBarred(s)).map(name).sort();
   const barred = seatedRows.filter(isBarred).map(name).sort();
@@ -417,6 +453,8 @@ export function renderRow(row) {
   const record = row.record.state === 'current' || row.record.state === 'stale'
     ? `${row.record.state} ${row.record.verdict} by ${row.record.by ?? 'nobody named'} (${row.record.id})`
     : row.record.state;
+  // The comments the author binding dropped are printed, never silent (card #33705).
+  const untrusted = row.record.ignored > 0 ? ` (${row.record.ignored} by an untrusted author not read)` : '';
   const holder = row.claim.holder;
   const claim = holder === null
     ? row.claim.state
@@ -425,7 +463,7 @@ export function renderRow(row) {
     `${row.status}  #${row.pr} ${row.draft ? 'draft' : 'ready'}`,
     `face ${row.face.join('+')}`,
     `head ${short(row.head)} (${row.waited === null ? '? min' : `${row.waited} min`})`,
-    `record ${record}`,
+    `record ${record}${untrusted}`,
     `hand-off ${row.handoff.state}${row.handoff.to ? ` ${row.handoff.to}` : ''}${row.handoff.id === null ? '' : ` (${row.handoff.id})`}`,
     `claim ${claim}`,
     `hold ${holdText(row.hold)}`,
@@ -461,6 +499,20 @@ function holdText(hold) {
   return hold.state;
 }
 
+/**
+ * The note every report carries beside a barred review seat. `area-lease.md` lets the maintainer's own word
+ * in a review thread seat a review seat on the PR's own account; that word is not on GitHub, so this reader
+ * keeps the seat barred and says what it cannot see. ⛔ Never a reading that frees the seat. Pure constant.
+ */
+export const AREA_LEASE_BAR_NOTE = 'barred = a review seat on this PR\'s own account (`lanes/review.md` 独立性). '
+  + 'Under area-lease mode (`area-lease.md`) the maintainer may seat one anyway by their own word in that seat\'s review thread; '
+  + 'this tool reads GitHub only and cannot see that word, so the seat stays barred here — read the review thread before taking it.';
+
+/** The report's notes, by what its rows show: the area-lease note once when any row bars a review seat. Pure. */
+export function reportNotes(rows) {
+  return (Array.isArray(rows) ? rows : []).some((r) => (r?.reviewBarred?.length ?? 0) > 0) ? [AREA_LEASE_BAR_NOTE] : [];
+}
+
 /** The printed report. Pure. */
 export function renderReport(rows, { repo, now, read, gaps }) {
   const count = (s) => rows.filter((r) => r.status === s).length;
@@ -478,6 +530,8 @@ export function renderReport(rows, { repo, now, read, gaps }) {
       ...listed.map((r) => `  - #${r.pr} held by ${r.hold.session} since ${r.hold.at ?? '?'} (${holdAge(r.hold)}) until ${r.hold.until}`),
     );
   }
+  const notes = reportNotes(rows);
+  if (notes.length > 0) lines.push('', ...notes.map((n) => `⚖️ ${n}`));
   if (gaps.length > 0) {
     lines.push('', `⚠️ sweep INCOMPLETE — ${gaps.length} read(s) failed; the rows above are not the whole answer:`, ...gaps.map((g) => `  - ${g}`));
   }
@@ -548,7 +602,7 @@ const USAGE = [
   '  names; else a seated review seat first (`review#N`), the lane seat once a further round has',
   '  passed with no claim, or the lane seat alone while no review seat is seated — never triage.',
   `  --repo   the repository whose pulls are read (default ${DEFAULT_REPO}); --board, where the seat posts live`,
-  '  --now    the clock (default: now); --json prints the rows as JSON',
+  '  --now    the clock (default: now); --json prints the rows and the report\'s notes (the area-lease note when a seat is barred) as JSON',
   '  Report-only: reads through `gh api`, writes nothing, exits 0 on every read; 2 on a usage error.',
 ].join('\n');
 
@@ -567,7 +621,7 @@ export function main(argv, { get = ghApi, log = console.log, error = console.err
   const snapshot = readSnapshot({ repo: opts.repo, board: opts.board, get });
   const rows = owedReviewRows(snapshot, { now });
   const read = { pulls: snapshot.pulls.length, drafts: snapshot.pulls.filter((p) => p.draft === true).length };
-  if (opts.json) log(JSON.stringify({ repo: opts.repo, now: new Date(now).toISOString(), read, gaps: snapshot.gaps, rows }, null, 2));
+  if (opts.json) log(JSON.stringify({ repo: opts.repo, now: new Date(now).toISOString(), read, gaps: snapshot.gaps, notes: reportNotes(rows), rows }, null, 2));
   else for (const line of renderReport(rows, { repo: opts.repo, now, read, gaps: snapshot.gaps })) log(line);
   return EXIT_OK;
 }
@@ -581,10 +635,13 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: modes and every refusal': 6,
   'the owed face: paths, the Clause-② line, the label — drafts included, nothing else owes': 9,
-  'the record: on this head (by whom, as stated), on an earlier head, none, unjudged': 8,
+  // 8 → 13 (#33705): the queue guard's author binding (an untrusted PASS unread, unable to shadow a trusted FAIL, an
+  // approver's read) and its counted verdict reading (two lines `ambiguous`, an inline word alone `unstated`).
+  'the record: on this head (by whom, as stated), on an earlier head, none, unjudged': 13,
   'the triggers: (a) hand-off or label the same round, (b) a full round, (c) the lane seat': 10,
   // 10 → 14 → 16: S2 and S4 of PR #29967's contract review — a review seat on the PR's own account is barred (`lanes/review.md` 独立性); an unread card thread leaves the bar unjudged.
-  'review-seat first: a seated review seat takes before the lane, the lane joins after a further round, and takes alone while none is seated': 16,
+  // 16 → 17 (#34003): the area-lease exception is named beside a barred seat, which stays barred — the maintainer's word is off GitHub.
+  'review-seat first: a seated review seat takes before the lane, the lane joins after a further round, and takes alone while none is seated': 17,
   'a live claim holds the head and a record settles it; a lapsed claim holds nothing': 6,
   'the live instance: two Tier H drafts with a hand-off on the current head list as TAKE under (a)': 4,
   'the live read: every read through one reader; a failed read is INCOMPLETE, never clean': 6,
@@ -615,7 +672,8 @@ export function selfTest() {
   const REVIEWER = 'session_01ReviewSeatFixture7Qx';
   const handoff = (head, at, to = 'review#1') => ({ id: 6463525633, created_at: at, body: `## Seat note · contract review owed\n\nContract-review-handoff: ${to} — CONTRACT_REVIEW_TIER unavailable (ceiling model out for the fleet since 2026-10-27, seat runs at TIER_DEFAULT, ${at.slice(0, 16)}Z) · head \`${head}\`` });
   const claimRow = (session, head, at, sig) => ({ id: 6468788431, created_at: at, body: `${sig}\n\nContract-review-claim: \`${session}\` · head \`${head}\` · ${at.slice(0, 16)}Z\n\nTaking the review.` });
-  const recordRow = (head, verdict = 'PASS', id = 6469007202) => ({ id, created_at: '2026-10-28T12:29:43Z', body: `## Contract review\n\nServed-tier: \`CONTRACT_REVIEW_TIER\`\nHead-sha: \`${head}\`\nLocal-runs: none\n\nReviewed-by: \`${TRIAGE}\`\n\n**VERDICT: ${verdict}**` });
+  // Records are posted through the relay, so the fixtures carry its login: the author binding reads no other (#33705).
+  const recordRow = (head, verdict = 'PASS', id = 6469007202, login = FLEET_BOT_LOGIN) => ({ id, created_at: '2026-10-28T12:29:43Z', user: { login }, body: `## Contract review\n\nServed-tier: \`CONTRACT_REVIEW_TIER\`\nHead-sha: \`${head}\`\nLocal-runs: none\n\nReviewed-by: \`${TRIAGE}\`\n\n**VERDICT: ${verdict}**` });
   const pull = (o = {}) => ({
     number: 27136,
     draft: true,
@@ -666,9 +724,17 @@ export function selfTest() {
   // ⭐ #27979, the measured instance (PR #27964, record 6516042954): a DELTA record on an earlier head whose prose
   // names this head three times. The whole-body span scan read it as `current` here and the queue guard cleared on
   // it; the `Head-sha:` line alone decides now, through the one locator both share.
-  const deltaRow = { id: 6516042954, created_at: '2026-10-30T05:53:38Z', body: `## Contract review\n\nServed-tier: \`CONTRACT_REVIEW_TIER\`\nHead-sha: \`${HEAD2}\`\nLocal-runs: none\n\nThis is a DELTA record. The PR has since moved to \`${HEAD.slice(0, 8)}\` (seat comment 6515952505); this record judges \`${HEAD2.slice(0, 8)}\` alone. The runs were cancelled by the push of \`${HEAD.slice(0, 8)}\`; landing waits on \`${HEAD}\` and that head's record.\n\nReviewed-by: \`${TRIAGE}\`\n\n**VERDICT: PASS**` };
+  const deltaRow = { id: 6516042954, created_at: '2026-10-30T05:53:38Z', user: { login: FLEET_BOT_LOGIN }, body: `## Contract review\n\nServed-tier: \`CONTRACT_REVIEW_TIER\`\nHead-sha: \`${HEAD2}\`\nLocal-runs: none\n\nThis is a DELTA record. The PR has since moved to \`${HEAD.slice(0, 8)}\` (seat comment 6515952505); this record judges \`${HEAD2.slice(0, 8)}\` alone. The runs were cancelled by the push of \`${HEAD.slice(0, 8)}\`; landing waits on \`${HEAD}\` and that head's record.\n\nReviewed-by: \`${TRIAGE}\`\n\n**VERDICT: PASS**` };
   t('⛔ #27979: a delta record on an EARLIER head whose PROSE names this head is STALE for this head — the review is owed again', (() => { const r = row({ comments: [deltaRow] }); return r.record.state === 'stale' && r.record.id === 6516042954 && r.status !== 'DONE'; })());
   t('⭐ #27979: …and CURRENT for the head its `Head-sha:` line names', row({ head: { sha: HEAD2, ref: 'claude/project-thread-6d34fw' }, comments: [deltaRow] }).record.state === 'current');
+  // #33705: the queue guard's author binding and its counted verdict reading, imported, never copied.
+  const untrusted = row({ comments: [recordRow(HEAD, 'PASS', 6469007203, 'drive-by-commenter')] });
+  t('⛔ #33705: a PASS record on this head posted by an author outside the relay and GOVERNED_APPROVERS is NOT read — none, still owed, and the drop is printed', untrusted.record.state === 'none' && untrusted.status !== 'DONE' && untrusted.record.ignored === 1 && renderRow(untrusted).includes('record none (1 by an untrusted author not read)'), JSON.stringify(untrusted.record));
+  t('⛔ #33705: …nor does a newer untrusted PASS shadow a trusted FAIL on the same head, on either thread', (() => { const r = row({ card: 25922, comments: [recordRow(HEAD, 'FAIL', 11)], cardComments: [{ ...recordRow(HEAD, 'PASS', 12, 'drive-by-commenter'), created_at: '2026-10-28T12:50:00Z' }] }); return r.record.state === 'current' && r.record.id === 11 && r.record.verdict === 'FAIL' && r.record.ignored === 1; })());
+  t('#33705: a record an account in GOVERNED_APPROVERS posted is read, and the binding is the guard\'s own set, relay first', row({ comments: [recordRow(HEAD, 'PASS', 13, GOVERNED_APPROVERS[0])] }).record.state === 'current' && JSON.stringify(RECORD_AUTHORS) === JSON.stringify([FLEET_BOT_LOGIN, ...GOVERNED_APPROVERS]));
+  const twoLines = { ...recordRow(HEAD), body: `${recordRow(HEAD).body}\n\n> **VERDICT: FAIL**` };
+  t('⛔ #33705: a record stating TWO `VERDICT:` lines reads `ambiguous` as the guard counts them, never its first match PASS', (() => { const r = row({ comments: [twoLines] }); return r.record.state === 'current' && r.record.verdict === 'ambiguous' && renderRow(r).includes('record current ambiguous by'); })());
+  t('#33705: …a heading-inline word alone is `unstated` (the guard reads no `VERDICT:` line), and one line reads its word', [verdictOf('## Contract review (clause ②) — **PASS**\n\nPASS'), verdictOf(recordRow(HEAD).body), verdictOf(recordRow(HEAD, 'FAIL').body)].join() === 'unstated,PASS,FAIL');
 
   battery('the triggers: (a) hand-off or label the same round, (b) a full round, (c) the lane seat');
   const fresh = '2026-10-28T12:30:00Z';
@@ -705,6 +771,7 @@ export function selfTest() {
   t('S2: the lane seat gone and the only review seat barred ⇒ the lane\'s next seat; a review seat with no account on its post is never barred', rv({ body: ATTR, headCommittedAt: fresh }, [{ lane: REVIEW_LANE, seat: 1, status: 'seated', account: 'os-support-ai' }]).taker === "the domain:ui seat next on duty (review seat review#1 is on this PR's own account)" && rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, [...SEATED, { lane: REVIEW_LANE, seat: 1, status: 'seated', account: null }]).taker === 'a review seat (review#1) first');
   t('⭐ S4: the card\'s comments unreadable ⇒ own accounts null, the bar UNJUDGED: a seated review seat is named with the caveat, never as free, and the lane seat beside it; with no seated review seat the states read as before', (() => { const unread = { card: 25922, cardComments: null, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }; const r = rv(unread, OWN); const gone = rv({ card: 25922, cardComments: null, headCommittedAt: fresh }, [{ lane: REVIEW_LANE, seat: 1, status: 'seated', account: 'os-support-ai' }]); return ownAccountsOf({ card: 25922, cardComments: null }) === null && ownAccountsOf({ card: null, cardComments: [] }).size === 0 && r.reviewSeat === 'unjudged' && r.reviewSeats.join() === 'review#1' && r.reviewBarred.length === 0 && r.taker === "a review seat (review#1) unless on this PR's own account (card comments unread), or the domain:ui seat" && gone.taker === "a review seat (review#1) unless on this PR's own account (card comments unread), or the domain:ui seat next on duty" && rv(unread, SEATED).reviewSeat === 'absent' && rv(unread, [...SEATED, { lane: REVIEW_LANE, seat: 1, status: 'paused' }]).reviewSeat === 'stood-down' && renderRow(r).includes('review seat unjudged review#1'); })());
   t('S4: a readable but empty comment thread on the card, or no card at all, judges the bar — the attribution login alone bars', rv({ card: 25922, cardComments: [], body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN).reviewSeat === 'barred' && rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN).reviewSeat === 'barred');
+  t('⛔ area-lease: a same-account seat the maintainer may have seated in its review thread STAYS barred — that word is off GitHub — and the report names the exception once; no barred seat, no note', (() => { const barred = [rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN), { ...rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN), pr: 27137 }]; const free = [rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] })]; const report = (rows) => renderReport(rows, { repo: DEFAULT_REPO, now: NOW, read: { pulls: rows.length, drafts: rows.length }, gaps: [] }); const notes = report(barred).filter((l) => l.includes('area-lease.md')); return barred.every((r) => r.reviewSeat === 'barred' && r.reviewSeats.length === 0 && r.taker === "the domain:ui seat (review seat review#1 is on this PR's own account)") && notes.length === 1 && notes[0] === `⚖️ ${AREA_LEASE_BAR_NOTE}` && reportNotes(barred).length === 1 && reportNotes(free).length === 0 && !report(free).some((l) => l.includes('area-lease.md')); })());
   t('the printed row carries the review-seat reading and the taker', renderRow(rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] })).includes(`review seat seated review#1,review#2 → (a) label · take: ${BOTH} first`) && renderRow(rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, SEATED)).includes('review seat absent → (a) label · take: the domain:ui seat (no review seat seated)'));
 
   battery('a live claim holds the head and a record settles it; a lapsed claim holds nothing');
@@ -766,7 +833,7 @@ export function selfTest() {
   t('the header counts what was read and what is owed', printed[0].includes('2 open PR(s) read (1 draft)') && printed[0].includes('1 owe a contract review — 1 to take'));
   t('rows sort TAKE, WAIT, HELD, DONE, then by number', owedReviewRows({ pulls: [pull({ number: 3, comments: [recordRow(HEAD)] }), pull({ number: 2, headCommittedAt: '2026-10-28T12:59:00Z' }), pull({ number: 1, labels: [{ name: WAITING_LABEL }] })], seats: SEATED }, { now: NOW }).map((r) => `${r.status}${r.pr}`).join() === 'TAKE1,WAIT2,DONE3');
   const jsonOut = [];
-  t('--json prints the rows as one JSON document, still exit 0', main(['--repo', DEFAULT_REPO, '--json', '--now', '2026-10-28T13:00:00Z'], { get: fake(routes), log: (l) => jsonOut.push(l) }) === EXIT_OK && JSON.parse(jsonOut.join('\n')).rows[0].pr === 27136);
+  t('--json prints the rows and the report\'s notes as one JSON document, still exit 0', main(['--repo', DEFAULT_REPO, '--json', '--now', '2026-10-28T13:00:00Z'], { get: fake(routes), log: (l) => jsonOut.push(l) }) === EXIT_OK && (() => { const doc = JSON.parse(jsonOut.join('\n')); return doc.rows[0].pr === 27136 && Array.isArray(doc.notes) && JSON.stringify(doc.notes) === JSON.stringify(reportNotes(doc.rows)); })());
   t('a usage error exits 2 and prints the usage', main(['--bogus'], { get: fake({}), log: () => {}, error: () => {} }) === EXIT_USAGE);
 
   battery('the hold: a live hold on this head holds (b) alone, (a) and (c) still fire; a new head clears it; at 24 hours it is listed, still WAIT');
@@ -815,7 +882,7 @@ export function selfTest() {
   }
   console.log(
     `✓ check-owed-reviews self-test: ${cases.length} cases pass in ${declared.length} batteries (the owed face from paths, `
-      + 'the Clause-② line and the label, drafts included; the record on this head, an earlier head, none, unjudged; '
+      + 'the Clause-② line and the label, drafts included; the record on this head, an earlier head, none, unjudged, read by the queue guard\'s author binding with its verdict lines counted; '
       + 'the (a) / (b) / (c) triggers and the taker — the named seat, the lane seat or a review seat, never triage; claims holding and lapsing, the earliest live claim holding; the two live drafts as TAKE; '
       + 'every read through one reader with failures as gaps; the report, exit 0; a lane\'s live hold holding (b) alone, '
       + 'cleared by a new head, an unreadable hold line voiding nothing and printed, listed at 24 hours and still WAIT).',
