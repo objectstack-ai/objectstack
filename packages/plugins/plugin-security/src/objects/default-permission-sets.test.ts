@@ -372,6 +372,35 @@ describe('sys_comment_reaction delete is ownership-shaped (#22566)', () => {
 });
 
 /**
+ * [#33584] Maintainer decision, option A ("members may react by default"):
+ * `member_default` names `sys_comment_reaction` read + create, and nothing
+ * more — no edit (the object serves no update), no delete (ADR-0090 D5; unreact
+ * is plugin-audit's own-row door). Which rows stays plugin-audit's comment
+ * gate. The decision covers `member_default` only, so `external_default` is
+ * the CONTROL: a portal user's answer is unchanged.
+ */
+describe('member_default lets a member react to comments; external_default does not (#33584)', () => {
+  it('member_default carries exactly read + create on sys_comment_reaction', () => {
+    // The parsed entry, so the schema's materialized `false`s are pinned too:
+    // no transfer and no view-all / modify-all bypass rides on the grant.
+    expect(setByName('member_default').objects.sys_comment_reaction).toEqual({
+      allowRead: true,
+      allowCreate: true,
+      allowEdit: false,
+      allowDelete: false,
+      allowTransfer: false,
+      viewAllRecords: false,
+      modifyAllRecords: false,
+    });
+  });
+
+  it('CONTROL: external_default names no sys_comment_reaction grant', () => {
+    expect(setByName('external_default')).toBeTruthy();
+    expect(setByName('external_default').objects).not.toHaveProperty('sys_comment_reaction');
+  });
+});
+
+/**
  * [#11965 / #11663 Choice 6A] platform-admin re-anchor, L1 behaviour-neutrality
  * pin.
  *

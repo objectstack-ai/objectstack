@@ -2806,6 +2806,8 @@ const es = {
         ssoBackToConsole: "Volver a la consola",
         ssoSwitchAccountHint: "Cambiar de cuenta abre tu servicio de inicio de sesión en una pestaña nueva y cierra allí tu sesión. Después, vuelve a iniciar sesión aquí con una cuenta que tenga acceso.",
         linkEmailMismatch: "La cuenta no se vinculó: su dirección de correo electrónico no coincide con la de la cuenta con la que iniciaste sesión. Vincula una cuenta que use la misma dirección de correo electrónico.",
+        linkAlreadyLinkedToOtherUser: "La cuenta no se vinculó: ya está vinculada a otro usuario de este sistema. Vincula otra cuenta, o inicia sesión como el usuario al que está vinculada y desvincúlala allí primero.",
+        linkUnableToLink: "No se pudo vincular la cuenta. Comprueba que su dirección de correo electrónico esté verificada en ese servicio de inicio de sesión y vuelve a intentarlo. Si sigue fallando, contacta con tu administrador.",
         twoFactorInvalidCode: "Ese código no es válido. Revise su aplicación de autenticación e inténtelo de nuevo.",
         twoFactorInvalidBackupCode: "Ese código de respaldo no es válido o ya se ha utilizado.",
         twoFactorTooManyAttempts: "Demasiados códigos incorrectos. Vuelva a iniciar sesión con su contraseña.",

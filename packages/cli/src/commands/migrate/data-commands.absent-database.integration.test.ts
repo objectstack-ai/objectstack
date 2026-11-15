@@ -82,6 +82,10 @@
  * born with the answer too. Its control rows are an older writer's copies of a
  * secret-store row and a settings row, each carrying its key-material column,
  * planted below the writer.
+ *
+ * [#33155] `os migrate audit-side-copies`, the third twin, joined it born with
+ * the answer too. Its control rows are an older writer's copies of an approval
+ * request, each carrying its side-copy column, planted below the writer.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -474,6 +478,18 @@ await k(shard.name).insert({
   changed_fields: '[]',
   metadata: JSON.stringify({ old: null, new: { id: 'set_26687', namespace: 'os26687', key: 'k', encrypted: true, value_enc: 'key-material-sentinel-26687' } }),
 });
+// [#33155] An older writer's copies of an approval request, each still carrying
+// its side-copy column (a sentinel). The activity row carries its read-rule
+// stamp, so it is no row of work for \`activity-changed-fields\`.
+await k('sys_audit_log').insert({
+  id: 'aud_33155', object_name: 'sys_approval_request', record_id: 'ar_33155', action: 'create',
+  new_value: JSON.stringify({ id: 'ar_33155', status: 'pending', payload_json: 'side-copy-sentinel-33155' }),
+});
+await k(shard.name).insert({
+  organization_id: 'org_fixture', id: 'act_33155', timestamp: new Date().toISOString(), type: 'create', summary: 'created', object_name: 'sys_approval_request', record_id: 'ar_33155',
+  changed_fields: '[]',
+  metadata: JSON.stringify({ old: null, new: { id: 'ar_33155', status: 'pending', payload_json: 'side-copy-sentinel-33155' } }),
+});
 await k('sys_comment').insert({
   organization_id: 'org_fixture', id: 'cmt_23857', thread_id: 'sys_metadata:m_21552', body: 'planted below the writer', author_id: 'u1',
   created_at: new Date().toISOString(),
@@ -564,6 +580,21 @@ const DOORS: readonly Door[] = [
       // The seeded key-material copy is the one row to rewrite on each table;
       // the rotation-managed table's rows are READ, as for audit-metadata-bodies.
       expect(doc.report).toMatchObject({ failures: 0, byObject: { sys_audit_log: { rewritten: 1 }, sys_activity: { rewritten: 1 } } });
+    },
+  },
+  {
+    name: 'migrate audit-side-copies',
+    argv: ['migrate', 'audit-side-copies'],
+    empty: (doc) => {
+      expect(doc).toMatchObject({ apply: false, report: { scanned: 0, rewritten: 0, failures: 0 } });
+      expect(Object.keys(doc.report.byObject).sort()).toEqual(['sys_activity', 'sys_audit_log']);
+    },
+    humanEmpty: /Nothing to remove/,
+    tables: ['sys_audit_log', 'sys_activity'],
+    work: (doc) => {
+      // The seeded approval-request copy is the one row to rewrite on each table,
+      // the live sys_activity row included; the rotation-managed table's rows are READ.
+      expect(doc.report).toMatchObject({ failures: 0, byObject: { sys_audit_log: { scanned: 1, rewritten: 1 }, sys_activity: { scanned: 1, rewritten: 1 } } });
     },
   },
   {

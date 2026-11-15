@@ -2804,7 +2804,15 @@ export class SeedLoaderService implements ISeedLoaderService {
 
     // Not a natural key (an internal id, or a non-string the engine will
     // reject on its own terms) — keep it verbatim.
-    if (typeof value !== 'string' || this.looksLikeInternalId(value)) {
+    //
+    // [#33280] Except a person on an organization-scoped load: an id names a
+    // person exactly as a name does, so it is judged by the same membership
+    // rule. A member's id resolves to itself; an id of someone outside the
+    // organization gets the refusal a name gets. A shape the pattern does not
+    // recognise (`usr_…`) already reached the probe through its `id` leg, so
+    // keeping the recognised shapes verbatim was the only door past the rule.
+    if (typeof value !== 'string') return { status: 'kept', value };
+    if (this.looksLikeInternalId(value) && !(await this.judgesInternalIdByMembership(ref.targetObject, config))) {
       return { status: 'kept', value };
     }
 
@@ -2918,20 +2926,30 @@ export class SeedLoaderService implements ISeedLoaderService {
 
   /**
    * [#33207] Resolve a person for an organization-scoped load: `sys_user`
-   * carries no organization (identity lives above the organization), so the
-   * candidates the field names are kept only when they hold a `sys_member` row
-   * in the load's organization. ⛔ A person who is not a member is never
-   * resolved, however exactly the name matches: they could not even read the
-   * row they would be made to own. The member with the lowest id wins: the
-   * candidates are read in id order, so the answer does not depend on the
-   * driver's row order.
+   * carries no organization (identity lives above the organization), so a
+   * person resolves only when they hold a `sys_member` row in the load's
+   * organization. ⛔ A person who is not a member is never resolved, however
+   * exactly the name matches: they could not even read the row they would be
+   * made to own. The member with the lowest id wins, so the answer does not
+   * depend on the driver's row order.
    *
-   * A name is not unique above the organization (every organization may sign
-   * its people up under the same seeded names), so the candidates are read
-   * page by page until a member is found or none is left: "not a member" is
-   * said only after every person the key names has been asked about, never
-   * on a truncated read. A refused membership read is reported as a refusal
-   * on `sys_member`, the table that refused it.
+   * The probe is driven from the organization's member set, never from the
+   * people the key names (#33280): a name is not unique above the organization
+   * (every organization may sign its people up under the same seeded names),
+   * so reading the same-named people first made the cost grow with the
+   * deployment. The members are read in `user_id` order, a page at a time, by
+   * keyset (`user_id` greater than the last one seen) — an offset page shifts
+   * under a concurrent delete and skips a member, which is a false "not a
+   * member". Each page is asked ONE `sys_user` read constrained to that page's
+   * people AND the key; the pages ascend, so the first page that answers holds
+   * the lowest-id member and the walk stops there. "Not a member" is said only
+   * after every member was asked about; whether anyone outside the
+   * organization answers to the key is then one bounded read (`limit: 1`),
+   * which only words the verdict.
+   *
+   * The `id` key needs no member page: the membership row of that one person
+   * is read directly. A refused membership read is reported as a refusal on
+   * `sys_member`, the table that refused it.
    */
   private async probeOrganizationMember(
     probeField: string,
@@ -2939,37 +2957,61 @@ export class SeedLoaderService implements ISeedLoaderService {
     organizationId: string,
   ): Promise<{ id: string | null; nonMemberMatched: boolean; refusal?: ProbeRefusal }> {
     const page = SeedLoaderService.MEMBER_PROBE_PAGE;
-    let nonMemberMatched = false;
-    for (let offset = 0; ; offset += page) {
-      const userProbe: EngineQueryOptions = {
-        where: { [probeField]: value },
+    const firstUser = async (where: Record<string, unknown>): Promise<string | null> => {
+      const users = (await this.engine.find(SystemObjectName.USER, {
+        where,
         fields: ['id'],
         orderBy: [{ field: 'id', order: 'asc' }],
-        limit: page,
-        offset,
+        limit: 1,
         context: { isSystem: true },
-      };
-      const users = (await this.engine.find(SystemObjectName.USER, userProbe)) as Array<Record<string, unknown>> | undefined;
-      const candidates = (users ?? []).map((u) => String(u.id ?? u._id)).filter((id) => id !== 'undefined');
-      if (candidates.length === 0) return { id: null, nonMemberMatched };
-      const memberProbe: EngineQueryOptions = {
-        where: { user_id: candidates.length === 1 ? candidates[0] : { $in: candidates }, organization_id: organizationId },
+      } satisfies EngineQueryOptions)) as Array<Record<string, unknown>> | undefined;
+      const id = users?.[0]?.id ?? users?.[0]?._id;
+      return id === undefined || id === null ? null : String(id);
+    };
+    const readMembers = async (where: Record<string, unknown>, limit: number): Promise<string[]> => {
+      const members = (await this.engine.find(SystemObjectName.MEMBER, {
+        where: { ...where, organization_id: organizationId },
         fields: ['user_id'],
-        limit: candidates.length,
+        orderBy: [{ field: 'user_id', order: 'asc' }],
+        limit,
         context: { isSystem: true },
-      };
-      let members: Array<Record<string, unknown>> | undefined;
+      } satisfies EngineQueryOptions)) as Array<Record<string, unknown>> | undefined;
+      return (members ?? [])
+        .map((m) => m.user_id)
+        .filter((id) => id !== undefined && id !== null && id !== '')
+        .map(String);
+    };
+
+    if (probeField === 'id') {
+      let isMember: boolean;
       try {
-        members = (await this.engine.find(SystemObjectName.MEMBER, memberProbe)) as Array<Record<string, unknown>> | undefined;
+        isMember = (await readMembers({ user_id: value }, 1)).length > 0;
       } catch (err) {
         return { id: null, nonMemberMatched: false, refusal: this.reportRefusedProbe(SystemObjectName.MEMBER, 'user_id', err) };
       }
-      const memberIds = new Set((members ?? []).map((m) => String(m.user_id)));
-      const member = candidates.find((id) => memberIds.has(id));
-      if (member) return { id: member, nonMemberMatched: false };
-      nonMemberMatched = true;
-      if ((users ?? []).length < page) return { id: null, nonMemberMatched };
+      const person = await firstUser({ id: value });
+      if (person === null) return { id: null, nonMemberMatched: false };
+      return isMember ? { id: person, nonMemberMatched: false } : { id: null, nonMemberMatched: true };
     }
+
+    for (let after: string | undefined; ;) {
+      let memberIds: string[];
+      try {
+        memberIds = await readMembers(after === undefined ? {} : { user_id: { $gt: after } }, page);
+      } catch (err) {
+        return { id: null, nonMemberMatched: false, refusal: this.reportRefusedProbe(SystemObjectName.MEMBER, 'user_id', err) };
+      }
+      if (memberIds.length > 0) {
+        const member = await firstUser({
+          [probeField]: value,
+          id: memberIds.length === 1 ? memberIds[0] : { $in: memberIds },
+        });
+        if (member !== null) return { id: member, nonMemberMatched: false };
+      }
+      if (memberIds.length < page) break;
+      after = memberIds[memberIds.length - 1];
+    }
+    return { id: null, nonMemberMatched: (await firstUser({ [probeField]: value })) !== null };
   }
 
   /**
@@ -3502,11 +3544,13 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   /**
-   * [#33207] How many same-named people one page of the membership probe
-   * weighs. A name is not unique above the organization, so the probe pages
-   * through every person the key names; the page only bounds each read.
+   * [#33207] How many members of the load's organization one page of the
+   * membership probe weighs (#33280: the probe pages the organization's
+   * members by keyset, never the people a key names). The page only bounds
+   * each read and the `$in` list the person read carries; an organization
+   * smaller than one page is answered by one member read and one person read.
    */
-  private static readonly MEMBER_PROBE_PAGE = 50;
+  private static readonly MEMBER_PROBE_PAGE = 500;
 
   /**
    * The engine write {@link writeRecoveringSummary} guards, as a NAMED callee.
@@ -4587,6 +4631,21 @@ export class SeedLoaderService implements ISeedLoaderService {
         references: ledger.withdrawnReferences,
       },
     );
+  }
+
+  /**
+   * [#33280] Whether an internal-id-shaped reference value is still judged by
+   * the membership rule: only on a load pinned to an organization (the probe
+   * is unscoped without one), never on a dry run (which reads no database),
+   * and only for the target that resolves through membership (`sys_user`,
+   * the `members` probe scope). Every other target keeps its id verbatim.
+   */
+  private async judgesInternalIdByMembership(
+    targetObject: string,
+    config: { dryRun?: boolean; organizationId?: string },
+  ): Promise<boolean> {
+    if (!config.organizationId || config.dryRun) return false;
+    return (await this.probeScopeOf(targetObject)).kind === 'members';
   }
 
   private looksLikeInternalId(value: string): boolean {

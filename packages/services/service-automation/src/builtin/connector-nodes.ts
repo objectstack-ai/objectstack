@@ -5,7 +5,7 @@ import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationEngine, ConnectorActionContext } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
 import { describeHold } from '../plugin-extension-api.js';
-import { findConnectorActionInputSchema, judgeConnectorInput, TEXT_FOR_SCALAR_HINT } from '../connector-input-schema.js';
+import { findConnectorActionInputSchema, judgeConnectorInput, TEXT_FOR_SCALAR_HINT, UNDECLARED_KEY_HINT } from '../connector-input-schema.js';
 import { resolveValueSlotMap } from './value-slot-map.js';
 
 /**
@@ -146,9 +146,23 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             // is `connector-input-schema.ts`'s, the one the pull door runs too
             // (#28040). A `runtime` failure, not a guard: the input can come
             // from run data, so a `fault` edge may handle it.
+            //
+            // [#33553] A key the action's schema does not declare is refused
+            // here too, instead of reaching the provider — the shape a
+            // connector or action switch leaves behind in a stored flow. Judged
+            // HERE, at run time, and not at registration: the boot flow pull
+            // registers every flow before a declarative connector materializes
+            // (and a later-starting plugin, a package's `kernel:ready`
+            // rehydrate or a stored entry at `kernel:bootstrapped` adds its
+            // connector after that), and an instance's schema is re-read from
+            // its upstream on every re-materialization. A registration-time
+            // verdict would be one the boot can still contradict (AGENTS.md
+            // "Startup registry reads"); this one reads the schema of the very
+            // instance the call is about to dispatch to.
             const verdict = judgeConnectorInput(
                 findConnectorActionInputSchema(engine, cfg.connectorId, cfg.actionId, packageId),
                 input,
+                { refuseUndeclaredKeys: true },
             );
             if (verdict) {
                 return {
@@ -159,7 +173,8 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
                         + `does not match the action's inputSchema — ${verdict.violations}`
                         + `. Nothing was sent. Fix connectorConfig.input so it satisfies the inputSchema `
                         + `GET /api/v1/automation/connectors lists for this action.`
-                        + (verdict.textForScalar ? TEXT_FOR_SCALAR_HINT : ''),
+                        + (verdict.textForScalar ? TEXT_FOR_SCALAR_HINT : '')
+                        + (verdict.undeclaredKey ? UNDECLARED_KEY_HINT : ''),
                 };
             }
 

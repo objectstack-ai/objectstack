@@ -29,7 +29,8 @@
  *
  * Not measured here: the cross-object `POST /batch` (this harness has no
  * transactional batch and answers `501`); a throw there leaves through the
- * same exit as `createMany`.
+ * same exit as `createMany`, and `rest-batch-endpoint.test.ts` pins its
+ * `details.candidates` over a transactional engine double.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
