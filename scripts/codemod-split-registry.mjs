@@ -157,10 +157,13 @@ const HOSTS_CLASS = 'FacetHost';
  * into names nobody reads.
  */
 const PATH_READER_PINS = Object.freeze({
-  // Empty since #30055: the six rows the #4918 query-options erasure guard
-  // held here (its per-file baseline names `registry.ts`, so a moved `as any`
-  // site would have red `pnpm lint`) retired once their sites were typed, and
-  // the fourth pass (`--members`) moved the six bodies.
+  // `pnpm check:adr-symbol-anchors` resolves each ADR's
+  // `packages/objectql/src/registry.ts#<symbol>` anchor against THIS file's
+  // declarations and string tokens; `docs/adr/**` is a governed surface a
+  // split PR does not edit, so the anchored declarations stay here.
+  mergeObjectDefinitions: 'ADR-0029 and ADR-0146 anchor `registry.ts#mergeObjectDefinitions` (check:adr-symbol-anchors)',
+  isShareableNamespace: 'ADR-0130 and ADR-0141 anchor `registry.ts#isShareableNamespace` (check:adr-symbol-anchors)',
+  TENANT_SCOPE_INDEX: "ADR-0117 anchors `registry.ts#organization_id`, which resolves as the `'organization_id'` token this declaration carries (check:adr-symbol-anchors)",
 });
 
 /**
