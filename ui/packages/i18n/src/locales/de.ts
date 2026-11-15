@@ -4086,6 +4086,7 @@ const de = {
       objectsAndFields: "Objekte und Felder",
       views: "Ansichten",
       suggestedField: "ergänzt",
+      suggestedFieldLegend: "Mit „{{mark}}“ markierte Felder hat die KI hinzugefügt; Sie haben sie nicht angefordert.",
       nameField: "Bezeichnung: {{field}}",
     },
     build: {

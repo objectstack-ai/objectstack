@@ -5010,6 +5010,7 @@ const en = {
       objectsAndFields: 'Objects and fields',
       views: 'Views',
       suggestedField: 'suggested',
+      suggestedFieldLegend: 'Fields marked “{{mark}}” were added by the AI; you didn’t ask for them.',
       nameField: 'Name: {{field}}',
     },
     build: {
