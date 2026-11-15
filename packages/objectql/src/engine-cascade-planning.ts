@@ -47,6 +47,7 @@ import type { ServiceObject } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isMissingTableError } from '@objectstack/metadata/errors';
+import { declaredHttpStatus } from '@objectstack/types';
 import { ORGANIZATION_OBJECT, resolveTenantFieldName } from './tenancy/system-write-organization.js';
 import { isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 import {
@@ -1425,21 +1426,31 @@ export class CascadePlanningFacet {
  * each, when:
  *   - the child's driver has no `deleteMany` (or is a floored external
  *     driver, which refuses a predicate write): the in-process path it has;
- *   - the batch's caller-scoped read misses a child it was asked for
+ *   - the child object is the organization object, which is deleted by id or
+ *     not at all (`organizationPredicateDeleteRefusal`): its by-id delete is
+ *     where the per-organization clean-up runs;
+ *   - the caller's READ door does not return every child of the chunk
+ *     ({@link readDoorReturnsChunk}): a by-id delete re-reads its row through
+ *     the read door (plugin-security step 2.7), so a child the caller cannot
+ *     read refuses there, where a nested predicate delete, scoped by the
+ *     write-class policies alone, would delete it;
+ *   - the batch's caller-scoped WRITE read misses a child it was asked for
  *     (`CascadeBatchNarrowed`, thrown before any hook or write): a by-id
- *     delete of that child refuses where a predicate one would skip it, and
- *     the refusal rolls the whole cascade back (ruling 6893104201 point 2).
- * So one cascade can show both shapes.
+ *     delete of that child refuses where a predicate one would skip it.
+ * In each case the by-id path gives today's answer, and a refusal rolls the
+ * whole cascade back (ruling 6893104201 point 2). So one cascade can show
+ * both shapes.
  */
-async function deleteCascadedChildren(host: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'delete' | 'getDriver'>, childName: string, dependents: ReadonlyArray<string | number>, context: ExecutionContext | undefined, cascadeSet: CascadeDeleteSet): Promise<void> {
+async function deleteCascadedChildren(host: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'delete' | 'find' | 'getDriver'>, childName: string, dependents: ReadonlyArray<string | number>, context: ExecutionContext | undefined, cascadeSet: CascadeDeleteSet): Promise<void> {
   const driver = host.getDriver(childName) as { deleteMany?: unknown };
-  const batchable = typeof driver?.deleteMany === 'function' && !isExternalDriverFloor(driver as any);
+  const batchable = typeof driver?.deleteMany === 'function' && !isExternalDriverFloor(driver as any) &&
+    childName !== ORGANIZATION_OBJECT;
   const batchSize = ObjectQL.REFERENCE_PROBE_BATCH;
   for (let i = 0; i < dependents.length; i += batchSize) {
     // [#22305] An earlier chunk's own cascade may have entered a member.
     const chunk = dependents.slice(i, i + batchSize).filter((depId) => !cascadeSetHas(cascadeSet.entered, childName, depId));
     if (chunk.length === 0) continue;
-    if (batchable) {
+    if (batchable && await readDoorReturnsChunk(host, childName, chunk, context)) {
       try {
         await host.cascadeIssuedDeletes.run(
           { object: childName, ids: new Set(chunk.map((depId) => String(depId))), claimed: false },
@@ -1464,4 +1475,34 @@ async function deleteCascadedChildren(host: Pick<CascadePlanningHost, 'cascadeIs
       );
     }
   }
+}
+
+/**
+ * [ruling 6893104201 point 2] Does the caller's READ door return every child
+ * of the chunk? Asked through the public `find()` under the walk's context,
+ * so select-class row-level security, the sharing read filter and every data
+ * middleware's read visibility compose onto it, as they compose onto the
+ * by-id child delete's own re-read of its row (plugin-security step 2.7). A
+ * cascade batch is a nested write, and the security plugin composes the read
+ * scope onto an addressed predicate write only, so without this question a
+ * child the caller cannot read, admitted by a delete-class policy, would be
+ * deleted where the by-id delete refuses it.
+ *
+ * `false` hands the chunk to the by-id path, which gives today's answer in
+ * every case: it refuses a hidden child, and deletes one no write-class row
+ * filter binds. A read the door REFUSES (a declared 4xx) is answered `false`
+ * for the same reason: the by-id path asks its own question and answers it.
+ * A store fault propagates as raised: an outage is not a hidden row.
+ */
+async function readDoorReturnsChunk(host: Pick<CascadePlanningHost, 'find'>, childName: string, chunk: ReadonlyArray<string | number>, context: ExecutionContext | undefined): Promise<boolean> {
+  let rows: unknown;
+  try {
+    rows = await host.find(childName, { where: { id: { $in: [...chunk] } }, fields: ['id'], context });
+  } catch (e) {
+    const status = declaredHttpStatus(e);
+    if (status === undefined || status >= 500) throw e;
+    return false;
+  }
+  const found = new Set((Array.isArray(rows) ? rows : []).map((row: any) => String(row?.id)));
+  return chunk.every((depId) => found.has(String(depId)));
 }

@@ -547,11 +547,15 @@ export class DeleteAndAggregateFacet {
           );
           predicateMatchedRows = doomed;
           // [ruling 6893104201 point (2)] The read ran through the AST the
-          // middleware chain composed, so it is the caller's scope. A child the
-          // walk asked for and the read did not return is one a by-id delete
-          // would REFUSE (403) where this predicate would skip it: before any
-          // hook and any write, hand the chunk back to the walk, which deletes
-          // it by id, so the refusal and the rollback are today's.
+          // middleware chain composed for this delete, so it is the caller's
+          // WRITE scope (the delete-class row filters). The READ scope is not
+          // on it: the security plugin composes that onto an addressed
+          // predicate write only, never a nested one, so the walk asked the
+          // read door for the chunk before issuing it (`readDoorReturnsChunk`).
+          // A child the walk asked for and this read did not return is one a
+          // by-id delete would REFUSE (403) where this predicate would skip it:
+          // before any hook and any write, hand the chunk back to the walk,
+          // which deletes it by id, so the refusal and the rollback are today's.
           if (cascadeBatch) {
             const found = new Set(doomed.map((row) => String(row?.id)));
             if (!(cascadeBatchIdsOf(options?.where) ?? []).every((v) => found.has(v))) {

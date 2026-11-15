@@ -21,7 +21,11 @@
  *     to today's by-id deletes: today's shape (`'record'`, no `multi`), today's
  *     refusal envelope and rollback, and no batch hook ran first. One cascade
  *     can show both shapes;
- *   - a driver with no `deleteMany` keeps the by-id path.
+ *   - so does a chunk the caller's READ door does not return whole: the read
+ *     scope a by-id child delete enforces through its re-read (plugin-security
+ *     step 2.7) is not on a nested predicate delete's write scope;
+ *   - a driver with no `deleteMany` keeps the by-id path, and so does a cascade
+ *     into the organization object, which is deleted by id or not at all.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -351,5 +355,97 @@ describe('[F1] a chunk the caller\'s scope narrows falls back to today\'s by-id 
     await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
     expect(seen.map((s) => s.mode)).toEqual(['record', 'record', 'record']);
     expect(driver.writes).toEqual(['delete line l1', 'delete line l2', 'delete line l3', 'delete acct a1']);
+  });
+});
+
+/**
+ * A scope that hides a row from the caller's READ door and refuses the by-id
+ * delete of it, the shape plugin-security's step 2.7 gives a child a
+ * select-class policy hides (its re-read through the read door comes back
+ * empty). The write scope of a nested predicate delete does not carry the read
+ * scope, so the walk asks the read door before it batches.
+ */
+function hideFromReadsAndRefuse(engine: ObjectQL, object: string, hidden: string, refuseById: boolean) {
+  const byIdAttempts: unknown[] = [];
+  engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+    if (opCtx.object === object && !opCtx.context?.isSystem) {
+      if (opCtx.operation === 'find' && opCtx.ast) {
+        opCtx.ast = { ...opCtx.ast, where: { $and: [opCtx.ast.where ?? {}, { id: { $nin: [hidden] } }] } };
+      }
+      if (opCtx.operation === 'delete' && opCtx.options?.where?.id === hidden) {
+        byIdAttempts.push(hidden);
+        if (refuseById) {
+          throw Object.assign(new Error(`no access to ${object}/${hidden}`), { code: 'PERMISSION_DENIED', status: 403 });
+        }
+      }
+    }
+    await next();
+  });
+  return byIdAttempts;
+}
+
+const MEMBER = { userId: 'u1' };
+
+describe('[F1] a chunk the caller\'s READ door narrows falls back to today\'s by-id deletes', () => {
+  it('a child the read door hides and the by-id delete refuses: today\'s 403, nothing deleted, no batch hook ran', async () => {
+    const { engine, driver } = await makeEngine();
+    const seen: Seen[] = [];
+    listen(engine, seen, 'line');
+    const byIdAttempts = hideFromReadsAndRefuse(engine, 'line', 'l2', true);
+
+    const err: any = await engine.delete('acct', { where: { id: 'a1' }, context: { ...MEMBER } }).then(() => null, (e: unknown) => e);
+
+    expect(err?.code).toBe('PERMISSION_DENIED');
+    expect(err?.status).toBe(403);
+    expect(byIdAttempts).toEqual(['l2']);
+    expect(seen.map((s) => `${s.event} ${String(s.id)} ${String(s.mode)}`)).toEqual([
+      'beforeDelete l1 record', 'afterDelete l1 record',
+    ]);
+    expect(driver.writes.some((w: string) => w.startsWith('deleteMany'))).toBe(false);
+    expect(ids(driver.rowsOf('line'))).toEqual(['l1', 'l2', 'l3']);
+    expect(ids(driver.rowsOf('acct'))).toEqual(['a1']);
+  });
+
+  it('a child the read door hides and the by-id delete allows: deleted by id, today\'s shape', async () => {
+    const { engine, driver } = await makeEngine();
+    const seen: Seen[] = [];
+    listen(engine, seen, 'line', ['beforeDelete']);
+    hideFromReadsAndRefuse(engine, 'line', 'l2', false);
+
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...MEMBER } });
+
+    expect(seen.map((s) => `${String(s.id)} ${String(s.mode)}`)).toEqual(['l1 record', 'l2 record', 'l3 record']);
+    expect(driver.writes).toEqual(['delete line l1', 'delete line l2', 'delete line l3', 'delete acct a1']);
+  });
+
+  it('every child the read door returns: batched (control)', async () => {
+    const { engine, driver } = await makeEngine();
+    hideFromReadsAndRefuse(engine, 'line', 'l_nowhere', true);
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...MEMBER } });
+    expect(driver.writes).toEqual(['deleteMany line l1,l2,l3', 'delete acct a1']);
+  });
+});
+
+describe('[F1] a cascade into the organization object keeps today\'s by-id deletes', () => {
+  it('an organization cascaded from its parent is deleted by id, not refused as a predicate delete', async () => {
+    const { engine, driver } = await makeEngine();
+    engine.registry.registerObject({
+      name: 'sys_organization', label: 'Organization',
+      fields: {
+        id: { ...text('id'), primaryKey: true }, name: text('name'),
+        holder: { name: 'holder', type: 'lookup', reference: 'acct', deleteBehavior: 'cascade' },
+      },
+    } as any, '__test__');
+    await driver.create('sys_organization', { id: 'o1', name: 'O1', holder: 'a1' });
+    driver.writes.length = 0;
+    const seen: Seen[] = [];
+    listen(engine, seen, 'sys_organization', ['beforeDelete']);
+
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
+
+    expect(seen.map((s) => `${String(s.id)} ${String(s.mode)} marker=${String(s.marker)}`)).toEqual(['o1 record marker=true']);
+    expect(driver.writes).toContain('delete sys_organization o1');
+    expect(driver.writes.some((w: string) => w.startsWith('deleteMany sys_organization'))).toBe(false);
+    expect(driver.rowsOf('sys_organization')).toEqual([]);
   });
 });
