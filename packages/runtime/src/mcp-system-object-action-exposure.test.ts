@@ -29,6 +29,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a clocked case: the dispatcher's reach dynamic-imports it (check:test-source-alias).
+import '@objectstack/metadata';
 
 import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
 import { STORED_METADATA_BODY_OBJECTS } from '@objectstack/spec/kernel';
