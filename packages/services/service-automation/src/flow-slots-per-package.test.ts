@@ -1179,6 +1179,9 @@ describe('[#33748] a trigger binding does not dispatch a slot whose package is d
         ship(P2, triggered('t', 'beta'));
         // The resolver answers `not-found` for either package now; that is not a disable.
         registry.unregisterItem('flow', 't');
+        registry.unregisterItem('flow', 't');
+        expect(flowNameResolver(ctx)('t', P1)).toEqual({ status: 'not-found' });
+        expect(flowNameResolver(ctx)('t', P2)).toEqual({ status: 'not-found' });
         expect(await fireAll()).toEqual(['alpha', 'beta']);
         expect(skipSaid()).toEqual([]);
     });
