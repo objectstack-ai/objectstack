@@ -30,8 +30,8 @@
  *     failure is a `runtime` one: a `fault` edge receives it, with
  *     `$error.code === 'VALIDATION_ERROR'`.
  *  6. **A key the action does not declare is refused, nothing sent** (#33553).
- *     A key outside an object schema's `properties` / `required` — at the top
- *     of `connectorConfig.input` or inside a section — fails the step naming
+ *     A key outside an object schema's `properties` / `required` — at every
+ *     object level of `connectorConfig.input`, array items included — fails the step naming
  *     the node, the key and the keys declared there, the EVALUATED input
  *     included. A schema that admits more keys (`additionalProperties` true
  *     or a schema, `patternProperties`, a composition keyword) or lists no
@@ -369,8 +369,16 @@ describe('6. a key the action does not declare is refused before dispatch (#3355
     expect(sent).toEqual([{ action: 'post', input: { channel: 'c1', text: 'hi' } }]);
   });
 
-  it('the judgment is opt-in: a door that does not ask for it (the connector pull door) is unchanged', () => {
+  // The pull door itself is pinned in connector-pull.test.ts ([#33553] an undeclared key is not refused there).
+  it('the judgment is opt-in on the helper: without the option an undeclared key is not judged', () => {
     expect(judgeConnectorInput(SLACK_POST, { channel: 'c1', extra: 'kept' })).toBeUndefined();
     expect(judgeConnectorInput(SLACK_POST, { channel: 'c1', extra: 'kept' }, { refuseUndeclaredKeys: true })?.undeclaredKey).toBe(true);
+  });
+
+  it('a draft 2019-09 `$recursiveRef` or a 2020-12 `$dynamicRef` reads the key set as open', () => {
+    for (const keyword of ['$recursiveRef', '$dynamicRef']) {
+      const schema = { ...SLACK_POST, [keyword]: '#' };
+      expect(judgeConnectorInput(schema, { channel: 'c1', extra: 'kept' }, { refuseUndeclaredKeys: true }), keyword).toBeUndefined();
+    }
   });
 });

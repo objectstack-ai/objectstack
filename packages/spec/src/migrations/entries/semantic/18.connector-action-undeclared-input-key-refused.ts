@@ -9,11 +9,13 @@ import type { SemanticMigration } from '../../types.js';
 export const entry: SemanticMigration = {
   id: 'connector-action-undeclared-input-key-refused',
   surface:
-    '`flow.nodes[].connectorConfig.input` of a `connector_action` node, when it holds a key (at the top '
-    + 'or inside a section) that the action\'s `inputSchema` does not declare at that level.',
+    '`flow.nodes[].connectorConfig.input` of a `connector_action` node, when it holds a key (at any object '
+    + 'level, array items included) that the action\'s `inputSchema` does not declare at that level.',
   replacement:
     'Drop the key from `connectorConfig.input`, or pick the action that declares it. The declared keys '
-    + 'are the names in the schema\'s `properties` plus those in `required`, as `GET /api/v1/automation/connectors` lists them.',
+    + 'are the names in the schema\'s `properties` plus those in `required`, as `GET /api/v1/automation/connectors` lists them. '
+    + 'For a parameter the provider takes that the action does not list (Slack `chat.postMessage` / `chat.update` list four '
+    + 'each), use the connector\'s pass-through action: Slack `call` with `method` and `params`.',
   reason:
     'Every shipped connector input schema leaves `additionalProperties` unset, so under JSON Schema\'s '
     + 'open default a key no action reads passed the input check and reached the provider. A connector or '

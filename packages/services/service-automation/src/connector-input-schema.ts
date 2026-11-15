@@ -136,7 +136,7 @@ const MAX_LISTED_DECLARED_KEYS = 8;
  * pulls in another schema's keys. A schema carrying one is read as OPEN.
  */
 const KEY_ADMITTING_KEYWORDS = [
-    'patternProperties', '$ref', '$dynamicRef', 'allOf', 'anyOf', 'oneOf',
+    'patternProperties', '$ref', '$dynamicRef', '$recursiveRef', 'allOf', 'anyOf', 'oneOf',
     'if', 'then', 'else', 'dependentSchemas', 'dependencies',
 ];
 
