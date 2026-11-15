@@ -8206,7 +8206,9 @@ export class SchemaRegistry {
     return {
       ...owner.definition,
       ...(extended ? { validations: (this.packagedRules(contributors) ?? []) as ServiceObject['validations'] } : {}),
-      ...(addedFields !== undefined ? { fields: { ...owner.definition.fields, ...addedFields } } : {}),
+      ...(addedFields !== undefined
+        ? { fields: { ...owner.definition.fields, ...addedFields } as ServiceObject['fields'] }
+        : {}),
     };
   }
 
