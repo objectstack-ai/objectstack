@@ -46,7 +46,7 @@
 - 留道:已分析、修法清楚的卡碰 `ui/**`、`packages/spec/**` 仍留本车道开发,送本席复核线程,档
   照 `contract-review.md`;他道席在线只通知(「如果车道有人在线，只需要通知他就可以。」)。
 - 仅两种交出:他道在线席已认领该段代码;规则要求(cloud 路由、`security-findings.md`、ADR)。
-- 送审:欠不欠、敲谁、档与 head 后移只照 `contract-review.md`。
+- 送审:欠不欠、档、谁跑只照 `contract-review.md`;四面皆不碰 ⇒ ⛔ 不送复核、不起 agent。
 - 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 区照 `landing-operations.md` 自己落地。
 - PASS 且全绿的非受管 PR 10 分钟内落地;挂前先查 PR 上已有落地评论,有即 ⛔ 不再挂。
 - 受管面与超 3,000 行 PR 区 ⛔ 不落,交席位;席位照 SKILL.md〈路径分叉〉①–④ 一笔交棒。
@@ -54,8 +54,8 @@
 - 插队照 `landing-operations.md` 三因;⛔ 本文不改队列配置。
 - 性能卡与 PR 的提速数字只引已复审的 bench PR 读数;⛔ 不引估算或未复审的本地测量。
 - 席只裁路由(拆并延、归区);改可见行为或解读 ADR 照 SKILL.md〈升级与决策〉呈维护者。
-- 呈前每组选项先过独立 `CONTRACT_REVIEW_TIER` 评审,带 `Prior rulings read:` 行;开发前成
-  批呈(批法照 `decision-analysis.md`),⛔ 不在施工中途;对维护者「应该用中文和我沟通」。
+- 仅呈维护者选项组过独立 `CONTRACT_REVIEW_TIER` 评审,多卡一批;席自裁 ⛔ 不起评审,自读码。
+  均带 `Prior rulings read:` 行,开工前呈 ⛔ 不在施工中途;对维护者「应该用中文和我沟通」。
 - 席信箱只收:待裁、待落地受管 PR、跨区冲突、阻塞、交接完成;安全照 `security-findings.md`。
 - 线程到约 150k 上下文即在干净点轮换,⛔ 不在复审中途;交接照下节落 GitHub。
 - 每读一次用量,在座位贴评论记一行:用量 %、关卡数、合并 PR 数。
