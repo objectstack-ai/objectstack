@@ -502,8 +502,9 @@
  *     OR the name sends the PR to H; security teaching the name cannot see is the
  *     contract reviewer's to label `security`;
  *   - the head lives in the base repository (`forkVerdict`);
- *   - every catalog path is a MODIFIED regular file — an added, deleted or renamed
- *     skill or eval, a symlink or a status not read is H (`catalogFiles`).
+ *   - every catalog path is a MODIFIED regular file with the same mode at both ends
+ *     — an added, deleted, renamed or copied skill or eval, a symlink, a mode change
+ *     or a status not read is H (`catalogFiles`).
  *
  * Then the landing is Tier S's: a `## Contract review` record for the current
  * head at `CONTRACT_REVIEW_TIER` (the record recognisers' `rules` face — no
@@ -1152,7 +1153,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
-  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 70,
+  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 74,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2343,10 +2344,12 @@ export function lowRiskChangesetReasons(file) {
 
 /**
  * The arm's verdict over one matched slice, from a READING of the pull request:
- * `{ measured: true, paths, body, labels, timeline, fork, changesets }` — every
- * changed path (ungoverned ones included), the PR body, its label names, its
- * timeline events, `forkVerdict` of the pull object and the changesets read at
- * the head (`{ measured, reason, files: [{ path, text }] }`). Pure.
+ * `{ measured: true, paths, body, labels, timeline, fork, changesets, catalogFiles }`
+ * — every changed path (ungoverned ones included), the PR body, its label names,
+ * its timeline events, `forkVerdict` of the pull object, the changesets read at
+ * the head (`{ measured, reason, files: [{ path, text }] }`) and the status and
+ * modes of each catalog file (`{ measured, reason, files: [{ path, status,
+ * oldMode, mode }] }`, one row per commit that touched it). Pure.
  *
  * Tier S only when ALL of these hold, each a reason when it does not:
  *   - every governed row hit is a low-risk row (a `.claude/**`, workflow or
@@ -2357,6 +2360,11 @@ export function lowRiskChangesetReasons(file) {
  *   - the body carries one bare `Clause-②: no` and one bare `Metadata-protocol: none`
  *     (`readBareDeclaration` over the fleet's readers);
  *   - at least one changeset, every one read at the head and clean (`lowRiskChangesetReasons`);
+ *   - no path below a low-risk row names security, auth or permission
+ *     (`LOW_RISK_SECURITY_NAME`, any segment, any case; ruling B on card #33501);
+ *   - every catalog path's every status row reads `modified`, with a regular mode
+ *     (`LOW_RISK_REGULAR_MODES`) at both ends and the same mode at both ends — an
+ *     add, delete, rename, copy, symlink, mode change or unread row is H (ruling A);
  *   - the labels were read and none is `security`, and the timeline was read and
  *     never removed a `security` label;
  *   - the head lives in the base repository (no fork).
@@ -2393,7 +2401,9 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
   if (securityNamed.length > 0) reasons.push(`a catalog path that names security, auth or permission: ${more(securityNamed, 4)}`);
   // ⭐ Only a MODIFIED regular catalog file is wording: adding, deleting or renaming a skill or an eval
   // changes what the catalog teaches, not how it words it. Status and mode come from `catalogFiles`
-  // (`{ measured, reason, files: [{ path, status, mode }] }`), one row per commit that touched the path.
+  // (`{ measured, reason, files: [{ path, status, oldMode, mode }] }`), one row per commit that touched
+  // the path. Both ends are read: a symlink turned regular file can be called `modified`, so a regular
+  // mode at the head alone proves nothing, and any change of mode is H.
   const armPaths = paths.filter(underArm);
   if (armPaths.length > 0) {
     const catalog = reading.catalogFiles;
@@ -2403,17 +2413,20 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
       const unread = [];
       const notModified = new Set();
       const notRegular = new Set();
+      const modeChanged = new Set();
       for (const p of armPaths) {
         const rows = catalog.files.filter((f) => f?.path === p);
         if (rows.length === 0) unread.push(p);
         for (const r of rows) {
           if (r?.status !== 'modified') notModified.add(`${p} (${r?.status || 'no status'})`);
-          else if (!LOW_RISK_REGULAR_MODES.includes(String(r?.mode ?? ''))) notRegular.add(`${p} (${r?.mode ?? 'mode not read'})`);
+          else if (![r?.oldMode, r?.mode].every((m) => LOW_RISK_REGULAR_MODES.includes(String(m ?? '')))) notRegular.add(`${p} (${r?.oldMode ?? 'base mode not read'} to ${r?.mode ?? 'head mode not read'})`);
+          else if (r.oldMode !== r.mode) modeChanged.add(`${p} (${r.oldMode} to ${r.mode})`);
         }
       }
       if (unread.length > 0) reasons.push(`no status was read for ${more(unread, 4)}`);
       if (notModified.size > 0) reasons.push(`a catalog file added, deleted or renamed rather than modified: ${more([...notModified], 4)}`);
-      if (notRegular.size > 0) reasons.push(`a catalog path that is not a regular file: ${more([...notRegular], 4)}`);
+      if (notRegular.size > 0) reasons.push(`a catalog path that is not a regular file at both ends: ${more([...notRegular], 4)}`);
+      if (modeChanged.size > 0) reasons.push(`a catalog file whose mode changed: ${more([...modeChanged], 4)}`);
     }
   }
   const listed = new Set(paths);
@@ -4258,37 +4271,47 @@ export function pullLowRiskReading(head, paths, { timeline = null, changesets = 
 
 /**
  * Each changed file's STATUS off the API's file walk (`added`, `removed`,
- * `modified`, `renamed`, ...), a rename's old name carried as `renamed` too.
- * Pure; the mode is not on the API row, so `pullCatalogReading` reads it.
+ * `modified`, `renamed`, ...). A rename's old name is carried as `renamed`;
+ * any other row's `previous_filename` (a copy's source) as `<status> source`,
+ * never `modified`, so it reads H. Pure; the modes are not on the API row, so
+ * `pullCatalogReading` reads them.
  */
 export function pullCatalogStatuses(files) {
   const out = [];
   for (const file of Array.isArray(files) ? files : []) {
     const status = typeof file?.status === 'string' ? file.status : '';
     if (typeof file?.filename === 'string' && file.filename !== '') out.push({ path: file.filename, status });
-    if (typeof file?.previous_filename === 'string' && file.previous_filename !== '') out.push({ path: file.previous_filename, status: 'renamed' });
+    if (typeof file?.previous_filename === 'string' && file.previous_filename !== '') out.push({ path: file.previous_filename, status: status === 'renamed' ? 'renamed' : `${status || 'unread'} source` });
   }
   return out;
 }
 
 /**
  * `--pr`'s status-and-mode reading for the arm: the API's status per path, and
- * the mode of each modified catalog path at the PR's head from THIS checkout
- * (`git ls-tree`). No statuses, or a head not here, is NOT MEASURED (Tier H).
+ * the mode of each modified catalog path at the merge base (`oldMode`) and at
+ * the PR's head (`mode`) from THIS checkout (`git ls-tree`) — the API's status
+ * alone cannot tell a symlink replaced by a regular file from an edit. No
+ * statuses, a head or base not here, or no merge base is NOT MEASURED (Tier H).
  */
 export function pullCatalogReading({ derivation, statuses, paths, sameCheckout, run }) {
   const unmeasured = (reason) => ({ measured: false, reason, files: [] });
   if (!Array.isArray(statuses)) return unmeasured('the file walk carried no status per file');
   const headSha = derivation?.headSha;
+  const baseSha = derivation?.baseSha;
   if (!sameCheckout) return unmeasured('the PR is not in the repository this checkout holds, so its file modes cannot be read here');
-  if (!isObjectId(headSha)) return unmeasured('the PR object named no head commit');
-  if (!run(['cat-file', '-e', `${headSha}^{commit}`]).ok) return unmeasured(`${headSha.slice(0, 10)} is not in this checkout — \`git fetch origin pull/${derivation.pull}/head\``);
+  if (!isObjectId(headSha) || !isObjectId(baseSha)) return unmeasured('the PR object named no head or base commit');
+  const missing = [headSha, baseSha].filter((sha) => !run(['cat-file', '-e', `${sha}^{commit}`]).ok);
+  if (missing.length > 0) return unmeasured(`${missing.map((sha) => sha.slice(0, 10)).join(' and ')} not in this checkout — \`git fetch origin pull/${derivation.pull}/head main\``);
+  const mergeBase = run(['merge-base', baseSha, headSha]);
+  if (!mergeBase.ok || !isObjectId(mergeBase.out)) return unmeasured('no merge base of the PR head and its base could be computed here (a shallow clone?)');
+  const modeAt = (sha, path) => {
+    const tree = run(['ls-tree', sha, '--', path]);
+    return tree.ok ? (/^(\d{6}) /.exec(tree.out)?.[1] ?? null) : null;
+  };
   const wanted = new Set((Array.isArray(paths) ? paths : []).filter((p) => GOVERNED_SURFACES.some((s) => s.lowRisk && p.startsWith(s.prefix))));
   const files = statuses.filter((f) => wanted.has(f.path)).map((f) => {
-    if (f.status !== 'modified') return { ...f, mode: null };
-    const tree = run(['ls-tree', headSha, '--', f.path]);
-    const mode = tree.ok ? (/^(\d{6}) /.exec(tree.out)?.[1] ?? null) : null;
-    return { ...f, mode };
+    if (f.status !== 'modified') return { ...f, oldMode: null, mode: null };
+    return { ...f, oldMode: modeAt(mergeBase.out, f.path), mode: modeAt(headSha, f.path) };
   });
   return { measured: true, reason: null, files };
 }
@@ -5822,7 +5845,7 @@ async function selfTest() {
     const CS = '.changeset/33501-skills-wording.md';
     const CS_TEXT = "---\n'@objectstack/skills': patch\n---\n\nskills: wording\n\nClause-②: no\nMetadata-protocol: none\n";
     // Every catalog path a MODIFIED regular file — the shape a wording PR has.
-    const catFiles = (paths, status = 'modified', mode = '100644') => paths.filter((p) => /^(?:ui\/)?skills\//.test(p)).map((path) => ({ path, status, mode }));
+    const catFiles = (paths, status = 'modified', mode = '100644') => paths.filter((p) => /^(?:ui\/)?skills\//.test(p)).map((path) => ({ path, status, oldMode: mode, mode }));
     const csFiles = (paths, text = CS_TEXT) => paths.filter((p) => LOW_RISK_CHANGESET_PATH.test(p)).map((path) => ({ path, text }));
     const read = (paths, over = {}) => ({
       measured: true, reason: null, paths, body: 'Fixes #1\n\nClause-②: no\nMetadata-protocol: none\n', labels: [],
@@ -5959,22 +5982,43 @@ async function selfTest() {
     assert('⛔ STATUS-deleting-a-skill-is-H-on-either-spelling', ['removed', 'deleted'].every((st) => tier([SK, CS], cat([SK, CS], [{ path: SK, status: st, mode: null }])) === GOVERNED_TIER_H));
     assert('⛔ STATUS-a-rename-inside-the-catalog-is-H-both-sides', tier(['skills/a/x.md', 'skills/a/y.md', CS], cat(['skills/a/x.md', 'skills/a/y.md', CS], [{ path: 'skills/a/y.md', status: 'renamed', mode: '100644' }, { path: 'skills/a/x.md', status: 'renamed', mode: null }])) === GOVERNED_TIER_H);
     assert('⛔ STATUS-an-eval-added-in-one-commit-and-modified-in-the-next-is-H', tier(['skills/a/evals/e.json', CS], cat(['skills/a/evals/e.json', CS], [{ path: 'skills/a/evals/e.json', status: 'added', mode: '100644' }, { path: 'skills/a/evals/e.json', status: 'modified', mode: '100644' }])) === GOVERNED_TIER_H);
-    assert('⛔ STATUS-a-symlink-or-a-mode-not-read-is-H-an-executable-regular-file-is-not', tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', mode: '120000' }])) === GOVERNED_TIER_H && /not a regular file: skills\/objectstack-data\/SKILL\.md \(120000\)/.test(reasons([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', mode: '120000' }]))) && tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', mode: null }])) === GOVERNED_TIER_H && tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', mode: '100755' }])) === GOVERNED_TIER_S);
+    assert('⛔ STATUS-a-symlink-or-a-mode-not-read-is-H-an-executable-regular-file-is-not', tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', oldMode: '120000', mode: '120000' }])) === GOVERNED_TIER_H && /not a regular file at both ends: skills\/objectstack-data\/SKILL\.md \(120000 to 120000\)/.test(reasons([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', oldMode: '120000', mode: '120000' }]))) && tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', oldMode: '100644', mode: null }])) === GOVERNED_TIER_H && tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', oldMode: '100755', mode: '100755' }])) === GOVERNED_TIER_S);
+    // ⛔ N10 (record 6888217778): the API can call a symlink replaced by a regular file `modified`, so the
+    // BASE mode is read too, and any change of mode is H — a regular mode at the head alone proves nothing.
+    assert('⛔ MODE-a-symlink-turned-regular-file-called-modified-is-H-on-its-base-mode', tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', oldMode: '120000', mode: '100644' }])) === GOVERNED_TIER_H && /not a regular file at both ends: skills\/objectstack-data\/SKILL\.md \(120000 to 100644\)/.test(reasons([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', oldMode: '120000', mode: '100644' }]))));
+    assert('⛔ MODE-a-regular-file-made-executable-or-back-is-H-any-mode-change-is', ['100644', '100755'].every((from) => { const to = from === '100644' ? '100755' : '100644'; const c = cat([SK, CS], [{ path: SK, status: 'modified', oldMode: from, mode: to }]); return tier([SK, CS], c) === GOVERNED_TIER_H && new RegExp(`mode changed: skills/objectstack-data/SKILL\\.md \\(${from} to ${to}\\)`).test(reasons([SK, CS], c)); }));
+    assert('⛔ MODE-a-base-mode-not-read-is-H-the-head-mode-alone-never-reads-S', tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', mode: '100644' }])) === GOVERNED_TIER_H && /\(base mode not read to 100644\)/.test(reasons([SK, CS], cat([SK, CS], [{ path: SK, status: 'modified', mode: '100644' }]))));
     assert('⛔ STATUS-a-catalog-path-with-no-status-row-or-no-status-reading-is-H', tier([SK, CS], cat([SK, CS], [])) === GOVERNED_TIER_H && /no status was read for/.test(reasons([SK, CS], cat([SK, CS], []))) && tier([SK, CS], read([SK, CS], { catalogFiles: { measured: false, reason: 'not here', files: [] } })) === GOVERNED_TIER_H && tier([SK, CS], read([SK, CS], { catalogFiles: undefined })) === GOVERNED_TIER_H && tier([SK, CS], cat([SK, CS], [{ path: SK, status: '', mode: '100644' }])) === GOVERNED_TIER_H);
     assert('STATUS-a-changeset-or-docs-rider-ADDED-beside-a-modified-skill-stays-S-the-status-test-reads-catalog-paths-only', tier([SK, CS, 'docs/agents/new.md'], read([SK, CS, 'docs/agents/new.md'])) === GOVERNED_TIER_S);
     assert('pullCatalogStatuses-reads-each-status-and-a-renames-old-name', (() => {
       const st = pullCatalogStatuses([{ filename: 'a.md', status: 'modified' }, { filename: 'b.md', status: 'renamed', previous_filename: 'c.md' }, { filename: 'd.md' }]);
       return JSON.stringify(st) === JSON.stringify([{ path: 'a.md', status: 'modified' }, { path: 'b.md', status: 'renamed' }, { path: 'c.md', status: 'renamed' }, { path: 'd.md', status: '' }]);
     })());
-    assert('pullCatalogReading-reads-the-mode-of-each-modified-catalog-file-at-the-head-or-is-NOT-MEASURED', (() => {
+    // N10: a copy's source is not renamed — it is carried as `copied source`, never `modified`, so still H.
+    assert('⛔ pullCatalogStatuses-carries-a-copys-source-as-copied-source-never-renamed-or-modified-and-it-reads-H', (() => {
+      const st = pullCatalogStatuses([{ filename: 'skills/a/new.md', status: 'copied', previous_filename: SK }, { filename: 'e.md', status: 'modified', previous_filename: 'f.md' }]);
+      return JSON.stringify(st) === JSON.stringify([{ path: 'skills/a/new.md', status: 'copied' }, { path: SK, status: 'copied source' }, { path: 'e.md', status: 'modified' }, { path: 'f.md', status: 'modified source' }]) &&
+        tier([SK, CS], cat([SK, CS], [{ path: SK, status: 'copied source', oldMode: '100644', mode: '100644' }])) === GOVERNED_TIER_H;
+    })());
+    assert('pullCatalogReading-reads-the-mode-of-each-modified-catalog-file-at-the-merge-base-and-the-head-or-is-NOT-MEASURED', (() => {
       const Hd = 'a'.repeat(40);
-      const run = (argv) => (argv[0] === 'cat-file' ? { ok: true, out: '' } : argv[0] === 'ls-tree' ? { ok: true, out: `${argv[3] === SK ? '120000' : '100644'} blob ${'f'.repeat(40)}\t${argv[3]}` } : { ok: false, out: '' });
+      const Bs = 'b'.repeat(40);
+      const Mb = 'c'.repeat(40);
+      // SK was a symlink at the merge base and is a regular file at the head: the API calls it `modified`.
+      const modeOf = (sha, p) => (p === SK ? (sha === Mb ? '120000' : '100644') : '100644');
+      const run = (argv) => (argv[0] === 'cat-file' ? { ok: true, out: '' } : argv[0] === 'merge-base' ? { ok: true, out: Mb } : argv[0] === 'ls-tree' ? { ok: true, out: `${modeOf(argv[1], argv[3])} blob ${'f'.repeat(40)}\t${argv[3]}` } : { ok: false, out: '' });
       const statuses = [{ path: SK, status: 'modified' }, { path: UISK, status: 'modified' }, { path: 'skills/a/new.md', status: 'added' }, { path: CS, status: 'added' }];
-      const r = pullCatalogReading({ derivation: { headSha: Hd, pull: 2 }, statuses, paths: [SK, UISK, 'skills/a/new.md', CS], sameCheckout: true, run });
-      return r.measured === true && r.files.length === 3 && r.files[0].mode === '120000' && r.files[1].mode === '100644' && r.files[2].mode === null &&
-        pullCatalogReading({ derivation: { headSha: Hd, pull: 2 }, statuses, paths: [SK], sameCheckout: false, run }).measured === false &&
-        pullCatalogReading({ derivation: { headSha: Hd, pull: 2 }, statuses: null, paths: [SK], sameCheckout: true, run }).measured === false &&
-        pullCatalogReading({ derivation: { headSha: Hd, pull: 2 }, statuses, paths: [SK], sameCheckout: true, run: () => ({ ok: false, out: '' }) }).measured === false;
+      const derivation = { headSha: Hd, baseSha: Bs, pull: 2 };
+      const r = pullCatalogReading({ derivation, statuses, paths: [SK, UISK, 'skills/a/new.md', CS], sameCheckout: true, run });
+      const noBase = pullCatalogReading({ derivation, statuses, paths: [SK], sameCheckout: true, run: (argv) => (argv[0] === 'cat-file' && argv[2] === `${Bs}^{commit}` ? { ok: false, out: '' } : run(argv)) });
+      return r.measured === true && r.files.length === 3 && r.files[0].oldMode === '120000' && r.files[0].mode === '100644' && r.files[1].oldMode === '100644' && r.files[1].mode === '100644' && r.files[2].mode === null && r.files[2].oldMode === null &&
+        tier([SK, CS], read([SK, CS], { catalogFiles: pullCatalogReading({ derivation, statuses, paths: [SK, CS], sameCheckout: true, run }) })) === GOVERNED_TIER_H &&
+        noBase.measured === false && /bbbbbbbbbb not in this checkout/.test(noBase.reason) &&
+        pullCatalogReading({ derivation: { headSha: Hd, pull: 2 }, statuses, paths: [SK], sameCheckout: true, run }).measured === false &&
+        pullCatalogReading({ derivation, statuses, paths: [SK], sameCheckout: true, run: (argv) => (argv[0] === 'merge-base' ? { ok: false, out: '' } : run(argv)) }).measured === false &&
+        pullCatalogReading({ derivation, statuses, paths: [SK], sameCheckout: false, run }).measured === false &&
+        pullCatalogReading({ derivation, statuses: null, paths: [SK], sameCheckout: true, run }).measured === false &&
+        pullCatalogReading({ derivation, statuses, paths: [SK], sameCheckout: true, run: () => ({ ok: false, out: '' }) }).measured === false;
     })());
     assert('LOW_RISK_ARM_FILE_PATTERNS-are-frozen-and-two', Object.isFrozen(LOW_RISK_ARM_FILE_PATTERNS) && LOW_RISK_ARM_FILE_PATTERNS.length === 2);
     assert('pullChangesetReading-reads-each-changeset-at-the-head-or-is-NOT-MEASURED', (() => {

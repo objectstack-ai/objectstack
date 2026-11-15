@@ -672,7 +672,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
   '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
   '⭐ the workflows split at the queue (ruling record 6722205630)': 30,
-  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 52,
+  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 54,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1924,11 +1924,17 @@ export function renderGuardVerdict(verdict) {
  * Re-read one governed entry's tier with the low-risk skills arm's reading
  * (#33501): `paths` = every path of the PR's commits (`allPaths`); the body,
  * labels and fork predicate off the pull object the queue leg read; the timeline
- * the enqueue leg read (`timeline`: `{ measured, reason, events }`); and each
- * changeset at the commit that touched it, read with `runGit`. An entry with no
- * catalog row is left untouched; `pull` null (its read failed) is an UNMEASURED
- * reading, so the entry stays Tier H with the reason printed, and so is a
- * missing timeline, fork reading or git reader.
+ * the enqueue leg read (`timeline`: `{ measured, reason, events }`); each
+ * changeset at the commit that touched it, read with `runGit`; and the status
+ * and both modes of every path of every governed commit (`catalogFilesOf`).
+ * `lowRiskArmVerdict` then holds all of its conditions: catalog rows only, an
+ * allowlisted path list, the bare declarations in the body and in clean
+ * changesets, no `security` label now or removed, no catalog path named for
+ * security, auth or permission, every catalog file a modified regular file with
+ * its mode unchanged, and no fork. An entry with no catalog row is left
+ * untouched; `pull` null (its read failed) is an UNMEASURED reading, so the
+ * entry stays Tier H with the reason printed, and so is a missing timeline,
+ * fork reading, status reading or git reader.
  * ⛔ The tier comes from the register's own `governedTierFor` and
  * `applyLowRiskArm` — no second predicate here. Mutates `entry` (its `surfaces`
  * and `tier`); returns it.
@@ -1972,10 +1978,12 @@ export function readLowRiskTier(entry, repo, pull, { timeline = null, runGit = n
 const RAW_STATUS = Object.freeze({ M: 'modified', A: 'added', D: 'deleted', T: 'type-changed', R: 'renamed', C: 'copied' });
 
 /**
- * The status and mode of every path each governed commit of the entry touched,
- * read with `git diff-tree -r --raw -z --no-renames` against the commit's first
- * parent (the same comparison `enumerateRows` lists the paths from). One row per
- * commit per path, so an add in one commit and an edit in the next reads `added`.
+ * The status and both modes of every path each governed commit of the entry
+ * touched, read with `git diff-tree -r --raw -z --no-renames` against the
+ * commit's first parent (the same comparison `enumerateRows` lists the paths
+ * from): `{ path, status, oldMode, mode }`, the raw line's two modes, so a mode
+ * change reads H in the arm. One row per commit per path, so an add in one
+ * commit and an edit in the next reads `added`.
  * No git reader, a commit with no sha, or a read that throws is NOT MEASURED.
  */
 export function catalogFilesOf(entry, runGit) {
@@ -1994,7 +2002,7 @@ export function catalogFilesOf(entry, runGit) {
     for (let i = 0; i + 1 < tokens.length; i += 2) {
       const meta = /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([A-Z])/.exec(tokens[i].trim());
       if (!meta || tokens[i + 1] === '') continue;
-      files.push({ path: tokens[i + 1], status: RAW_STATUS[meta[3]] ?? meta[3], mode: meta[2] });
+      files.push({ path: tokens[i + 1], status: RAW_STATUS[meta[3]] ?? meta[3], oldMode: meta[1], mode: meta[2] });
     }
   }
   return { measured: true, reason: null, files };
@@ -5774,7 +5782,7 @@ export async function selfTest() {
     const CS_TEXT = "---\n'@objectstack/skills': patch\n---\n\nskills: wording\n\nClause-②: no\nMetadata-protocol: none\n";
     // The committed changeset text, by `git show <sha>:<path>`; any other read throws, as git does.
     // `diff-tree --raw -z` rows: every path the fixtures touch, a MODIFIED regular file unless a case says otherwise.
-    const rawOf = (rows) => rows.map(([st, mode, p]) => `:100644 ${mode} ${'1'.repeat(40)} ${'2'.repeat(40)} ${st}\0${p}\0`).join('');
+    const rawOf = (rows) => rows.map(([st, mode, p, oldMode = '100644']) => `:${oldMode} ${mode} ${'1'.repeat(40)} ${'2'.repeat(40)} ${st}\0${p}\0`).join('');
     const MODIFIED = rawOf([SK, 'skills/objectstack-data/evals/evals.json', 'skills/objectstack-data/rules/security.md', 'skills/a/rules/guide.md', 'skills/a/rules/permission-guide.md', 'skills/a/rules/security.md', 'skills/objectstack-data/hook.mjs'].map((p) => ['M', '100644', p]).concat([['A', '100644', CS]]));
     const csGit = (text = CS_TEXT, raw = MODIFIED) => (args) => {
       if (args[0] === 'show' && /^[0-9a-f]{40}:\.changeset\//.test(args[1]) && text !== null) return text;
@@ -5934,6 +5942,10 @@ export async function selfTest() {
     assert('⛔ STATUS-a-skill-DELETED-in-the-group-stays-H', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['D', '000000', SK], ['A', '100644', CS]])) })) === H);
     assert('⛔ STATUS-a-rename-read-as-delete-plus-add-under-no-renames-stays-H', JSON.stringify(await hCase({ files: ['skills/a/rules/guide.md', 'skills/a/rules/howto.md', CS], runGit: csGit(CS_TEXT, rawOf([['D', '000000', 'skills/a/rules/guide.md'], ['A', '100644', 'skills/a/rules/howto.md'], ['A', '100644', CS]])) })) === H);
     assert('⛔ STATUS-a-SYMLINK-under-the-catalog-stays-H', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['M', '120000', SK], ['A', '100644', CS]])) })) === H);
+    // N10 (record 6888217778): the raw line's OLD mode is read too — a symlink turned regular file, however its
+    // status letter reads, and a regular file made executable both change the mode, and any mode change is H.
+    assert('⛔ MODE-a-symlink-turned-regular-file-stays-H-on-its-old-mode-as-M-or-as-T', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['M', '100644', SK, '120000'], ['A', '100644', CS]])) })) === H && JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['T', '100644', SK, '120000'], ['A', '100644', CS]])) })) === H);
+    assert('⛔ MODE-a-regular-file-made-executable-stays-H-and-catalogFilesOf-carries-both-modes', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['M', '100755', SK], ['A', '100644', CS]])) })) === H && JSON.stringify(catalogFilesOf({ shas: ['a'.repeat(40)] }, csGit(CS_TEXT, rawOf([['M', '100755', SK]]))).files) === JSON.stringify([{ path: SK, status: 'modified', oldMode: '100644', mode: '100755' }]));
     assert('⛔ STATUS-a-status-read-that-throws-or-misses-the-path-stays-H', JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, null) })) === H && JSON.stringify(await hCase({ runGit: csGit(CS_TEXT, rawOf([['A', '100644', CS]])) })) === H);
     assert('catalogFilesOf-reads-status-and-mode-per-commit-and-fails-closed', (() => {
       const e = { shas: ['a'.repeat(40), 'b'.repeat(40)] };
