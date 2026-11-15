@@ -712,8 +712,8 @@ function buildNullableFieldIndex(objects: AnyRec[]): Map<string, Set<string>> {
  * author declared keeps the author's keys and the author's verdict, at both.
  */
 function injectedColumnsNotCarried(obj: AnyRec): string[] {
-  const carried = new Set(fieldEntries(obj).map(([fname]) => fname));
-  return Object.keys(injectedSystemColumnDefs(obj)).filter((fname) => !carried.has(fname));
+  const carriedFieldNames = new Set(fieldEntries(obj).map(([fname]) => fname));
+  return Object.keys(injectedSystemColumnDefs(obj)).filter((fname) => !carriedFieldNames.has(fname));
 }
 
 /**
@@ -768,14 +768,14 @@ function hookRunsBeforeStamp(hookEvents: unknown): boolean {
 
 /** Each object's set from both indexes, joined. */
 function joinNullableIndexes(a: Map<string, Set<string>>, b: Map<string, Set<string>>): Map<string, Set<string>> {
-  const joined = new Map<string, Set<string>>();
-  for (const [name, fields] of a) joined.set(name, new Set(fields));
+  const joinedNullable = new Map<string, Set<string>>();
+  for (const [name, fields] of a) joinedNullable.set(name, new Set(fields));
   for (const [name, fields] of b) {
-    const into = joined.get(name) ?? new Set<string>();
-    for (const fname of fields) into.add(fname);
-    joined.set(name, into);
+    const joinedFields = joinedNullable.get(name) ?? new Set<string>();
+    for (const fname of fields) joinedFields.add(fname);
+    joinedNullable.set(name, joinedFields);
   }
-  return joined;
+  return joinedNullable;
 }
 
 /**
@@ -2614,9 +2614,12 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // [#33435] The flow and hook condition sites also judge the injected
   // columns a stored row can hold `null` in, and a `beforeInsert` hook the two
   // stamped timestamps, wherever the objects as read do not carry them as
-  // fields: at `os build` (and the extension door, which reads the objects as
-  // authored), so it gives the verdict a runtime door gives over the served
-  // objects. Read off the objects as served, a tied field included: a column
+  // fields: at `os build`, so it gives the verdict a runtime door gives over
+  // the served objects. Two runtime readers hand authored objects too and
+  // judge the same way: the MCP `validate_expression` tool at a flow condition
+  // (`judgeAuthoredSiteExpression` strips the injected columns), and a
+  // `publish-drafts` batch carrying a draft of the flow's or hook's own object
+  // (the pending-draft door: the draft body replaces the served object). Read off the objects as served, a tied field included: a column
   // two packages tie on is carried, so it gets no verdict, as above.
   const flowHookNullableIndex = joinNullableIndexes(nullableIndex, buildInjectedNullableIndex(servedObjects));
   const preStampIndex = buildPreStampIndex(servedObjects);

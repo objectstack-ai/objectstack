@@ -4487,7 +4487,7 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // the pre-stamp index, and the join's own Maps and Sets. Their keys are
       // Map / Set methods, never metadata keys; the injected columns are read
       // off the spec's `injectedSystemColumnDefs` over the tabled `obj`.
-      'flowHookNullableIndex', 'preStampIndex', 'carried', 'joined', 'into',
+      'flowHookNullableIndex', 'preStampIndex', 'carriedFieldNames', 'joinedNullable', 'joinedFields',
       // [#29926] The fault-outcome ledger's own site descriptor (`kind`,
       // `severity`, `triggerKind`, `sweepsTypedObject`), built at each call site from the
       // tabled receivers (`rule.severity`) — never read off metadata itself.

@@ -152,8 +152,9 @@ holds for the columns the platform adds as well: `owner_id`, `created_by`,
 `updated_by`, `owning_business_unit_id`, `queue` and `organization_id` are `null` on
 a row a system write, a seed or a guest left them empty in, so write
 `record.owner_id != null && record.owner_id > 'a'`. `created_at` and `updated_at`
-are stamped on every stored row, except under a `beforeInsert` hook, which can run
-before the stamp and reads them as `null`.
+are stamped on every stored row and need no guard, except in a `beforeInsert` hook:
+one with a `priority` below 10 runs before the stamp and reads them as `null`, so
+`os build` and the publish gate ask for the guard at every `beforeInsert` hook.
 
 ## Elevation — `runAs`
 
