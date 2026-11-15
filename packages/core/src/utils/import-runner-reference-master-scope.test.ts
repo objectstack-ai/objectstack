@@ -164,7 +164,7 @@ describe('[#33523] an import lookup naming a detail resolves within the row\'s o
     const scoped = findData.mock.calls.filter(([a]) => a.object === 'xm_milestone').map(([a]) => a);
     expect(scoped.length).toBeGreaterThan(0);
     for (const a of findData.mock.calls.map(([call]) => call)) expect(a.context).toBe(CALLER);
-    expect(scoped.every((a) => a.query!.where!.contract === 'c1')).toBe(true);
+    expect(scoped.every((a) => (a.query!.where as Record<string, unknown>).contract === 'c1')).toBe(true);
   });
 
   it('two columns pointing at the master do not say which is the master: the lookup stays unscoped', async () => {
