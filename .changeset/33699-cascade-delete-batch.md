@@ -5,7 +5,7 @@
 
 perf(objectql)!: a cascade delete removes a relation's children as one predicate delete per chunk
 
-Clause-②: no (narrowing)
+Clause-②: no (narrowing) — the published hook dispatch shape for cascaded children changes (`dispatch.mode` 'record' → 'per-row', `options.multi`, before-hooks run before the set delete); BREAKING banner + ADR-0087 disposition in the changeset; one CONTRACT_REVIEW_TIER review owed before the queue
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped and no stored row is rewritten: what changes is the runtime hook dispatch shape the engine gives a cascaded child delete, so there is nothing for `objectstack migrate meta` to convert. -->

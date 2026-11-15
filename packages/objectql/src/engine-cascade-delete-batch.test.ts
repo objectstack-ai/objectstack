@@ -167,7 +167,7 @@ describe('[F1] a cascade deletes a relation\'s children as one batch per chunk',
     engine.on('beforeDelete', 'line', (ctx: any) => { order.push(`before ${ctx.input.id} writes=${driver.writes.length}`); });
     engine.on('afterDelete', 'line', (ctx: any) => { order.push(`after ${ctx.input.id} writes=${driver.writes.length}`); });
 
-    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } } as any);
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
 
     // Every before ran with nothing written; ONE set delete; then every after.
     expect(order).toEqual([
@@ -196,9 +196,9 @@ describe('[F1] a cascade deletes a relation\'s children as one batch per chunk',
     const { engine } = await makeEngine();
     const remaining: number[] = [];
     engine.on('beforeDelete', 'line', async () => {
-      remaining.push((await engine.find('line', { where: { acct: 'a1' } } as any)).length);
+      remaining.push((await engine.find('line', { where: { acct: 'a1' } })).length);
     });
-    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } } as any);
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
     // The per-child walk saw 3, 2, 1: the one real behaviour flip the ruling names.
     expect(remaining).toEqual([3, 3, 3]);
   });
@@ -211,7 +211,7 @@ describe('[F1] a cascade deletes a relation\'s children as one batch per chunk',
     const seen: Seen[] = [];
     listen(engine, seen, 'line_note');
 
-    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } } as any);
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
 
     expect(driver.writes).toEqual(['deleteMany line_note n1,n2', 'deleteMany line l1,l2,l3', 'delete acct a1']);
     expect(seen.map((s) => `${s.event} ${String(s.id)} ${String(s.mode)} ${String(s.marker)}`)).toEqual([
@@ -222,7 +222,7 @@ describe('[F1] a cascade deletes a relation\'s children as one batch per chunk',
 
   it('chunks of 500: 501 children are two set deletes', async () => {
     const { engine, driver } = await makeEngine({ lines: 501 });
-    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } } as any);
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
     const sets = driver.writes.filter((w: string) => w.startsWith('deleteMany line'));
     expect(sets.map((w: string) => w.split(' ')[2].split(',').length)).toEqual([500, 1]);
     expect(driver.rowsOf('line')).toEqual([]);
@@ -238,7 +238,7 @@ describe('[F1] a cascade deletes a relation\'s children as one batch per chunk',
     } as any;
     engine.setRealtimeService(realtime);
 
-    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } } as any);
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
 
     const lines = published.filter((e) => e.object === 'line');
     expect(lines.map((e) => e.type)).toEqual(['data.record.deleted', 'data.record.deleted', 'data.record.deleted']);
@@ -251,7 +251,7 @@ describe('[F1] a cascade deletes a relation\'s children as one batch per chunk',
     engine.on('beforeDelete', 'line', (ctx: any) => {
       if (ctx.input.id === 'l2') throw Object.assign(new Error('l2 is frozen'), { code: 'PERMISSION_DENIED', status: 403 });
     });
-    const err: any = await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } } as any).then(() => null, (e: unknown) => e);
+    const err: any = await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } }).then(() => null, (e: unknown) => e);
     expect(err?.code).toBe('PERMISSION_DENIED');
     expect(err?.status).toBe(403);
     expect(driver.writes).toEqual([]);
@@ -264,7 +264,7 @@ describe('[F1] a cascade deletes a relation\'s children as one batch per chunk',
     engine.on('afterDelete', 'line', (ctx: any) => {
       if (ctx.input.id === 'l3') throw Object.assign(new Error('l3 refused after'), { code: 'PERMISSION_DENIED', status: 403 });
     });
-    const err: any = await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } } as any).then(() => null, (e: unknown) => e);
+    const err: any = await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } }).then(() => null, (e: unknown) => e);
     expect(err?.code).toBe('PERMISSION_DENIED');
     expect(err?.status).toBe(403);
     expect(driver.rolledBack.length).toBeGreaterThan(0);
@@ -302,7 +302,7 @@ describe('[F1] a chunk the caller\'s scope narrows falls back to today\'s by-id 
     listen(engine, seen, 'line');
     const byIdAttempts = narrowAndRefuse(engine, 'line', 'l2');
 
-    const err: any = await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } } as any).then(() => null, (e: unknown) => e);
+    const err: any = await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } }).then(() => null, (e: unknown) => e);
 
     expect(err?.code).toBe('PERMISSION_DENIED');
     expect(err?.status).toBe(403);
@@ -331,7 +331,7 @@ describe('[F1] a chunk the caller\'s scope narrows falls back to today\'s by-id 
     listen(engine, seen, 'line', ['beforeDelete']);
     listen(engine, seen, 'memo', ['beforeDelete']);
 
-    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } } as any);
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
 
     const shapes = seen.map((s) => `${s.object} ${String(s.id)} ${String(s.mode)} multi=${String(s.multi)} marker=${String(s.marker)}`);
     expect(shapes.filter((s) => s.startsWith('line'))).toEqual([
@@ -348,7 +348,7 @@ describe('[F1] a chunk the caller\'s scope narrows falls back to today\'s by-id 
     const { engine, driver } = await makeEngine({ deleteMany: false });
     const seen: Seen[] = [];
     listen(engine, seen, 'line', ['beforeDelete']);
-    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } } as any);
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
     expect(seen.map((s) => s.mode)).toEqual(['record', 'record', 'record']);
     expect(driver.writes).toEqual(['delete line l1', 'delete line l2', 'delete line l3', 'delete acct a1']);
   });
