@@ -3,6 +3,7 @@
   "entry": "./contracts",
   "exports": [
     "ACTION_CONFIRMATION_REFUSAL_REASONS (const)",
+    "ACTION_CONFIRMATION_SERVICE (const)",
     "AIActionConfirmation (interface)",
     "AIConversation (interface)",
     "AIMessage (type)",
