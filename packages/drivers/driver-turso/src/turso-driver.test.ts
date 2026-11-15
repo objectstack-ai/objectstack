@@ -437,17 +437,45 @@ describe('TursoDriver Capabilities', () => {
     expect(typeof driver.syncSchemasBatch).toBe('function');
   });
 
-  it('claims batchSchemaSync, an emptied queryDateGranularity and no transactions in remote mode', () => {
+  it('claims batchSchemaSync, an emptied queryDateGranularity, no transactions and no measure filter in remote mode', () => {
     const remote = new TursoDriver({ url: 'libsql://test-db.turso.io', authToken: 'test-token' });
     expect(remote.transportMode).toBe('remote');
     // [#18063] `transactionsUnsupported` joins the remote-only diff. It is a
     // claim HERE and not in local mode for the reason this census exists: the
     // bit is per-INSTANCE, and a value equal to the base's is not a claim.
+    // [#33698] `aggregationFilter` likewise: off remotely, inherited locally.
     expect(ownCapabilityClaims(remote)).toEqual([
+      'aggregationFilter',
       'batchSchemaSync',
       'queryDateGranularity',
       'transactionsUnsupported',
     ]);
+  });
+
+  it('[#33698] reports aggregationFilter off in remote mode, and inherits it on in local mode', async () => {
+    // Remote mode's `aggregate()` is `RemoteTransport.aggregate`, which refuses
+    // a per-aggregation filter (501): the bit must say so, so the engine keeps
+    // filtered measures on `find()` + in-memory there.
+    const remote = new TursoDriver({ url: 'libsql://test-db.turso.io', authToken: 'test-token' });
+    expect(remote.supports.aggregationFilter).toBe(false);
+    // Local mode runs SqlDriver's own `aggregate()`, which compiles it.
+    const local = new TursoDriver({ url: ':memory:' });
+    expect(local.supports.aggregationFilter).toBe(true);
+    await local.connect();
+    try {
+      await local.initObjects([{ name: 'm33698', fields: { stage: { type: 'text' }, amount: { type: 'number' } } }] as never);
+      await local.create('m33698', { id: 'r1', stage: 'won', amount: 3 });
+      await local.create('m33698', { id: 'r2', stage: 'open', amount: 5 });
+      const rows = await local.aggregate('m33698', {
+        aggregations: [
+          { function: 'sum', field: 'amount', alias: 'won', filter: { stage: 'won' } },
+          { function: 'count', alias: 'n' },
+        ],
+      } as never);
+      expect(rows).toEqual([{ won: 3, n: 2 }]);
+    } finally {
+      await local.disconnect();
+    }
   });
 
   it('does NOT advertise native date-granularity in remote mode (avoids the "[object Object]" aggregate 500)', () => {
