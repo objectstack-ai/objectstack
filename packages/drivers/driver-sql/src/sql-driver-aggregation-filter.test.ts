@@ -214,6 +214,51 @@ for (const cell of DIALECT_CELLS) {
   declareDialectCell(cell, 'aggregate measure filter (#33698)', declareCell);
 }
 
+describe('[#33698] a measure filter under a tenant scope: the scope stays on the statement, the filter narrows inside it', () => {
+  const T = 'os33698_tenant_measure';
+  let driver: SqlDriver;
+  const statements: string[] = [];
+
+  beforeAll(async () => {
+    driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+    await driver.initObjects([
+      { name: T, fields: { organization_id: { type: 'string' }, stage: { type: 'string' }, amount: { type: 'number' } } },
+    ] as never);
+    await driver.create(T, { id: 'a1', organization_id: 'org_a', stage: 'won', amount: 10 } as never);
+    await driver.create(T, { id: 'a2', organization_id: 'org_a', stage: 'open', amount: 20 } as never);
+    // Another organization's row the filter WOULD match.
+    await driver.create(T, { id: 'b1', organization_id: 'org_b', stage: 'won', amount: 1000 } as never);
+    (driver as unknown as { knex: { on(e: string, f: (d: { sql?: string }) => void): void } }).knex.on('query', (d) => {
+      if (typeof d?.sql === 'string' && d.sql.includes(T)) statements.push(d.sql);
+    });
+  });
+
+  afterAll(async () => {
+    await driver?.disconnect();
+  });
+
+  it('each organization counts only its own rows, and the statement carries the tenant predicate once, outside the CASE', async () => {
+    const query = {
+      where: { amount: { $gt: 0 } },
+      aggregations: [
+        { function: 'sum', field: 'amount', alias: 'won', filter: { stage: 'won' } },
+        { function: 'count', alias: 'n' },
+      ],
+    } as DriverQuery;
+    expect(await driver.aggregate(T, query, { tenantId: 'org_a' } as never)).toEqual([{ won: 10, n: 2 }]);
+    expect(await driver.aggregate(T, query, { tenantId: 'org_b' } as never)).toEqual([{ won: 1000, n: 1 }]);
+    // No tenant (the admin / seed path): every row, as `find()` answers it.
+    expect(await driver.aggregate(T, query)).toEqual([{ won: 1010, n: 3 }]);
+    const scoped = statements.find((sql) => sql.includes('CASE WHEN') && sql.includes('organization_id'))!;
+    expect(scoped).toBeDefined();
+    // The CASE holds the measure filter alone; the tenant predicate is in the WHERE.
+    const caseBody = scoped.slice(scoped.indexOf('CASE WHEN'), scoped.indexOf('END') + 3);
+    expect(caseBody).toContain('stage');
+    expect(caseBody).not.toContain('organization_id');
+    expect(scoped.slice(scoped.indexOf(' where '))).toContain('organization_id');
+  });
+});
+
 describe('[#33698] the lift guard: a predicate that cannot be isolated is refused, never guessed at', () => {
   /** A where compiler that leaves a literal `?` the bindings do not pair with. */
   class LiteralPlaceholderDriver extends SqlDriver {

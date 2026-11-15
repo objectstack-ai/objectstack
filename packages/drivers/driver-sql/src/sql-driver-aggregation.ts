@@ -108,32 +108,42 @@ export class AggregationFacet {
     // [#33698] A measure filter's predicate, compiled by the SAME where
     // compiler a `where` goes through (`applyFilters`: the same comparand
     // gates, refusals, coercion and column map), on a builder of the same
-    // table, then lifted out of `select * from t where …`. It goes inside the
-    // aggregate as `CASE WHEN (pred) THEN … END`, so it only NARROWS the rows
-    // the statement already reads: the tenant wall and the read scope stay on
-    // the statement's own WHERE, never in a measure. `undefined` = the filter
-    // compiled to no condition at all (a vacuous tree), so the measure is the
-    // unfiltered aggregate — what the in-memory path answers for it.
-    // The lift is guarded rather than trusted: a statement that is not that
-    // exact prefix plus a predicate, or whose `?` placeholders do not pair one
-    // to one with its bindings (a `??` or an escaped `\?` would be re-read by
+    // table carrying the same tenant scope as the statement, then lifted out
+    // of `select * from t [where <tenant>] (where|and) <pred>`. It goes inside
+    // the aggregate as `CASE WHEN (pred) THEN … END`, so it only NARROWS the
+    // rows the statement already reads: the tenant wall and the read scope
+    // stay on the statement's own WHERE, never in a measure. Neither builder
+    // here is executed; each is scoped like every other builder of a read
+    // door, so the reference statement and the filtered one differ by exactly
+    // the predicate. `undefined` = the filter compiled to no condition at all
+    // (a vacuous tree), so the measure is the unfiltered aggregate — what the
+    // in-memory path answers for it.
+    // The lift is guarded rather than trusted: a statement that is not the
+    // reference plus one predicate, whose leading bindings are not the
+    // reference's, or whose predicate's `?` placeholders do not pair one to
+    // one with its own bindings (a `??` or an escaped `\?` would be re-read by
     // `knex.raw`), is refused (NOT_IMPLEMENTED/501), never guessed at.
     const compileMeasureFilter = (filter: NonNullable<DriverQuery['where']>, alias: string): { sql: string; bindings: readonly unknown[] } | undefined => {
-      const bare = this.getBuilder(object, options).toSQL().sql;
+      const reference = this.getBuilder(object, options);
+      this.applyTenantScope(reference, object, options);
       const filtered = this.getBuilder(object, options);
+      this.applyTenantScope(filtered, object, options);
       this.applyFilters(filtered, filter, options);
+      const bare = reference.toSQL();
       const compiled = filtered.toSQL();
-      if (compiled.sql === bare && compiled.bindings.length === 0) return undefined;
-      const prefix = `${bare} where `;
-      const placeholders = (compiled.sql.match(/\?/g) ?? []).length;
+      if (compiled.sql === bare.sql && compiled.bindings.length === bare.bindings.length) return undefined;
+      const prefix = [`${bare.sql} where `, `${bare.sql} and `].find((p) => compiled.sql.startsWith(p));
+      const sql = prefix === undefined ? '' : compiled.sql.slice(prefix.length);
+      const bindings = compiled.bindings.slice(bare.bindings.length);
       if (
-        !compiled.sql.startsWith(prefix)
-        || /\?\?|\\\?/.test(compiled.sql)
-        || placeholders !== compiled.bindings.length
+        prefix === undefined
+        || bare.bindings.some((b, i) => b !== compiled.bindings[i])
+        || /\?\?|\\\?/.test(sql)
+        || (sql.match(/\?/g) ?? []).length !== bindings.length
       ) {
         throw unsupportedAggregationFilterError(alias, 'driver-sql');
       }
-      return { sql: compiled.sql.slice(prefix.length), bindings: compiled.bindings };
+      return { sql, bindings };
     };
     this.applyTenantScope(builder, object, options);
 
