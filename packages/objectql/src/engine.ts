@@ -192,6 +192,7 @@ import {
 import {
   type TenancyPosture,
   type TenantLayer0Verdict,
+  postureEnforcesWall,
   postureUsesUnionScope,
 } from '@objectstack/spec/security';
 
@@ -4275,6 +4276,8 @@ export class ObjectQL implements IObjectQLEngine {
       uncomposableReadableIdsParent: (...a) => this.uncomposableReadableIdsParent(...a),
       hasHooksFor: (...a) => this.hasHooksFor(...a),
       getDriver: (...a) => this.getDriver(...a),
+      getSchema: (name) => this._registry.getObject(name),
+      wallInForce: () => postureEnforcesWall(this.resolveEnginePosture()),
     };
     return relationSemiJoinServes.call(host, object, target);
   }
