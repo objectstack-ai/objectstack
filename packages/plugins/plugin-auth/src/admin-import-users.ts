@@ -213,7 +213,8 @@ export interface IdentityImportDeps {
    */
   consoleResetPasswordUrl?(): string;
   noteMustChangePasswordIssued(): void;
-  logger?: { warn(msg: string): void };
+  /** `error` receives, once, a failure answered with the generic message (`mapAuthApiError`). */
+  logger?: { warn(msg: string): void; error?(message: string, error?: Error): void };
 }
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
@@ -631,7 +632,7 @@ export async function runAdminImportUsers(
   try {
     temporaryLength = temporaryPasswordLength((await deps.getAuthContext()).password.config);
   } catch (error) {
-    return mapAuthApiError(error, 'import-users failed');
+    return mapAuthApiError(error, 'import-users failed', deps.logger);
   }
 
   const protocol: ImportProtocolLike = {

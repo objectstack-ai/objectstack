@@ -155,7 +155,12 @@ export interface AdminUserEndpointDeps {
    * Absent ⇒ no join: the creation behaves as before.
    */
   getCallerActiveOrganizationId?(): Promise<string | null>;
-  logger?: { warn(msg: string): void };
+  /**
+   * The mount's logger. `error` receives, once, a failure that carries no
+   * vendor code and is answered with the generic internal-error message
+   * ({@link mapAuthApiError}).
+   */
+  logger?: { warn(msg: string): void; error?(message: string, error?: Error): void };
 }
 
 /**
@@ -242,7 +247,7 @@ import { identitySourceUnreadable, judgeSsoOnlyLocalPassword, readUserSource, ss
 import { temporaryPasswordLength } from './temporary-password-length.js';
 import { isPendingSsoSource, pendingSsoPasswordRefusal } from './pending-sso-marker.js';
 import { isCloudManaged } from '@objectstack/core';
-import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
+import { INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
@@ -668,19 +673,42 @@ export async function writeAdminAudit(
   }
 }
 
-export function mapAuthApiError(error: unknown, fallback: string): EndpointResult {
+/**
+ * Map what a vendor call threw onto the endpoint envelope.
+ *
+ * A refusal the vendor classifies (it carries a body code) keeps its own
+ * message and status; `USER_ALREADY_EXISTS` is normalised to 409. A failure
+ * that carries no vendor code is unclassified: it is answered `INTERNAL_ERROR`
+ * in the generic words every route catch in `auth-plugin.ts` uses, and the
+ * error is handed to `logger.error` once, as `[AuthPlugin] <fallback>` — the
+ * thrown error's own text never reaches the caller. The status is read the
+ * same way in both.
+ *
+ * @param fallback  names the route's failure (`'create-user failed'`); it is
+ *                  the log line, and a classified refusal's message when the
+ *                  vendor sent none.
+ */
+export function mapAuthApiError(
+  error: unknown,
+  fallback: string,
+  logger?: { error?(message: string, error?: Error): void },
+): EndpointResult {
   const e = error as {
     statusCode?: number;
     status?: number | string;
     body?: { code?: string; message?: string };
     message?: string;
   } | null;
-  const code = e?.body?.code ?? 'INTERNAL_ERROR';
-  const message = e?.body?.message ?? e?.message ?? fallback;
+  const vendorCode = e?.body?.code ?? undefined;
   const rawStatus =
     typeof e?.statusCode === 'number' ? e.statusCode : typeof e?.status === 'number' ? e.status : 500;
-  const status = code === 'USER_ALREADY_EXISTS' ? 409 : rawStatus;
-  return { status, body: { success: false, error: { code, message } } };
+  if (vendorCode === undefined) {
+    logger?.error?.(`[AuthPlugin] ${fallback}`, error instanceof Error ? error : new Error(String(error)));
+    return { status: rawStatus, body: { success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } } };
+  }
+  const message = e?.body?.message ?? e?.message ?? fallback;
+  const status = vendorCode === 'USER_ALREADY_EXISTS' ? 409 : rawStatus;
+  return { status, body: { success: false, error: { code: vendorCode, message } } };
 }
 
 // ── POST /admin/create-user ──────────────────────────────────────────────
@@ -747,7 +775,7 @@ export async function runAdminCreateUser(
   try {
     lengthPolicy = (await deps.getAuthContext()).password.config;
   } catch (error) {
-    return mapAuthApiError(error, 'create-user failed');
+    return mapAuthApiError(error, 'create-user failed', deps.logger);
   }
   const resolved = await resolvePassword(deps, body, 'password', lengthPolicy);
   if ('status' in resolved) return resolved;
@@ -849,7 +877,7 @@ export async function runAdminCreateUser(
         },
       });
     } catch (error) {
-      return mapAuthApiError(error, 'create-user failed');
+      return mapAuthApiError(error, 'create-user failed', deps.logger);
     }
 
     const userId = created?.user?.id;
@@ -987,7 +1015,7 @@ export class CreationRefused extends Error {
  * answers by.
  */
 export async function joinCurrentOrganization(
-  deps: Pick<AdminUserEndpointDeps, 'getDataEngine'>,
+  deps: Pick<AdminUserEndpointDeps, 'getDataEngine' | 'logger'>,
   addMember: AddMemberCapableApi['addMember'],
   userId: string,
   organizationId: string,
@@ -1004,7 +1032,7 @@ export async function joinCurrentOrganization(
   try {
     await addMember({ body: { userId, role: 'member', organizationId } });
   } catch (error) {
-    const refused = mapAuthApiError(error, 'organization/add-member failed');
+    const refused = mapAuthApiError(error, 'organization/add-member failed', deps.logger);
     throw new CreationRefused({
       status: refused.status,
       body: {
@@ -1101,7 +1129,7 @@ export async function runAdminSetUserPassword(
   try {
     authCtx = await deps.getAuthContext();
   } catch (error) {
-    return mapAuthApiError(error, 'set-user-password failed');
+    return mapAuthApiError(error, 'set-user-password failed', deps.logger);
   }
   const resolved = await resolvePassword(deps, body, 'newPassword', authCtx.password.config);
   if ('status' in resolved) return resolved;
@@ -1159,7 +1187,7 @@ export async function runAdminSetUserPassword(
       });
     }
   } catch (error) {
-    return mapAuthApiError(error, 'set-user-password failed');
+    return mapAuthApiError(error, 'set-user-password failed', deps.logger);
   }
 
   // The flag write is credited to the administrator this route admitted (and,

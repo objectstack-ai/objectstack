@@ -91,6 +91,12 @@ export interface AddMemberCapableApi {
 
 export interface OrganizationAddMemberDeps {
   getAuthApi(): Promise<AddMemberCapableApi | Record<string, unknown>>;
+  /**
+   * The mount's logger. A failure that carries no vendor code is answered
+   * with the generic internal-error message, and the error is handed here,
+   * once, at error level (`mapAuthApiError`).
+   */
+  logger?: { error(message: string, error?: Error): void };
 }
 
 const badRequest = (message: string): EndpointResult => ({
@@ -197,7 +203,8 @@ export async function runOrganizationAddMember(
     // USER_NOT_FOUND, USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION,
     // ORGANIZATION_MEMBERSHIP_LIMIT_REACHED, … (400s; limit is 403). Their
     // checks are not duplicated here: duplicated security checks are where
-    // bypasses live (see adopt-membership.ts).
-    return mapAuthApiError(error, 'organization/add-member failed');
+    // bypasses live (see adopt-membership.ts). A failure with no vendor code
+    // is not a verdict: it answers the generic message and is logged.
+    return mapAuthApiError(error, 'organization/add-member failed', deps.logger);
   }
 }

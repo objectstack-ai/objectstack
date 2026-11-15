@@ -4144,6 +4144,7 @@ export class AuthPlugin implements Plugin {
             const source = await readUserSource(this.authManager!.getDataEngine(), String(callerId));
             return source.ok && isPendingSsoSource(source.value) ? pendingSsoPasswordRefusal('setInitialPassword') : undefined;
           },
+          logger: ctx.logger,
         });
         return c.json(body, status);
       } catch (error) {
@@ -4497,6 +4498,7 @@ export class AuthPlugin implements Plugin {
         return engine.transaction(async () => work());
       },
       resolveApiKeyLifecyclePolicy: () => this.authManager!.resolveApiKeyLifecyclePolicy(),
+      logger: ctx.logger,
     });
     const serviceAccountRoute = (
       path: string,
@@ -5265,7 +5267,7 @@ export class AuthPlugin implements Plugin {
         // attribution seam here — the `sys_member` row this creates is
         // credited to the admin instead of recorded as the system.
         const { status, body } = await runAttributedToUser(actor, () =>
-          runOrganizationAddMember({ getAuthApi: () => this.authManager!.getApi() as any }, c.req.raw),
+          runOrganizationAddMember({ getAuthApi: () => this.authManager!.getApi() as any, logger: ctx.logger }, c.req.raw),
         );
         return c.json(body, status as any);
       } catch (error) {
