@@ -434,7 +434,12 @@ export function bindAppArtifactHandlers(
                             // the function a string `handler` names, is handed the
                             // `ctx.title(field?)` a `body` gets in the sandbox. The binder
                             // applies it after resolving the name, so both take this one wrap.
-                            wrapHandler: (handler, hook) => withInProcessHookTitle(handler, ql, String(hook.name)),
+                            // [#33214] …and its throws are answered against the hook's refusal
+                            // catalogue, in the caller's language, with the body path's wire.
+                            wrapHandler: (handler, hook) => withInProcessHookTitle(handler, ql, hook, {
+                                i18n: options.i18n,
+                                logger,
+                            }),
                         });
                         out.hooks += group.hooks.length;
                         out.functions += Object.keys(group.functions).length;

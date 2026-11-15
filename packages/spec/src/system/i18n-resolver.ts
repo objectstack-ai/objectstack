@@ -4392,21 +4392,25 @@ export function flowNoticeMessageKey(flowName: string, nodeId: string): string {
 /**
  * Dot-notation i18n key for a hook's declared refusal message —
  * `hooks.<hook>.refusals.<CODE>.message` (#26170, maintainer ruling 6431311681
- * letter A).
+ * letter A), or, given a declared reason under the code (#33214, ruling
+ * 6879477573 S1), `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`.
  *
  * A sibling of {@link objectValidationMessageKey} and
  * {@link flowRefusalMessageKey}, spelled here for the same reason: its consumer
  * holds an `II18nService` (which takes a key), not a `TranslationBundle`. Used
- * by the sandboxed body runner, which answers a body's throw of a declared code
- * (`HookSchema.refusals`) with this translation in the caller's locale
- * (`HookContext.session.locale`), the declared message on a miss.
+ * by the hook runtime (the sandboxed body runner and the in-process handler
+ * seam), which answers a throw of a declared code (`HookSchema.refusals`) with
+ * this translation in the caller's locale (`HookContext.session.locale`), the
+ * declared sentence on a miss.
  *
  * `hookName` is `Hook.name` and `code` the catalogue's key — by hook, never by
  * object, so a hook bound to several objects or to `'*'` owns one translation
  * per code.
  */
-export function hookRefusalMessageKey(hookName: string, code: string): string {
-  return `hooks.${hookName}.refusals.${code}.message`;
+export function hookRefusalMessageKey(hookName: string, code: string, reason?: string): string {
+  return reason === undefined
+    ? `hooks.${hookName}.refusals.${code}.message`
+    : `hooks.${hookName}.refusals.${code}.reasons.${reason}.message`;
 }
 
 /**
