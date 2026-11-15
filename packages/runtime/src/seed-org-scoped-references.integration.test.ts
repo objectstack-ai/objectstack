@@ -505,3 +505,43 @@ describe('a dataset OF an object walled by a declared tenant column replays per 
     expect(initech.map((r) => r.organization_id).sort()).toEqual([ORG_NORTH, ORG_SOUTH].sort());
   });
 });
+
+describe('a dataset OF a global object (tenancy disabled) replays per organization onto one shared row', () => {
+  const countries = (records: Array<Record<string, unknown>>) => ({ object: 'crm_country', mode: 'upsert', externalId: 'name', records });
+  const rowsOf = async (engine: ObjectQL, object: string): Promise<Row[]> =>
+    ((await engine.find(object, { where: {}, context: { isSystem: true } } satisfies EngineQueryOptions)) as Row[])
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+  it('two organizations replay it: exactly one shared row, unstamped; a second replay is idempotent', async () => {
+    const { engine, replayer } = await boot({ posture: 'isolated', data: [countries([{ name: 'Japan' }])] });
+
+    const north = await replayer!(ORG_NORTH);
+    const south = await replayer!(ORG_SOUTH);
+
+    expect(north.errors).toEqual([]);
+    expect(south.errors).toEqual([]);
+    expect(north.inserted).toBe(1);
+    expect(south.inserted).toBe(0);
+    const landed = await rowsOf(engine, 'crm_country');
+    expect(landed.map((r) => r.name)).toEqual(['Japan']);
+    // No organization column to stamp: the row carries none.
+    expect(landed[0].organization_id ?? null).toBeNull();
+
+    const again = [await replayer!(ORG_NORTH), await replayer!(ORG_SOUTH)];
+    for (const r of again) {
+      expect(r.errors).toEqual([]);
+      expect(r.inserted).toBe(0);
+    }
+    expect(await rowsOf(engine, 'crm_country')).toEqual(landed);
+  });
+
+  it('a load with no organization, pinned or derivable, writes the row: it is not refused for a column it does not have', async () => {
+    const { engine, metadata, logger } = await boot({ posture: 'isolated', data: [] });
+    const loader = new SeedLoaderService(engine as any, metadata as any, logger as any);
+
+    const result = await loader.load({ seeds: [countries([{ name: 'Peru' }])], config: { multiPass: true } } as any);
+
+    expect(result.errors).toEqual([]);
+    expect((await rowsOf(engine, 'crm_country')).map((r) => r.name)).toEqual(['Peru']);
+  });
+});
