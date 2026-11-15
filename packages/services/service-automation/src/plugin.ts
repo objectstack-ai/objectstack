@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { installEgressGuard, type EgressPolicy } from '@objectstack/core/egress';
 import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
 import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
@@ -306,6 +307,15 @@ export interface AutomationServicePluginOptions {
      * {@link createPackageFileLoader} and {@link createPackagePathResolver}).
      */
     packageRoot?: string;
+    /**
+     * The outbound-request guard's policy for the flow `http` node's inline
+     * arm. Omitted, the open-core default applies: only public addresses,
+     * plus the targets the operator lists in `OS_EGRESS_ALLOWED_TARGETS`;
+     * link-local and cloud metadata addresses are never reachable. A
+     * multi-tenant host binds a stricter policy here (it is asked per
+     * organization and source). A malformed allowlist fails the boot.
+     */
+    egressPolicy?: EgressPolicy;
 }
 
 /**
@@ -2274,7 +2284,11 @@ export class AutomationServicePlugin implements Plugin {
         // Seed the platform's built-in node executors. A bare
         // `new AutomationServicePlugin()` is thus a self-contained automation
         // capability — no companion node-pack plugins required (ADR-0018).
-        installBuiltinNodes(this.engine, ctx);
+        // The outbound-request guard the `http` node sends through, installed
+        // here so a malformed `OS_EGRESS_ALLOWED_TARGETS` fails the boot.
+        installBuiltinNodes(this.engine, ctx, {
+            egress: installEgressGuard({ policy: this.options.egressPolicy, logger: ctx.logger }),
+        });
 
         if (this.options.debug) {
             ctx.hook('automation:beforeExecute', async (flowName: string) => {

@@ -17,7 +17,7 @@
  */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { signHttpBody } from '@objectstack/core';
 
 import { AutomationEngine } from '../engine.js';
@@ -32,6 +32,16 @@ const SIGNATURE = 'x-objectstack-signature';
 let server: Server;
 let baseUrl: string;
 const received: Array<{ headers: Record<string, unknown>; body: string }> = [];
+
+// This suite's receiver listens on loopback, which the outbound-request guard
+// refuses unless the operator allowlists it — so the suite allowlists it the way
+// an operator does, through the environment.
+beforeAll(() => {
+    vi.stubEnv('OS_EGRESS_ALLOWED_TARGETS', '127.0.0.1');
+});
+afterAll(() => {
+    vi.unstubAllEnvs();
+});
 
 beforeAll(async () => {
     server = createServer((req, res) => {

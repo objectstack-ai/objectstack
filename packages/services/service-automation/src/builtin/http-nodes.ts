@@ -2,6 +2,7 @@
 
 import { HTTP_SIGNATURE_HEADER, signHttpBody } from '@objectstack/core';
 import type { PluginContext } from '@objectstack/core';
+import { defaultEgressGuard, findEgressRefusal, type EgressGuard } from '@objectstack/core/egress';
 import { defineActionDescriptor, HttpConfigSchema } from '@objectstack/spec/automation';
 import type { HttpConfigParsed } from '@objectstack/spec/automation';
 import { randomUUID } from 'node:crypto';
@@ -111,7 +112,21 @@ interface MessagingHttpSurface {
 
 const HTTP_TYPE = 'http' as const;
 
-export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext): void {
+/** Options for {@link registerHttpNodes}. */
+export interface HttpNodeOptions {
+    /**
+     * The outbound-request guard the inline arm sends through (the automation
+     * plugin passes the one it installed). Omitted, the process's default
+     * guard for `OS_EGRESS_ALLOWED_TARGETS`, which throws on a malformed
+     * allowlist. There is no unguarded arm.
+     */
+    egress?: EgressGuard;
+}
+
+export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext, options: HttpNodeOptions = {}): void {
+    // Resolved here, at registration, so a malformed allowlist fails the boot
+    // rather than the first run.
+    const egress = options.egress ?? defaultEgressGuard();
     const getMessaging = (): MessagingHttpSurface | undefined => {
         try {
             return ctx.getService<MessagingHttpSurface>('messaging');
@@ -286,8 +301,15 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             // template resolves here, so what was authored is what signs.
             const signingSecret = cfg.signingSecret;
 
+            // The organization the request is made for — the same value the
+            // durable arm stamps on its outbox row; the egress guard is asked
+            // with it.
+            const organizationId =
+                typeof context.tenantId === 'string' && context.tenantId !== '' ? context.tenantId : undefined;
+
             // One inline send: the default mode, and the durable arm's no-outbox
-            // fallback (awaited, or in the background on the save path).
+            // fallback (awaited, or in the background on the save path). It
+            // connects through the egress guard, never a bare fetch.
             const sendInline = async () => {
                 // #4354 — unlike a connector action, an HTTP call's effect IS
                 // knowable: the method says it. A GET reads and can never write, so
@@ -304,12 +326,11 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                     ? { ...headers, [HTTP_SIGNATURE_HEADER]: signHttpBody(requestBody ?? '', signingSecret) }
                     : headers;
                 try {
-                    const response = await fetch(url, {
-                        method,
-                        headers: requestHeaders,
-                        body: requestBody,
-                        signal: controller.signal,
-                    });
+                    const response = await egress.fetch(
+                        url,
+                        { method, headers: requestHeaders, body: requestBody, signal: controller.signal },
+                        { source: 'flow-http', organizationId },
+                    );
                     const data = await readBody(response);
                     return {
                         success: response.ok,
@@ -326,6 +347,10 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                                 : { unmeasuredEffect: true },
                     };
                 } catch (err) {
+                    // A connect the egress guard refused sent nothing: the run
+                    // reads the named refusal, and no effect happened.
+                    const refused = findEgressRefusal(err);
+                    if (refused) return { success: false, error: `http: ${refused.message}`, metrics: { acted: 0 } };
                     const e = err as { name?: string; message?: string };
                     const msg = e?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : describeFetchFailure(err, url);
                     // A timed-out or aborted mutating request may well have landed —
@@ -355,10 +380,6 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                     // lands `organization_id = NULL` — a row of no
                     // organization, which no tenant-scoped read or redeliver()
                     // reaches (ADR-0131 D8 retired the driver's NULL arm).
-                    const organizationId =
-                        typeof context.tenantId === 'string' && context.tenantId !== ''
-                            ? context.tenantId
-                            : undefined;
                     if (!organizationId) {
                         // Fail-LOUD, not fail-guess, not fail-closed (#11303's
                         // triage): a `single`-posture install and a stack before
