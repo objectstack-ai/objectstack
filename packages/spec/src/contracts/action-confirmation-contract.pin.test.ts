@@ -52,6 +52,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   ACTION_CONFIRMATION_REFUSAL_REASONS,
+  ACTION_CONFIRMATION_SERVICE,
   AI_ACTION_CONFIRMATION_CAPABILITY,
   AI_ACTION_CONFIRMATION_MEMBER,
   type AIActionConfirmation,
@@ -156,10 +157,12 @@ describe('action-confirmation contract — an unconfirmed gated action is refuse
  * 「3826 照建议（征询版）」, objectstack-ai/cloud#3826 item 6, as amended on
  * the card).
  *
- * Pinned here: the capability's spelling, the CLOSED refusal-reason set (a
+ * Pinned here: the capability's spelling, the service slot the hand-off seam
+ * is registered under, the CLOSED refusal-reason set (a
  * hand-off is not in it), that `details.reason` is typed to it and stays
  * optional while the member gates still answer without it, the pending
- * answer's discriminant and the hand-off seam's shape, that the amendment adds
+ * answer's discriminant and the hand-off seam's shape (a `resume_run` call
+ * carries its run), that the amendment adds
  * no second refusal code, and that the contract's own text names every reason,
  * every answer and the three steps, so the types and the prose cannot drift
  * apart. NOT pinned: any door behaviour, which the implementing change lands
@@ -182,6 +185,14 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
     expect(AI_ACTION_CONFIRMATION_CAPABILITY).toBe('elicitation');
     // Control: it is not the member; the two travel on different channels.
     expect(AI_ACTION_CONFIRMATION_CAPABILITY).not.toBe(AI_ACTION_CONFIRMATION_MEMBER);
+  });
+
+  it('the hand-off seam has ONE service slot a door and a host agree on', () => {
+    expect(ACTION_CONFIRMATION_SERVICE).toBe('ai.actionConfirmation');
+    // Step 3 turns on that slot, by name, and on nothing else.
+    expect(capabilityProse()).toContain(
+      '**Refuse**, only when the host registers no service under {@link ACTION_CONFIRMATION_SERVICE}',
+    );
   });
 
   it('the refusal reasons are a CLOSED set of exactly five', () => {
@@ -224,7 +235,7 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
     expect(ACTION_CONFIRMATION_REFUSAL_REASONS).toContain(reason);
   });
 
-  it('a hand-off answers with the pending discriminant, through an optional host seam', () => {
+  it('a hand-off answers with the pending discriminant, through an optional host seam', async () => {
     const pending: ActionConfirmationPending = {
       status: 'pending_confirmation',
       pendingId: 'pc_1',
@@ -246,10 +257,23 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
     const handOff: ActionConfirmationHandOff = {
       actionName: 'archive_account', objectName: 'account', recordId: 'a1', params: {}, door: 'mcp',
     };
-    const service: IActionConfirmationService = {
-      submit: async (h) => ({ pendingId: `pc_${h.actionName}` }),
+    // A `resume_run` hand-off carries the parked run and the screen's values,
+    // so approving it resumes THAT run rather than starting a new one.
+    const resumeHandOff: ActionConfirmationHandOff = {
+      actionName: 'approve_discount', params: {}, door: 'mcp',
+      run: { runId: 'run_7', values: { discount: 12 } },
     };
-    return expect(service.submit(handOff, {} as never)).resolves.toEqual({ pendingId: 'pc_archive_account' });
+    const runWithoutValues: ActionConfirmationHandOff = {
+      actionName: 'approve_discount', params: {}, door: 'mcp',
+      // @ts-expect-error — the run leg carries the values it resumes with.
+      run: { runId: 'run_7' },
+    };
+    expect(runWithoutValues.run?.runId).toBe('run_7');
+    const service: IActionConfirmationService = {
+      submit: async (h) => ({ pendingId: h.run ? `pc_resume_${h.run.runId}` : `pc_${h.actionName}` }),
+    };
+    await expect(service.submit(handOff, {} as never)).resolves.toEqual({ pendingId: 'pc_archive_account' });
+    await expect(service.submit(resumeHandOff, {} as never)).resolves.toEqual({ pendingId: 'pc_resume_run_7' });
   });
 
   it('the amendment keeps ONE refusal code: no second code is registered for it', () => {
@@ -268,20 +292,37 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
     for (const answer of ['`accept`', '`decline`', '`cancel`', 'timed out', 'then approved in the app', 'then rejected in the app']) {
       expect(prose, `the contract no longer says what ${answer} does`).toContain(answer);
     }
-    for (const step of ['**Elicit**', '**Hand off**', '**Refuse**, only when the host has no pending-confirmation service']) {
+    for (const step of ['**Elicit**', '**Hand off**', '**Refuse**, only when the host registers no service']) {
       expect(prose, `the contract dropped the step ${step}`).toContain(step);
     }
-    expect(prose, 'the contract dropped the AI-identity refusal on the approve and reject doors').toMatch(
-      /approve and reject doors of the pending-confirmation service refuse an AI identity/,
+    expect(prose, 'the approve and reject doors no longer take only a person\'s signed-in session').toMatch(
+      /approve and reject doors of the pending-confirmation service take a person's signed-in session to the app and nothing else/,
+    );
+    expect(prose, 'the contract dropped the AI-identity refusal on the approve and reject doors').toMatch(/They refuse an AI identity/);
+    expect(prose, 'the approve and reject doors no longer refuse a credential that resolves to the person').toMatch(
+      /also refuse an API key, a delegated or OAuth token and any other service credential, whoever it resolves to/,
+    );
+    expect(prose, 'the contract no longer says who decides a pending item').toMatch(
+      /The person who approves or rejects is the person the call ran as .*and nobody else/,
+    );
+    expect(prose, 'the contract no longer leaves lapse and outcome delivery to the host').toMatch(
+      /When a pending item lapses, and how the caller learns its outcome, are the host's to define and outside this contract/,
+    );
+    expect(prose, 'approving a handed-off resume_run no longer resumes the parked run').toMatch(
+      /approving it resumes THAT parked run with the values the call carried, as the approver, who must be the run's owner as today; it never starts a new run/,
     );
     expect(prose, 'the contract dropped the re-check at approval').toMatch(/every gate and permission re-checked/);
     expect(prose, 'the contract dropped the trust bound of an elicited answer').toMatch(/proves that the CLIENT answered, not that a person did/);
+    expect(prose, 'the contract dropped the trust bound of an approved hand-off').toMatch(
+      /An approval of a hand-off proves that a signed-in session to the app answered, not that a person did/,
+    );
+    expect(prose, 'the contract claims a hand-off proves a person again').not.toMatch(/is the stronger of the two/);
     expect(prose, 'the contract claims a refused call read nothing again').not.toMatch(/no record was read/);
     expect(prose, 'the contract dropped "the caller\'s `confirm` never counts"').toMatch(/The caller's `confirm` never counts/);
     expect(prose, 'the contract dropped the unchanged AI service account rule').toMatch(
       /An AI service account: unchanged\*\* \(ADR-0151 D3 rule 3\)/,
     );
-    expect(prose, 'the refusal for a client without elicitation no longer names the remedy').toMatch(
+    expect(prose, 'the refusal for a host without the pending-confirmation service no longer names the remedy').toMatch(
       /use a client that supports confirmation, or to perform the action in the app/,
     );
   });

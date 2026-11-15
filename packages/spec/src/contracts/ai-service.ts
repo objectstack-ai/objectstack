@@ -467,15 +467,22 @@ export interface ActionConfirmationRequiredDetails {
  *       (MCP 2025-11-25). The answer is the result's `action` alone; any
  *       `content` is not read.
  *    2. **Hand off**, otherwise: the door hands the call to the host's
- *       pending-confirmation service ({@link IActionConfirmationService}) and
+ *       pending-confirmation service ({@link IActionConfirmationService}, the
+ *       service registered under {@link ACTION_CONFIRMATION_SERVICE}) and
  *       answers the caller with {@link ActionConfirmationPending}: a pending
  *       id and a plain message that a confirmation was sent to the person.
  *       Nothing runs then. The host shows the pending item to the person in
  *       the app and notifies them (an emailed link, for example); the person
- *       signs in and approves or rejects it there.
- *    3. **Refuse**, only when the host has no pending-confirmation service:
- *       reason `no_confirmation_service`. The message tells the person to use
- *       a client that supports confirmation, or to perform the action in the
+ *       signs in and approves or rejects it there. The person who approves or
+ *       rejects is the person the call ran as (its `userId`, the person an
+ *       agent acts for), and nobody else: another user who can see the item
+ *       cannot decide it. When a pending item lapses,
+ *       and how the caller learns its outcome, are the host's to define and
+ *       outside this contract.
+ *    3. **Refuse**, only when the host registers no service under
+ *       {@link ACTION_CONFIRMATION_SERVICE}: reason
+ *       `no_confirmation_service`. The message tells the person to use a
+ *       client that supports confirmation, or to perform the action in the
  *       app.
  *    A door or a client that cannot elicit is never refused for that alone:
  *    it takes step 2, or step 3 when the host has no service. No step ever
@@ -496,12 +503,20 @@ export interface ActionConfirmationRequiredDetails {
  *    - Handed off, then approved in the app: the action runs as the person
  *      who approved it, through the same admitted sequence, every gate and
  *      permission re-checked at that moment; a refusal there runs nothing and
- *      is recorded on the pending item.
+ *      is recorded on the pending item. A handed-off `resume_run` call
+ *      carries its run ({@link ActionConfirmationHandOff.run}): approving it
+ *      resumes THAT parked run with the values the call carried, as the
+ *      approver, who must be the run's owner as today; it never starts a new
+ *      run of the flow.
  *    - Handed off, then rejected in the app: nothing runs.
- *    The approve and reject doors of the pending-confirmation service refuse
- *    an AI identity: an agent principal (`principalKind: 'agent'`, with or
- *    without `onBehalfOf`), and any call that arrives through an AI door. A
- *    person decides; an agent never decides for one.
+ *    The approve and reject doors of the pending-confirmation service take a
+ *    person's signed-in session to the app and nothing else. They refuse an
+ *    AI identity: an agent principal (`principalKind: 'agent'`, with or
+ *    without `onBehalfOf`), and any call that arrives through an AI door. They
+ *    also refuse an API key, a delegated or OAuth token and any other service
+ *    credential, whoever it resolves to: a person's own API key resolves as
+ *    that person, and is refused there all the same. A person decides; an
+ *    agent, a script or a credential never decides for one.
  * 5. **The caller's `confirm` never counts.** On a declared-gated call the
  *    member ({@link AI_ACTION_CONFIRMATION_MEMBER}) confers nothing: not with
  *    an elicitation, not in place of one, not in place of a hand-off, and not
@@ -526,9 +541,15 @@ export interface ActionConfirmationRequiredDetails {
  * did. The amendment closes the measured hole, an agent model answering for
  * the person inside a client that would have asked its user; a caller that
  * writes its own client can advertise `elicitation` and answer `accept`
- * itself, bounded by its credentials as before. A hand-off is decided by a
- * person signed in to the app, through doors that refuse an AI identity, and
- * is the stronger of the two.
+ * itself, bounded by its credentials as before.
+ *
+ * An approval of a hand-off proves that a signed-in session to the app
+ * answered, not that a person did: the approve and reject doors refuse every
+ * credential but a person's session, so a caller holding only the person's
+ * API key or token cannot approve its own hand-off, and one that holds the
+ * person's session (their password, or a browser they are signed in to) can,
+ * bounded by that session as any action in the app is. Each answer is as
+ * strong as what it takes to give it; neither proves a human.
  *
  * ## Its bounds
  *
@@ -568,7 +589,8 @@ export const AI_ACTION_CONFIRMATION_CAPABILITY = 'elicitation';
  *   with an error, or the connection dropped first.
  * - `timed_out`: no answer to the elicitation within the door's bound.
  * - `no_confirmation_service`: the client could not be elicited and the host
- *   has no pending-confirmation service ({@link IActionConfirmationService}).
+ *   registers no pending-confirmation service ({@link IActionConfirmationService})
+ *   under {@link ACTION_CONFIRMATION_SERVICE}.
  *   The person uses a client that supports confirmation, or performs the
  *   action in the app.
  * - `service_account`: an AI service account, which never confirms an action
@@ -603,6 +625,18 @@ export interface ActionConfirmationHandOff {
     params: Record<string, unknown>;
     /** The AI door the call arrived through, e.g. `mcp`. */
     door: string;
+    /**
+     * The parked run a `resume_run` call continues: present exactly when the
+     * call is a `resume_run`, absent for `run_action`. Approval resumes this
+     * run with `values`, as the approver, who must be the run's owner; it
+     * never starts a new run, and `params` is then empty.
+     */
+    run?: {
+        /** The paused run the call resumes. */
+        runId: string;
+        /** The screen's field values the call carried. */
+        values: Record<string, unknown>;
+    };
 }
 
 /**
@@ -624,18 +658,32 @@ export interface ActionConfirmationPending {
 }
 
 /**
+ * The service slot a {@link IActionConfirmationService} is registered under
+ * (step 2 of {@link AI_ACTION_CONFIRMATION_CAPABILITY}). The open build ships
+ * none; with none registered, a door that cannot elicit refuses, reason
+ * `no_confirmation_service` (step 3).
+ */
+export const ACTION_CONFIRMATION_SERVICE = 'ai.actionConfirmation';
+
+/**
  * The host's pending-confirmation service: the hand-off seam of the amended
- * contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY}, step 2). OPTIONAL — a
- * host without one refuses, reason `no_confirmation_service` (step 3), which
- * is the case of a bare open-source deployment.
+ * contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY}, step 2), registered
+ * under {@link ACTION_CONFIRMATION_SERVICE}. OPTIONAL — a host without one
+ * refuses, reason `no_confirmation_service` (step 3), which is the case of a
+ * bare open-source deployment.
  *
  * The service owns what happens after the hand-off: it stores the pending
- * item, shows it to the person in the app and notifies them, and serves the
- * approve and reject doors. Those doors refuse an AI identity (an agent
- * principal, with or without `onBehalfOf`, and any call through an AI door).
- * On approval the action runs as the approving person through the same
- * admitted sequence, every gate and permission re-checked; on rejection
- * nothing runs. A host may build it over its own pending-action store; the
+ * item, shows it to the person the call ran as in the app and notifies them,
+ * and serves the approve and reject doors. Only that person decides the item.
+ * Those doors take a person's signed-in session and nothing else: they refuse
+ * an AI identity (an agent principal, with or without `onBehalfOf`, and any
+ * call through an AI door) and an API key, token or other service credential,
+ * whoever it resolves to. On approval the action runs as the approving person
+ * through the same admitted sequence, every gate and permission re-checked; a
+ * hand-off that carries a run ({@link ActionConfirmationHandOff.run}) resumes
+ * that run instead of starting one. On rejection nothing runs. When an item
+ * lapses, and how the caller learns its outcome, are the host's to define. A
+ * host may build it over its own pending-action store; the
  * `held` outcome of {@link IAIService.approvePendingAction} is the existing
  * precedent for a write that waits on a person outside the conversation.
  */
