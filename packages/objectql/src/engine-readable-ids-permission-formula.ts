@@ -70,6 +70,7 @@
  * ({@link unrestrictedRequiredMasterLeavesDropped}).
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { ReadableIds, RLS_DENY_FILTER, controlledByParentMasterOf, filterSubtreeProvenanceOf, isReadableIds, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -258,10 +259,26 @@ export async function composeReadableIdsChain<N>(
  * resolution that threw: each keeps the chain, the answer every reader had
  * before, so a failure here costs the subquery and never a row.
  */
+/**
+ * [#33696 · review 6895328067, route (a)] Set while a write's middleware
+ * chain runs (`executeWithMiddleware`, for every write-epoch operation), so a
+ * read issued on a write's behalf under the caller's context — the security
+ * plugin's predicate-write narrowing, its 2.8 gate's predicate leg, its
+ * step-2.7 by-id read, a hook's read — keeps the chain: ruling 6893666857 is a
+ * read ruling, and every write path answers byte-identically to before it. An
+ * async scope, not a context stamp, for the reason the security plugin's
+ * `engineOperationScope` gives: a context is shared and spread across the very
+ * reads and sub-writes it would have to mark, and a scope cannot outlive the
+ * write it wraps.
+ */
+export const READABLE_IDS_WRITE_IN_FLIGHT = new AsyncLocalStorage<true>();
+
 const EFFECTIVE_PERMISSIONS = new WeakMap<ReadableIdsChain, Promise<Readonly<Record<string, unknown>> | null>>();
 
 /** Does the read's caller hold View All (`viewAllRecords`, or `modifyAllRecords`) on `object`? */
 async function readerViewsAllOf(chain: ReadableIdsChain, object: string): Promise<boolean> {
+  // Inside a write: the chain stays, whoever reads (route (a) above).
+  if (READABLE_IDS_WRITE_IN_FLIGHT.getStore() === true) return false;
   let pending = EFFECTIVE_PERMISSIONS.get(chain);
   if (pending === undefined) {
     const svc = chain.security.kind === 'usable'
