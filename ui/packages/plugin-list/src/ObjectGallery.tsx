@@ -55,6 +55,18 @@ export interface ObjectGalleryProps {
      * already use this spelling for exactly this situation.
      */
     onRowClick?: (record: Record<string, unknown>, event?: any) => void;
+    /**
+     * Whether a click on a card opens anything, as the host that owns the
+     * click (`onRowClick`) knows it — the grid's `rowOpensRecord`, handed down
+     * by `ListView` (objectstack#33548). `false` ⇒ the cards draw no pointer and
+     * no hover lift; the click still reaches `onRowClick`, so whatever else the
+     * host routes through it is untouched, and links inside a card stay links.
+     * Absent (or `true`) ⇒ every card is drawn as before.
+     *
+     * A RUNTIME prop, never authored metadata: the host resolves it, and no
+     * node key reaches it.
+     */
+    rowOpensRecord?: boolean;
 }
 
 const GRID_CLASSES: Record<NonNullable<GalleryConfig['cardSize']>, string> = {
@@ -797,11 +809,14 @@ export const ObjectGallery: React.FC<ObjectGalleryProps> = (props) => {
         const imageUrl = resolveCoverUrl(item, coverField);
         const placeholder = pickPlaceholderGradient(String(id) + '|' + title);
 
+        // A card the host says opens nothing looks like nothing to open: no
+        // pointer and no hover lift (objectstack#33548).
+        const cardOpens = props.rowOpensRecord !== false;
         const cardClass = cn(
             'group relative overflow-hidden border-border/60 bg-card',
             'transition-all duration-200 ease-out',
-            'hover:shadow-lg hover:border-border hover:-translate-y-0.5',
-            (props.onCardClick || props.onRowClick || schema.navigation) && 'cursor-pointer',
+            cardOpens && 'hover:shadow-lg hover:border-border hover:-translate-y-0.5',
+            cardOpens && (props.onCardClick || props.onRowClick || schema.navigation) && 'cursor-pointer',
         );
 
         // Icon-style galleries (coverFit:'contain' — app marketplaces, logo

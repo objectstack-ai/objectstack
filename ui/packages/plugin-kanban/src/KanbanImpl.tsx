@@ -227,6 +227,13 @@ export interface KanbanBoardProps {
    */
   cardsMovable?: boolean
   /**
+   * Whether a click on a card opens anything, as the host that owns the click
+   * knows it — `ObjectKanban`'s `rowOpensRecord` (objectstack#33548). `false` ⇒
+   * a card that cannot be dragged draws no pointer; the click still reaches
+   * `onCardClick`. Absent (or `true`) ⇒ every card is drawn as before.
+   */
+  rowOpensRecord?: boolean
+  /**
    * The per-column drop gate (#25933): whether a card that sits in
    * `fromColumnId` may be dropped into `toColumnId`. Absent, every column takes
    * every card, as before. `ObjectKanban` derives it from the object's
@@ -282,6 +289,12 @@ export interface KanbanLaneRows {
 const KanbanCardsMovable = React.createContext(true)
 
 /**
+ * Whether a click on a card opens anything — {@link KanbanBoardProps.rowOpensRecord},
+ * read by every {@link SortableCard} the way {@link KanbanCardsMovable} is.
+ */
+const KanbanCardsOpenRecord = React.createContext(true)
+
+/**
  * Evaluate conditional formatting rules for a card.
  * Returns CSS style overrides for backgroundColor and borderColor.
  */
@@ -314,6 +327,7 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
   // A disabled sortable attaches no drag listeners and reports
   // `aria-disabled` (objectui#12082).
   const movable = React.useContext(KanbanCardsMovable)
+  const opens = React.useContext(KanbanCardsOpenRecord)
   const {
     attributes,
     listeners,
@@ -372,7 +386,9 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
         }
       }}
     >
-      <Card className={cn("mb-2 border-border border-l-4 border-l-primary/40 bg-card/60 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10 transition-all duration-300 group touch-manipulation", movable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer")} style={cardStyles}>
+      {/* A card that neither drags nor opens (objectstack#33548) draws no
+          pointer and no hover lift: nothing about it answers a click. */}
+      <Card className={cn("mb-2 border-border border-l-4 border-l-primary/40 bg-card/60 transition-all duration-300 group touch-manipulation", (movable || opens) && "hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10", movable ? "cursor-grab active:cursor-grabbing" : opens && "cursor-pointer")} style={cardStyles}>
         {card.coverImage && (
           <div className="w-full h-32 overflow-hidden rounded-t-lg">
             <img
@@ -989,23 +1005,27 @@ function moveOutcomeSentence(outcome: unknown, movedSentence: string): string | 
   return movedSentence
 }
 
-export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, cardsMovable = true, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps) {
+export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, cardsMovable = true, rowOpensRecord = true, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps) {
   const hasDnd = useHasDndProvider()
 
   if (hasDnd) {
     return (
       <KanbanCardsMovable.Provider value={cardsMovable}>
+      <KanbanCardsOpenRecord.Provider value={rowOpensRecord}>
         <DndBridge>
           {(dnd) => <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={dnd} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />}
         </DndBridge>
+      </KanbanCardsOpenRecord.Provider>
       </KanbanCardsMovable.Provider>
     )
   }
 
   return (
     <KanbanCardsMovable.Provider value={cardsMovable}>
+      <KanbanCardsOpenRecord.Provider value={rowOpensRecord}>
       <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={null} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />
-    </KanbanCardsMovable.Provider>
+    </KanbanCardsOpenRecord.Provider>
+      </KanbanCardsMovable.Provider>
   )
 }
 
