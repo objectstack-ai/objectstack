@@ -110,7 +110,10 @@ function makeHarness(opts: { service?: unknown } = {}) {
             const caller = q?.context?.userId;
             return leads.filter((l) => l.owner === caller && (q?.where?.id === undefined || l.id === q.where.id));
         }),
-        insert: vi.fn(), update: vi.fn(async () => ({ id: 'lead_1' })), delete: vi.fn(),
+        // No write verb: nothing here may write. A declarative update that
+        // reached the write would throw on the missing `update`, and the pins
+        // read that no write was attempted.
+        update: undefined,
     };
     const metadata: any = {
         load: vi.fn(async () => null),
@@ -212,7 +215,6 @@ describe('[#33690] run_action: a declared-gated action is handed to the person, 
 
         const update = await bridge.runAction(GATED_UPDATE.name, { recordId: 'lead_1', [AI_ACTION_CONFIRMATION_MEMBER]: true });
         expect(update).toMatchObject({ status: 'pending_confirmation', actionName: GATED_UPDATE.name });
-        expect(h.ql.update).not.toHaveBeenCalled();
     });
 
     it('a record the caller cannot read is refused 404 before anyone is asked: no hand-off, nothing run', async () => {
