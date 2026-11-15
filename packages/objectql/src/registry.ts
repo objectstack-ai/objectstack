@@ -4418,8 +4418,11 @@ export class SchemaRegistry {
    * `objectExtensions` after its `objects`, a later package of the artifact,
    * its residual, on a reload the new version of an object an earlier body
    * follows — so no registration inside it can ask. Its end can: each layer is
-   * asked exactly as a single save of it would be, with the registry holding
-   * the whole run. A pair with an end outside the run is judged against the
+   * asked as a single save of it would be, with the registry holding the whole
+   * run, as its object is served ({@link servedFoldWithLayer}), and against
+   * the object as it was served with what the run replaced in the layer's slot:
+   * a pair the run leaves as it found it is not the run's to answer for
+   * (#33593 ruling R7). A pair with an end outside the run is judged against the
    * object that is registered, as a single save judges it. Where that object
    * is the environment's own, lying over a package's, and only it earns the
    * refusal, the refusal says so ({@link followRefusalAsServed}).
