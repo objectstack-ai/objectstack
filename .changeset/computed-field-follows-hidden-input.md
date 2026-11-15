@@ -14,12 +14,12 @@ Skills-docs: none — `skills/objectstack-data` teaches a rate as a `formula` ov
 
 Who moves: a role that read such a computed field — a role whose set marks a field `readable: false`, or that fails a field's `requiredPermissions`, or is served a field under its `maskingRule`, and that read a computed field over that field.
 
-What moves (each line FROM → TO):
+For that caller, after this release:
 
-- `find` / `findOne`, and the record an `insert` / `update` echoes back, for that caller: FROM the computed field served with its value TO the key absent, as the field it reads is.
-- the same caller filtering by, or aggregating, a stored computed field over such a field: FROM admitted TO refused `403 PERMISSION_DENIED`, as filtering by or aggregating the field it reads already is; `getQueryableFields` no longer lists it for that caller.
-- a computed field over a field the caller is served partially masked: FROM served in full TO absent; a mask written for the field it reads does not describe the value computed from it.
-- a computed field whose reads cannot be named from its expression (a computed member key, a method or macro on the record, the record handed whole to a function, a dialect other than CEL): withheld whenever the caller may not read some other field of the object.
+- `find` / `findOne`, and the record an `insert` / `update` echoes back, carry no key for the computed field, as they carry none for the field it reads. Before, the computed field was served with its value.
+- filtering by, or aggregating, a stored computed field over such a field is refused `403 PERMISSION_DENIED`, as filtering by or aggregating the field it reads already was; `getQueryableFields` no longer lists it. Before, both were admitted.
+- a computed field over a field the caller is served partially masked carries no key: a mask written for the field it reads does not describe the value computed from it. Before, it was served in full.
+- a computed field whose reads cannot be named from its expression (a computed member key, a method or macro on the record, the record handed whole to a function, a dialect other than CEL) is withheld whenever the caller may not read some other field of the object.
 
 The fix, when the role should read the computed field: grant the role read on every field the computed field reads (or the capability its `requiredPermissions` names). When it should not, nothing is owed.
 
