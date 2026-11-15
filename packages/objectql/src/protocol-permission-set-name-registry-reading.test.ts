@@ -473,7 +473,12 @@ describe('[#32780] two namespaces\' stored permission sets of one name: each ser
     const N = 'qa_shared_reader';
     const setOf = (cap: string) => ({ ...permissionSet(N), label: cap, systemPermissions: [cap] });
     const manifestOf = (id: string, sets: string[] = []) =>
-        ({ id, name: id, version: '1.0.0', namespace: NS[id], ...(sets.length ? { permissions: sets.map(permissionSet) } : {}) }) as any;
+        ({
+            id, name: id, version: '1.0.0', namespace: NS[id],
+            // crm_two co-owns the `crm` namespace by a declared dependency (ADR-0141 D5).
+            ...(id === CRM_TWO ? { dependencies: { [CRM]: '^1.0.0' } } : {}),
+            ...(sets.length ? { permissions: sets.map(permissionSet) } : {}),
+        }) as any;
 
     /** Boot over `stores`, with `installs` installed before the boot hydration reads the stored rows. */
     async function boot(stores: Stores, installs: readonly string[], before?: (engine: ObjectQL) => void): Promise<{ engine: ObjectQL; protocol: any }> {
@@ -569,9 +574,9 @@ describe('[#32780] two namespaces\' stored permission sets of one name: each ser
 
     it('crm ships a set, hr saves one of the name, then crm saves its own and a third namespace saves one: each lands and each is served at its own package, also after a restart (FROM: crm\'s and fin\'s saves refused naming hr)', async () => {
         const stores: Stores = new Map();
-        // crm's set is registered before the boot hydration, as a cold boot registers a package's items.
         const ship = (target: ObjectQL) => target.registry.registerItem('permission', setOf('cap_crm_shipped') as any, 'name', CRM);
-        const { engine, protocol } = await boot(stores, [CRM, HR, FIN], ship);
+        const { engine, protocol } = await boot(stores, [CRM, HR, FIN]);
+        ship(engine);
         expect(await grants(engine, [CRM]), 'the shipped set').toEqual({ [CRM]: ['cap_crm_shipped'] });
         expect((await save(protocol, HR, 'cap_hr')).success).toBe(true);
         // Each package's grant confers its own package's set.
@@ -584,6 +589,7 @@ describe('[#32780] two namespaces\' stored permission sets of one name: each ser
         expect(provenance(engine).filter((p) => p.packageId !== CRM)).toEqual([
             { packageId: FIN, tenantAuthored: true }, { packageId: HR, tenantAuthored: true },
         ]);
+        // The restart registers crm's set before its boot hydration, as a cold boot registers a package's items.
         for (const rows of [stores, reversedRows(stores)]) {
             const restarted = await boot(rows, [CRM, HR, FIN], ship);
             expect(await grants(restarted.engine, [CRM, HR, FIN]), 'after a restart').toEqual(served);
