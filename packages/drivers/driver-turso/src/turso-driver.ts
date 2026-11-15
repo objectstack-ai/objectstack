@@ -1938,6 +1938,15 @@ export class TursoDriver extends SqlDriver {
       // Local and embedded-replica modes inherit `false` from SqlDriver: they
       // run knex against a real connection and honour `options.transaction`.
       transactionsUnsupported: this.transportMode === 'remote',
+
+      // [#33698] The remote transport compiles no measure filter: remote mode
+      // delegates `aggregate()` to `RemoteTransport.aggregate`, which refuses a
+      // per-aggregation `filter` (NOT_IMPLEMENTED / 501,
+      // `refusePerAggregationFilter`). Inheriting SqlDriver's `true` here would
+      // send every filtered measure to that refusal. `false` keeps remote mode
+      // on the engine's `find()` + in-memory path, which answers it; local and
+      // embedded-replica modes run SqlDriver's own compile and inherit `true`.
+      ...(this.transportMode === 'remote' ? { aggregationFilter: false } : {}),
     };
   }
 
