@@ -212,6 +212,15 @@ export function sessionLockDatabase(dialect: 'postgres' | 'mysql' = 'postgres') 
         return shape({ locked: take(id, key) });
       case 'select GET_LOCK(?, 0) as locked':
         return shape({ locked: take(id, key) ? 1 : 0 });
+      // A run's session marker, and the check that the session holding a lock here holds a marker.
+      case 'select pg_try_advisory_lock(?::bigint) as marked':
+        return shape({ marked: take(id, key) });
+      case 'select GET_LOCK(?, 0) as marked':
+        return shape({ marked: take(id, key) ? 1 : 0 });
+      case 'select IS_USED_LOCK(?) = IS_USED_LOCK(?) as seen': {
+        const [marker, lock] = [holders.get(key), holders.get(String(bindings[1]))];
+        return shape({ seen: marker === undefined || lock === undefined ? null : Number(marker === lock) });
+      }
       case 'select pg_advisory_lock(?::bigint)':
         if (await wait(id, key, session.lockTimeoutMs)) return shape({});
         throw Object.assign(new Error('canceling statement due to lock timeout'), { code: '55P03' });
@@ -224,6 +233,12 @@ export function sessionLockDatabase(dialect: 'postgres' | 'mysql' = 'postgres') 
       case 'select 1 as held':
         return shape({ held: 1 });
       default: {
+        if (sql.startsWith('select exists (select 1 from pg_locks m join pg_locks l on l.pid = m.pid')) {
+          // classid and objid, the high and low 32 bits of each key, back to the key.
+          const keyOf = (high: unknown, low: unknown) => BigInt.asIntN(64, (BigInt(String(high)) << 32n) | BigInt(String(low))).toString();
+          const [marker, lock] = [holders.get(keyOf(bindings[0], bindings[1])), holders.get(keyOf(bindings[2], bindings[3]))];
+          return shape({ seen: marker !== undefined && marker === lock });
+        }
         const timeout = /^set lock_timeout = (\d+)$/.exec(sql);
         if (timeout) {
           session.lockTimeoutMs = Number(timeout[1]);

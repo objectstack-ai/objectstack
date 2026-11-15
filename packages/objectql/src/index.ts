@@ -923,4 +923,4 @@ export {
   databaseSessionLockPgKey,
   tryDatabaseSessionLock,
 } from './database-session-lock.js';
-export type { DatabaseSessionLock, DatabaseSessionLockWait } from './database-session-lock.js';
+export type { DatabaseSessionLock, DatabaseSessionLockRunOptions, DatabaseSessionLockWait } from './database-session-lock.js';

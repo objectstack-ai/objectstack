@@ -109,7 +109,13 @@ function sealedObjects(engine: AuditSealLockEngine, objects: readonly string[]):
 /** `'a', 'b'` for a line. */
 const named = (objects: readonly string[]): string => objects.map((o) => `'${o}'`).join(', ');
 
-/** The sealed objects of `objects`, grouped by the driver that holds each one's hot rows: one lock per database. */
+/**
+ * `objects` grouped by the driver that holds each one's hot rows. A group is a
+ * datasource, not yet a database: two datasources can reach one lock
+ * namespace — one Postgres database, or two schemas of one MySQL server, whose
+ * `GET_LOCK` names are server-wide — and there they share ONE lock, the one
+ * this run or pass took first ({@link LockCover}).
+ */
 function byDriver(engine: AuditSealLockEngine, objects: readonly string[]): Map<unknown, string[]> {
   const groups = new Map<unknown, string[]>();
   for (const object of objects) {
@@ -120,29 +126,81 @@ function byDriver(engine: AuditSealLockEngine, objects: readonly string[]): Map<
 }
 
 /**
+ * The locks one run or pass holds, each with the objects it covers. Every lock
+ * is taken with the ones before it as `ownLocks`, so a datasource whose
+ * database another datasource of the same run already locked is answered that
+ * lock, never `'held'`: a run or pass never contends with itself (review
+ * 6894679963 M1). Covering more than one datasource, a lock is still one
+ * session, released once.
+ */
+class LockCover {
+  private readonly covered = new Map<DatabaseSessionLock, string[]>();
+
+  /** The locks taken so far: the `ownLocks` of the next. */
+  get own(): DatabaseSessionLock[] {
+    return [...this.covered.keys()];
+  }
+
+  add(lock: DatabaseSessionLock, objects: readonly string[]): void {
+    this.covered.set(lock, [...(this.covered.get(lock) ?? []), ...objects]);
+  }
+
+  entries(): Array<{ objects: string[]; lock: DatabaseSessionLock }> {
+    return [...this.covered].map(([lock, objects]) => ({ objects, lock }));
+  }
+
+  async releaseAll(): Promise<void> {
+    for (const lock of this.covered.keys()) await lock.release();
+  }
+}
+
+/**
  * Hold the audit seal lock for an `os migrate audit-* --apply` run (E), on
  * each database that holds the hot rows of a sealed object the run rewrites;
  * call it before the run's first write and {@link AuditSealLockHold.finish}
  * after its last. A run whose objects declare no `lifecycle.seal` takes no
  * lock: no sealer pass reads its rows, so there is nothing to exclude.
  *
- * Contended, it says so once through `warn` and waits up to
- * {@link AUDIT_SEAL_LOCK_WAIT_MS}, then refuses. Where a sealed object's
+ * Each database is locked once, however many of the run's datasources reach
+ * it ({@link LockCover}). Contended, it says so once through `warn` and waits
+ * up to {@link AUDIT_SEAL_LOCK_WAIT_MS}, then refuses. Where a sealed object's
  * database offers no session lock (B), the run is refused unless
- * `sealerStopped`, and with it the run goes ahead and says on whose word.
- * Every refusal comes before anything is written, and lets go of every lock
- * the hold had already taken.
+ * `sealerStopped` — before any wait on another database — and with it the run
+ * goes ahead and says on whose word. Every refusal comes before anything is
+ * written, and lets go of every lock the hold had already taken.
  */
 export async function holdAuditSealLock(engine: AuditSealLockEngine, options: AuditSealLockHoldOptions): Promise<AuditSealLockHold> {
   const waitMs = options.waitMs ?? AUDIT_SEAL_LOCK_WAIT_MS;
-  const held: Array<{ objects: string[]; lock: DatabaseSessionLock }> = [];
+  const cover = new LockCover();
+  const contended: Array<[unknown, string[]]> = [];
   const unlocked: string[] = [];
+  const refuseUnlocked = (): void => {
+    if (unlocked.length === 0 || options.sealerStopped) return;
+    throw new Error(
+      `Refusing to rewrite ${named(unlocked)}: ${unlocked.length === 1 ? 'it declares' : 'they declare'} ` +
+        'lifecycle.seal, and the database that holds its rows offers no session lock to exclude the audit sealer ' +
+        'with (only Postgres and MySQL do), so a sealer pass of a running server could seal a row while this run ' +
+        'rewrites it. Stop every server that seals this database, then re-run with --sealer-stopped. ' +
+        'This run changed nothing.',
+    );
+  };
   try {
+    // First one try on every database, never waiting: a database that offers no lock is refused (B) before
+    // any wait on another, and a database another datasource of this run already locked is found covered.
     for (const [driver, objects] of byDriver(engine, sealedObjects(engine, options.objects))) {
+      const lock = await tryDatabaseSessionLock(driver, AUDIT_SEAL_LOCK_NAME, { ownLocks: cover.own });
+      if (lock === null) unlocked.push(...objects);
+      else if (lock === 'held') contended.push([driver, objects]);
+      else cover.add(lock, objects);
+    }
+    refuseUnlocked();
+    // Then the wait, where another session holds it.
+    for (const [driver, objects] of contended) {
       const where = `the database of ${named(objects)}`;
       const lock = await acquireDatabaseSessionLock(driver, {
         name: AUDIT_SEAL_LOCK_NAME,
         waitMs,
+        ownLocks: cover.own,
         onWait: () => options.warn(
           `A sealer pass or another run of ${AUDIT_SEAL_LOCK_REWRITE_COMMANDS} holds the audit seal lock on ${where}; ` +
             `waiting up to ${Math.ceil(waitMs / 1000)} s for it to finish…`,
@@ -153,20 +211,12 @@ export async function holdAuditSealLock(engine: AuditSealLockEngine, options: Au
             'changed nothing. Run it again once that has finished.',
         ),
       });
-      if (lock) held.push({ objects, lock });
+      if (lock) cover.add(lock, objects);
       else unlocked.push(...objects);
     }
-    if (unlocked.length > 0 && !options.sealerStopped) {
-      throw new Error(
-        `Refusing to rewrite ${named(unlocked)}: ${unlocked.length === 1 ? 'it declares' : 'they declare'} ` +
-          'lifecycle.seal, and the database that holds its rows offers no session lock to exclude the audit sealer ' +
-          'with (only Postgres and MySQL do), so a sealer pass of a running server could seal a row while this run ' +
-          'rewrites it. Stop every server that seals this database, then re-run with --sealer-stopped. ' +
-          'This run changed nothing.',
-      );
-    }
+    refuseUnlocked();
   } catch (error) {
-    for (const { lock } of held) await lock.release();
+    await cover.releaseAll();
     throw error;
   }
   if (unlocked.length > 0) {
@@ -179,7 +229,7 @@ export async function holdAuditSealLock(engine: AuditSealLockEngine, options: Au
   return {
     async finish() {
       const lost: string[] = [];
-      for (const { objects, lock } of held) {
+      for (const { objects, lock } of cover.entries()) {
         if (!(await lock.isHeld())) lost.push(...objects);
         await lock.release();
       }
@@ -202,26 +252,27 @@ export type AuditSealPassLocks =
 
 /**
  * A sealer pass's try (E): the audit seal lock on each database that holds the
- * hot rows of `objects`, once, never waiting. `held` names the objects of the
- * first database where another session holds it — every lock already taken is
+ * hot rows of `objects`, once, never waiting, and once per database however
+ * many datasources reach it ({@link LockCover}). `held` names the objects of
+ * the first database where another session holds it — every lock already taken is
  * let go again, and the pass is skipped. A database that offers no session
  * lock adds none: there, B is the migrations' to enforce. A failure to try is
  * handed on, every lock already taken let go.
  */
 export async function trySealPassLocks(engine: Pick<AuditSealLockEngine, 'getDriverForObject'>, objects: readonly string[]): Promise<AuditSealPassLocks> {
-  const locks: Array<{ objects: string[]; lock: DatabaseSessionLock }> = [];
+  const cover = new LockCover();
   try {
     for (const [driver, group] of byDriver(engine as AuditSealLockEngine, objects)) {
-      const lock = driver === undefined ? null : await tryDatabaseSessionLock(driver, AUDIT_SEAL_LOCK_NAME);
+      const lock = driver === undefined ? null : await tryDatabaseSessionLock(driver, AUDIT_SEAL_LOCK_NAME, { ownLocks: cover.own });
       if (lock === 'held') {
-        for (const taken of locks) await taken.lock.release();
+        await cover.releaseAll();
         return { held: true, objects: group };
       }
-      if (lock) locks.push({ objects: group, lock });
+      if (lock) cover.add(lock, group);
     }
   } catch (error) {
-    for (const taken of locks) await taken.lock.release();
+    await cover.releaseAll();
     throw error;
   }
-  return { held: false, locks };
+  return { held: false, locks: cover.entries() };
 }

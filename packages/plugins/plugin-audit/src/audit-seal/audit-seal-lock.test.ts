@@ -52,8 +52,8 @@ describe('an --apply run holds it on the datasource that holds the audit rows (E
     const hold = await holdAuditSealLock(engineOf([SEALED, PLAIN], { sys_audit_log: hot, sys_activity: primary }), {
       objects: RUN, sealerStopped: false, warn,
     });
-    const [taken] = hotDb.statements;
-    expect(taken.sql).toBe('select pg_try_advisory_lock(?::bigint) as locked');
+    const taken = hotDb.statements.find((st) => st.sql === 'select pg_try_advisory_lock(?::bigint) as locked')!;
+    expect(taken.bindings).toEqual([AUDIT_SEAL_PG_LOCK_KEY]);
     expect(hotDb.holder(AUDIT_SEAL_PG_LOCK_KEY)).toBe(taken.session);
     expect(primaryDb.statements).toEqual([]);
     expect(warn).not.toHaveBeenCalled();
@@ -67,7 +67,11 @@ describe('an --apply run holds it on the datasource that holds the audit rows (E
     const hot = lockableStore(new MemoryStore(), db);
     const both = [SEALED, { ...PLAIN, lifecycle: { class: 'audit', seal: {} } }];
     const hold = await holdAuditSealLock(engineOf(both, { sys_audit_log: hot, sys_activity: hot }), { objects: RUN, sealerStopped: false, warn: vi.fn() });
-    expect(db.statements.map((st) => st.sql)).toEqual(['select pg_try_advisory_lock(?::bigint) as locked']);
+    // The session's marker of the run, then the one lock.
+    expect(db.statements.map((st) => st.sql)).toEqual([
+      'select pg_try_advisory_lock(?::bigint) as marked',
+      'select pg_try_advisory_lock(?::bigint) as locked',
+    ]);
     await hold.finish();
   });
 
@@ -97,6 +101,106 @@ describe('an --apply run holds it on the datasource that holds the audit rows (E
     const finished = await hold.finish();
     expect(finished.lost).toBe(true);
     expect(finished.lost && finished.line).toMatch(/audit seal lock on the database of 'sys_audit_log' was lost.*os audit verify/);
+  });
+});
+
+describe('two datasources on one database: the run locks it once and never waits on itself (review 6894679963 M1)', () => {
+  // Two datasources over ONE lock namespace: one Postgres database, or two schemas of one MySQL server, whose
+  // GET_LOCK names are server-wide. Each opens its own session; the lock is the namespace's, not the session's.
+  const BOTH_SEALED = [SEALED, { ...PLAIN, lifecycle: { class: 'audit', seal: {} } }];
+  const LOCK_KEY = { postgres: AUDIT_SEAL_PG_LOCK_KEY, mysql: AUDIT_SEAL_LOCK_NAME } as const;
+
+  for (const dialect of ['postgres', 'mysql'] as const) {
+    it(`${dialect}: the --apply hold takes the lock on the first datasource, and the second is under it — no wait, no line`, async () => {
+      const db = sessionLockDatabase(dialect);
+      const audit = lockableStore(new MemoryStore(), db);
+      const activity = lockableStore(new MemoryStore(), db);
+      const warn = vi.fn();
+      const hold = await holdAuditSealLock(engineOf(BOTH_SEALED, { sys_audit_log: audit, sys_activity: activity }), {
+        objects: RUN, sealerStopped: false, warn, waitMs: 50,
+      });
+      expect(warn).not.toHaveBeenCalled();
+      expect(db.statements.map((st) => st.sql)).not.toContain('set lock_timeout = 50');
+      expect(db.statements.map((st) => st.sql)).not.toContain('select GET_LOCK(?, ?) as locked');
+      // One session holds the lock; the second datasource's session was closed once it proved itself covered.
+      const holder = db.holder(LOCK_KEY[dialect]);
+      expect(holder).toBeDefined();
+      expect(db.open()).toEqual([holder]);
+      await expect(hold.finish()).resolves.toEqual({ lost: false });
+      expect(db.holder(LOCK_KEY[dialect])).toBeUndefined();
+      expect(db.open()).toEqual([]);
+    });
+  }
+
+  it('a lost shared lock is reported for every object it covered', async () => {
+    const db = sessionLockDatabase();
+    const hold = await holdAuditSealLock(
+      engineOf(BOTH_SEALED, { sys_audit_log: lockableStore(new MemoryStore(), db), sys_activity: lockableStore(new MemoryStore(), db) }),
+      { objects: RUN, sealerStopped: false, warn: vi.fn(), waitMs: 50 },
+    );
+    db.kill(db.holder(AUDIT_SEAL_PG_LOCK_KEY)!);
+    const finished = await hold.finish();
+    expect(finished.lost && finished.line).toMatch(/database of 'sys_audit_log', 'sys_activity' was lost/);
+  });
+
+  it('⛔ the run\'s own lock on ANOTHER database is never read as cover: a held lock there is contention, waited for and refused', async () => {
+    const mine = sessionLockDatabase();
+    const theirs = sessionLockDatabase();
+    const sealerPass = await theirs.hold(AUDIT_SEAL_PG_LOCK_KEY);
+    const warn = vi.fn();
+    const refusal = await holdAuditSealLock(
+      engineOf(BOTH_SEALED, { sys_audit_log: lockableStore(new MemoryStore(), mine), sys_activity: lockableStore(new MemoryStore(), theirs) }),
+      { objects: RUN, sealerStopped: false, warn, waitMs: 20 },
+    ).then(() => null, (e: unknown) => e);
+    expect((refusal as Error).message).toMatch(/^Refusing to rewrite 'sys_activity'.*after 20 ms/);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(mine.open()).toEqual([]);
+    expect(theirs.open()).toEqual([sealerPass.session]);
+  });
+
+  it('a pass of the sealer seals both objects, where the lock per datasource skipped every pass', async () => {
+    const H = 60 * 60 * 1000;
+    const DAY0 = Date.UTC(2026, 10, 10);
+    const store = memoryEngine(BOTH_SEALED.map((o) => ({ ...o, fields: SEALED.fields })));
+    const db = sessionLockDatabase();
+    lockableStore(store.hot, db);
+    // A second datasource over the same tables, on the same database.
+    const activity = lockableStore({
+      find: (object: string, query: Record<string, unknown>) => store.hot.find(object, query),
+      count: (object: string, query?: Record<string, unknown>) => store.hot.count(object, query),
+      create: (object: string, data: Record<string, unknown>) => store.hot.create(object, data),
+      delete: (object: string, id: string) => store.hot.delete(object, id),
+    }, db);
+    store.engine.getDriverForObject = (object: string) => (object === 'sys_activity' ? activity : store.hot);
+    const crypto = bindingCrypto();
+    const logger = recordingLogger();
+    const sealer = new AuditSealer({
+      engine: store.engine, crypto, signer: () => new LocalCheckpointSigner({ engine: store.engine, crypto }), logger, now: () => DAY0 + 12 * H,
+    });
+    for (const object of RUN) {
+      store.hot.table(object).push({ id: `${object}-r1`, created_at: new Date(DAY0 + 8 * H).toISOString(), tenant_id: 'org_a', new_value: '{}' });
+    }
+    expect(await sealer.runPass()).toBe(2);
+    expect(new Set(store.hot.table('sys_audit_checkpoint').map((r) => r.sealed_object))).toEqual(new Set(RUN));
+    expect(logger.lines.filter((l) => /audit seal lock/.test(l.message))).toEqual([]);
+    expect(db.open()).toEqual([]);
+  });
+});
+
+describe('N2: a database that offers no lock is refused before any wait on another', () => {
+  it('⛔ refuses at once, with no wait line, when one sealed object is lockless and another\'s lock is held', async () => {
+    const held = sessionLockDatabase();
+    const sealerPass = await held.hold(AUDIT_SEAL_PG_LOCK_KEY);
+    const lockless = lockableStore(new MemoryStore(), { ...sessionLockDatabase(), face: { dialectName: 'sqlite', getKnex: () => { throw new Error('never asked'); } } });
+    const warn = vi.fn();
+    const refusal = await holdAuditSealLock(
+      engineOf([SEALED, { ...PLAIN, lifecycle: { class: 'audit', seal: {} } }], { sys_audit_log: lockableStore(new MemoryStore(), held), sys_activity: lockless }),
+      { objects: RUN, sealerStopped: false, warn },
+    ).then(() => null, (e: unknown) => e);
+    expect((refusal as Error).message).toMatch(/^Refusing to rewrite 'sys_activity'.*--sealer-stopped/);
+    expect(warn).not.toHaveBeenCalled();
+    expect(held.statements.map((st) => st.sql)).not.toContain(`set lock_timeout = ${AUDIT_SEAL_LOCK_WAIT_MS}`);
+    expect(held.open()).toEqual([sealerPass.session]);
   });
 });
 

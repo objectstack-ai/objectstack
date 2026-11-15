@@ -20,7 +20,7 @@
  * Its own module, importing nothing but `node:crypto`, so the pins on it load
  * the lock and not the engine around it.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 /**
  * The Postgres advisory-lock key of a lock named `name`: the first 8 bytes of
@@ -57,6 +57,65 @@ export interface DatabaseSessionLock {
   isHeld(): Promise<boolean>;
 }
 
+/**
+ * The options of a lock that one run takes on several datasources under one
+ * name ({@link tryDatabaseSessionLock}, {@link acquireDatabaseSessionLock}).
+ */
+export interface DatabaseSessionLockRunOptions {
+  /**
+   * The locks of the same name this run already holds on other datasources,
+   * each taken with this option too. Passing it — empty for the run's first —
+   * marks the new session as the run's, so that a later lock of the run can
+   * tell it from another holder.
+   *
+   * Two datasources can reach one lock namespace: a Postgres advisory lock is
+   * database-wide and a MySQL `GET_LOCK` name server-wide, so two datasources
+   * on one Postgres database, or on two schemas of one MySQL server, share the
+   * lock while each opens its own session. Without this, the run's second
+   * session finds the lock held — by the run's first — and the run contends
+   * with itself for good. With it, a lock found held is first checked against
+   * these: when one of them holds it in the same namespace, the new session is
+   * closed and THAT lock is answered, the database already being under it.
+   * The check proves the namespace and never guesses it (see `heldAmong`), so
+   * a holder it cannot prove its own is contention, as before.
+   */
+  readonly ownLocks?: readonly DatabaseSessionLock[];
+}
+
+/**
+ * The marker a session of a run holds beside its named lock: a second session
+ * lock under a name no other session can know. Seen held from another
+ * session, it proves that session shares the marked session's namespace.
+ */
+interface LockMarker {
+  readonly name: string;
+  readonly pgKey: string;
+}
+
+/** The marker of each lock taken with {@link DatabaseSessionLockRunOptions.ownLocks}. */
+const markers = new WeakMap<DatabaseSessionLock, LockMarker>();
+
+/** A Postgres key's `classid` and `objid` in `pg_locks`: its high and low 32 bits, unsigned. */
+function pgLockHalves(pgKey: string): [string, string] {
+  const unsigned = BigInt.asUintN(64, BigInt(pgKey));
+  return [(unsigned >> 32n).toString(), (unsigned & 0xffffffffn).toString()];
+}
+
+/**
+ * Whether the session that holds a marker (its key's two halves, granted in
+ * the CURRENT database) also holds the named lock (its two halves) there.
+ */
+const PG_HELD_BY_MARKED =
+  'select exists (select 1 from pg_locks m join pg_locks l on l.pid = m.pid and l.database = m.database ' +
+  "where m.locktype = 'advisory' and m.granted and m.objsubid = 1 " +
+  'and m.database = (select oid from pg_database where datname = current_database()) ' +
+  'and m.classid::bigint = ?::bigint and m.objid::bigint = ?::bigint ' +
+  "and l.locktype = 'advisory' and l.granted and l.objsubid = 1 " +
+  'and l.classid::bigint = ?::bigint and l.objid::bigint = ?::bigint) as seen';
+
+/** The same on MySQL, server-wide: the connection holding the marker holds the named lock (`NULL` when either is free). */
+const MYSQL_HELD_BY_MARKED = 'select IS_USED_LOCK(?) = IS_USED_LOCK(?) as seen';
+
 /** The single row a lock statement answers, whichever client shaped the result. */
 function lockRow(result: unknown): Record<string, unknown> | undefined {
   // pg answers `{ rows }`; mysql2 answers `[rows, fields]`.
@@ -71,7 +130,17 @@ interface LockSession {
   close(): Promise<void>;
   /** Try once, without waiting. */
   tryLock(): Promise<boolean>;
-  held(): DatabaseSessionLock;
+  /**
+   * Take this session's marker, BEFORE its named lock: a MySQL older than
+   * 5.7.5 keeps one `GET_LOCK` per session and lets the earlier go, so there
+   * the marker is the one dropped — the run then reads its own lock as
+   * contention, as without markers — and never the named lock. `null` when
+   * the marker could not be taken; the lock is then simply unmarked.
+   */
+  mark(): Promise<LockMarker | null>;
+  /** The lock of `own` whose session this session sees holding the named lock here: it already covers this namespace. */
+  heldAmong(own: readonly DatabaseSessionLock[]): Promise<DatabaseSessionLock | undefined>;
+  held(marker: LockMarker | null): DatabaseSessionLock;
 }
 
 /**
@@ -120,9 +189,33 @@ async function openLockSession(driver: unknown, name: string): Promise<LockSessi
         : await run('select GET_LOCK(?, 0) as locked', [name]);
       return tried?.locked === true || Number(tried?.locked) === 1;
     },
-    held() {
+    async mark() {
+      // A name of its own per session, the same length every time (MySQL caps a name at 64 characters).
+      const marker = { name: `objectstack:lock-session:${randomUUID()}`, pgKey: '' };
+      marker.pgKey = databaseSessionLockPgKey(marker.name);
+      const tried = pg
+        ? await run('select pg_try_advisory_lock(?::bigint) as marked', [marker.pgKey])
+        : await run('select GET_LOCK(?, 0) as marked', [marker.name]);
+      return tried?.marked === true || Number(tried?.marked) === 1 ? marker : null;
+    },
+    async heldAmong(own) {
+      // Exact, never a guess: the database itself answers that the session holding the named lock in
+      // THIS namespace holds the marker only `lock`'s session took — on Postgres in this database
+      // (`pg_locks` lists every database of the cluster), on MySQL on this server. Session ids are never
+      // compared across sessions of the run: two servers number their sessions alike.
+      for (const lock of own) {
+        const marker = markers.get(lock);
+        if (!marker) continue;
+        const seen = pg
+          ? await run(PG_HELD_BY_MARKED, [...pgLockHalves(marker.pgKey), ...pgLockHalves(pgKey)])
+          : await run(MYSQL_HELD_BY_MARKED, [marker.name, name]);
+        if (seen?.seen === true || Number(seen?.seen) === 1) return lock;
+      }
+      return undefined;
+    },
+    held(marker) {
       let held = true;
-      return {
+      const lock: DatabaseSessionLock = {
         release: async () => {
           if (!held) return;
           held = false;
@@ -142,6 +235,8 @@ async function openLockSession(driver: unknown, name: string): Promise<LockSessi
           }
         },
       };
+      if (marker) markers.set(lock, marker);
+      return lock;
     },
   };
 }
@@ -150,28 +245,38 @@ async function openLockSession(driver: unknown, name: string): Promise<LockSessi
  * Take the lock named `name` on `driver`'s database if it is free, once,
  * never waiting and never printing: the lock, `'held'` when another session
  * holds it (this session is closed again), or `null` when the database offers
- * no session lock ({@link openLockSession}). A statement that fails is handed
+ * no session lock ({@link openLockSession}). With `options.ownLocks`, a lock
+ * found held by one of those in this database's namespace answers that lock
+ * ({@link DatabaseSessionLockRunOptions}). A statement that fails is handed
  * on as it is, the session closed — never read as free or as held.
  */
-export async function tryDatabaseSessionLock(driver: unknown, name: string): Promise<DatabaseSessionLock | 'held' | null> {
+export async function tryDatabaseSessionLock(
+  driver: unknown,
+  name: string,
+  options: DatabaseSessionLockRunOptions = {},
+): Promise<DatabaseSessionLock | 'held' | null> {
   const session = await openLockSession(driver, name);
   if (!session) return null;
+  let marker: LockMarker | null = null;
+  let own: DatabaseSessionLock | undefined;
   let locked: boolean;
   try {
+    if (options.ownLocks) marker = await session.mark();
     locked = await session.tryLock();
+    if (!locked && options.ownLocks) own = await session.heldAmong(options.ownLocks);
   } catch (error) {
     await session.close();
     throw error;
   }
   if (!locked) {
     await session.close();
-    return 'held';
+    return own ?? 'held';
   }
-  return session.held();
+  return session.held(marker);
 }
 
 /** How a waiting lock speaks: its one wait line and its refusal are the caller's words. */
-export interface DatabaseSessionLockWait {
+export interface DatabaseSessionLockWait extends DatabaseSessionLockRunOptions {
   /** The lock's name: MySQL's `GET_LOCK` name, and the source of its Postgres key. */
   readonly name: string;
   /** How long to wait for another session to let go before refusing. */
@@ -185,7 +290,9 @@ export interface DatabaseSessionLockWait {
 /**
  * Take the lock named `wait.name` on `driver`'s database, waiting up to
  * `wait.waitMs` for another session to let go, or `null` when the database
- * offers no session lock ({@link openLockSession}).
+ * offers no session lock ({@link openLockSession}). With `wait.ownLocks`, a
+ * lock found held by one of those in this database's namespace answers that
+ * lock at once, with no wait and no line ({@link DatabaseSessionLockRunOptions}).
  *
  * Uncontended, it is silent: one statement, no output. Contended, it calls
  * `onWait` ONCE, then waits up to `waitMs` and throws `refuse()` on timeout.
@@ -196,8 +303,15 @@ export async function acquireDatabaseSessionLock(driver: unknown, wait: Database
   if (!session) return null;
   const { pg, run } = session;
   const { waitMs } = wait;
+  let marker: LockMarker | null = null;
   try {
+    if (wait.ownLocks) marker = await session.mark();
     if (!(await session.tryLock())) {
+      const own = wait.ownLocks ? await session.heldAmong(wait.ownLocks) : undefined;
+      if (own) {
+        await session.close();
+        return own;
+      }
       wait.onWait();
       if (pg) {
         await run(`set lock_timeout = ${Math.max(1, Math.trunc(waitMs))}`, []);
@@ -218,5 +332,5 @@ export async function acquireDatabaseSessionLock(driver: unknown, wait: Database
     await session.close();
     throw error;
   }
-  return session.held();
+  return session.held(marker);
 }

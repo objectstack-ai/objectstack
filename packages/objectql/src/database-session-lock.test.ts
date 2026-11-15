@@ -171,3 +171,67 @@ describe('acquireDatabaseSessionLock: a lock of another name waits and refuses i
     ]);
   });
 });
+
+describe('ownLocks: a run that locks several datasources never contends with itself (review 6894679963 M1)', () => {
+  /** A key's `pg_locks` `classid` and `objid`: its high and low 32 bits, unsigned. */
+  const halves = (key: string) => {
+    const unsigned = BigInt.asUintN(64, BigInt(key));
+    return [(unsigned >> 32n).toString(), (unsigned & 0xffffffffn).toString()];
+  };
+  const SEEN_PG = /^select exists \(select 1 from pg_locks m join pg_locks l on l\.pid = m\.pid and l\.database = m\.database where /;
+
+  it('without it, no marker: the schema-migration lock\'s statements are unchanged', async () => {
+    const f = fakeDriver('postgres', () => ({ locked: false }));
+    await expect(tryDatabaseSessionLock(f.driver, NAME)).resolves.toBe('held');
+    expect(f.statements.map((s) => s.sql)).toEqual(['select pg_try_advisory_lock(?::bigint) as locked']);
+  });
+
+  it('Postgres: the run\'s session takes a marker of its own before the lock; a later session finding the lock held asks whether the marked session holds it in THIS database, and answers that lock', async () => {
+    const first = fakeDriver('postgres', (sql) => (sql.endsWith('as marked') ? { marked: true } : { locked: true }));
+    const own = await tryDatabaseSessionLock(first.driver, NAME, { ownLocks: [] });
+    const [mark, lock] = first.statements;
+    expect([mark.sql, lock.sql]).toEqual(['select pg_try_advisory_lock(?::bigint) as marked', 'select pg_try_advisory_lock(?::bigint) as locked']);
+    const markerKey = String(mark.bindings[0]);
+    expect(markerKey).not.toBe(KEY);
+
+    const second = fakeDriver('postgres', (sql) => (sql.endsWith('as marked') ? { marked: true } : SEEN_PG.test(sql) ? { seen: true } : { locked: false }));
+    await expect(tryDatabaseSessionLock(second.driver, NAME, { ownLocks: [own as never] })).resolves.toBe(own);
+    const seen = second.statements.find((s) => SEEN_PG.test(s.sql))!;
+    expect(seen.sql).toContain('m.database = (select oid from pg_database where datname = current_database())');
+    expect(seen.bindings).toEqual([...halves(markerKey), ...halves(KEY)]);
+    expect(second.destroyed).toEqual([second.connection]);
+  });
+
+  it('⛔ a held lock the marked session does not hold is contention, as before: "held", and the wait for acquire', async () => {
+    const first = fakeDriver('postgres', (sql) => (sql.endsWith('as marked') ? { marked: true } : { locked: true }));
+    const own = await tryDatabaseSessionLock(first.driver, NAME, { ownLocks: [] });
+    const other = fakeDriver('postgres', (sql) => (sql.endsWith('as marked') ? { marked: true } : SEEN_PG.test(sql) ? { seen: false } : { locked: false }));
+    await expect(tryDatabaseSessionLock(other.driver, NAME, { ownLocks: [own as never] })).resolves.toBe('held');
+    const timedOut = Object.assign(new Error('canceling statement due to lock timeout'), { code: '55P03' });
+    const waiting = fakeDriver('postgres', (sql) =>
+      sql.endsWith('as marked') ? { marked: true } : SEEN_PG.test(sql) ? { seen: false } : sql.startsWith('select pg_try') ? { locked: false } : sql.startsWith('select pg_advisory_lock') ? timedOut : {});
+    const onWait = vi.fn();
+    const refusal = new Error('refused');
+    await expect(acquireDatabaseSessionLock(waiting.driver, { name: NAME, waitMs: 1_000, onWait, refuse: () => refusal, ownLocks: [own as never] }))
+      .rejects.toBe(refusal);
+    expect(onWait).toHaveBeenCalledTimes(1);
+  });
+
+  it('MySQL: the connection holding the run\'s marker holds the name, server-wide — acquire answers the run\'s lock with no wait and no line', async () => {
+    const first = fakeDriver('mysql', (sql) => (sql.endsWith('as marked') ? { marked: 1 } : { locked: 1 }));
+    const own = await tryDatabaseSessionLock(first.driver, NAME, { ownLocks: [] });
+    const markerName = String(first.statements[0].bindings[0]);
+    expect(first.statements[0].sql).toBe('select GET_LOCK(?, 0) as marked');
+    expect(markerName.length).toBeLessThanOrEqual(64);
+    const second = fakeDriver('mysql', (sql) => (sql.endsWith('as marked') ? { marked: 1 } : sql.endsWith('as seen') ? { seen: 1 } : { locked: 0 }));
+    const onWait = vi.fn();
+    await expect(acquireDatabaseSessionLock(second.driver, { name: NAME, waitMs: 1_000, onWait, refuse: () => new Error('no'), ownLocks: [own as never] }))
+      .resolves.toBe(own);
+    expect(second.statements.map((s) => [s.sql, s.bindings]).slice(1)).toEqual([
+      ['select GET_LOCK(?, 0) as locked', [NAME]],
+      ['select IS_USED_LOCK(?) = IS_USED_LOCK(?) as seen', [markerName, NAME]],
+    ]);
+    expect(onWait).not.toHaveBeenCalled();
+    expect(second.destroyed).toEqual([second.connection]);
+  });
+});
