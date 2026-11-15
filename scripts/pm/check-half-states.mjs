@@ -10004,9 +10004,14 @@ export function renderDanglingReferences(report, { markdown = false } = {}) {
 // readings reuse the file's own recognisers: `SEAT_RECORD_MARKER` +
 // `seatRecordAccepts` (seat-record.mjs, H69's reading) for the ACCEPT, and
 // `latestContractReviewOnHead` (the record reader `record-recognisers.mjs`
-// imports too) for the PASS, widened with the verdict WORD
-// (`contractReviewVerdictOf`) because a FAIL on the current head owes a patch
-// round, not a request. Two bounds, stated: the PR thread is the one thread
+// imports too) for the PASS, widened with the verdict WORD because a FAIL on
+// the current head owes a patch round, not a request. The PASS is read the
+// way the queue guard reads one (card #33705): only a comment whose author the
+// guard trusts — the relay or an account in `GOVERNED_APPROVERS`, through the
+// guard's own `recordAuthorTrusted` and trusted set (`h43RecordAuthors`) — and
+// the word of its ONE `VERDICT:` line (`contractReviewVerdictLines`), so a
+// record stating two lines, or none, is no PASS; a binding that did not load
+// leaves every thread UNJUDGED and says why. Two bounds, stated: the PR thread is the one thread
 // read — a PASS that sits on the card alone (the queue guard's second thread)
 // reads here as BEFORE, so this row can only under-report, never ask early;
 // and the ACCEPT's freshness against the head is H69's question, not this
@@ -10165,7 +10170,11 @@ export async function loadGovernedRegister(load = (specifier) => import(specifie
           'other row is unaffected',
       };
     }
-    return { available: true, matcher: (paths) => matcher(paths, repo), tierOf, recordTier, approvers, repo, reason: null };
+    // The guard's record-author binding rides along for H43's hand-off reading (card #33705). Not a condition of
+    // the register: a guard without it leaves H43's threads UNJUDGED (`h43RecordAuthors`), never the rest unread.
+    const authorTrusted = typeof guard?.recordAuthorTrusted === 'function' ? guard.recordAuthorTrusted : null;
+    const loadRecognisers = typeof guard?.loadRecordRecognisers === 'function' ? guard.loadRecordRecognisers : null;
+    return { available: true, matcher: (paths) => matcher(paths, repo), tierOf, recordTier, approvers, repo, reason: null, authorTrusted, loadRecognisers };
   } catch (err) {
     return {
       available: false,
@@ -10217,6 +10226,36 @@ export function h43CheapCoverage(pr) {
   return logins;
 }
 
+/**
+ * The queue guard's record-author binding, for H43's hand-off reading (card #33705):
+ * `{ available: true, admits(row) }`, asking the guard's `recordAuthorTrusted` with the
+ * trusted set its own `loadRecordRecognisers` assembles (the relay and `GOVERNED_APPROVERS`),
+ * or `{ available: false, reason }`. ⛔ Never a second login list here.
+ *
+ * Read at SWEEP time, never at module scope: the guard's loader imports `record-recognisers.mjs`
+ * and `check-handover.mjs`, and both import THIS file, so a call during its top-level await (or
+ * its `--self-test`'s) deadlocks; the self-test injects `load`. Never fatal: a binding that would
+ * not load names its reason, and the hand-off it would have judged reads UNJUDGED.
+ */
+export async function h43RecordAuthors(register = GOVERNED_REGISTER, load = register?.loadRecognisers) {
+  if (!register?.available) return { available: false, reason: `the governed register did not load (${register?.reason ?? 'no reason given'})` };
+  if (typeof register.authorTrusted !== 'function' || typeof load !== 'function') {
+    return { available: false, reason: 'the queue guard exports no `recordAuthorTrusted` / `loadRecordRecognisers` — a rename is the likely cause; follow it, never a second login list' };
+  }
+  let loaded;
+  try {
+    loaded = await load();
+  } catch (err) {
+    return { available: false, reason: `the guard's record recognisers would not load: ${String(err?.message ?? err).split('\n')[0]}` };
+  }
+  const trusted = loaded?.trustedAuthors;
+  if (loaded?.available !== true || !Array.isArray(trusted) || trusted.length === 0) {
+    return { available: false, reason: `the guard's record-author set did not load: ${loaded?.reason ?? 'no trusted author was exported'}` };
+  }
+  const admits = register.authorTrusted;
+  return { available: true, admits: (row) => admits(row, trusted), reason: null };
+}
+
 /** The three hand-off states (header, "The timing"): unread is UNJUDGED, before is quiet by design, due can fire. */
 export const H43_HANDOFF_STATES = Object.freeze(['unread', 'before', 'due']);
 
@@ -10226,21 +10265,24 @@ export const H43_HANDOFF_STATES = Object.freeze(['unread', 'before', 'due']);
  * issue-comment thread — H48's fetch class — in its three states (undefined
  * never consulted, null unreadable, rows judged); `headSha` is the PR's CURRENT
  * head. ACCEPT is the NEWEST `## 席位核对` record's verdict (seat-record.mjs,
- * the one reading); PASS is the newest `## Contract review` naming this head
- * whose verdict word reads PASS. Pure.
+ * the one reading); PASS is the newest `## Contract review` naming this head,
+ * among the comments `authors` admits (`h43RecordAuthors`, the queue guard's
+ * binding), whose ONE `VERDICT:` line reads PASS. An `authors` binding that
+ * is not available leaves the thread UNREAD — the PASS cannot be judged. Pure.
  *
  * @returns {{ state: 'unread'|'before'|'due', accepted: boolean, passed: boolean,
  *   record: { createdAt: string|null, stamp: number|null, index: number }|null,
  *   review: { id: number|null, sha: string|null, verdict: string|null, createdAt: string|null }|null }}
  */
-export function h43HandoffReading(commentRows, headSha) {
-  if (commentRows === undefined || commentRows === null) {
+export function h43HandoffReading(commentRows, headSha, authors = undefined) {
+  if (commentRows === undefined || commentRows === null || authors?.available !== true) {
     return { state: 'unread', accepted: false, passed: false, record: null, review: null };
   }
   const rows = Array.isArray(commentRows) ? commentRows : [];
   const record = latestMarkedComment(rows, SEAT_RECORD_MARKER);
   const accepted = record !== null && seatRecordAccepts(rows[record.index]?.body);
-  const review = latestContractReviewOnHead(rows, headSha);
+  // The queue guard's author binding (card #33705): an untrusted comment is never the record and never shadows one.
+  const review = latestContractReviewOnHead(rows.filter((row) => authors.admits(row)), headSha);
   const passed = review !== null && review.verdict === 'PASS';
   return { state: accepted && passed ? 'due' : 'before', accepted, passed, record, review };
 }
@@ -12793,21 +12835,24 @@ export function latestContractReviewOnHead(commentRows, headSha) {
   const newest = latestMarkedComment(onHead, CONTRACT_REVIEW_HEADING_MARKER);
   if (!newest) return null;
   const row = onHead[newest.index];
-  // The verdict WORD rides beside id and sha for H43's hand-off reading; existing readers ignore it.
-  return { ...newest, id: row?.id ?? null, sha: contractReviewHeadMatch(row?.body, headSha), verdict: contractReviewVerdictOf(row?.body) };
+  // The verdict WORD rides beside id and sha for H43's hand-off reading; existing readers ignore it. Read as the
+  // queue guard reads it (card #33705): the word of the record's ONE `VERDICT:` line, null with none or two.
+  const words = contractReviewVerdictLines(row?.body);
+  return { ...newest, id: row?.id ?? null, sha: contractReviewHeadMatch(row?.body, headSha), verdict: words.length === 1 ? words[0] : null };
 }
 
 /**
  * The verdict WORD a contract-review record carries — `PASS`, `FAIL`, or
  * `null` when none can be read.
  *
- * ⚠️ This is the ONE reader of the word, and it is a PATROL's reader: the
- * queue guard's Tier S record leg reads the same explicit line through
+ * ⚠️ A FIRST-MATCH reader, and since card #33705 no patrol reads a verdict
+ * with it: the queue guard's Tier S record leg, H43's hand-off and the
+ * owed-review list all read the explicit line through
  * `contractReviewVerdictLines` below, which counts the lines instead of taking
- * the first (card #33541). H43 needs the word because the
- * hand-off it patrols is owed only after a PASS — a FAIL on the current head
- * owes a patch round, not a request — and a word it cannot read is `null`,
- * which H43 reads as NOT yet due (a quiet row), never as PASS.
+ * the first (card #33541), so a record stating two lines, or only an inline
+ * or bare word, is no PASS anywhere. ⛔ Do not wire it into a reader that
+ * decides or displays a verdict; it stays the three-dialect description
+ * pinned below.
  *
  * Three measured dialects, consulted in this order:
  *   explicit   a line opening `**VERDICT: PASS**` (the `--template` form),
@@ -18279,6 +18324,7 @@ export const SWEEP_COUNT_KEYS = [
   'governedHandoffRead',
   'governedHandoffDue',
   'governedRegisterReason',
+  'governedRecordAuthorsReason',
   'liveFolds',
   'memberReadCandidates',
   'memberReadProbed',
@@ -18890,7 +18936,10 @@ export function summaryLine(counts, findingCount) {
           `read on ${counts.governedHandoffRead ?? 0} of ${counts.governedReviewCandidates ?? 0} and ` +
           `${counts.governedHandoffDue ?? 0} are past the seat's hand-off point (a \`## 席位核对\` ACCEPT and a ` +
           'same-head `## Contract review` PASS on the thread — before both, nobody is owed a request and the row ' +
-          'is quiet; an unread thread is UNJUDGED), and the submitted-review leg answered on ' +
+          'is quiet; an unread thread is UNJUDGED; a PASS counts only from the relay or an account in ' +
+          '`GOVERNED_APPROVERS`, on its one `VERDICT:` line, as the queue guard reads it' +
+          `${counts.governedRecordAuthorsReason ? ` — NOT MEASURED, every thread UNJUDGED: ${counts.governedRecordAuthorsReason}` : ''}), ` +
+          'and the submitted-review leg answered on ' +
           `${counts.governedReviewProbed ?? 0} of those ${counts.governedHandoffDue ?? 0} (Tier H only — a Tier S ` +
           `PR lands on a record, is asked nobody, and is out of this item; oldest-first, ${H43_REVIEW_PROBE_CAP} ` +
           'per run). An unread review leg leaves its row standing on the two cheap fields and the row says so; a ' +
@@ -24117,11 +24166,15 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // the seat's `## 席位核对` ACCEPT and a same-head `## Contract review` PASS
     // are both on the thread, nobody is owed a request, so such a PR buys no
     // review page and fires no row; an unread thread is UNJUDGED.
+    // The PASS is read through the queue guard's author binding (card #33705), loaded once, here, at sweep time.
+    const recordAuthors = shortOfCoverage.length > 0 ? await h43RecordAuthors() : null;
+    if (recordAuthors !== null && !recordAuthors.available) stats.governedRecordAuthorsReason = recordAuthors.reason;
     const handoffByPr = new Map();
     for (const pr of shortOfCoverage) {
       const rows = await prCommentRowsFor(pr.number);
-      if (rows !== null) stats.governedHandoffRead = (stats.governedHandoffRead ?? 0) + 1;
-      handoffByPr.set(pr.number, h43HandoffReading(rows, pr.head?.sha));
+      const handoff = h43HandoffReading(rows, pr.head?.sha, recordAuthors);
+      if (handoff.state !== 'unread') stats.governedHandoffRead = (stats.governedHandoffRead ?? 0) + 1;
+      handoffByPr.set(pr.number, handoff);
     }
     const handoffDue = shortOfCoverage.filter((pr) =>
       h43NeedsReviewProbe(pr, governedByPr.get(pr.number) ?? [], GOVERNED_REGISTER.approvers, handoffByPr.get(pr.number)),
@@ -25509,8 +25562,12 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // thread — so the controls that keep it a narrowing and not a silencer live
   // inside it: the DUE case that must still fire, the FAIL / older-head / REWORK
   // cases that must stay quiet, the unread thread that must stay UNJUDGED, and
-  // the three verdict-word dialects.
-  'H43 hand-off timing': 80,
+  // the three verdict-word dialects. 80 → 88 (#33705): the queue guard's author
+  // binding and its counted verdict reading — an untrusted PASS unread, unable to
+  // shadow a trusted FAIL, an approver's read, two lines and an inline word alone
+  // no PASS, no binding UNREAD, the binding's four unloaded reasons and its clause
+  // (two more, the real guard's predicate and set, run where the register loads).
+  'H43 hand-off timing': 88,
   // Registered with the seat-patrol rows (#28642), pin just under the count: two
   // free readings, each with its firing controls and its out-of-scope arms inside.
   'H70/H71 seat patrol': 30,
@@ -32781,9 +32838,13 @@ async function selfTest() {
   const PASS43 = '## Contract review\n\nServed-tier: `CONTRACT_REVIEW_TIER`\nHead-sha: `7cc88889e229`\nReviewed-by: `session_01x`\n\n**VERDICT: PASS**';
   const FAIL43 = PASS43.replace('**VERDICT: PASS**', '**VERDICT: FAIL**');
   const OLD_PASS43 = PASS43.replace('`7cc88889e229`', '`0123456789ab`');
-  const rows43 = (...bodies) => bodies.map((body, i) => ({ id: 900 + i, body, created_at: `2026-10-28T1${i}:00:00Z` }));
-  const DUE43 = h43HandoffReading(rows43(ACCEPT43, PASS43), HEAD43);
-  const BEFORE43 = h43HandoffReading(rows43(ACCEPT43), HEAD43);
+  // Every fixture row is posted by the relay, and the hand-off is read through an author binding (#33705): the
+  // fixture binding admits the relay and the approvers, as the guard's does; the REAL one is pinned further down.
+  const RELAY43 = 'objectstack-fleet[bot]';
+  const AUTH43 = { available: true, admits: (row) => [RELAY43, ...APP43].includes(row?.user?.login) };
+  const rows43 = (...bodies) => bodies.map((body, i) => ({ id: 900 + i, body, created_at: `2026-10-28T1${i}:00:00Z`, user: { login: RELAY43 } }));
+  const DUE43 = h43HandoffReading(rows43(ACCEPT43, PASS43), HEAD43, AUTH43);
+  const BEFORE43 = h43HandoffReading(rows43(ACCEPT43), HEAD43, AUTH43);
   const h43Gap = (pr, governed, approvers, reviewed, handoff = DUE43) => h43GovernedReviewRequestGap(pr, governed, approvers, reviewed, handoff);
   const h43Probe = (pr, governed, approvers, handoff = DUE43) => h43NeedsReviewProbe(pr, governed, approvers, handoff);
   const h43row = (...args) => String(h43Gap(...args) ?? '');
@@ -32873,6 +32934,31 @@ async function selfTest() {
   t43('H43 register: …and says the rest of the sweep is unaffected', governedRegisterFailure({ code: 'ERR_MODULE_NOT_FOUND' }).includes('every other row is unaffected'), true);
   t43('H43 register: any other load failure carries its own message', governedRegisterFailure(new Error('boom')).includes('boom'), true);
 
+  // #33705: the record-author binding H43 reads the PASS through — the queue guard's own predicate and set,
+  // ⛔ never a second login list. The guard's loader cannot run inside this self-test (it imports files that
+  // import this one: a deadlock under the top-level await), so the set is handed in through `load`, built by the
+  // guard's own `recordTrustedAuthors` from the relay login its owner declares, read from that file's source.
+  const authorsOf43 = (register, load) => h43RecordAuthors(register, load);
+  const noRegister43 = await authorsOf43({ available: false, reason: 'the pair is not installed' }, async () => ({}));
+  const noExports43 = await authorsOf43({ available: true }, async () => ({}));
+  const thrown43 = await authorsOf43({ available: true, authorTrusted: () => true }, async () => { throw new Error('ERR_MODULE_NOT_FOUND x'); });
+  const unloaded43 = await authorsOf43({ available: true, authorTrusted: () => true }, async () => ({ available: false, reason: 'no relay login' }));
+  t43('#33705 H43 authors: an unloaded register, a guard without the binding, a loader that throws or answers unavailable — each NOT available, with its reason', [noRegister43, noExports43, thrown43, unloaded43].map((a) => `${a.available}:${/the pair is not installed|recordAuthorTrusted|ERR_MODULE_NOT_FOUND|no relay login/.test(a.reason)}`).join(), 'false:true,false:true,false:true,false:true');
+  t43('#33705 H43 summary: an unloaded binding is NOT MEASURED on the clause, every thread UNJUDGED, with its reason', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 2, governedReviewCandidates: 2, governedRecordAuthorsReason: 'no relay login' }, 0)).includes('NOT MEASURED, every thread UNJUDGED: no relay login') && SWEEP_COUNT_KEYS.includes('governedRecordAuthorsReason'), true);
+  if (GOVERNED_REGISTER.available) {
+    const guard43 = await import('./check-governed-queue-guard.mjs');
+    let handover43 = '';
+    try {
+      handover43 = readFileSync(new URL('./check-handover.mjs', import.meta.url), 'utf8');
+    } catch {
+      handover43 = '';
+    }
+    const relay43 = /export const FLEET_BOT_LOGIN = '([^']+)'/.exec(handover43)?.[1] ?? null;
+    const real43 = await authorsOf43(GOVERNED_REGISTER, async () => ({ available: true, trustedAuthors: guard43.recordTrustedAuthors(relay43) }));
+    t43('#33705 H43 authors: the register carries the guard\'s OWN predicate and loader — imported, never copied', GOVERNED_REGISTER.authorTrusted === guard43.recordAuthorTrusted && GOVERNED_REGISTER.loadRecognisers === guard43.loadRecordRecognisers && relay43 !== null, true);
+    t43('#33705 H43 authors: …and the binding admits the relay and every approver, refusing any other author, a case-folded relay and an unreadable one', real43.available && [relay43, ...GOVERNED_REGISTER.approvers].every((login) => real43.admits({ user: { login } })) && !real43.admits({ user: { login: 'drive-by-commenter' } }) && !real43.admits({ user: { login: String(relay43).toUpperCase() } }) && !real43.admits({}), true);
+  }
+
   // The per-row scope (ruling B2, 2026-10-13): the register's question carries
   // the swept board, bound ONCE at load. Driven through the real modules with
   // an explicit board each, so the reading does not depend on which board this
@@ -32931,7 +33017,7 @@ async function selfTest() {
   // would put an unreviewed PR in front of a human — the very defect the
   // filing cards measured — so the row is QUIET, and an unread thread is
   // UNJUDGED rather than quiet-by-verdict.
-  const reading = (rows, head = HEAD43) => h43HandoffReading(rows, head);
+  const reading = (rows, head = HEAD43, authors = AUTH43) => h43HandoffReading(rows, head, authors);
   const states = (...pairs) => pairs.map(([rows, head]) => reading(rows, head).state).join();
   t43('H43 hand-off: an unread thread (never consulted, or unreadable) is UNREAD — never before, never due', states([undefined], [null]), 'unread,unread');
   t43('H43 hand-off: an empty thread is BEFORE', reading([]).state, 'before');
@@ -32945,6 +33031,16 @@ async function selfTest() {
   t43('H43 hand-off: the NEWEST seat record decides — ACCEPT then REWORK is BEFORE, REWORK then ACCEPT is DUE', states([rows43(ACCEPT43, REWORK43, PASS43)], [rows43(REWORK43, ACCEPT43, PASS43)]), 'before,due');
   t43('H43 hand-off: the newest PASS on the head decides, and a FAIL after it withdraws the hand-off', states([rows43(ACCEPT43, PASS43, FAIL43)], [rows43(ACCEPT43, FAIL43, PASS43)]), 'before,due');
   t43('H43 hand-off: a head too short to match is never DUE (the PASS cannot be bound to it)', reading(rows43(ACCEPT43, PASS43), '7cc8').state, 'before');
+  // #33705: the PASS is read as the queue guard reads it — its author binding, and its ONE `VERDICT:` line.
+  const by43 = (row, login) => ({ ...row, user: { login } });
+  const untrusted43 = (...bodies) => rows43(...bodies).map((row, i) => (i === bodies.length - 1 ? by43(row, 'drive-by-commenter') : row));
+  t43('⛔ #33705 H43 hand-off: a same-head PASS posted by an author outside the relay and GOVERNED_APPROVERS is not read — BEFORE', [reading(untrusted43(ACCEPT43, PASS43)).state, reading(untrusted43(ACCEPT43, PASS43)).passed, reading(untrusted43(ACCEPT43, PASS43)).review].join(), 'before,false,');
+  t43('⛔ #33705 H43 hand-off: …nor does a NEWER untrusted PASS shadow a trusted FAIL on the head — still BEFORE, on the FAIL', (() => { const r = reading(untrusted43(ACCEPT43, FAIL43, PASS43)); return [r.state, r.review?.verdict, r.review?.id].join(); })(), 'before,FAIL,901');
+  t43('#33705 H43 hand-off: a PASS an account in GOVERNED_APPROVERS posted is read — DUE', reading(rows43(ACCEPT43, PASS43).map((row, i) => (i === 1 ? by43(row, APP43[0]) : row))).state, 'due');
+  const TWO_LINES43 = `${PASS43}\n\n> **VERDICT: FAIL**`;
+  t43('⛔ #33705 H43 hand-off: a record stating TWO `VERDICT:` lines is no PASS, whichever comes first — BEFORE, its word unread', [reading(rows43(ACCEPT43, TWO_LINES43)).state, reading(rows43(ACCEPT43, TWO_LINES43)).review?.verdict, reading(rows43(ACCEPT43, FAIL43.replace('**VERDICT: FAIL**', '**VERDICT: FAIL**\n\n**VERDICT: PASS**'))).state].join(), 'before,,before');
+  t43('⛔ #33705 H43 hand-off: …nor is a heading-inline or bare PASS with no `VERDICT:` line (the guard reads none) — BEFORE', states([rows43(ACCEPT43, '## Contract review (clause ②) — **PASS** · head `7cc88889`\n\nHead-sha: `7cc88889e229`\nReviewed-by: `session_01x`')], [rows43(ACCEPT43, '## Contract review\n\nHead-sha: `7cc88889e229`\nReviewed-by: `session_01x`\n\nPASS')]), 'before,before');
+  t43('⛔ #33705 H43 hand-off: with no author binding — none handed, or one that did not load — the thread is UNREAD, never judged on every author', [h43HandoffReading(rows43(ACCEPT43, PASS43), HEAD43).state, h43HandoffReading(rows43(ACCEPT43, PASS43), HEAD43, { available: false, reason: 'x' }).state].join(), 'unread,unread');
   // The verdict WORD — the one reader of it, three measured dialects.
   t43('H43 verdict: the template line `**VERDICT: PASS**` reads PASS, and FAIL reads FAIL', [contractReviewVerdictOf(PASS43), contractReviewVerdictOf(FAIL43)].join(), 'PASS,FAIL');
   t43('H43 verdict: the heading-inline dialect `## Contract review (clause ②) — **PASS** · head …` reads PASS', contractReviewVerdictOf('## Contract review (clause ②) — **PASS** · head `7cc88889`\n\n### ① Derived judgments\n- none'), 'PASS');

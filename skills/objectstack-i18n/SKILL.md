@@ -42,9 +42,15 @@ export default defineStack({
 
 | Property | Type | Required / Default | Description |
 |:---------|:-----|:-------------------|:------------|
-| `defaultLocale` | `string` | **required** | Default BCP-47 locale code |
+| `defaultLocale` | `string` | **required** | The locale a user who has not chosen one gets |
+| `sourceLocale` | `string` | optional, defaults to `defaultLocale` | The language inline `label:` text is written in; read by `os lint`, `os i18n check`, `os i18n extract` |
 | `supportedLocales` | `string[]` | **required** | All supported locales |
 | `fallbackLocale` | `string` | optional | Fallback when translation missing |
+
+An app authored in English for Chinese users declares `defaultLocale: 'zh-CN', sourceLocale: 'en'`,
+not an English `defaultLocale`. ⚠️ Label serving still reads inline text as `defaultLocale` text: with no
+`fallbackLocale: 'en'`, an `en` request reaches the zh-CN bundle before the English inline label.
+`sourceLanguage`, `authoringLocale` and `authoringLanguage` are refused, each naming `sourceLocale`.
 
 ---
 
@@ -300,7 +306,7 @@ It compares registered bundles against source metadata and reports missing keys
 per locale for every surface the extractor walks — objects and their sub-keys,
 global actions, apps, dashboards, pages, flow screens. The platform's metadata
 forms count only for a stack that ships their translations (`--include-platform`
-audits them anyway). Gaps in the default locale are errors, `--strict` promotes
+audits them anyway). Gaps in the source locale are errors, `--strict` promotes
 the rest, `--show-keys` lists them all; `os lint --i18n-strict` folds it in.
 
 ### `os i18n extract --check` — freshness, not coverage
@@ -416,10 +422,10 @@ os i18n extract --locales=zh-CN --out=./src/translations
 
 This writes `<locale>.objects.generated.ts` TypeScript modules (not JSON), plus a
 `<locale>.metadata-forms.generated.ts` companion unless `--no-metadata-forms` —
-the default locale is filled from schema labels, other locales follow `--fill`
-(`empty | default | todo`). `os i18n extract --help` lists the rest: `--filter`,
-`--default-locale`, `--no-merge`, `--objects-only`, `--source-hashes`, `--dry-run`,
-`--json`, …
+the source locale is filled from schema labels, other locales follow `--fill`
+(`empty | default | todo`). `--default-locale` overrides the source locale for one run
+(`i18n.sourceLocale`, else `i18n.defaultLocale`, else `en`). `os i18n extract --help` lists
+the rest: `--filter`, `--no-merge`, `--objects-only`, `--source-hashes`, `--dry-run`, `--json`, …
 
 ⚠️ **`--objects-only` is on by DEFAULT**, so extract writes only the `objects` /
 `globalActions` subtree — while `os i18n check` also demands `app`, `navigation`,

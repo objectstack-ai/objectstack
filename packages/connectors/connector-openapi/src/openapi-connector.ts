@@ -557,7 +557,9 @@ function buildInputSchema(op: OpenApiOperation, auth: RestAuth, schemeFilled: Re
         if (sec.required.length) schema.required = sec.required;
         if (unresolvedParameter) schema.additionalProperties = true;
         properties[where] = schema;
-        // Path params are always required when present; others only if any are.
+        // `path` is required when it declares a parameter (a path parameter is
+        // always required); any section, when it lists a required parameter. A
+        // section emitted only because an unresolved `$ref` opened it is not.
         if ((where === 'path' && declared) || sec.required.length) required.push(where);
     }
 

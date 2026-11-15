@@ -60,7 +60,10 @@ export const SysSession = ObjectSchema.create({
     reason: 'Identity table managed by better-auth — see ADR-0010.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
-  description: 'Active user sessions',
+  // Neutral on purpose: the console draws the OBJECT description as
+  // the subtitle of every list view, and the `revoked` view lists ended
+  // sessions, so a description that says "active" is false there.
+  description: 'User sessions',
   displayNameField: 'user_id',
   nameField: 'user_id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['user_id', 'ip_address', 'expires_at'],

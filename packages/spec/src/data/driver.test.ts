@@ -58,12 +58,16 @@ const RETIRED_BITS = [
  * it. `transactions` was retired because no code read it; this one is read by
  * `driverSupportsTransactions`, which every transaction entrance in the engine
  * now calls. It is not that key revived — see the tombstone pin below.
+ *
+ * `aggregationFilter` is the fifth, under the same rule: `engine.aggregate`
+ * reads it (with method presence) to send a per-measure filter to the driver.
  */
 const LIVE_BITS = [
   'queryDateGranularity',
   'autonumber',
   'batchSchemaSync',
   'transactionsUnsupported',
+  'aggregationFilter',
 ] as const;
 
 describe('DriverCapabilitiesSchema', () => {
@@ -73,6 +77,7 @@ describe('DriverCapabilitiesSchema', () => {
       autonumber: true,
       batchSchemaSync: true,
       transactionsUnsupported: true,
+      aggregationFilter: true,
     };
 
     expect(() => DriverCapabilitiesSchema.parse(capabilities)).not.toThrow();
@@ -88,9 +93,15 @@ describe('DriverCapabilitiesSchema', () => {
     // [#18063] Absence is the whole point for `transactionsUnsupported`: a
     // driver that declares nothing keeps the transactions it has today.
     expect(parsed).not.toHaveProperty('transactionsUnsupported');
+    // Absent = the engine aggregates a filtered measure in memory, as before the bit.
+    expect(parsed).not.toHaveProperty('aggregationFilter');
   });
 
-  it('declares exactly the audited shape: 4 live bits + 31 tombstones', () => {
+  it('refuses a non-boolean aggregationFilter', () => {
+    expect(DriverCapabilitiesSchema.safeParse({ aggregationFilter: 'yes' }).success).toBe(false);
+  });
+
+  it('declares exactly the audited shape: 5 live bits + 31 tombstones', () => {
     const shape = (DriverCapabilitiesSchema as unknown as { shape: Record<string, unknown> }).shape;
     const keys = Object.keys(shape).sort();
     expect(keys).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
@@ -191,7 +202,7 @@ describe('tsc channel: the retired bits are unwritable in DriverCapabilities', (
     const props = new Map(capsType.getProperties().map((p) => [p.getName(), p]));
 
     // Anti-vacuity: the walked shape is the audited key set — 31 tombstones
-    // plus the live bits (4 since #18063 added `transactionsUnsupported`).
+    // plus the live bits (5 since `aggregationFilter`).
     expect([...props.keys()].sort()).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
 
     const decl = capsAlias!.declarations?.[0];
