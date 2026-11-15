@@ -48,7 +48,7 @@ import type { EngineAggregateOptions } from '@objectstack/spec/data';
 // entry IS this node, so this door and the REST query door (which parses
 // `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape
 // with one refusal.
-import { AggregationNodeSchema } from '@objectstack/spec/data';
+import { AggregationNodeSchema, SEARCH_COMPANION_FIELD } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
 import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
@@ -2632,8 +2632,16 @@ export function registerObjectTools(
           const fieldDefs = Array.isArray(def.fields) ? (def.fields as Array<Record<string, unknown>>) : [];
           const fields: string[] = [];
           const fieldTypes: Record<string, string> = {};
+          // The hidden search companion is served beside the declared fields
+          // (the registry stamps it where pinyin search is on), but no
+          // expression may read it: every read strips it, and `os validate`
+          // judges against the declared and injected columns, which never
+          // include it. Left in, it is listed in `inScope.fields` and a read
+          // of it answers ok here while the gate refuses it. The name is the
+          // protocol's one constant, the same one the engine provisions under.
           for (const f of fieldDefs) {
             if (typeof f?.name !== 'string') continue;
+            if (f.name === SEARCH_COMPANION_FIELD) continue;
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }

@@ -853,6 +853,23 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // the same two gates.
       sys_comment: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
       sys_activity: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // [#33584 — maintainer decision 2026-11-15, option A: members may react
+      // by default] A member reacts to the comments they can read. Before this
+      // line no shipped set named `sys_comment_reaction`, so a stock member was
+      // refused (`403`) the reaction control the record page offers them.
+      //
+      // Same shape as `sys_comment` above: this opens the OBJECT, and ⛔ no row
+      // policy is added (the reaction tripwire in default-permission-sets.test.ts
+      // forbids one). WHICH ROWS is plugin-audit's comment gate
+      // (`comment-access-hooks.ts`): a reaction is listed and read only on a
+      // comment the caller can read, and an insert on any other comment is
+      // refused, with `user_id` stamped from the session.
+      //
+      // ⛔ No `allowEdit` (the object serves no update) and no `allowDelete`
+      // (the anchor reason above). Unreact is plugin-audit's own-row door
+      // (`DELETE /api/v1/comments/reactions/:id`), which removes only a row
+      // whose `created_by` is the caller. `external_default` gets no such line.
+      sys_comment_reaction: { allowRead: true, allowCreate: true, allowEdit: false, allowDelete: false },
       // [#32442 — maintainer ruling 6849636735, 1B] The approval requests a
       // member takes part in, on the data door and the MCP read tools, as the
       // approvals inbox already serves them. Before this line a member held no

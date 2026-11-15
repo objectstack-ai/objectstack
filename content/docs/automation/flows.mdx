@@ -343,10 +343,16 @@ a list of them, each a string or an envelope:
 reach a whole organization, write `org:members`: every member of the
 notification's organization, whatever their organization membership level, a
 member recorded with none included. The organization is the run's, else that
-of the record the notification is about — never one written in the string:
-where there is none, `org:members` reaches nobody, and any other `org:` value
-is no selector and reaches nobody either, each with a warning in the server
-log. A selector that names a group of members (`org:members`, `team:ID`) reads
+of the record the notification is about — never one written in the string;
+any other `org:` value is no selector and reaches nobody, with a warning in the
+server log. Where there is none — a `schedule` flow that declares no
+`organization` and notifies about no record — the tenancy posture decides:
+under `single`, `org:members` reaches nobody, with a warning in the server log,
+and the step succeeds; under `group`, the notification itself is refused
+(`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`) and the step fails; under `isolated`,
+such a flow is never armed. Declare the flow's
+[acting organization](#the-acting-organization) to reach its members. A
+selector that names a group of members (`org:members`, `team:ID`) reads
 every member, however many there are. An
 envelope may evaluate to a recipient; to a list of them — a multi-user field, a
 list variable — whose every recipient is added; or to `null` or a blank string,

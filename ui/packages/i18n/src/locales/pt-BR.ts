@@ -2801,6 +2801,8 @@ const pt = {
         ssoBackToConsole: "Voltar ao console",
         ssoSwitchAccountHint: "Trocar de conta abre seu serviço de login em uma nova aba e encerra sua sessão lá. Depois, entre aqui novamente com uma conta que tenha acesso.",
         linkEmailMismatch: "A conta não foi vinculada: o endereço de e-mail dela não corresponde ao da conta com a qual você entrou. Vincule uma conta que use o mesmo endereço de e-mail.",
+        linkAlreadyLinkedToOtherUser: "A conta não foi vinculada: ela já está vinculada a outro usuário deste sistema. Vincule outra conta ou entre como o usuário ao qual ela está vinculada e desvincule-a lá primeiro.",
+        linkUnableToLink: "Não foi possível vincular a conta. Verifique se o endereço de e-mail dela está confirmado nesse serviço de login e tente novamente. Se continuar falhando, fale com seu administrador.",
         twoFactorInvalidCode: "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
         twoFactorInvalidBackupCode: "Esse código de backup não é válido ou já foi usado.",
         twoFactorTooManyAttempts: "Muitos códigos incorretos. Faça login novamente com sua senha.",
