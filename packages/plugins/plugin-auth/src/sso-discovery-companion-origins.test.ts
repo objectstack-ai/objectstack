@@ -491,9 +491,14 @@ describe('an origin a register or update body names is trusted for that provider
   });
 
   it('CONTROL: on update too, the sign-out capability check refuses a logout endpoint on a host the body does not name', async () => {
-    restore = stubDiscovery({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${BODY_HOST}/logout`) });
+    // Registered while the IdP publishes no logout endpoint (the vendor's own
+    // discovery check judges a published one too); it publishes one on a
+    // foreign host by the time the update turns the switch on.
+    restore = stubDiscovery({ [OTHER_ISSUER]: discoveryDocument(OTHER_ISSUER, `${OTHER_ISSUER}/userinfo`) });
     const rp = await makeCheckedRp();
     expect((await postAs(rp, '/sso/register', registration('other-oidc', OTHER_ISSUER), BASE)).status).toBe(200);
+    restore();
+    restore = stubDiscovery({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${BODY_HOST}/logout`) });
     const before = JSON.stringify(storedRows(rp));
     const res = await postAs(rp, '/sso/update-provider', { providerId: 'other-oidc', issuer: OTHER_ISSUER, signOutOfIdp: true }, BASE);
     expect(res.status).toBe(400);

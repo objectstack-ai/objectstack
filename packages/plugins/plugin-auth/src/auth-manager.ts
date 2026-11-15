@@ -4452,10 +4452,11 @@ export class AuthManager {
    * endpoint it read is kept for the after-hook, which stores it once the
    * vendor's write landed.
    *
-   * This is a server-side discovery read of the provider the body names, so
-   * it trusts the origins that body names (`ssoDiscoveryTrustedOrigins`) beside
-   * the configured ones, on both doors — for this read only; the request's own
-   * origin check never sees them (`sso-discovery-companion-origins.ts`).
+   * Its verdict on the OIDC logout endpoint is a validation of the provider
+   * the body names, so that verdict alone trusts the origins that body names
+   * (`ssoDiscoveryTrustedOrigins`) beside the configured ones, on both doors.
+   * The discovery read it makes keeps the configured trust, and the request's
+   * own origin check never sees them (`sso-discovery-companion-origins.ts`).
    */
   private async assertSsoSignOutOfIdpSupported(ctx: any): Promise<void> {
     const path = ctx?.path;
@@ -4481,7 +4482,8 @@ export class AuthManager {
       issuer,
       stored: stored ? { samlConfig: stored.samlConfig, oidcConfig: stored.oidcConfig } : undefined,
       body: { samlConfig: ctx.body.samlConfig, oidcConfig: ctx.body.oidcConfig },
-      isTrustedOrigin: trustingBodyNamedOrigins(
+      isTrustedOrigin: (url) => context.isTrustedOrigin(url),
+      isTrustedLogoutOrigin: trustingBodyNamedOrigins(
         (url) => context.isTrustedOrigin(url),
         await this.ssoDiscoveryTrustedOrigins(ctx.body),
       ),
@@ -6111,22 +6113,23 @@ export class AuthManager {
   }
 
   /**
-   * The origins an external-SSO registration body names, trusted for that
-   * provider's discovery fetch and validation only (ADR-0135 D6: a customer
-   * IdP registers at runtime without the operator pre-listing it in boot
-   * config). `body` is the vendor endpoint's parsed `/sso/register` body; the
-   * answer is the PUBLIC-ROUTABLE origins of its `issuer` and every explicit
+   * The origins an external-SSO register or update body names, trusted for
+   * that provider's discovery fetch and validation only (ADR-0135 D6: a
+   * customer IdP registers at runtime without the operator pre-listing it in
+   * boot config). `body` is the vendor endpoint's parsed `/sso/register` or
+   * `/sso/update-provider` body; the answer is the PUBLIC-ROUTABLE origins of its `issuer` and every explicit
    * `oidcConfig` endpoint. Private / internal / loopback hosts are never
    * trusted this way (better-auth's `isPublicRoutableHost`, the same predicate
    * its own sub-endpoint check uses). Best-effort: anything unreadable yields
    * `[]`.
    *
    * ⛔ Never an accepted `Origin`: the request's own origin check reads the
-   * deployment's configured trusted origins alone. This list reaches the two
-   * server-side discovery reads of that provider only: the vendor's register
-   * endpoint (the global before-hook hands it to that endpoint's context,
-   * after the origin check has run) and the sign-out capability check on
-   * register and update (`assertSsoSignOutOfIdpSupported`); see
+   * deployment's configured trusted origins alone. This list reaches two
+   * server-side checks of that provider only: the vendor's register endpoint
+   * (the global before-hook hands it to that endpoint's context, after the
+   * origin check has run) and the sign-out capability check's verdict on the
+   * provider's logout endpoint, on register and update
+   * (`assertSsoSignOutOfIdpSupported`); see
    * `sso-discovery-companion-origins.ts`.
    */
   private async ssoDiscoveryTrustedOrigins(body: unknown): Promise<string[]> {

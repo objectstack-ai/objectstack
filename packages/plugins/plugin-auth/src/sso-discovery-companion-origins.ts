@@ -40,9 +40,10 @@
  * - the vendor's `/sso/register` discovery and endpoint validation, through
  *   the same per-endpoint context change as a companion origin;
  * - the sign-out capability check on `/sso/register` and
- *   `/sso/update-provider` (`AuthManager.assertSsoSignOutOfIdpSupported`),
- *   which reads the provider's discovery document for its logout endpoint,
- *   through {@link trustingBodyNamedOrigins}.
+ *   `/sso/update-provider` (`AuthManager.assertSsoSignOutOfIdpSupported`):
+ *   its verdict on the provider's logout endpoint alone, through
+ *   {@link trustingBodyNamedOrigins}. The discovery document it reads to
+ *   find that endpoint is fetched under the configured trust.
  *
  * The vendor's `/sso/update-provider` itself fetches no discovery document,
  * and its endpoint validation admits any public host on its own, so it reads
@@ -115,11 +116,11 @@ export function ssoDiscoveryCompanionContext(
 }
 
 /**
- * A trusted-origin predicate for a server-side discovery read of the provider
- * a register or update body names: the request's own predicate, and also the
+ * A trusted-origin predicate for a validation of the provider a register or
+ * update body names: the request's own predicate, and also the
  * origins that body names (`AuthManager.ssoDiscoveryTrustedOrigins`), matched
- * exactly, as the vendor matches a plain origin. ⛔ Only for such a read: the
- * request's origin check never takes it.
+ * exactly, as the vendor matches a plain origin. ⛔ Only for such a
+ * validation: the request's origin check never takes it.
  */
 export function trustingBodyNamedOrigins(
   isTrustedOrigin: (url: string) => boolean,
