@@ -2938,8 +2938,14 @@ export class AutomationEngine implements IAutomationService {
      */
     // [#32183, R4-G] `heldByMany` reads every holder, a disabled package's
     // included: a disable keeps that package's slot armed, so it never folds
-    // a shared name back to one bare entry (`main`'s answer).
-    private readonly flowSlots = new FlowSlotTable((name) => this.durableFlowHolder(name)?.status === 'refused');
+    // a shared name back to one bare entry (`main`'s answer). [#33893;
+    // amendment 7] `coHeldByDisabled`: so is the key of a holder whose
+    // co-holders are disabled, which the boot pull files alone and a disabled
+    // co-holder's withdrawal leaves alone; it keeps its qualified key.
+    private readonly flowSlots = new FlowSlotTable(
+        (name) => this.durableFlowHolder(name)?.status === 'refused',
+        (name) => this.durableFlowHolder(name)?.status === 'refused' && this.flowHolder(name)?.status !== 'refused',
+    );
     /** [#31696] Slot keys whose trigger decline ({@link activateFlowTrigger}) has been said. */
     private readonly sharedSlotTriggerWarned = new Set<string>();
     /**
@@ -4199,6 +4205,9 @@ export class AutomationEngine implements IAutomationService {
         // holds under two packages (the other's body refused, M1) still holds
         // the bare key, which would read as the name's one holder: it is not
         // armed, behind this warning, and runs when called by its package.
+        // [#33893] Both served ({@link loneSharedFlowKey}): beside a disabled
+        // co-holder the slot is the name's one served holder, filed under its
+        // qualified key, and is armed; the warning names no refused body.
         if (this.loneSharedFlowKey(this.flowSlotName(flowName)) === flowName) {
             if (!this.sharedSlotTriggerWarned.has(flowName)) {
                 this.sharedSlotTriggerWarned.add(flowName);
@@ -5381,10 +5390,16 @@ export class AutomationEngine implements IAutomationService {
         return keys.length > 0 ? keys : [name];
     }
 
-    /** [M1] The key of `name`'s one slot while the registry holds `name` under two packages, else `undefined`. */
+    /**
+     * [M1] The key of `name`'s one slot while the registry holds `name` under
+     * two packages SERVED, so another served package's body of it is not held
+     * here (refused), else `undefined`. [#33893] A co-holder that is only
+     * disabled is no M1: the slot is the name's one served holder, keeps its
+     * qualified key (amendment 7) and is armed, and no body was refused.
+     */
     private loneSharedFlowKey(name: string): string | undefined {
         const keys = this.flowSlots.keysOf(name);
-        return keys.length === 1 && this.flowSlots.isShared(name) ? keys[0] : undefined;
+        return keys.length === 1 && this.flowSlots.isShared(name) && this.flowHolder(name)?.status === 'refused' ? keys[0] : undefined;
     }
 
     /** [#31696] Is `key` the key of a slot whose name another slot holds too? */
@@ -5642,7 +5657,10 @@ export class AutomationEngine implements IAutomationService {
         };
         withdrawFlow.call(host, name);
         // [#31696] The slot goes with its flow; a name left with one slot
-        // files it under the bare name again.
+        // files it under the bare name again. [#33893] Not while the registry
+        // still holds the name under a disabled package (the re-sync of a
+        // disable withdraws its slot): the served holder keeps its key and
+        // its binding (amendment 7).
         this.moveFlowRecords(this.flowSlots.remove(name));
     }
 

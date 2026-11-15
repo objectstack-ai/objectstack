@@ -1279,3 +1279,144 @@ describe('[#33905] the bare entries of a flow whose only holder\'s package is di
         expect(ran).toEqual(['p1']);
     });
 });
+
+/**
+ * [ADR-0150 D3/D4, #33893; seat ruling 6884403301, amendment 7] A disable is
+ * reversible and moves no key. The served holder of a name a disabled
+ * package co-holds keeps its slot under `PACKAGE/NAME`, armed, and its
+ * trigger dispatches: when the boot pull registers it alone (the disabled
+ * holder's flows not pulled), and when the disable's re-sync withdraws the
+ * disabled holder's slot. The M1 decline and its warning stay for a body
+ * that really was refused (the `[M1]` pins above). A holder that leaves the
+ * registry (an uninstall) folds the name back to its bare key, as before
+ * (CONTROL).
+ */
+describe('[#33893] the served holder of a name a disabled package co-holds keeps its qualified key, armed', () => {
+    const tagOf = (packageId: string) => packageId.split('.').pop()!;
+    let armed: Map<string, (c: unknown) => Promise<void>>;
+    let started: string[];
+    let stopped: string[];
+
+    beforeEach(() => {
+        armed = new Map();
+        started = [];
+        stopped = [];
+        engine.registerTrigger({
+            type: 'record_change',
+            start: (b: { flowName: string }, callback: (c: unknown) => Promise<void>) => {
+                started.push(b.flowName);
+                armed.set(b.flowName, callback);
+            },
+            stop: (key: string) => {
+                stopped.push(key);
+                armed.delete(key);
+            },
+        } as unknown as FlowTrigger);
+    });
+
+    async function fireAll(): Promise<string[]> {
+        ran = [];
+        for (const [key, callback] of armed) await callback({ params: { flowName: key } });
+        return [...ran].sort();
+    }
+
+    /** The registry holds `body` under `packageId` (its loader set too); the engine is not handed it. */
+    function heldOnly(packageId: string, body: { name: string }): void {
+        registry.registerItem('flow', { ...body, _packageId: packageId }, 'name' as never, packageId);
+        loaderSets[body.name] = [...new Set([...(loaderSets[body.name] ?? []), packageId])];
+    }
+
+    /** The pull (or the re-sync) hands the engine package `packageId`'s flow, as precedence arms a name two packages hold. */
+    function pull(packageId: string, body: { name: string }): void {
+        engine.registerFlow(body.name, body, { source: 'package', packageId, holder: packageId });
+    }
+
+    const refusedBodyWarned = () => engineLogger.warn.mock.calls.filter(([message]: [string]) => /whose body was refused/.test(message));
+
+    it('FlowSlotTable: beside a disabled co-holder the first slot is filed qualified, and a co-holder\'s removal moves no key', () => {
+        let coHeldByDisabled = true;
+        const slots = new FlowSlotTable(() => true, () => coHeldByDisabled);
+        expect(slots.add({ packageId: P1, name: 'f' })).toEqual({ key: `${P1}/f`, moved: [] });
+        expect(slots.isShared('f')).toBe(true);
+        expect(slots.add({ packageId: P2, name: 'f' })).toEqual({ key: `${P2}/f`, moved: [] });
+        expect(slots.remove(`${P2}/f`)).toEqual([]);
+        expect(slots.keyOf('f', P1)).toBe(`${P1}/f`);
+        // CONTROL: with no disabled co-holder the removal folds the name back, as before.
+        slots.add({ packageId: P2, name: 'f' });
+        coHeldByDisabled = false;
+        expect(slots.remove(`${P2}/f`)).toEqual([{ from: `${P1}/f`, to: 'f' }]);
+    });
+
+    describe.each([[P1, P2], [P2, P1]].map((order) => [order.map(tagOf).join(' then '), order] as const))('registry holds %s', (_o, order) => {
+        it.each([[P1, P2], [P2, P1]])('boot disable, %s disabled: the served holder is filed under PACKAGE/NAME, armed and dispatched, with no warning (FROM: bare key, declined behind the refused-body warning)', async (off, on) => {
+            for (const holder of order) heldOnly(holder, triggered('t', tagOf(holder)));
+            registry.disablePackage(off);
+            pull(on, triggered('t', tagOf(on)));
+
+            expect(engine.flowSlotKey(on, 't')).toBe(`${on}/t`);
+            expect(started).toEqual([`${on}/t`]);
+            expect(await fireAll()).toEqual([tagOf(on)]);
+            expect(refusedBodyWarned()).toEqual([]);
+            expect(engine.flowDispatchHolder(`${on}/t`)).toEqual({ packageId: on, claimBare: false, name: 't' });
+            expect(engine.getFlowRegistration('t')).toEqual({ state: 'registered' });
+            // The bare name reaches its one served holder.
+            ran = [];
+            expect((await engine.execute('t')).success).toBe(true);
+            expect(ran).toEqual([tagOf(on)]);
+
+            // Enabled, the re-sync registers the other holder: no key moves, nothing is re-armed.
+            registry.enablePackage(off);
+            pull(off, triggered('t', tagOf(off)));
+            expect(started).toEqual([`${on}/t`, `${off}/t`]);
+            expect(stopped).toEqual([]);
+            expect(await fireAll()).toEqual([tagOf(P1), tagOf(P2)].sort());
+        });
+
+        it.each([[P1, P2], [P2, P1]])('runtime disable of %s, then the re-sync withdraws its slot: the served holder keeps its key and binding and dispatches (FROM: re-keyed to the bare name, its binding stopped)', async (off, on) => {
+            for (const holder of order) ship(holder, triggered('t', tagOf(holder)));
+            expect(await fireAll()).toEqual([tagOf(P1), tagOf(P2)].sort());
+            started = [];
+            stopped = [];
+
+            registry.disablePackage(off);
+            engine.withdrawFlowSlot(off, 't');
+            expect(engine.flowSlotKey(on, 't')).toBe(`${on}/t`);
+            expect(engine.flowSlotKey(off, 't')).toBeUndefined();
+            expect(stopped).toEqual([`${off}/t`]);
+            expect([...armed.keys()]).toEqual([`${on}/t`]);
+            expect(await fireAll()).toEqual([tagOf(on)]);
+            expect(refusedBodyWarned()).toEqual([]);
+            expect(engine.flowDispatchHolder(`${on}/t`)).toEqual({ packageId: on, claimBare: false, name: 't' });
+
+            registry.enablePackage(off);
+            pull(off, triggered('t', tagOf(off)));
+            expect(started).toEqual([`${off}/t`]);
+            expect(stopped).toEqual([`${off}/t`]);
+            expect(await fireAll()).toEqual([tagOf(P1), tagOf(P2)].sort());
+        });
+    });
+
+    it('the disabled holder then uninstalled: the served holder keeps its key, and the bare name and its trigger still reach it', async () => {
+        ship(P1, triggered('t', 'alpha'));
+        ship(P2, triggered('t', 'beta'));
+        registry.disablePackage(P2);
+        engine.withdrawFlowSlot(P2, 't');
+        registry.unregisterItemsByPackage(P2);
+        expect(engine.flowSlotKey(P1, 't')).toBe(`${P1}/t`);
+        expect(await fireAll()).toEqual(['alpha']);
+        ran = [];
+        expect((await engine.execute('t')).success).toBe(true);
+        expect(await engine.getFlow('t')).toMatchObject({ name: 't' });
+        expect(ran).toEqual(['alpha']);
+    });
+
+    it('CONTROL — the other holder uninstalled before its slot is withdrawn: the name folds back to its bare key, as before', async () => {
+        ship(P1, triggered('t', 'alpha'));
+        ship(P2, triggered('t', 'beta'));
+        registry.unregisterItemsByPackage(P2);
+        engine.withdrawFlowSlot(P2, 't');
+        expect(engine.flowSlotKey(P1, 't')).toBe('t');
+        expect([...armed.keys()]).toEqual(['t']);
+        expect(await fireAll()).toEqual(['alpha']);
+    });
+});
