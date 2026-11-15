@@ -1906,9 +1906,11 @@ export class SharingService implements ISharingService {
    * [ADR-0111 D1/D7] Non-system callers must hold {@link canManageShares} on
    * the record; the recipient must be a `user` (the only type any gate
    * enforces); and the object must be in an enforcing sharing posture. The
-   * upsert matches on `(object, record, recipient, source)` so a manual grant
-   * never clobbers a rule-materialised row (and vice versa) — when both exist,
-   * the gates' `$in` queries make the widest level win (grants are additive).
+   * upsert matches on `(object, record, recipient, source)`, plus `source_id`
+   * for a materialised grant, so a manual grant never clobbers a
+   * rule-materialised row (and vice versa) and one rule never clobbers
+   * another's — when several exist, the gates' `$in` queries make the widest
+   * level win (grants are additive).
    */
   async grant(
     input: GrantShareInput,
@@ -2004,6 +2006,22 @@ export class SharingService implements ISharingService {
     // is part of the key (ADR-0111 D7): a manual grant must not clobber a
     // rule-materialised row — the rule's next reconcile would fight it (flip
     // it back or purge it), leaving access flapping between the two answers.
+    //
+    // A materialised grant's `source_id` is part of the key too: one row per
+    // (rule, recipient). Two rules reaching one user on one record are two
+    // grants, and the gates' `$in` reads already take the widest level across
+    // rows, so the effective access is the highest any rule grants. Keyed
+    // without it, the second rule found the first rule's row and overwrote its
+    // level and `source_id`: the last rule written won whatever its level
+    // (edit then read left read), and because every rule reconciles and
+    // revokes by its own `source_id`, the merged row belonged to whichever
+    // rule wrote last — revoking that rule took away access the other rule
+    // still grants, and the other rule's revoke found nothing to remove.
+    // Only the rule evaluator's SYSTEM path supplies a `source_id` that names a
+    // rule. A manual grant, and any grant made outside the rule evaluator, keeps
+    // the four-part key, so a repeated grant of that kind still upserts its one
+    // row.
+    const sourceId = context?.isSystem && source !== 'manual' && input.sourceId ? input.sourceId : undefined;
     const existing = await this.engine.find('sys_record_share', {
       where: {
         object_name: input.object,
@@ -2011,6 +2029,7 @@ export class SharingService implements ISharingService {
         recipient_type: recipientType,
         recipient_id: input.recipientId,
         source,
+        ...(sourceId !== undefined ? { source_id: sourceId } : {}),
       },
       limit: 1,
       context: SYSTEM_CTX,

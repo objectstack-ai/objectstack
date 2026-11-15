@@ -92,7 +92,18 @@ export function namespacedScenario(scenario: LoadedScenario): LoadedScenario {
         object: o(op.object),
         outcome: op.outcome.kind === 'applied' ? { ...op.outcome, state: op.outcome.state.map((s) => ({ ...s, object: o(s.object) })) } : op.outcome,
       })),
-      guardrails: c.run.guardrails.map((g) => (g.cell ? { ...g, cell: { ...g.cell, object: o(g.cell.object) } } : g)),
+      guardrails: c.run.guardrails.map((g) => ({
+        ...g,
+        ...(g.cell ? { cell: { ...g.cell, object: o(g.cell.object) } } : {}),
+        ...(g.forbids
+          ? {
+              forbids: {
+                ...(g.forbids.writes ? { writes: g.forbids.writes.map(o) } : {}),
+                ...(g.forbids.discloses ? { discloses: { ...g.forbids.discloses, object: o(g.forbids.discloses.object) } } : {}),
+              },
+            }
+          : {}),
+      })),
       ...(c.run.agentActions ? { agentActions: c.run.agentActions.map((a) => ({ ...a, name: o(a.name), object: o(a.object) })) } : {}),
     },
     iterate: {
