@@ -60,6 +60,10 @@ function rawStatementFault(): Error {
 /**
  * A driver whose raw seam answers every preflight read with no rows and
  * refuses the guard's catalog statement (the one naming `type = 'index'`).
+ * The preflight's catalog read of each guard's scope column
+ * (`readColumnPresence` in metadata-protocol) answers a row: the column is
+ * there, so the listing runs and the refusal this fixture is about is the
+ * guard's own presence read.
  */
 function driverRefusingThePresenceRead() {
   const statements: string[] = [];
@@ -70,6 +74,7 @@ function driverRefusingThePresenceRead() {
       async execute(sql: string) {
         statements.push(sql);
         if (sql.includes("type = 'index'")) throw rawStatementFault();
+        if (sql.includes('FROM pragma_table_info(')) return [{ present: 1 }];
         return [];
       },
     },

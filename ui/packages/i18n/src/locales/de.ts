@@ -2733,6 +2733,7 @@ const de = {
         ssoSwitchAccount: "Konto wechseln",
         ssoBackToConsole: "Zurück zur Konsole",
         ssoSwitchAccountHint: "Konto wechseln öffnet Ihren Anmeldedienst in einem neuen Tab und meldet Sie dort ab. Melden Sie sich anschließend hier erneut mit einem Konto an, das Zugriff hat.",
+        linkEmailMismatch: "Das Konto wurde nicht verknüpft: Seine E-Mail-Adresse stimmt nicht mit der des Kontos überein, mit dem Sie angemeldet sind. Verknüpfen Sie ein Konto mit derselben E-Mail-Adresse.",
         twoFactorInvalidCode: "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
         twoFactorInvalidBackupCode: "Dieser Backup-Code ist ungültig oder wurde bereits verwendet.",
         twoFactorTooManyAttempts: "Zu viele falsche Codes. Melden Sie sich erneut mit Ihrem Passwort an.",
