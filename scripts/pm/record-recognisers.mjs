@@ -2170,10 +2170,18 @@ export function contractReviewBriefLines(values = {}) {
     '',
   ];
   // A `hits` path on the low-risk skills arm lands on this record alone (#33501, ruling B): the arm reads
-  // the `security` label and the path's name, so teaching the name does not show is the reviewer's to label.
-  const lowRiskLines = scopeHits !== undefined && lowRiskRowHit(scopeHits) ? [
-    'Security — a `hits` path sits on the low-risk skills arm: the contract reviewer adds the `security` label',
-    "  when the change teaches security, auth or permission behaviour the path name doesn't show, and the record says so.",
+  // the `security` label and the path's name, so teaching the name does not show must be flagged here. An
+  // isolated reviewer cannot label, so the record says so and the adopting seat adds the label. With no
+  // `--paths` the brief cannot know the hits, and the skill teaches the bare `--brief-template`, so every
+  // at-tier brief over unknown paths carries the duty in its conditional form.
+  const securityDuty = "  behaviour the path name doesn't show, the record says so and the seat adopting the record adds the `security` label.";
+  const lowRiskLines = scopeHits !== undefined ? (lowRiskRowHit(scopeHits) ? [
+    'Security — a `hits` path sits on the low-risk skills arm: when the change teaches security, auth or permission',
+    securityDuty,
+    '',
+  ] : []) : atTier && face?.id !== 'narrowing' ? [
+    'Security — if a `hits` path is under `skills/**` or `ui/skills/**` and the change teaches security, auth or permission',
+    securityDuty,
     '',
   ] : [];
   return [
@@ -2376,7 +2384,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 23,
   '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
-  '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 21,
+  '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 22,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
   '⭐ the `Contract-review-handoff:` line — names the current head ⇒ the named review or sibling seat\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own; `triage` unreadable': 17,
   // Raised 27 → 40 with the scenario table's seven admitted keys and the `seat-online` patrol field: one pin
@@ -2684,9 +2692,11 @@ export async function selfTest() {
   t('…and over a declaration-only list it hands `--face declaration`, as the face table would', says(contractReviewBriefLines({ paths: DECL_PATHS }).join('\n'), '--template --face declaration`') && contractReviewBriefLines({ paths: DECL_PATHS }).join('\n') === contractReviewBriefLines({ face: 'declaration' }).join('\n'));
   // #33501 ruling B: the low-risk arm reads the `security` label and the path's name, so the brief over a
   // catalog path hands the reviewer the label duty for teaching the name does not show.
-  const SECURITY_DUTY = 'the contract reviewer adds the `security` label';
-  t('⭐ the brief over a low-risk skills path hands the reviewer the `security` label duty, on either catalog row and through the CLI', (() => { const own = ['skills/objectstack-data/SKILL.md', 'ui/skills/objectui-forms/SKILL.md']; return own.every((p) => says(contractReviewBriefLines({ paths: [p, ...DECL_PATHS] }).join('\n'), SECURITY_DUTY)) && says(faceCli(['--brief-template', '--paths', own[0]]).stdout, "behaviour the path name doesn't show, and the record says so"); })());
-  t('⛔ …and no other brief carries it — a mixed list off the arm, the declaration face, the default brief', [contractReviewBriefLines({ paths: MIXED }), contractReviewBriefLines({ face: 'declaration' }), contractReviewBriefLines(), contractReviewBriefLines({ face: 'narrowing' })].every((b) => !says(b.join('\n'), SECURITY_DUTY)));
+  const SECURITY_DUTY = 'the seat adopting the record adds the `security` label';
+  const SECURITY_IF = 'if a `hits` path is under `skills/**` or `ui/skills/**`';
+  t('⭐ the brief over a low-risk skills path hands the `security` label duty, unconditionally, on either catalog row and through the CLI — the record says so, the adopting seat labels', (() => { const own = ['skills/objectstack-data/SKILL.md', 'ui/skills/objectui-forms/SKILL.md']; return own.every((p) => { const b = contractReviewBriefLines({ paths: [p, ...DECL_PATHS] }).join('\n'); return says(b, SECURITY_DUTY) && says(b, 'sits on the low-risk skills arm') && !says(b, SECURITY_IF); }) && says(faceCli(['--brief-template', '--paths', own[0]]).stdout, "behaviour the path name doesn't show, the record says so") && !says(contractReviewBriefLines({ paths: [own[0]] }).join('\n'), 'reviewer adds'); })());
+  t('⭐ SF5: the bare `--brief-template` and `--face rules` brief — the spelling the skill teaches — carry the duty in its CONDITIONAL form', (() => { const forms = [contractReviewBriefLines(), contractReviewBriefLines({ face: 'rules' }), contractReviewBriefLines({ face: 'schema' })].map((b) => b.join('\n')); return forms.every((b) => says(b, SECURITY_IF) && says(b, SECURITY_DUTY)) && says(faceCli(['--brief-template']).stdout, SECURITY_IF) && says(faceCli(['--brief-template', '--face', 'rules']).stdout, SECURITY_IF); })());
+  t('⛔ …and a brief whose `hits` are known and off the arm carries none, nor does the declaration or the narrowing face', [contractReviewBriefLines({ paths: MIXED }), contractReviewBriefLines({ face: 'declaration' }), contractReviewBriefLines({ face: 'narrowing' })].every((b) => !says(b.join('\n'), SECURITY_DUTY)));
   t('⭐ `--template --paths` and `--brief-template --paths` print exactly the function output and exit 0', (() => { const a = faceCli(['--template', '--paths', ...MIXED]); const b = faceCli(['--brief-template', '--paths', ...MIXED]); return a.status === 0 && a.stdout === `${contractReviewTemplateLines({ paths: MIXED }).join('\n')}\n` && b.status === 0 && b.stdout === `${contractReviewBriefLines({ paths: MIXED }).join('\n')}\n`; })());
   t('⛔ `--paths` naming no path, or beside `--face` in either order, is REFUSED with the usage, exit 1', [['--template', '--paths'], ['--template', '--paths', RULES_PATH, '--face', 'rules'], ['--brief-template', '--face', 'rules', '--paths', RULES_PATH], ['--template', '--paths', '']].every((args) => { const r = faceCli(args); return r.status === 1 && says(r.stderr, 'usage:'); }));
   t('…and the usage names the flag, the face it reads and the line it fills', ['--paths PATH...', '`reviewFace`', '`Scope:`'].every((s) => usageLines().join('\n').includes(s)));

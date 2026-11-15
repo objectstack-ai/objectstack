@@ -287,7 +287,7 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     (人合: every row outside Tier S): those four lift only for an authorized APPROVED review by an account in
     `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is spent once per PR — the OWNING seat then lands
     it, later pushes included; the click stays the maintainer's. **Tier S** (席内达档复核落地: `.claude/**`,
-    objectstack workflow edits (`readWorkflowDiff`) and skills-only wording (`lowRiskArmVerdict`; the reviewer labels
+    objectstack workflow edits (`readWorkflowDiff`) and skills-only wording (`lowRiskArmVerdict`; the seat labels
     unnamed security teaching) read as S): those four lift once the PR thread or its card carries a `## Contract review`
     record for the PR's current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is
     green — the owning seat lands it through the queue; the post-merge audit is the compensating control. A PR whose

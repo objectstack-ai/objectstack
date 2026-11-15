@@ -499,8 +499,9 @@
  *   - the labels were read and none is `security`, and the timeline was read and
  *     never removed one; and no catalog path names security, auth or permission
  *     (`LOW_RISK_SECURITY_NAME`, any segment below the row, any case) — the label
- *     OR the name sends the PR to H; security teaching the name cannot see is the
- *     contract reviewer's to label `security`;
+ *     OR the name sends the PR to H; security teaching the name cannot see is
+ *     flagged in the contract review's record and labelled `security` by the
+ *     seat adopting it (the reviewer brief says so);
  *   - the head lives in the base repository (`forkVerdict`);
  *   - every catalog path is a MODIFIED regular file with the same mode at both ends
  *     — an added, deleted, renamed or copied skill or eval, a symlink, a mode change
@@ -2273,7 +2274,8 @@ export const LOW_RISK_ARM_FILE_PATTERNS = Object.freeze([/\.md$/, /(?:^|\/)evals
  * skill FOLDER named for it counts as well as a file — says security, auth or
  * permission (any case) keeps the PR H, with or without the label. A segment
  * rather than the basename alone, because a security skill's entry file is
- * `SKILL.md`. Teaching the name cannot see is the contract reviewer's to label.
+ * `SKILL.md`. Teaching the name cannot see is flagged in the review's record and
+ * labelled by the seat adopting it.
  */
 export const LOW_RISK_SECURITY_NAME = /security|auth|permission/i;
 
@@ -4235,6 +4237,7 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
       pull,
       headSha: sha,
       baseSha: typeof head?.base?.sha === 'string' ? head.base.sha : null,
+      baseRef: typeof head?.base?.ref === 'string' && head.base.ref !== '' ? head.base.ref : null,
       endpoint: `/repos/${slug}/pulls/${pull}/files`,
       channel: chosen.id,
       pages,
@@ -4301,7 +4304,7 @@ export function pullCatalogReading({ derivation, statuses, paths, sameCheckout, 
   if (!sameCheckout) return unmeasured('the PR is not in the repository this checkout holds, so its file modes cannot be read here');
   if (!isObjectId(headSha) || !isObjectId(baseSha)) return unmeasured('the PR object named no head or base commit');
   const missing = [headSha, baseSha].filter((sha) => !run(['cat-file', '-e', `${sha}^{commit}`]).ok);
-  if (missing.length > 0) return unmeasured(`${missing.map((sha) => sha.slice(0, 10)).join(' and ')} not in this checkout — \`git fetch origin pull/${derivation.pull}/head main\``);
+  if (missing.length > 0) return unmeasured(`${missing.map((sha) => sha.slice(0, 10)).join(' and ')} not in this checkout — ${pullFetchHint(derivation, missing)}`);
   const mergeBase = run(['merge-base', baseSha, headSha]);
   if (!mergeBase.ok || !isObjectId(mergeBase.out)) return unmeasured('no merge base of the PR head and its base could be computed here (a shallow clone?)');
   const modeAt = (sha, path) => {
@@ -4314,6 +4317,21 @@ export function pullCatalogReading({ derivation, statuses, paths, sameCheckout, 
     return { ...f, oldMode: modeAt(mergeBase.out, f.path), mode: modeAt(headSha, f.path) };
   });
   return { measured: true, reason: null, files };
+}
+
+/**
+ * The fetch that brings a PR's missing commits into this checkout: the head by
+ * `pull/N/head`, the base by the PR's own base ref — never an assumed `main`,
+ * since a PR can target any branch — or by its sha when the ref was not read.
+ * Pure.
+ */
+export function pullFetchHint(derivation, missing) {
+  const want = new Set(Array.isArray(missing) ? missing : []);
+  const refs = [
+    want.has(derivation?.headSha) ? `pull/${derivation?.pull}/head` : null,
+    want.has(derivation?.baseSha) ? (derivation?.baseRef ?? derivation?.baseSha) : null,
+  ].filter(Boolean);
+  return `\`git fetch origin ${refs.join(' ')}\``;
 }
 
 /** Does any of these paths sit under a register row that carries the low-risk arm? Pure. */
@@ -4900,7 +4918,7 @@ export function pullWorkflowDiff({ derivation, paths, sameCheckout, run, git: re
   if (!sameCheckout) return unmeasured('the PR is not in the repository this checkout holds, so its commits cannot be read here');
   if (!isObjectId(headSha) || !isObjectId(baseSha)) return unmeasured('the PR object named no head or base commit');
   const missing = [headSha, baseSha].filter((sha) => !run(['cat-file', '-e', `${sha}^{commit}`]).ok);
-  if (missing.length > 0) return unmeasured(`${missing.map((sha) => sha.slice(0, 10)).join(' and ')} not in this checkout — \`git fetch origin pull/${derivation.pull}/head main\``);
+  if (missing.length > 0) return unmeasured(`${missing.map((sha) => sha.slice(0, 10)).join(' and ')} not in this checkout — ${pullFetchHint(derivation, missing)}`);
   const mergeBase = run(['merge-base', baseSha, headSha]);
   if (!mergeBase.ok || !isObjectId(mergeBase.out)) return unmeasured('no merge base of the PR head and its base could be computed here (a shallow clone?)');
   return readWorkflowDiff({ paths, base: mergeBase.out, head: headSha, git: readGit });
@@ -6013,7 +6031,8 @@ async function selfTest() {
       const noBase = pullCatalogReading({ derivation, statuses, paths: [SK], sameCheckout: true, run: (argv) => (argv[0] === 'cat-file' && argv[2] === `${Bs}^{commit}` ? { ok: false, out: '' } : run(argv)) });
       return r.measured === true && r.files.length === 3 && r.files[0].oldMode === '120000' && r.files[0].mode === '100644' && r.files[1].oldMode === '100644' && r.files[1].mode === '100644' && r.files[2].mode === null && r.files[2].oldMode === null &&
         tier([SK, CS], read([SK, CS], { catalogFiles: pullCatalogReading({ derivation, statuses, paths: [SK, CS], sameCheckout: true, run }) })) === GOVERNED_TIER_H &&
-        noBase.measured === false && /bbbbbbbbbb not in this checkout/.test(noBase.reason) &&
+        noBase.measured === false && /bbbbbbbbbb not in this checkout — `git fetch origin bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb`$/.test(noBase.reason) &&
+        pullCatalogReading({ derivation: { ...derivation, baseRef: 'release/v4' }, statuses, paths: [SK], sameCheckout: true, run: () => ({ ok: false, out: '' }) }).reason.endsWith('`git fetch origin pull/2/head release/v4`') &&
         pullCatalogReading({ derivation: { headSha: Hd, pull: 2 }, statuses, paths: [SK], sameCheckout: true, run }).measured === false &&
         pullCatalogReading({ derivation, statuses, paths: [SK], sameCheckout: true, run: (argv) => (argv[0] === 'merge-base' ? { ok: false, out: '' } : run(argv)) }).measured === false &&
         pullCatalogReading({ derivation, statuses, paths: [SK], sameCheckout: false, run }).measured === false &&
