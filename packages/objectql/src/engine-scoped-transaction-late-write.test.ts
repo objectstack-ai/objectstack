@@ -282,7 +282,7 @@ const noteUnenrolled = (driver: any) =>
 describe('an async after-hook beside a blocking one writes outside the door\'s unit', () => {
   it('a blocking afterUpdate beside an async one: the async hook\'s write is stored, on its own connection', async () => {
     const { driver, api, drafted, outcomes } = await makeUpdateEngine({ blocking: true });
-    await api.object('rec').update('r1', { name: 'accepted' });
+    await api.object('rec').updateById('r1', { name: 'accepted' });
     expect(outcomes).toEqual(['blocking ran']);
     expect(await drafted).toBe('stored');
     // The door still opened its unit for the blocking leg, and that leg's write is the unit's.
@@ -293,7 +293,7 @@ describe('an async after-hook beside a blocking one writes outside the door\'s u
 
   it('inside a caller\'s ctx.api.transaction, the write threaded through the unit\'s own context: the async hook\'s write is stored outside it', async () => {
     const { driver, api, drafted } = await makeUpdateEngine();
-    await api.transaction(async (tx) => { await tx.object('rec').update('r1', { name: 'accepted' }); });
+    await api.transaction(async (tx) => { await tx.object('rec').updateById('r1', { name: 'accepted' }); });
     expect(await drafted).toBe('stored');
     expect(driver.begun).toHaveLength(1);
     expect(noteUnenrolled(driver)).toEqual([true]);
@@ -301,7 +301,7 @@ describe('an async after-hook beside a blocking one writes outside the door\'s u
 
   it('inside a caller\'s engine transaction(), the write enrolled only ambiently: the async hook\'s write is stored outside it', async () => {
     const { engine, driver, api, drafted } = await makeUpdateEngine();
-    await engine.transaction(async () => { await api.object('rec').update('r1', { name: 'accepted' }); });
+    await engine.transaction(async () => { await api.object('rec').updateById('r1', { name: 'accepted' }); });
     expect(await drafted).toBe('stored');
     expect(driver.begun).toHaveLength(1);
     expect(noteUnenrolled(driver)).toEqual([true]);
@@ -309,7 +309,7 @@ describe('an async after-hook beside a blocking one writes outside the door\'s u
 
   it('a unit the async hook opens itself is its own: its write is enrolled in it and stored', async () => {
     const { driver, api, drafted } = await makeUpdateEngine({ ownUnit: true });
-    await api.object('rec').update('r1', { name: 'accepted' });
+    await api.object('rec').updateById('r1', { name: 'accepted' });
     expect(await drafted).toBe('stored');
     expect(driver.begun).toHaveLength(1);
     expect(noteUnenrolled(driver)).toEqual([false]);
@@ -317,7 +317,7 @@ describe('an async after-hook beside a blocking one writes outside the door\'s u
 
   it('CONTROL async only: no unit, the write is stored outside any, unchanged', async () => {
     const { driver, api, drafted } = await makeUpdateEngine();
-    await api.object('rec').update('r1', { name: 'accepted' });
+    await api.object('rec').updateById('r1', { name: 'accepted' });
     expect(await drafted).toBe('stored');
     expect(driver.begun).toHaveLength(0);
     expect(noteUnenrolled(driver)).toEqual([true]);
@@ -326,14 +326,14 @@ describe('an async after-hook beside a blocking one writes outside the door\'s u
 
   it('CONTROL the second leg async too: no unit, both writes stored, unchanged', async () => {
     const { driver, api, drafted } = await makeUpdateEngine({ secondAsync: true });
-    await api.object('rec').update('r1', { name: 'accepted' });
+    await api.object('rec').updateById('r1', { name: 'accepted' });
     expect(await drafted).toBe('stored');
     expect(driver.begun).toHaveLength(0);
   });
 
   it('CONTROL blocking only: its write joins the door\'s unit, unchanged', async () => {
     const { driver, api, outcomes } = await makeUpdateEngine({ blocking: true, asyncLeg: false });
-    await api.object('rec').update('r1', { name: 'accepted' });
+    await api.object('rec').updateById('r1', { name: 'accepted' });
     expect(outcomes).toEqual(['blocking ran']);
     expect(driver.begun).toHaveLength(1);
     expect(noteUnenrolled(driver)).toEqual([false]);
