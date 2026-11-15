@@ -781,6 +781,14 @@ describe('[#34040] the exact read never serves the service\'s copy of another pa
     );
   });
 
+  /** Ship an item that parses: a shipped action is stored as its schema parse, which wants a target. */
+  const shipParsed = (type: string, name: string, packageId: string) => registry.registerItem(
+    type,
+    { name, label: `${packageId.split('.').pop()} ${type}`, ...(type === 'action' ? { type: 'url', target: 'https://example.com' } : {}) },
+    'name' as never,
+    packageId,
+  );
+
   const servedWith = (wrongBody: Record<string, unknown>) => {
     const metadata = {
       get: vi.fn(async () => wrongBody),
@@ -793,8 +801,8 @@ describe('[#34040] the exact read never serves the service\'s copy of another pa
   it.each([...NOT_READ_BY_PACKAGE].filter((type) => !ONE_HOLDER.includes(type) && !NOT_JUDGED.includes(type)))(
     '%s: `?package=` of each holder serves that holder\'s body, whichever holder\'s copy the service keeps',
     async (type) => {
-      ship(type, 'shared', A);
-      ship(type, 'shared', B);
+      shipParsed(type, 'shared', A);
+      shipParsed(type, 'shared', B);
       for (const kept of [A, B]) {
         const { served, metadata } = servedWith({ name: 'shared', label: `${kept.split('.').pop()} ${type}`, _packageId: kept });
         for (const [packageId, label] of [[A, `alpha ${type}`], [B, `beta ${type}`]] as const) {
@@ -807,7 +815,7 @@ describe('[#34040] the exact read never serves the service\'s copy of another pa
   );
 
   it.each(OUTSIDE.filter((type) => !NOT_JUDGED.includes(type)))('CONTROL — %s: the service\'s copy is served at its own holder\'s address, and a copy bound to no package at any address', async (type) => {
-    ship(type, 'shared', A);
+    shipParsed(type, 'shared', A);
     const own = servedWith({ name: 'shared', label: 'service copy', _packageId: A });
     expect(labelOf(await own.served.getMetaItem({ type, name: 'shared', packageId: A })), `${type} at its holder`).toBe('service copy');
     const unbound = servedWith({ name: 'shared', label: 'service copy' });
