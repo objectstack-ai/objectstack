@@ -23,12 +23,15 @@
  * as its UTC calendar day. See `date-on-instant-column.ts`.
  *
  * Every cell writes and reads the same rows: SQLite and MySQL never had the
- * defect (SQLite stores text; MySQL's session is UTC and `DATETIME` is
- * zone-naive) and must still answer the same day. The row written while the
- * field was a `datetime` is asserted through the filter and the bucket on
- * Postgres only: on SQLite and MySQL a bare-day comparand does not match a
- * stored instant with a time of day, the same on the pre-fix tree, and that is
- * not what this card changes.
+ * zone defect (SQLite stores text; MySQL's session is UTC and `DATETIME` is
+ * zone-naive) and must still answer the same day.
+ *
+ * [#33002] The row written while the field was a `datetime` is asserted
+ * through the filter and the bucket on EVERY cell. Before #33002, on SQLite
+ * and MySQL a bare-day comparand did not match that stored instant with a time
+ * of day although it read as that day (measured on SQLite at `e540baf8`:
+ * `due = '2026-11-12'` found only the row written after the publish); the
+ * filter now reads such a column as its calendar day there too.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -48,8 +51,11 @@ const DATETIME_ERA = '2026-11-12T20:00:00.000Z';
 const DAY = '2026-11-12';
 const SEEN = '2026-11-12T23:30:00.000Z';
 
+/** Unwrap a raw result across knex's three dialect shapes: mysql2 answers `[rows, fields]`. */
 const rowsOf = (res: unknown): Record<string, unknown>[] =>
-  (Array.isArray(res) ? res : ((res as { rows?: unknown[] })?.rows ?? [])) as Record<string, unknown>[];
+  (Array.isArray(res)
+    ? Array.isArray(res[0]) ? res[0] : res
+    : ((res as { rows?: unknown[] })?.rows ?? [])) as Record<string, unknown>[];
 
 function measure(cell: DialectCell): void {
   describe(`a \`datetime\` field published as \`date\` — ${cell.label} (#32851)`, () => {
@@ -115,6 +121,9 @@ function measure(cell: DialectCell): void {
       expect(labelsOf(range as any[])).toEqual(expect.arrayContaining(['created', 'updated']));
       const before = await driver.find(TABLE, { where: { due: { $lt: DAY } } });
       expect(labelsOf(before as any[])).not.toContain('created');
+      expect(labelsOf(before as any[])).not.toContain('era');
+      const after = await driver.find(TABLE, { where: { due: { $gt: DAY } } });
+      expect(labelsOf(after as any[])).toEqual([]);
     });
 
     it('a `datetime` field beside it still reads and filters as its instant', async () => {
@@ -124,7 +133,7 @@ function measure(cell: DialectCell): void {
       expect(labelsOf(hit as any[])).toEqual(['created']);
     });
 
-    it.runIf(pg)('the row written as a `datetime` reads, filters and buckets as one day', async () => {
+    it('the row written as a `datetime` reads, filters and buckets as one day', async () => {
       const era: any = await driver.findOne(TABLE, { where: { id: ids.era } });
       expect(era.due).toBe(DAY);
 
@@ -138,11 +147,15 @@ function measure(cell: DialectCell): void {
       expect((grouped as any[]).map((g) => [g.due, Number(g.n)])).toEqual([[DAY, 3]]);
     });
 
-    it.runIf(pg)('the outside-the-builder doors (analytics native SQL) answer the same day', async () => {
-      const column = driver.temporalFilterColumnSql(TABLE, 'due', '"due"');
+    it('the outside-the-builder filter door (analytics native SQL) answers the same day', async () => {
+      const q = cell.id === 'mysql' ? '`' : '"';
+      const column = driver.temporalFilterColumnSql(TABLE, 'due', `${q}due${q}`);
       const comparand = driver.temporalFilterValue(TABLE, 'due', DAY);
-      const hit = rowsOf(await driver.execute(`select label from "${TABLE}" where ${column} = ? order by label`, [comparand]));
+      const hit = rowsOf(await driver.execute(`select label from ${q}${TABLE}${q} where ${column} = ? order by label`, [comparand]));
       expect(hit.map((r) => r.label)).toEqual(['created', 'era', 'updated']);
+    });
+
+    it.runIf(pg)('the outside-the-builder bucket door (analytics native SQL) answers the same day', async () => {
 
       const expr = driver.dateBucketSql(TABLE, 'due', 'day');
       const echoed = rowsOf(await driver.execute(`select ${expr} as b, count(*) as n from "${TABLE}" group by ${expr}`));

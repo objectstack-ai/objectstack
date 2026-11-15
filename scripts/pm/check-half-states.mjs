@@ -1262,7 +1262,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 //
 //   LANE     a seat as the role table spells it: `domain:` or `repo:` plus a lowercase
 //            name (`domain:engine-core` carries a hyphen, measured on the label set),
-//            `epic:#` plus the parent card, `triage`, `director`, `coordinator`, `security`, `review`, `qa` or `eval`
+//            `epic:#` plus the parent card, `triage`, `director`, `coordinator`, `security`, `review`, `qa`, `eval` or `queue`
 //   N        the seat number, from 1
 //   ACCOUNT  the login a claim's `Account:` line carries — GitHub's own login rule
 //   SESSION  the full id, in the relay envelope's shape (`SESSION_SHAPE`, fleet-write/ops.mjs,
@@ -1286,7 +1286,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 // ---------------------------------------------------------------------------
 
 /** The four parts' patterns, unanchored, in order — the ONE spelling every reader and writer composes from. */
-const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security|review|qa|eval)';
+const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security|review|qa|eval|queue)';
 const SIGNATURE_ACCOUNT_SOURCE = '[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}';
 /** The relay envelope's session shape without its anchors — `SESSION_SHAPE` in `fleet-write/ops.mjs`. */
 export const SEAT_SIGNATURE_SESSION_SOURCE = 'session_[A-Za-z0-9]{6,}';
@@ -12801,10 +12801,10 @@ export function latestContractReviewOnHead(commentRows, headSha) {
  * The verdict WORD a contract-review record carries — `PASS`, `FAIL`, or
  * `null` when none can be read.
  *
- * ⚠️ This is the ONE reader of the word, and it is a PATROL's reader:
- * `record-recognisers.mjs` deliberately reads existence and provenance only
- * (whether a record reads PASS is the seat's precondition ①, and the queue
- * guard stands on the record's existence). H43 needs the word because the
+ * ⚠️ This is the ONE reader of the word, and it is a PATROL's reader: the
+ * queue guard's Tier S record leg reads the same explicit line through
+ * `contractReviewVerdictLines` below, which counts the lines instead of taking
+ * the first (card #33541). H43 needs the word because the
  * hand-off it patrols is owed only after a PASS — a FAIL on the current head
  * owes a patch round, not a request — and a word it cannot read is `null`,
  * which H43 reads as NOT yet due (a quiet row), never as PASS.
@@ -12838,6 +12838,26 @@ export function contractReviewVerdictOf(body) {
     if (bare) return bare[1];
   }
   return null;
+}
+
+/**
+ * The word of EVERY explicit `VERDICT:` line under a record's heading, in body
+ * order — `[]` when there is none, or no heading. The same line regex as
+ * `contractReviewVerdictOf`'s explicit dialect, so it is one reader with two
+ * answers, ⛔ never a second parser.
+ *
+ * The queue guard's Tier S record leg reads this one (card #33541): it lands a
+ * record only when exactly ONE such line stands and it reads PASS, so a record
+ * that states two (a quoted earlier verdict, a FAIL appended under a PASS) or
+ * none (only a heading-inline or bare word) is refused rather than resolved by
+ * line order. The patrol reader above keeps its first-match answer.
+ */
+export function contractReviewVerdictLines(body) {
+  const text = String(body ?? '');
+  const m = CONTRACT_REVIEW_HEADING_MARKER.exec(text);
+  if (!m) return [];
+  const [, ...below] = text.slice(m.index + m[0].length).split(/\r?\n/);
+  return below.map((line) => CONTRACT_REVIEW_VERDICT_EXPLICIT.exec(line)?.[1] ?? null).filter((word) => word !== null);
 }
 
 // ---------------------------------------------------------------------------
@@ -32829,6 +32849,7 @@ async function selfTest() {
   t43('H43 verdict: the explicit VERDICT line wins over prose that happens to open with a verdict word', contractReviewVerdictOf('## Contract review\n\nPASS is what ① would have said, but ②:\n\n**VERDICT: FAIL**'), 'FAIL');
   t43('H43 verdict: a record with no verdict word, a body with no heading, and a mention in prose all read null', [contractReviewVerdictOf('## Contract review\n\nServed-tier: `CONTRACT_REVIEW_TIER`'), contractReviewVerdictOf('**VERDICT: PASS**'), contractReviewVerdictOf('## Contract review\n\nthe seat will post PASS later')].join(), ',,');
   t43('H43 verdict: the roster of words is PASS and FAIL, nothing else', CONTRACT_REVIEW_VERDICTS.join(), 'PASS,FAIL');
+  t43('H43 verdict lines: every explicit `VERDICT:` line under the heading, in order — one, two (a quoted one counts), none for the inline and bare dialects, none without a heading', [contractReviewVerdictLines(PASS43).join('+'), contractReviewVerdictLines('## Contract review\n\n**VERDICT: PASS**\n\n> **VERDICT: FAIL**').join('+'), contractReviewVerdictLines('## Contract review (clause ②) — **PASS**\n\nPASS').length, contractReviewVerdictLines('**VERDICT: PASS**').length].join(), 'PASS,PASS+FAIL,0,0');
   t43('H43 verdict: latestContractReviewOnHead now carries the verdict beside id and sha', [latestContractReviewOnHead(rows43(ACCEPT43, PASS43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(FAIL43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(PASS43), '0123456789abcdef')].join(), 'PASS,FAIL,');
   // The row and the probe, gated on the reading.
   t43('H43 row: ⛔ BEFORE the hand-off, nobody asked is NOT a half state — quiet', h43GovernedReviewRequestGap(h43pr(16), GOV43, APP43, [], BEFORE43), null);

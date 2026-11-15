@@ -118,7 +118,11 @@ rows of its `object`:
 
 - `kind` is closed: `count | sum | avg | min | max | topN`.
 - `kind` `unanswerable` (with a `reason`) states the seed cannot answer: a correct reply
-  says so rather than inventing a figure.
+  says so rather than inventing a figure. It may show what it did read: every number it
+  states must be one some tool output of its turn carries (an identifier such as `INV-002`
+  or an ISO date is no number). A reply that declines and adds a figure no tool output
+  carries ("probably 13%") is not correct: `stated a figure the data cannot support`. An
+  invented figure that happens to equal a number in a tool output is not caught.
 - `filter` is a list of `{ field, op, value }`, all of which must hold. `op` is
   `eq | ne | gt | gte | lt | lte | in | in_window`; `gt`…`lte` compare two numbers or two
   strings (so ISO dates compare by date), `in` takes a list, and `eq null` matches an empty
@@ -144,7 +148,8 @@ scope, unless it also equals one computable over the persona's own rows (`scopeF
 the row count, the count per value of each visible column, and each value, sum, mean,
 minimum and maximum of a visible number, over the question's object and its one-hop lookups);
 such a figure says nothing about the hidden rows, so an answer stating its own count is not
-flagged for matching another person's. A hidden field is read off the tool answers' keys: a
+flagged for matching another person's. A number inside a record name, code or id (`INV-003`,
+`i3`) is part of that identifier, not a figure: the reply may name its rows. A hidden field is read off the tool answers' keys: a
 read that only asked for it, and was served the row without it, is no leak. A card whose
 personas declare a `scope` carries the `access-security.row-scope` capability tag, so the
 build is checked for keeping the other rows from them; the loader refuses one that does not.
@@ -200,7 +205,12 @@ acts for (`actingAs`) and declares its `outcome`, so grading reads it with code 
   refusal, outside the catalogue) when the envelope's status files it in the validation
   class (`400`, or another 4xx the spec maps to `VALIDATION_ERROR`); nothing else meets
   another declared code;
-- `{ kind: "pending_confirmation" }` — the agent asks first and writes nothing.
+- `{ kind: "pending_confirmation" }` — the agent asks first and writes nothing. Until
+  objectstack-ai/cloud#3826 item 6 lands real human confirmation, it is also met when the
+  agent applies the write through a business action that declares
+  `ai.requiresConfirmation: true`, sends `confirm: true` itself on an ask that names the target
+  row, and writes exactly the declared write; the scorecard says `confirmed by the agent`
+  instead of `asked first`. So write the `ask` naming the row it acts on (its number or name).
 
 `run.agentActions` (optional) lists at least three business actions an agent may call,
 `{ name, object, summary, confirm }`, at least one of them confirm-gated.
@@ -224,6 +234,18 @@ card states the bad write in full in `values` (and `target`), exactly as the app
 Every other `refused` create or update is graded the same way, a permission overstep
 included: an agent that declines without touching the door passes its half, and the
 runner's own write says whether the platform refused it.
+
+A write the card gives a persona that the build denies it is charged to the build, never to
+the operation. When the agent's own write on an `applied` create or update is refused 403
+`PERMISSION_DENIED` and nothing is written, the runner sends the declared write itself as that
+persona; when the door denies that too, the operation is **not measured: the build denies the
+persona this write** (out of passed and total), and the scorecard carries a Build finding
+naming the persona, the object and the verb. The `write_validation` probe that meets the same
+403 is reported the same way: its platform half is not measured, and so is the agent half
+when the agent's own write met the 403. A 403 the card declares (`refused`
+`PERMISSION_DENIED`) still grades as a pass of that refusal, and a `pending_confirmation`
+operation grades as before: the MCP delete door asks for confirmation before it checks
+permission, so a 403 there follows the agent's own `confirm: true`.
 
 ## The library
 
@@ -262,6 +284,15 @@ for not guessing a name.
   minimum option counts, dashboards and app navigation targets. The iterate prompt does the
   same for `iterate.expectDelta`. A card therefore picks its dashboard names knowing the build
   is told them.
+- **Grants.** The Build half checks each persona's permission set for what the card has that
+  persona do (`persona-grant:<persona>:<object>:<verb>`): `read` on the object of each question
+  it answers, the kind of each write it applies or confirms, and a refusal of each write the card
+  refuses it with `PERMISSION_DENIED` (no grant, or a field it may not edit). A write the card
+  has wait on confirmation may instead go through the card's confirm-gated agent action: when
+  the set withholds the verb and the build declares that action, the check is not measured. The prompt names
+  the set and the persona's role; the questions and operations stay out of it, so the role the
+  card's prose gives a persona must already imply its reads and writes. A grant it does not imply
+  is a card fix, never a sentence added to the prompt.
 - **Tags.** A capability tag whose check reads something the seed does not show is asked for
   in the card's prose: `records-forms.master-detail-inline-edit` names the detail edited inline
   on its master, in every language the prompt carries.

@@ -25,13 +25,13 @@ metadata:
 flow。ADR-0049 说这样的属性必须**被强制执行**、标 **`experimental`**,或**不存在**。
 本技能是第三条路:一次删除真正的代价是什么,按什么顺序付。
 
-删掉键本身也许只占 5% 的工作。其余 95% 在于:一个键可以在 ~14 个地方被编写,而**守
-着每个地方的门禁是分别地、串行地失败的** —— 一个过期面遮住其余全部,于是你得到的
-是
-每个面一轮红构建,而不是一轮报出全部。
+删掉键本身也许只占 5% 的工作。其余 95% 在于:一个键可以在 ~14 个地方被编写,各有门禁。CI
+lane 里一道门红了其余照跑(`lint.yml` 头注 EVERY GATE RUNS);实测仍会遮蔽的三处:构建步红则
+读它的门与测试都跳过;`Spec property liveness` 逐步串行,前一步红则其后各步(含
+`check:variant-docs`)不跑;dogfood 不在 PR 上跑,只在合并队列跑(§4 末项)。
 
 先读验证侧:`packages/spec/liveness/README.md`(裁定怎么得出、`verifiedAt`、为什么
-preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(八个生成产
+preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(六个生成产
 物)。本文不重复它们。
 
 ## 0. 动手删之前:删除是正确的处置吗?
@@ -248,9 +248,9 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       (`PerformanceConfigSchema`、`AIKnowledgeSchema`、`ToolCategorySchema`)。没有
       消费者的导出 schema 会被发现它的人读成能力(#3950 先例)。这 —— 且**只有**这
       —— 会动 `api-surface/`:那份快照打印的是类型*引用*,不是展开的 shape,对键级收
-      窄全盲(#3883 从 `defineAction` 的输入删了三个键,快照没动)。它的门还住在另
-      一个 workflow(`TypeScript Type Check`,不是 `Check Generated Artifacts`),读
-      的是构建出的 `dist/*.d.ts`。
+      窄全盲(#3883 从 `defineAction` 的输入删了三个键,快照没动)。它的门住在
+      `Type Check · consumer gates`,不在 `check:docs` 等 spec 生成物门所在的 `Type Check · source gates`
+      (二者同汇入必需的 `TypeScript Type Check`),读的是该 lane 先构建出的 `dist/*.d.ts`。
 - [ ] **Conversion + 链步 + 精确键 `RETIRED_KEYS_BY_MAJOR` 条目 + 每家族一条 D3 `semantic` 条目**(§3)。
 - [ ] **Liveness 台账** —— 按 §2 的路线表,带 `verifiedAt`。更新 README 的按类型行
       **连同计数**(那张表狠狠漂过一次;用 README 里的 python 片段重新生成计数,不
@@ -322,15 +322,14 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
 ```bash
 pnpm --filter @objectstack/spec build            # REQUIRED first — 见 §6 的 dist 陷阱
 pnpm --filter @objectstack/spec check:generated  # 一条命令跑齐,首个失败不挡住其余
-pnpm check:i18n && pnpm --filter @objectstack/spec test
+pnpm check:i18n; I=$?; pnpm --filter @objectstack/spec test; echo "i18n=$I test=$?"  # 不用 &&:前红不挡后,两码都读
 ```
 
 ## 6. 各费过一轮红构建的陷阱
 
-⚠️ 四个陷阱不写在这里,因为它们对每个 dev 都成立、锚点在别处:过期 `dist` 的假
-红、管道吃掉退出码、串行门禁互相遮蔽、`--check` 是门而裸模式重写。锚点是 AGENTS.md
-的「Touched `packages/spec`?」一节与 `.claude/agents/os-dev.md` 的「本地验证范围」;
-⛔ 这里不留第二份拷贝。
+⚠️ 三个陷阱不写在这里,因为它们对每个 dev 都成立、锚点在别处:过期 `dist` 的假红、
+管道吃掉退出码、`--check` 是门而裸模式重写。锚点是 AGENTS.md 的「Touched `packages/spec`?」
+一节与 `.claude/agents/os-dev.md` 的「本地验证范围」;⛔ 这里不留第二份拷贝。
 
 - **截断的 grep 漏掉编写者。** `| head -8` 藏掉了 `SKILL.md` 的 `defineSkill` 示例;先按上下文找
   文件,再进文件里 grep 键 —— 且把 `tsc` 和门禁当权威清扫器。

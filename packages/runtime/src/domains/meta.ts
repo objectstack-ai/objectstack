@@ -10,6 +10,7 @@
 
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, PackageScopedNameRefusedError,
+    userTextLocalesOf,
     type PackageScopedHolder,
 } from '@objectstack/core';
 // [commit 67ceb9aef] `canonicalMetaUrlType` is the FOLD this transport was missing.
@@ -1930,6 +1931,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         // `copilot`, which the mapping refuses on this door.
                         ...saveOptions.request,
                         ...(actor ? { actor } : {}),
+                        // [#32656] The languages the findings' `userMessage`
+                        // is composed in: the request's locale, then the
+                        // workspace default, off the execution context.
+                        userTextLocales: userTextLocalesOf(ec),
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {

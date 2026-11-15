@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
+import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
 import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type {
@@ -80,7 +80,7 @@ import {
 import { connectorReadWithheldText, type ConnectorFailureTextRewrite } from './connector-read-withheld-text.js';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
-import { connectorNameResolver, mappingNameResolver, packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
+import { connectorNameResolver, mappingNameResolver, packageScopedRegistryOf } from './connector-package-scope.js';
 import { functionResolverOf, packageScopedFunctionEngineOf } from './function-package-scope.js';
 import type { PackageScopedRefusal, PackageScopedRegistry } from '@objectstack/objectql';
 import { createConnectorRequestSigner } from './request-signing/index.js';
@@ -1183,6 +1183,90 @@ function withFailureTextRewritten(
  * **instance** the automation service materializes at boot (ADR-0097);
  * its absence marks a catalog **descriptor** (#2612).
  */
+/**
+ * [#31699] The package a declared connector entry belongs to: its
+ * `_packageId`, or `null` for an entry no package ships (the environment's,
+ * a stored row's provenance sentinel, the compatibility API's default).
+ */
+function declaredEntryPackage(entry: unknown): string | null {
+    const stamp = (entry as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (typeof stamp !== 'string' || stamp.length === 0) return null;
+    return stamp === 'sys_metadata' || stamp === RUNTIME_COMPATIBILITY_PACKAGE_ID ? null : stamp;
+}
+
+/**
+ * [#31699] The package a declared connector instance is: the engine instance
+ * it is registered as, and the package its connections are read and written
+ * by. An entry stamped with a real package is that package's. An entry with
+ * no package of its own (no stamp, the compatibility API's default, or the
+ * environment's stored row, `sys_metadata`) is the name's durable holder's
+ * when that is a package: the package the boot backfill binds a package-less
+ * row of the name to, so a row the instance connected is still its row once
+ * bound, and the holder whose item a stored row over its name customizes
+ * (ADR-0005; the registry reads such a row as that holder's, never as a
+ * second item). With no registry to ask, or no package holder, it is no
+ * package's. [#31699 PR 3] A name two packages hold gives such an entry no
+ * package: {@link connectorInstanceRefusal} refuses it, and the reconcile
+ * materializes nothing for it.
+ */
+function connectorInstancePackage(
+    resolve: ReturnType<typeof connectorNameResolver>,
+    entry: unknown,
+): string | null {
+    const own = declaredEntryPackage(entry);
+    if (own !== null) return own;
+    const name = (entry as { name?: unknown } | null | undefined)?.name;
+    if (typeof name !== 'string' || name.length === 0) return null;
+    const holder = resolve(name, null, { includeDisabledPackages: true });
+    return holder?.status === 'resolved' && holder.holder.kind === 'package' ? holder.holder.packageId : null;
+}
+
+/**
+ * [ADR-0150 D3, #31699 PR 3] Why a declared entry is no instance it can be
+ * addressed as: an entry with no package of its own
+ * ({@link connectorInstancePackage}) whose name two packages hold. Which of
+ * them it is cannot be told, so it is refused, naming every candidate, and
+ * never registered as either (ADR-0150 red line 2). `undefined` for every
+ * other entry: one stamped with a package is that package's instance.
+ */
+function connectorInstanceRefusal(
+    resolve: ReturnType<typeof connectorNameResolver>,
+    entry: unknown,
+): PackageScopedRefusal | undefined {
+    if (declaredEntryPackage(entry) !== null) return undefined;
+    const name = (entry as { name?: unknown } | null | undefined)?.name;
+    if (typeof name !== 'string' || name.length === 0) return undefined;
+    const holder = resolve(name, null, { includeDisabledPackages: true });
+    return holder?.status === 'refused' ? holder : undefined;
+}
+
+/**
+ * [ADR-0150 D4, #31699 PR 3] The key the materializer keeps an instance's
+ * state by (live, degraded, retry, grant handle): its name for the instance
+ * of no package, else its package and name. A connector name is snake_case
+ * (`ConnectorSchema`), so it never contains the separator.
+ */
+function connectorInstanceKey(name: string, packageId: string | null): string {
+    return packageId === null ? name : `${packageId}/${name}`;
+}
+
+/** [#31699 PR 3] How a log record names an instance's package, after its name: nothing for the instance of none. */
+function inPackage(packageId: string | null): string {
+    return packageId === null ? '' : ` of package '${packageId}'`;
+}
+
+/**
+ * [#27237] One declared entry naming a credential reference: its name, its
+ * stamp as the listing reports it, and [#31699 PR 3] the package of the
+ * instance it is (`null`: the instance of no package; `false`: refused, no
+ * instance).
+ */
+interface DeclaredCredentialUser {
+    name: string;
+    packageId?: string;
+    instance: string | null | false;
+}
+
 interface DeclaredConnectorItem {
     name?: string;
     label?: string;
@@ -1229,7 +1313,13 @@ interface DeclaredConnectorItem {
  *
  *  - a registry entry whose name the artifact re-declares is superseded by the
  *    artifact's (an edit re-materializes; an unchanged one still hashes to the
- *    same signature and is left alone);
+ *    same signature and is left alone) — unless the two are entries of two
+ *    different packages. [#31699 PR 3] Two packages may each declare a
+ *    connector of one name, so a reload of one package's artifact supersedes
+ *    that package's entry of the name, and the other package's entry is kept
+ *    (its instance is not torn down). An artifact item with no stamp of its own
+ *    arrives stamped with its manifest's id (the capture stamps it, as
+ *    `MetadataPlugin._parseAndRegisterArtifact` stamps it in the registry);
  *  - a registry entry owned by one of the artifact's own packages but ABSENT
  *    from it was deleted from the stack — dropped, so the reconcile tears it
  *    down;
@@ -1242,26 +1332,40 @@ interface DeclaredConnectorItem {
  * — an artifact with no manifest id, whose items were never stamped — the
  * middle rule cannot fire and the fold degrades to name-wise replacement: an
  * edited or added connector is still picked up, a deleted one waits for the
- * restart it always waited for.
+ * restart it always waited for. An artifact item that still has no package
+ * (no stamp, no manifest id) supersedes every registry entry of its name, as
+ * before: nothing tells which package's entry it edits. So does every item
+ * where the registry offers no package-scoped reads (`byPackage` false): the
+ * reconcile keeps one instance per name there (ADR-0150 red line 1).
  */
 export function mergeDeclaredConnectorSources(
     registryItems: readonly unknown[],
     artifact: { items: readonly unknown[]; owners: ReadonlySet<string> } | undefined,
+    opts: { byPackage?: boolean } = {},
 ): unknown[] {
     if (!artifact) return [...registryItems];
-    const declaredNames = new Set(
-        artifact.items
-            .map((item) => (item as DeclaredConnectorItem)?.name)
-            .filter((name): name is string => typeof name === 'string' && name.length > 0),
-    );
-    const kept = registryItems.filter((item) => {
+    const items = artifact.items;
+    /** name → the packages the artifact re-declares it under (`null`: an item of no package). */
+    const declared = new Map<string, Set<string | null>>();
+    for (const item of items) {
         const name = (item as DeclaredConnectorItem)?.name;
-        if (typeof name === 'string' && declaredNames.has(name)) return false;
-        const owner = (item as { _packageId?: unknown })?._packageId;
-        if (typeof owner === 'string' && artifact.owners.has(owner)) return false;
-        return true;
+        if (typeof name !== 'string' || name.length === 0) continue;
+        const under = declared.get(name) ?? new Set<string | null>();
+        under.add(declaredEntryPackage(item));
+        declared.set(name, under);
+    }
+    const kept = registryItems.filter((item) => {
+        const own = declaredEntryPackage(item);
+        if (own !== null && artifact.owners.has(own)) return false;
+        const name = (item as DeclaredConnectorItem)?.name;
+        const under = typeof name === 'string' ? declared.get(name) : undefined;
+        if (!under) return true;
+        // Superseded unless every re-declaration is another package's entry,
+        // and only where a package-scoped registry tells two packages'
+        // instances apart; elsewhere one instance per name, as before.
+        return opts.byPackage === true && own !== null && !under.has(null) && !under.has(own);
     });
-    return [...kept, ...artifact.items];
+    return [...kept, ...items];
 }
 
 /**
@@ -1525,7 +1629,8 @@ export class AutomationServicePlugin implements Plugin {
     private bootFlowViewFingerprint: string | undefined;
     /**
      * Provider-bound declarative connectors this plugin has materialized
-     * (ADR-0097), keyed by connector name. `signature` is a stable hash of the
+     * (ADR-0097), keyed by instance ({@link connectorInstanceKey}: the name, or
+     * `package/name` for a package's instance, ADR-0150 D9). `signature` is a stable hash of the
      * entry's materialization inputs so a `metadata:reloaded` reconcile can tell
      * an unchanged instance (skip — don't re-open its MCP connection) from a
      * changed one (re-materialize). `close` is the optional teardown (e.g. an MCP
@@ -1534,10 +1639,17 @@ export class AutomationServicePlugin implements Plugin {
      * the registered def carries none, and the connector sync executor reads
      * only a `rest` / `openapi` instance, so the answer is recorded here.
      */
-    private materializedConnectors = new Map<string, { signature: string; provider: string; close?: () => void | Promise<void> }>();
+    private materializedConnectors = new Map<string, {
+        name: string;
+        packageId: string | null;
+        signature: string;
+        provider: string;
+        close?: () => void | Promise<void>;
+    }>();
     /**
      * Degraded declarative instances (#3017): provider-bound entries whose
-     * upstream was unreachable at materialization. Keyed by connector name;
+     * upstream was unreachable at materialization. Keyed by instance, as
+     * {@link materializedConnectors} is;
      * `attempts` drives the retry backoff, `signature` detects a config edit
      * (which resets the backoff), `reason` is what the registered husk surfaces.
      * Disjoint from {@link materializedConnectors} EXCEPT when a *changed*
@@ -1557,7 +1669,14 @@ export class AutomationServicePlugin implements Plugin {
      * fault is held the same way, with the configuration reason: only a change
      * of its declaration or a restart re-attempts it.
      */
-    private degradedInstances = new Map<string, { attempts: number; signature: string; reason: string; held?: boolean }>();
+    private degradedInstances = new Map<string, {
+        name: string;
+        packageId: string | null;
+        attempts: number;
+        signature: string;
+        reason: string;
+        held?: boolean;
+    }>();
     /**
      * [#27237] References whose upstream refused a value the credential door
      * does not hold — an environment variable or the host's resolver — keyed
@@ -1728,6 +1847,18 @@ export class AutomationServicePlugin implements Plugin {
      * registry, and supplies the execution context (`opts.context`) built from
      * the job's `organization`.
      */
+    /**
+     * [#20919, #31699] The provider a materialized declarative instance was
+     * built by: the instance of `packageId` (`null`: of no package), or, with
+     * `packageId` absent, the one materialized instance of `name` (`undefined`
+     * when there are two, never one of them).
+     */
+    private materializedProviderOf(name: string, packageId?: string | null): string | undefined {
+        if (packageId !== undefined) return this.materializedConnectors.get(connectorInstanceKey(name, packageId))?.provider;
+        const ofName = [...this.materializedConnectors.values()].filter((tracked) => tracked.name === name);
+        return ofName.length === 1 ? ofName[0].provider : undefined;
+    }
+
     async pullConnectorSource(opts: ConnectorPullOptions): Promise<ConnectorPullResult> {
         const ctx = this.ctx;
         const engine = this.engine;
@@ -1748,7 +1879,9 @@ export class AutomationServicePlugin implements Plugin {
             {
                 protocol,
                 registry: engine,
-                providerOf: (connector) => this.materializedConnectors.get(connector)?.provider,
+                // [#31699] The instance the pull resolved, by its package; with none
+                // addressed, the one materialized instance of the name.
+                providerOf: (connector, packageId) => this.materializedProviderOf(connector, packageId),
                 logger: ctx.logger,
                 // [ADR-0150 D3, #32071] A pull naming the package that declares
                 // its job reads the mapping from that package.
@@ -2036,7 +2169,14 @@ export class AutomationServicePlugin implements Plugin {
         this.connectorCredentialStore = new ConnectorCredentialStore(() => this.resolveDataEngine(ctx));
         // ADR-0143 D3 / D5 — the connector connection store, and the door the
         // `automation` service's connection members answer through.
-        this.connectorConnectionStore = new ConnectorConnectionStore(() => this.resolveDataEngine(ctx));
+        // [#31699] While the name's durable resolution (the question the boot
+        // backfill asks) answers one holder, every row of the name is the one
+        // instance's; under two holders each package's rows are its own.
+        const connectionNullRowHolder = connectorNameResolver(ctx);
+        this.connectorConnectionStore = new ConnectorConnectionStore(
+            () => this.resolveDataEngine(ctx),
+            (name) => connectionNullRowHolder(name, null, { includeDisabledPackages: true }),
+        );
         this.engine.setConnectorConnectionDoor({
             get: (request) => this.getConnectorConnection(ctx, request),
             begin: (request) => this.beginConnectorConnection(ctx, request),
@@ -2933,43 +3073,29 @@ export class AutomationServicePlugin implements Plugin {
      */
     private captureReloadedConnectors(payload: unknown): void {
         const metadata = (payload as { metadata?: Record<string, unknown> } | undefined)?.metadata;
-        const items = metadata?.connectors;
-        if (!Array.isArray(items)) return;
+        const carried = metadata?.connectors;
+        if (!Array.isArray(carried)) return;
         const owners = new Set<string>();
         const manifestId =
             (metadata as { manifest?: { id?: unknown } } | undefined)?.manifest?.id
             ?? (metadata as { id?: unknown } | undefined)?.id;
-        if (typeof manifestId === 'string' && manifestId.length > 0) owners.add(manifestId);
+        const packageId = typeof manifestId === 'string' && manifestId.length > 0 ? manifestId : undefined;
+        if (packageId) owners.add(packageId);
+        // [#31699 PR 3] An item with no stamp is its manifest's, as
+        // `_parseAndRegisterArtifact` stamps it in the registry: two packages
+        // may each declare the name, and the merge supersedes by (package, name).
+        // Stamped here, once, so the merge and the host-entry judgment
+        // (`declaringPackageReadersOrNone`, by identity) see the same object.
+        const items = carried.map((item) =>
+            packageId && item && typeof item === 'object' && (item as { _packageId?: unknown })._packageId === undefined
+                ? { ...item, _packageId: packageId }
+                : item,
+        );
         for (const item of items) {
             const owner = (item as { _packageId?: unknown })?._packageId;
             if (typeof owner === 'string' && owner.length > 0) owners.add(owner);
         }
         this.reloadedConnectors = { items, owners };
-    }
-
-    /**
-     * [ADR-0150 D3] The refusal of every enabled provider-bound declared
-     * connector name that resolves to no single holder, read over the ObjectQL
-     * registry ({@link refusedConnectorNames}). A composition with no registry
-     * has no package coordinate to resolve against, and refuses nothing here.
-     */
-    private refusedDeclaredConnectorNames(ctx: PluginContext, declared: readonly unknown[]): Map<string, PackageScopedRefusal> {
-        let registry: PackageScopedRegistry | undefined;
-        try {
-            registry = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry);
-        } catch {
-            registry = undefined; // no registry service
-        }
-        if (!registry) return new Map();
-        const names: string[] = [];
-        for (const raw of declared) {
-            const entry = raw as DeclaredConnectorItem;
-            if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
-            if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
-            if (entry.enabled === false) continue;
-            names.push(entry.name);
-        }
-        return refusedConnectorNames(registry, names);
     }
 
     /**
@@ -3048,11 +3174,13 @@ export class AutomationServicePlugin implements Plugin {
         opts: { post: boolean },
     ): Promise<unknown[] | undefined> {
         let registryItems: unknown[] | undefined;
+        let byPackage = false;
         try {
             const ql = ctx.getService<{
                 registry?: { listItems?: (type: string) => unknown[] };
             }>('objectql');
             registryItems = ql?.registry?.listItems?.('connector') ?? [];
+            byPackage = packageScopedRegistryOf(ql?.registry) !== undefined;
         } catch {
             registryItems = undefined; // no registry service
         }
@@ -3075,7 +3203,7 @@ export class AutomationServicePlugin implements Plugin {
             if (!this.reloadedConnectors) return undefined;
             base = [];
         }
-        return mergeDeclaredConnectorSources(base, this.reloadedConnectors);
+        return mergeDeclaredConnectorSources(base, this.reloadedConnectors, { byPackage });
     }
 
     /**
@@ -3091,8 +3219,19 @@ export class AutomationServicePlugin implements Plugin {
         // Both call sites are post-boot hooks (`kernel:ready`, `metadata:reloaded`).
         const declared = await this.readDeclaredConnectorItems(ctx, { post: true });
         if (!declared || declared.length === 0) return;
-        const live = new Set(this.engine.getConnectorDescriptors().map((d) => d.name));
-        const inert = findInertDeclaredConnectors(declared, live);
+        // [#31699 PR 3] Live is judged per entry, as a dispatch would read it:
+        // the entry's own package's caller is served an instance (a plugin's
+        // connector of the name, or the package's own). Two packages may each
+        // declare the name, so another package's live instance serves nothing
+        // of this entry's and does not silence it.
+        const engine = this.engine;
+        const resolve = connectorNameResolver(ctx);
+        const unserved = declared.filter((entry) => {
+            const name = (entry as DeclaredConnectorItem)?.name;
+            if (typeof name !== 'string' || name.length === 0) return true;
+            return engine.resolveConnectorInstanceFor(name, connectorInstancePackage(resolve, entry)).status !== 'instance';
+        });
+        const inert = findInertDeclaredConnectors(unserved, new Set());
         if (inert.length === 0) return;
         ctx.logger.warn(
             `[Automation] ${inert.length} declarative connector(s) declare actions but are not registered ` +
@@ -3279,41 +3418,78 @@ export class AutomationServicePlugin implements Plugin {
             ctx.logger.error(msg, undefined, cause === undefined ? undefined : describeThrownForLog(cause));
         };
 
-        // [ADR-0150 D3, epic #31527 child E5] A declared name that resolves to
-        // no single holder (two packages declare it) is refused, naming every
-        // candidate, and never materialized: no instance is picked by list
-        // order ({@link refusedConnectorNames}).
-        const refusedNames = this.refusedDeclaredConnectorNames(ctx, declared);
-        for (const [name, refusal] of refusedNames) {
-            const stored = declared.some((raw) => (raw as DeclaredConnectorItem)?.name === name && storedEntry(raw));
-            fail(`[Automation] connector instance '${name}' is not materialized: ${refusal.message}`, undefined, stored);
-        }
-
-        // Build the desired set: enabled provider-bound instances, keyed by name.
-        // A descriptor (no `provider`) or an `enabled: false` instance is not
-        // desired — if we materialized it before, it is torn down below.
-        const desired = new Map<string, { entry: DeclaredConnectorItem & { name: string; provider: string }; signature: string }>();
+        // Build the desired set: enabled provider-bound instances, keyed by
+        // instance ([ADR-0150 D4, #31699 PR 3] package and name: two packages'
+        // instances of one name are two instances, each materialized as its
+        // own). A descriptor (no `provider`) or an `enabled: false` instance is
+        // not desired — if we materialized it before, it is torn down below.
+        const resolveName = connectorNameResolver(ctx);
+        // [ADR-0150 D9, #31699] Two packages' instances of one name live side
+        // by side only where the package-scoped registry can judge them (the
+        // install door admits a second holder of a name only from another
+        // namespace). A composition with no registry to ask keeps one instance
+        // per name, as before the narrowing: red line 1, never loosened where
+        // it cannot be judged.
+        let judgedByPackage = false;
+        try {
+            judgedByPackage = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry) !== undefined;
+        } catch { /* no ObjectQL: nothing to judge by */ }
+        const desired = new Map<string, {
+            entry: DeclaredConnectorItem & { name: string; provider: string };
+            packageId: string | null;
+            signature: string;
+        }>();
         for (const raw of declared) {
             const entry = raw as DeclaredConnectorItem;
             if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
             if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
             const bound = entry as DeclaredConnectorItem & { name: string; provider: string };
             if (bound.enabled === false) continue;
-            if (refusedNames.has(bound.name)) continue;
             // [#28713] Held until every plugin has started ({@link holdStoredEntries}).
             if (this.holdStoredEntries && storedEntry(bound)) {
                 this.storedEntriesHeld = true;
                 continue;
             }
-            if (desired.has(bound.name)) {
+            // [ADR-0150 D3, #31699 PR 3] An entry with no package of its own,
+            // under a name two packages hold, is no instance anyone can address:
+            // refused, naming every candidate, and never materialized as one of
+            // them ({@link connectorInstanceRefusal}). Each package's own entry
+            // is its own instance, materialized beside the other's.
+            const refusal = connectorInstanceRefusal(resolveName, bound);
+            if (refusal !== undefined) {
+                fail(`[Automation] connector instance '${bound.name}' is not materialized: ${refusal.message}`, undefined, storedEntry(bound));
+                continue;
+            }
+            const packageId = connectorInstancePackage(resolveName, bound);
+            const key = connectorInstanceKey(bound.name, packageId);
+            if (desired.has(key)) {
                 fail(
-                    `[Automation] duplicate declarative connector instance name '${bound.name}' — connector names must be unique (ADR-0097).`,
+                    `[Automation] duplicate declarative connector instance name '${bound.name}'`
+                        + `${packageId === null ? '' : ` in package '${packageId}'`} — connector names must be unique `
+                        + '(ADR-0097), within a package (ADR-0150 D4).',
                     undefined,
                     storedEntry(bound),
                 );
                 continue;
             }
-            desired.set(bound.name, { entry: bound, signature: connectorInstanceSignature(bound) });
+            if (!judgedByPackage && [...desired.values()].some((d) => d.entry.name === bound.name)) {
+                fail(
+                    `[Automation] duplicate declarative connector instance name '${bound.name}' — connector names must be `
+                        + 'unique (ADR-0097); two packages may each declare one only where the package-scoped registry '
+                        + 'tells their instances apart (ADR-0150 D9), and this composition serves none.',
+                    undefined,
+                    storedEntry(bound),
+                );
+                continue;
+            }
+            // [#31699] The instance package joins the signature: an entry whose
+            // package moves (an unstamped entry's durable holder changing) is
+            // registered again under the new one, never left under the old.
+            desired.set(key, {
+                entry: bound,
+                packageId,
+                signature: `${connectorInstanceSignature(bound)}|package:${packageId ?? ''}`,
+            });
         }
 
         // [#27237] Where each instance's `credentialRef` resolves from joins its
@@ -3355,12 +3531,15 @@ export class AutomationServicePlugin implements Plugin {
         // the other organizations keep their cached tokens), and neither does
         // a refresh that rotates the token.
         const connectionStates = new Map<string, ConnectionStateOfInstance>();
-        for (const [name, d] of desired) {
+        for (const [key, d] of desired) {
+            const name = d.entry.name;
             const auth = d.entry.auth;
             if (auth?.type !== 'oauth2' || auth.grant !== 'authorization_code') continue;
             let state: ConnectionStateOfInstance;
             try {
-                const rows = await this.connectorConnectionStoreOrNone().listFor(name);
+                // [#31699] An organization whose read is refused has no connection to materialize with.
+                const rows = (await this.connectorConnectionStoreOrNone().listFor(name, d.packageId))
+                    .filter((r) => r.conflict === undefined);
                 const reconnectRequired = rows.filter((r) => r.status === 'reconnect_required').map((r) => r.organizationId).sort();
                 const discovery = discoveryOrganizationOf(rows);
                 const discoveryConnectedAt = rows.find((r) => r.organizationId === discovery)?.connectedAt;
@@ -3376,11 +3555,11 @@ export class AutomationServicePlugin implements Plugin {
             } catch (err) {
                 state = { kind: 'unreadable' };
                 ctx.logger.warn(
-                    `[Automation] the connections of connector instance '${name}' could not be read; it retries.`,
+                    `[Automation] the connections of connector instance '${name}'${inPackage(d.packageId)} could not be read; it retries.`,
                     describeThrownForLog(err),
                 );
             }
-            connectionStates.set(name, state);
+            connectionStates.set(key, state);
             d.signature += state.kind === 'unreadable'
                 ? '|connections:unreadable'
                 : state.connected.length > 0
@@ -3402,34 +3581,37 @@ export class AutomationServicePlugin implements Plugin {
 
         // 1. Remove connectors we previously materialized that are no longer
         //    desired (deleted from the stack, or newly `enabled: false`).
-        for (const [name, tracked] of [...this.materializedConnectors]) {
-            if (desired.has(name)) continue;
-            await this.dematerializeConnector(engine, name, tracked, ctx);
+        for (const [key, tracked] of [...this.materializedConnectors]) {
+            if (desired.has(key)) continue;
+            await this.dematerializeConnector(engine, { key, name: tracked.name, packageId: tracked.packageId }, tracked, ctx);
         }
         // Degraded instances (#3017) whose entry vanished / was disabled are
         // dropped too: unregister the husk (idempotent — a kept-serving old
         // connector was already torn down above) and forget the retry.
-        for (const name of [...this.degradedInstances.keys()]) {
-            if (desired.has(name)) continue;
-            this.degradedInstances.delete(name);
-            try { engine.unregisterConnector(name); } catch { /* ignore */ }
-            ctx.logger.info(`[Automation] dropped degraded connector instance '${name}' (no longer declared)`);
+        for (const [key, degraded] of [...this.degradedInstances]) {
+            if (desired.has(key)) continue;
+            this.degradedInstances.delete(key);
+            // [#31699 PR 3] The instance itself: another package's of the name stays.
+            try { engine.unregisterConnector(degraded.name, degraded.packageId); } catch { /* ignore */ }
+            ctx.logger.info(`[Automation] dropped degraded connector instance '${degraded.name}'${inPackage(degraded.packageId)} (no longer declared)`);
         }
-        for (const name of [...this.credentialRefusalAttempts.keys()]) {
-            if (!desired.has(name)) this.credentialRefusalAttempts.delete(name);
+        for (const key of [...this.credentialRefusalAttempts.keys()]) {
+            if (!desired.has(key)) this.credentialRefusalAttempts.delete(key);
         }
 
         // 2. Add new instances and re-materialize changed ones (signature diff).
         let changed = 0;
-        for (const [name, { entry, signature }] of desired) {
-            const existing = this.materializedConnectors.get(name);
+        for (const [key, { entry, packageId, signature }] of desired) {
+            const name = entry.name;
+            const instance = { key, name, packageId };
+            const existing = this.materializedConnectors.get(key);
             if (existing && existing.signature === signature) {
                 // Unchanged — leave the live connector as-is. If a retry was
                 // pending for a *changed* config that has since been reverted,
                 // the live connector is already the desired one: cancel it.
-                if (this.degradedInstances.delete(name)) {
+                if (this.degradedInstances.delete(key)) {
                     ctx.logger.info(
-                        `[Automation] connector instance '${name}' reverted to its live configuration; pending retry cancelled`,
+                        `[Automation] connector instance '${name}'${inPackage(packageId)} reverted to its live configuration; pending retry cancelled`,
                     );
                 }
                 continue;
@@ -3438,7 +3620,7 @@ export class AutomationServicePlugin implements Plugin {
             // [#27237] Held: its upstream refused this very stored value. The
             // next attempt is the next change of the credential or the entry,
             // or a restart.
-            const held = this.degradedInstances.get(name);
+            const held = this.degradedInstances.get(key);
             if (held?.held && held.signature === signature) continue;
 
             const provider = entry.provider;
@@ -3483,10 +3665,10 @@ export class AutomationServicePlugin implements Plugin {
                     ? oauth2NotServableReason(name, { ...entry, provider }, entry.auth, engine.providerAppliesCredentialHandle(provider))
                     : undefined;
             if (grantRefusal !== undefined) {
-                if (existing) await this.dematerializeConnector(engine, name, existing, ctx, 'no longer servable');
-                this.grantHandles.delete(name);
+                if (existing) await this.dematerializeConnector(engine, instance, existing, ctx, 'no longer servable');
+                this.grantHandles.delete(key);
                 this.failDegradedConnectorInstance(engine, ctx, {
-                    name,
+                    ...instance,
                     entry,
                     provider,
                     signature,
@@ -3525,7 +3707,7 @@ export class AutomationServicePlugin implements Plugin {
                 }
                 if (resolution.kind !== 'resolved') {
                     await this.degradeConnectorForCredential(engine, ctx, {
-                        name, entry, provider, signature, existing, ref, resolution,
+                        ...instance, entry, provider, signature, existing, ref, resolution,
                     });
                     continue;
                 }
@@ -3551,7 +3733,7 @@ export class AutomationServicePlugin implements Plugin {
                 }
                 if (resolution.kind !== 'resolved') {
                     await this.degradeConnectorForCredential(engine, ctx, {
-                        name, entry, provider, signature, existing, ref: vendorRef, resolution,
+                        ...instance, entry, provider, signature, existing, ref: vendorRef, resolution,
                     });
                     continue;
                 }
@@ -3591,10 +3773,10 @@ export class AutomationServicePlugin implements Plugin {
                 // fault and never fails a boot: it is held degraded, "not
                 // connected" or "reconnect required", until a connect.
                 if (entry.auth.grant === 'authorization_code') {
-                    const state = connectionStates.get(name);
+                    const state = connectionStates.get(key);
                     if (state?.kind === 'unreadable') {
                         this.degradeConnectorInstance(engine, ctx, {
-                            name,
+                            ...instance,
                             entry,
                             provider,
                             signature,
@@ -3606,7 +3788,7 @@ export class AutomationServicePlugin implements Plugin {
                     }
                     if (state === undefined || state.connected.length === 0) {
                         await this.holdConnectorUntilConnected(engine, ctx, {
-                            name,
+                            ...instance,
                             entry,
                             provider,
                             signature,
@@ -3618,8 +3800,8 @@ export class AutomationServicePlugin implements Plugin {
                         continue;
                     }
                 }
-                credentialHandle = this.createGrantHandle(ctx, name, entry, entry.auth, credential?.value);
-                const state = entry.auth.grant === 'authorization_code' && provider === 'mcp' ? connectionStates.get(name) : undefined;
+                credentialHandle = this.createGrantHandle(ctx, name, packageId, entry, entry.auth, credential?.value);
+                const state = entry.auth.grant === 'authorization_code' && provider === 'mcp' ? connectionStates.get(key) : undefined;
                 if (state?.kind === 'read' && state.discovery !== undefined) {
                     materializingHandle = askingDuringMaterializationAs(credentialHandle, state.discovery);
                     discoveryConnection = {
@@ -3738,7 +3920,7 @@ export class AutomationServicePlugin implements Plugin {
                 // and the secret left alone (#26702).
                 if (isConnectorCredentialRejected(thrown) && discoveryConnection !== undefined) {
                     await this.holdConnectorForRefusedConnection(engine, ctx, {
-                        name,
+                        ...instance,
                         entry,
                         provider,
                         signature,
@@ -3755,7 +3937,7 @@ export class AutomationServicePlugin implements Plugin {
                 // retry loop against the same value.
                 if (isConnectorCredentialRejected(thrown)) {
                     await this.holdConnectorForRejectedCredential(engine, ctx, {
-                        name,
+                        ...instance,
                         entry,
                         provider,
                         signature,
@@ -3776,7 +3958,7 @@ export class AutomationServicePlugin implements Plugin {
                 // the instance at once.
                 if (isConnectorUpstreamChanged(thrown)) {
                     this.degradeConnectorInstance(engine, ctx, {
-                        name,
+                        ...instance,
                         entry,
                         provider,
                         signature,
@@ -3789,7 +3971,7 @@ export class AutomationServicePlugin implements Plugin {
                 }
                 if (isConnectorUpstreamUnavailable(thrown)) {
                     this.degradeConnectorInstance(engine, ctx, {
-                        name,
+                        ...instance,
                         entry,
                         provider,
                         signature,
@@ -3812,9 +3994,9 @@ export class AutomationServicePlugin implements Plugin {
                 // [#27992] A configuration fault met by an instance that is
                 // degraded — its backoff retry, or a reload — ends the retry:
                 // ADR-0097 does not retry a configuration fault.
-                if (!opts.fatal && this.degradedInstances.has(name)) {
+                if (!opts.fatal && this.degradedInstances.has(key)) {
                     this.failDegradedConnectorInstance(engine, ctx, {
-                        name,
+                        ...instance,
                         entry,
                         provider,
                         signature,
@@ -3849,7 +4031,7 @@ export class AutomationServicePlugin implements Plugin {
             // what the factory named its def, so discovery, dispatch, and the
             // conflict rule all agree with the metadata the author wrote.
             const def = { ...materialization.def, name };
-            const tracked = { signature, provider, close: materialization.close };
+            const tracked = { name, packageId, signature, provider, close: materialization.close };
             // [#27237] A credentialed instance's calls are watched for the
             // upstream's 401 / 403 (rest and openapi answer them as a result),
             // and — unless the provider proved the credential while
@@ -3864,7 +4046,7 @@ export class AutomationServicePlugin implements Plugin {
             // that answer too; the provider's own covers a `401`.
             const handlers = credential && ref !== undefined && credentialHandle === undefined
                 ? this.watchForCredentialRejection(engine, ctx, {
-                    name, entry, provider, signature, ref, credential, tracked, proven,
+                    ...instance, entry, provider, signature, ref, credential, tracked, proven,
                 }, materialization.handlers)
                 : credentialHandle && entry.auth?.type === 'app-credential'
                     ? retryOnVendorTokenRefusal(name, entry.auth.vendor, credentialHandle, materialization.handlers)
@@ -3876,17 +4058,18 @@ export class AutomationServicePlugin implements Plugin {
                 def,
                 withFailureTextRewritten(handlers, connectorReadWithheldText(entry)),
                 'declarative',
+                { packageId },
             );
-            this.materializedConnectors.set(name, tracked);
-            if (credentialHandle) this.grantHandles.set(name, credentialHandle);
-            else this.grantHandles.delete(name);
+            this.materializedConnectors.set(key, tracked);
+            if (credentialHandle) this.grantHandles.set(key, credentialHandle);
+            else this.grantHandles.delete(key);
             // Success clears any pending degraded retry — including replacing a
             // registered husk (registerConnector above overwrote it).
-            const recovered = this.degradedInstances.delete(name);
+            const recovered = this.degradedInstances.delete(key);
             changed++;
             ctx.logger.info(
                 `[Automation] ${recovered ? 'recovered' : existing ? 're-materialized' : 'materialized'} ` +
-                    `connector instance '${name}' via provider '${provider}' (${def.actions?.length ?? 0} action(s))`,
+                    `connector instance '${name}'${inPackage(packageId)} via provider '${provider}' (${def.actions?.length ?? 0} action(s))`,
             );
             // [#27237] Only a provider that proved the credential while
             // materializing (`credentialVerified` — mcp's handshake) says the
@@ -3894,7 +4077,7 @@ export class AutomationServicePlugin implements Plugin {
             // where a `2xx` only stamps a `set` row's time; neither that nor a
             // materialization alone turns a `rejected` row back to `set`.
             if (credential && ref !== undefined && proven && credentialHandle === undefined) {
-                await this.recordCredentialProven(ctx, name, ref, credential);
+                await this.recordCredentialProven(ctx, instance, ref, credential);
             }
         }
 
@@ -3942,6 +4125,10 @@ export class AutomationServicePlugin implements Plugin {
         ctx: PluginContext,
         info: {
             name: string;
+            /** [#31699 PR 3] The materializer's key of the instance ({@link connectorInstanceKey}). */
+            key: string;
+            /** [#31699 PR 3] The instance's package (`null`: none). */
+            packageId: string | null;
             entry: DeclaredConnectorItem;
             provider: string;
             signature: string;
@@ -3967,9 +4154,9 @@ export class AutomationServicePlugin implements Plugin {
             fault?: 'unavailable' | 'changed';
         },
     ): void {
-        const prior = this.degradedInstances.get(info.name);
+        const prior = this.degradedInstances.get(info.key);
         const attempts = prior && prior.signature === info.signature ? prior.attempts + 1 : 1;
-        this.degradedInstances.set(info.name, { attempts, signature: info.signature, reason: info.reason });
+        this.degradedInstances.set(info.key, { name: info.name, packageId: info.packageId, attempts, signature: info.signature, reason: info.reason });
 
         if (!info.hasLive) {
             try {
@@ -3984,6 +4171,8 @@ export class AutomationServicePlugin implements Plugin {
                     info.reason,
                     'declarative',
                     info.cause,
+                    undefined,
+                    { packageId: info.packageId },
                 );
             } catch (err) {
                 // Can't even register the husk (e.g. the entry's def no longer
@@ -4005,7 +4194,7 @@ export class AutomationServicePlugin implements Plugin {
         // which would ship the thrown value's stack on every retry (#5575).
         const changed = info.fault === 'changed';
         ctx.logger.error(
-            `[Automation] connector instance '${info.name}' (provider '${info.provider}') ` +
+            `[Automation] connector instance '${info.name}'${inPackage(info.packageId)} (provider '${info.provider}') ` +
                 (changed
                     ? 'serves a tool definition that differs from its toolsSnapshot — '
                     : 'upstream unavailable — ') +
@@ -4035,6 +4224,10 @@ export class AutomationServicePlugin implements Plugin {
         ctx: PluginContext,
         info: {
             name: string;
+            /** [#31699 PR 3] The materializer's key of the instance ({@link connectorInstanceKey}). */
+            key: string;
+            /** [#31699 PR 3] The instance's package (`null`: none). */
+            packageId: string | null;
             entry: DeclaredConnectorItem;
             provider: string;
             signature: string;
@@ -4043,7 +4236,7 @@ export class AutomationServicePlugin implements Plugin {
             cause: unknown;
         },
     ): void {
-        this.degradedInstances.set(info.name, { attempts: 1, signature: info.signature, reason: info.reason, held: true });
+        this.degradedInstances.set(info.key, { name: info.name, packageId: info.packageId, attempts: 1, signature: info.signature, reason: info.reason, held: true });
         if (!info.hasLive) {
             try {
                 // [#28016] Held: the husk says so, and a dispatch names the edit.
@@ -4053,6 +4246,7 @@ export class AutomationServicePlugin implements Plugin {
                     'declarative',
                     info.cause,
                     { kind: 'declaration' },
+                    { packageId: info.packageId },
                 );
             } catch (err) {
                 ctx.logger.warn(
@@ -4067,7 +4261,7 @@ export class AutomationServicePlugin implements Plugin {
         // no thrown value: its reason rides `meta` instead, so the record never
         // renders `describeThrownForLog(undefined)`, the string "undefined".
         ctx.logger.error(
-            `[Automation] failed to materialize connector instance '${info.name}' via provider '${info.provider}' (ADR-0097): ` +
+            `[Automation] failed to materialize connector instance '${info.name}'${inPackage(info.packageId)} via provider '${info.provider}' (ADR-0097): ` +
                 'a configuration fault, so the instance is no longer retried. ' +
                 (info.hasLive ? 'The previously-materialized connector keeps serving. ' : '') +
                 'Fix its declaration; an edit or a restart re-attempts it.',
@@ -4119,6 +4313,7 @@ export class AutomationServicePlugin implements Plugin {
     private createGrantHandle(
         ctx: PluginContext,
         name: string,
+        packageId: string | null,
         entry: DeclaredConnectorItem,
         auth: OAuth2InstanceAuth,
         clientSecret: string | undefined,
@@ -4128,6 +4323,13 @@ export class AutomationServicePlugin implements Plugin {
         // the client its administrator entered (`clientSource: 'installer'`).
         return createOAuth2GrantHandle({
             connector: name,
+            // [#31699 PR 3] The instance's own package, fixed: the handle is
+            // the instance's, and an instance whose package moves (an unstamped
+            // entry's holder replaced) is re-materialized under the new one —
+            // its signature carries the package — with a handle of its own.
+            // Asked on every read it could name another instance's connections
+            // between a second holder's arrival and the next reconcile.
+            packageId,
             config: {
                 grant: auth.grant,
                 ...(takesInstallerClient(auth) ? { clientSource: 'installer' as const } : {}),
@@ -4172,6 +4374,10 @@ export class AutomationServicePlugin implements Plugin {
         ctx: PluginContext,
         info: {
             name: string;
+            /** [#31699 PR 3] The materializer's key of the instance ({@link connectorInstanceKey}). */
+            key: string;
+            /** [#31699 PR 3] The instance's package (`null`: none). */
+            packageId: string | null;
             entry: DeclaredConnectorItem;
             provider: string;
             signature: string;
@@ -4186,14 +4392,14 @@ export class AutomationServicePlugin implements Plugin {
         let marked = false;
         try {
             const store = this.connectorConnectionStoreOrNone();
-            const record = await store.read(connection.organizationId, name);
+            const record = await store.read(connection.organizationId, name, info.packageId);
             if (record && record.status === 'connected' && record.connectedAt === connection.connectedAt) {
                 await store.markReconnectRequired(record, reason);
                 marked = true;
             }
         } catch (err) {
             ctx.logger.warn(
-                `[Automation] connector instance '${name}': the connection of organization '${connection.organizationId}' `
+                `[Automation] connector instance '${name}'${inPackage(info.packageId)}: the connection of organization '${connection.organizationId}' `
                     + 'could not be marked to be reconnected; the instance retries.',
                 describeThrownForLog(err),
             );
@@ -4201,6 +4407,8 @@ export class AutomationServicePlugin implements Plugin {
         if (!marked) {
             this.degradeConnectorInstance(engine, ctx, {
                 name,
+                key: info.key,
+                packageId: info.packageId,
                 entry: info.entry,
                 provider: info.provider,
                 signature: info.signature,
@@ -4211,10 +4419,13 @@ export class AutomationServicePlugin implements Plugin {
             });
             return;
         }
-        this.degradedInstances.set(name, { attempts: 1, signature: info.signature, reason, held: true });
+        this.degradedInstances.set(info.key, { name, packageId: info.packageId, attempts: 1, signature: info.signature, reason, held: true });
         if (!info.hasLive) {
             try {
-                engine.registerDegradedConnector(this.buildDegradedHuskDef(name, info.entry), reason, 'declarative', info.cause, { kind: 'connection' });
+                engine.registerDegradedConnector(
+                    this.buildDegradedHuskDef(name, info.entry), reason, 'declarative', info.cause, { kind: 'connection' },
+                    { packageId: info.packageId },
+                );
             } catch (err) {
                 ctx.logger.warn(
                     `[Automation] could not register degraded husk for '${name}' — the instance stays absent from the `
@@ -4224,7 +4435,7 @@ export class AutomationServicePlugin implements Plugin {
             }
         }
         ctx.logger.warn(
-            `[Automation] connector instance '${name}' (provider '${info.provider}'): its MCP server refused the token of `
+            `[Automation] connector instance '${name}'${inPackage(info.packageId)} (provider '${info.provider}'): its MCP server refused the token of `
                 + `organization '${connection.organizationId}' while it listed its tools (HTTP ${info.status}); that connection `
                 + 'needs to be reconnected (ADR-0143 D4).',
         );
@@ -4244,6 +4455,10 @@ export class AutomationServicePlugin implements Plugin {
         ctx: PluginContext,
         info: {
             name: string;
+            /** [#31699 PR 3] The materializer's key of the instance ({@link connectorInstanceKey}). */
+            key: string;
+            /** [#31699 PR 3] The instance's package (`null`: none). */
+            packageId: string | null;
             entry: DeclaredConnectorItem;
             provider: string;
             signature: string;
@@ -4251,8 +4466,8 @@ export class AutomationServicePlugin implements Plugin {
             reason: string;
         },
     ): Promise<void> {
-        if (info.existing) await this.dematerializeConnector(engine, info.name, info.existing, ctx, 'no working connection');
-        this.degradedInstances.set(info.name, { attempts: 1, signature: info.signature, reason: info.reason, held: true });
+        if (info.existing) await this.dematerializeConnector(engine, info, info.existing, ctx, 'no working connection');
+        this.degradedInstances.set(info.key, { name: info.name, packageId: info.packageId, attempts: 1, signature: info.signature, reason: info.reason, held: true });
         try {
             engine.registerDegradedConnector(
                 this.buildDegradedHuskDef(info.name, info.entry),
@@ -4260,6 +4475,7 @@ export class AutomationServicePlugin implements Plugin {
                 'declarative',
                 undefined,
                 { kind: 'connection' },
+                { packageId: info.packageId },
             );
         } catch (err) {
             ctx.logger.warn(
@@ -4268,7 +4484,7 @@ export class AutomationServicePlugin implements Plugin {
                 describeThrownForLog(err),
             );
         }
-        ctx.logger.warn(`[Automation] connector instance '${info.name}' (provider '${info.provider}') is degraded: ${info.reason}.`);
+        ctx.logger.warn(`[Automation] connector instance '${info.name}'${inPackage(info.packageId)} (provider '${info.provider}') is degraded: ${info.reason}.`);
     }
 
     /** ADR-0143 D5 — where begun connects wait: the cluster KV, or this process on a single node. */
@@ -4332,7 +4548,8 @@ export class AutomationServicePlugin implements Plugin {
         const serverUrl = mcpDiscoveryServerUrl(entry, auth);
         if (serverUrl === undefined) return undefined;
         const store = this.connectorConnectionStoreOrNone();
-        const existing = installerClient ? undefined : await store.readOrRefuse(organizationId, name);
+        const packageId = connectorInstancePackage(connectorNameResolver(ctx), entry);
+        const existing = installerClient ? undefined : await store.readOrRefuse(organizationId, name, packageId);
         if (existing?.hasRegisteredClient) {
             let kept: McpAuthorizationClient | undefined;
             try {
@@ -4361,7 +4578,7 @@ export class AutomationServicePlugin implements Plugin {
                 ...(typeof entry.requestTimeoutMs === 'number' ? { timeoutMs: entry.requestTimeoutMs } : {}),
             });
             ctx.logger.info(
-                `[Automation] connector instance '${name}': the MCP authorization flow found its authorization server`
+                `[Automation] connector instance '${name}'${inPackage(packageId)}: the MCP authorization flow found its authorization server`
                     + `${client.registered ? ' and registered a client' : ''} for organization '${organizationId}'.`,
             );
             return client;
@@ -4383,9 +4600,17 @@ export class AutomationServicePlugin implements Plugin {
     private async connectionDoorSubject(
         ctx: PluginContext,
         request: ConnectorConnectionRequest | undefined,
+        /**
+         * [#31699, M7] The instance's package as the pending authorization
+         * recorded it: a package id, `null` for the environment's or the
+         * platform's instance. Absent, the door resolves the name.
+         */
+        recordedPackage?: string | null,
     ): Promise<{
         name: string;
         entry: DeclaredConnectorItem;
+        /** [#31699] The instance's package (`null`: the environment's or the platform's instance). */
+        packageId: string | null;
         auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>;
         organizationId: string;
         userId?: string;
@@ -4395,7 +4620,12 @@ export class AutomationServicePlugin implements Plugin {
             throw credentialDoorRefusal('A connector instance name is required.', 'VALIDATION_ERROR', 400);
         }
         const declared = await this.readDeclaredConnectorItems(ctx, { post: true });
-        const entry = (declared ?? []).find((raw) => (raw as DeclaredConnectorItem | null)?.name === name) as DeclaredConnectorItem | undefined;
+        // [ADR-0150 D5, #31699 PR 3] The addressed door
+        // (`/automation/connectors/:ns/:name/connection`) names the package
+        // the domain admitted the address to: that package's instance, read
+        // exactly, as a recorded package is.
+        const addressed = typeof request?.package === 'string' && request.package.length > 0 ? request.package : undefined;
+        const { entry, packageId } = this.connectionDoorInstance(ctx, name, declared ?? [], recordedPackage !== undefined ? recordedPackage : addressed);
         if (!entry || typeof entry.provider !== 'string' || entry.provider.length === 0) {
             throw credentialDoorRefusal(
                 `No installed package declares a provider-bound connector instance '${name}'.`,
@@ -4426,7 +4656,61 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const userId = typeof request?.context?.userId === 'string' && request.context.userId.length > 0 ? request.context.userId : undefined;
-        return { name, entry, auth, organizationId, userId };
+        return { name, entry, packageId, auth, organizationId, userId };
+    }
+
+    /**
+     * [ADR-0150 D3/D4, #31699; design review M6] Which declared instance the
+     * connection door's name means, and its package. The resolver decides
+     * identity; the entry always comes from the declared list, matched on name
+     * and package:
+     *
+     * - a package the pending authorization recorded (`recordedPackage`) is
+     *   read exactly, never re-resolved: an entry of that package, else none;
+     * - `refused` (two packages hold the name) answers `409` naming them;
+     * - `resolved` takes the entry whose instance package
+     *   ({@link connectorInstancePackage}) is the resolved one (`null`: the
+     *   environment's or the platform's); when no declared entry is, the rule
+     *   below;
+     * - `not-found`, or no registry to ask (a code-registered instance, one only
+     *   a dev reload declares, a composition with no ObjectQL), serves the one
+     *   declared entry of the name as before, with the package that entry
+     *   carries; two declared entries are refused `409`, never picked.
+     */
+    private connectionDoorInstance(
+        ctx: PluginContext,
+        name: string,
+        declared: readonly unknown[],
+        recordedPackage: string | null | undefined,
+    ): { entry: DeclaredConnectorItem | undefined; packageId: string | null } {
+        const ofName = declared.filter((raw) => (raw as DeclaredConnectorItem | null)?.name === name) as DeclaredConnectorItem[];
+        const resolve = connectorNameResolver(ctx);
+        const exactly = (packageId: string | null) => ({
+            entry: ofName.find((entry) => connectorInstancePackage(resolve, entry) === packageId),
+            packageId,
+        });
+        if (recordedPackage !== undefined) return exactly(recordedPackage);
+        const resolution = resolve(name, null);
+        if (resolution?.status === 'refused') {
+            throw credentialDoorRefusal(resolution.message, 'RESOURCE_CONFLICT', 409);
+        }
+        if (resolution?.status === 'resolved') {
+            const held = exactly(resolution.holder.kind === 'package' ? resolution.holder.packageId : null);
+            // A holder no declared entry is the instance of (an entry stamped
+            // with another package than the one the name resolves to) falls to
+            // the one declared entry below, with that entry's own package: the
+            // package the dispatch reads the same instance's connection by.
+            if (held.entry !== undefined) return held;
+        }
+        if (ofName.length > 1) {
+            throw credentialDoorRefusal(
+                `${ofName.length} declared connector instances are named '${name}', and the connection door connects one: `
+                    + 'address the instance by its package.',
+                'RESOURCE_CONFLICT',
+                409,
+            );
+        }
+        return { entry: ofName[0], packageId: ofName[0] ? connectorInstancePackage(resolve, ofName[0]) : null };
     }
 
     /** ADR-0143 D3 — a connection row (or its absence) as the door answers it. Never a token. */
@@ -4480,6 +4764,7 @@ export class AutomationServicePlugin implements Plugin {
      */
     private async installerClientOfBegin(
         name: string,
+        packageId: string | null,
         auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>,
         request: ConnectorConnectionRequest,
         organizationId: string,
@@ -4496,7 +4781,7 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         if (offered === undefined) {
-            const kept = await this.keptInstallerClient(name, organizationId);
+            const kept = await this.keptInstallerClient(name, packageId, organizationId);
             if (kept) return kept;
             throw refuse(
                 `Connector instance '${name}' takes its OAuth client from the installer (\`clientSource: 'installer'\`), and this `
@@ -4538,9 +4823,9 @@ export class AutomationServicePlugin implements Plugin {
      * encrypted client column, or `undefined` when it keeps none. A store
      * that cannot read or decrypt it refuses (`503`), never "keeps none".
      */
-    private async keptInstallerClient(name: string, organizationId: string): Promise<InstallerClient | undefined> {
+    private async keptInstallerClient(name: string, packageId: string | null, organizationId: string): Promise<InstallerClient | undefined> {
         const store = this.connectorConnectionStoreOrNone();
-        const record = await store.readOrRefuse(organizationId, name);
+        const record = await store.readOrRefuse(organizationId, name, packageId);
         if (record?.installerClientId === undefined) return undefined;
         const kept = parseKeptConnectionClient(await store.resolveRegisteredClient(record));
         if (!kept?.installer) return undefined;
@@ -4555,9 +4840,13 @@ export class AutomationServicePlugin implements Plugin {
      * is absent, never a refusal: the read still answers the status.
      */
     private async getConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
-        const { name, organizationId } = await this.connectionDoorSubject(ctx, request);
+        const { name, packageId, organizationId } = await this.connectionDoorSubject(ctx, request);
         this.refuseClientOffLeg(name, request, 'read');
-        const state = this.describeConnection(name, organizationId, await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name));
+        const state = this.describeConnection(
+            name,
+            organizationId,
+            await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name, packageId),
+        );
         const redirectUri = this.derivedConnectorOAuthRedirectUri();
         return redirectUri === undefined ? state : { ...state, redirectUri };
     }
@@ -4568,7 +4857,7 @@ export class AutomationServicePlugin implements Plugin {
      * the authorization URL. Nothing is written to the connection record.
      */
     private async beginConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin> {
-        const { name, entry, auth, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
+        const { name, entry, packageId, auth, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
         if (userId === undefined) {
             throw credentialDoorRefusal(
                 `Connecting connector instance '${name}' needs a signed-in user: the callback is accepted only from the user `
@@ -4578,17 +4867,17 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const redirectUri = this.connectorOAuthRedirectUri();
-        const installerClient = await this.installerClientOfBegin(name, auth, request, organizationId, redirectUri);
+        const installerClient = await this.installerClientOfBegin(name, packageId, auth, request, organizationId, redirectUri);
         const client = await this.mcpAuthorizationClient(ctx, name, entry, auth, organizationId, redirectUri, installerClient);
         const state = createAuthorizationState();
         const { verifier, challenge } = createPkcePair();
         const expiresAt = Date.now() + PENDING_AUTHORIZATION_TTL_SECONDS * 1000;
         await this.pendingAuthorizations(ctx).put(state, {
-            connector: name, organizationId, userId, verifier, redirectUri, expiresAt,
+            connector: name, packageId, organizationId, userId, verifier, redirectUri, expiresAt,
             ...(client ? { client } : {}),
             ...(installerClient ? { installerClient } : {}),
         });
-        ctx.logger.info(`[Automation] connect of connector instance '${name}' begun for organization '${organizationId}' by user '${userId}'.`);
+        ctx.logger.info(`[Automation] connect of connector instance '${name}'${inPackage(packageId)} begun for organization '${organizationId}' by user '${userId}'.`);
         const resource = auth.resource ?? client?.resource;
         return {
             connector: name,
@@ -4659,10 +4948,14 @@ export class AutomationServicePlugin implements Plugin {
         }
         // The declaration is read again: the instance may have changed while
         // the browser was away.
-        const { name, auth, organizationId } = await this.connectionDoorSubject(ctx, {
+        // [#31699, M7] Exactly the instance the connect was begun for: the
+        // package it recorded (`null`: the environment's or the platform's
+        // instance), never the bare name resolved again. A record from before
+        // the package was recorded (no key, within its TTL) resolves the name.
+        const { name, packageId, auth, organizationId } = await this.connectionDoorSubject(ctx, {
             connector: pending.connector,
             context: request.context,
-        });
+        }, pending.packageId);
         const client = pending.client;
         // ADR-0143 D2.1 (2026-11-02 amendment): an instance that takes the
         // installer's client exchanges as the client its connect was begun
@@ -4723,6 +5016,7 @@ export class AutomationServicePlugin implements Plugin {
             const stored = await this.connectorConnectionStoreOrNone().connect({
                 organizationId,
                 connectorName: name,
+                packageId,
                 ...(userId ? { userId } : {}),
                 ...(token.refreshToken === undefined ? {} : { refreshToken: token.refreshToken }),
                 ...(token.scope === undefined ? {} : { scopes: token.scope }),
@@ -4744,7 +5038,7 @@ export class AutomationServicePlugin implements Plugin {
                     : {}),
             });
             ctx.logger.info(
-                `[Automation] connector instance '${name}' connected for organization '${organizationId}'`
+                `[Automation] connector instance '${name}'${inPackage(packageId)} connected for organization '${organizationId}'`
                     + `${userId ? ` by user '${userId}'` : ''}; reconciling it.`,
             );
             await this.reconcileDeclaredConnectors(ctx, { fatal: false });
@@ -4752,20 +5046,20 @@ export class AutomationServicePlugin implements Plugin {
         });
         // The access token the exchange answered serves the next dispatch; it is
         // never stored (D3).
-        this.grantHandles.get(name)?.seed(organizationId, record.revision, token);
+        this.grantHandles.get(connectorInstanceKey(name, packageId))?.seed(organizationId, record.revision, token, record.id);
         return this.describeConnection(name, organizationId, record);
     }
 
     /** ADR-0143 D5 — `IAutomationService.revokeConnectorConnection`. */
     private async revokeConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
-        const { name, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
+        const { name, packageId, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
         this.refuseClientOffLeg(name, request, 'revoke');
         const removed = await this.onReconcileQueue(async () => {
-            const gone = await this.connectorConnectionStoreOrNone().revoke(organizationId, name, userId);
+            const gone = await this.connectorConnectionStoreOrNone().revoke(organizationId, name, userId, packageId);
             if (!gone) return false;
-            this.grantHandles.get(name)?.forget(organizationId);
+            this.grantHandles.get(connectorInstanceKey(name, packageId))?.forget(organizationId);
             ctx.logger.info(
-                `[Automation] connection of connector instance '${name}' revoked for organization '${organizationId}'`
+                `[Automation] connection of connector instance '${name}'${inPackage(packageId)} revoked for organization '${organizationId}'`
                     + `${userId ? ` by user '${userId}'` : ''}; reconciling it.`,
             );
             await this.reconcileDeclaredConnectors(ctx, { fatal: false });
@@ -4863,6 +5157,10 @@ export class AutomationServicePlugin implements Plugin {
         ctx: PluginContext,
         info: {
             name: string;
+            /** [#31699 PR 3] The materializer's key of the instance ({@link connectorInstanceKey}). */
+            key: string;
+            /** [#31699 PR 3] The instance's package (`null`: none). */
+            packageId: string | null;
             entry: DeclaredConnectorItem;
             provider: string;
             signature: string;
@@ -4876,12 +5174,12 @@ export class AutomationServicePlugin implements Plugin {
             : info.resolution.reason;
         let hasLive = info.existing !== undefined;
         if (info.resolution.kind === 'missing' && info.existing) {
-            await this.dematerializeConnector(engine, info.name, info.existing, ctx, `its credential '${info.ref}' is no longer set`);
+            await this.dematerializeConnector(engine, info, info.existing, ctx, `its credential '${info.ref}' is no longer set`);
             hasLive = false;
         }
-        const prior = this.degradedInstances.get(info.name);
+        const prior = this.degradedInstances.get(info.key);
         const repeat = prior !== undefined && prior.signature === info.signature && prior.reason === reason;
-        this.degradedInstances.set(info.name, {
+        this.degradedInstances.set(info.key, { name: info.name, packageId: info.packageId,
             attempts: repeat ? prior.attempts + 1 : 1,
             signature: info.signature,
             reason,
@@ -4890,7 +5188,10 @@ export class AutomationServicePlugin implements Plugin {
         if (repeat) return;
         if (!hasLive) {
             try {
-                engine.registerDegradedConnector(this.buildDegradedHuskDef(info.name, info.entry), reason, 'declarative');
+                engine.registerDegradedConnector(
+                    this.buildDegradedHuskDef(info.name, info.entry), reason, 'declarative', undefined, undefined,
+                    { packageId: info.packageId },
+                );
             } catch (err) {
                 ctx.logger.warn(
                     `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
@@ -4900,7 +5201,7 @@ export class AutomationServicePlugin implements Plugin {
             }
         }
         ctx.logger.warn(
-            `[Automation] connector instance '${info.name}' (provider '${info.provider}') is degraded: ${reason}.` +
+            `[Automation] connector instance '${info.name}'${inPackage(info.packageId)} (provider '${info.provider}') is degraded: ${reason}.` +
                 (hasLive ? ' The previously-materialized connector keeps serving.' : ''),
         );
     }
@@ -4912,17 +5213,24 @@ export class AutomationServicePlugin implements Plugin {
      * `enabled: false` is listed too: an administrator may fill its credential
      * before enabling it.
      */
-    private async declaredCredentialRefs(ctx: PluginContext): Promise<Map<string, Array<{ name: string; packageId?: string }>>> {
+    private async declaredCredentialRefs(ctx: PluginContext): Promise<Map<string, DeclaredCredentialUser[]>> {
         const declared = (await this.readDeclaredConnectorItems(ctx, { post: true })) ?? [];
-        const out = new Map<string, Array<{ name: string; packageId?: string }>>();
+        const resolve = connectorNameResolver(ctx);
+        const out = new Map<string, DeclaredCredentialUser[]>();
         for (const raw of declared) {
             const entry = raw as DeclaredConnectorItem & { _packageId?: unknown };
             if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
             if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
             const packageId = typeof entry._packageId === 'string' && entry._packageId.length > 0 ? entry._packageId : undefined;
+            // [#31699 PR 3] The instance this entry is (its own package, else
+            // the name's holder's), or none when it is refused: the listing
+            // reads that instance's state, and names each instance once.
+            const instance = connectorInstanceRefusal(resolve, entry) ? false : connectorInstancePackage(resolve, entry);
             for (const ref of credentialRefsOf(entry.auth)) {
                 const list = out.get(ref) ?? [];
-                if (!list.some((c) => c.name === entry.name)) list.push({ name: entry.name, ...(packageId ? { packageId } : {}) });
+                if (!list.some((c) => c.name === entry.name && c.instance === instance)) {
+                    list.push({ name: entry.name, ...(packageId ? { packageId } : {}), instance });
+                }
                 out.set(ref, list);
             }
         }
@@ -4945,12 +5253,20 @@ export class AutomationServicePlugin implements Plugin {
     private async describeCredentialRef(
         chain: ConnectorCredentialChain,
         ref: string,
-        declaredBy: Array<{ name: string; packageId?: string }> | undefined,
+        declaredBy: DeclaredCredentialUser[] | undefined,
         rows: ReadonlyMap<string, ConnectorCredentialRecord>,
     ): Promise<ConnectorCredentialRef> {
         const probe = await probeConnectorCredential(chain, ref, rows);
         const record = chain.store ? rows.get(ref) : undefined;
-        const descriptors = new Map((this.engine?.getConnectorDescriptors() ?? []).map((d) => [d.name, d]));
+        const descriptors = this.engine?.getConnectorDescriptors() ?? [];
+        // [ADR-0150 D9, #31699] Two packages' instances of one name are two
+        // descriptors: an entry reads its own instance's (by the instance's
+        // package, not its stamp: an environment row or a compatibility entry
+        // is the holder's instance), and a refused entry reads none.
+        const descriptorOf = (c: DeclaredCredentialUser) =>
+            c.instance === false
+                ? undefined
+                : descriptors.find((d) => d.name === c.name && (d.packageId ?? null) === c.instance);
         // A refused value the door does not hold has no row: its refusal is
         // kept in memory, and reported while the reference still resolves from there.
         const refusal = this.credentialRefusals.get(ref);
@@ -4963,7 +5279,7 @@ export class AutomationServicePlugin implements Plugin {
             writable: probe.source !== 'env' && chain.store !== undefined,
             declared: declaredBy !== undefined,
             connectors: (declaredBy ?? []).map((c) => {
-                const d = descriptors.get(c.name);
+                const d = descriptorOf(c);
                 return {
                     name: c.name,
                     ...(c.packageId ? { packageId: c.packageId } : {}),
@@ -5251,6 +5567,10 @@ export class AutomationServicePlugin implements Plugin {
         ctx: PluginContext,
         info: {
             name: string;
+            /** [#31699 PR 3] The materializer's key of the instance ({@link connectorInstanceKey}). */
+            key: string;
+            /** [#31699 PR 3] The instance's package (`null`: none). */
+            packageId: string | null;
             entry: DeclaredConnectorItem;
             provider: string;
             signature: string;
@@ -5264,19 +5584,19 @@ export class AutomationServicePlugin implements Plugin {
     ): Promise<void> {
         let hasLive = info.live !== undefined;
         if (info.takeDown && info.live) {
-            await this.dematerializeConnector(engine, info.name, info.live, ctx, 'its upstream refused its credential');
+            await this.dematerializeConnector(engine, info, info.live, ctx, 'its upstream refused its credential');
             hasLive = false;
         }
         const stored = info.credential?.source === 'object' ? info.credential.record : undefined;
         const held = info.credential === undefined || stored !== undefined;
         let attempts = 1;
         if (held) {
-            this.degradedInstances.set(info.name, { attempts, signature: info.signature, reason: info.reason, held: true });
+            this.degradedInstances.set(info.key, { name: info.name, packageId: info.packageId, attempts, signature: info.signature, reason: info.reason, held: true });
         } else {
-            const prior = this.credentialRefusalAttempts.get(info.name);
+            const prior = this.credentialRefusalAttempts.get(info.key);
             attempts = prior && prior.signature === info.signature ? prior.attempts + 1 : 1;
-            this.credentialRefusalAttempts.set(info.name, { signature: info.signature, attempts });
-            this.degradedInstances.set(info.name, { attempts, signature: info.signature, reason: info.reason });
+            this.credentialRefusalAttempts.set(info.key, { signature: info.signature, attempts });
+            this.degradedInstances.set(info.key, { name: info.name, packageId: info.packageId, attempts, signature: info.signature, reason: info.reason });
             const source = info.credential?.source;
             if (info.ref !== undefined && (source === 'env' || source === 'vault')) {
                 this.credentialRefusals.set(info.ref, { source, reason: info.reason });
@@ -5293,6 +5613,7 @@ export class AutomationServicePlugin implements Plugin {
                     'declarative',
                     info.cause,
                     held ? (stored ? { kind: 'credential', ref: stored.ref } : { kind: 'declaration' }) : undefined,
+                    { packageId: info.packageId },
                 );
             } catch (err) {
                 ctx.logger.warn(
@@ -5314,7 +5635,7 @@ export class AutomationServicePlugin implements Plugin {
         }
         // #5575 — the reason quotes the upstream, foreign text: it rides `meta`.
         ctx.logger.warn(
-            `[Automation] connector instance '${info.name}' (provider '${info.provider}') is degraded: its upstream refused ` +
+            `[Automation] connector instance '${info.name}'${inPackage(info.packageId)} (provider '${info.provider}') is degraded: its upstream refused ` +
                 `its credential. ` +
                 (hasLive
                     ? 'The previously-materialized connector keeps serving' + (held ? '.' : `; retrying with backoff, attempt ${attempts}.`)
@@ -5334,11 +5655,11 @@ export class AutomationServicePlugin implements Plugin {
      */
     private async recordCredentialProven(
         ctx: PluginContext,
-        name: string,
+        { key, name }: { key: string; name: string },
         ref: string,
         credential: Extract<ConnectorCredentialResolution, { kind: 'resolved' }>,
     ): Promise<void> {
-        this.credentialRefusalAttempts.delete(name);
+        this.credentialRefusalAttempts.delete(key);
         if (credential.source !== 'object') {
             if (this.credentialRefusals.get(ref)?.source === credential.source) this.credentialRefusals.delete(ref);
             return;
@@ -5395,6 +5716,10 @@ export class AutomationServicePlugin implements Plugin {
         ctx: PluginContext,
         info: {
             name: string;
+            /** [#31699 PR 3] The materializer's key of the instance ({@link connectorInstanceKey}). */
+            key: string;
+            /** [#31699 PR 3] The instance's package (`null`: none). */
+            packageId: string | null;
             entry: DeclaredConnectorItem;
             provider: string;
             signature: string;
@@ -5407,7 +5732,7 @@ export class AutomationServicePlugin implements Plugin {
     ): Record<string, ConnectorMaterializationHandler> {
         let refused = false;
         let accepted = info.proven;
-        const current = () => !this.destroyed && this.materializedConnectors.get(info.name) === info.tracked;
+        const current = () => !this.destroyed && this.materializedConnectors.get(info.key) === info.tracked;
         const watched: Record<string, ConnectorMaterializationHandler> = {};
         for (const [key, handler] of Object.entries(handlers)) {
             watched[key] = async (input, callCtx) => {
@@ -5438,6 +5763,8 @@ export class AutomationServicePlugin implements Plugin {
                         if (!current()) return;
                         await this.holdConnectorForRejectedCredential(engine, ctx, {
                             name: info.name,
+                            key: info.key,
+                            packageId: info.packageId,
                             entry: info.entry,
                             provider: info.provider,
                             signature: info.signature,
@@ -5521,18 +5848,20 @@ export class AutomationServicePlugin implements Plugin {
     /** Unregister and tear down one materialized declarative connector (ADR-0097). */
     private async dematerializeConnector(
         engine: AutomationEngine,
-        name: string,
+        instance: { key: string; name: string; packageId: string | null },
         tracked: { close?: () => void | Promise<void> },
         ctx: PluginContext,
         why = 'no longer declared',
     ): Promise<void> {
-        try { engine.unregisterConnector(name); } catch { /* ignore */ }
+        // [#31699 PR 3] The instance itself, by its package and name: another
+        // package's instance of the name stays registered.
+        try { engine.unregisterConnector(instance.name, instance.packageId); } catch { /* ignore */ }
         if (tracked.close) {
             try { await tracked.close(); } catch { /* best-effort */ }
         }
-        this.materializedConnectors.delete(name);
-        this.grantHandles.delete(name);
-        ctx.logger.info(`[Automation] unregistered declarative connector instance '${name}' (${why})`);
+        this.materializedConnectors.delete(instance.key);
+        this.grantHandles.delete(instance.key);
+        ctx.logger.info(`[Automation] unregistered declarative connector instance '${instance.name}'${inPackage(instance.packageId)} (${why})`);
     }
 
     /**

@@ -358,9 +358,12 @@ const CASES: Case[] = [
     run: () => objectqlSql({ cube: 'sales_by_account', measures: ['remote_sum'] }),
   },
   {
+    // [#33335] The refusal set moved here on purpose: a one-hop leaf is served
+    // as the engine's nested-relation condition, so the row is the negated
+    // leaf this path still refuses, in that refusal's own words.
     name: '⑪ objectql-strategy: a cross-object FILTER',
     site: 'objectql-strategy.ts planCrossObject (filter)',
-    message: /cannot evaluate a cross-object filter \("account\.region"\)/,
+    message: /cannot evaluate the cross-object filter \("account\.region"\) under a \$not/,
     code: 'INVALID_FIELD',
     member: 'account.region',
     param: 'where',
@@ -368,7 +371,7 @@ const CASES: Case[] = [
       objectqlSql({
         cube: 'sales_by_account',
         measures: ['revenue'],
-        where: { 'account.region': 'NA' },
+        where: { $not: { 'account.region': 'NA' } },
       }),
   },
   {

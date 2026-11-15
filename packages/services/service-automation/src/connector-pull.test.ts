@@ -15,7 +15,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { buildFieldMetaMap, runImport } from '@objectstack/core';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
 import { SchemaRegistry } from '@objectstack/objectql';
-import { mappingNameResolver } from './connector-package-scope.js';
+import { connectorNameResolver, mappingNameResolver } from './connector-package-scope.js';
+import { AutomationEngine } from './engine.js';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import {
     pullConnectorSource,
@@ -379,6 +380,23 @@ describe('[#28040] connector pull — the input is checked against the action\'s
             path: '/contacts', query: { limit: 50, since: '2026-01-02T00:00:00.000Z' },
         });
         expect(res.pulled).toBe(0);
+    });
+
+    it('[#33553] an undeclared key is not refused here: the pull door does not opt in to that judgment', async () => {
+        const h = harness({
+            inputSchema: SINCE_REQUIRED,
+            mapping: baseMapping({
+                connectorSource: {
+                    connector: 'crm_api', action: 'request',
+                    input: { path: '/contacts', query: { since: '2026-01-01', stale: 'x' }, extra: 'kept' },
+                },
+            }),
+        });
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect(h.handler).toHaveBeenCalledTimes(1);
+        expect(h.handler.mock.calls[0][0]).toEqual({
+            path: '/contacts', query: { since: '2026-01-01', stale: 'x' }, extra: 'kept',
+        });
     });
 
     it('a valid input still pulls and writes', async () => {
@@ -799,5 +817,91 @@ describe('[#32071] connector pull — a package caller reads the mapping from it
         h.deps.mappingByPackage = () => undefined;
         await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: CALLER });
         expect(pathPulled(h), 'no registry: the protocol read, as before').toBe('beta');
+    });
+});
+
+/**
+ * [ADR-0150 D9, #31699 — the narrowing] Two packages of different namespaces
+ * may each declare a connector of one name. A pull resolves the mapping's
+ * `connectorSource.connector` from the package that holds the mapping, as a
+ * flow's `connector_action` resolves from the flow's package, and reads
+ * exactly that instance: its origin, state, provider, action and inputSchema.
+ */
+describe('[#31699] connector pull — the connector resolves from the mapping\'s package', () => {
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+    const silentEngineLogger = { debug() {}, info() {}, warn() {}, error() {}, child() { return this; } } as never;
+
+    function overTwoInstances(opts: { instances?: string[]; providers?: Record<string, string> } = {}) {
+        const h = harness();
+        const registry = new SchemaRegistry({ multiTenant: false });
+        registry.logLevel = 'silent';
+        const pulled: string[] = [];
+        const engine = new AutomationEngine(silentEngineLogger);
+        for (const id of [ALPHA, BETA]) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() } as never, 'code');
+            registry.registerItem('connector', { name: 'crm_api', label: 'CRM', type: 'api' } as never, 'name' as never, id);
+            registry.registerItem('mapping', baseMapping({ label: id }) as never, 'name' as never, id);
+        }
+        for (const id of opts.instances ?? [ALPHA, BETA]) {
+            engine.registerConnector(
+                { name: 'crm_api', label: 'CRM', type: 'api', authentication: { type: 'none' }, actions: [{ key: 'request', label: 'HTTP Request' }] } as never,
+                { request: async () => { pulled.push(id); return { status: 200, ok: true, body: [] }; } },
+                'declarative',
+                { packageId: id },
+            );
+        }
+        const ctx = { getService: <T>() => ({ registry }) as T };
+        engine.setConnectorNameResolver(connectorNameResolver(ctx as never));
+        h.deps.registry = engine;
+        h.deps.mappingByPackage = mappingNameResolver(ctx);
+        const providers = opts.providers ?? { [ALPHA]: 'rest', [BETA]: 'rest' };
+        h.deps.providerOf = (name, packageId) => (name === 'crm_api' && typeof packageId === 'string' ? providers[packageId] : undefined);
+        return { h, pulled, registry };
+    }
+
+    it('each package\'s mapping pulls through its own package\'s instance of the name', async () => {
+        const { h, pulled } = overTwoInstances();
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: ALPHA });
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: BETA });
+        expect(pulled).toEqual([ALPHA, BETA]);
+    });
+
+    it('the provider read is the resolved instance\'s: BETA\'s non-rest provider refuses BETA\'s pull only', async () => {
+        const { h, pulled } = overTwoInstances({ providers: { [ALPHA]: 'rest', [BETA]: 'mcp' } });
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: ALPHA });
+        const err = await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: BETA }).then(() => undefined, (e: unknown) => e);
+        expect((err as ConnectorPullError).reason).toBe('connector_provider_unsupported');
+        expect(pulled).toEqual([ALPHA]);
+    });
+
+    it('⛔ the mapping\'s holder has no instance of the name: not registered, never pulled through the other package\'s instance', async () => {
+        const { h, pulled } = overTwoInstances({ instances: [BETA] });
+        const err = await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: ALPHA }).then(() => undefined, (e: unknown) => e);
+        expect(err).toBeInstanceOf(ConnectorPullError);
+        expect((err as ConnectorPullError).reason).toBe('connector_not_registered');
+        expect(pulled).toEqual([]);
+    });
+
+    it('a mapping no package holds names a connector two packages hold: refused 409 naming both, nothing pulled', async () => {
+        const { h, pulled } = overTwoInstances();
+        h.deps.mappingByPackage = undefined;
+        // The fake protocol answers the environment's mapping, with no holder.
+        const err = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' }).then(() => undefined, (e: unknown) => e);
+        expect(err).toBeInstanceOf(ConnectorPullError);
+        expect((err as ConnectorPullError).reason).toBe('connector_name_refused');
+        expect((err as ConnectorPullError).status).toBe(409);
+        expect(String((err as Error).message)).toContain(ALPHA);
+        expect(String((err as Error).message)).toContain(BETA);
+        expect(pulled).toEqual([]);
+    });
+
+    it('[review S5] one of the two holders disabled: the environment\'s mapping pulls through the one served holder\'s instance, the enabled package\'s through its own', async () => {
+        const { h, pulled, registry } = overTwoInstances();
+        registry.disablePackage(ALPHA);
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: BETA });
+        h.deps.mappingByPackage = undefined;
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect(pulled).toEqual([BETA, BETA]);
     });
 });

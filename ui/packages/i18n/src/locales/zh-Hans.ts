@@ -134,6 +134,7 @@ const zh = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: '仅显示 {{total}} 条记录中的前 {{shown}} 条。请缩小筛选范围。',
     rowCeilingNoteUnknownTotal: '仅显示前 {{shown}} 条记录。请缩小筛选范围。',
+    ungroupedSection: '其他',
   },
   actions: {
     decisionOutput: {
@@ -2777,6 +2778,10 @@ const zh = {
       noAccountText: '还没有账户？',
       signUpText: '注册',
       signingIn: '正在登录…',
+      directSignIn: {
+        description: "使用你所在组织的单点登录。",
+        retry: "继续单点登录",
+      },
       ssoHandoff: '继续前往 {{target}}',
       devAdminHint: {
         title: '本地开发实例',
@@ -2791,8 +2796,20 @@ const zh = {
         ssoAccountNotInvited: "你的账号尚未在本系统中开通。请联系管理员邀请你。",
         ssoAccountNotLinked: "本系统中已有使用你邮箱的账号，但它尚未关联单点登录。请改用其他方式登录，或请管理员为你关联。",
         ssoResponseRejected: "你所在组织的登录服务返回了本系统无法接受的响应。请联系管理员检查单点登录配置。",
+        ssoEmailDomainNotAllowed: "未创建账号：你的邮箱不属于本系统接受新账号的域名。请使用你的组织邮箱，或联系管理员。",
+        ssoEmailNotAnAddress: "未创建账号：你所在组织的登录服务没有提供可用的邮箱地址。请联系管理员检查单点登录配置。",
         ssoStartFromLoginPage: "登录需要从本系统的登录页发起。请在此输入你的工作邮箱，然后选择“使用 SSO 登录”。",
         ssoTechnicalDetails: "技术详情",
+        directSignInIncomplete: "登录没有完成：你从单点登录返回时仍未登录。请确认浏览器允许本站点的 Cookie，然后重试。",
+        directSignInUnavailable: "无法为本系统发起单点登录。请联系管理员检查本系统使用的登录服务。",
+        directSignInRateLimited: "刚刚从此网络发起的登录过多。请等待几秒后再试。",
+        ssoAccessDenied: "你登录所用的账号无权访问本系统。请使用有权访问的账号登录，或请本系统所属组织的管理员将你添加为成员。",
+        ssoSwitchAccount: "切换账号",
+        ssoBackToConsole: "返回控制台",
+        ssoSwitchAccountHint: "“切换账号”会在新标签页中打开你的登录服务并在那里退出登录。之后请在此处使用有权访问的账号重新登录。",
+        linkEmailMismatch: "该账号未关联：它的邮箱地址与你当前登录账号的邮箱地址不一致。请关联使用相同邮箱地址的账号。",
+        linkAlreadyLinkedToOtherUser: "该账号未关联：它已关联到本系统中的另一个用户。请关联其他账号，或先以它所关联的用户登录，在那里解除关联。",
+        linkUnableToLink: "无法关联该账号。请确认它的邮箱地址已在该登录服务中完成验证，然后重试。如果仍然失败，请联系管理员。",
         twoFactorInvalidCode: '验证码无效，请检查身份验证器应用后重试。',
         twoFactorInvalidBackupCode: '该备用码无效或已被使用。',
         twoFactorTooManyAttempts: '错误次数过多，请重新使用密码登录。',
@@ -3476,6 +3493,11 @@ const zh = {
     back: '返回',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: '发布后这里会显示记录',
+      message: '你正在预览一个尚未发布的对象，它在发布前还没有任何记录。发布后即可开始录入数据，或载入示例数据。',
+    },
     empty: {
       loadFailedTitle: '草稿预览加载失败',
       loadFailedDescription: '无法读取草稿数据。请重试，或检查网络连接。',
@@ -3810,12 +3832,13 @@ const zh = {
       notAllowedToInvite: '您无权邀请用户加入该组织。',
       notAllowedToInviteWithRole: '您无权以该角色邀请用户。',
       alreadyInvited: '该用户已被邀请加入本组织。',
+      alreadyMember: '该用户已是本组织成员。',
       organizationExists: '该组织已存在。',
       slugTaken: '该标识已被占用。',
       notAllowedToCreate: '您无权创建新组织。',
       organizationLimitReached: '您创建的组织数量已达上限。被邀请加入的组织不计入此上限。',
       notTheRecipient: '您不是该邀请的收件人。',
-      invitationNotFound: '该邀请已失效或已过期。',
+      invitationNotFound: '该邀请已被使用、已过期或已撤销。如果您已接受过该邀请，可在组织列表中找到该组织。',
       unknown: '出了点问题，请重试。',
     },
     backToList: '返回组织列表',
@@ -4203,6 +4226,11 @@ const zh = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: '发送消息',
     scrollToBottom: '滚动到最新消息',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: '当前回复结束后发送',
+      queuedCancel: '取消',
+    },
     answer: {
       showFull: '展开全文',
       collapse: '收起',
@@ -4296,6 +4324,9 @@ const zh = {
       countSeedData: '示例数据',
       extendTarget: '添加到现有应用：{{app}}',
       awaitingConfirm: '等待确认',
+      // objectstack#32984 — the plan card's build states.
+      confirmed: '已确认',
+      buildFailed: '未搭建成功 · 没有创建任何内容',
       iterateOrNew: {
         question: '这个方案和你已有的应用「{{app}}」重叠。要在它上面继续完善，还是另建一个独立应用？',
         questionUnnamed: '这个方案和你已有的一个应用重叠。要在那个应用上继续完善，还是另建一个独立应用？',
@@ -4306,6 +4337,7 @@ const zh = {
       objectsAndFields: '对象与字段',
       views: '视图',
       suggestedField: '补充',
+      suggestedFieldLegend: '标「{{mark}}」的字段是 AI 自行补充的，你没有要求。',
       nameField: '名称：{{field}}',
     },
     build: {
@@ -4328,6 +4360,15 @@ const zh = {
       verifying: '正在检查改动…',
       verifyStep: '第 {{n}} 步',
       verified: '已检查改动',
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: '{{count}} 处待修复',
+      issuesSummary: '这次搭建有部分内容需要修复后才能使用。回复「修复这些问题」，助手会帮你处理。',
+      warningsSummary: '应用已搭建好，有几处值得检查。想进一步完善的话，可以问问助手具体是哪些。',
+      issuesDetails: '技术详情',
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: '{{count}} 项需要处理',
+      needsAttention_one: '{{count}} 项需要处理',
+      needsAttention_other: '{{count}} 项需要处理',
       unknownPhase: '未知的构建阶段',
       nextStepsLead: '接下来可以说：{{steps}}',
       nextStepQuote: '「{{step}}」',
@@ -4816,6 +4857,7 @@ const zh = {
     disableAppNamed: '停用 {{name}}',
     setDefault: '设为默认',
     setDefaultNamed: '将 {{name}} 设为默认',
+    alreadyDefault: '已是默认应用',
     deleteApp: '删除应用',
     deleteAppNamed: '删除 {{name}}',
     confirmDelete: '再次点击以确认删除',

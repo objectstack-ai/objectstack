@@ -24,6 +24,9 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import {
   FILTER_COMPARAND_TYPE_CASES,
   FILTER_COMPARAND_TYPE_ROWS,
+  FILTER_STRING_STORED_COMPARAND_CASES,
+  FILTER_STRING_STORED_COMPARAND_FIELDS,
+  FILTER_STRING_STORED_COMPARAND_ROWS,
   parseFilterAST,
   type FilterCondition,
 } from '@objectstack/spec/data';
@@ -99,5 +102,47 @@ describe('[#7872] InMemoryDriver.find — comparand-type conformance (behind the
     await expect(
       driver.find(TABLE, { where: { qty: { $eq: BigInt(100) } } as unknown as FilterCondition }),
     ).rejects.toThrow(/BigInt/);
+  });
+});
+
+/**
+ * [#29486] `FILTER_STRING_STORED_COMPARAND_CASES`, the driver's half: a number
+ * or boolean comparand on a text- or option-family field reaches mingo already
+ * narrowed to the string the write door stored (the engine's declared-type
+ * door, pinned in `@objectstack/objectql`), so each case's `stored()` filter
+ * must select exactly its rows here — and the as-written filter, handed to the
+ * driver directly, still selects none of them: mingo compares `42` with `"42"`
+ * strictly, which is the cell the door stands in front of.
+ */
+describe('[#29486] InMemoryDriver.find — a number or boolean comparand on a string-stored field, as the door hands it', () => {
+  const STRING_TABLE = 'string_stored_conformance';
+  let driver: InMemoryDriver;
+
+  beforeAll(async () => {
+    driver = new InMemoryDriver({ persistence: false });
+    await driver.connect();
+    await driver.syncSchema(STRING_TABLE, { fields: FILTER_STRING_STORED_COMPARAND_FIELDS as never });
+    for (const row of FILTER_STRING_STORED_COMPARAND_ROWS) await driver.create(STRING_TABLE, { ...row });
+  });
+
+  const ids = async (where: FilterCondition | undefined): Promise<string[]> => {
+    const rows = await driver.find(STRING_TABLE, { fields: ['id'], where });
+    return (rows as Array<Record<string, unknown>>)
+      .map((r) => String(r.id))
+      .sort((x, y) => x.localeCompare(y));
+  };
+
+  it('the fixture really is every row', async () => {
+    expect(await ids(undefined)).toEqual(FILTER_STRING_STORED_COMPARAND_ROWS.map((r) => r.id));
+  });
+
+  for (const c of FILTER_STRING_STORED_COMPARAND_CASES) {
+    it(c.name, async () => {
+      expect(await ids(parseFilterAST(c.stored())), c.note).toEqual([...c.expected]);
+    });
+  }
+
+  it('the strict cell still exists on the direct path — { code: 42 } handed to mingo matches no row', async () => {
+    expect(await ids(parseFilterAST({ code: 42 }))).toEqual([]);
   });
 });

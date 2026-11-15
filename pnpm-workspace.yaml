@@ -399,6 +399,9 @@ overrides:
   # The two declarations (plugin-hono-server, client) move to ^2.1.3 in lockstep
   # so a downstream install, which never sees this override, lands on the
   # patched line too; @modelcontextprotocol/sdk's ^1.19.9 || ^2.0.5 admits it.
+  # 2026-11-14 (#33211): GHSA-jpvv-r467-5p4w and GHSA-qv5m-9pm6-hqp3 (5.3 medium
+  # each) flag 2.1.5, fixed in 2.1.6 — target lifted from ^2.1.3, selector stays
+  # at the <3.0.0 boundary; the same two declarations move to ^2.1.6 in lockstep.
   # brace-expansion, 2026-09-30 (#20769): three MORE advisories, GHSA-6j4f-fj2g-mc7p,
   # GHSA-qhr7-859c-m2p7 and GHSA-q2hr-2g5m-vwhr, fixed in 5.0.12 — target lifted from
   # ^5.0.9, selector stays at the <6.0.0 major boundary. This floor keeps THIS
@@ -410,7 +413,7 @@ overrides:
   # (objectui's react-router-dom 7.18 pins its own react-router) has no fix to force onto.
   'react-router@>=8.0.0 <8.3.0': '^8.3.0'
   '@sveltejs/kit@<2.69.1': '^2.69.1'
-  '@hono/node-server@<3.0.0': '^2.1.3'
+  '@hono/node-server@<3.0.0': '^2.1.6'
   # OSV batch 2026-08 (#5032) — all three name a fixed version, so they are
   # upgrades, not exemptions (the osv-scanner.toml route #4965 defines is for
   # advisories with NO fix and does not apply here):
@@ -454,8 +457,13 @@ overrides:
   #     The declared ranges go to ^4.13.5 in lockstep for the downstream-install
   #     reason above; the @objectstack/hono PEER range stays ^4.12.8, unchanged,
   #     for the reason above it.
+  #     2026-11-14 (#33211): five MORE hono advisories, GHSA-3gg2-335m-rxc6
+  #     (3.4 low), GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-4m76-xfj5-7975
+  #     and GHSA-h7mg-cq63-vhpq (5.3 each), fixed in 4.13.16 — target lifted
+  #     from ^4.13.5, selector stays at the 5.0.0 boundary. The declared ranges
+  #     go to ^4.13.16 in lockstep; the PEER range stays ^4.12.8 as above.
   'fast-uri@<4.0.0': '^3.1.9'
-  'hono@<5.0.0': '^4.13.5'
+  'hono@<5.0.0': '^4.13.16'
   # OSV 2026-08-07 (#6407) — transitive-only, and the same "it has a fix, so
   # take the fix" disposition as the batch above:
   #   dompurify GHSA-55q2-fjhq-7xh7 (5.1 medium) — an IN_PLACE hook removal

@@ -43,9 +43,17 @@ export interface MetadataKeyedItem<T = any> {
    * item for; absent for an item it holds for no package. A customization of
    * a package's item (D4) is held for that package though its body names
    * none, which is why the package travels beside the body rather than being
-   * read off it.
+   * read off it. [#32458, #32680] Also on a `loadManyKeyed` entry of a type
+   * stored per `(package, name)` (a loader's own, and `MetadataManager`'s,
+   * which hands on its loaders' packages).
    */
   readonly packageId?: string;
+}
+
+/** [#32985] A stored row {@link MetadataLoader.stampOnlyRows} answers: its id and the writer its `source` column names. */
+export interface MetadataStampOnlyRow {
+  readonly id: string;
+  readonly source: string | null;
 }
 
 /**
@@ -154,6 +162,16 @@ export interface MetadataLoader {
    * calls it in place of the write-through it skips (`skipSourceLoader`).
    */
   bindReadRowPackage?(type: string, name: string, item: object): Promise<void>;
+
+  /**
+   * [#32985] This loader's stored rows of `(type, name)` that name `packageId`
+   * by the `_packageId` stamp alone, their `package_id` column empty
+   * (`stampOnlyPackageOf`): rows a 17.0.0–18.3.0 boot may have stamped onto
+   * the environment's own items. Read-only. Optional;
+   * `MetadataManager.unregisterPackage` keeps an item any loader answers a
+   * row for, unless the caller forces the removal.
+   */
+  stampOnlyRows?(type: string, name: string, packageId: string): Promise<MetadataStampOnlyRow[]>;
 
   /**
    * Check if item exists

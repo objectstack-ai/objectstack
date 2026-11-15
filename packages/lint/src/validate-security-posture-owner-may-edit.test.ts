@@ -268,3 +268,36 @@ describe('security-controlled-by-parent-owner-policy-without-opt-in (#25760)', (
     });
   });
 });
+
+/**
+ * [ADR-0055 §3 as amended for #33250 · ruling A+] On a detail that declares
+ * `sharing: { controlledByParent: { writeRequiresMasterRead: true } }` the
+ * master gate asks READ for every write, so a caller-keyed update policy there
+ * decides among everyone who reads the master, as authored: the arm is silent,
+ * whichever user field the policy keys. Each silence is measured against the
+ * same policy flagged on the same detail without the key.
+ */
+describe('security-controlled-by-parent-owner-policy-without-opt-in under writeRequiresMasterRead (#33250)', () => {
+  const MASTER_READ = { sharing: { controlledByParent: { writeRequiresMasterRead: true } } };
+
+  it('silent for an owner_id-keyed policy — CONTROL: the same policy is flagged without the key', () => {
+    expect(ownerArm(stack([MASTER, detail()], policy()))).toHaveLength(1);
+    expect(ownerArm(stack([MASTER, detail(MASTER_READ)], policy()))).toEqual([]);
+  });
+
+  it('silent for a policy keyed on another user field — CONTROL: flagged without the key', () => {
+    const fields = { ...DETAIL_FIELDS, owner: { name: 'owner', type: 'lookup', label: 'Owner', reference: 'sys_user' } };
+    const offColumn = policy({ using: 'owner == current_user.id' });
+    expect(ownerArm(stack([MASTER, detail({ fields })], offColumn))).toHaveLength(1);
+    expect(ownerArm(stack([MASTER, detail({ fields, ...MASTER_READ })], offColumn))).toEqual([]);
+  });
+
+  it('the fixture is spec-legal: the detail parses with the key, and the stack parses whole', () => {
+    expect(ObjectSchema.safeParse(detail(MASTER_READ)).success).toBe(true);
+    expect(ObjectStackSchema.safeParse(stack([MASTER, detail(MASTER_READ)], policy())).success).toBe(true);
+  });
+
+  it('`os explain` names the second opt-in', () => {
+    expect(explainRule(SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN)?.paragraphs.join('\n')).toContain('writeRequiresMasterRead');
+  });
+});

@@ -69,6 +69,7 @@ import {
   LAST_LOCAL_CREDENTIAL_CODE,
   LAST_LOCAL_CREDENTIAL_MESSAGE,
 } from './last-local-credential.js';
+import { answerRefusedAuthorization } from './oauth-authorize-refusal.js';
 import { refuseRequestNamingDifferentAccounts } from './one-account-per-request.js';
 import {
   SSO_ONLY_RESET_UNREADABLE_MESSAGE,
@@ -78,7 +79,9 @@ import {
   resolveResetDoorUserId,
   SSO_ONLY_REFUSAL_CODE,
   SSO_ONLY_REFUSAL_MESSAGES,
+  readUserSource,
 } from './sso-only-local-password.js';
+import { isPendingSsoSource, PENDING_SSO_MESSAGES } from './pending-sso-marker.js';
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
 import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
@@ -119,6 +122,7 @@ export interface BeforeHookHost {
   assertSsoSignOutOfIdpSupported: AuthManager['assertSsoSignOutOfIdpSupported'];
   readonly config: AuthManager['config'];
   existingAddressSignUpAnswersSuccess: AuthManager['existingAddressSignUpAnswersSuccess'];
+  getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
   hasExistingUserFor: AuthManager['hasExistingUserFor'];
   isAuthGateActive: AuthManager['isAuthGateActive'];
@@ -142,7 +146,7 @@ export async function globalBeforeHook(
   this: BeforeHookHost,
   ctx: any,
   setShouldSkipSessionRefresh: typeof import('better-auth/api').setShouldSkipSessionRefresh,
-): Promise<ReturnType<typeof ssoDiscoveryCompanionContext> | void> {
+): Promise<ReturnType<typeof ssoDiscoveryCompanionContext> | Response | void> {
   // ── #4586: hand the attribution scope its actor resolver ─────
   // FIRST, and unconditionally: this global before-hook is the one
   // seam every better-auth endpoint passes through (`matcher: () =>
@@ -238,11 +242,30 @@ export async function globalBeforeHook(
   // request is answered exactly as before; a reset record that cannot be
   // read fails closed (503). Ahead of the complexity check,
   // so the refusal names the real reason.
-  if (
-    (ctx?.path === RESET_PASSWORD_PATH || ctx?.path === PHONE_RESET_PASSWORD_PATH) &&
-    this.isSsoOnlyMode()
-  ) {
-    const subject = await resolveResetDoorUserId(ctx, this.config.phoneOtp?.allowedAttempts ?? 3);
+  //
+  // ── A pending person gets no local password either ──
+  // A row still reading `idp_pending` (added through `admin/add-sso-user`,
+  // `pending-sso-marker.ts`) signs in only through the hosting organisation's
+  // identity provider: both reset doors refuse it in EVERY mode, with no
+  // exception, judged by the same non-spending read of the presented token or
+  // code. A record or source that cannot be read leaves the request to the
+  // arm below exactly as before, since no row carried the marker before it.
+  const resetDoor = ctx?.path === RESET_PASSWORD_PATH || ctx?.path === PHONE_RESET_PASSWORD_PATH;
+  const resetSubject = resetDoor
+    ? await resolveResetDoorUserId(ctx, this.config.phoneOtp?.allowedAttempts ?? 3)
+    : undefined;
+  if (resetSubject?.ok && resetSubject.userId) {
+    const source = await readUserSource(this.getDataEngine(), resetSubject.userId);
+    if (source.ok && isPendingSsoSource(source.value)) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError('CONFLICT', {
+        message: PENDING_SSO_MESSAGES.resetPassword,
+        code: 'RESOURCE_CONFLICT',
+      });
+    }
+  }
+  if (resetDoor && resetSubject && this.isSsoOnlyMode()) {
+    const subject = resetSubject;
     // A reset record that cannot be read fails closed, as a source that
     // cannot be read does.
     let verdict: 'allow' | 'refuse' | 'unreadable' = subject.ok ? 'allow' : 'unreadable';
@@ -542,10 +565,13 @@ export async function globalBeforeHook(
           clientId: String(clientId),
         });
         if (!allowed) {
-          const { APIError } = await import('better-auth/api');
-          throw new APIError('FORBIDDEN', {
-            message: 'You are not authorized to sign in to this environment.',
-            code: 'ENV_ACCESS_DENIED',
+          // The refusal, delivered by who is asking (`oauth-authorize-refusal.ts`):
+          // the `403` envelope for a fetch or an API client, unchanged; for a
+          // browser navigating here, `access_denied` back to the client's
+          // REGISTERED `redirect_uri`, or a readable page when there is none.
+          return answerRefusedAuthorization(ctx, {
+            userId: actor.userId,
+            consoleUrl: this.getConsolePageUrl('/'),
           });
         }
       }

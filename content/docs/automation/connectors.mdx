@@ -757,7 +757,12 @@ a rotating refresh token is never spent twice.
   encrypted in `sys_connector_connection`, one row per organization and
   instance, an instance being its package and name (one per organization for
   an instance the environment authored or a plugin registers); it is
-  not a sign-in account, and signing in never touches it. A run dispatches
+  not a sign-in account, and signing in never touches it. A callback
+  completes the instance its connect was begun for, never the name read
+  again, and the bare connect door refuses with `409` a name two packages hold
+  rather than pick one: connect each package's instance at its namespace
+  address, `/api/v1/automation/connectors/NS/NAME/connection` (see
+  [Two packages, one connector name](#two-packages-one-connector-name)). A run dispatches
   with its own organization's connection; a run with no organization uses the
   instance's only connection, and is refused when there are several. When the
   grant stops working, the connection is marked **reconnect required** and the
@@ -932,6 +937,45 @@ A materialized instance is dispatched exactly like any other connector — by
 See [Flows](/docs/automation/flows) for the node reference and how outputs
 flow into downstream nodes.
 
+### Two packages, one connector name
+
+Two packages that declare **different namespaces** may each declare a
+connector of the same `name`. Each is its own instance, held by its package
+and name: each is materialized, connected, credentialed and listed on its own
+(`GET /api/v1/automation/connectors` lists both, each descriptor carrying its
+`packageId`). Two packages of **one** namespace still may not, nor a package
+that declares no namespace beside another holder: the install is refused,
+naming both, as before. A deployment that already holds such a pair (code
+packages a boot only warns about) materializes each instance under its
+package, but no HTTP address tells them apart: the namespace door answers
+`409` for both. Give one of them its own namespace.
+
+A bare name is resolved for whoever names it, and never picked between two
+holders:
+
+| Who names the connector | Which instance it means |
+|:---|:---|
+| A flow's `connector_action` (`connectorId`) | The flow's own package's instance, else the one holder in the package's declared dependencies; refused, naming every candidate, when its reach holds two or holds it only outside |
+| A flow the environment authored | The environment's own instance, else the one package holder; refused, naming both, when two packages hold it |
+| A connector pull (`mapping.connectorSource.connector`) | Resolved as a flow is, from the package that holds the mapping (an environment mapping: as the environment's flow). A refused name fails the pull `409` (`connector_name_refused`); a name that resolves to a package with no live instance is `connector_not_registered`, never another package's instance |
+| The connection door, `/api/v1/automation/connectors/NAME/connection` | The one holder of the name; `409` naming both when two packages hold it |
+| The connection door at the namespace address, `/api/v1/automation/connectors/NS/NAME/connection` | The instance of the package of namespace `NS`: connect, read and revoke each package's connection there |
+| `GET /api/v1/meta/connector/NAME` | `409` naming both when two packages hold it; read each with `?package=ID` or `/meta/connector/NS/NAME` |
+
+Each package's instance has its own connection per organization: connecting
+one leaves the other's untouched, and revoking one leaves the other serving.
+
+A connector a plugin registers in code is no package's: it is dispatched by
+its name as before. A package may still declare a catalog descriptor of that
+name (an entry without a `provider`); the package's flows are then served the
+plugin's connector.
+
+A disabled package holds no name for anyone else: its instance is not served
+to a caller outside the package, even before the next reconcile removes it. A
+flow of the disabled package itself still reads its own instance. An entry
+with no package of its own over a name only a disabled package holds is that
+package's instance, and is not dispatched until the package is enabled again.
+
 ## Failure modes at a glance
 
 Boot distinguishes **configuration faults** (your entry is wrong — fail loud,
@@ -951,6 +995,8 @@ retry):
 | A response to an `alipay-v3` call is unsigned (below status 400) or its signature does not verify | The dispatch **fails** naming the instance and the status; the response's body is never returned |
 | The upstream refuses the credential (`401` / `403`), or an `mcp` server sent a static credential does not list a tool the instance's `include` names | **Not fatal**: the instance registers **degraded**. A stored credential is marked `rejected` and waits until it is set again (or a restart); an environment or vault credential is retried on the backoff |
 | Instance `name` collides with a plugin-registered connector | **Hard boot error** — there is no silent precedence between the two worlds |
+| Two entries of one package share a `name` | **Hard boot error** naming the name and the package (a stored entry is logged and skipped): a name is unique within a package |
+| An entry with no package of its own (one the environment stored, or an unstamped one) shares a `name` two packages hold | **Not materialized**, refused naming both holders, since which package's instance it would be cannot be told: a host's own entry fails the boot, a stored or installed one is logged and skipped. Declare it in one of the packages, or under another name |
 | stdio transport without host opt-in | **Hard boot error** with the `declarativeStdio` fix inline — a security rejection is never retried |
 | An entry of an **installed** package (`os package install`, `POST /api/v1/marketplace/install-local`) names a package-relative file — an `openapi` `spec` path — or needs a location inside its package, as a stdio `mcp` transport's working directory does | Configuration fault, **never resolved against the host's directory**: an installed package has no directory on the runtime it was installed into, and the host's is not its own. The instance is not materialized, and the reconcile's error names the entry, its package and the ref. Rebuild the package with a current `os build`, which carries an `openapi` spec file into the artifact, or inline the document; reach an MCP server from an installed package over `http`. Whether an entry is the host's is read from what the install recorded, never from the package's own words: an entry carrying a `_packageId` other than its own package's is refused at the install, every member of a `packages[]` bundle is recorded as installed whatever its `source` says, and an entry naming a package no registration records is refused its ref too. The host's own entries keep reading their files |
 | A **stored** entry — one saved in this environment through the metadata door (`PUT /api/v1/meta/connector/:name`, Studio), environment-wide or in a package created here (`POST /api/v1/packages`) — names a package-relative file or needs a location inside a package | Configuration fault, **never resolved against the host's directory**: a stored definition is no package's declaration and has no directory on disk. The instance is not materialized, and the reconcile's error names the entry, its package if it has one, and the ref. This one is never fatal, even at boot: a stored row at rest is logged and skipped, and the platform starts. Carry the document inline in the definition, or name it by an `http(s)` URL; reach an MCP server from a stored entry over `http`. Only what the host's own stack declares reads its files: a stored row is never read as the host's, whatever `_packageId` its body carries |

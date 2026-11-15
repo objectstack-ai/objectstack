@@ -542,13 +542,78 @@ function recordBind(ql: object, owner: string, record: BoundRecord): void {
     byArtifact.set(owner, { owners: [...new Set(record.owners)], functions: record.functions });
 }
 
+/** What one {@link unbindAppArtifactHandlers} call tore down. */
+export interface AppArtifactHandlerUnbinding {
+    /** Every owner whose actions, hooks and functions left the engine: the artifact's owner first. */
+    owners: string[];
+}
+
+/**
+ * Withdraw from `ql` every executable handler {@link bindAppArtifactHandlers}
+ * bound for the package `appId` — the binder's inverse, for a package that
+ * leaves the running kernel (the install-local uninstall door, after its
+ * registry withdrawal).
+ *
+ * The bind registers a package's script-action handlers, body hooks and
+ * bundle functions on the engine under `app:<appId>` (and, for a
+ * multi-package artifact, under each body's `app:<package id>`), and a
+ * registry withdrawal (`SchemaRegistry.uninstallPackage`) reaches none of
+ * them: the engine's handler slots are not the registry. Left there, the
+ * withdrawn package still counted as a holder of each action key, so a call
+ * that names no package (`POST /actions/OBJECT/NAME/ID`) beside another
+ * package's action of the same name stayed refused as ambiguous, naming the
+ * uninstalled package, until a restart; its body hooks kept firing and its
+ * functions stayed resolvable the same way.
+ *
+ * The teardown is the bind's own, applied to every owner and dropping all of
+ * it: the artifact's owner and every owner its last bind on this engine
+ * recorded lose their actions (`removeActionsByPackage`), hooks
+ * (`unregisterHooksByPackage`) and functions (`unregisterFunctionsByPackage`),
+ * each owner's bare-name function claims go with its functions
+ * (`releaseFunctionClaims`), and the bind record is forgotten, so a later
+ * install of the same id binds as a first bind. ⛔ Only those owners: another
+ * package's handlers, host code and the environment's authored-action
+ * handlers (`metadata-service`) are untouched. Jobs are not here: the
+ * uninstall cleanup {@link scheduleAppArtifactJobs} registers cancels them.
+ *
+ * Never throws: an engine method that throws is logged at `error` with the
+ * owner, and the rest of the teardown still runs.
+ */
+export function unbindAppArtifactHandlers(
+    ql: IObjectQLEngine,
+    appId: string,
+    options: { logger: Logger; source?: string },
+): AppArtifactHandlerUnbinding {
+    const tag = `[${options.source ?? 'AppPlugin'}]`;
+    const owner = appArtifactHandlerOwner(appId);
+    const owners = [...new Set([owner, ...previousBind(ql, owner).owners])];
+    const engine = ql as FunctionHoldingEngine;
+    for (const each of owners) {
+        try {
+            if (typeof ql.removeActionsByPackage === 'function') ql.removeActionsByPackage(each);
+            if (typeof ql.unregisterHooksByPackage === 'function') ql.unregisterHooksByPackage(each);
+            if (typeof engine.unregisterFunctionsByPackage === 'function') {
+                engine.unregisterFunctionsByPackage(each);
+                releaseFunctionClaims(engine, each);
+            }
+        } catch (err: any) {
+            options.logger?.error(
+                `${tag} Failed to withdraw the handlers of an uninstalled package — what was left stays bound until the runtime restarts`,
+                err as Error,
+                { appId, owner: each },
+            );
+        }
+    }
+    boundOwnersByEngine.get(ql)?.delete(owner);
+    return { owners };
+}
+
 /** The engine's function-holder seam the re-bind reads and writes (`ObjectQL`'s methods of these names). */
 interface FunctionHoldingEngine {
     /** The engine's registry: the bare-name rule records a function's holder as a claim there (`claimBareNameFunctions`). */
     readonly registry?: { releaseBareNameFunctions?(owner: string | undefined, stillHolds: (name: string) => boolean): void };
     unregisterFunctionsByPackage?(packageId: string): number;
     registerFunction?(name: string, handler: any, options?: { packageId?: string; effect?: unknown }): void;
-    resolveFunctionEntry?(name: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined;
     functionHoldersOf?(name: string): {
         readonly packageHolders: readonly string[];
         packageItem(packageId: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined;
@@ -582,6 +647,18 @@ function hookHandlersOf(groups: readonly HookBindingGroup[], owner: string): str
  * namespaces' packages may each hold one function name, and the bare read of
  * such a name is refused (409, ADR-0150 D3) and answers no reader, so for it
  * `holder`'s own entry is all that is read and put back.
+ *
+ * [#32907, #32933] What is put back is `holder`'s package's own holder entry,
+ * read off the holder set, never through the bare read. For a name that
+ * package alone holds, that entry IS the bare slot (`registerFunction` stores
+ * one entry object in both, and the engine puts the holder's entry back in
+ * the bare map when another holder's last registration leaves). The bare read
+ * is a resolution, not that slot: it refuses a name the platform (an
+ * owner-less registration) holds beside the package, which would abort this
+ * teardown, and answers nothing for a disabled package, which would drop the
+ * owner spelling the package held the kept function by. Beside the platform,
+ * the package's entry is put back under its own spelling too; the bare read
+ * of that name is refused either way.
  */
 function releaseMovedFunctions(engine: FunctionHoldingEngine, holder: string, moved: readonly string[], known: Iterable<string>): void {
     if (typeof engine.registerFunction !== 'function' || typeof engine.functionHoldersOf !== 'function') return;
@@ -592,7 +669,7 @@ function releaseMovedFunctions(engine: FunctionHoldingEngine, holder: string, mo
         if (leaving.has(name)) continue;
         const holders = engine.functionHoldersOf(name);
         const entry = holders.packageItem(packageId);
-        if (entry) keep.push({ name, entry, bare: holders.packageHolders.length > 1 ? undefined : engine.resolveFunctionEntry?.(name) });
+        if (entry) keep.push({ name, entry, bare: holders.packageHolders.length > 1 ? undefined : entry });
     }
     engine.unregisterFunctionsByPackage?.(holder);
     for (const { name, entry, bare } of keep) {

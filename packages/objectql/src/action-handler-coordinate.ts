@@ -39,9 +39,9 @@ const AUTHORED_ACTION_OWNER = 'metadata-service';
  *
  *  - `app:<packageId>` (the runtime's `bindAppArtifactHandlers`) → that package;
  *  - `metadata-service` → {@link ENVIRONMENT_ACTION_COORDINATE}: an
- *    environment-authored action (the resync binds no row a code package
- *    ships, `isArtifactShippedAction`, except a declared override, which is
- *    bound at its base's coordinate instead);
+ *    environment-authored action (the resync binds no row on an object a code
+ *    package's action of its name owns, `isArtifactShippedAction`, except a
+ *    declared override, which is bound at its base's coordinate instead);
  *  - none or `''` → {@link HOST_ACTION_COORDINATE}: host code;
  *  - any other owner (a plugin's id) → itself, as the one-holder rule names it
  *    ({@link handlerOwnerPackageId}).

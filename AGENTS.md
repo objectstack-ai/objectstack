@@ -197,7 +197,9 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
      `packages/spec/src/kernel/metadata-plugin.zod.ts`
    - REST endpoints → plural (`/api/v1/ai/agents`)
 4. **Imports:** Use `@objectstack/spec` namespaces or subpaths. Never relative `../../packages/spec`.
-5. **No workarounds.** Adopt sustainable, well-architected solutions — not temporary patches.
+5. **No workarounds.** Adopt sustainable, well-architected solutions — not temporary patches. **SQL first:** build
+   a query capability at its fastest SQL shape (JOIN or semi-join, aggregates in the database); memory and mongo refuse
+   what they cannot run with a stable code; ⛔ never a slower path built only for parity (ruling record 6888468549).
 6. **Object name = table name.** The object `name` is the canonical id everywhere (API, ObjectQL, REST, SDK, DB table).
    **Never** set `namespace` (deprecated) or `tableName` (always equals `name`). For module prefixes, embed in the name
    (`sys_user`, `ai_conversations`).
@@ -273,7 +275,7 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     seat merges, queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
     `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md`,
     `CLAUDE.md` and `.github/workflows/**`, and under `ui/` `ui/docs/adr/**`, `ui/.claude/**`, `ui/skills/**`,
-    `ui/AGENTS.md`, `ui/CLAUDE.md` and `ui/.github/workflows/**`, all Tier H. The register is `GOVERNED_SURFACES` in
+    `ui/AGENTS.md`, `ui/CLAUDE.md` and `ui/.github/workflows/**`. The register is `GOVERNED_SURFACES` in
     `scripts/pm/check-governed-merges.mjs`, each row carrying its tier; adding a surface is an edit *there*, never here,
     and `pnpm check:pm-governed-prose` reds per-PR when this paragraph names fewer surfaces than the register — or
     more. A fork PR (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies,
@@ -284,17 +286,17 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
     its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
     the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
-    (人合: every register row except `.claude/**` and Tier S workflow edits): those four lift only for an
-    authorized APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is
-    spent once per PR — the OWNING seat then lands it, later pushes included; the click stays the maintainer's.
-    **Tier S** (席内达档复核落地: objectstack workflow edits `readWorkflowDiff` reads as Tier S, and all of
-    `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
-    current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is green — the owning
-    seat then lands it through the queue; the post-merge audit is the compensating control. A PR whose only governed
-    paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an uncertified
-    recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving review on a
-    governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green" carries no
-    information about a governance change. An authorized account's enqueue is a review record too: ⛔ never a seat's.
+    (人合: every row outside Tier S): those four lift only for an authorized APPROVED review by an account in
+    `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is spent once per PR — the OWNING seat then lands
+    it, later pushes included; the click stays the maintainer's. **Tier S** (席内达档复核落地: `.claude/**`,
+    objectstack workflow edits (`readWorkflowDiff`) and skills-only wording (`lowRiskArmVerdict`; the seat labels
+    unnamed security teaching) read as S): those four lift once the PR thread or its card carries a `## Contract review`
+    record for the PR's current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is
+    green — the owning seat lands it through the queue; the post-merge audit is the compensating control. A PR whose
+    only governed paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an
+    uncertified recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving
+    review on a governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green"
+    says nothing about a governance change. An authorized account's enqueue is a review record too: ⛔ never a seat's.
 
     **Already armed or queued when you read this?** Disable auto-merge AND convert it back to **draft**, which disarms
     an unqueued PR; no seat act, those two included, is measured to dequeue one (`platform-readings.md`, queue
@@ -490,8 +492,7 @@ Even inside your own worktree, operate defensively:
 6. **Don't rebase or force-update shared branches** to tidy other agents' commits.
 7. **Land through the merge queue: arm auto-merge on a PR that is already green,
    accepted and non-draft, then let the queue merge it**
-   ([why](docs/agents/multi-agent-discipline.md#what-the-merge-queue-does-with-your-pr)). **Arm only what is
-   already green and accepted.**
+   ([why](docs/agents/multi-agent-discipline.md#what-the-merge-queue-does-with-your-pr)).
 
    ⛔ **Three classes of PR never enter this path on green alone:** (a) a diff touching any **governed surface**
    (**Prime Directive #14**, which names them and holds the current list — **this file and `CLAUDE.md` are on it**,
@@ -1010,8 +1011,7 @@ Both non-handshake shapes, and how to classify and probe your own:
 1. `pnpm test` — verify nothing broke. Touched a type-check-covered package? `pnpm typecheck` too.
 2. **Land it — don't leave passing work in the working tree.** Once tests pass, create
    a feature branch, commit, push, open a PR, and — once remote CI is fully green and
-   the PR is accepted — arm auto-merge so the queue lands it (Multi-agent discipline
-   §7: never straight to `main`; never arm a PR that isn't green yet). A finished task
+   the PR is accepted — arm auto-merge so the queue lands it (Multi-agent discipline §7). A finished task
    = a merged PR, not a dirty working tree. ⛔ **Except a diff touching a governed
    surface** (Prime Directive #14 names them — more than ADRs): push it, open the PR, and stop
    there; landing waits for its tier's record — the maintainer's word, or a seat's contract-tier

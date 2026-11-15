@@ -491,6 +491,18 @@ export interface MetadataGetOptions {
    * blank selector, and any selector on a type with no members.
    */
   member?: string;
+  /**
+   * The READER's package (ADR-0150 D3), sent as `?callerPackage=`: the package
+   * of the item that reads this one (a report, a dashboard, a list view's
+   * chart). The door resolves the name from it: that package's own item, else
+   * the one holder in its declared dependency closure plus `sys`, else it
+   * refuses `409 RESOURCE_CONFLICT` naming the candidates. Distinct from
+   * {@link packageId}, which names the HOLDER exactly (D5); the door refuses
+   * the two together, and serves this arm on the `dataset` read only.
+   * OMITTED, never sent empty, when the reader has no package (an item
+   * authored in the environment reads the name bare).
+   */
+  callerPackage?: string;
 }
 
 // `surface` is a SAVE input (`?surface=` on `PUT`); the delete door reads no
@@ -807,6 +819,16 @@ export interface MetadataHistoryOptions {
   sinceSeq?: number;
   /** Limit the number of events returned. */
   limit?: number;
+  /**
+   * The package whose versions to read (`?package=`, the `layered()`
+   * spelling). For a type stored per `(package, name)` the server numbers a
+   * name's versions across every holder; naming the package reads only that
+   * holder's, and a bare read of a name two holders hold is refused `409`
+   * naming every holder. On every other type both doors refuse it `400`:
+   * send it only for a type `isPackageSlottedMetaType` (`@objectstack/spec/api`)
+   * answers true for.
+   */
+  packageId?: string;
 }
 
 /** A single field-anchored spec-validation issue (server `error.details.issues`). */
@@ -815,6 +837,14 @@ export interface MetadataValidationIssue {
   path: string;
   message: string;
   code?: string;
+  /**
+   * The producer's sentence for the person who saved, in the request's
+   * language — `RuntimeAuthoringIssueSchema.userMessage`, which the runtime
+   * authoring gate's 422 `issues[]` carry. Typed from the spec row, so a
+   * rename there stops this compiling. Absent on spec-validation issues and on
+   * any finding the producer wrote no sentence for.
+   */
+  userMessage?: RuntimeAuthoringIssue['userMessage'];
 }
 
 export interface MetadataError extends Error {
@@ -1248,6 +1278,7 @@ export class MetadataClient {
     else if (this.previewDrafts) params.push('preview=draft');
     if (options.packageId) params.push(`package=${encodeURIComponent(options.packageId)}`);
     if (options.member) params.push(`member=${encodeURIComponent(options.member)}`);
+    if (options.callerPackage) params.push(`callerPackage=${encodeURIComponent(options.callerPackage)}`);
     const qs = params.length ? `?${params.join('&')}` : '';
     const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs}`;
     return this.shareRead('readItemResponse', url, async () => {
@@ -2015,14 +2046,22 @@ export class MetadataClient {
    * `{ success, version, seq, restoredFromVersion, message }`. Throws
    * `404 version_not_found` for unknown versions and `409 version_not_restorable`
    * when the target version is a delete tombstone.
+   *
+   * `packageId` (`?package=`) names whose row a by-package name's version is
+   * restored into, as `history()`'s does: the version must be that holder's
+   * (`404` otherwise), and a bare rollback of a name two holders hold is
+   * refused `409` naming every holder, with no row written. As with
+   * `history()`, only for a type `isPackageSlottedMetaType` answers true for:
+   * every other type refuses it `400`.
    */
   async rollback<T = unknown>(
     type: string,
     name: string,
     toVersion: number,
-    options: { message?: string } = {},
+    options: { message?: string; packageId?: string } = {},
   ): Promise<T> {
-    const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/rollback`;
+    const qs = options.packageId ? `?package=${encodeURIComponent(options.packageId)}` : '';
+    const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/rollback${qs}`;
     const headers: Record<string, string> = {
       ...this.headers,
       'Content-Type': 'application/json',
@@ -2075,6 +2114,7 @@ export class MetadataClient {
     const params = new URLSearchParams();
     if (options.sinceSeq !== undefined) params.set('sinceSeq', String(options.sinceSeq));
     if (options.limit !== undefined) params.set('limit', String(options.limit));
+    if (options.packageId) params.set('package', options.packageId);
     const qs = params.toString();
     const url = `${this.base}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`;
     const res = await this.fetchImpl(url, { method: 'GET', headers: this.headers, cache: 'no-store' });

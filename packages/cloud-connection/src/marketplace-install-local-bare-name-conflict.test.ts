@@ -32,12 +32,18 @@
  * ## What these cases pin
  *
  *   - a fresh cloud-fetched install and a cloud-fetched upgrade, each declaring
- *     a connector name another package holds: `422 PLUGIN_REGISTER_FAILED` in
- *     the declared envelope, both holders and the rename named, the registry
- *     and the ledger exactly as before the call, the holder's items still the
- *     holder's. [#31696] These cases declared a flow name until the flow's
- *     one-holder rule narrowed to the namespace (ADR-0150 D9); the connector
- *     keeps one package holder per name, so it carries the refusal now;
+ *     a connector name another package of the SAME namespace holds (a
+ *     co-owner, admitted to the namespace by its dependency on the holder):
+ *     `422 PLUGIN_REGISTER_FAILED` in the declared envelope, both holders and
+ *     the rename named, the registry and the ledger exactly as before the
+ *     call, the holder's items still the holder's. [#31696] These cases
+ *     declared a flow name until the flow's one-holder rule narrowed to the
+ *     namespace (ADR-0150 D9); [#31699] the connector, the last covered type,
+ *     narrowed too, so the refusal is now a co-owner's;
+ *   - [#31699] the same move for a connector (Clause-② yes (narrowing)): a
+ *     cloud-fetched install declaring a connector name another namespace's
+ *     package holds now installs, each package's connector its own, and a
+ *     by-name read that names no package refused naming both;
  *   - [#31696] the answer that moved, FROM → TO (Clause-② yes (narrowing)): a
  *     cloud-fetched install declaring a flow name another namespace's package
  *     holds was refused `422` naming both; it now installs, `200` and
@@ -58,6 +64,12 @@
  *
  * A register failure that is NOT a registry refusal keeps #22695's lenient
  * answer; `marketplace-install-local-hot-loaded.test.ts` pins that.
+ *
+ * [#33050] The other side of the same rule: a re-install or upgrade through
+ * this door withdraws the tool and flow its new version no longer ships, so
+ * another package may declare the name at once (measured before the fix: the
+ * dropped tool kept serving and the other package was refused `422`); a
+ * re-install that still ships the name keeps holding it.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -84,7 +96,7 @@ const CLOUD_URL = 'http://cloud.test';
 const HOLDER_ID = 'com.acme.dispatch';
 /** The package the cloud-fetched install asks for. */
 const INCOMING_ID = 'com.acme.routing';
-/** The connector name both declare: one package holder per name (#30803). */
+/** The connector name both declare: one holder per namespace since #31699 (one per deployment under #30803). */
 const HELD_CONN = 'technician_api';
 /** [#31696] The flow name both declare: scoped to the namespace, so each package holds its own. */
 const SHARED_FLOW = 'assign_technician';
@@ -250,14 +262,23 @@ function expectBareNameRefusal(res: any) {
     expect(res.payload.error.message).toContain(`package "${INCOMING_ID}"`);
     expect(res.payload.error.message).toContain(`package "${HOLDER_ID}"`);
     expect(res.payload.error.message).toContain(`"${HELD_CONN}"`);
-    expect(res.payload.error.message).toContain(`"routing_${HELD_CONN}"`);
+    // [#31699] The co-owner's namespace is the holder's, so the rename carries it.
+    expect(res.payload.error.message).toContain(`"dispatch_${HELD_CONN}"`);
 }
+
+/** [#31699] The holder's namespace, shared through a dependency on the holder: a co-owner. */
+const CO_OWNER: Bag = { namespace: 'dispatch', dependencies: { [HOLDER_ID]: '^1.0.0' } };
 
 describe('install-local cloud branch refuses a package declaring a bare name another package holds, before any write', () => {
     const versions = {
         'v1-free': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW]),
-        'v1-held': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW], { connectors: [connector(HELD_CONN, 'routing')] }),
-        'v2-held': packageVersion(INCOMING_ID, '2.0.0', [FREE_FLOW], { connectors: [connector(HELD_CONN, 'routing')] }),
+        // [#31699] Every covered type has narrowed to the namespace, so the
+        // refusal is a co-owner's: the incoming package shares the holder's
+        // namespace (allowed by its dependency on the holder) and declares the
+        // holder's connector name.
+        'v1-held': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW], { ...CO_OWNER, connectors: [connector(HELD_CONN, 'routing')] }),
+        'v2-held': packageVersion(INCOMING_ID, '2.0.0', [FREE_FLOW], { ...CO_OWNER, connectors: [connector(HELD_CONN, 'routing')] }),
+        'v1-other-ns-conn': packageVersion(INCOMING_ID, '1.0.0', [FREE_FLOW], { connectors: [connector(HELD_CONN, 'routing')] }),
         'v1-shared-flow': packageVersion(INCOMING_ID, '1.0.0', [SHARED_FLOW]),
     };
 
@@ -352,6 +373,26 @@ describe('install-local cloud branch refuses a package declaring a bare name ano
         expect(String((refusal as Error | undefined)?.message)).toContain(INCOMING_ID);
         expect(ql.registry.getItem<Bag>('connector', HELD_CONN)?.label).toBe('dispatch connector');
     });
+
+    it('[#31699] a connector name another namespace\'s package holds installs: 200, hot-loaded, each holder\'s connector its own, a bare read refused naming both', async () => {
+        serveVersions(versions);
+        const { ql, installFromCloud, installHolder } = await bootPlugin();
+        await installHolder();
+
+        const res = await installFromCloud('v1-other-ns-conn');
+
+        // FROM `422 PLUGIN_REGISTER_FAILED` naming both holders, TO installed.
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.hotLoaded).toBe(true);
+        expect(res.payload.data.hotLoadError).toBeUndefined();
+        expect(ledger().incoming?.version).toBe('1.0.0');
+        expect(ql.registry.resolveItem<Bag>('connector', HELD_CONN, HOLDER_ID)?.label).toBe('dispatch connector');
+        expect(ql.registry.resolveItem<Bag>('connector', HELD_CONN, INCOMING_ID)?.label).toBe('routing connector');
+        let refusal: unknown;
+        try { ql.registry.resolveItem('connector', HELD_CONN); } catch (e) { refusal = e; }
+        expect(String((refusal as Error | undefined)?.message)).toContain(HOLDER_ID);
+        expect(String((refusal as Error | undefined)?.message)).toContain(INCOMING_ID);
+    });
 });
 
 describe('install-local cloud branch refuses a package whose namespace another package owns, before any write (#31392)', () => {
@@ -405,5 +446,77 @@ describe('install-local cloud branch refuses a package whose namespace another p
         expect(ledger()).toEqual(before);
         expect(ledger().incoming?.version).toBe('1.0.0');
         expectHolderFlowKept(ql);
+    });
+});
+
+describe('[#33050] a re-install or upgrade withdraws what the new version no longer ships, so its bare name is free at once', () => {
+    /** Two packages with no namespace: each meets every holder, so one tool name has one holder (ADR-0150 D2). */
+    const TOOL_PKG = 'com.qa.tool-1';
+    const OTHER_PKG = 'com.qa.tool-2';
+    const SHARED_TOOL = 'qa_shared_tool';
+    const DROPPED_FLOW = 'qa_sync';
+    const tool = (name: string, tag: string): Bag => ({
+        name,
+        label: `${tag} tool`,
+        description: `${tag} tool body`,
+        parameters: {},
+    });
+    const bare = (id: string, version: string, extra: Bag = {}): Bag => ({
+        id,
+        name: id.split('.').pop()!.replace('-', '_'),
+        type: 'app',
+        version,
+        ...extra,
+    });
+
+    it('a re-install of the same version without the tool and the flow withdraws both; another package then installs the tool name: 200', async () => {
+        const { ql, install } = await bootPlugin();
+        const first = await install({ manifest: bare(TOOL_PKG, '1.0.0', { tools: [tool(SHARED_TOOL, 'one')], flows: [flow(DROPPED_FLOW, 'one')] }) });
+        expect(first.status, JSON.stringify(first.payload)).toBe(200);
+        expect(ql.registry.getItem<Bag>('tool', SHARED_TOOL)?._packageId).toBe(TOOL_PKG);
+        expect(ql.registry.resolveItem<Bag>('flow', DROPPED_FLOW, TOOL_PKG)?.label).toBe('one flow');
+
+        const again = await install({ manifest: bare(TOOL_PKG, '1.0.0', { tools: [], flows: [] }) });
+
+        expect(again.status, JSON.stringify(again.payload)).toBe(200);
+        expect(again.payload.data.hotLoaded).toBe(true);
+        expect(ql.registry.getPackage(TOOL_PKG)?.manifest?.version).toBe('1.0.0');
+        expect(ql.registry.getItem('tool', SHARED_TOOL)).toBeUndefined();
+        expect(ql.registry.resolveItem('flow', DROPPED_FLOW, TOOL_PKG)).toBeUndefined();
+        expect(ql.registry.getItem('flow', DROPPED_FLOW)).toBeUndefined();
+
+        // The name is free at once. Before the fix: 422 PLUGIN_REGISTER_FAILED, "already held by package com.qa.tool-1".
+        const other = await install({ manifest: bare(OTHER_PKG, '1.0.0', { tools: [tool(SHARED_TOOL, 'two')] }) });
+        expect(other.status, JSON.stringify(other.payload)).toBe(200);
+        expect(ql.registry.getItem<Bag>('tool', SHARED_TOOL)?._packageId).toBe(OTHER_PKG);
+        expect(ql.registry.getItem<Bag>('tool', SHARED_TOOL)?.label).toBe('two tool');
+    });
+
+    it('an upgrade to 1.0.1 that drops one tool withdraws it and keeps serving the tool it still ships', async () => {
+        const { ql, install } = await bootPlugin();
+        const first = await install({ manifest: bare(TOOL_PKG, '1.0.0', { tools: [tool(SHARED_TOOL, 'one'), tool('qa_kept_tool', 'one')] }) });
+        expect(first.status, JSON.stringify(first.payload)).toBe(200);
+
+        const upgrade = await install({ manifest: bare(TOOL_PKG, '1.0.1', { tools: [tool('qa_kept_tool', 'one v1.0.1')] }) });
+
+        expect(upgrade.status, JSON.stringify(upgrade.payload)).toBe(200);
+        expect(ql.registry.getPackage(TOOL_PKG)?.manifest?.version).toBe('1.0.1');
+        expect(ql.registry.getItem('tool', SHARED_TOOL)).toBeUndefined();
+        expect(ql.registry.getItem<Bag>('tool', 'qa_kept_tool')?.label).toBe('one v1.0.1 tool');
+        expect(ql.registry.listItems<Bag>('tool', TOOL_PKG).map((t) => t.name)).toEqual(['qa_kept_tool']);
+    });
+
+    it('CONTROL — a re-install that still ships the tool keeps holding its name: the other package is refused 422', async () => {
+        const { ql, install } = await bootPlugin();
+        expect((await install({ manifest: bare(TOOL_PKG, '1.0.0', { tools: [tool(SHARED_TOOL, 'one')] }) })).status).toBe(200);
+        expect((await install({ manifest: bare(TOOL_PKG, '1.0.1', { tools: [tool(SHARED_TOOL, 'one v1.0.1')] }) })).status).toBe(200);
+
+        const other = await install({ manifest: bare(OTHER_PKG, '1.0.0', { tools: [tool(SHARED_TOOL, 'two')] }) });
+
+        expect(other.status, JSON.stringify(other.payload)).toBe(422);
+        expect(other.payload.error.code).toBe('PLUGIN_REGISTER_FAILED');
+        expect(other.payload.error.message).toContain(TOOL_PKG);
+        expect(ql.registry.getItem<Bag>('tool', SHARED_TOOL)?.label).toBe('one v1.0.1 tool');
+        expect(ql.registry.getPackage(OTHER_PKG)).toBeUndefined();
     });
 });

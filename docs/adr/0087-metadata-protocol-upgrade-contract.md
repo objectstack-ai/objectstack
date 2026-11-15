@@ -1,6 +1,6 @@
 # ADR-0087: Metadata protocol upgrades for AI consumers — conversion over notification, executable migrations, machine-verifiable upgrades
 
-**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what is generated where and where each part landed, and the struck clauses in the P2 phase-status bullet) · **Amended** (2026-10-13, #23038 — the artifact-ingestion window's third disjunct, landed as `58f5c90999`: a floor that is the first release of a major replays that major's conversion step, verdict `'converted-major-step'`; see the 2026-10-13 amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-27, #26220, the maintainer's decision A: D8's predicate 4 gains an index-signature limb, and D9's predicate 1 maps a `src/index.tsx` source entry; see the 2026-10-27 amendment notes under D8's predicate 4 and under D9's unmappable-entry paragraph) · **Amended** (2026-10-27, #26220, ruling A on PR #26365, comment `6439038287` — D9 gains a whole-package operand, `<package>#*`, for a published package deleted at HEAD; see the second 2026-10-27 amendment note under D9's unmappable-entry paragraph) · **Amended** (2026-10-26, #25767 ruling D2 = A, scoped by ruling 6434038284 of 2026-10-27 — a retirement kit (the `retiredKey()` tombstone and its D2 conversion with fixtures) lives one protocol major after the one it retired in and is then removed; a removed key is refused as a strict unknown key whose refusal names the protocol upgrade guide; the kit ages out, the chain's step stays, and the support floor stays 16; see the 2026-10-26 addendum, which also amends the "never deleted" wording in D2 and the conversion "forever" in the 2026-07-31 and 2026-09-13 addenda)
+**Status**: Accepted (2026-07-04, #2582) · trued up to as-built 2026-07-15 (see Addendum) · **Amended** (2026-09-30, #20390 ruling A — the artifact-ingestion window decides per entry by each retired conversion's `retiredAfter`; see the amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-09, #22449 ruling B′ — the two D4 projections, the per-major section of `spec-changes.json` and the protocol upgrade guide, are generated at publish rather than committed; see the amendment note under D4, which says what is generated where and where each part landed, and the struck clauses in the P2 phase-status bullet) · **Amended** (2026-10-13, #23038 — the artifact-ingestion window's third disjunct, landed as `58f5c90999`: a floor that is the first release of a major replays that major's conversion step, verdict `'converted-major-step'`; see the 2026-10-13 amendment note under the 2026-09-13 addendum's window bullet) · **Amended** (2026-10-27, #26220, the maintainer's decision A: D8's predicate 4 gains an index-signature limb, and D9's predicate 1 maps a `src/index.tsx` source entry; see the 2026-10-27 amendment notes under D8's predicate 4 and under D9's unmappable-entry paragraph) · **Amended** (2026-10-27, #26220, ruling A on PR #26365, comment `6439038287` — D9 gains a whole-package operand, `<package>#*`, for a published package deleted at HEAD; see the second 2026-10-27 amendment note under D9's unmappable-entry paragraph) · **Amended** (2026-11-14, #30598, the maintainer's decision A narrowed, record `6885400963` — D9's three operands take a literal subpath key of the `exports` map, `<package>/<subpath>#…`, and a wildcard key is refused by name; see the 2026-11-14 amendment note under D9's unmappable-entry paragraph) · **Amended** (2026-10-26, #25767 ruling D2 = A, scoped by ruling 6434038284 of 2026-10-27 — a retirement kit (the `retiredKey()` tombstone and its D2 conversion with fixtures) lives one protocol major after the one it retired in and is then removed; a removed key is refused as a strict unknown key whose refusal names the protocol upgrade guide; the kit ages out, the chain's step stays, and the support floor stays 16; see the 2026-10-26 addendum, which also amends the "never deleted" wording in D2 and the conversion "forever" in the 2026-07-31 and 2026-09-13 addenda)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0059](./0059-third-party-backward-compatibility-gates.md) (layered backward-compat gates — this ADR is its consumer-facing sequel), [ADR-0078](./0078-no-silently-inert-metadata.md) (no declarable-but-unenforced metadata — the un-checked `engines.protocol` is exactly this class), [ADR-0025](./0025-plugin-package-distribution.md) (§3.2 `engines.protocol` / `engines.platform` compatibility ranges, §3.10 #3 protocol-first check order), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (the authoring population this ADR designs for), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs), AGENTS.md Prime Directive #12 (contract-first, no consumer-side dialect fallbacks — §"Why the conversion layer does not violate PD #12" draws the line)
 **Consumers**: `@objectstack/spec` (protocol version constant, conversion layer, deprecation/change registries), `@objectstack/cli` (`validate`, `doctor`, `migrate meta`), the runtime metadata loader (handshake + conversion), `@objectstack/mcp` (the AI-native change/migration surface), `@objectstack/create-objectstack`, the Release workflow, and every third-party consumer — whose maintainer is assumed to be an **AI agent**
@@ -762,11 +762,24 @@ avoid. `registered` must name ids that resolve *and* are new in the diff;
 `unpublished` requires every bumped package to be `private: true`;
 `already-registered` requires the named ids to pre-date the merge base;
 `no-migration-prescription` is refused by a body that carries a migration
-prescription; `runtime-interface-only` is the subject of the rest of this
-addendum; `type-surface-only` — the sixth, added 2026-08-30 — is the subject of
-the addendum after it; and `runtime-export-retired` — the seventh, added 2026-10-12,
-whose whole-package operand `<package>#*` was added 2026-10-27 (#26220) — is the
-subject of the addendum after that. The checks live in
+prescription (**amended 2026-11-12**, #32601, seat decision A, landed as PR #32649,
+`a8c761fb`: it is also refused outright, before its justification or its body is
+read, on a changeset that declares `Metadata-protocol: narrowed`, signal (5) of the
+breaking declaration. A narrowing refuses something an author used to write, and the
+upgrade guide and `objectstack migrate meta`, both generated from the ledger, are
+where an upgrading author learns that before a save door, a publish or a boot
+refuses it; whether the fix is written as an arrow, a table or a sentence does not
+change that. The fix is a `registered` semantic entry, one file under
+`packages/spec/src/migrations/entries/semantic/`, or a category resting on a checked
+fact when one is true: `already-registered`, `unpublished`, `runtime-interface-only`,
+`type-surface-only`, `runtime-export-retired`. If the change refuses nothing an author
+could write, the `Metadata-protocol:` line is what is wrong, not the disposition.
+`added`, `semantic` and `none` keep the exemption, and a changeset already breaking
+at the branch point is inherited and never re-judged); `runtime-interface-only` is
+the subject of the rest of this addendum; `type-surface-only` — the sixth, added
+2026-08-30 — is the subject of the addendum after it; and `runtime-export-retired` —
+the seventh, added 2026-10-12, whose whole-package operand `<package>#*` was added
+2026-10-27 (#26220) — is the subject of the addendum after that. The checks live in
 [`scripts/check-adr-0087-registration.mjs`](../../scripts/check-adr-0087-registration.mjs),
 which is also where each one's measured history is written down.
 
@@ -864,7 +877,7 @@ for a disposition, and every one of the five is closed to it. Measured on the re
 | `registered` | refused — no id is new in the diff, and writing one would put a prescription in the ledger that `objectstack migrate meta`, `spec-changes.json` and the upgrade guide cannot project. False data in the one ledger this whole mechanism keeps true. |
 | `not-required (unpublished)` | refused — `@objectstack/client` publishes to npm. |
 | `not-required (already-registered <id>)` | the gate *admits* it, and that is the problem: it verifies the id RESOLVES and PRE-DATES the base, never that the entry COVERS this change. The only thing closing this door is the author's honesty, which is not a mechanism. |
-| `not-required (no-migration-prescription)` | refused — the body carries a FROM/TO block. |
+| `not-required (no-migration-prescription)` | refused — the body carries a FROM/TO block. (**Amended 2026-11-12**, #32601 / PR #32649: on a changeset declaring `Metadata-protocol: narrowed` it is refused before the body is read; see the vocabulary paragraph of the 2026-08-13 addendum.) |
 | `not-required (runtime-interface-only …)` | refused — it inherits that same refusal. |
 
 So the exit the gate names in its own refusal text — *"use a category that can be
@@ -1039,7 +1052,9 @@ fails predicates 2 and 3 outright — it bumps `@objectstack/spec` and adds
 
 The vocabulary above gained a seventh answer, with three operand kinds that may be
 mixed in one marker (the third, `<package>#*`, amended 2026-10-27, #26220 — see the
-second 2026-10-27 amendment note under D9):
+second 2026-10-27 amendment note under D9; each may name a literal subpath key after the
+package, `<package>/<subpath>#…`, amended 2026-11-14, #30598 — see the 2026-11-14 amendment
+note under D9):
 
 ```text
 <!-- adr-0087: not-required (runtime-export-retired <package>#<Export>[, ...]) <why> -->
@@ -1183,6 +1198,66 @@ package's root entry is followed through the same mapping.
 > and the refusal names the `<package>#*` spelling. Nothing else about the category
 > changes: the operands named are judged, and the claim's completeness is not.
 
+> **Amended 2026-11-14 (#30598) — the three operands on a literal subpath key:
+> `<package>/<subpath>#…`.** Provenance: the maintainer's decision A, narrowed,
+> 「A 收窄:只认字面子路径键」, on a decision card (2026-11-14T22:42Z), recorded on the card
+> as comment `6885400963`. Only the root entry was read, so an export retired from a
+> published subpath (an `exports` key such as `./console`) named no operand this category
+> could verify. Its changeset could only claim `no-migration-prescription` and write its
+> FROM lines without an arrow, the detector-miss shape D7 retires. Two merged changesets
+> held that: `@objectstack/cli/console` (ten exports) and the `@object-ui/i18n` locale
+> rename of #30511 (PR #30902), which is not re-graded. Measured at `f068cde8`, 26 of 110
+> published packages declare subpath keys, 78 keys in all (`./package.json` aside): 68 map
+> by the rule below, 4 do not (`@objectstack/scenarios`), 5 are not TypeScript entries
+> (four `./style.css`, one `./openapi.json`) and 1 is a wildcard (`@object-ui/i18n`
+> `./locales/*`).
+>
+> The three operands take an optional LITERAL key of the package's `exports` map after
+> the package name:
+>
+> ```text
+> <!-- adr-0087: not-required (runtime-export-retired <package>/<subpath>#<Export>) <why> -->
+> <!-- adr-0087: not-required (runtime-export-retired <package>/<subpath>#<Type>.<member>) <why> -->
+> <!-- adr-0087: not-required (runtime-export-retired <package>/<subpath>#*) <why> -->
+> ```
+>
+> An export or member operand reads the `./<subpath>` key exactly as the root operand reads
+> `.`: predicate 1 locates the key's types entry with `resolveTypesEntry(manifest,
+> './<subpath>')`, and the declaration entry `dist/<p>.d.ts` (or its `.d.mts` / `.d.cts`
+> twin) is generated from exactly one of `src/<p>.ts` or `src/<p>.tsx`. Predicates 2 and 3
+> are unchanged: an import of the subpath already counts as an import of the package's
+> module, and the FROM side names the export or `Type.member`. Refused by name, never
+> guessed or resolved:
+>
+> - an operand that only a **wildcard** key reaches (`@object-ui/i18n/locales/zh`, through
+>   `./locales/*`), and an operand that spells a `*` in its subpath;
+> - a key whose entry is **not a TypeScript declaration**: a stylesheet (`./style.css`) or a
+>   JSON file exports no name a TypeScript consumer imports, and a `types` condition naming a
+>   `.ts` source file names no declaration entry the mapping can read;
+> - a key that **cannot be mapped** (`dist/score.d.ts` with no `src/score.ts`), or maps to
+>   both `.ts` and `.tsx`;
+> - a key the map does not have. At HEAD that refusal names the whole-key spelling, unless
+>   the package has no `exports` map there, where the whole-key form is refused too.
+>
+> `<package>/<subpath>#*` retires the KEY while the package stays, the subpath twin of
+> `<package>#*`:
+>
+> 1. **retired-from-entry**: at the merge base the key is a literal key whose entry maps as
+>    above. At HEAD the package is still a workspace member (a deleted one is `<package>#*`),
+>    it declares an `exports` map (without one, or with `"exports": null`, which Node and
+>    TypeScript read as absent, every file is importable by path, so no key's absence proves
+>    anything), the key is not in that map, and no wildcard key reaches it.
+> 2. **no-metadata-surface**: none of the package's own files the key's entry reaches is a
+>    metadata surface, and no metadata surface outside the package names
+>    `<package>/<subpath>` in code, read as for `<package>#*`. Another workspace package's
+>    file that the entry re-exports is that package's, as for `<package>#*`: a name re-exported
+>    from it is judged when it is named as an export operand, and is refused there when it is
+>    a metadata surface.
+> 3. **from-operands-named**: one FROM line names the specifier
+>    (`` - FROM `<package>/<subpath>` TO … ``); the key's exports take no line of their own.
+>
+> A wildcard key is not resolved. That waits for a second case.
+
 **The deviation accepted with the ruling.** A merge base has no build output (`dist/`
 is gitignored), so predicate 1 compiles the **source** entry that generates the
 public `.d.ts`, not the `.d.ts` itself. For the question "which names does the
@@ -1230,8 +1305,10 @@ category.
 `type-surface-only`, the gate judges the operands named, not every export the diff
 removed.
 
-**A subpath entry or a static member.** Only the root entry is read, and a member is
-read on a class's instance type; anything else is refused rather than assumed.
+**A wildcard subpath key or a static member.** The root entry and literal subpath keys are
+read (amended 2026-11-14, #30598); an operand only a wildcard key such as `./locales/*`
+reaches is refused by name. A member is read on a class's instance type. Anything else is
+refused rather than assumed.
 
 **The detector.** `no-migration-prescription`'s refusal and the detector's arrow rule
 are unchanged; the arrowless line stays outside the detector's reach, stated as such

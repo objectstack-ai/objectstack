@@ -1203,9 +1203,12 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
   // the environment serves. This `describe()` is the SOURCE of the generated
   // reference page (`content/docs/references/security/permission.mdx`); its
   // earlier "unique per organization" (#8554) read the retired
-  // `sys_permission_set` row's index.
-  /** Permission set name, unique within the security catalog the environment serves */
-  name: SnakeCaseIdentifierSchema.describe('Permission set name, unique within the security catalog the environment serves (lowercase snake_case)'),
+  // `sys_permission_set` row's index. [ADR-0150 D2/D9] A set is identified by
+  // its package and name, so a name has one holder per namespace (the one
+  // predicate is `permissionSetHoldersMeet`, `@objectstack/core`); positions
+  // and capabilities keep one name per deployment.
+  /** Permission set name; a set is identified by its package and name, one holder of a name per namespace */
+  name: SnakeCaseIdentifierSchema.describe('Permission set name (lowercase snake_case). A set is identified by its package and name: a name has one holder per namespace, so packages of two namespaces may each hold a set of one name, while two packages of one namespace, a package with no namespace, a platform package (base, system, sys), the environment and the platform-requested guest_portal share one set of it'),
   
   /** Display label */
   label: z.string().optional().describe('Display label'),

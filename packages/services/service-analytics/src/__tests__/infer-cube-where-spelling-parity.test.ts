@@ -321,7 +321,7 @@ describe('[#5353] the seeded dimensions change no verdict and no statement', () 
     // statement joins something ([#21249]), and this one joins nothing. This is
     // the whole reason #5353 was an observation rather than a defect — and the
     // assertion that keeps a newly-DECLARED dimension from starting to qualify.
-    expect(objectSpelling.sqls[0]).toContain('WHERE stage = ');
+    expect(objectSpelling.sqls[0]).toContain('WHERE "stage" = ');
     expect(objectSpelling.sqls[0]).not.toContain('"deal"."stage"');
   });
 
@@ -423,7 +423,7 @@ describe('[#5353/#5739] a dotted `where` key is unified too — as a traversal',
     // The mis-cast's own spellings, named so a regression cannot hide behind the
     // parity: neither the stripped dimension nor the base-column predicate.
     expect(object.dimensions).not.toContain('region');
-    expect(object.sqls[0]).not.toContain('WHERE region = ');
+    expect(object.sqls[0]).not.toContain('WHERE "region" = ');
   });
 
   it('runs the query the object spelling used to be refused for', async () => {

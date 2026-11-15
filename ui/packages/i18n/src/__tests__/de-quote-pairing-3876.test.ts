@@ -437,7 +437,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `empty.recordPagePlacesNoComponentDescription`, the record view naming a
     // record page that places no component („{{name}}“) — one interpolated
     // span, runtime data.
-    expect(okSpans, 'correctly paired spans').toBe(118);
+    // 119 once objectstack-ai/objectstack#33419 added
+    // `chatbot.plan.suggestedFieldLegend`, the plan card's legend naming the
+    // suggested-field mark („{{mark}}“) — one interpolated span, pack text.
+    expect(okSpans, 'correctly paired spans').toBe(119);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -547,7 +550,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `fields.file.typeNotAccepted`, one more matched pair. 118 / 118 / 0 after
     // objectstack-ai/objectstack#32478 added
     // `empty.recordPagePlacesNoComponentDescription`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 118, close: 118, rdq: 0 });
+    // 119 / 119 / 0 after objectstack-ai/objectstack#33419 added
+    // `chatbot.plan.suggestedFieldLegend`, one more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 119, close: 119, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

@@ -157,9 +157,12 @@ import { lintConnectorCredentialLiterals } from './lint-connector-credential-lit
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
+import { lintDuplicateFieldLabels } from './lint-duplicate-field-labels.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
 import { validateEmailTemplateHoleGrammar } from './validate-email-template-hole-grammar.js';
+import { validateEmailTemplateDefaultArguments } from './validate-email-template-default-arguments.js';
+import { validateNotifyTemplateVariables } from './validate-notify-template-variables.js';
 import { validateCustomizationNamespace } from './validate-customization-namespace.js';
 import {
   lintUniqueDeclarations,
@@ -170,6 +173,7 @@ import {
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { UserTextParams } from './finding-user-text.js';
+import type { StoredObjectExtension } from './object-graph.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -354,6 +358,15 @@ export interface AuthoringRuleContext {
    * platform names, a platform-prefixed name advised at `warning`) applies.
    */
   runtimeWriteType?: string;
+  /**
+   * [#33494] Set by the runtime gate on an `object_extension` write only: the
+   * written entry's target's other packages' published extensions, as the
+   * host's registry holds them. Read by one rule, `validateStackExpressions`,
+   * whose extension walk folds the written entry among them by priority (the
+   * build's own fold, `objectsAsServed`), so the door judges the definition
+   * the build judges (`StackExpressionOptions.storedObjectExtensions`).
+   */
+  storedObjectExtensions?: readonly StoredObjectExtension[];
   /**
    * [#32666] Set by the runtime gate on its SUBJECT pass only, which judges
    * the subject collections it withholds from every other pass
@@ -838,10 +851,20 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // extension draft is refused, because that batch's pending set carries no
     // extension drafts (#33152); publishing the extension first through the
     // per-item door works.
+    //
+    // [#33154] The same walk judges each `validations[]` rule the written
+    // extension adds, by the object walk's own rule pass, so a rule the
+    // registry merges onto the target is refused at this door and in the
+    // build alike (`object 'TARGET' · objectExtensions[0] · validation 'N'`).
+    // MEASURED first: 0 first-party `objectExtensions` entries carry a
+    // validation rule (examples/**, packages/**, HotCRM).
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'action', 'hook', 'object', 'view', 'page', 'object_extension'],
     run: (stack, ctx) =>
-      runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
+      runStackExpressionPasses(stack, {
+        runtimeWriteType: ctx.runtimeWriteType,
+        ...(ctx.storedObjectExtensions !== undefined ? { storedObjectExtensions: ctx.storedObjectExtensions } : {}),
+      }).map((i) => ({
         severity: i.severity ?? 'error',
         // [#32529, #32554] The stored-expression input member names its own
         // two ids; every other finding of the pass is `expression-invalid`.
@@ -2336,6 +2359,35 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         hint: f.fix ?? '',
       })),
   },
+  // Two visible fields of one object served under one label
+  // (`field-label-duplicate`): the platform's `owner_id` and an author's
+  // `assignee`, both read as "负责人" by a zh-CN reader, are two columns of one
+  // name in every grid, card and form, and editing one reads as editing the
+  // other. GATING on all three commands and on the runtime publish gate's
+  // `object` writes, the door an AI or Studio author has. The labels compared
+  // are the ones `translateObject` serves (see the rule's module note). The
+  // gate's differential never charges a stored object's clash to a write of
+  // another object; a re-save of that object is judged on its own body, as
+  // for every gating rule at this door. No boot or registration path runs
+  // this table, so an app already installed keeps loading.
+  {
+    name: 'lintDuplicateFieldLabels',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/lint-duplicate-field-labels.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack) =>
+      lintDuplicateFieldLabels(stack).map((f) => ({
+        severity: f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.hint,
+      })),
+  },
   // #3991 / ADR-0120 D5b — a column carrying BOTH a field-level `unique` and a
   // single-column declared unique index states two scopes of which at most one
   // takes effect (`unique/double-declaration`, the four-quadrant matrix).
@@ -2725,8 +2777,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // The load it does take (~64 ms cold once, ~15 ms warm per publish
     // carrying such a rule) is the measured, adjudicated price of refusing a
     // validation rule that would otherwise ship compiled-by-nothing.
+    //
+    // [#33217] `object_extension` joins: the walk reads the `validations[]`
+    // an extension adds (the registry merges them onto the target, and every
+    // save runs them), so a regex or schema the build refuses on an extension
+    // is refused at that publish door too, same rule id, located at the entry
+    // (`object 'TARGET' · objectExtensions[0] · validation 'N'`). The target's
+    // own rules the door's live objects carry are judged in the baseline as
+    // well, so the differential charges the write with its entry's alone.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['object'],
+    runtimeTypes: ['object', 'object_extension'],
     run: (stack) => validateRuleCompilability(stack),
   },
   // #5178 — the residual half of #5029, which registering `ajv-formats` does
@@ -2751,8 +2811,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // the two judgements over one artifact stay on one side of the wall
     // (#7220's family discipline). Same lazy-ajv contract: the registered
     // format set is only enumerated once a schema actually names a format.
+    // [#33217] And it crosses on `object_extension` with its sibling, for the
+    // same reason: the shared walk reads the rules an extension adds.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['object'],
+    runtimeTypes: ['object', 'object_extension'],
     run: (stack) => validateRuleSchemaFormats(stack),
   },
   // [#25189] The email half of #25082 (ruling `6335348115`, F1 A2): a hole an
@@ -2829,6 +2891,39 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         liveUniverse: ctx.runtimeWriteType !== undefined,
         ...(ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
       }),
+  },
+  // Ruling record 6845318122 (letter B): a template default is literal text,
+  // and there is no syntax that falls back to another variable. A hole whose
+  // unquoted `default` argument reads like a variable path
+  // (`{{ person_name | default:first_name }}`) prints that text to the
+  // recipient, so it is advised at every door the hole grammar runs at — the
+  // publish door included, where it rides the save response as an advisory.
+  // Advisory: the hole renders as the grammar defines, and quoting the
+  // argument says the literal is meant.
+  {
+    name: 'validateEmailTemplateDefaultArguments',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-email-template-default-arguments.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['email_template'],
+    run: (stack) => validateEmailTemplateDefaultArguments(stack),
+  },
+  // Ruling record 6845318122 (letter B): a `notify` node that sends an email
+  // template without a variable the template declares `required` — every such
+  // send fails with MISSING_VARIABLES — is advised at validation. Advisory,
+  // not gating: a host may supply the variable through a default template
+  // context the stack does not state (the rule's module note).
+  {
+    name: 'validateNotifyTemplateVariables',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-notify-template-variables.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateNotifyTemplateVariables(stack),
   },
   // [#28473] ADR-0146 D3: a package whose `manifest.namespace` is too long to
   // have a paired customization namespace (`customizationNamespace` answers

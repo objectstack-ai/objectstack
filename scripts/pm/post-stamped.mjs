@@ -971,7 +971,11 @@ import { readClause2Line } from './clause2-line.mjs';
 import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT, TIER_FLOOR, ceilingTierSpellings, containerModelRefusal } from './dispatch-gates.mjs';
 // The record's `Local-runs:` line is read by the file that owns the record's
 // every other line — judged when present, an absent line not re-judged.
-import { localRunsStand, readLocalRuns } from './record-recognisers.mjs';
+// The mailbox doorbell is read by the same file: a knock's `To:` seat and its key come from `readMailboxLine`.
+import { localRunsStand, readLocalRuns, readMailboxLine, readServedTier } from './record-recognisers.mjs';
+// A record that names `CONTRACT_REVIEW_TIER` is written only on the reviewer's transcript showing every turn served
+// there: the judge lives in the file that owns it, ⛔ never a copy here.
+import { verdictText as tierVerdictText, verifyReviewTranscriptFile } from './verify-review-tier.mjs';
 // The fleet's repository roster — the one place a repository joins the fleet —
 // is what a read-back may collapse a reference expansion against (header).
 import { GOVERNED_REPOS } from './check-governed-merges.mjs';
@@ -2132,6 +2136,42 @@ export function recordLineRefusalText(rows) {
 }
 
 // ---------------------------------------------------------------------------
+// The record's tier — a record naming `CONTRACT_REVIEW_TIER` is written only on evidence that the tier served it
+// ---------------------------------------------------------------------------
+
+/**
+ * Why a `## Contract review` record that names `CONTRACT_REVIEW_TIER` on its `Served-tier:` line cannot be written,
+ * or `null` when it can. The name is the seat's own declaration and AGENTS.md keeps the model identifier out of the
+ * comment, so the evidence stays local: `--tier-evidence=PATH` names the reviewing run's transcript (a sub-agent's output file, or a session's own) and
+ * `verify-review-tier.mjs` must pass on it (every turn served at the tier, no fallback). ⛔ The path and every model
+ * identifier stay out of the comment, and out of this refusal too. A record naming another tier and every comment
+ * that is not a record are untouched. Reads the evidence file and nothing else.
+ */
+export function recordTierEvidenceRefusal(body, tierEvidence) {
+  const text = String(body ?? '');
+  if (!CONTRACT_REVIEW_HEADING_MARKER.test(text)) return null;
+  const served = readServedTier(text);
+  if (served.state !== 'read' || served.value !== CONTRACT_REVIEW_TIER_NAME) return null;
+  if (tierEvidence === null || tierEvidence === undefined) return { why: `no --tier-evidence was given — nothing shows this review was served at ${CONTRACT_REVIEW_TIER_NAME}` };
+  const verdict = verifyReviewTranscriptFile(tierEvidence);
+  return verdict.ok ? null : { why: tierVerdictText(verdict) };
+}
+
+/** The refusal a caller reads, from `recordTierEvidenceRefusal`; `tool` names the sender, as the signature refusal does. */
+export function recordTierEvidenceRefusalText(refusal, { tool = 'post-stamped' } = {}) {
+  return (
+    `${tool}: REFUSED — this \`## Contract review\` record declares \`Served-tier: ${CONTRACT_REVIEW_TIER_NAME}\` without evidence that passes. Nothing was written.\n` +
+    `  ${refusal.why}\n\n` +
+    `  Pass the transcript of the run that REVIEWED, as --tier-evidence=PATH on this ${tool} call: a review sub-agent's\n` +
+    '  output file (the Agent tool names it when the agent starts), or, for a review this session ran itself (a card\n' +
+    '  thread, or in-seat), this session\'s own transcript under ~/.claude/projects/ (SESSION.jsonl, every turn of it).\n' +
+    '  The file stays local; neither it nor any model identifier enters the comment. `node scripts/pm/verify-review-tier.mjs\n' +
+    '  PATH` reads the same verdict. A transcript that refuses means the review did not run at the tier: rerun it with the\n' +
+    '  tier\'s model passed explicitly, ⛔ never post the record as at-tier and ⛔ never rename its tier to clear this.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // A VACANT seat body's ledger — refused BEFORE the write (#23396, ruling 6162084315, letter A)
 // ---------------------------------------------------------------------------
 //
@@ -2507,6 +2547,36 @@ export function decisionFacetRefusalText(rows) {
     '  The shape is `references/decision-analysis.md` 〈四棱卡面块固定形状〉. The pre-handover check finds a pending\n' +
     '  decision by that marker alone, so an analysis without it leaves the decision outside the maintainer\'s inbox.\n' +
     '  A marker inside code is a quotation and clears nothing. ⛔ No flag turns it off.'
+  );
+}
+
+/**
+ * A contract-review knock addressed to triage — the route the rule text closes (`references/contract-review.md`
+ * 〈复核归属与资格〉): a lane that cannot take `CONTRACT_REVIEW_TIER` sends `Request: contract-review` to a seated
+ * review seat, then to a sibling seat that can take the tier, else leaves the PR on the owed-review list — ⛔ never
+ * to triage. This is the write tool's input check on its own act, the same class as the signature and the keyed
+ * lines above it: no landing, check, workflow or queue reads it, and a knock it refuses was never on the board.
+ * The doorbell is read by its owner (`readMailboxLine`), never restated here. A knock it reads AND one it finds
+ * unreadable (no reason, a bare PR number, a second line) are both judged: an unreadable reading still carries the
+ * `id` and `to` parsed before the template failed, and a malformed knock to triage is still a knock to triage. A
+ * comment the reader refuses outright (no `To:` seat, a key outside the table) names no contract-review knock at
+ * all and passes, as it does today. Comments only. Answers the reading, or null. Pure.
+ */
+export function triageContractReviewKnock(body) {
+  const knock = readMailboxLine(String(body ?? ''));
+  if ((knock.state !== 'read' && knock.state !== 'unreadable') || knock.id !== 'request:contract-review') return null;
+  return /^triage#/u.test(knock.to) ? knock : null;
+}
+
+/** The refusal a caller reads, from `triageContractReviewKnock`'s reading. */
+export function triageContractReviewKnockText(knock) {
+  return (
+    `post-stamped: REFUSED — a \`Request: contract-review\` knock addressed to triage (\`To: ${knock.to}\`). Nothing was written.\n` +
+    '  A lane that cannot take CONTRACT_REVIEW_TIER (the account cannot reach it, a 429 refusal, or the maintainer\n' +
+    '  rationed it) knocks a seated review seat\'s mailbox — `To: review#N`, the PR its seat post\'s `Mailbox:` line\n' +
+    '  names — and, while no review seat is seated, a sibling lane seat that can take the tier; with neither, the PR\n' +
+    '  waits on the owed-review list (`scripts/pm/check-owed-reviews.mjs`). ⛔ Never triage. The route is\n' +
+    '  `references/contract-review.md` 〈复核归属与资格〉. ⛔ No flag turns it off.'
   );
 }
 
@@ -3429,7 +3499,7 @@ export function unreadPassText(check) {
 
 /** The flags this tool takes. An argument outside this set is a typo, and a typo is refused. */
 export const KNOWN_FLAGS = Object.freeze(['--dry-run', '--json', '--self-test', '--help', '-h']);
-export const KNOWN_OPTIONS = Object.freeze(['comment', 'body', 'file', 'repo', 'ack-through']);
+export const KNOWN_OPTIONS = Object.freeze(['comment', 'body', 'file', 'repo', 'ack-through', 'tier-evidence']);
 
 export function readOption(argv, name) {
   const prefix = `--${name}=`;
@@ -3477,6 +3547,13 @@ export function parseOptions(argv) {
       return { ok: false, error: `\`${ack}\` is not a comment id. --ack-through=ID takes the numeric id of the newest comment on the card.` };
     }
   }
+  const tierEvidence = readOption(args, 'tier-evidence');
+  if (tierEvidence !== null && comment === null) {
+    return { ok: false, error: '--tier-evidence belongs to a comment (--comment=N): it is the transcript behind a `## Contract review` record, and a record IS a comment.' };
+  }
+  if (tierEvidence === '') {
+    return { ok: false, error: '--tier-evidence= names no file. Pass the reviewing run\'s transcript (a sub-agent\'s output file, or this session\'s own): --tier-evidence=PATH.' };
+  }
   return {
     ok: true,
     options: {
@@ -3485,6 +3562,7 @@ export function parseOptions(argv) {
       file: readOption(args, 'file'),
       repo: readOption(args, 'repo'),
       ackThrough,
+      tierEvidence,
       dryRun: args.includes('--dry-run'),
       json: args.includes('--json'),
     },
@@ -3825,7 +3903,8 @@ function rearmThroughProxy(args) {
  * sender that folds a comment into a wider stroke (`label-write.mjs --comment-file`) judges it on exactly the path
  * `main` does, never a copy. `options.mode` is `comment` or `body`; `nowMs` is the clock the stamp substitutes;
  * `tool` names the sender in the signature refusal. Answers `{ ok: true, rendered }`, or `{ ok: false, rendered,
- * text }` — `text` is what the caller prints before it exits refused with nothing written. Pure.
+ * text }` — `text` is what the caller prints before it exits refused with nothing written. Pure but for one read: the
+ * `options.tierEvidence` transcript, read only when the body is a record that names `CONTRACT_REVIEW_TIER`.
  */
 export function judgeBody(input, options = {}, nowMs = Date.now(), tool = 'post-stamped') {
   const rendered = renderBody(input, nowMs);
@@ -3841,9 +3920,15 @@ export function judgeBody(input, options = {}, nowMs = Date.now(), tool = 'post-
   // The record's line, on the same act and with the same scope: a record IS a comment.
   const record = options.mode === 'comment' ? recordKeyedLineRefusals(rendered.body) : [];
   if (record.length > 0) return { ok: false, rendered, text: recordLineRefusalText(record) };
+  // The record's tier, on the same act: a record naming `CONTRACT_REVIEW_TIER` carries local evidence that passes.
+  const tier = options.mode === 'comment' ? recordTierEvidenceRefusal(rendered.body, options.tierEvidence ?? null) : null;
+  if (tier !== null) return { ok: false, rendered, text: recordTierEvidenceRefusalText(tier, { tool }) };
   // ⛔ Comments only: a decision analysis is anchored on its card AS A COMMENT, and the handover check reads comments.
   const facets = options.mode === 'comment' ? decisionFacetRefusals(rendered.body) : [];
   if (facets.length > 0) return { ok: false, rendered, text: decisionFacetRefusalText(facets) };
+  // ⛔ Comments only: a mailbox knock IS a comment on the seat's mailbox PR.
+  const triageKnock = options.mode === 'comment' ? triageContractReviewKnock(rendered.body) : null;
+  if (triageKnock !== null) return { ok: false, rendered, text: triageContractReviewKnockText(triageKnock) };
   // ⛔ Bodies only: a VACANT seat post's ledger holds pointers, never obligations (#23396).
   const vacant = options.mode === 'body' ? vacantLedgerRefusals(rendered.body) : [];
   if (vacant.length > 0) return { ok: false, rendered, text: vacantLedgerRefusalText(vacant) };
@@ -3853,7 +3938,7 @@ export function judgeBody(input, options = {}, nowMs = Date.now(), tool = 'post-
 const USAGE = [
   'post-stamped — write a seat artefact to GitHub with a stamp this act read, never one typed from memory.',
   '',
-  '  node scripts/pm/post-stamped.mjs --comment=N [--file=PATH] [--repo=OWNER/NAME] [--dry-run] [--json]',
+  '  node scripts/pm/post-stamped.mjs --comment=N [--file=PATH] [--repo=OWNER/NAME] [--tier-evidence=PATH] [--dry-run] [--json]',
   '  node scripts/pm/post-stamped.mjs --body=N    [--file=PATH] [--repo=OWNER/NAME] [--ack-through=ID] [--dry-run] [--json]',
   '  node scripts/pm/post-stamped.mjs --self-test',
   '',
@@ -3882,10 +3967,15 @@ const USAGE = [
   '  checkers that OWN them, and the comment is REFUSED when one cannot be read — a ceiling tier citing neither the',
   '  MANDATORY hit `--tier` printed nor a `reason:` included — and the refusal prints the spelling that can.',
   '  A `## Contract review` comment\'s `Local-runs:` line is read the same way when it is present (`none`, or',
-  '  `probe — REASON`); a record without the line is not re-judged.',
+  '  `probe — REASON`); a record without the line is not re-judged. A record whose `Served-tier:` names',
+  '  `CONTRACT_REVIEW_TIER` is REFUSED unless --tier-evidence=PATH names the reviewing run\'s transcript and',
+  '  `verify-review-tier.mjs` passes on it; the path and the model stay local, out of the comment.',
   '  A comment that is a decision analysis — a decision frame, an options table or lettered options, and a',
   `  recommendation naming one — is REFUSED when it carries no \`${DECISION_FACET_MARKER}\` marker outside code; the`,
   '  refusal prints the four-facet block it owes. Card bodies and every other route are untouched.',
+  '  A mailbox comment whose `To:` is a triage seat and whose key is `Request: contract-review` is REFUSED, whether',
+  '  or not the key line spells its template: a lane without the review tier knocks a review seat, then a sibling',
+  '  seat with the tier — never triage.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
   '',
   `  Exit: 0 written and stored · ${EXIT_USAGE} usage · ${EXIT_REFUSED} refused, nothing written ·`,
@@ -4117,8 +4207,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
   'the signature: every body opens with LANE#N · ACCOUNT · SESSION or is refused, beside the stamp contract; one leading signature changes no reading': 11,
   'the one judge: every body refusal on ONE path — `main` and `label-write.mjs --comment-file` call `judgeBody`, never a copy': 8,
+  'the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes': 10,
+  'the record tier: a record naming `CONTRACT_REVIEW_TIER` is written only on a transcript `verify-review-tier.mjs` passes; another tier and a non-record comment are untouched': 15,
 });
-const SELF_TEST_BATTERY_FLOOR = 18;
+const SELF_TEST_BATTERY_FLOOR = 29;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
@@ -5653,7 +5745,71 @@ export function selfTest() {
     t('structural: main reaches every body refusal through judgeBody alone, ⛔ no inline copy beside it', (mainOnly.match(/judgeBody\(/gu) ?? []).length === 1 && !/signatureRefusal\(|claimKeyedLineRefusals\(|decisionFacetRefusals\(|vacantLedgerRefusals\(/u.test(mainOnly));
     let lw = '';
     try { lw = readFileSync(new URL('./label-write.mjs', import.meta.url), 'utf8'); } catch { lw = ''; }
-    t('↔ structural: label-write imports judgeBody and judges its folded comment with it, ⛔ no reader of its own', /\bjudgeBody\b[^;]*from '\.\/post-stamped\.mjs'/u.test(lw) && /judgeBody\(text, \{ mode: 'comment' \}/u.test(lw) && !/function\s+(signatureRefusal|claimKeyedLineRefusals|decisionFacetRefusals)\b/u.test(lw));
+    t('↔ structural: label-write imports judgeBody and judges its folded comment with it, ⛔ no reader of its own', /\bjudgeBody\b[^;]*from '\.\/post-stamped\.mjs'/u.test(lw) && /judgeBody\(text, \{ mode: 'comment', tierEvidence: options\.tierEvidence \}/u.test(lw) && !/function\s+(signatureRefusal|claimKeyedLineRefusals|decisionFacetRefusals)\b/u.test(lw));
+  }
+
+  battery('the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes');
+  {
+    const SIG = 'domain:server#3 · os-bill · session_01QSeKYmhU5KEj1nukYhp1Tg';
+    const HEAD = '1b03a9c3d4e5f60718293a4b5c6d7e8f90a1b2c3';
+    const KNOCK = (to, key = `Request: contract-review · PR #26766 · head ${HEAD} · CONTRACT_REVIEW_TIER rationed`) => `${SIG}\nTo: ${to}\n${key}`;
+    const judged = (to, key) => judgeBody(KNOCK(to, key), { mode: 'comment' }, NOW_MS);
+    const refused = judged('triage#1');
+    t('⭐ a contract-review knock addressed to `triage#1` is refused, and the refusal names the seat it was addressed to', !refused.ok && refused.text.startsWith('post-stamped: REFUSED') && refused.text.includes('`To: triage#1`'));
+    t('⭐ …and the refusal names the review seat\'s mailbox, the sibling fallback, the owed-review list and the rule\'s home', refused.text.includes('`To: review#N`') && refused.text.includes('`Mailbox:`') && refused.text.includes('sibling lane seat') && refused.text.includes('check-owed-reviews.mjs') && refused.text.includes('references/contract-review.md') && refused.text.includes('Nothing was written'));
+    t('⭐ a MALFORMED knock to triage is refused too — no reason, a bare PR number, a second line: the reader\'s unreadable reading still names the key and the seat', [`Request: contract-review · PR #26766 · head ${HEAD}`, 'Request: contract-review · 26766 · rationed', `Request: contract-review · PR #26766 · head ${HEAD} · rationed\nbecause fable is short today`].every((key) => { const r = judged('triage#1', key); return !r.ok && r.text.includes('`To: triage#1`'); }) && judged('review#1', `Request: contract-review · PR #26766 · head ${HEAD}`).ok);
+    t('a bare `To: triage` reads as `triage#1` (the doorbell reader\'s seat spelling) and is refused the same way', !judged('triage').ok && !judged('Triage#2').ok);
+    t('⭐ the same knock addressed to a review seat passes', judged('review#1').ok && judged('review#2').ok);
+    t('…and to a sibling lane seat, the fallback while no review seat is seated', judged('domain:server#2').ok);
+    t('⛔ every other key to triage is untouched: `Request: urgent-triage` and `Request: triage` pass', judged('triage#1', 'Request: urgent-triage · #26766 · main red on Test Core').ok && judged('triage#1', 'Request: triage · #26766 · which lane takes it').ok);
+    t('⛔ a card BODY is untouched — the check is a comment\'s, as a knock is a comment on a mailbox PR', judgeBody(KNOCK('triage#1'), { mode: 'body' }, NOW_MS).ok);
+    t('⛔ the refusal\'s own words (the seat it echoes aside) carry no tracker number and no HTML comment — a runtime string an author is shown', /#\d/u.test(triageContractReviewKnockText({ to: 'SEAT' })) === false && triageContractReviewKnockText({ to: 'SEAT' }).includes('<!--') === false);
+    const own = readFileSync(SELF_PATH, 'utf8');
+    t('structural: the doorbell reader is imported from the file that owns it, ⛔ never restated, and the check runs inside judgeBody on comments only', /import \{[^}]*\breadMailboxLine\b[^}]*\} from '\.\/record-recognisers\.mjs';/u.test(own) && !/function\s+readMailboxLine\b/u.test(own) && /const triageKnock = options\.mode === 'comment' \? triageContractReviewKnock\(rendered\.body\) : null;/u.test(own));
+  }
+
+  battery('the record tier: a record naming `CONTRACT_REVIEW_TIER` is written only on a transcript `verify-review-tier.mjs` passes; another tier and a non-record comment are untouched');
+  {
+    const SIG = 'domain:skills#1 · os-project-manager · session_01QSeKYmhU5KEj1nukYhp1Tg';
+    const OTHER = 'other-model-for-the-self-test';
+    const REC = (tierName) => [SIG, '## Contract review', '', `Served-tier: \`${tierName}\``, `Head-sha: \`${'0123456789abcdef'.repeat(2)}01234567\``, 'Local-runs: none', '', '**VERDICT: PASS**'].join('\n');
+    const turn = (model) => JSON.stringify({ type: 'assistant', requestedModel: model, message: { role: 'assistant', model, content: [] } });
+    const dir = mkdtempSync(join(tmpdir(), 'post-stamped-tier-'));
+    try {
+      const atTier = join(dir, 'at-tier.output');
+      const offTier = join(dir, 'off-tier.output');
+      const empty = join(dir, 'empty.output');
+      writeFileSync(atTier, [JSON.stringify({ type: 'user', message: { role: 'user', content: 'review' } }), turn(CONTRACT_REVIEW_TIER), turn(CONTRACT_REVIEW_TIER)].join('\n'));
+      writeFileSync(offTier, [turn(CONTRACT_REVIEW_TIER), turn(OTHER)].join('\n'));
+      writeFileSync(empty, '');
+      const judged = (body, tierEvidence) => judgeBody(body, { mode: 'comment', tierEvidence }, NOW_MS);
+      const none = judged(REC(CONTRACT_REVIEW_TIER_NAME), null);
+      t('⛔ a record naming CONTRACT_REVIEW_TIER with no --tier-evidence is refused', !none.ok && none.text.includes('--tier-evidence'));
+      t('⭐ …and the same record passes on a transcript served at the tier throughout', judged(REC(CONTRACT_REVIEW_TIER_NAME), atTier).ok);
+      const sessionAtTier = join(dir, 'session.jsonl');
+      writeFileSync(sessionAtTier, [JSON.stringify({ type: 'queue-operation' }), JSON.stringify({ type: 'attachment', attachment: { type: 'model', identity: { modelId: CONTRACT_REVIEW_TIER } } }), turn(CONTRACT_REVIEW_TIER), JSON.stringify({ type: 'system', subtype: 'stop_hook_summary' })].join('\n'));
+      t('⭐ …and on a SESSION transcript run wholly at the tier — the path a card-thread or in-seat reviewer passes', judged(REC(CONTRACT_REVIEW_TIER_NAME), sessionAtTier).ok);
+      t('the refusal names the sender it was handed, and both evidence paths a reviewer can follow', (() => {
+        const lw = judgeBody(REC(CONTRACT_REVIEW_TIER_NAME), { mode: 'comment' }, NOW_MS, 'label-write');
+        return !lw.ok && lw.text.startsWith('label-write: REFUSED') && lw.text.includes('output file') && lw.text.includes('~/.claude/projects/');
+      })());
+      const off = judged(REC(CONTRACT_REVIEW_TIER_NAME), offTier);
+      t('⛔ a transcript with one turn served off the tier is refused', !off.ok && off.text.includes('REFUSED'));
+      t('⛔ an empty transcript is refused', !judged(REC(CONTRACT_REVIEW_TIER_NAME), empty).ok);
+      t('⛔ a transcript path that cannot be read is refused, never thrown', !judged(REC(CONTRACT_REVIEW_TIER_NAME), join(dir, 'missing.output')).ok);
+      t('⛔ no refusal text carries a model identifier or the evidence path', [none, off, judged(REC(CONTRACT_REVIEW_TIER_NAME), join(dir, 'missing.output'))].every((r) => !r.ok && !String(r.text).includes(CONTRACT_REVIEW_TIER) && !String(r.text).includes(OTHER) && !String(r.text).includes(dir)));
+      t('⭐ a record naming TIER_DEFAULT is untouched, with no evidence', judged(REC('TIER_DEFAULT'), null).ok);
+      t('⭐ a comment that is not a record is untouched, with no evidence', judged(`${SIG}\nThe seat's own note: Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\` is what records carry.`, null).ok);
+      t('⭐ a card BODY is untouched — the check is a record\'s, and a record is a comment', judgeBody(REC(CONTRACT_REVIEW_TIER_NAME), { mode: 'body' }, NOW_MS).ok);
+      t('the CLI carries --tier-evidence=PATH on a comment, and leaves it null when absent', parseOptions(['--comment=1', `--tier-evidence=${atTier}`]).options.tierEvidence === atTier && parseOptions(['--comment=1']).options.tierEvidence === null);
+      t('⛔ --tier-evidence with --body, or with no path, is refused', parseOptions(['--body=1', '--tier-evidence=x']).ok === false && parseOptions(['--comment=1', '--tier-evidence=']).ok === false);
+      const verifier = spawnSync(process.execPath, [fileURLToPath(new URL('./verify-review-tier.mjs', import.meta.url)), '--self-test'], { encoding: 'utf8' });
+      t('the verifier\'s own --self-test runs HERE, so CI runs it inside check:pm-post-stamped: exit 0 and its success line', verifier.status === 0 && /✓ verify-review-tier self-test: \d+ cases pass/u.test(verifier.stdout));
+      const own = readFileSync(SELF_PATH, 'utf8');
+      t('structural: the transcript judge is imported from verify-review-tier.mjs, ⛔ never restated here', /import \{[^}]*\bverifyReviewTranscriptFile\b[^}]*\} from '\.\/verify-review-tier\.mjs';/u.test(own) && !/function\s+(judgeReviewTranscript|verifyReviewTranscriptFile)\b/u.test(own));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 
   // The floor, evaluated last: a battery that stops running names itself here.

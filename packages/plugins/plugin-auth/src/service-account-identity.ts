@@ -133,10 +133,14 @@ const has = (data: Record<string, unknown>, key: string): boolean =>
 /** True when a written value leaves the column empty. */
 const isEmpty = (v: unknown): boolean => v === undefined || v === null || v === '';
 
-async function readUserRow(engine: any, userId: string): Promise<Record<string, unknown> | undefined> {
+async function readUserRow(
+  engine: any,
+  userId: string,
+  extraFields: readonly string[] = [],
+): Promise<Record<string, unknown> | undefined> {
   let found: any = await engine.find(USER_OBJECT, {
     where: { id: userId },
-    fields: [...SERVICE_ACCOUNT_ROW_FIELDS],
+    fields: [...SERVICE_ACCOUNT_ROW_FIELDS, ...extraFields],
     limit: 1,
     context: SYSTEM_CTX,
   });
@@ -188,14 +192,30 @@ async function readFault(door: 'session' | 'credential', cause: unknown): Promis
  * the row that fails refuses with {@link USER_ROW_READ_FAULT_REFUSAL}.
  */
 export async function refuseAgentAccountSession(engine: any, session: unknown): Promise<void> {
-  const userId = (session as { userId?: unknown } | null | undefined)?.userId;
-  let agent: boolean;
+  await readSessionUserRow(engine, session);
+}
+
+/**
+ * [#33181] {@link refuseAgentAccountSession}, reading the row ONCE for every
+ * session refusal composed after it: `extraFields` join the read, and the row
+ * is handed on (`undefined` when there is no user id, no engine or no row).
+ * The refusals and the read fault are exactly the agent refusal's.
+ */
+export async function readSessionUserRow(
+  engine: any,
+  session: unknown,
+  extraFields: readonly string[] = [],
+): Promise<Record<string, unknown> | undefined> {
+  const id = str((session as { userId?: unknown } | null | undefined)?.userId);
+  if (!id || !engine || typeof engine.find !== 'function') return undefined;
+  let row: Record<string, unknown> | undefined;
   try {
-    agent = await isAgentAccountUser(engine, userId);
+    row = await readUserRow(engine, id, extraFields);
   } catch (cause) {
     return readFault('session', cause);
   }
-  if (agent) await forbidden(AGENT_ACCOUNT_SESSION_REFUSAL);
+  if (isAgentAccountRow(row)) await forbidden(AGENT_ACCOUNT_SESSION_REFUSAL);
+  return row;
 }
 
 /**

@@ -19,10 +19,12 @@ import { describe, expect, it } from 'vitest';
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../../../../cli/src/lint/corpus.js';
-import { formatRefusal, loadScenarios, readCapabilityAreas } from '../../src/loader.js';
+import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas } from '../../src/loader.js';
 import {
   CAPABILITY_TAG_CHECKS,
   gradeCapabilityTags,
+  gradePersonaGrants,
+  personaGrantNeeds,
   readArtifactFacts,
   scoreScenarioArtifact,
   type ScenarioArtifactCard,
@@ -615,6 +617,49 @@ describe('row-level security — each scoped persona kept to its rows by a route
     ]);
     expect(rowTags(narrowed(), card)['access-security.row-level-security']!.status).toBe('pass');
   });
+
+  describe("a scoped detail of a master the persona reads in full, narrowed by the detail's own read policy", () => {
+    // The gallery build's shape: the detail is controlled by its parent, the
+    // master is `public_read` (every persona reads it), and the persona's set
+    // also carries a read policy on the detail itself. The engine ANDs that
+    // policy with the master-derived filter, so the detail is kept to the
+    // persona's rows.
+    const contractor = { ...CARD.run.personas[0]!, scope: [{ object: 'task', field: 'project.owner', value: 'u_kim' }] };
+    const card = { ...CARD, run: { ...CARD.run, personas: [contractor, CARD.run.personas[1]!] } };
+    const ownTasks = { name: 'own_tasks', object: 'task', operation: 'all', using: 'project in current_user.my_project_ids' };
+    const openMaster = (detailPolicies: Bag[]) =>
+      richArtifact((stack) => {
+        stack.objects[0].sharingModel = 'public_read';
+        stack.permissions[0].rowLevelSecurity = detailPolicies;
+      });
+    const enforced = (a: Bag) => rowTags(a, card)['access-security.row-level-security']!.checks;
+
+    it('passes: a detail policy that lowers to a filter and admits only some rows', () => {
+      expect(readArtifactFacts(openMaster([])).objects.get('task')?.sharingModel).toBe('controlled_by_parent');
+      expect(enforced(openMaster([ownTasks]))).toEqual([
+        { check: 'row-level-security:task->enforced', pass: true, detail: 'enforced for pm_contractor' },
+      ]);
+    });
+
+    it('still fails with no detail policy, or one that admits every row: the master is followed', () => {
+      for (const policies of [[], [{ ...ownTasks, using: 'true' }], [ownTasks, { ...ownTasks, name: 'all_tasks', using: 'true' }]]) {
+        expect(enforced(openMaster(policies)), JSON.stringify(policies)).toEqual([
+          { check: 'row-level-security:task->enforced', pass: false, detail: 'no read policy on pm_contractor narrows project' },
+        ]);
+      }
+    });
+
+    it('still fails with a detail policy that does not lower to a filter, beside one that does', () => {
+      for (const policies of [[{ ...ownTasks, using: 'size(name) > 2' }], [ownTasks, { ...ownTasks, name: 'long_tasks', using: 'size(name) > 2' }]]) {
+        const dead = String(policies[policies.length - 1]!.name);
+        expect(enforced(openMaster(policies)), JSON.stringify(policies)).toEqual([{
+          check: 'row-level-security:task->enforced',
+          pass: false,
+          detail: `the read policy ${dead} on pm_contractor does not lower to a filter on task, so it matches no row`,
+        }]);
+      }
+    });
+  });
 });
 
 describe('report — a report whose dataset binds an object the card names', () => {
@@ -706,5 +751,193 @@ describe('a multi-package artifact (collections only under packages[])', () => {
     expect(multi.tags).toEqual(single.tags);
     expect(multi.agentActions).toEqual(single.agentActions);
     expect(multi.score).toBe(single.score);
+  });
+});
+
+describe('persona grants — what the card has each persona read and write, against its permission set', () => {
+  const card = (id: string): ScenarioArtifactCard => {
+    const { card: loaded, refusals } = loadScenarioFile(resolve(SCENARIOS_DIR, `${id}.json`), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    if (!loaded) throw new Error(refusals.map(formatRefusal).join('\n'));
+    return loaded.card;
+  };
+  // project_with_tasks: the contractor answers task questions and creates,
+  // updates and deletes tasks; the client viewer hides `task` and is refused
+  // closing one (PERMISSION_DENIED).
+  const PROJECT = card('project_with_tasks');
+  const ALL_TASK_VERBS = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+  /** The rich build with the two persona sets, named bare (no namespace): `edit` adjusts them before the parse. */
+  const artifact = (sets: Record<string, Bag>, edit?: (stack: Bag) => void) =>
+    richArtifact((stack) => {
+      stack.permissions = Object.entries(sets).map(([name, set]) => ({ name, label: name, ...set }));
+      edit?.(stack);
+    });
+  const built = (sets: Record<string, Bag>, edit?: (stack: Bag) => void) => readArtifactFacts(artifact(sets, edit));
+  const verdicts = (facts: ReturnType<typeof readArtifactFacts>, c: ScenarioArtifactCard = PROJECT, namespace?: string) =>
+    gradePersonaGrants(facts, c, namespace === undefined ? {} : { namespace }).map((r) => [r.check, r.notMeasured === undefined ? r.pass : 'not-measured']);
+  const GRANTED = { contractor: { objects: { project: { allowRead: true }, task: ALL_TASK_VERBS } }, client_viewer: { objects: { project: { allowRead: true } } } };
+
+  it('derives one need per persona × object × verb from the card alone, and nothing from a question about an object the persona hides', () => {
+    expect(personaGrantNeeds(PROJECT).map((n) => [n.persona, n.object, n.verb, n.requiredBy.length > 0 ? 'needed' : 'refused'])).toEqual([
+      ['contractor', 'task', 'read', 'needed'],
+      ['contractor', 'task', 'create', 'needed'],
+      ['contractor', 'task', 'update', 'needed'],
+      ['contractor', 'task', 'delete', 'needed'],
+      ['client_viewer', 'task', 'update', 'refused'],
+    ]);
+    // `task_without_title` is refused VALIDATION_FAILED: it implies nothing, so `create` is needed by `add_task` alone.
+    expect(personaGrantNeeds(PROJECT).find((n) => n.verb === 'create')!.requiredBy).toEqual(['operation add_task']);
+  });
+
+  it('a grant present: every check passes', () => {
+    expect(verdicts(built(GRANTED))).toEqual([
+      ['persona-grant:contractor:task:read', true],
+      ['persona-grant:contractor:task:create', true],
+      ['persona-grant:contractor:task:update', true],
+      ['persona-grant:contractor:task:delete', true],
+      ['persona-grant:client_viewer:task:update', true],
+    ]);
+  });
+
+  const READ_ONLY = { ...GRANTED, contractor: { objects: { project: { allowRead: true }, task: { allowRead: true } } } };
+  const withoutAction = (name: string) => (stack: Bag) => {
+    stack.actions = (stack.actions as Bag[]).filter((x) => x.name !== name);
+  };
+
+  it('a grant missing: the read-only contractor of the first live run fails each write the card gives it', () => {
+    const readOnly = built(READ_ONLY, withoutAction('delete_task'));
+    expect(verdicts(readOnly)).toEqual([
+      ['persona-grant:contractor:task:read', true],
+      ['persona-grant:contractor:task:create', false],
+      ['persona-grant:contractor:task:update', false],
+      ['persona-grant:contractor:task:delete', false],
+      ['persona-grant:client_viewer:task:update', true],
+    ]);
+    expect(gradePersonaGrants(readOnly, PROJECT).find((c) => c.check.endsWith(':create'))!.detail).toBe(
+      'contractor grants no create on task, which operation add_task needs',
+    );
+  });
+
+  it("a write the card has wait on confirmation, withheld and routed through the build's confirm-gated card action: not measured, named, never a pass", () => {
+    // The rich build declares the card's set_task_status (not confirm-gated)
+    // and delete_task (confirm-gated). `start_qa` is applied: it stays measured
+    // against the grant whatever actions the build adds. `drop_packing` waits
+    // on confirmation: the card designs delete_task as its route.
+    const facts = built(READ_ONLY);
+    expect(verdicts(facts).slice(1, 4)).toEqual([
+      ['persona-grant:contractor:task:create', false],
+      ['persona-grant:contractor:task:update', false],
+      ['persona-grant:contractor:task:delete', 'not-measured'],
+    ]);
+    expect(gradePersonaGrants(facts, PROJECT)[3]!.notMeasured).toBe(
+      'contractor grants no delete on task, and the build declares the card\'s confirm-gated agent action delete_task there, a door that writes as the platform: whether operation drop_packing goes through it is the run\'s to observe',
+    );
+    const s = scoreScenarioArtifact(artifact(READ_ONLY), PROJECT);
+    const g = scoreScenarioArtifact(artifact(GRANTED), PROJECT);
+    expect([s.total, s.passed]).toEqual([g.total - 1, g.passed - 3]);
+    // The card's action without `confirm` is no designed route: the check is measured.
+    const unconfirmed: ScenarioArtifactCard = {
+      ...PROJECT,
+      run: { ...PROJECT.run, agentActions: PROJECT.run.agentActions!.map((a) => ({ ...a, confirm: false })) },
+    };
+    expect(verdicts(facts, unconfirmed)[3]).toEqual(['persona-grant:contractor:task:delete', false]);
+    // A delete the card applies outright is measured, even beside the confirm-gated action.
+    const appliedDelete: ScenarioArtifactCard = {
+      ...PROJECT,
+      run: { ...PROJECT.run, operations: PROJECT.run.operations!.map((o) => (o.id === 'drop_packing' ? { ...o, outcome: { kind: 'applied' as const, state: [] } } : o)) },
+    };
+    expect(verdicts(facts, appliedDelete)[3]).toEqual(['persona-grant:contractor:task:delete', false]);
+  });
+
+  it('edit and delete are read ∧ grant, as the enforcement door folds them', () => {
+    const writeOnly = built({ ...GRANTED, contractor: { objects: { task: { allowCreate: true, allowEdit: true, allowDelete: true } } } }, (stack) => {
+      // The authoring schema refuses a write grant without read; a stored set may still carry one.
+      stack.permissions[0].objects.task.allowRead = true;
+      withoutAction('delete_task')(stack);
+    });
+    writeOnly.permissionSets[0]!.objects = { task: { allowCreate: true, allowEdit: true, allowDelete: true } };
+    expect(verdicts(writeOnly).slice(0, 4)).toEqual([
+      ['persona-grant:contractor:task:read', false],
+      ['persona-grant:contractor:task:create', true],
+      ['persona-grant:contractor:task:update', false],
+      ['persona-grant:contractor:task:delete', false],
+    ]);
+  });
+
+  describe('a grant the card refuses', () => {
+    const refused = (viewer: Bag, edit?: (stack: Bag) => void) =>
+      verdicts(built({ ...GRANTED, client_viewer: viewer }, edit)).find(([c]) => c === 'persona-grant:client_viewer:task:update')![1];
+    const EDITS_TASKS = { project: { allowRead: true }, task: { allowRead: true, allowEdit: true } };
+
+    it('passes when the set grants no update on the object', () => {
+      expect(refused({ objects: { project: { allowRead: true } } })).toBe(true);
+      expect(refused({ objects: { project: { allowRead: true }, task: { allowRead: true } } })).toBe(true);
+    });
+
+    it('fails when the set grants the update and nothing in it refuses the write', () => {
+      expect(refused({ objects: EDITS_TASKS })).toBe(false);
+    });
+
+    it('passes when the set locks a field the write names (the same 403 the field-level write step answers)', () => {
+      expect(refused({ objects: EDITS_TASKS, fields: { 'task.status': { readable: true, editable: false } } })).toBe(true);
+      // A lock on a field the write does not name refuses nothing.
+      expect(refused({ objects: EDITS_TASKS, fields: { 'task.title': { readable: true, editable: false } } })).toBe(false);
+      // Modify All votes every field editable, so the lock is overridden.
+      expect(refused({ objects: { project: { allowRead: true }, task: { allowRead: true, modifyAllRecords: true } }, fields: { 'task.status': { readable: true, editable: false } } })).toBe(false);
+    });
+
+    it('is not measured when only a row rule could refuse it, and counts in neither figure', () => {
+      const viewer = {
+        objects: EDITS_TASKS,
+        rowLevelSecurity: [{ name: 'own_tasks', object: 'task', operation: 'update', using: 'owner == current_user.id' }],
+      };
+      expect(refused(viewer)).toBe('not-measured');
+      expect(refused({ ...viewer, rowLevelSecurity: [{ ...viewer.rowLevelSecurity[0], operation: 'select' }] })).toBe(false);
+      expect(refused({ objects: EDITS_TASKS, fields: { 'task.status': { readable: true, editable: false, when: "record.status == 'done'" } } })).toBe('not-measured');
+
+      const withRow = artifact({ ...GRANTED, client_viewer: viewer });
+      const without = artifact({ ...GRANTED, client_viewer: { objects: EDITS_TASKS } });
+      const a = scoreScenarioArtifact(withRow, PROJECT);
+      const b = scoreScenarioArtifact(without, PROJECT);
+      expect([a.total, a.passed]).toEqual([b.total - 1, b.passed]);
+    });
+
+    it('a write refused on one row and applied on another: the needed check alone, never an absence the card contradicts', () => {
+      // requisition_to_receipt: the department manager approves level one
+      // (applied) and is refused the finance level (PERMISSION_DENIED) on
+      // the same object and verb.
+      const req = card('requisition_to_receipt');
+      const n = personaGrantNeeds(req).find((x) => x.persona === 'dept_manager' && x.object === 'approval_step' && x.verb === 'update')!;
+      expect([n.requiredBy, n.refusedBy.map((r) => r.operation)]).toEqual([['operation manager_approves_level_one'], ['manager_approves_finance_level']]);
+      const facts = readArtifactFacts({ permissions: [{ name: 'dept_manager', objects: { approval_step: { allowRead: true, allowEdit: true } } }] });
+      const c = gradePersonaGrants(facts, req).find((x) => x.check === 'persona-grant:dept_manager:approval_step:update')!;
+      expect([c.pass, c.detail]).toEqual([true, 'dept_manager grants it; manager_approves_finance_level is refused by a row or a field, not the grant']);
+    });
+  });
+
+  it("reads the platform's fold: a '*' wildcard covers a public object and not a private one", () => {
+    const wildcard = { ...GRANTED, contractor: { objects: { '*': ALL_TASK_VERBS } } };
+    expect(verdicts(built(wildcard)).slice(0, 4).map(([, v]) => v)).toEqual([true, true, true, true]);
+    const privateTask = built(wildcard, (stack) => {
+      (stack.objects as Bag[]).find((o) => o.name === 'task')!.access = { default: 'private' };
+      withoutAction('delete_task')(stack);
+    });
+    expect(verdicts(privateTask).slice(0, 4).map(([, v]) => v)).toEqual([false, false, false, false]);
+  });
+
+  it("judges the persona's own set by its name in the namespace, and fails every check of a persona whose set the build does not declare", () => {
+    const facts = built(GRANTED);
+    expect(verdicts(facts, PROJECT, 'demoproject').map(([, v]) => v)).toEqual([false, false, false, false, false]);
+    expect(gradePersonaGrants(facts, PROJECT, { namespace: 'demoproject' })[0]!.detail).toBe('the build declares no permission set demoproject_contractor');
+    const renamed = built({ demoproject_contractor: GRANTED.contractor, demoproject_client_viewer: GRANTED.client_viewer });
+    expect(verdicts(renamed, PROJECT, 'demoproject').map(([, v]) => v)).toEqual([true, true, true, true, true]);
+  });
+
+  it('counts in the card score, and a card pick without questions or operations derives none', () => {
+    const facts = built(GRANTED);
+    const s = scoreScenarioArtifact(artifact(GRANTED), PROJECT);
+    expect(s.personaGrants.map((c) => c.check)).toEqual(gradePersonaGrants(facts, PROJECT).map((c) => c.check));
+    const { questions: _q, operations: _o, ...run } = PROJECT.run;
+    expect(gradePersonaGrants(facts, { ...PROJECT, run })).toEqual([]);
+    expect(scoreScenarioArtifact(richArtifact(), CARD).personaGrants).toEqual([]);
   });
 });

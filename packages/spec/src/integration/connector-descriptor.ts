@@ -75,6 +75,14 @@ export interface ConnectorActionDescriptor {
  */
 export interface ConnectorDescriptor {
   readonly name: string;
+  /**
+   * ADR-0150 D9 (#31699) — the package that holds this instance, when one does.
+   * Two packages of different namespaces may each declare a connector of the
+   * same name, so `name` alone no longer identifies one instance; the pair does.
+   * Absent for a connector registered with no package (a plugin connector, or a
+   * declarative entry no package holds).
+   */
+  readonly packageId?: string;
   readonly label: string;
   /**
    * The connector's category (`saas`, `database`, `rest`, …) — the same `type`

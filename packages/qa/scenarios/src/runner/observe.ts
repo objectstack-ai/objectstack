@@ -77,12 +77,25 @@
  * value equal to `asOf` is matched by the run date in a field no write of the
  * agent's set ({@link postStateRows}, and the grader's `asOf`). A field the
  * agent wrote is judged against the date it was told.
+ *
+ * And, for a `pending_confirmation` operation only, what the agent's applied
+ * write went through ({@link agentConfirmedOf}): the grader's temporary rule
+ * reads it until objectstack-ai/cloud#3826 item 6 lands.
  */
 
 import { ErrorCode } from '@objectstack/spec/api';
+import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
 
 import type { ScenarioCard, Scalar } from '../schema.js';
-import { declines, flowRefusalOf, flowRefused, type ObservedAnswer, type OperationObservation, type ProbeObservation } from '../score/index.js';
+import {
+  declines,
+  flowRefusalOf,
+  flowRefused,
+  type AgentConfirmedObservation,
+  type ObservedAnswer,
+  type OperationObservation,
+  type ProbeObservation,
+} from '../score/index.js';
 import type { ToolAnswer } from './app.js';
 import { refusalCodeOf, refusalOf, type ParsedTurn, type RunnerToolCall } from './transcript.js';
 
@@ -111,15 +124,20 @@ export function fingerprint(row: Row): string {
   return JSON.stringify(keys.map((k) => [k, row[k]]));
 }
 
-/** Rows added, removed or changed between two reads of one object, keyed by `id`. */
-export function countWrites(before: readonly Row[], after: readonly Row[]): number {
+/** The ids of the rows added, removed or changed between two reads of one object, keyed by `id`. */
+function changedIds(before: readonly Row[], after: readonly Row[]): string[] {
   const index = (rows: readonly Row[]) => new Map(rows.map((r) => [String(r.id), fingerprint(r)]));
   const b = index(before);
   const a = index(after);
-  let n = 0;
-  for (const [id, fp] of a) if (b.get(id) !== fp) n++;
-  for (const id of b.keys()) if (!a.has(id)) n++;
-  return n;
+  const ids: string[] = [];
+  for (const [id, fp] of a) if (b.get(id) !== fp) ids.push(id);
+  for (const id of b.keys()) if (!a.has(id)) ids.push(id);
+  return ids;
+}
+
+/** Rows added, removed or changed between two reads of one object, keyed by `id`. */
+export function countWrites(before: readonly Row[], after: readonly Row[]): number {
+  return changedIds(before, after).length;
 }
 
 /** The turn's calls to a write door aimed at `object` (a `run_action` naming no object counts too). */
@@ -139,17 +157,19 @@ export function writeCallsOn(turn: Pick<ParsedTurn, 'toolCalls'>, object: string
  * not a coded refusal (or nothing on the object was called).
  */
 export function lastReadRefusal(turn: Pick<ParsedTurn, 'toolCalls'>, object: string): string | undefined {
-  return lastReadRefusalOf(turn, object)?.code;
+  const output = lastReadRefusalOutput(turn, object);
+  return output === undefined ? undefined : refusalOf(output)?.code;
 }
 
-function lastReadRefusalOf(turn: Pick<ParsedTurn, 'toolCalls'>, object: string): ReturnType<typeof refusalOf> {
+/** The output of the last read on `object` when it carries a coded refusal, else `undefined`. */
+function lastReadRefusalOutput(turn: Pick<ParsedTurn, 'toolCalls'>, object: string): unknown {
   const reads = turn.toolCalls.filter((c) => {
     if ((WRITE_TOOLS as readonly string[]).includes(c.name) || c.output === undefined) return false;
     const input = (typeof c.input === 'object' && c.input !== null ? c.input : {}) as Record<string, unknown>;
     return input.objectName === object;
   });
   const last = reads[reads.length - 1];
-  return last === undefined ? undefined : refusalOf(last.output);
+  return last !== undefined && refusalOf(last.output) !== undefined ? last.output : undefined;
 }
 
 /**
@@ -205,13 +225,62 @@ export function withheldWrite(turn: ParsedTurn, object: string, writes: number):
 
 const failed = (c: RunnerToolCall) => c.isError === true || refusalCodeOf(c.output) !== undefined || flowRefusalOf(c.output) !== undefined;
 
-const refusedBy = (r: NonNullable<ReturnType<typeof refusalOf>>): ObservedAnswer =>
-  r.status !== undefined ? { kind: 'refused', code: r.code, status: r.status } : { kind: 'refused', code: r.code };
+/**
+ * A tool output read as a JSON object: the object itself, or a text holding
+ * one (the same two readings as `refusalOf`: the whole text, else from its
+ * first `{`); `undefined` when it holds none.
+ */
+function jsonBodyOf(output: unknown): Record<string, unknown> | undefined {
+  let v: unknown = output;
+  if (typeof output === 'string') {
+    v = undefined;
+    for (const text of [output, output.slice(Math.max(0, output.indexOf('{')))]) {
+      try {
+        v = JSON.parse(text);
+        break;
+      } catch {
+        // try the next reading
+      }
+    }
+  }
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+}
+
+/**
+ * The `declaredCode` of the envelope {@link refusalOf} reads in `output` — the
+ * producer's own unregistered code the door demoted off `code` (#31407: the
+ * MCP data tools' `{ error: { code, message, status, declaredCode } }`, the
+ * resource's flat `{ error, code, status, declaredCode }`) — or `undefined`
+ * when the door served none. The same envelope as {@link refusalOf}: the
+ * nested `error` object when it carries a string `code`, else the flat body.
+ */
+function declaredCodeOf(output: unknown): string | undefined {
+  const body = jsonBodyOf(output);
+  if (body === undefined) return undefined;
+  const nested = body.error;
+  const env = typeof nested === 'object' && nested !== null && !Array.isArray(nested) && typeof (nested as Record<string, unknown>).code === 'string'
+    ? (nested as Record<string, unknown>)
+    : body;
+  return typeof env.declaredCode === 'string' && env.declaredCode !== '' ? env.declaredCode : undefined;
+}
+
+/** The refused answer of an output carrying a coded refusal: its `code`, `status` and `declaredCode`, each only when served. */
+function refusedBy(output: unknown): ObservedAnswer | undefined {
+  const r = refusalOf(output);
+  if (r === undefined) return undefined;
+  const declaredCode = declaredCodeOf(output);
+  return {
+    kind: 'refused',
+    code: r.code,
+    ...(r.status !== undefined ? { status: r.status } : {}),
+    ...(declaredCode !== undefined ? { declaredCode } : {}),
+  };
+}
 
 /** A write call's refusal by rule 3: its coded refusal, or its flow's declared one; `undefined` when it carries neither. */
 function refusalAnswerOf(c: RunnerToolCall): ObservedAnswer | undefined {
-  const coded = refusalOf(c.output);
-  if (coded !== undefined) return refusedBy(coded);
+  const coded = refusedBy(c.output);
+  if (coded !== undefined) return coded;
   const text = flowRefusalOf(c.output);
   if (text === undefined) return undefined;
   return text === '' ? { kind: 'refused', code: flowRefused } : { kind: 'refused', code: flowRefused, note: `the flow answered ${JSON.stringify(text)}` };
@@ -224,8 +293,8 @@ export function observedAnswer(turn: ParsedTurn, object: string, writes: number)
   const refusals = calls.map(refusalAnswerOf).filter((r) => r !== undefined);
   if (refusals.some((r) => r.kind === 'refused' && r.code === CONFIRMATION_REQUIRED_CODE)) return { kind: 'pending_confirmation' };
   if (refusals.length > 0) return refusals[refusals.length - 1]!;
-  const readRefusal = calls.length === 0 ? lastReadRefusalOf(turn, object) : undefined;
-  if (readRefusal !== undefined) return refusedBy(readRefusal);
+  const readRefusal = calls.length === 0 ? refusedBy(lastReadRefusalOutput(turn, object)) : undefined;
+  if (readRefusal !== undefined) return readRefusal;
   if (calls.length === 0 && asksToConfirm(turn.replyText)) return { kind: 'pending_confirmation' };
   if (calls.length > 0) {
     const last = calls[calls.length - 1]!;
@@ -254,6 +323,44 @@ export function agentSetFields(turn: Pick<ParsedTurn, 'toolCalls'>, object: stri
 export function agentSetOf(op: CardOperation, turn: Pick<ParsedTurn, 'toolCalls'>): Record<string, string[]> {
   const objects = new Set([op.object, ...(op.outcome.kind === 'applied' ? op.outcome.state.map((s) => s.object) : [])]);
   return Object.fromEntries([...objects].map((o) => [o, agentSetFields(turn, o)]));
+}
+
+/**
+ * The agent's applied write on a `pending_confirmation` operation, for the
+ * grader's temporary rule (`AGENT_CONFIRMATION_MEETS_PENDING`, until
+ * objectstack-ai/cloud#3826 item 6): each `run_action` the door applied on
+ * the operation's object (the action its answer names, whether the call
+ * carried the confirmation member, and the build's `ai.requiresConfirmation`
+ * for it from `actionGates`), each raw data door that applied a write there,
+ * the ids of the rows the turn changed, and the target row after the turn.
+ * An applied `run_action` whose answer names another object is not counted.
+ */
+function agentConfirmedOf(
+  op: CardOperation,
+  turn: Pick<ParsedTurn, 'toolCalls'>,
+  before: readonly Row[],
+  after: readonly Row[],
+  actionGates?: Readonly<Record<string, boolean>>,
+): AgentConfirmedObservation {
+  const applied = writeCallsOn(turn, op.object).filter((c) => c.output !== undefined && !failed(c));
+  const actions: Array<AgentConfirmedObservation['actions'][number]> = [];
+  for (const c of applied.filter((x) => x.name === 'run_action')) {
+    const input = (typeof c.input === 'object' && c.input !== null ? c.input : {}) as Record<string, unknown>;
+    const answer = jsonBodyOf(c.output) ?? {};
+    if (typeof answer.objectName === 'string' && answer.objectName !== op.object) continue;
+    const action = typeof answer.action === 'string' ? answer.action : undefined;
+    actions.push({
+      ...(action !== undefined ? { action } : {}),
+      confirm: input[AI_ACTION_CONFIRMATION_MEMBER] === true,
+      ...(actionGates !== undefined ? { requiresConfirmation: action !== undefined && actionGates[action] === true } : {}),
+    });
+  }
+  return {
+    actions,
+    directWrites: applied.filter((c) => c.name !== 'run_action').map((c) => c.name),
+    changed: changedIds(before, after),
+    target: (op.target !== undefined ? after.find((r) => String(r.id) === op.target) : undefined) ?? null,
+  };
 }
 
 /**
@@ -314,6 +421,12 @@ export interface ObserveInput {
    * ({@link clockDates}); its `agentSet`, when absent, is read off `turn` ({@link agentSetOf}).
    */
   today?: DeclaredToday;
+  /**
+   * The build's `ai.requiresConfirmation === true` per action name declared on
+   * the operation's object (`actionGatesOf` in `orchestrate.ts`); absent ⇒ the
+   * build was not read.
+   */
+  actionGates?: Readonly<Record<string, boolean>>;
 }
 
 /** Assemble the observation the write grader takes. */
@@ -331,6 +444,9 @@ export function observeOperation(input: ObserveInput): OperationObservation {
   obs.agentSet = agentSet;
   if (input.auditActor !== undefined) obs.auditActor = input.auditActor;
   if (input.probe !== undefined) obs.probe = input.probe;
+  if (input.op.outcome.kind === 'pending_confirmation') {
+    obs.agentConfirmed = agentConfirmedOf(input.op, input.turn, input.before, input.after, input.actionGates);
+  }
   return obs;
 }
 

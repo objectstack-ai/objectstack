@@ -12,11 +12,13 @@
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
 - 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
 - 每日看板与轮次记录列「待维护者」:当前里程碑已清的专题,注小结贴否;读数非门禁。
+- 「待维护者」另逐张列 open `needs-user-decision` 与 `pm:awaiting-maintainer` 卡,注入态以来卡龄。
 - 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`domain:*`);② `pm:queue` 无 `domain:*`(仅多车道仓);
 - ③ `domain:*` 无 pm-state;④ `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
 - 析取 ⑤:窗内新建且 `pm:queue`/`priority:*` 与建卡同分钟,照未分诊首触;⛔ 不凭 actor。
 - 首触定级与五析取 sweep 每 fire 跑到清空,先于旧卡重验:⛔ 无每轮预算、无逐卡豁免评论。
+- 五析取由 `node scripts/pm/first-touch-sweep.mjs --since=ISO` 照原文全量跑,⛔ 不手敲窄化或截断。
 - 排序:每轮清空时最新优先,清不空起最老优先;半状态积压 ②③④ 恒最老、P0 嫌疑先行。
 - 裸卡数 >15 ⇒ 下一 fire 整轮改域分批集中模式,每批 ≤5 张同族卡,照样跑到清空。
 - 紧急卡直接分诊:维护者点名或 p0 嫌疑 ⇒ 立即起默认判断档分诊子代理,不等定时轮。
@@ -40,7 +42,7 @@
 - 或实测拖慢车队开发:正确源上假红/假绿、反复重跑、同因丢复核轮;卡须具名实例。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
 - 入 `pm:queue` 前读最新转换评论(dispatch-runbook 状态提取):hold/冻结/裁决 ⇒ 分诊自补半状态。
-- 自补 = 同笔 `pm:on-hold`+引原文 `Restart-when:`;写不出可执行判据才挂 `pm:retriage` 问所属车道。
+- 自补 = 同笔 `pm:on-hold`+原文 `Restart-when:`+降 p3;写不出可执行判据才挂 `pm:retriage` 问车道。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序;只挂 issue。
 - 先例已定新键/值/导出名非契约形状提案;分诊审计 ⛔ 不自加门,唯语义/形状真分歧呈人。
 - 碰迁移形状或删已发布能力也进决策箱;说明书脱节不进:有裁定出处才是 (b),否则改文档。
@@ -60,7 +62,7 @@
 - 定级按北极星「Priority」1–3 条;首行 `Path: <定义项> | <清单项 id/缺项> | P<路步> | none`。
 - 定义项取北极星「What gets built」或仪器卡的车队决定;无则关;`none` 非分诊缺口。
 - 「无则关」= 首触即关 not_planned,带理由与入队三门,⛔ 不定 p3、不 hold;下行同此。
-- 所入车道队列 P0/P1 开着(= 未派发,在飞不算)时,三门皆无的 p2/p3 `tooling` 卡同样关。
+- 所入车道队列 P0/P1 未派时,三门皆无的 p2/p3 `tooling` 卡同样关;「Priority」第 3 条豁免除外。
 - 路由属分诊技术判断,⛔ 不升级哪个仓的问题;父单永不派发,`pm:epic` 卡 `pm:retriage` 即答。
 - 算涉 cloud:亦含托管面(objectos-runtime)、修复待其改动的 `Blocked-by:` cloud 卡、病因在 cloud。
 - 不算涉 cloud:修复与验收全在本仓,只在 cloud 测得或只缺其事实读数;仅引 cloud 卡作历史。
@@ -86,7 +88,7 @@
 - 人工地板(恒呈维护者):功能新增;ADR;协议/公开契约变化;破坏性或难回滚动作。
 - 人工地板同含:安全/权限边界;门禁削弱(降阈/删必查/抬上限/跳测);新增运行时第三方依赖;
 - 花费/配额/舰队形态/默认模型档位;新增必需门禁/hook/棘轮(卡具名所守契约与预期捕获)。
-- 地板同含:发版与对外发布;对外承诺;卡的命运(关 not planned、降级、撤回、砍半);
+- 地板同含:发版与对外发布;对外承诺;卡的命运(关 not planned、非 hold 的降级、撤回、砍半);
 - 规则与流程(技能、AGENTS、工作流、CODEOWNERS、抬天花板、常设令、例外);跨车道冲突;
 - 默认值与出厂形态(租户默认、isDefault 权限集、OWD、模型档位、并发);身份与租户模型。
 - 风险判据(任一即呈):①安全/权限/身份/租户边界;②存量数据不可逆;③契约/ADR 变化;

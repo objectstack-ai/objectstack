@@ -1062,19 +1062,35 @@ describe('DeleteMetaItemResponseSchema (carries the declared = returned discipli
     expect(DeleteMetaItemResponseSchema.parse(realResponse).projectionApplied).toBeUndefined();
   });
 
-  it('declares neither `version` nor `advisories` — this branch provably sends neither', () => {
+  it('does not declare `version` — this branch provably never sends it', () => {
     // The mirror is the siblings' SHAPE, not their member list. A delete mints
     // no new content hash (the row is gone, so there is no ADR-0008 OCC token
-    // to echo as `If-Match`), and the #4463 authoring gate runs on the two
-    // WRITE doors by D1 — a delete submits no body for it to judge. Declaring
-    // either would be a contract for bytes no producer emits.
+    // to echo as `If-Match`). Declaring it would be a contract for bytes no
+    // producer emits.
     const parsed = DeleteMetaItemResponseSchema.parse({
       ...realResponse,
       version: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
-      advisories: [],
     }) as Record<string, unknown>;
     expect(parsed).not.toHaveProperty('version');
-    expect(parsed).not.toHaveProperty('advisories');
+  });
+
+  it('declares `advisories` — the stored-expression fill of a removal that hands an object back its definition (#32958)', () => {
+    // The #4463 authoring gate still runs on the two WRITE doors only; what
+    // rides a delete's `advisories` is the save door's fill of the object a
+    // removed `object_extension` hands back (the producer-side pin is
+    // `packages/objectql/src/stored-expression-backfill.test.ts`).
+    const advisory = {
+      rule: 'stored-expression-filled',
+      severity: 'info' as const,
+      where: 'object "leave_request" · field "days"',
+      path: 'objects.leave_request.fields.days',
+      message: "'leave_request.days' computes a new value at this change, so the platform filled the object's existing rows.",
+      hint: 'Nothing to do: every row holds what a write of it would store.',
+    };
+    const parsed = DeleteMetaItemResponseSchema.parse({ ...realResponse, advisories: [advisory] });
+    expect(parsed.advisories).toEqual([advisory]);
+    // Optional: a clean delete omits the key.
+    expect(DeleteMetaItemResponseSchema.parse(realResponse)).not.toHaveProperty('advisories');
   });
 });
 
@@ -1513,10 +1529,37 @@ describe('PublishPackageDraftsResponseSchema (declares the batch publish respons
       published: [],
       failed: [],
     };
-    for (const key of ['seedApplied', 'materializeApplied', 'probes', 'commitId', 'unhiddenApps', 'unhideError', 'rebindError'] as const) {
+    for (const key of ['seedApplied', 'materializeApplied', 'probes', 'commitId', 'unhiddenApps', 'unhideError', 'rebindError', 'unregistered'] as const) {
       expect(minimal).not.toHaveProperty(key);
     }
     expect(PublishPackageDraftsResponseSchema.safeParse(minimal).success).toBe(true);
+  });
+
+  it('declares published_unregistered: the drafts landed, unregistered[] names each object the registry refused (#33277)', () => {
+    const unregistered = {
+      ...realResponse,
+      success: false,
+      outcome: 'published_unregistered',
+      published: [
+        ...realResponse.published,
+        { type: 'object', name: 'ticket', version: 'sha256:2cad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f2' },
+      ],
+      publishedCount: 3,
+      unregistered: [{ type: 'object', name: 'ticket', rule: 'object-registry-refused' }],
+    };
+    const parsed = PublishPackageDraftsResponseSchema.parse(unregistered);
+    expect(parsed).toEqual(unregistered);
+    // The rule is the declared id, not any string: an entry must say why.
+    expect(PublishPackageDraftsResponseSchema.safeParse({
+      ...unregistered,
+      unregistered: [{ type: 'object', name: 'ticket', rule: 'registry-said-no' }],
+    }).success).toBe(false);
+    expect(PublishPackageDraftsResponseSchema.safeParse({
+      ...unregistered,
+      unregistered: [{ type: 'object', name: 'ticket' }],
+    }).success).toBe(false);
+    // The vocabulary stays closed around the new value.
+    expect(PublishPackageDraftsResponseSchema.safeParse({ ...realResponse, outcome: 'partial' }).success).toBe(false);
   });
 
   it('does not fabricate any key: parse of a lean body adds nothing (byte-stability half)', () => {
@@ -3101,5 +3144,30 @@ describe('seedApplied.landed (#30348) — one shared schema on both publish resp
     expect(SeedAppliedLandedSchema.safeParse({ object: 'a', inserted: { ids: [] }, matched: list([]) }).success).toBe(false);
     expect(SeedAppliedLandedSchema.safeParse({ object: 'a', inserted: { ids: [], total: 0 }, matched: list([]) }).success).toBe(false);
     expect(SeedAppliedLandedSchema.safeParse({ object: 'a', inserted: list([]) }).success).toBe(false);
+  });
+});
+
+import { RollbackMetaItemRequestSchema } from './protocol.zod';
+
+describe('RollbackMetaItemRequestSchema declares what the rollback door enforces', () => {
+  // The REST door reads `toVersion` through this declaration (body and query),
+  // and the protocol method refuses a version below 1 as well: a history
+  // version is a whole number of at least 1, so the published contract says
+  // so instead of a bare number the door would refuse.
+  const base = { type: 'flow', name: 'shared_flow' } as const;
+
+  it.each([[0], [-1], [1.5], ['2'], [true]])('refuses toVersion %j', (toVersion) => {
+    expect(RollbackMetaItemRequestSchema.safeParse({ ...base, toVersion }).success).toBe(false);
+  });
+
+  it('CONTROL: accepts toVersion 1 with every optional member, preserving each through parse', () => {
+    const full = { ...base, toVersion: 1, message: 'back', member: 'flow', packageId: 'com.acme.alpha.custom' };
+    const result = RollbackMetaItemRequestSchema.safeParse(full);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(full);
+  });
+
+  it('requires toVersion', () => {
+    expect(RollbackMetaItemRequestSchema.safeParse(base).success).toBe(false);
   });
 });

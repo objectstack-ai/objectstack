@@ -97,7 +97,17 @@ export const SETUP_APP: App = {
       type: 'group',
       label: 'Diagnostics',
       icon: 'stethoscope',
-      requiredPermissions: ['manage_platform_settings'],
+      // No group gate: each entry carries its own. A group's
+      // `requiredPermissions` prunes its whole subtree before any child is
+      // judged (`filterAppForUserWithReason` in `@objectstack/rest`, and the
+      // console's sidebar guard alike), so a group gate here hid the Audit
+      // Log entry from a holder of `view_all_audit_log`, its own read
+      // capability, who does not also hold `manage_platform_settings` — the
+      // separation-of-duties auditor. The gate moved down onto the entries
+      // that need it (`setup-nav.contributions.ts`; `@objectstack/plugin-audit`
+      // gates its entry on `view_all_audit_log`), as `group_configuration`
+      // already does. ⛔ A contributor into this slot gates its own entry: the
+      // slot no longer gates it.
       children: [],
     },
     {

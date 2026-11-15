@@ -88,7 +88,7 @@ export const RECYCLE_BIN_LIST_QUERY_PARAMS: readonly string[] = ['limit', 'offse
 export const RECYCLE_BIN_ACT_QUERY_PARAMS: readonly string[] = [];
 
 /** The keys a refusal of a bin act carries, forwarded to the caller as `details`. */
-const REFUSAL_DETAIL_KEYS = ['entryId', 'object', 'recordId', 'field', 'parentObject', 'parentId', 'parentEntryId', 'param'] as const;
+const REFUSAL_DETAIL_KEYS = ['entryId', 'object', 'recordId', 'field', 'fieldLabel', 'parentObject', 'parentId', 'parentEntryId', 'param'] as const;
 
 /** What the doors call on the engine. */
 interface RecycleBinEngine {

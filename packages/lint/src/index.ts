@@ -1085,6 +1085,7 @@ export {
   FLOW_START_NODE_MISSING,
   FLOW_AFTER_SAVE_INLINE_RETRY,
   FLOW_MULTI_WRITE_UNFILTERED,
+  FLOW_MULTI_UPDATE_MOVES_STORED_INPUT,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,
   FLOW_DECISION_MODE_INVALID,
@@ -1159,6 +1160,22 @@ export {
 } from './validate-email-template-hole-grammar.js';
 export type { EmailTemplateHoleGrammarFinding, EmailTemplateHoleGrammarOptions } from './validate-email-template-hole-grammar.js';
 
+// Ruling record 6845318122 (letter B): a template default is literal text. An
+// email template hole whose unquoted `default` argument reads like a variable
+// path, and a `notify` node that sends a template without a variable it
+// declares `required`, are advised at validation. The rule ids are published
+// for `--json` consumers (`rule-id-barrel-exports.test.ts`).
+export {
+  validateEmailTemplateDefaultArguments,
+  EMAIL_TEMPLATE_DEFAULT_READS_AS_PATH,
+} from './validate-email-template-default-arguments.js';
+export type { EmailTemplateDefaultArgumentFinding } from './validate-email-template-default-arguments.js';
+export {
+  validateNotifyTemplateVariables,
+  NOTIFY_TEMPLATE_VARIABLE_MISSING,
+} from './validate-notify-template-variables.js';
+export type { NotifyTemplateVariableFinding } from './validate-notify-template-variables.js';
+
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';
 export {
@@ -1167,6 +1184,9 @@ export {
   AUTONUMBER_SELF_REFERENCE,
   AUTONUMBER_LITERAL_TOKEN,
 } from './lint-autonumber-formats.js';
+
+export { lintDuplicateFieldLabels, FIELD_LABEL_DUPLICATE } from './lint-duplicate-field-labels.js';
+export type { DuplicateFieldLabelFinding } from './lint-duplicate-field-labels.js';
 
 export { lintViewRefs } from './lint-view-refs.js';
 export type { ViewRefFinding } from './lint-view-refs.js';

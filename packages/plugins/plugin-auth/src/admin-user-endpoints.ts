@@ -238,8 +238,9 @@ import { resolveDefaultOrgId } from './tenancy-service.js';
 import type { AddMemberCapableApi } from './organization-add-member.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
-import { identitySourceUnreadable, judgeSsoOnlyLocalPassword, ssoOnlyPasswordRefusal } from './sso-only-local-password.js';
+import { identitySourceUnreadable, judgeSsoOnlyLocalPassword, readUserSource, ssoOnlyPasswordRefusal } from './sso-only-local-password.js';
 import { temporaryPasswordLength } from './temporary-password-length.js';
+import { isPendingSsoSource, pendingSsoPasswordRefusal } from './pending-sso-marker.js';
 import { isCloudManaged } from '@objectstack/core';
 import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
 import type { FieldErrorCode } from '@objectstack/spec/api';
@@ -466,16 +467,21 @@ async function stampMustChangePassword(
  * endpoint created the user" as a determinant — an admin-created account is
  * not an implicit invitation.
  *
- * Returns the shape the response/audit consumed pre-ADR-0093:
- * `membershipCreated` is true only when THIS call inserted the row (a `bound`
- * outcome); a `yielded` outcome (the hook or a race already bound it) reports
- * the org with `membershipCreated: false`. Under `invite-only` the reconciler
- * answers `policy-skip` before it looks at any org, so the caller reports no
- * organization and `membershipCreated: false` — the account is created, the
- * membership is not.
+ * Returns what the response and the audit row report: `membershipCreated`
+ * says the store holds a membership for the new account after this call,
+ * whichever writer made the row. The account did not exist before this call,
+ * so any membership it holds was created by this creation — a `bound` outcome
+ * (this call inserted it) and a `yielded` outcome (the `user.create.after`
+ * reconciler or a host hook bound it moments earlier, during the same
+ * `createUser`) both answer `true`. Reporting `yielded` as `false` told the
+ * administrator a member-less account had been made while `sys_member` held
+ * the row. Under `invite-only` the reconciler answers `policy-skip` before it
+ * looks at any org, so the caller reports no organization and
+ * `membershipCreated: false` — the account is created, the membership is not.
+ * A `failed` / `no-target-org` / `agent-account` outcome reports `false`.
  */
-async function bindUserToSoleOrganization(
-  deps: AdminUserEndpointDeps,
+export async function bindUserToSoleOrganization(
+  deps: Pick<AdminUserEndpointDeps, 'getDataEngine' | 'getMembershipPolicy' | 'getTenancy' | 'logger'>,
   userId: string,
 ): Promise<{ organizationId: string | null; membershipCreated: boolean }> {
   const engine = deps.getDataEngine();
@@ -497,7 +503,7 @@ async function bindUserToSoleOrganization(
   });
   return {
     organizationId: result.organizationId ?? null,
-    membershipCreated: result.outcome === 'bound',
+    membershipCreated: result.outcome === 'bound' || result.outcome === 'yielded',
   };
 }
 
@@ -512,7 +518,8 @@ async function bindUserToSoleOrganization(
  * - `placeholderEmail` — the admin created a phone-only identity, so the
  *   address on the account is a generated placeholder. The decision, never
  *   the address.
- * - `membershipCreated` — this call bound the membership (ADR-0093 D2).
+ * - `membershipCreated` — the new account holds a membership after this call
+ *   (ADR-0093 D2), whichever writer made the row during this creation.
  * - `organizationId` — a reference to the organization bound to, a record of
  *   its own; present only when one was resolved.
  *
@@ -521,11 +528,17 @@ async function bindUserToSoleOrganization(
  * mirror row for the same write, in the snapshot column the ledger's read
  * side narrows.
  */
-type AdminAuditDecisions =
+export type AdminAuditDecisions =
   | {
       event: 'user.admin_created';
       placeholderEmail: boolean;
       passwordGenerated: boolean;
+      membershipCreated: boolean;
+      organizationId?: string;
+    }
+  | {
+      /** A pending, SSO-only person was added (`pending-sso-users.ts`); no password exists. */
+      event: 'user.admin_added_pending';
       membershipCreated: boolean;
       organizationId?: string;
     }
@@ -597,8 +610,8 @@ type AdminAuditDecisions =
  * the pins in `admin-user-endpoints.test.ts` fail on any key outside the
  * decision set and on any value this call wrote into the user.
  */
-async function writeAdminAudit(
-  deps: AdminUserEndpointDeps,
+export async function writeAdminAudit(
+  deps: Pick<AdminUserEndpointDeps, 'getDataEngine' | 'logger'>,
   entry: {
     action: 'create' | 'update';
     actor: AdminActor;
@@ -943,7 +956,7 @@ interface CreatedAccount {
 }
 
 /** [#25338] Thrown out of the unit of work so it rolls back; carries the refusal the caller answers. */
-class CreationRefused extends Error {
+export class CreationRefused extends Error {
   constructor(readonly result: EndpointResult) {
     super(result.body.error?.message ?? 'user creation refused');
     this.name = 'CreationRefused';
@@ -967,11 +980,14 @@ class CreationRefused extends Error {
  * `membershipPolicy: 'invite-only'` admits (D1). The role is `member`, the D1
  * default: elevation stays the separate, audited `update-member-role`.
  *
- * A membership already there is respected and reported as
- * `membershipCreated: false`, exactly as the reconciler reports it.
+ * A membership already there is respected (no second `addMember`) and
+ * reported as `membershipCreated: true`: the account was created by this call,
+ * so a row in the current organization was written during this creation (a
+ * host's `user.create.after` hook, say) — the same rule the single-org bind
+ * answers by.
  */
-async function joinCurrentOrganization(
-  deps: AdminUserEndpointDeps,
+export async function joinCurrentOrganization(
+  deps: Pick<AdminUserEndpointDeps, 'getDataEngine'>,
   addMember: AddMemberCapableApi['addMember'],
   userId: string,
   organizationId: string,
@@ -983,7 +999,7 @@ async function joinCurrentOrganization(
       { where: { organization_id: organizationId, user_id: userId }, limit: 1 },
       { context: SYSTEM_CTX },
     );
-    if (Array.isArray(existing) && existing.length > 0) return { organizationId, membershipCreated: false };
+    if (Array.isArray(existing) && existing.length > 0) return { organizationId, membershipCreated: true };
   }
   try {
     await addMember({ body: { userId, role: 'member', organizationId } });
@@ -1013,7 +1029,9 @@ async function joinCurrentOrganization(
  * default-organization bind, unchanged. A host that wires no way to read the
  * caller's current organization does not join either.
  */
-function multiOrgCreationJoinsCurrentOrganization(deps: AdminUserEndpointDeps): boolean {
+export function multiOrgCreationJoinsCurrentOrganization(
+  deps: Pick<AdminUserEndpointDeps, 'getTenancy' | 'getCallerActiveOrganizationId'>,
+): boolean {
   return deps.getTenancy?.()?.isolationActive === true && typeof deps.getCallerActiveOrganizationId === 'function';
 }
 
@@ -1093,12 +1111,23 @@ export async function runAdminSetUserPassword(
       return { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'User not found' } } };
     }
 
+    // A pending person (`sys_user.source = 'idp_pending'`, added through
+    // `admin/add-sso-user`) signs in only through the hosting organisation's
+    // identity provider and holds no local password until then, in every mode
+    // and for every caller (`pending-sso-users.ts`). A source that cannot be
+    // read is judged by the arms below exactly as before: none of them existed
+    // for a pending row, and no row carried the marker before it did.
+    const pendingSource = await readUserSource(deps.getDataEngine(), userId);
+    if (pendingSource.ok && isPendingSsoSource(pendingSource.value)) {
+      return pendingSsoPasswordRefusal('setUserPassword');
+    }
+
     // [#25083] [#33203] On a cloud-managed environment no password is set
     // here for anyone: everyone signs in through the hosting organisation's
     // identity provider, and a hosted environment keeps no local break-glass
-    // administrator (ruling 10 of objectstack-ai/cloud#4465). So the target's
-    // identity source is not read: an `env_native` row is refused like an
-    // `idp_provisioned` one. `cloud-managed.ts` states the rule.
+    // administrator (ruling 10 of objectstack-ai/cloud#4465). So no arm below
+    // reads the target's identity source: an `env_native` row is refused like
+    // an `idp_provisioned` one. `cloud-managed.ts` states the rule.
     if (isCloudManaged()) return cloudManagedRefusal('setUserPassword');
 
     // With SSO-only mode on, an IdP-provisioned user signs in through the

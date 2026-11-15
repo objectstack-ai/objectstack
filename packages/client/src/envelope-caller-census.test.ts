@@ -504,7 +504,7 @@ const LEDGER: readonly LedgerRow[] = [
     // ── the nested-relation pin in `@objectstack/rest`: producer reads only ──
     {
         file: 'packages/rest/src/analytics-nested-relation-filter.test.ts',
-        method: 'analytics.query', receiver: 'service', count: 5, verdict: 'NOT_SDK',
+        method: 'analytics.query', receiver: 'service', count: 7, verdict: 'NOT_SDK',
         why: 'the real AnalyticsService (the cube read), called to compare its answer for the nested-relation filter with the engine\'s',
     },
     // ── a producer face outside the SDK: driver-memory's cube service ────────
@@ -790,7 +790,9 @@ describe('#13079 §2 — positive controls on the matcher itself', () => {
         // [#29304] Two more sites in that file: the route pin calls the same
         // plugin-registered AnalyticsService to read which strategy serves a
         // stored dimension and which refuses a formula one.
-        expect(service.length, literalNote()).toBe(19);
+        // [#33335] Two more in the nested-relation pin: the dotted cross-object
+        // filter the ObjectQL strategy now serves, compared with the engine's.
+        expect(service.length, literalNote()).toBe(21);
         expect([...new Set(service.map((s) => s.file))].sort()).toEqual([
             'packages/client/src/analytics-automation-json-erasure.test.ts',
             'packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts',
@@ -855,7 +857,8 @@ describe('#13079 §3 — every call site is classified', () => {
         // [#28852] 14 -> 15: its dateRange-precedence call.
         // [#28977] 15 -> 17: the non-date bucket dry-run parity pin's two producer calls (§2).
         // [#29304] 17 -> 19: the same file's route pin, two producer calls (§2).
-        expect(verdictTotal('NOT_SDK')).toBe(19);
+        // [#33335] 19 -> 21: the nested-relation pin's two dotted-filter producer calls (§2).
+        expect(verdictTotal('NOT_SDK')).toBe(21);
         // The three above are LEDGER sums and cannot move on a census reading;
         // this one is census-derived, so it carries the note. [#13874]
         // [#31695] 28 -> 31: the package-address pins' three trigger calls.

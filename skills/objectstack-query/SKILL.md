@@ -287,9 +287,9 @@ key in `fields`** — the relation is carried by that column:
 import type { IDataEngine } from '@objectstack/spec/contracts';
 declare const engine: IDataEngine;
 const tasks = await engine.find('task', {
-  fields: ['title', 'status', 'assignee', 'project'],   // the FK columns stay
+  fields: ['title', 'status', 'owner_id', 'project'],   // the FK columns stay
   expand: {
-    assignee: { object: 'user', fields: ['name', 'email'] },
+    owner_id: { object: 'user', fields: ['name', 'email'] },
     project: {
       object: 'project',
       fields: ['name'],

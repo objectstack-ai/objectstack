@@ -51,12 +51,14 @@ function formulaSourceOf(def: AnyRec): string | undefined {
  * (`object 'x_job' · field 'f_total' expression`). `fields` are the object's
  * fields by name, as served (an `objectExtensions` field included, so a cycle
  * through one is seen); only the names in `report` get a finding, so each is
- * located on a field the caller's walk names.
+ * located on a field the caller's walk names. [#33153] `report` given as a map
+ * names each reported field's location itself: the extension walk's, from
+ * {@link extensionFormulaLoci}.
  */
 export function formulaCycleIssues(
   objectName: string,
   fields: ReadonlyMap<string, AnyRec>,
-  report: ReadonlySet<string>,
+  report: ReadonlySet<string> | ReadonlyMap<string, string>,
 ): FormulaCycleIssue[] {
   const sources = new Map<string, string>();
   for (const [name, def] of fields) {
@@ -78,7 +80,47 @@ export function formulaCycleIssues(
   for (const [field, source] of sources) {
     const message = cycles.get(field);
     if (message === undefined || !report.has(field)) continue;
-    issues.push({ where: `object '${objectName}' · field '${field}' expression`, message, source, severity: 'error' });
+    const where = report instanceof Map ? report.get(field) : undefined;
+    issues.push({ where: where ?? `object '${objectName}' · field '${field}' expression`, message, source, severity: 'error' });
   }
   return issues;
+}
+
+/**
+ * [#33153] Where the extension walk locates a cycle member an
+ * `objectExtensions` entry adds to `target`: each field name an entry adds,
+ * mapped to that entry's location for it
+ * (`object 'T' · objectExtensions[0] · field 'f' expression`, the location
+ * the field-formula pass gives the same field). `entries` are the target's
+ * entries in fold order (`objectExtensionsByTarget`), so a name two entries
+ * add is located at the later one, the definition the registry serves. A
+ * name in `left` is left out: the caller's names whose member is located
+ * elsewhere. The build passes the names the authored target declares (the
+ * object walk locates those at the object, so a cycle closing through a
+ * declared formula keeps that location); the `object_extension` door passes
+ * none, since its target is served before the write and the object walk does
+ * not run there.
+ *
+ * [#33494] A `stored` entry (another package's published extension, which the
+ * door folds in among the written one by priority) locates nothing: a name it
+ * adds later in fold order than the written entry is the stored entry's
+ * definition, served over the written one, so no locus is left for it, and a
+ * cycle it closes through another field of the written entry is named on
+ * that field alone.
+ */
+export function extensionFormulaLoci(
+  target: string,
+  entries: ReadonlyArray<{ path: string; fields: readonly AnyRec[]; stored?: true }>,
+  left: ReadonlySet<string>,
+): Map<string, string> {
+  const loci = new Map<string, string>();
+  for (const entry of entries) {
+    for (const field of entry.fields) {
+      const name = field.name;
+      if (typeof name !== 'string' || left.has(name)) continue;
+      if (entry.stored) loci.delete(name);
+      else loci.set(name, `object '${target}' · ${entry.path} · field '${name}' expression`);
+    }
+  }
+  return loci;
 }

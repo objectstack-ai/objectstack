@@ -164,7 +164,7 @@ describe('NativeSQLStrategy', () => {
 
     expect(sql).toContain('SELECT');
     expect(sql).toContain('COUNT(*)');
-    expect(sql).toContain('SUM(amount)');
+    expect(sql).toContain('SUM("amount")');
     expect(sql).toContain('GROUP BY');
     expect(sql).toContain('LIMIT 10');
     expect(params).toContain('completed');

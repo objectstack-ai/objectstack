@@ -120,7 +120,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "该身份的创建方式——idp_provisioned（联合 SSO 即时开通）或 env_native（本地注册 / 应用最终用户）。系统维护，请勿编辑。",
         options: {
           idp_provisioned: "IdP 开通",
-          env_native: "本地账号"
+          env_native: "本地账号",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
@@ -2167,6 +2168,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             label: "发现文档 URL",
             helpText: "可选。OIDC 发现文档 URL（https）。留空则推导为 `<issuer>/.well-known/openid-configuration`。在此填写的端点会被此提供方信任。"
           },
+          authorizationEndpoint: {
+            label: "Authorization URL",
+            helpText: "Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust."
+          },
+          tokenEndpoint: {
+            label: "Token URL",
+            helpText: "Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token"
+          },
+          jwksEndpoint: {
+            label: "JWKS URL",
+            helpText: "Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs"
+          },
           userInfoEndpoint: {
             label: "Userinfo 端点 URL",
             helpText: "可选。OIDC userinfo 端点 URL（https），取代发现文档中给出的端点。在此填写的端点会被此提供方信任：当注册因发现文档给出的 userinfo 主机不受服务器信任而被拒绝时，请在此填写。"
@@ -2253,6 +2266,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             label: "映射：组属性",
             helpText: "可选。携带用户所属组的断言属性。每次登录都会授予映射到这些组的权限集。留空则不映射任何组。",
             placeholder: "groups"
+          },
+          mapAccountKey: {
+            label: "Map: Account key attribute",
+            helpText: "Optional. Assertion attribute with one stable value per person that the IdP sets and the user cannot edit (Entra ID object id, Okta user id; never an email, name or other attribute a user can change), used as the account key instead of the NameID, so a sign-in from your sign-in page and one from the IdP’s app portal reach the same account, and an email change keeps it. Leave blank for the default: Microsoft Entra ID (IdP Entity ID on sts.windows.net or login.microsoftonline.com) uses http://schemas.microsoft.com/identity/claims/objectidentifier, every other IdP the NameID. Set it when the provider is registered: accounts already made keep the key they were made with.",
+            placeholder: "http://schemas.microsoft.com/identity/claims/objectidentifier"
           }
         }
       },

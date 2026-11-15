@@ -19,6 +19,7 @@ import {
 } from './register-sso-provider';
 import { AuthPlugin } from './auth-plugin';
 import type { PluginContext } from '@objectstack/core';
+import { SysSsoProvider } from '@objectstack/platform-objects';
 
 const makeReq = (body: any) =>
   new Request('http://localhost:3000/api/v1/auth/admin/sso/register-saml', {
@@ -621,6 +622,92 @@ describe('the Register SSO Provider form names the userinfo endpoint and the use
     );
     expect(res.body.error?.message ?? '').not.toMatch(/Unrecognized key|Invalid/);
     expect(res.status).toBe(401);
+  });
+});
+
+describe('the Register SSO Provider form names every endpoint /sso/register takes (an IdP whose endpoints sit on other hosts)', () => {
+  // Google's discovery names its token, key and userinfo endpoints on three
+  // hosts other than its issuer's; each is trusted only when the registration
+  // names it, so the bridge carries each one to `oidcConfig` under its own name.
+  const GOOGLE = {
+    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+    jwksEndpoint: 'https://www.googleapis.com/oauth2/v3/certs',
+    userInfoEndpoint: 'https://openidconnect.googleapis.com/v1/userinfo',
+  };
+  const captureOidc = async (form: Record<string, unknown>) => {
+    let dispatched: any = null;
+    const handle = vi.fn(async (req: Request) => {
+      if (req.url.endsWith('/get-session')) return new Response('null', { status: 200 });
+      dispatched = await req.clone().json();
+      return new Response(JSON.stringify({ providerId: 'acme' }), { status: 200 });
+    });
+    const res = await runRegisterSsoProviderFromForm(handle, makeOidcReq(form));
+    expect(res.status).toBe(200);
+    return dispatched;
+  };
+
+  it('sends each named endpoint, trimmed, in oidcConfig under the member of the same name', async () => {
+    const padded = Object.fromEntries(Object.entries(GOOGLE).map(([k, v]) => [k, ` ${v} `]));
+    const sent = await captureOidc({ ...OIDC_FORM, issuer: 'https://accounts.google.com', ...padded });
+    for (const [member, url] of Object.entries(GOOGLE)) expect(sent.oidcConfig[member], member).toBe(url);
+  });
+
+  it('CONTROL: a form naming none of them, or leaving them blank, sends none of them', async () => {
+    for (const extra of [{}, { tokenEndpoint: '', jwksEndpoint: '   ', authorizationEndpoint: '' }]) {
+      const sent = await captureOidc({ ...OIDC_FORM, ...extra });
+      for (const member of Object.keys(GOOGLE)) expect(member in sent.oidcConfig, member).toBe(false);
+    }
+  });
+
+  it('the body naming every endpoint clears the INSTALLED vendor schema (reaches the session gate)', async () => {
+    const res = await runRegisterSsoProviderFromForm(
+      makeRealAuthHandler(),
+      makeOidcReq({ ...OIDC_FORM, issuer: 'https://accounts.google.com', ...GOOGLE }),
+    );
+    expect(res.body.error?.message ?? '').not.toMatch(/Unrecognized key|Invalid/);
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('the Setup form register_sso_provider names each endpoint under the oidcConfig member the bridge carries it to', () => {
+  // The other half of the seam above: the Setup form (`sys_sso_provider`
+  // action `register_sso_provider`) posts its params FLAT to this bridge, which
+  // reads each endpoint by name. A form param spelled otherwise is dropped on
+  // the wire, and a member the form never offers leaves a Google-style IdP
+  // unregistrable from Setup. Every endpoint `/sso/register` takes in
+  // `oidcConfig`, each one a form param of type `url`:
+  const NAMED_ENDPOINTS = ['discoveryEndpoint', 'authorizationEndpoint', 'tokenEndpoint', 'jwksEndpoint', 'userInfoEndpoint'];
+  const formParams = (): Array<{ name?: string; type?: string; required?: boolean }> => {
+    const action = (SysSsoProvider.actions ?? []).find((a) => a.name === 'register_sso_provider');
+    if (!action) throw new Error('sys_sso_provider declares no `register_sso_provider` action');
+    return (action.params ?? []) as Array<{ name?: string; type?: string; required?: boolean }>;
+  };
+
+  it('offers every endpoint the bridge takes as an optional url param of the same name', () => {
+    const urlParams = formParams().filter((p) => p.type === 'url');
+    expect(urlParams.map((p) => p.name).sort()).toEqual([...NAMED_ENDPOINTS].sort());
+    for (const p of urlParams) expect(p.required ?? false, String(p.name)).toBe(false);
+  });
+
+  it('each url param the form posts reaches oidcConfig under its own name', async () => {
+    const form: Record<string, unknown> = { ...OIDC_FORM };
+    const expected: Record<string, string> = {};
+    for (const p of formParams().filter((q) => q.type === 'url')) {
+      const url = `https://${String(p.name).toLowerCase()}.idp.example.com/path`;
+      form[String(p.name)] = url;
+      expected[String(p.name)] = url;
+    }
+    expect(Object.keys(expected).length).toBeGreaterThan(0);
+    let dispatched: any = null;
+    const handle = vi.fn(async (req: Request) => {
+      if (req.url.endsWith('/get-session')) return new Response('null', { status: 200 });
+      dispatched = await req.clone().json();
+      return new Response(JSON.stringify({ providerId: 'acme' }), { status: 200 });
+    });
+    const res = await runRegisterSsoProviderFromForm(handle, makeOidcReq(form));
+    expect(res.status).toBe(200);
+    for (const [param, url] of Object.entries(expected)) expect(dispatched.oidcConfig[param], param).toBe(url);
   });
 });
 

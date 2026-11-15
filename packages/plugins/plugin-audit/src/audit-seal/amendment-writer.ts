@@ -112,15 +112,38 @@ const NONE: RedactionDecision = Object.freeze({ kind: 'none' });
 const messageOf = (err: unknown): string => String((err as Error)?.message ?? err);
 const refused = (reason: string): RedactionDecision => ({ kind: 'refused', reason });
 
-/** A stored checkpoint that lists a row, and its signed body. */
+/** A stored checkpoint and its signed body: one object per checkpoint, shared by every row it lists. */
 interface ListedCheckpoint {
   readonly stored: Row;
   readonly body: CheckpointSignedBody;
 }
 
+/** An opened checkpoint: the leaf hash it signed for each row it lists, and its salts; or why it does not open. */
+type OpenedCheckpoint =
+  | { readonly leafOf: ReadonlyMap<string, string>; readonly saltOf: (rowId: string, column: string) => Buffer }
+  | string;
+
+/** An answer kept once it settles: a fault is kept too, and thrown again to each row that asks. */
+type Settled<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown };
+
+const settle = <T>(pending: Promise<T>): Promise<Settled<T>> =>
+  pending.then((value) => ({ ok: true as const, value }), (error: unknown) => ({ ok: false as const, error }));
+
+const unwrap = <T>(settled: Settled<T>): T => {
+  if (settled.ok) return settled.value;
+  throw settled.error;
+};
+
 export class RedactionAmender {
   private sealedFields: Map<string, SealedFieldTypes> | undefined;
   private readonly listings = new Map<string, Promise<Map<string, ListedCheckpoint[]>>>();
+  /**
+   * Each listed checkpoint's admission and opening, worked out once per run
+   * and reused for every row it lists: its signature is verified once, its
+   * root rebuilt from `leaf_hashes` once, and its seed opened once.
+   */
+  private readonly admissions = new Map<ListedCheckpoint, Promise<Settled<boolean>>>();
+  private readonly openings = new Map<ListedCheckpoint, Promise<Settled<OpenedCheckpoint>>>();
   private trust: SigningKeyTrust | undefined;
   private signer: (IAuditCheckpointSigner & { activeKeyId?(): Promise<string | null> }) | undefined;
   private keyId: string | null = null;
@@ -175,6 +198,49 @@ export class RedactionAmender {
     return (await trust.signature(body.signing_key_id, signedBodyBytes(body), stored.signature)) === 'ok';
   }
 
+  /** Whether a listed checkpoint is admitted ({@link admits}), answered once per run. */
+  private admitted(trust: SigningKeyTrust, listed: ListedCheckpoint): Promise<boolean> {
+    let pending = this.admissions.get(listed);
+    if (!pending) {
+      pending = settle(this.admits(trust, listed.body, listed.stored));
+      this.admissions.set(listed, pending);
+    }
+    return pending.then(unwrap);
+  }
+
+  /**
+   * A listed checkpoint, opened once per run: the leaf hashes it signed,
+   * matched against its signed root, and its seed. A seed that is missing or
+   * does not open is an answer too, given to every row the checkpoint lists;
+   * a re-run opens it again.
+   */
+  private opened(crypto: ICryptoProvider, object: string, listed: ListedCheckpoint): Promise<OpenedCheckpoint> {
+    let pending = this.openings.get(listed);
+    if (!pending) {
+      pending = settle(this.open(crypto, object, listed));
+      this.openings.set(listed, pending);
+    }
+    return pending.then(unwrap);
+  }
+
+  private async open(crypto: ICryptoProvider, object: string, { stored, body }: ListedCheckpoint): Promise<OpenedCheckpoint> {
+    const hashes = checkpointLeafHashesFromRow(stored, body);
+    const handle = await readAuditSealSecret(this.seal.engine, body.seed_handle);
+    if (!handle) return `the seed of checkpoint ${body.sequence} that sealed it is missing`;
+    let seed: Buffer;
+    try {
+      seed = decodeCheckpointSeed(await crypto.decrypt(handle, checkpointSeedContext(object, body.tenant_id, body.sequence)));
+    } catch (err) {
+      return `the seed of checkpoint ${body.sequence} that sealed it does not open (${messageOf(err)})`;
+    }
+    // A row's leaf is the one at its first place in the list, as `row_ids.indexOf` reads it.
+    const leafOf = new Map<string, string>();
+    body.row_ids.forEach((id, at) => {
+      if (!leafOf.has(id)) leafOf.set(id, hashes[at]);
+    });
+    return { leafOf, saltOf: columnSaltsOf(seed, object) };
+  }
+
   /**
    * The stored checkpoints of `object`, by each row id they list: a row is
    * located by its id, never by its own `created_at` or `tenant_id`, which an
@@ -201,7 +267,8 @@ export class RedactionAmender {
           } catch {
             continue; // a malformed checkpoint holds nothing (D9)
           }
-          for (const id of body.row_ids) byRow.set(id, [...(byRow.get(id) ?? []), { stored, body }]);
+          const listed: ListedCheckpoint = { stored, body };
+          for (const id of body.row_ids) byRow.set(id, [...(byRow.get(id) ?? []), listed]);
         }
         return byRow;
       })();
@@ -242,9 +309,9 @@ export class RedactionAmender {
       const crypto = this.seal.crypto;
       const trust = this.trustOf();
       if (!crypto || !trust) return refused('no crypto provider is available to this run, so the seed of the checkpoint that sealed it cannot be opened');
-      for (const { stored, body } of listing) {
-        if (!(await this.admits(trust, body, stored))) {
-          return refused(`checkpoint ${body.sequence} that lists it does not verify under a trusted signing key, so what it sealed cannot be shown`);
+      for (const listed of listing) {
+        if (!(await this.admitted(trust, listed))) {
+          return refused(`checkpoint ${listed.body.sequence} that lists it does not verify under a trusted signing key, so what it sealed cannot be shown`);
         }
       }
       const reader = rows ?? this.seal.engine.getDriverForObject(object);
@@ -252,8 +319,9 @@ export class RedactionAmender {
       if (!row) return refused('the row could not be read whole, so whether it still matches its checkpoint cannot be told');
       const prior = await this.admittedRedactions(trust, object, id);
       const drafts: RedactionDraft[] = [];
-      for (const { stored, body } of listing) {
-        const proven = await this.proveLeaf(crypto, object, id, row, fields, stored, body, prior);
+      for (const listed of listing) {
+        const { body } = listed;
+        const proven = await this.proveLeaf(crypto, object, id, row, fields, listed, prior);
         if (typeof proven === 'string') return refused(proven);
         for (const [column, value] of Object.entries(patch)) {
           if (body.columns.clear.includes(column)) {
@@ -278,7 +346,7 @@ export class RedactionAmender {
   }
 
   /**
-   * The row's leaf under the admitted checkpoint `body`, rebuilt and matched
+   * The row's leaf under the admitted checkpoint `listed`, rebuilt and matched
    * against the leaf hash it signed, under the admitted redactions of the
    * row: the current commitments, the commitments it sealed, and the salts;
    * or why it does not match.
@@ -289,20 +357,13 @@ export class RedactionAmender {
     id: string,
     row: Row,
     fields: SealedFieldTypes,
-    stored: Row,
-    body: CheckpointSignedBody,
+    listed: ListedCheckpoint,
     prior: readonly RedactionAmendmentBody[],
   ): Promise<{ current: Row; sealed: Row; saltOf: (rowId: string, column: string) => Buffer } | string> {
-    const hashes = checkpointLeafHashesFromRow(stored, body);
-    const handle = await readAuditSealSecret(this.seal.engine, body.seed_handle);
-    if (!handle) return `the seed of checkpoint ${body.sequence} that sealed it is missing`;
-    let seed: Buffer;
-    try {
-      seed = decodeCheckpointSeed(await crypto.decrypt(handle, checkpointSeedContext(object, body.tenant_id, body.sequence)));
-    } catch (err) {
-      return `the seed of checkpoint ${body.sequence} that sealed it does not open (${messageOf(err)})`;
-    }
-    const saltOf = columnSaltsOf(seed, object);
+    const { body } = listed;
+    const opened = await this.opened(crypto, object, listed);
+    if (typeof opened === 'string') return opened;
+    const { saltOf } = opened;
     const current = leafInput(row, body.columns, fields, saltOf);
     // The admitted redactions of this row: a column holding the commitment one rewrote to sealed the one it names.
     const sealed: Row = { ...current };
@@ -311,7 +372,7 @@ export class RedactionAmender {
       if (!body.columns.committed.includes(amendment.column_name)) continue;
       if (current[amendment.column_name] === amendment.rewritten_commitment) sealed[amendment.column_name] = amendment.sealed_commitment;
     }
-    if (leafHash(sealed).toString('hex') !== hashes[body.row_ids.indexOf(id)]) {
+    if (leafHash(sealed).toString('hex') !== opened.leafOf.get(id)) {
       return `it no longer matches checkpoint ${body.sequence} that sealed it, so the value that checkpoint sealed cannot be shown`;
     }
     return { current, sealed, saltOf };
