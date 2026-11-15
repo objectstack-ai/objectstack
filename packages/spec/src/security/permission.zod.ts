@@ -1044,7 +1044,11 @@ const FIELD_PERMISSION_WHEN_ON_READABLE =
  * every field of it, on every row (ADR-0066 ⑧ note of 2026-11-02, ruling of
  * record 6573563853): `viewAllRecords` votes `readable: true`,
  * `modifyAllRecords` votes `readable: true` and `editable: true`; View All
- * never grants an edit. Otherwise union without deny is unchanged. The write gate
+ * never grants an edit. One exception (ADR-0066 ⑧ note of 2026-11-15): a set
+ * holding View All without Modify All casts no read vote on a field its OWN
+ * entry declares `readable: false`, so that row binds the set's own holders;
+ * another set's vote, and the Modify All vote, are as before. Otherwise union
+ * without deny is unchanged. The write gate
  * judges it on the stored row before an update and on the incoming row of an
  * insert. It reaches the EDIT vote only: reads are row-blind (per-row masking
  * waits for a measured need), so `readable: false` beside a `when` is refused

@@ -41,9 +41,10 @@
  *    entry, which covers a `private` object only when it carries View All /
  *    Modify All ({@link grantFor}, `resolveObjectPermission`);
  *  - the field entry: `readable: false` hides the field, unless the set's
- *    View All / Modify All on the object votes every field readable
- *    (ADR-0066 D2 ⑧ as amended). No entry ⇒ readable, as the merge does with an
- *    absent key ({@link fieldHidden});
+ *    Modify All on the object votes every field readable (ADR-0066 D2 ⑧ as
+ *    amended). Beside View All alone the set's own entry binds (note of
+ *    2026-11-15). No entry ⇒ readable, as the merge does with an absent key
+ *    ({@link fieldHidden});
  *  - the capability gate (ADR-0066 D3): an object's `requiredPermissions` —
  *    the `string[]` form, or the `read` bucket of the per-operation map
  *    (`requiredCapsForOperation(…, 'find')`) — refuses the read
@@ -207,14 +208,16 @@ function grantFor(set: AnyRec, objectName: string, isPrivate: boolean): Effectiv
 
 /**
  * Does the set's own field entry hide `objectName.fieldName`? `readable: false`
- * hides it unless the set's super-user bypass on the object votes every field
- * readable (ADR-0066 D2 ⑧ as amended). No entry ⇒ not hidden.
+ * hides it unless the set's Modify All on the object votes every field
+ * readable (ADR-0066 D2 ⑧ as amended). The set's View All alone casts no vote
+ * on a field its own entry hides (note of 2026-11-15), so the entry binds
+ * there. No entry ⇒ not hidden.
  */
 function fieldHidden(set: AnyRec, objectName: string, fieldName: string): boolean {
   const fields = isRec(set.fields) ? set.fields : undefined;
   const entry = fields?.[`${objectName}.${fieldName}`];
   if (!isRec(entry) || entry.readable !== false) return false;
-  return !holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, objectName, 'view');
+  return !holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, objectName, 'modify');
 }
 
 /**
@@ -378,10 +381,10 @@ function hintFor(set: AnyRec, d: SummaryDescriptor): string {
     `That hides "${column}" from every holder of the set, and a co-held set with no entry for it does not ` +
     `restore it (View All or Modify All on "${d.parent.name}" does); to keep it for some holders, declare ` +
     `fields["${column}"]: { readable: true } in the sets they hold`;
-  if (holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, d.parent.name, 'view')) {
+  if (holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, d.parent.name, 'modify')) {
     return (
-      `If its value should not be visible to this set, first remove View All and Modify All on ` +
-      `"${d.parent.name}" from it, since ${entry} does not hide a field from a set holding either, then set ` +
+      `If its value should not be visible to this set, first remove Modify All on ` +
+      `"${d.parent.name}" from it, since ${entry} does not hide a field from a set holding it, then set ` +
       `${entry} on it. ${reach}`
     );
   }
