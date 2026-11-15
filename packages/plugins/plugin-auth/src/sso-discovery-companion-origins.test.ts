@@ -433,6 +433,48 @@ describe('an origin a register or update body names is trusted for that provider
     expect((await storedConfig(rp, 'other-oidc')).tokenEndpoint).toBe(`${BODY_HOST}/token`);
   });
 
+  /** A discovery document for `issuer` that publishes a logout endpoint at `endSession`. */
+  function withLogout(issuer: string, endSession: string): Record<string, unknown> {
+    return { ...discoveryDocument(issuer, `${issuer}/userinfo`), end_session_endpoint: endSession };
+  }
+
+  it('the sign-out capability check reads a body-named origin: a same-origin register with the switch on saves, keeping the logout endpoint', async () => {
+    restore = stubDiscovery({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${OTHER_ISSUER}/logout`) });
+    const rp = await makeCheckedRp();
+    const res = await postAs(rp, '/sso/register', { ...registration('other-oidc', OTHER_ISSUER), signOutOfIdp: true }, BASE);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await storedConfig(rp, 'other-oidc')).endSessionEndpoint).toBe(`${OTHER_ISSUER}/logout`);
+  });
+
+  it('the sign-out capability check reads a body-named origin: a same-origin update with the switch on saves, keeping the logout endpoint', async () => {
+    restore = stubDiscovery({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${OTHER_ISSUER}/logout`) });
+    const rp = await makeCheckedRp();
+    expect((await postAs(rp, '/sso/register', registration('other-oidc', OTHER_ISSUER), BASE)).status).toBe(200);
+    const res = await postAs(rp, '/sso/update-provider', { providerId: 'other-oidc', issuer: OTHER_ISSUER, signOutOfIdp: true }, BASE);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await storedConfig(rp, 'other-oidc')).endSessionEndpoint).toBe(`${OTHER_ISSUER}/logout`);
+  });
+
+  it('CONTROL: the sign-out capability check still refuses a logout endpoint on a host the body does not name', async () => {
+    restore = stubDiscovery({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${BODY_HOST}/logout`) });
+    const rp = await makeCheckedRp();
+    const res = await postAs(rp, '/sso/register', { ...registration('other-oidc', OTHER_ISSUER), signOutOfIdp: true }, BASE);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'VALIDATION_FAILED', field: 'signOutOfIdp' });
+    expect(storedRows(rp)).toEqual([]);
+  });
+
+  it('a body-named origin with the switch on is still refused as the request\'s Origin, on register and on update', async () => {
+    restore = stubDiscovery({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${OTHER_ISSUER}/logout`) });
+    const rp = await makeCheckedRp();
+    await expectOriginRefused(await postAs(rp, '/sso/register', { ...registration('other-oidc', OTHER_ISSUER), signOutOfIdp: true }, OTHER_ISSUER));
+    expect(storedRows(rp)).toEqual([]);
+    expect((await postAs(rp, '/sso/register', registration('other-oidc', OTHER_ISSUER), BASE)).status).toBe(200);
+    const before = JSON.stringify(storedRows(rp));
+    await expectOriginRefused(await postAs(rp, '/sso/update-provider', { providerId: 'other-oidc', issuer: OTHER_ISSUER, signOutOfIdp: true }, OTHER_ISSUER));
+    expect(JSON.stringify(storedRows(rp))).toBe(before);
+  });
+
   it('CONTROL: another POST is judged against the configured origins alone, as before', async () => {
     const rp = await makeCheckedRp();
     await expectOriginRefused(await postAs(rp, '/sign-out', { issuer: BODY_HOST }, BODY_HOST));
