@@ -297,3 +297,85 @@ describe('publishMetaItem notifies the host that ONE item went live (#10219 A)',
         expect(seen).toEqual([]);
     });
 });
+
+/**
+ * The ONE other emitter: an active save of a `position`. A position saved
+ * straight to active (`PUT /api/v1/meta/position/:name`, the default mode) is
+ * live the moment the save lands, and its one boot-cached consumer — the
+ * `renamedFrom` holder carry in plugin-security — listens only to the
+ * `metadata:reloaded` the host turns this signal into. The end-to-end half
+ * (holders carried before the door answers) is pinned in
+ * `runtime/src/domains/meta-active-save-position-carry.test.ts`.
+ */
+describe('an active save of a position notifies the host the way the per-item publish does', () => {
+    const position = (name: string) => ({ name, label: 'Sales rep', renamedFrom: ['field_rep'] });
+
+    it('emits the canonical type/name/scope once, and AWAITS the listener before answering', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const seen: MetaItemPublishedEvent[] = [];
+        const order: string[] = [];
+        protocol.onMetaItemPublished(async (evt) => {
+            await new Promise((r) => setTimeout(r, 5));
+            seen.push(evt);
+            order.push('carried');
+        });
+
+        const res = await protocol.saveMetaItem({ type: 'position', name: 'sales_rep', item: position('sales_rep'), packageId: PKG });
+        order.push('save-returned');
+
+        expect(res.success).toBe(true);
+        expect(seen).toEqual([{ type: 'position', name: 'sales_rep', organizationId: null }]);
+        expect(order).toEqual(['carried', 'save-returned']);
+    });
+
+    it('the plural route spelling folds to the canonical singular type', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const seen: MetaItemPublishedEvent[] = [];
+        protocol.onMetaItemPublished((evt) => { seen.push(evt); });
+
+        await protocol.saveMetaItem({ type: 'positions', name: 'sales_rep', item: position('sales_rep'), packageId: PKG });
+
+        expect(seen).toEqual([{ type: 'position', name: 'sales_rep', organizationId: null }]);
+    });
+
+    it('a draft save emits nothing, and its per-item publish emits exactly once — no second announce', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const seen: MetaItemPublishedEvent[] = [];
+        protocol.onMetaItemPublished((evt) => { seen.push(evt); });
+
+        await protocol.saveMetaItem({ type: 'position', name: 'sales_rep', item: position('sales_rep'), packageId: PKG, mode: 'draft' });
+        expect(seen).toEqual([]);
+        const res = await protocol.publishMetaItem({ type: 'position', name: 'sales_rep', actor: 'admin' });
+
+        expect(res.success).toBe(true);
+        expect(seen).toEqual([{ type: 'position', name: 'sales_rep', organizationId: null }]);
+    });
+
+    it('CONTROL — publish-drafts of a position emits nothing per item (the route announces the batch once)', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const seen: MetaItemPublishedEvent[] = [];
+        protocol.onMetaItemPublished((evt) => { seen.push(evt); });
+
+        await protocol.saveMetaItem({ type: 'position', name: 'sales_rep', item: position('sales_rep'), packageId: PKG, mode: 'draft' });
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
+        expect(seen).toEqual([]);
+    });
+
+    it('CONTROL — an active save of another type emits nothing: position only', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const seen: MetaItemPublishedEvent[] = [];
+        protocol.onMetaItemPublished((evt) => { seen.push(evt); });
+
+        const res = await protocol.saveMetaItem({ type: 'flow', name: 'ticket_closed', item: recordTriggeredFlow('ticket_closed'), packageId: PKG });
+
+        expect(res.success).toBe(true);
+        expect(seen).toEqual([]);
+    });
+});

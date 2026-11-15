@@ -105,6 +105,17 @@ export interface ClusterMetadataMutationPayload {
  * connector re-materialization, flow re-bind) for every other item in the same
  * batch. This event is emitted ONLY by the single-item door, which is the one
  * the batch route's own announce does not cover.
+ *
+ * ## The one other emitter: an active save of a `position`
+ *
+ * `saveMetaItem` in its default (active) mode emits it too, for the type
+ * `position` alone, after the save's projector and mutation event and awaited
+ * the same way: a position saved straight to active is live as one promoted
+ * here is, and its one boot-cached consumer — plugin-security's `renamedFrom`
+ * holder carry — listens only to `metadata:reloaded`. Every other type's active
+ * save emits nothing here (its live consumers hear the mutation event). The
+ * per-item publish and the batch door never pass through that save, so neither
+ * emits twice; a restore or revert that saves a position through it emits too.
  */
 export interface MetaItemPublishedEvent {
     /** Canonical singular metadata type of the promoted item. */
