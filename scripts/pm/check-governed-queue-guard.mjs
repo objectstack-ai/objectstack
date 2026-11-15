@@ -1597,7 +1597,7 @@ export function renderGuardVerdict(verdict) {
   const tierLines = (entry) =>
     entry.tier === TIER_S
       ? [
-          `        ⚖️ landing tier: S(席内达档复核落地) — every governed path above lies under a Tier S surface (${tierSGlobs()}),`,
+          `        ⚖️ landing tier: S(席内达档 L2 审核落地) — every governed path above lies under a Tier S surface (${tierSGlobs()}),`,
           '           so a review of record on the CURRENT head lands it in place of an authorized approval: a `## Contract',
           `           review\` comment on ${REVIEW_OF_RECORD_LOCATION} naming this head, \`Served-tier: CONTRACT_REVIEW_TIER\`,`,
           '           `**VERDICT: PASS**` and every check green; then the OWNING seat',
@@ -1863,7 +1863,7 @@ export function renderGuardVerdict(verdict) {
     if (tierS.length > 0) {
       lines.push(
         '',
-        `      ⚖️ Tier S (席内达档复核落地) — ${tierS.map((e) => `#${e.pr}`).join(', ')}: every governed path lies under a Tier S`,
+        `      ⚖️ Tier S (席内达档 L2 审核落地) — ${tierS.map((e) => `#${e.pr}`).join(', ')}: every governed path lies under a Tier S`,
         `         surface (${tierSGlobs()}). ⛔ What a seat must NOT do while no review of record for the CURRENT head is on`,
         '         the thread: flip it ready, enqueue it, or arm auto-merge — and ⛔ no seat submits an approving review',
         '         in its place. ✅ What lifts those: a `## Contract review` comment on',

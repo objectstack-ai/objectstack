@@ -288,7 +288,7 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
     (人合: every row outside Tier S): those four lift only for an authorized APPROVED review by an account in
     `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is spent once per PR — the OWNING seat then lands
-    it, later pushes included; the click stays the maintainer's. **Tier S** (席内达档复核落地: `.claude/**`,
+    it, later pushes included; the click stays the maintainer's. **Tier S** (席内达档 L2 审核落地: `.claude/**`,
     objectstack workflow edits (`readWorkflowDiff`) and skills-only wording (`lowRiskArmVerdict`; the seat labels
     unnamed security teaching) read as S): those four lift once the PR thread or its card carries a `## Contract review`
     record for the PR's current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is
