@@ -1930,14 +1930,14 @@
         {
           "clause": "preferences are read in the emitting organization: a flow that names no organization emits in the one stored on its event row, so a preference row stored under another organization neither mutes the recipient nor overrides their opt-out",
           "oracle": "api",
-          "verify": "with only the other organization's enabled:false row, the fire delivers the inbox row; with the Default Organization's opt-out beside the other organization's enabled:true row, the fire delivers nothing (packages/services/service-messaging/src/messaging-service.ts, emit's preference filter reads organizationId from the event row's organization). Pinned by packages/services/service-messaging/src/notification-organization-follows-event.integration.test.ts (describe 'the event row's derived organization is the one role: and the preference read use'; run it with `pnpm --filter @objectstack/service-messaging exec vitest run --reporter=tree --maxWorkers=1 FILE`, ≥1 test and 0 failed). Unreleased at main 159757ab (.changeset/33649-messaging-preferences-emitting-organization.md): a run on an earlier release reads the other organization's row, which is that release's behaviour, not a FAIL here",
+          "verify": "with only the other organization's enabled:false row, the fire delivers the inbox row; with the Default Organization's opt-out beside the other organization's enabled:true row, the fire delivers nothing (packages/services/service-messaging/src/messaging-service.ts, emit's preference filter reads organizationId from the event row's organization). Pinned by packages/services/service-messaging/src/notification-organization-follows-event.integration.test.ts (describe 'the event row's derived organization is the one role: and the preference read use'; run it with `pnpm --filter @objectstack/service-messaging exec vitest run --reporter=tree --maxWorkers=1 FILE`, ≥1 test and 0 failed). Released with 18.5.0 (2673f59, #33779; its changeset was not consumed by the version commit, #33903): a run on 18.4.x reads the other organization's row, which is that release's behaviour, not a FAIL; from 18.5.0 on, score the clause as written",
           "evidence": "the two fires' notification listings, the two preference rows with their organization_id, and the pin's output"
         }
       ],
       "negative": [
         "a suppression row present and enabled:false but an inbox row STILL landing is a FAIL — the preference filter was bypassed (distinct from the by-design fail-OPEN, which applies only to a preference OUTAGE: no data engine / lookup error keeps all channels; a HEALTHY lookup ignoring an enabled:false row is the FAIL)",
         "distinct from notify-inbox-delivery (the inbox happy path) — a run must not double-count the happy path here; this item's proof is the SUPPRESSION and its reversal",
-        "a row stored under another organization deciding the delivery (muting the recipient, or overriding the emitting organization's opt-out) at a release carrying the fix is a FAIL: preferences are per organization"
+        "a row stored under another organization deciding the delivery (muting the recipient, or overriding the emitting organization's opt-out) on 18.5.0 or later is a FAIL: preferences are per organization"
       ],
       "traps": [
         "wrong-persona",
@@ -1987,7 +1987,7 @@
         {
           "revision": 6,
           "date": "2026-11-15",
-          "change": "acceptance[5], steps[7], fixtures.requires[3], negative[2] and source[6] (new): the preference read follows the emitting organization (#33649, unreleased changeset at main 159757ab). No clause asked which organization's rows decide, so a row under another organization muting a recipient passed unseen. New coverage for ledger 6896511848 of #33761, rows 196 and 209. Read from source at main 159757ab. Card #33969",
+          "change": "acceptance[5], steps[7], fixtures.requires[3], negative[2] and source[6] (new): the preference read follows the emitting organization (#33649, released with 18.5.0 in 2673f59, #33779; its changeset was left unconsumed by the version commit, #33903). No clause asked which organization's rows decide, so a row under another organization muting a recipient passed unseen. New coverage for ledger 6896511848 of #33761, rows 196 and 209. Read from source at main 159757ab. Card #33969",
           "ref": "#34068"
         }
       ]
