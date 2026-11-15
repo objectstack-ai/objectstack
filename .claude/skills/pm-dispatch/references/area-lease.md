@@ -47,7 +47,8 @@
 - 留道:修法已清的卡碰 `ui/**`、`packages/spec/**` 仍在本道开发、本席复审;他道席在线只通知
   「如果车道有人在线，只需要通知他就可以。」本条先于条款②行(`execution-duties.md`)、
   移道的 `lanes/spec.md` 与 `--tier` 提示;交出闭集:他道在线席已认领、cloud 路由、安全、ADR。
-- 送审:每张 PR 经复核线程 ACCEPT 读(`review-checklist.md`);契约记录只欠 `contract-review.md` 四面。
+- 送审:≤50 行、只改文本或测试、`Clause-②: no` 且无他契约面的 PR 由区照 `review-checklist.md`
+  自审落地,ACCEPT 点名自审;余者由复核线程 ACCEPT 读;契约记录只欠 `contract-review.md` 四面。
 - 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 区照 `landing-operations.md` 自己落地。
 - PASS 且全绿的非受管 PR 10 分钟内落地;挂前先查 PR 上已有落地评论,有即 ⛔ 不再挂。
 - 受管面与超 3,000 行 PR 区 ⛔ 不落,交席位;席位照 SKILL.md〈路径分叉〉①–④ 一笔交棒。

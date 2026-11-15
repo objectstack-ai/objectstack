@@ -1389,7 +1389,13 @@ export const CEILINGS = new Map([
   // staying in lane, four devs per area with re-splitting, contract-tier review of batched
   // Chinese decisions, landing within ten minutes. The dated eight-area example was
   // deleted to pay part of it. Measured delta +8; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/area-lease.md', 68],
+  // Raised 68 → 69 by the area self-review rule (an ORDINARY ruled raise; ruling of record:
+  // the maintainer, 2026-11-15T16:06Z, verbatim: 「50 行内由区自审」, in the scope of card
+  // #34007, claim comment 6897299724): a PR of at most 50 changed lines that edits only text
+  // or tests and declares `Clause-②: no` with no other contract face is self-reviewed by the
+  // area against review-checklist.md and lands; every other PR goes to the seat's review
+  // thread. Measured delta +1; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/area-lease.md', 69],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
   // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
