@@ -1924,7 +1924,7 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
     };
 
     for (const elsewhere of [0, 1]) {
-        it(`${elsewhere} package holder(s) elsewhere: \`/actions/lead/approve\` serves the platform's \`lead\`-bound item and runs its handler, in both registration orders (BASE, environment registered last: the environment's object-less declaration over the platform's handler)`, async () => {
+        it(`${elsewhere} package holder(s) elsewhere: \`/actions/lead/approve\` serves the platform's \`lead\`-bound item and runs its handler, in both registration orders`, async () => {
             for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
                 freshEngine();
                 holdersElsewhere(elsewhere);
@@ -1935,7 +1935,7 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
             }
         });
 
-        it(`${elsewhere} package holder(s) elsewhere: the platform item's \`requiredPermissions\` gate \`/actions/lead/approve\` in both registration orders (BASE, environment registered last: a caller holding only the environment item's capability was admitted)`, async () => {
+        it(`${elsewhere} package holder(s) elsewhere: the platform item's \`requiredPermissions\` gate \`/actions/lead/approve\` in both registration orders`, async () => {
             for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
                 freshEngine();
                 holdersElsewhere(elsewhere);
@@ -1949,7 +1949,7 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
     }
 
     for (const elsewhere of [0, 1, 2]) {
-        it(`${elsewhere} package holder(s) elsewhere: the environment's object-less item serves every other route and runs its own handler, in both registration orders (BASE, platform registered last: no declaration)`, async () => {
+        it(`${elsewhere === 0 ? 'CONTROL — ' : ''}${elsewhere} package holder(s) elsewhere: the environment's object-less item serves every other route and runs its own handler, in both registration orders`, async () => {
             for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
                 freshEngine();
                 holdersElsewhere(elsewhere);
@@ -1963,7 +1963,7 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
         });
     }
 
-    it('two package holders elsewhere: `/actions/lead/approve` answers what the platform\'s `lead`-bound item alone answers there (no declaration, the bare route\'s answer beside two holders), never the environment\'s object-less item, in both registration orders (BASE, environment registered last: the environment\'s object-less declaration over the platform\'s handler)', async () => {
+    it('two package holders elsewhere: `/actions/lead/approve` answers what the platform\'s `lead`-bound item alone answers there (no declaration, the bare route\'s answer beside two holders), never the environment\'s object-less item, in both registration orders', async () => {
         for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
             freshEngine();
             holdersElsewhere(2);
@@ -1973,7 +1973,7 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
         }
     });
 
-    it('the environment\'s item bound to `lead`, registered after the platform\'s there, wins on `lead` and runs its own handler', async () => {
+    it('CONTROL — one key keeps one item: the environment\'s item bound to `lead`, registered after the platform\'s there, wins on `lead` and runs its own handler', async () => {
         for (const elsewhere of [0, 1, 2]) {
             freshEngine();
             holdersElsewhere(elsewhere);
@@ -1996,7 +1996,7 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
         }
     });
 
-    it('the environment\'s address: `/actions/_env/lead/approve` is the platform item\'s key, `404`, and every other route serves the environment\'s object-less item and runs its handler, in both registration orders (BASE: `lead` served the environment\'s object-less declaration over the platform\'s handler)', async () => {
+    it('the environment\'s address: `/actions/_env/lead/approve` is the platform item\'s key, `404`, and every other route serves the environment\'s object-less item and runs its handler, in both registration orders', async () => {
         const envAddress = (objectName: string) => resolveAddressedRouteActionDeclaration(deps, { request: {} } as any, {
             ql: engine, objectName, actionName: 'approve', qualifier: { environment: true },
         });
