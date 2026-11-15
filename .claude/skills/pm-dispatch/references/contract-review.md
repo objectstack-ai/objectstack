@@ -38,8 +38,8 @@
   `~/.claude/projects/*/<id>.jsonl`;`verify-review-tier.mjs` 拒即重跑 ⛔ 不改档名。
 - ④ 设计判断欠 schema、governed 规则文本、收窄三面:逐 `hits` 文件判改动对所引代码与
   验收场景是否成立,ADR 另判首个消费者与执行计划;①–④ 合称完整复核,余面同形无 ④。
-- 实质 head 各欠一轮完整复核,发现逐条定 must-fix/should-fix/nit(无碍正确性与契约);有前两级才
-  由原复核者 delta 复核;仅 nit 即终轮,记接受的偏差、转后续卡(`filing-gate.md`)或改散文面。
+- 实质 head 各欠一轮完整复核,发现逐条定 must-fix/should-fix/nit(无碍正确与契约);有前两级才由
+  原复核者 delta 复核;仅 nit 即终轮,记接受的偏差、转后续卡(`filing-gate.md`)或只改散文面。
 - 另记作者:PR `user.login` 非 `objectstack-fleet[bot]` ⇒ ③ 注点名该 login(脱中继写),落地前读。
 - ③ 恒查(席位自读同):SQL 可下推处新增 id 物化或应用内 join 而无因由 ⇒ 记发现(AGENTS.md)。
 - 简报从 `record-recognisers.mjs --brief-template` 起稿:只读条款与输入集内建,⛔ 不删 ⛔ 行。
