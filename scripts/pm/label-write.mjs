@@ -237,6 +237,26 @@
  * create the pair — and `--allow-two-states` is the declared exception, which
  * still prints what it let through.
  *
+ * ## The stateless write — an open card leaves a hand with a state, and a parked card with no holder
+ *
+ * `STATELESS_RULE_PATH` says 「开着的卡离手恒落一态」. The measured shape it closes: a seat landed `Part of`, or
+ * went offline leaving a stay-behind, and took `pm:dispatched` off with nothing in its place — the card then sat in
+ * no view (not the queue, not a lane, not the unlock scan, not the decision inbox) until triage happened on it by
+ * hand. `refuseStatelessWrite` is the ONE predicate, asked of a card's target at every door that strips a state:
+ *
+ *   - this file, at step ② on step ①'s own read (the plain write, `--comment-file` and `--release` alike);
+ *   - `fleet-write/dispatch.mjs`, for an actions file whose stroke takes a `pm:*` state off a card, parks one or
+ *     assigns someone to one — the target READ once, before the dry-run exit, as the kind rule reads it;
+ *   - `close-cards.mjs`, whose every pack closes the card it strips — pinned by asking the predicate of the pack.
+ *
+ * Two halves. The strip: a `pm:*` state the target drops on an OPEN issue while the target carries no state at all is
+ * REFUSED (exit 2, zero writes) — the legal exits all leave a state: the same write adds another state, adds
+ * `needs-user-decision`, or closes the card; a card with two states losing one keeps one. The holder: a target parked
+ * in `PARKED_STATE_LABELS` that keeps an assignee is REFUSED when this write moved a state or an assignee; a write
+ * that moved neither (a regrade) did not make the pair and passes. A `--release` (`pm:dispatched` → `pm:queue`, every
+ * assignee cleared) is legal by both halves, and the self-test pins it. A pull request carries no card state, so it
+ * is never judged. No flag lets either half through: every legal exit is a state.
+ *
  * ## The kind rule — no pm state on a pull request, no `pm:awaiting-merge` on an issue
  *
  * `.claude/skills/pm-dispatch/SKILL.md` keeps the two inboxes apart: the six
@@ -438,6 +458,68 @@ export function refuseTwoStates(target = []) {
     'scan and the decision inbox to pick which one they believe. A transition is a REPLACE: name the state ' +
     'being left in `--remove` in this same write. Pass `--allow-two-states` only if two claims really are true ' +
     'here, and say so on the card.'
+  );
+}
+
+/**
+ * The pm states a card is PARKED in — waiting in the queue, on an upstream, or behind a restart — and so held by
+ * nobody (`PARKED_RULE`, quoted from `KIND_RULE_PATH`'s state table; header: the stateless write).
+ */
+export const PARKED_STATE_LABELS = Object.freeze(['pm:queue', 'pm:blocked', 'pm:on-hold']);
+export const PARKED_RULE = '`pm:queue` 卡恒无 assignee,有即半态;`pm:blocked`/`pm:on-hold` 同';
+
+/** Where the stateless-write rule is written, and the phrase this file quotes from it (header: the stateless write). */
+export const STATELESS_RULE_PATH = '.claude/skills/pm-dispatch/references/state-machine.md';
+export const STATELESS_RULE = '开着的卡离手恒落一态';
+
+/**
+ * The stateless write (header), asked of ONE card's TARGET: would this write take the last `pm:*` state off an OPEN
+ * card, or leave an assignee on a card parked in `PARKED_STATE_LABELS`? Returns the refusal sentence, or null.
+ *
+ *   state     the card's state as read (`open` | `closed`); a closed card is never judged — closing is the third exit.
+ *   closes    the same write closes the card (close-cards, a relay stroke carrying `issue_patch state: closed`).
+ *   kind      the card's kind (`readTargetKind`); a pull request carries no card state, so taking one off it is the
+ *             kind rule's cleanup and is never judged here.
+ *   current / target                  the label sets before and after the write.
+ *   currentAssignees / assigneeTarget the assignee sets before and after the write.
+ *
+ * The strip half: a `pm:*` state on the card (one of `PM_EXCLUSIVE_STATE_LABELS` other than the inbox label) that the
+ * target drops, while the target carries NO state at all. The exits the rule names are all "the target still carries a
+ * state": the same write adds another state, or adds `needs-user-decision`; a card that carried two states and loses
+ * one (the ONE-OF repair) keeps one and passes too. The assignee half: the target is parked AND keeps an assignee, and
+ * THIS write moved a state or an assignee — a write that touches neither (a priority, a domain) did not make the pair
+ * and is not refused for it. Labels compare case-insensitively (`labelKey`), as GitHub matches them.
+ */
+export function refuseStatelessWrite({ state = 'open', closes = false, kind = KIND_ISSUE, current = [], target = [], currentAssignees = [], assigneeTarget = [] } = {}) {
+  if (state === 'closed' || closes || kind === KIND_PULL) return null;
+  const keysOf = (ls) => new Set((ls ?? []).map(labelKey));
+  const cur = keysOf(current);
+  const tgt = keysOf(target);
+  const pmStates = PM_EXCLUSIVE_STATE_LABELS.filter((l) => l !== DECISION_INBOX_LABEL);
+  const stripped = pmStates.filter((l) => cur.has(labelKey(l)) && !tgt.has(labelKey(l)));
+  const kept = PM_EXCLUSIVE_STATE_LABELS.filter((l) => tgt.has(labelKey(l)));
+  const tick = (ls) => ls.map((l) => `\`${l}\``).join(', ');
+  const rule = `${STATELESS_RULE_PATH}: 「${STATELESS_RULE}」`;
+  if (stripped.length && kept.length === 0) {
+    return (
+      `the write takes ${tick(stripped)} off an OPEN card and leaves it with NO state — ${rule}. A card no state names is ` +
+      'in no view: not the queue, not a lane, not the unlock scan, not the decision inbox, so nobody picks it up. Name ' +
+      `where it goes in this same write: \`--add\` the next state (\`pm:queue\` with its lane's \`domain:*\`, \`pm:blocked\` ` +
+      `with a \`Blocked-by:\` line, \`pm:on-hold\` with a \`Restart-when:\` line) or \`${DECISION_INBOX_LABEL}\` — or close the card.`
+    );
+  }
+  const parked = PARKED_STATE_LABELS.filter((l) => tgt.has(labelKey(l)));
+  const holders = dedupe(assigneeTarget ?? []);
+  if (!parked.length || !holders.length) return null;
+  const stateKeys = (set) => PM_EXCLUSIVE_STATE_LABELS.filter((l) => set.has(labelKey(l))).join(',');
+  const before = dedupe(currentAssignees ?? []);
+  const movedAssignees = before.length !== holders.length || holders.some((l) => !before.includes(l));
+  if (stateKeys(cur) === stateKeys(tgt) && !movedAssignees) return null;
+  return (
+    `the target parks the card in ${tick(parked)} and still assigns it to ${tick(holders)} — ${KIND_RULE_PATH}: 「${PARKED_RULE}」. A parked card is ` +
+    'held by nobody: the queue view reads an assigned card as claimed and skips it, so the work waits for a holder who ' +
+    'has already let go. Clear the assignee in this same write (`--clear-assignees`), or keep the card in the state its ' +
+    'holder is working it in.'
   );
 }
 
@@ -1073,6 +1155,14 @@ export async function runLabelWrite(options, deps = {}) {
   }
   if (twoStates) record(`[${stamp()}] ② --allow-two-states — letting it through, declared: ${twoStates}`);
 
+  // The stateless write (header) — on step ①'s own read; no flag lets it through, because every legal exit is a state.
+  const stateless = refuseStatelessWrite({ state, kind: targetKind.kind, current: currentLabels, target: labels.target, currentAssignees, assigneeTarget: assignees.target });
+  if (stateless) {
+    record(`[${stamp()}] ② REFUSED — ${stateless}`);
+    record(`[${stamp()}] ⛔ NOTHING WAS WRITTEN.`);
+    return result(EXIT_USAGE, { stoppedAt: 2, refusal: stateless });
+  }
+
   // ── `--comment-file`: the comment (and `--land`) folded into this ONE stroke, RELAY-ONLY (header) ──
   if (options.commentFile) {
     const readText = deps.readText ?? ((p) => readFileSync(p, 'utf8'));
@@ -1540,6 +1630,9 @@ export async function runRelease(options, deps = {}) {
   if (wrongKind) return refuse(`${wrongKind} A release puts \`${RELEASE_TO}\` on the card, so it is for issues only.`, { stoppedAt: 2 });
   const twoStates = refuseTwoStates(labels.target);
   if (twoStates) return refuse(`${twoStates} A release never takes --allow-two-states: fix the board first.`, { stoppedAt: 2 });
+  // The stateless write, asked here as at every door that strips a state (header): a release leaves `pm:queue` and no holder, so it passes.
+  const stateless = refuseStatelessWrite({ state: card.state, kind: readTargetKind(card).kind, current: currentLabels, target: labels.target, currentAssignees, assigneeTarget: assignees.target });
+  if (stateless) return refuse(stateless, { stoppedAt: 2 });
 
   let text;
   try {
@@ -2010,6 +2103,7 @@ export async function relayMissProbe({ route, send }) {
 const FOLD_BATTERY = "the fold: a claim (comment + labels + assignee) and a verdict (comment + pr_ready + automerge_enable) as ONE relay stroke, the comment judged on post-stamped's path, every part read back on its own line, a part that fails read-back exit 4 and never repaired, RELAY-ONLY";
 const REAL_TRANSPORT_BATTERY = "the real transport: a comment-bearing stroke (a fold, a release) through fleet-write's own sendFleetWrite — fake fetch, real dispatch, real read-back — settles, exit 0, every ④ line printed";
 const KIND_BATTERY = 'the kind rule: no pm state added to a pull request, no `pm:awaiting-merge` added to an issue, a removal never refused, an unreadable kind refused — on both write paths, before the transport';
+const STATELESS_BATTERY = 'the stateless write: an OPEN card never loses its last pm state unless the same write adds a state or needs-user-decision or closes it, a parked card never keeps an assignee a state or assignee move left there, a release stays legal — before the transport, zero writes';
 const SELF_TEST_BATTERIES = Object.freeze({
   'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
   'the arithmetic: union, difference, and the two idempotent no-ops': 12,
@@ -2026,8 +2120,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the release: a silent claim reclaimed in ONE relay stroke — Release: comment → pm:queue on → pm:dispatched off → unassign — on the knock\'s SERVER-clock age, RELAY-ONLY, never a direct write': 34,
   [FOLD_BATTERY]: 24,
   [REAL_TRANSPORT_BATTERY]: 5,
+  [STATELESS_BATTERY]: 19,
 });
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2102,6 +2197,41 @@ export async function selfTest() {
   t('the vocabulary is IMPORTED, never restated here', PM_EXCLUSIVE_STATE_LABELS.length, 6);
   t('a closed card carrying in-flight residue is NOTED, never blocked', typeof residueNote({ state: 'closed', target: ['pm:dispatched'] }), 'string');
 
+  // ── the stateless write ──────────────────────────────────────────────────
+  battery(STATELESS_BATTERY);
+  {
+    const sw = (o) => refuseStatelessWrite(o);
+    // Every door that strips a state asks the ONE predicate (header): the plain write and --release alike, read off the source.
+    t('runLabelWrite and runRelease both ask refuseStatelessWrite', [runLabelWrite, runRelease].map((fn) => String(fn).includes('refuseStatelessWrite(')), [true, true]);
+    const strip = sw({ current: ['pm:dispatched', 'domain:skills'], target: ['domain:skills'] });
+    t('⭐ taking the last pm state off an OPEN card is REFUSED', typeof strip === 'string' && strip.includes('`pm:dispatched`'));
+    t('…quoting the rule and where it lives, so a reworded rule reds the pin below', strip.includes(STATELESS_RULE) && strip.includes(STATELESS_RULE_PATH));
+    t('the same write adding the next state passes', sw({ current: ['pm:dispatched'], target: ['pm:queue'] }), null);
+    t('…adding needs-user-decision passes', sw({ current: ['pm:dispatched'], target: [DECISION_INBOX_LABEL] }), null);
+    t('…closing the card passes, and a card already closed is never judged', [sw({ closes: true, current: ['pm:dispatched'], target: [] }), sw({ state: 'closed', current: ['pm:queue'], target: [] })], [null, null]);
+    t('the ONE-OF repair passes: two states, one taken off, one kept', sw({ current: ['pm:queue', 'pm:blocked'], target: ['pm:blocked'] }), null);
+    t('a pull request carries no card state: a state off a PR is the kind rule\'s cleanup, never judged', sw({ kind: KIND_PULL, current: ['pm:queue'], target: [] }), null);
+    t('a state spelled in another case IS that state', typeof sw({ current: ['PM:Dispatched'], target: [] }), 'string');
+    t('needs-user-decision alone coming off is not a `pm:*` strip', sw({ current: [DECISION_INBOX_LABEL], target: [] }), null);
+    t('the vocabulary is IMPORTED and the parked states are three of it', PARKED_STATE_LABELS.every((l) => PM_EXCLUSIVE_STATE_LABELS.includes(l)) && PARKED_STATE_LABELS.length, 3);
+    const rel = computeLabelTarget({ current: [RELEASE_FROM, 'domain:skills'], add: [RELEASE_TO], remove: [RELEASE_FROM] });
+    t('⭐ a --release stays legal: pm:dispatched → pm:queue with every assignee cleared', sw({ current: [RELEASE_FROM, 'domain:skills'], target: rel.target, currentAssignees: ['os-x'], assigneeTarget: [] }), null);
+    const parked = sw({ current: ['pm:dispatched'], target: ['pm:blocked'], currentAssignees: ['os-x'], assigneeTarget: ['os-x'] });
+    t('⭐ parking a card while its holder stays assigned is REFUSED', typeof parked === 'string' && parked.includes('`pm:blocked`') && parked.includes('`os-x`'));
+    t('…and assigning a card that sits in pm:queue is REFUSED too, quoting the state table', String(sw({ current: ['pm:queue'], target: ['pm:queue'], currentAssignees: [], assigneeTarget: ['os-x'] })).includes(PARKED_RULE));
+    t('a write that moves neither a state nor an assignee (a regrade) did not make the pair and passes', sw({ current: ['pm:on-hold', 'priority:p1'], target: ['pm:on-hold', 'priority:p3'], currentAssignees: ['os-x'], assigneeTarget: ['os-x'] }), null);
+    const lone = await driveOffline(['--repo', 'o/r', '--issue', '7', '--remove', 'pm:dispatched'], { labels: ['pm:dispatched', 'domain:skills'], assignees: ['os-x'] });
+    t('⭐ end to end: a lone --remove pm:dispatched is exit 2 at step ② with ZERO writes', [lone.exit, lone.res.stoppedAt, lone.fake.calls.filter((c) => c.method !== 'GET').length, lone.fake.board.labels], [EXIT_USAGE, 2, 0, ['pm:dispatched', 'domain:skills']]);
+    const handed = await driveOffline(['--repo', 'o/r', '--issue', '7', '--remove', 'pm:dispatched', '--add', 'pm:queue', '--clear-assignees'], { labels: ['pm:dispatched'], assignees: ['os-x'] });
+    t('…the same strip naming pm:queue and clearing the holder lands and reads back', [handed.exit, handed.fake.board.labels, handed.fake.board.assignees], [EXIT_OK, ['pm:queue'], []]);
+    const kept = await driveOffline(['--repo', 'o/r', '--issue', '7', '--remove', 'pm:dispatched', '--add', 'pm:queue'], { labels: ['pm:dispatched'], assignees: ['os-x'] });
+    t('…while keeping the holder is exit 2, zero writes', [kept.exit, kept.fake.calls.filter((c) => c.method !== 'GET').length], [EXIT_USAGE, 0]);
+    const viaRelay = await driveOffline(['--repo', 'o/r', '--issue', '7', '--remove', 'pm:dispatched'], { labels: ['pm:dispatched'] }, { route: { requested: 'dispatch', transport: 'dispatch', reason: 'self-test: relay', error: null, session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ' }, relay: 'success' });
+    t('…on the relay transport too: refused before the dispatch, nothing sent', [viaRelay.exit, viaRelay.sent.length], [EXIT_USAGE, 0]);
+    const ruleText = readFileSync(new URL(STATELESS_RULE_PATH, REPO_ROOT), 'utf8');
+    t('the quoted rules are substrings of the files they name', [ruleText.includes(STATELESS_RULE), readFileSync(new URL(KIND_RULE_PATH, REPO_ROOT), 'utf8').includes(PARKED_RULE)], [true, true]);
+  }
+
   // ── the read-back verdict ────────────────────────────────────────────────
   battery('the read-back verdict: three buckets, three different meanings');
   const v1 = readBackVerdict({ target: ['a', 'b'], removeCalls: ['c'], readBack: ['a', 'b'] });
@@ -2149,10 +2279,10 @@ export async function selfTest() {
 
   // The label is there at step ① and gone by step ③ — the race the directed
   // DELETE is supposed to survive. It cannot be produced any other way.
-  const raced = await driveOffline(['--repo', 'o/r', '--issue', '7', '--remove', 'pm:queue'], {
-    labels: ['pm:queue'],
+  const raced = await driveOffline(['--repo', 'o/r', '--issue', '7', '--remove', 'skip-changeset'], {
+    labels: ['skip-changeset'],
     before: (op, board) => {
-      if (op === 'label-delete') board.labels = board.labels.filter((l) => l !== 'pm:queue');
+      if (op === 'label-delete') board.labels = board.labels.filter((l) => l !== 'skip-changeset');
     },
   });
   t('a DELETE of a label the card no longer carries reads as SUCCESS', raced.exit, EXIT_OK);

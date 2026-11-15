@@ -500,14 +500,15 @@ async function idpInitiated(
     new Request(`${AUTH}/sso/saml2/sp/metadata?providerId=${PROVIDER_ID}`),
   )).text();
   const sp = samlify.ServiceProvider({ metadata: spMetadata });
+  const entityID = idpAs.entityID ?? IDP_ENTITY;
   const idp = samlify.IdentityProvider({
-    entityID: IDP_ENTITY,
+    entityID,
     privateKey: idpKeyPem,
     signingCert: idpCert,
     nameIDFormat: [EMAIL_FORMAT],
     singleSignOnService: [{ Binding: 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect', Location: IDP_SSO }],
   });
-  const { context } = await idp.createLoginResponse(sp, {}, 'post', { email }, customResponse(IDP_ENTITY, email, idpAs));
+  const { context } = await idp.createLoginResponse(sp, {}, 'post', { email }, customResponse(entityID, email, idpAs));
   expect(Buffer.from(context, 'base64').toString('utf8')).not.toMatch(/InResponseTo="[^"]+"/);
   return rp.manager.handleRequest(
     new Request(ACS, {
@@ -895,6 +896,185 @@ describe('an unmapped SAML sign-in reads the standard claims before the NameID',
     admitted(await idpInitiated(rp, UPN, undefined, idpInitiatedPersistent));
     const row = (rp.engine.tables.get('sys_sso_provider') ?? []).find((p: any) => p.provider_id === PROVIDER_ID);
     expect(JSON.parse(row.saml_config).mapping).toBeUndefined();
+  });
+});
+
+// ── A SAML provider keyed on a stable attribute: both entries reach one account ──
+//
+// `sso-saml-account-key.ts` states the rule. Microsoft Entra ID's default
+// claims plus its object id, an SP-initiated entry (email-format NameID: the
+// user principal name) and an IdP-initiated one (Entra's default persistent
+// NameID: an opaque id), through the real vendor pipeline. The CONTROL for a
+// provider that is not Entra and names no attribute is the describe above,
+// whose portal-first case still keys its account on the NameID.
+
+describe('a SAML provider keyed on a stable attribute: the app and the IdP portal reach one account', () => {
+  const C = 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims';
+  const OID_CLAIM = 'http://schemas.microsoft.com/identity/claims/objectidentifier';
+  const ENTRA = 'https://sts.windows.net/72f988bf-86f1-41af-91ab-2d7cd011db47/';
+  const UPN = 'mia.chen@acme.com';
+  const OPAQUE = 'pov4hy2mt2xk9-opaque-pairwise-id';
+  const OID = '8b6e3c1a-5f2d-4e7b-9a10-3c4d5e6f7a8b';
+  const CLAIMS = {
+    [`${C}/emailaddress`]: 'Mia.Chen@acme.com',
+    [`${C}/givenname`]: 'Mia',
+    [`${C}/surname`]: 'Chen',
+    [`${C}/name`]: UPN,
+    [OID_CLAIM]: OID,
+  };
+  const spInitiated: IdpAs = { entityID: ENTRA, nameID: UPN, attributes: CLAIMS };
+  const portal: IdpAs = { entityID: ENTRA, nameID: OPAQUE, nameIDFormat: PERSISTENT_FORMAT, attributes: CLAIMS };
+
+  const people = (rp: Rp) =>
+    (rp.engine.tables.get('sys_user') ?? []).filter((u: any) => u.email !== 'admin@acme.com').map((u: any) => `${u.email} (${u.name})`);
+  /** The account keys this provider's accounts carry, and whose they are. */
+  const accounts = (rp: Rp) =>
+    (rp.engine.tables.get('sys_account') ?? [])
+      .filter((a: any) => a.provider_id === PROVIDER_ID)
+      .map((a: any) => `${a.account_id} -> ${(rp.engine.tables.get('sys_user') ?? []).find((u: any) => u.id === a.user_id)?.email}`);
+  /** The users the live sessions belong to. */
+  const sessionUsers = (rp: Rp) => [...new Set((rp.engine.tables.get('sys_session') ?? []).map((s: any) => s.user_id))];
+  const keyedRp = async (opts: { issuer?: string; mapping?: Record<string, unknown>; allowJit?: boolean } = {}) => {
+    const issuer = opts.issuer ?? ENTRA;
+    const rp = await makeRp({
+      provider: { allowJit: opts.allowJit ?? true, allowIdpInitiated: true, issuer },
+      samlConfig: { issuer, idpMetadata: { entityID: issuer }, ...(opts.mapping ? { mapping: opts.mapping } : {}) },
+    });
+    await seedAdmin(rp);
+    return rp;
+  };
+  const admitted = (res: Response) => {
+    expect(res.status).toBe(302);
+    expect(landing(res).error, res.headers.get('location') ?? '').toBeNull();
+    expect(cookiesOf(res)).toMatch(/session_token=[^;]/);
+  };
+
+  it('Entra: SP-initiated, then IdP-initiated with a persistent NameID: one account keyed on the object id, and both sign in', async () => {
+    const rp = await keyedRp();
+    admitted(await signInThroughIdp(rp, UPN, undefined, undefined, spInitiated));
+    admitted(await idpInitiated(rp, UPN, undefined, portal));
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    expect(accounts(rp)).toEqual([`${OID} -> mia.chen@acme.com`]);
+    expect(sessionUsers(rp)).toHaveLength(1);
+  });
+
+  it('Entra, portal first: IdP-initiated, then SP-initiated: one account keyed on the object id, and both sign in', async () => {
+    const rp = await keyedRp();
+    admitted(await idpInitiated(rp, UPN, undefined, portal));
+    admitted(await signInThroughIdp(rp, UPN, undefined, undefined, spInitiated));
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    expect(accounts(rp)).toEqual([`${OID} -> mia.chen@acme.com`]);
+    expect(sessionUsers(rp)).toHaveLength(1);
+  });
+
+  it('Entra: an email change at the IdP keeps the account', async () => {
+    const rp = await keyedRp();
+    admitted(await signInThroughIdp(rp, UPN, undefined, undefined, spInitiated));
+    const renamed = { ...CLAIMS, [`${C}/emailaddress`]: 'mia.wong@acme.com' };
+    admitted(await idpInitiated(rp, 'mia.wong@acme.com', undefined, { ...portal, attributes: renamed }));
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    expect(accounts(rp)).toEqual([`${OID} -> mia.chen@acme.com`]);
+  });
+
+  it('a named attribute keys a provider that is not Entra: both entries reach one account', async () => {
+    const rp = await keyedRp({ issuer: IDP_ENTITY, mapping: { extraFields: { accountKey: 'employeeNumber' } } });
+    const attributes = { email: UPN, employeeNumber: 'E-004711' };
+    admitted(await signInThroughIdp(rp, UPN, undefined, undefined, { nameID: UPN, attributes }));
+    admitted(await idpInitiated(rp, UPN, undefined, { nameID: OPAQUE, nameIDFormat: PERSISTENT_FORMAT, attributes }));
+    expect(accounts(rp)).toEqual(['E-004711 -> mia.chen@acme.com']);
+  });
+
+  it('a named attribute is read before the Entra default', async () => {
+    const rp = await keyedRp({ mapping: { extraFields: { accountKey: 'employeeNumber' } } });
+    admitted(await idpInitiated(rp, UPN, undefined, { ...portal, attributes: { ...CLAIMS, employeeNumber: 'E-004711' } }));
+    expect(accounts(rp)).toEqual(['E-004711 -> mia.chen@acme.com']);
+  });
+
+  it('the same provider only: an account another provider made under the same key is never reached by it', async () => {
+    const rp = await keyedRp();
+    await rp.engine.insert('sys_user', { id: 'usr_other', email: 'someone.else@acme.com', name: 'Someone Else', email_verified: true });
+    await rp.engine.insert('sys_account', { id: 'acc_other', user_id: 'usr_other', provider_id: 'other-entra', account_id: OID });
+    admitted(await idpInitiated(rp, UPN, undefined, portal));
+    expect(accounts(rp)).toEqual([`${OID} -> mia.chen@acme.com`]);
+    expect(sessionUsers(rp)).not.toContain('usr_other');
+  });
+
+  it('an existing password account at the same address keeps the linking rule: refused account_not_linked, nothing written', async () => {
+    const rp = await keyedRp();
+    await rp.engine.insert('sys_user', { id: 'usr_known', email: UPN, name: 'Mia Chen', email_verified: true });
+    await rp.engine.insert('sys_account', { id: 'acc_known', user_id: 'usr_known', provider_id: 'credential', account_id: 'usr_known' });
+    const res = await idpInitiated(rp, UPN, undefined, portal);
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'account_not_linked' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(accounts(rp)).toEqual([]);
+  });
+
+  it('Entra, an assertion without the object id: the NameID keys that sign-in, as before', async () => {
+    const rp = await keyedRp();
+    const { [OID_CLAIM]: _oid, ...withoutOid } = CLAIMS;
+    admitted(await idpInitiated(rp, UPN, undefined, { ...portal, attributes: withoutOid }));
+    expect(accounts(rp)).toEqual([`${OPAQUE} -> mia.chen@acme.com`]);
+  });
+
+  it('a key value written with a comment is not read: the NameID keys that sign-in (the comment keeps the signature valid)', async () => {
+    const rp = await keyedRp();
+    const split = (posted: string) =>
+      Buffer.from(Buffer.from(posted, 'base64').toString('utf8').replace(OID, `${OID.slice(0, 8)}<!---->${OID.slice(8)}`)).toString('base64');
+    admitted(await idpInitiated(rp, UPN, split, portal));
+    expect(accounts(rp)).toEqual([`${OPAQUE} -> mia.chen@acme.com`]);
+  });
+
+  // An account made before the key applied: the row a SP-initiated Entra
+  // sign-in wrote under the old rule, keyed on its NameID (the UPN), for a
+  // user JIT made unverified. It is not rewritten; these three pins measure
+  // what reaches it now.
+  const seedLegacy = async (rp: Rp) => {
+    await rp.engine.insert('sys_user', { id: 'usr_legacy', email: UPN, name: 'Mia Chen', email_verified: false });
+    await rp.engine.insert('sys_account', { id: 'acc_legacy', user_id: 'usr_legacy', provider_id: PROVIDER_ID, account_id: UPN });
+  };
+
+  it('a legacy NameID-keyed account, same NameID and same email: signs in to it (found by email, then by its NameID), nothing new written', async () => {
+    const rp = await keyedRp();
+    await seedLegacy(rp);
+    admitted(await signInThroughIdp(rp, UPN, undefined, undefined, spInitiated));
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    expect(accounts(rp)).toEqual([`${UPN} -> mia.chen@acme.com`]);
+    expect(sessionUsers(rp)).toEqual(['usr_legacy']);
+  });
+
+  it('a legacy NameID-keyed account, from the other entry (another NameID): the linking rule refuses it account_not_linked, as before; nothing written', async () => {
+    const rp = await keyedRp();
+    await seedLegacy(rp);
+    const res = await idpInitiated(rp, UPN, undefined, portal);
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'account_not_linked' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(people(rp)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    expect(accounts(rp)).toEqual([`${UPN} -> mia.chen@acme.com`]);
+  });
+
+  it('a legacy NameID-keyed account, after an email change at the IdP (same NameID): not reached; with JIT a new user is made, without JIT the sign-in is refused', async () => {
+    const renamed: IdpAs = { ...spInitiated, attributes: { ...CLAIMS, [`${C}/emailaddress`]: 'mia.wong@acme.com' } };
+
+    const jit = await keyedRp();
+    await seedLegacy(jit);
+    admitted(await signInThroughIdp(jit, 'mia.wong@acme.com', undefined, undefined, renamed));
+    expect(people(jit).sort()).toEqual(['mia.chen@acme.com (Mia Chen)', 'mia.wong@acme.com (Mia Chen)']);
+    expect(accounts(jit).sort()).toEqual([`${OID} -> mia.wong@acme.com`, `${UPN} -> mia.chen@acme.com`]);
+    expect(sessionUsers(jit)).not.toContain('usr_legacy');
+
+    const noJit = await keyedRp({ allowJit: false });
+    await seedLegacy(noJit);
+    const res = await signInThroughIdp(noJit, 'mia.wong@acme.com', undefined, undefined, renamed);
+    expect(landing(res)).toEqual({ base: FAILED, error: 'SELF_REGISTRATION_CLOSED' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(people(noJit)).toEqual(['mia.chen@acme.com (Mia Chen)']);
+    expect(accounts(noJit)).toEqual([`${UPN} -> mia.chen@acme.com`]);
+  });
+
+  it('CONTROL: an IdP that is not Entra and names no attribute keys on the NameID, whatever the assertion carries', async () => {
+    const rp = await keyedRp({ issuer: IDP_ENTITY });
+    admitted(await idpInitiated(rp, UPN, undefined, { ...portal, entityID: IDP_ENTITY }));
+    expect(accounts(rp)).toEqual([`${OPAQUE} -> mia.chen@acme.com`]);
   });
 });
 

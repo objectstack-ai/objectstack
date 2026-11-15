@@ -157,6 +157,7 @@
     "automation/ExecutionLog:tenantId",
     "automation/ExecutionLog:trigger",
     "automation/ExecutionLog:variables",
+    "automation/ExecutionLog:waitMs",
     "automation/ExecutionStepLog:branch",
     "automation/ExecutionStepLog:completedAt",
     "automation/ExecutionStepLog:droppedFields",

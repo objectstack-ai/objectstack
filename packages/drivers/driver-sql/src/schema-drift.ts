@@ -696,6 +696,104 @@ export function parseHashShadowRowScope(generationExpression: string): string | 
   return m ? m[1]!.replace(/``/g, '`') : null;
 }
 
+/**
+ * The digest a #11627 hash shadow stores, as the driver writes it:
+ * `UNHEX(SHA2(<key>, 256))`, where the key is the one part bare, or every part
+ * joined by a `0x1f` separator inside `CONCAT`, and a NULL-safe part is spelled
+ * `COALESCE(<col>, '__global__')` (commit df1c75c4b).
+ *
+ * The one builder of that digest: `createHashShadowUniqueIndex` emits it, and
+ * {@link parseFunctionalRowScopedGuard} accepts a MySQL functional guard only
+ * when its digest is this one over the key parts it names. `metadata-protocol`'s
+ * package-less guards key "the driver's own hash-shadow digest" on the MySQL
+ * family, so a guard whose digest is anything else is not one of them.
+ */
+export function hashShadowDigestSql(columns: readonly string[], nullSafeColumns?: ReadonlySet<string>): string {
+  const ref = (c: string) => `\`${c.replace(/`/g, '``')}\``;
+  const part = (c: string) => (nullSafeColumns?.has(c) ? `COALESCE(${ref(c)}, '${GLOBAL_TENANT}')` : ref(c));
+  // ONE argument needs no separator, and CONCAT of one value would only add
+  // a chance to get the encoding wrong.
+  const key = columns.length === 1 ? part(columns[0]!) : `CONCAT(${columns.map(part).join(', 0x1f, ')})`;
+  return `UNHEX(SHA2(${key}, 256))`;
+}
+
+/**
+ * An expression in the spelling MySQL stores it: every blank outside a quoted
+ * run dropped and everything outside a quoted run lower-cased; a back-quoted
+ * identifier or a string literal is kept byte for byte. Only for an expression
+ * of calls, identifiers and literals (a digest), where no blank separates two
+ * words.
+ */
+function mysqlStoredDigestSpelling(sql: string): string {
+  let out = '';
+  let quote: string | null = null;
+  for (const ch of sql) {
+    if (quote !== null) {
+      out += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '`' || ch === "'") {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (/\s/.test(ch)) continue;
+    out += ch.toLowerCase();
+  }
+  return out;
+}
+
+/**
+ * `(case when (<col> is null) then <digest> end)`, as MySQL 8 stores a
+ * functional key part (`information_schema.STATISTICS.EXPRESSION`, measured on
+ * MySQL 8.0.46). See {@link parseFunctionalRowScopedGuard}.
+ */
+const FUNCTIONAL_ROW_SCOPE =
+  /^\s*\(\s*case\s+when\s+\(\s*`((?:[^`]|``)+)`\s+is\s+null\s*\)\s+then\s+([\s\S]*\S)\s+end\s*\)\s*$/i;
+
+/** A functional key part {@link parseFunctionalRowScopedGuard} reads as a partial unique. */
+export interface FunctionalRowScopedGuard {
+  /** The column whose NULL puts a row in the guard's scope. */
+  rowScope: string;
+  /** The columns the digest hashes, in key order: the guard's key. */
+  columns: string[];
+}
+
+/**
+ * The MySQL 8.0.13+ spelling of a package-less guard, read as the partial
+ * unique it is, or `null` for any other expression.
+ *
+ * `metadata-protocol`'s package-less guards (`*-packageless-index.ts`, ADR-0150
+ * D4) build on MySQL a UNIQUE index over ONE functional key part,
+ * `(CASE WHEN <scope> IS NULL THEN <digest of the key columns> END)`. UNIQUE is
+ * NULL-distinct, so every row whose `<scope>` is not NULL (a packaged row)
+ * hashes to NULL and is exempt: it is how MySQL says `UNIQUE (<key columns>)
+ * WHERE <scope> IS NULL`, the partial index the same guard is on SQLite and
+ * PostgreSQL. MariaDB, with no functional key part, spells it as a row-scoped
+ * hash shadow instead ({@link parseHashShadowRowScope}).
+ *
+ * Recognised strictly, never as "some expression over these columns": the
+ * whole stored expression must be the `case when (<col> is null) then … end`
+ * wrapper, the digest inside must be exactly what {@link hashShadowDigestSql}
+ * builds over the columns it names (plain parts only, the separator and the
+ * hash function included), and the scope column must not be one of them. So an
+ * operator's own functional index (`lower(name)`, another hash, another
+ * separator, an `IS NOT NULL` scope, a NULL-safe part) is never read as a guard.
+ */
+export function parseFunctionalRowScopedGuard(expression: string): FunctionalRowScopedGuard | null {
+  const m = FUNCTIONAL_ROW_SCOPE.exec(String(expression ?? ''));
+  if (!m) return null;
+  const rowScope = m[1]!.replace(/``/g, '`');
+  const digest = m[2]!;
+  const parts = parseHashShadowKeyParts(digest);
+  if (parts.length === 0 || parts.some((p) => p.nullSafe)) return null;
+  const columns = parts.map((p) => p.column);
+  if (columns.includes(rowScope)) return null;
+  if (mysqlStoredDigestSpelling(digest) !== mysqlStoredDigestSpelling(hashShadowDigestSql(columns))) return null;
+  return { rowScope, columns };
+}
+
 /** Minimal shape of an introspected physical column (see SqlDriver.introspectColumns). */
 export interface PhysicalColumn {
   name: string;
@@ -2611,14 +2709,15 @@ function widenedUniqueReplacements(args: {
       // A NULL in a gained column exempts the row from the wider key, so the
       // narrower index is the only thing keeping those rows to one per
       // `narrower`. It is offered for retirement only once a partial UNIQUE on
-      // exactly `narrower`, scoped by a WHERE, already stands beside it (the
-      // activation ledger's runtime-built package-less index). Until then it is
-      // KEPT: accounted for, so the orphan arm never offers to drop it either.
-      // A gained column the table does not have yet keeps it the same way: the
-      // wider index cannot exist before its column does.
+      // exactly `narrower`, scoped by a WHERE (or by MySQL's functional
+      // row-scoped digest), already stands beside it (the activation ledger's
+      // runtime-built package-less index). Until then it is KEPT: accounted
+      // for, so the orphan arm never offers to drop it either. A gained column
+      // the table does not have yet keeps it the same way: the wider index
+      // cannot exist before its column does.
       const kept =
         gained.some((c) => absent.has(c)) ||
-        (nullable.length > 0 && !hasPartialUniqueGuard(args.physical ?? [], narrower));
+        (nullable.length > 0 && !hasPartialUniqueGuard(args.physical ?? [], narrower, nullable));
       out.push({
         column: listed.find((c) => !narrower.includes(c))!,
         legacyColumns: narrower,
@@ -2642,13 +2741,40 @@ function widenedUniqueReplacements(args: {
  * hash-shadow carrier — MariaDB's spelling of the partial guard, which stores
  * one digest column ({@link parseHashShadowRowScope}) — answers by the columns
  * it hashes, exactly as the SQLite/PostgreSQL partial index answers by its own.
+ *
+ * MySQL 8.0.13+'s spelling, a UNIQUE index over one functional key part
+ * ({@link parseFunctionalRowScopedGuard}), answers by the columns its digest
+ * hashes too, and only when its row scope is the gained column whose NULL
+ * exempts a row from the wider key: the one nullable gained column, `nullable`.
+ * With two nullable gained columns, a row NULL in the one the guard does not
+ * test escapes both keys, so no single-scope guard stands for the narrower key.
  */
-function hasPartialUniqueGuard(physical: ReadonlyArray<PhysicalIndex>, columns: readonly string[]): boolean {
+function hasPartialUniqueGuard(
+  physical: ReadonlyArray<PhysicalIndex>,
+  columns: readonly string[],
+  nullable: readonly string[],
+): boolean {
   return physical.some((p) => {
-    if (!p.unique || p.partial !== true || (p.expressions?.length ?? 0) > 0) return false;
-    const key = enforcedIndexKey(p).columns;
-    return key.length === columns.length && key.every((c, i) => c === columns[i]);
+    if (!p.unique) return false;
+    const functional = functionalRowScopedGuardOf(p);
+    if (functional !== null) {
+      return sameColumns(functional.columns, columns) && nullable.length === 1 && functional.rowScope === nullable[0];
+    }
+    if (p.partial !== true || (p.expressions?.length ?? 0) > 0) return false;
+    return sameColumns(enforcedIndexKey(p).columns, columns);
   });
+}
+
+/**
+ * The guard a physical index is when its ONLY key part is MySQL's functional
+ * row-scoped digest ({@link parseFunctionalRowScopedGuard}), else `null`. An
+ * index with any column key part, a WHERE, a hash-shadow carrier or a second
+ * expression is not that guard.
+ */
+function functionalRowScopedGuardOf(p: PhysicalIndex): FunctionalRowScopedGuard | null {
+  if (p.primary === true || p.partial === true || p.columns.length > 0 || p.shadowKey !== undefined) return null;
+  const expressions = p.expressions ?? [];
+  return expressions.length === 1 ? parseFunctionalRowScopedGuard(expressions[0]!) : null;
 }
 
 /** The same column identities, in the same key order. */

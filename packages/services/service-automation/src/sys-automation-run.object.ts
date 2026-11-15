@@ -399,6 +399,20 @@ export const SysAutomationRun = ObjectSchema.create({
       group: 'State',
     }),
 
+    // [#32284] The wait clock of a paused run, and the reason it is ONE
+    // number: nothing executes while a run is parked, so at any later instant
+    // the run's total wait is its age minus the time it had spent executing
+    // when it paused. A resume reads it to fill `wait_ms`; a run that pauses
+    // again writes it forward, which is how every pause of a multi-stage run is
+    // summed. On a stranded terminal row it is the consumed pause's clock, with
+    // the rest of that snapshot (`variables_json`, `node_type`, …).
+    active_ms: Field.number({
+      label: 'Active Time Before Pause (ms)',
+      required: false,
+      description: 'On a paused run: the milliseconds it had spent executing when it paused (its age minus every earlier pause) — the clock its resume derives `wait_ms` from. On a failed run whose resume consumed a pause: that pause\'s value, for a restore. Null otherwise, and on rows written before this was tracked.',
+      group: 'State',
+    }),
+
     finished_at: Field.datetime({
       label: 'Finished At',
       required: false,
@@ -410,6 +424,15 @@ export const SysAutomationRun = ObjectSchema.create({
       label: 'Duration (ms)',
       required: false,
       description: 'Wall-clock duration of a terminal run.',
+      group: 'Outcome',
+    }),
+
+    // [#32284] `ExecutionLog.waitMs` on the durable row, so a run read back
+    // after a restart or a ring eviction still separates waiting from work.
+    wait_ms: Field.number({
+      label: 'Wait (ms)',
+      required: false,
+      description: 'The part of `duration_ms` the run spent suspended (at a screen, approval, wait or other pausing node), summed over all its pauses — so `duration_ms - wait_ms` is the time it spent executing. 0 for a run that never paused; null on rows written before this was tracked, which is not the same as zero.',
       group: 'Outcome',
     }),
 

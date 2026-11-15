@@ -79,6 +79,24 @@ app.use('/api/*', objectStackMiddleware(kernel));
 - Drivers differ by runtime: use [`@objectstack/driver-sql`](../../drivers/driver-sql) on Node. (Edge/multi-tenant turso driver ships in ObjectOS Cloud.)
 - Persist no long-lived state in module scope beyond the `kernel` instance.
 
+## Response compression
+
+`createHonoApp` does not compress responses. It sends no `Content-Encoding` and adds no
+`Vary: Accept-Encoding`. On this door, compression is the job of the platform or CDN in
+front of the app, and the application does not compress there. The edge runtimes this
+adapter targets do not all offer `node:zlib`, and the edge already does this work.
+
+- Check that your host compresses JSON, JavaScript and CSS responses. If it does not,
+  turn it on there, not in the app. A runtime you serve yourself may not compress at
+  all; put a proxy or CDN in front of it.
+- Keep the `ETag` unchanged when the host compresses. Saves send it back as `If-Match`
+  and the server compares it strongly, so a host that rewrites it to a weak `W/` tag
+  makes those saves fail their precondition.
+
+The self-hosted server, [`@objectstack/plugin-hono-server`](../../plugins/plugin-hono-server)
+(what `os dev` and `os start` run), does compress responses itself; its README says
+which ones.
+
 ## When to use
 
 - ✅ Edge, serverless, and multi-runtime deployments.
