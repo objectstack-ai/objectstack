@@ -65,6 +65,8 @@ import { PackageScopedNameRefusedError } from '@objectstack/core';
 import type { ApiError, DatasetQueryBatchEntry, GetMetaItemRequest } from '@objectstack/spec/api';
 import { DATASET_QUERY_BATCH_MAX_QUERIES, DatasetQueryBatchRequestSchema } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+// The ledger's `dataset_query` row: one per saved-dataset query that reached the read.
+import { runAuditedDatasetQuery } from './analytics-dataset-query-audit.js';
 import {
     boundedDeclaredUserMessage,
     classifiedRefusalAnswer,
@@ -83,8 +85,6 @@ import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { mayReadPendingDrafts, metaItemPackageBinding, type RestServer } from './rest-server.js';
 import { metaCallerPackageQuery, metaItemCallerPackageRefusalMessage } from './meta-item-read-gate.js';
 import { admitRefusedDatasetHolders } from './analytics-dataset-admission-order.js';
-// The ledger's `dataset_query` row: one per saved-dataset query that reached the read.
-import { runAuditedDatasetQuery } from './analytics-dataset-query-audit.js';
 
 /**
  * The `RestServer` members {@link registerAnalyticsEndpoints} reads — every
