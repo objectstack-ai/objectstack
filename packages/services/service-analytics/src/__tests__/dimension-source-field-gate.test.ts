@@ -309,8 +309,10 @@ describe('#5520 — the dataset face: refused before SQL exists, so nothing can 
                 measures: ['account_count'],
                 dimensions: ['bogus_dim'],
             } as any),
-        ).rejects.toMatchObject({ ...INVALID_FIELD, field: 'bogus_dim', dimension: 'bogus_dim' });
+        ).rejects.toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'bogus_dim', param: 'dimensions' });
 
+        // [ADR-0149 D1] On the dataset face an undeclared dimension is refused by
+        // the closed-member rule, ahead of this gate, with the same code/status.
         // Repro ③'s leak, at its source: no statement was ever built, so there is
         // no SQL for the REST envelope to echo. (`rest-server`'s 500 branch is
         // sanitised as well — see `analytics-dataset-dimension-gate.test.ts` —
@@ -329,9 +331,9 @@ describe('#5520 — the dataset face: refused before SQL exists, so nothing can 
             } as any),
         );
 
-        // It names the object and the field — a caller-shaped fact — and neither
-        // a SELECT list, a quoted table name, nor a GROUP BY clause.
-        expect(err.message).toContain("object 'crm_account' does not have");
+        // It names the dataset and the member — a caller-shaped fact — and
+        // neither a SELECT list, a quoted table name, nor a GROUP BY clause.
+        expect(err.message).toContain('does not declare the dimension "bogus_dim"');
         expect(err.message).not.toMatch(/SELECT/i);
         expect(err.message).not.toMatch(/GROUP BY/i);
         expect(err.message).not.toMatch(/no such column/);
@@ -383,20 +385,17 @@ describe('#5520 — what the gate must NOT do', () => {
         expect(aggregated).toEqual(['crm_account']);
     });
 
-    it('lets an UNDECLARED but REAL field group, on the dataset path', async () => {
-        // Same contract through `queryDataset`: `phone` is not one of
-        // `account_metrics`' declared dimensions, and still groups.
+    it('refuses an UNDECLARED but REAL field on the dataset path, which the cube path lets group', async () => {
+        // `phone` is not one of `account_metrics`' declared dimensions. The cube
+        // path above lets it group; the dataset is a closed surface (ADR-0149
+        // D1), so `queryDataset` refuses it before any statement is built.
         const { service, sqls } = makeService({ native: true });
 
-        const result = await service.queryDataset(ACCOUNT_METRICS, {
+        await expect(service.queryDataset(ACCOUNT_METRICS, {
             measures: ['account_count'],
             dimensions: ['phone'],
-        } as any);
-
-        expect(result.rows).toEqual([{ account_count: 1 }]);
-        expect(sqls).toEqual([
-            'SELECT "phone" AS "phone", COUNT(*) AS "account_count" FROM "crm_account" GROUP BY "phone"',
-        ]);
+        } as any)).rejects.toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'phone', param: 'dimensions' });
+        expect(sqls).toEqual([]);
     });
 
     it('admits the engine-assigned columns the data path admits', async () => {

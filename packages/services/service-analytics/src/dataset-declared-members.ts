@@ -110,7 +110,7 @@ export function undeclaredMembersRefusal(
       + 'answers only the members its dataset declares, by their declared names. '
       + `Measures you may use: ${listMemberNames(usableDeclaredMembers(dataset.measures, admitted?.measures))}. `
       + `Dimensions you may use: ${listMemberNames(usableDeclaredMembers(dataset.dimensions, admitted?.dimensions))}. `
-      + 'Select one of these, or declare the member on the dataset (its `measures` or `dimensions`) and select it by that name.',
+      + 'Use one of these, or declare the member on the dataset (its `measures` or `dimensions`) and query it by that name.',
     { member: first.member, param: first.param, cube: dataset.name },
   );
 }
