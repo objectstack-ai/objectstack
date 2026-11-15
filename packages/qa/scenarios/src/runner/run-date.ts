@@ -20,8 +20,20 @@
  * (`this_month`, `previous_month`, …) is re-read around the new `asOf`: the
  * truths are computed again over the moved seed ({@link truthsOver}), so the
  * figure the grader holds is the one the moved data gives. Weekday names in
- * an ask are written again for the moved date; a card whose seed keeps to
- * working days does not keep to them after a delta that is not whole weeks.
+ * an ask are written again for the moved date.
+ *
+ * Working days: a whole-day delta that is not whole weeks puts a Monday-to-
+ * Friday date on a weekend, so a leave request's days, the balances they come
+ * off and an ask that names "Wednesday" change meaning. A card that declares
+ * `workingDays: true` keeps every date it holds, but its today, on a working
+ * day (the loader refuses one that does not), and moves them by whole WORKING
+ * days instead ({@link shiftWorkingDays}): `asOf` still lands on the run date
+ * itself, a date before it lands on or before the run date and a date after it
+ * after the run date, consecutive working days stay consecutive, and N working
+ * days between two dates stay N. The run date may be a weekend: the card's
+ * other dates then move as they would for the Friday before it. A whole-week
+ * delta would keep the weekdays too, but only by putting the prompt's today up
+ * to three days off the run date, the very mismatch this rebase removes.
  *
  * What moves: `asOf`; every value under `run` and `iterate` that is an ISO date
  * (`YYYY-MM-DD`) or starts with one (an ISO date-time keeps its time); and the
@@ -73,6 +85,46 @@ export function shiftDate(date: string, days: number): string {
   return ymd(new Date(dayOf(date).getTime() + days * DAY_MS)) + date.slice(10);
 }
 
+/** Whether `t` (UTC midnight) is a working day, Monday to Friday; public holidays are out of scope. */
+function isWorkingDay(t: Date): boolean {
+  const w = t.getUTCDay();
+  return w !== 0 && w !== 6;
+}
+
+/** Whether `date` (`YYYY-MM-DD`, or an ISO date-time) falls on a working day, Monday to Friday. */
+export function onWorkingDay(date: string): boolean {
+  return isWorkingDay(dayOf(date));
+}
+
+// Working days are counted from Monday 1969-12-29, the Monday before the epoch (a Thursday).
+/** The working-day number of `t`, or of the working day before it when `t` is a weekend. */
+function workingDayNumber(t: Date): number {
+  const n = Math.round(t.getTime() / DAY_MS) + 3; // days since Monday 1969-12-29
+  const week = Math.floor(n / 7);
+  return week * 5 + Math.min(n - week * 7, 4);
+}
+
+/** The working day numbered `k` ({@link workingDayNumber}). */
+function workingDay(k: number): Date {
+  const week = Math.floor(k / 5);
+  return new Date((week * 7 + (k - week * 5) - 3) * DAY_MS);
+}
+
+/** Whole working days from `from` to `to`, each read as the working day on or before it. */
+export function workingDaysBetween(from: string, to: string): number {
+  return workingDayNumber(dayOf(to)) - workingDayNumber(dayOf(from));
+}
+
+/** `date`, a working day (`YYYY-MM-DD`, or an ISO date-time whose time is kept), moved by `days` whole working days. */
+export function shiftWorkingDays(date: string, days: number): string {
+  const t = dayOf(date);
+  if (!isWorkingDay(t)) throw new Error(`not a working day: ${JSON.stringify(date)}`);
+  return ymd(workingDay(workingDayNumber(t) + days)) + date.slice(10);
+}
+
+/** How a card's dates move: a day (UTC midnight) to the day it becomes. */
+type Move = (t: Date) => Date;
+
 /** Whether a card value is a date the rebase moves. */
 function isDateValue(v: string): boolean {
   const m = ISO_DATE.exec(v);
@@ -92,14 +144,18 @@ function nearestYear(m: number, d: number, anchor: Date): Date | undefined {
 const EN_WEEKDAY = `(?:(${EN_WEEKDAYS.join('|')}),? )?`;
 const EN_MONTH = `(${EN_MONTHS.join('|')})`;
 
-/** An ask's text with every date it writes moved by `days`, read around the card's `asOf`. */
-export function shiftTextDates(text: string, days: number, asOf: string): string {
+/**
+ * An ask's text with every date it writes moved, read around the card's `asOf`: by `move` whole days, or by
+ * the card's own {@link Move} (the working-day rebase).
+ */
+export function shiftTextDates(text: string, move: number | Move, asOf: string): string {
   const anchor = dayOf(asOf);
-  const moved = (t: Date) => new Date(t.getTime() + days * DAY_MS);
+  const moved: Move = typeof move === 'number' ? (t) => new Date(t.getTime() + move * DAY_MS) : move;
+  const shift = (iso: string) => ymd(moved(dayOf(iso))) + iso.slice(10);
 
   // ISO dates.
   let out = text.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (all, y: string, m: string, d: string) =>
-    parseDay(Number(y), Number(m), Number(d)) ? shiftDate(all, days) : all,
+    parseDay(Number(y), Number(m), Number(d)) ? shift(all) : all,
   );
 
   // English "[Weekday] D Month [YYYY]" and "[Weekday, ]Month D[, YYYY]", in one pass so no date moves twice.
@@ -146,35 +202,53 @@ export function shiftTextDates(text: string, days: number, asOf: string): string
 }
 
 /** `value` with every date in it moved; an `ask` object's texts are rewritten, every other string only when it IS a date. */
-function shiftTree(value: unknown, days: number, asOf: string, key?: string): unknown {
-  if (typeof value === 'string') return isDateValue(value) ? shiftDate(value, days) : value;
-  if (Array.isArray(value)) return value.map((v) => shiftTree(v, days, asOf));
+function shiftTree(value: unknown, move: Move, asOf: string, key?: string): unknown {
+  if (typeof value === 'string') return isDateValue(value) ? ymd(move(dayOf(value))) + value.slice(10) : value;
+  if (Array.isArray(value)) return value.map((v) => shiftTree(v, move, asOf));
   if (value === null || typeof value !== 'object') return value;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value)) {
     if (k === '$comment') out[k] = v;
-    else if (key === 'ask' && typeof v === 'string') out[k] = shiftTextDates(v, days, asOf);
-    else out[k] = shiftTree(v, days, asOf, k);
+    else if (key === 'ask' && typeof v === 'string') out[k] = shiftTextDates(v, move, asOf);
+    else out[k] = shiftTree(v, move, asOf, k);
   }
   return out;
 }
 
 /**
+ * How a card's dates move so `asOf` is `runDate`: by one whole-day delta, or, on a card that declares
+ * `workingDays`, `asOf` onto `runDate` and every other date by whole working days ({@link shiftWorkingDays}).
+ */
+function moveFor(card: LoadedScenario['card'], asOf: string, runDate: string): Move {
+  if (card.workingDays !== true) {
+    const days = daysBetween(asOf, runDate);
+    return (t) => new Date(t.getTime() + days * DAY_MS);
+  }
+  const [from, to] = [dayOf(asOf), dayOf(runDate)];
+  const days = workingDaysBetween(asOf, runDate);
+  return (t) => {
+    if (t.getTime() === from.getTime()) return to;
+    if (!isWorkingDay(t)) throw new Error(`card declares workingDays but holds ${ymd(t)}, a weekend`);
+    return workingDay(workingDayNumber(t) + days);
+  };
+}
+
+/**
  * `scenario` with its card's dates moved so `asOf` is `runDate`, and its truths
  * computed again over the moved seed. A card with no `asOf`, or one already on
- * `runDate`, is returned as it is. `scopeFigures` stay: a whole-day shift maps
- * distinct dates to distinct dates, so no count it holds moves.
+ * `runDate`, is returned as it is. `scopeFigures` stay: both moves map distinct
+ * dates to distinct dates (the working-day move keeps every date but `asOf` on
+ * a working day, and `asOf` alone on the run date), so no count it holds moves.
  */
 export function rebaseScenario(scenario: LoadedScenario, runDate: string): LoadedScenario {
   const { asOf } = scenario.card;
-  if (asOf === undefined) return scenario;
-  const days = daysBetween(asOf, runDate);
-  if (days === 0) return scenario;
+  if (asOf === undefined || daysBetween(asOf, runDate) === 0) return scenario;
+  const move = moveFor(scenario.card, asOf, runDate);
   const card = {
     ...scenario.card,
-    asOf: shiftDate(asOf, days),
-    run: shiftTree(scenario.card.run, days, asOf) as LoadedScenario['card']['run'],
-    iterate: shiftTree(scenario.card.iterate, days, asOf) as LoadedScenario['card']['iterate'],
+    asOf: ymd(move(dayOf(asOf))),
+    run: shiftTree(scenario.card.run, move, asOf) as LoadedScenario['card']['run'],
+    iterate: shiftTree(scenario.card.iterate, move, asOf) as LoadedScenario['card']['iterate'],
   };
   return { ...scenario, card, ...truthsOver(card, card.run.seed) };
 }
