@@ -29,7 +29,7 @@
  *
  * "The whole surface" above means the CEILINGS map below, which is an
  * ENUMERATION, never a root glob: the pm-dispatch surface (SKILL.md, its
- * references/, the per-lane job descriptions), the four other
+ * references/, the per-lane job descriptions), the five other
  * `.claude/skills/` playbook SKILL.md files, the dev-agent definition
  * `.claude/agents/os-dev.md`, and both root instruction files — `AGENTS.md`
  * and `CLAUDE.md`. Read a file's absence from the map as a fact to check, not
@@ -1992,6 +1992,12 @@ export const CEILINGS = new Map([
   // replaced with the pin's house sentence AND the pin docblock's one allowed
   // variant shape carried into the skill, +6 lines within the card's budget.
   ['.claude/skills/spec-property-retirement/SKILL.md', 337],
+  // #34012: the fifth playbook, `scenario-eval`, landed without a row — the map
+  // is an enumeration, so nothing derived it from the tree. Seeded at its
+  // measured count on `origin/main` after its 26 over-120-byte lines were
+  // re-wrapped whitespace-only to `wrapLine`'s canonical form (131 → 157 lines,
+  // byte-identical after whitespace normalization). Landed count, headroom 0.
+  ['.claude/skills/scenario-eval/SKILL.md', 157],
   // #9792: root AGENTS.md is the largest, most-read, most binding instruction
   // file in the repo and had no ceiling — the hole the oversized 39-line
   // read-layer clause (compacted by #9715) entered through. Set at its line
@@ -2732,6 +2738,8 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/checklist-author/SKILL.md', 0],
   ['.claude/skills/dogfood-verification/SKILL.md', 0],
   ['.claude/skills/spec-property-retirement/SKILL.md', 326],
+  // #34012: seeded at its own widest table row, headroom 0.
+  ['.claude/skills/scenario-eval/SKILL.md', 237],
   // Lowered 1081 → 768 by the rules-only rewrite: the translations row lost its
   // in-cell narrative; the widest survivor is that same row. Landed width, headroom 0.
   ['AGENTS.md', 768],
@@ -3393,7 +3401,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'every lane/seat job description in the tree carries a ceiling row': 1,
   '...and one carrying no row is RED, with the message naming that file': 1,
   '...and an EMPTY roster is RED, not vacuously green: a derived roster checks nothing when the read fails': 1,
-  'the other four skills are covered (#9473)': 1,
+  'the other five skills are covered (#9473, #34012)': 1,
   'root AGENTS.md is covered (#9792)': 1,
   'root CLAUDE.md is covered (#9965)': 1,
   'references/compile-surfaces.md is covered (#12098)': 1,
@@ -3644,7 +3652,7 @@ function selfTest() {
     ['every lane/seat job description in the tree carries a ceiling row', laneRosterVerdict(laneFilesOnDisk(), CEILINGS).ok, true],
     ['...and one carrying no row is RED, with the message naming that file', !laneGap.ok && laneGap.msg.includes('triage.md'), true],
     ['...and an EMPTY roster is RED, not vacuously green: a derived roster checks nothing when the read fails', laneRosterVerdict([], CEILINGS).ok, false],
-    ['the other four skills are covered (#9473)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
+    ['the other five skills are covered (#9473, #34012)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement', 'scenario-eval'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
     ['root AGENTS.md is covered (#9792)', CEILINGS.has('AGENTS.md'), true],
     ['root CLAUDE.md is covered (#9965)', CEILINGS.has('CLAUDE.md'), true],
     // #12098: the last uncovered pm-dispatch references file. Found by
