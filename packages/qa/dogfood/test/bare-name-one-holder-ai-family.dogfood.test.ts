@@ -333,37 +333,48 @@ describe('agent, skill and tool names held per namespace, on a booted showcase',
     expect(await metaAt('tool', TOOL, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha tool']);
   });
 
-  it('CONTROL — install-local of a package declaring fresh agent, skill and tool names installs, and every AI door serves it', async () => {
-    const { status, body } = await installLocal(inline('epsilon', {
-      agents: [agent('epsilon', 'epsilon_agent')],
-      skills: [skill('epsilon', 'epsilon_skill')],
-      tools: [tool('epsilon', 'epsilon_tool')],
-    }));
-    expect(status, JSON.stringify(body)).toBeLessThan(300);
-    expect(await packageIds()).toContain('com.qa.bare.epsilon');
-    expect(await metaPackage('agent', 'epsilon_agent')).toBe('com.qa.bare.epsilon');
-    expect(await metaPackage('skill', 'epsilon_skill')).toBe('com.qa.bare.epsilon');
-    expect(await metaPackage('tool', 'epsilon_tool')).toBe('com.qa.bare.epsilon');
-    expect(await promptText('epsilon-epsilon_skill')).toContain('epsilon skill instructions');
-    expect(await promptText('epsilon_skill'), 'one holder: the bare name still answers').toContain('epsilon skill instructions');
+  // The install is SETUP (loading), so it runs in a hook and the `it` times only the reads it judges.
+  describe('CONTROL — install-local of a package declaring fresh agent, skill and tool names', () => {
+    beforeAll(async () => {
+      const { status, body } = await installLocal(inline('epsilon', {
+        agents: [agent('epsilon', 'epsilon_agent')],
+        skills: [skill('epsilon', 'epsilon_skill')],
+        tools: [tool('epsilon', 'epsilon_tool')],
+      }));
+      expect(status, JSON.stringify(body)).toBeLessThan(300);
+    }, 60_000);
+
+    it('installs, and every AI door serves it', async () => {
+      expect(await packageIds()).toContain('com.qa.bare.epsilon');
+      expect(await metaPackage('agent', 'epsilon_agent')).toBe('com.qa.bare.epsilon');
+      expect(await metaPackage('skill', 'epsilon_skill')).toBe('com.qa.bare.epsilon');
+      expect(await metaPackage('tool', 'epsilon_tool')).toBe('com.qa.bare.epsilon');
+      expect(await promptText('epsilon-epsilon_skill')).toContain('epsilon skill instructions');
+      expect(await promptText('epsilon_skill'), 'one holder: the bare name still answers').toContain('epsilon skill instructions');
+    });
   });
 
-  it('[#31701, #31985] install-local of a package of a THIRD namespace declaring the held agent, skill and tool names installs; the bare read then names all three holders', async () => {
-    const { status, body } = await installLocal(inline('gamma', { agents: [agent('gamma')], skills: [skill('gamma')], tools: [tool('gamma')] }));
-    expect(status, JSON.stringify(body)).toBeLessThan(300);
-    expect(await packageIds()).toContain('com.qa.bare.gamma');
-    expect(await metaAt('agent', AGENT, 'com.qa.bare.gamma')).toEqual(['com.qa.bare.gamma', 'gamma agent']);
-    expect(await metaAt('skill', SKILL, 'com.qa.bare.gamma')).toEqual(['com.qa.bare.gamma', 'gamma skill']);
-    expect(await metaAt('tool', TOOL, 'com.qa.bare.gamma')).toEqual(['com.qa.bare.gamma', 'gamma tool']);
-    const all = ['com.qa.bare.alpha', 'com.qa.bare.beta', 'com.qa.bare.gamma'];
-    await expectMetaRefused('agent', AGENT, all);
-    await expectMetaRefused('skill', SKILL, all);
-    await expectMetaRefused('tool', TOOL, all);
-    expect(await metaAt('tool', TOOL, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha tool']);
-    // The first packages' items are unchanged.
-    expect(await metaAt('agent', AGENT, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha agent']);
-    expect(await promptText(`alpha-${SKILL}`)).toContain('alpha skill instructions');
-    expect(await promptText(`gamma-${SKILL}`)).toContain('gamma skill instructions');
+  describe('[#31701, #31985] install-local of a package of a THIRD namespace declaring the held agent, skill and tool names', () => {
+    beforeAll(async () => {
+      const { status, body } = await installLocal(inline('gamma', { agents: [agent('gamma')], skills: [skill('gamma')], tools: [tool('gamma')] }));
+      expect(status, JSON.stringify(body)).toBeLessThan(300);
+    }, 60_000);
+
+    it('installs; the bare read then names all three holders', async () => {
+      expect(await packageIds()).toContain('com.qa.bare.gamma');
+      expect(await metaAt('agent', AGENT, 'com.qa.bare.gamma')).toEqual(['com.qa.bare.gamma', 'gamma agent']);
+      expect(await metaAt('skill', SKILL, 'com.qa.bare.gamma')).toEqual(['com.qa.bare.gamma', 'gamma skill']);
+      expect(await metaAt('tool', TOOL, 'com.qa.bare.gamma')).toEqual(['com.qa.bare.gamma', 'gamma tool']);
+      const all = ['com.qa.bare.alpha', 'com.qa.bare.beta', 'com.qa.bare.gamma'];
+      await expectMetaRefused('agent', AGENT, all);
+      await expectMetaRefused('skill', SKILL, all);
+      await expectMetaRefused('tool', TOOL, all);
+      expect(await metaAt('tool', TOOL, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha tool']);
+      // The first packages' items are unchanged.
+      expect(await metaAt('agent', AGENT, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha agent']);
+      expect(await promptText(`alpha-${SKILL}`)).toContain('alpha skill instructions');
+      expect(await promptText(`gamma-${SKILL}`)).toContain('gamma skill instructions');
+    });
   });
 
   /**
