@@ -164,6 +164,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
 | `domain:cloud` | 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席):读或改 cloud 代码、生产方或带 cloud 半边;本仓车道 ⛔ 不认领;只缺事实读数者留车道敲信箱;cloud PM 跟到关卡,余下本仓活写明 cloud 事实后另立卡;判据见 `references/cross-repo-coordination.md`、`references/lanes/cloud.md` |
 | `security` · `review` · `eval`(车道,无 `domain:*` 标签) | 本仓安全公告(私有仓卡归该仓车道,cloud 即上行);席位 `security#N` 见 `references/lanes/security.md`;永不公开的规则只住 `references/security-findings.md`。复核席、AI 评测席各见 `references/lanes/review.md`、`references/lanes/eval.md` |
+| `repo:objectstack`(全仓调度,无 `domain:*` 标签) | 跨各域按区认领本仓卡,多席以区租约分工;`domain:*` 仍定文件归属;cloud 与安全公告除外;见 `references/lanes/objectstack.md` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统,测试基建见 devx 行)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。

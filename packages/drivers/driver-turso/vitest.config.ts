@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import path from 'path';
 import { defineConfig } from 'vitest/config';
 import { memoryBackedTmpEnv } from '../../../scripts/vitest-memory-tmp.mjs';
 
@@ -27,5 +28,13 @@ export default defineConfig({
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
     env: memoryBackedTmpEnv(),
+  },
+  resolve: {
+    alias: [
+      // The Server-Timing collector the remote transport counts into: resolved
+      // to source so the pins report on the checkout, never on a stale `dist/`
+      // (scripts/check-test-source-alias.mjs).
+      { find: /^@objectstack\/observability$/, replacement: path.resolve(__dirname, '../../observability/src/index.ts') },
+    ],
   },
 });
