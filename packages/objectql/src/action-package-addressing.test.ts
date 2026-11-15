@@ -282,7 +282,20 @@ describe('ADR-0150 D4 — a package-less action customizes only the holder whose
     expect([item(A), item(B), item(null)], 'on A\'s object').toEqual(['env account', 'beta contact', undefined]);
   });
 
-  it('CONTROL — on the one holder\'s own owner key it is still that holder\'s customization (object-bound and object-less)', () => {
+  it('CONTROL — beside the one holder on its own owner key it is still that holder\'s customization (object-bound and object-less)', () => {
+    install(A);
+    ship('approve', A, 'account');
+    authored('approve', 'account');
+    expect([item(A), item(null)], 'bound').toEqual(['env account', undefined]);
+    registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+    install(A);
+    ship('approve', A);
+    authored('approve');
+    expect([item(A), item(null)], 'object-less').toEqual(['env global', undefined]);
+  });
+
+  it('beside a bound holder and an object-less one, it customizes the holder on its own owner key only', () => {
     install(A);
     install(B);
     ship('approve', A, 'account');
