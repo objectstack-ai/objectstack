@@ -166,6 +166,48 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
     }
   });
 
+  it('[#33626] two and three hops: each hop is the related object\'s own planned read, so each is a semi-join leaf nested in the scope of the one above — one driver call', async () => {
+    const owner = (scope: unknown) => ({ SEMI_JOIN: OWNER, scope });
+    const ledger = (scope: unknown) => ({ SEMI_JOIN: OBJECT, scope });
+    const cases: ReadonlyArray<readonly [FilterCondition, unknown]> = [
+      // 2 hops: ledger.owner → owner.account → ledger.title
+      [{ owner: { account: { title: 'a' } } }, { owner: { $in: owner({ account: { $in: ledger({ title: 'a' }) } }) } }],
+      // 3 hops, a sibling key beside the inner relation at the middle hop
+      [
+        { owner: { region: 'NA', account: { owner: { region: { $ne: 'EU' } } } } },
+        { owner: { $in: owner({ region: 'NA', account: { $in: ledger({ owner: { $in: owner({ region: { $ne: 'EU' } }) } }) } }) } },
+      ],
+      // 3 hops through a tree and a master_detail field
+      [
+        { parent: { boss: { account: { title: 'z' } } } },
+        { parent: { $in: ledger({ boss: { $in: owner({ account: { $in: ledger({ title: 'z' }) } }) } }) } },
+      ],
+    ];
+    for (const [where, expected] of cases) {
+      rec.reads.length = 0;
+      await engine.find(OBJECT, { where });
+      expect(rec.reads, JSON.stringify(where)).toHaveLength(1);
+      expect(normalized(rec.reads[0].ast.where), JSON.stringify(where)).toEqual(expected);
+      expect(engine.judgeFilter(OBJECT, where), JSON.stringify(where)).toEqual({ ok: true });
+    }
+  });
+
+  it('[#33626] a multi-valued relation at an inner hop keeps its capped id read there; the hops above stay semi-joins', async () => {
+    const OWNER_WITH_MULTI = {
+      ...OWNER_OBJECT,
+      fields: { ...OWNER_OBJECT.fields, accounts: { name: 'accounts', type: 'lookup', reference: OBJECT, multiple: true } },
+    };
+    engine.registry.registerObject(OWNER_WITH_MULTI as any, 'test');
+    rec.answers.set(OBJECT, idRows('l1'));
+    rec.reads.length = 0;
+    await engine.find(OBJECT, { where: { owner: { accounts: { title: 'a' } } } });
+    // The inner id read (ledger, by title), then the outer read.
+    expect(rec.reads.map((r) => r.object)).toEqual([OBJECT, OBJECT]);
+    expect(normalized(rec.reads[1].ast.where)).toEqual({
+      owner: { $in: { SEMI_JOIN: OWNER, scope: { $and: [{ $or: [{ accounts: { $contains: 'l1' } }] }] } } },
+    });
+  });
+
   it('a multi-valued relation matches on ANY member: an $or of $contains per id, the spec\'s any-of spelling', async () => {
     rec.answers.set(OWNER, idRows('u1', 'u3'));
     expect(await outerWhereOf({ owners: { region: 'NA' } })).toEqual({
@@ -311,11 +353,12 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
 
   // ── what the first cut keeps refusing ────────────────────────────────────
 
-  it('keeps refusing, in the engine\'s words and before any read: a second level, a dotted key, an undeclared key, {}, an unregistered related object', async () => {
+  it('keeps refusing, in the engine\'s words and before any read: a fourth hop, a dotted key, an undeclared key at any hop, {}, an unregistered related object', async () => {
     const cases: ReadonlyArray<readonly [FilterCondition, string, string]> = [
-      [{ parent: { owner: { region: 'NA' } } }, 'where.parent', "'owner' is itself a lookup field of the related object 'nested_rel_ledger'"],
-      [{ owner: { account: { title: 'a' } } }, 'where.owner', "'account' is itself a lookup field of the related object 'nested_rel_owner'"],
-      [{ owner: { 'account.title': 'a' } }, 'where.owner', "'account.title' is a dotted path: the condition reaches one level only"],
+      [{ owner: { account: { owner: { account: { title: 'a' } } } } }, 'where.owner.account.owner', "'account' holds a condition of its own past the 3-relationship limit"],
+      [{ parent: { parent: { owner: { account: { title: 'a' } } } } }, 'where.parent.parent.owner', "'account' is itself a lookup field of the related object 'nested_rel_owner'"],
+      [{ owner: { account: { titel: 'a' } } }, 'where.owner.account', "'titel' is not a field of the related object 'nested_rel_ledger'"],
+      [{ owner: { 'account.title': 'a' } }, 'where.owner', "'account.title' is a dotted path, which a condition does not follow"],
       [{ owner: { regio: 'NA' } }, 'where.owner', "'regio' is not a field of the related object 'nested_rel_owner'"],
       [{ owner: {} }, 'where.owner', 'names no field of the related object'],
       [{ stray: { region: 'NA' } }, 'where.stray', "no object 'nested_rel_missing' is registered here"],

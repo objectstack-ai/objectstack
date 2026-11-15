@@ -10,11 +10,15 @@
  *
  * ## The cut, closed (maintainer ruling on #20802, letter A)
  *
- * - **Forward, one level.** The condition names a relation field of the
- *   queried object and fields of the related object. A second relation beneath
- *   it (`{ owner: { account: { name: 'x' } } }`, or the dotted
- *   `{ owner: { 'account.name': 'x' } }`) is refused, loudly. The reverse form
- *   (a parent filtered by its children) is not served here at all.
+ * - **Forward, up to {@link RELATION_CONDITION_MAX_HOPS} relationships.** The
+ *   condition names a relation field of the queried object and fields of the
+ *   related object; one of those may itself be a relation holding a condition
+ *   of its own (`{ owner: { account: { name: 'x' } } }`), down to ADR-0071's
+ *   hop limit. A condition past it, and the dotted spelling
+ *   (`{ owner: { 'account.name': 'x' } }`), are refused, loudly. Each hop is
+ *   the related object's own read (below), so each carries that object's read
+ *   scope. The reverse form (a parent filtered by its children) is not served
+ *   here at all.
  * - **Where.** `where`, on every verb that takes one (`find`, `findOne`,
  *   `count`, `aggregate`, `update`, `delete`) and on the judge-only
  *   `judgeFilter`. An aggregation's own `filter` and `having` keep the
@@ -88,6 +92,14 @@ import { isNoOperatorObject, provisionedNoOperatorObjectColumn } from './no-oper
  */
 export const RELATION_FILTER_ID_CAP = 1000;
 
+/**
+ * The most relationships one nested-relation condition may traverse: ADR-0071's
+ * hop limit (3 to-one hops, four objects), the one the dataset `include` path
+ * carries. `{ a: { b: { c: { field: v } } } }` is three hops; a condition
+ * beneath a fourth relation is refused (`hop-limit`), never cut.
+ */
+export const RELATION_CONDITION_MAX_HOPS = 3;
+
 /** One nested-relation condition the walk found and admitted. */
 export interface RelationFilterSite {
   /** The relation field of the queried object — the filter key. */
@@ -110,7 +122,7 @@ export type RelationConditionRefusalReason =
   | 'empty'
   | 'dotted-key'
   | 'undeclared-key'
-  | 'second-level';
+  | 'hop-limit';
 
 /** A condition the admission refused: the site, the reason, and the key at fault. */
 export interface RelationConditionRefusal {
@@ -123,9 +135,9 @@ export interface RelationConditionRefusal {
   readonly path: string;
   /** The condition's own keys, in order. */
   readonly keys: readonly string[];
-  /** The key the refusal is about (`dotted-key`, `undeclared-key`, `second-level`). */
+  /** The key the refusal is about (`dotted-key`, `undeclared-key`, `hop-limit`). */
   readonly key?: string;
-  /** `second-level`: the declared type of the related object's relation field. */
+  /** `hop-limit`: the declared type of the related object's relation field. */
   readonly keyType?: string;
 }
 
@@ -160,9 +172,12 @@ function declaredTypeOf(def: unknown): string | undefined {
  * (`schemaOf` answers its declared field map), the condition names at least
  * one field, and every key is a field the related object declares — or a
  * column the platform provisions on every record (`id`, `created_at`,
- * `updated_at`) — undotted, and not itself a relation holding a condition of
- * its own (one level). What each key is compared WITH is the related object's
- * own doors' question, asked when the related object is read.
+ * `updated_at`) — undotted. A key that is itself a relation holding a
+ * condition of its own is admitted the same way, one hop further, up to
+ * {@link RELATION_CONDITION_MAX_HOPS}; its refusal is the answer for the whole
+ * condition (it names its own field and path). What each key is compared WITH
+ * is the related object's own doors' question, asked when the related object
+ * is read.
  */
 export function admitRelationCondition(
   field: string,
@@ -170,6 +185,7 @@ export function admitRelationCondition(
   condition: Record<string, unknown>,
   path: string,
   schemaOf: ((name: string) => unknown) | undefined,
+  hops = 1,
 ): RelationConditionVerdict {
   const type = declaredTypeOf(def) ?? 'lookup';
   const target = referenceTargetOf(def);
@@ -199,7 +215,11 @@ export function admitRelationCondition(
     }
     const keyType = declaredTypeOf(declared);
     if (keyType !== undefined && REFERENCE_VALUE_TYPES.has(keyType) && isNoOperatorObject(condition[key])) {
-      return refuse('second-level', key, keyType);
+      if (hops >= RELATION_CONDITION_MAX_HOPS) return refuse('hop-limit', key, keyType);
+      const inner = admitRelationCondition(
+        key, declared, condition[key] as Record<string, unknown>, `${path}.${key}`, schemaOf, hops + 1,
+      );
+      if (!inner.ok) return inner;
     }
   }
   return { ok: true, site: { field, type, target, multiple, condition, path } };
@@ -288,14 +308,14 @@ export function relationConditionRefusalMessage(refusal: RelationConditionRefusa
       );
     case 'dotted-key':
       return (
-        `${head}, and '${key}' is a dotted path: the condition reaches one level only. `
-        + `Read ${named} with that condition, ${twoStep} ${verdict}`
+        `${head}, and '${key}' is a dotted path, which a condition does not follow: nest each relation `
+        + `instead, or read ${named} with that condition, ${twoStep} ${verdict}`
       );
-    case 'second-level':
+    case 'hop-limit':
     default:
       return (
-        `${head}, and '${key}' holds a condition of its own: one level only. Read ${named} with `
-        + `{ "${key}": { … } }, ${twoStep} ${verdict} '${key}' is itself a `
+        `${head}, and '${key}' holds a condition of its own past the ${RELATION_CONDITION_MAX_HOPS}-relationship `
+        + `limit. Read ${named} with { "${key}": { … } }, ${twoStep} ${verdict} '${key}' is itself a `
         + `${refusal.keyType ?? 'relation'} field of ${related}.`
       );
   }
