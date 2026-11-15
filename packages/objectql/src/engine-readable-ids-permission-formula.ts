@@ -62,9 +62,14 @@
  * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
+ *
+ * [#33696 · ruling record 6893097935, option A] `composeReadableIdsChain`
+ * reads the registry too (`_registry`, a getter like the others): a leaf over
+ * the REQUIRED master of a `controlled_by_parent` object is dropped when its
+ * master's scope is unrestricted ({@link unrestrictedRequiredMasterLeavesDropped}).
  */
 
-import { ReadableIds, RLS_DENY_FILTER, controlledByParentMasterOf, markFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { ReadableIds, RLS_DENY_FILTER, controlledByParentMasterOf, filterSubtreeProvenanceOf, isReadableIds, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
@@ -152,9 +157,24 @@ export const READABLE_IDS_MAX_CHAIN_DEPTH = 8;
  * not compose, inside an answered scope is refused by the same walk that
  * refuses it in a caller's `where` ({@link collectComposableReadableIds}):
  * the scope is the `where` of a read of its parent and is judged as one.
+ *
+ * [#33696 · ruling record 6893097935, option A] 5. A leaf over the REQUIRED
+ * master of the object whose `where` or scope `node` is — that object
+ * `controlled_by_parent`, the leaf the whole comparand of a `$in` on its
+ * required `master_detail` field, in an AND position — is DROPPED, not
+ * composed, when the master's answered scope is `undefined` (admitted, no
+ * row restriction): `fk IN (SELECT id FROM master)` then removes only the
+ * rows whose master is missing or empty, and the ruling has an unrestricted
+ * reader see those. A scope that is left with no condition once its own leaves
+ * are dropped is itself `undefined`, so a chain drops whole only when every
+ * hop is unrestricted; a restricted hop keeps its leaf and every leaf below
+ * it. An optional master, a leaf in an `$or`/`$not`, and every other
+ * consumer's leaf compose exactly as before. The tenant wall is not part of
+ * the scope (D2 step 3): the outer read's own wall still bounds the detail
+ * rows. See {@link unrestrictedRequiredMasterLeavesDropped}.
  */
 export async function composeReadableIdsChain<N>(
-  this: Pick<ReadableIdsPermissionFormulaHost, 'refuseUncomposableReadableIdsClasses' | 'readableIdsScopeOf' | 'composeReadableIdsChain'>,
+  this: Pick<ReadableIdsPermissionFormulaHost, '_registry' | 'refuseUncomposableReadableIdsClasses' | 'readableIdsScopeOf' | 'composeReadableIdsChain'>,
   chain: ReadableIdsChain,
   node: N,
   sites: readonly ComposableReadableIdsSite[],
@@ -196,16 +216,106 @@ export async function composeReadableIdsChain<N>(
     // The scope is the `where` of a read of `parent`: judged as one, and
     // the leaves it carries are composed before this parent's leaf is.
     const nested = collectComposableReadableIds(object, operation, answer.scope, 'where', `${site.at}.scope`);
-    chain.answers.set(parent, nested.length === 0
-      ? answer
-      : { scope: await this.composeReadableIdsChain(chain, answer.scope, nested, [...ancestors, parent]) });
+    if (nested.length === 0) {
+      chain.answers.set(parent, answer);
+      continue;
+    }
+    const composed = await this.composeReadableIdsChain(chain, answer.scope, nested, [...ancestors, parent]);
+    // [#33696] Every condition of the scope was a dropped leaf: unrestricted.
+    chain.answers.set(parent, { scope: isEmptyCondition(composed) ? undefined : composed });
   }
+  // [#33696] Step 5: the required master's leaf over an unrestricted master.
+  const scoped = ancestors.length === 0 ? object : ancestors[ancestors.length - 1]!;
+  const pruned = unrestrictedRequiredMasterLeavesDropped(
+    node,
+    requiredControlledByParentMasterOf(this._registry.getObject(scoped)),
+    (leaf) => chain.answers.get(leaf.object)?.scope === undefined && chain.answers.get(leaf.object) != null,
+  );
   // A parent with no answer (`null`, or never asked: not registered) is
   // `$in: []`.
-  return composeReadableIdsLeaves(node, (leaf) => {
+  return composeReadableIdsLeaves(pruned, (leaf) => {
     const answer = chain.answers.get(leaf.object);
     return answer ? ReadableIds.compose(leaf, answer.scope) : [];
   });
+}
+
+/** A plain object with no key: a condition that matches every row. */
+function isEmptyCondition(node: unknown): boolean {
+  if (node === null || typeof node !== 'object' || Array.isArray(node)) return false;
+  const proto = Object.getPrototypeOf(node);
+  return (proto === Object.prototype || proto === null) && Object.keys(node).length === 0;
+}
+
+/**
+ * [ADR-0055 §1 · #33696] The REQUIRED master of a `controlled_by_parent`
+ * object, as its field map declares it — the field and the object it
+ * references — or `undefined`: another sharing model, an optional master
+ * (`required: false`, whose leaf is one arm of an `$or` and always composes),
+ * no resolvable master, or a reference that is not a plain object name.
+ */
+function requiredControlledByParentMasterOf(schema: unknown): { field: string; master: string } | undefined {
+  const s = schema as { sharingModel?: unknown; security?: { sharingModel?: unknown }; fields?: Record<string, { reference?: unknown }> } | null | undefined;
+  if ((s?.sharingModel ?? s?.security?.sharingModel) !== 'controlled_by_parent') return undefined;
+  const relation = controlledByParentMasterOf(s?.fields);
+  if (!relation || relation.optional) return undefined;
+  const master = s?.fields?.[relation.field]?.reference;
+  return typeof master === 'string' && master.length > 0 ? { field: relation.field, master } : undefined;
+}
+
+/**
+ * [#33696 · ruling record 6893097935, option A] `node` — the `where` or
+ * scope of a `controlled_by_parent` object — with every leaf over its REQUIRED
+ * master removed whose master `unrestricted` answers as unrestricted. Only a
+ * leaf that is the whole comparand of `{ [master.field]: { $in: leaf } }` is
+ * removed, and only in an AND position: the node itself or a member of an
+ * `$and` reached through AND positions. A `$and` member left empty goes, and
+ * an `$and` left empty goes with it. Copy-on-write, provenance marks kept.
+ *
+ * Why only there: in an AND position the leaf is one conjunct, so removing it
+ * widens exactly by the rows the leaf alone removed — with the master
+ * unrestricted, the rows whose required master is missing or empty, which the
+ * ruling has an unrestricted reader see. Under an `$or` or a `$not` removing a
+ * conjunct is no such widening, and the optional master's leaf sits in an
+ * `$or` by construction ({@link requiredControlledByParentMasterOf} does not
+ * name it either), so neither is touched.
+ */
+function unrestrictedRequiredMasterLeavesDropped<N>(
+  node: N,
+  master: { field: string; master: string } | undefined,
+  unrestricted: (leaf: ReadableIds) => boolean,
+): N {
+  if (!master) return node;
+  const prune = (value: unknown): unknown => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return value;
+    let out: Record<string, unknown> | undefined;
+    for (const key of Object.keys(value)) {
+      const item = (value as Record<string, unknown>)[key];
+      if (key === master.field && item !== null && typeof item === 'object' && !Array.isArray(item)
+        && Object.keys(item).length === 1) {
+        const leaf = (item as { $in?: unknown }).$in;
+        if (isReadableIds(leaf) && leaf.object === master.master && unrestricted(leaf)) {
+          out ??= { ...(value as Record<string, unknown>) };
+          delete out[key];
+          continue;
+        }
+      }
+      if (key === '$and' && Array.isArray(item)) {
+        const members = item.map(prune);
+        if (members.some((m, i) => m !== item[i])) {
+          const kept = members.filter((m) => !isEmptyCondition(m));
+          out ??= { ...(value as Record<string, unknown>) };
+          if (kept.length === 0) delete out[key];
+          else out[key] = kept;
+        }
+      }
+    }
+    if (out === undefined) return value;
+    const mark = filterSubtreeProvenanceOf(value);
+    return mark === null ? out : markFilterSubtreeProvenance(out, mark);
+  };
+  return prune(node) as N;
 }
 
 /** The body of `ObjectQL#findUnservableControlledByParentMasters`; the method's docblock there is its contract. */
