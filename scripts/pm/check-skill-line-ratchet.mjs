@@ -1872,8 +1872,8 @@ export const CEILINGS = new Map([
   // same convention as every lane charter above).
   ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 28],
   // repo:objectstack lane charter: the whole-repo dispatch lane, several seats on several
-  // accounts, each running area-lease mode and splitting areas through seat-post lease tables
-  // and `Notify: split` (#33959; ruling of record: the maintainer, 2026-11-15, verbatim in that
+  // accounts, each running area-lease mode and splitting areas through the lease tables on
+  // their seat posts (#33959; ruling of record: the maintainer, 2026-11-15, verbatim in that
   // card's body). A NEW file, so this is an added row and no other row moves; set at the landed
   // line count (headroom 0, same convention as every lane charter above).
   ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 35],
