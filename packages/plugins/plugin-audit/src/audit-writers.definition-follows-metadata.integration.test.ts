@@ -21,8 +21,10 @@ import { installDefaultOrganization } from './default-organization.testkit.js';
  * `installAuditWriters` used to keep each object's first `getSchema` answer for
  * the life of the process. An object whose `enable.files` was switched on
  * through the door kept refusing attachments with 403 `FILES_DISABLED` until a
- * restart, while the door's own read-back showed the new value. The same copy
- * fed every other reader, the ledger's credential mask among them.
+ * restart, while the door's own read-back showed the new value (that gate has
+ * since left this capability: the storage service is the opt-in's one
+ * enforcer). The same copy fed every other reader: the `enable.feeds` gate
+ * these cases now observe, and the ledger's credential mask.
  *
  * The composition is the one the door runs in: `ObjectKernel` +
  * `ObjectQLPlugin` (which assembles the metadata protocol and registers it as
@@ -33,8 +35,8 @@ import { installDefaultOrganization } from './default-organization.testkit.js';
  * its first write makes the writers look the definition up BEFORE the change,
  * which is the lookup a held copy kept.
  *
- * `sys_attachment` is a stand-in under the real name: service-storage owns the
- * definition, and the gate reads only `parent_object`.
+ * `sys_comment` is a stand-in under the real name: the gate reads only
+ * `thread_id`, whose `object:record` prefix names the target object.
  */
 describe('audit writers answer from the current definition after a metadata-door change (#24565)', () => {
   const HARNESS_PACKAGE = 'com.objectstack.audit.test.definition-follows-metadata';
@@ -61,20 +63,16 @@ describe('audit writers answer from the current definition after a metadata-door
     expect(result?.success).toBe(true);
   };
 
-  /** One attachment onto `parent`: admitted, or the refusal's envelope. */
-  const attach = async (parent: string): Promise<{ admitted: true } | { code: unknown; status: unknown }> => {
+  /** One comment on a record of `target`: admitted, or the refusal's envelope. */
+  const comment = async (target: string): Promise<{ admitted: true } | { code: unknown; status: unknown }> => {
     try {
-      await engine.insert(
-        'sys_attachment',
-        { parent_object: parent, parent_id: 'rec-1', file_id: 'file-1' },
-        SYSTEM,
-      );
+      await engine.insert('sys_comment', { thread_id: `${target}:rec-1`, body: 'hello' }, SYSTEM);
       return { admitted: true };
     } catch (e: any) {
       return { code: e?.code, status: e?.status };
     }
   };
-  const REFUSED = { code: 'FILES_DISABLED', status: 403 };
+  const REFUSED = { code: 'FEEDS_DISABLED', status: 403 };
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false } as any);
@@ -89,9 +87,9 @@ describe('audit writers answer from the current definition after a metadata-door
     engine.registerDriver(driver, true);
     engine.registry.registerObject(
       {
-        name: 'sys_attachment',
-        label: 'Attachment',
-        fields: { parent_object: text('parent_object'), parent_id: text('parent_id'), file_id: text('file_id') },
+        name: 'sys_comment',
+        label: 'Comment',
+        fields: { thread_id: text('thread_id'), body: text('body') },
       } as any,
       HARNESS_PACKAGE,
     );
@@ -108,29 +106,29 @@ describe('audit writers answer from the current definition after a metadata-door
     }
   }, 30_000);
 
-  it('enable.files switched ON through the door admits the same attachment, with no restart', async () => {
-    await save('qa_kid');
-    // Refused while the object declares no files, and this refusal is the
+  it('enable.feeds switched back ON through the door admits the same comment, with no restart', async () => {
+    await save('qa_kid', { enable: { feeds: false } });
+    // Refused while the object declares feeds off, and this refusal is the
     // lookup a held copy would have kept.
-    expect(await attach('qa_kid')).toEqual(REFUSED);
+    expect(await comment('qa_kid')).toEqual(REFUSED);
 
-    await save('qa_kid', { enable: { files: true } });
+    await save('qa_kid', { enable: { feeds: true } });
     // The registry already serves the new value, so the door's read-back shows it.
-    expect(engine.getSchema('qa_kid')?.enable?.files).toBe(true);
-    expect(await attach('qa_kid')).toEqual({ admitted: true });
+    expect(engine.getSchema('qa_kid')?.enable?.feeds).toBe(true);
+    expect(await comment('qa_kid')).toEqual({ admitted: true });
   });
 
-  it('switched OFF again through the door, the same attachment is refused again', async () => {
-    await save('qa_kid_reverse', { enable: { files: true } });
-    expect(await attach('qa_kid_reverse')).toEqual({ admitted: true });
+  it('switched OFF through the door, the same comment is refused', async () => {
+    await save('qa_kid_reverse', { enable: { feeds: true } });
+    expect(await comment('qa_kid_reverse')).toEqual({ admitted: true });
 
-    await save('qa_kid_reverse', { enable: { files: false } });
-    expect(await attach('qa_kid_reverse')).toEqual(REFUSED);
+    await save('qa_kid_reverse', { enable: { feeds: false } });
+    expect(await comment('qa_kid_reverse')).toEqual(REFUSED);
   });
 
-  it('control: an object authored with enable.files from the start, never looked up before, admits it', async () => {
-    await save('qa_kid_from_start', { enable: { files: true } });
-    expect(await attach('qa_kid_from_start')).toEqual({ admitted: true });
+  it('control: an object authored with feeds off from the start, never looked up before, refuses it', async () => {
+    await save('qa_kid_from_start', { enable: { feeds: false } });
+    expect(await comment('qa_kid_from_start')).toEqual(REFUSED);
   });
 
   // `password`, not `secret`: both are masked on the ledger copy, and a

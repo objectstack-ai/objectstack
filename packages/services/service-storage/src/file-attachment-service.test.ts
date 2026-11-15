@@ -8,8 +8,8 @@
  *
  * What these pin, through the plugin's OWN wiring (a real `ObjectQL` over
  * sqlite `:memory:`, the package's ruled test backend; the plugin's own
- * `kernel:ready` gates; `plugin-audit`'s REAL `enable.files` gate on the
- * `sys_attachment` insert; the plugin's local adapter in a temp directory; and
+ * `kernel:ready` gates, the `enable.files` opt-in gate among them, beside
+ * `plugin-audit`'s REAL writers on the same engine; the plugin's local adapter in a temp directory; and
  * a settings namespace carrying `max_upload_mb`), reached by its registry name:
  *
  *  - an admitted call writes exactly one committed `sys_file` (attachments
@@ -136,8 +136,9 @@ async function engineWithParents(): Promise<ObjectQL> {
     },
   ]);
   expect(relaxed.applied).toHaveLength(1);
-  // plugin-audit's REAL `enable.files` gate (and the rest of its writers), as
-  // AuditPlugin installs them on the composed engine.
+  // plugin-audit's REAL writers, as AuditPlugin installs them on the composed
+  // engine. They judge no `sys_attachment` write: the `enable.files` refusals
+  // below are the storage plugin's own gate, installed at `kernel:ready`.
   installAuditWriters(ql as any);
   await ql.insert('att_case', { id: 'case_a', name: 'in org_a', organization_id: 'org_a' }, SYS);
   await ql.insert('att_case', { id: 'case_b', name: 'in org_b', organization_id: 'org_b' }, SYS);

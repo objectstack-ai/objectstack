@@ -150,9 +150,10 @@ import { findReferenceableFile, unreadableFileMessage, type FileReferenceReadAut
  * bypass all three gates, as do context-less programmatic calls on bare
  * kernels (no principal to authorize — REST always carries a context).
  *
- * These run alongside plugin-audit's `enforceFilesCapability` (the
- * enable.files opt-in gate); both are fail-closed 403s, so their relative
- * order is not load-bearing.
+ * These run after this service's own `enable.files` opt-in gate
+ * (`installAttachmentFilesOptInGate`, installed first in the same handler), so
+ * an object that has not opted in answers with that refusal before any
+ * question about the caller.
  */
 
 /**

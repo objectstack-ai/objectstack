@@ -89,7 +89,8 @@ import {
  *  - **The `sys_attachment` row.** A data-engine insert, so every gate the
  *    engine runs on a `sys_attachment` insert judges it — the gate's decision,
  *    never a copy of it here. Measured under this verb's system context:
- *    `plugin-audit`'s `enable.files` gate runs and refuses `403
+ *    the storage service's own `enable.files` gate
+ *    (`installAttachmentFilesOptInGate`) runs and refuses `403
  *    FILES_DISABLED` for a parent object without the opt-in; the attachment
  *    lifecycle hooks run; the parent-EDIT gate
  *    (`installAttachmentAccessHooks`) returns at its system-context line by its

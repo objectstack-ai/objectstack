@@ -417,7 +417,7 @@
         "files": {
           "status": "live",
           "proof": "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts#attachments-permission-matrix",
-          "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts (enforceFilesCapability beforeInsert hook: sys_attachment rows may only target objects declaring enable.files true — 403 FILES_DISABLED otherwise); objectui RecordAttachmentsPanel renders the record Attachments surface (upload/list/download/delete) when the flag is true. Opt-in — spec default false (#2727)."
+          "evidence": "packages/services/service-storage/src/attachment-files-opt-in.ts (installAttachmentFilesOptInGate beforeInsert and beforeUpdate hooks, the opt-in's one enforcer: sys_attachment rows may only target objects declaring enable.files true — 403 FILES_DISABLED otherwise); objectui RecordAttachmentsPanel renders the record Attachments surface (upload/list/download/delete) when the flag is true. Opt-in — spec default false (#2727)."
         },
         "feeds": {
           "status": "live",

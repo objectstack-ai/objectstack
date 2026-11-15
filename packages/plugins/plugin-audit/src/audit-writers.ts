@@ -1566,7 +1566,7 @@ export function installAuditWriters(
   /**
    * [#24565] The object's REGISTERED definition, read on every call and never
    * held here. Every gate and every row this installer writes asks it: the
-   * `enable.files` / `enable.feeds` capability gates, the ledger's credential
+   * `enable.feeds` capability gate, the ledger's credential
    * mask and `internal` omission, the activity mirror's `enable.activities`
    * switch, its milestones, titles, labels and computed-field drop.
    *
@@ -2582,72 +2582,40 @@ export function installAuditWriters(
   engine.registerHook('beforeInsert', enforceFeedsCapability, { object: 'sys_comment', packageId });
   engine.registerHook('beforeUpdate', enforceFeedsCapability, { object: 'sys_comment', packageId });
 
-  /**
-   * `enable.files` server-side enforcement (#2727). The generic Attachments
-   * panel persists `sys_attachment` join rows through the generic data path,
-   * so — like the feeds gate above — the engine hook seam is the one gate
-   * every caller crosses. Unlike feeds, `files` is opt-IN (spec default
-   * `false`): the panel is a new surface, not an existing behavior, so a
-   * parent object must declare `enable: { files: true }` before attachments
-   * may target it. Fail-closed: an absent enable block, an absent flag, and
-   * an unknown parent object all reject — opt-in means *explicit*.
-   *
-   * Deliberately NOT gated: `Field.file` / `Field.image` uploads. Those
-   * store the file URL in the record's own column via service-storage and
-   * never create a sys_attachment row, so field-level attachments keep
-   * working regardless of this flag.
-   *
-   * [#10170] Registered on `beforeUpdate` as well, for the feeds gate's
-   * reason one object over: `enable.files` says whether attachments may
-   * TARGET this object, so a re-point that makes a row target it is inside
-   * the declaration whether or not a creation happened. On insert only, a
-   * caller barred from *creating* an attachment on a `files: false` object
-   * could *move* an existing one onto it. `attachment-access-hooks.ts`
-   * authorizes the re-point (commit da891e0ef: the new `parent_object`/`parent_id`
-   * must be editable) — access, again, not capability.
+  /*
+   * `enable.files`, the per-object attachment opt-in, is NOT enforced here. It
+   * is the storage service's, and only the storage service's
+   * (`installAttachmentFilesOptInGate` in service-storage's
+   * `attachment-files-opt-in.ts`): the service that registers `sys_attachment`
+   * enforces the declaration on every insert and re-point wherever the object
+   * exists, so a composition without this capability refuses exactly what one
+   * with it refuses (maintainer ruling on #32754, route A). A second copy here
+   * would be a second enforcer of one declaration, free to drift from the
+   * first.
    */
-  const enforceFilesCapability = async (ctx: HookContext) => {
-    const data: any = (ctx.input as any)?.data;
-    const parentObject = data?.parent_object;
-    // Two meanings, one line. On INSERT an absent `parent_object` is a
-    // schema violation — left to validation to report, so the gate never
-    // shadows the real diagnostic. On UPDATE (#10170) it means "this write is
-    // not a re-point", so there is no new target to ask about and the row's
-    // existing parent was already gated when it was created. Either way the
-    // gate has nothing to say.
-    if (typeof parentObject !== 'string' || parentObject.length === 0) return;
-    const def = getObjectDef(parentObject);
-    if (def?.enable?.files !== true) {
-      const err: any = new Error(`File attachments are not enabled for object '${parentObject}' (requires enable.files: true)`);
-      err.code = 'FILES_DISABLED';
-      err.status = 403;
-      err.object = parentObject;
-      throw err;
-    }
-  };
-  engine.registerHook('beforeInsert', enforceFilesCapability, { object: 'sys_attachment', packageId });
-  engine.registerHook('beforeUpdate', enforceFilesCapability, { object: 'sys_attachment', packageId });
 
   /*
-   * [#10170] Why neither `beforeUpdate` registration above declares
-   * `dispatchUnscopedMultiWrite` (#9719, widened to `beforeUpdate` by #9974).
+   * [#10170] Why the feeds gate's `beforeUpdate` registration above does not
+   * declare `dispatchUnscopedMultiWrite` (#9719, widened to `beforeUpdate` by
+   * #9974).
    *
    * That flag buys ONE extra dispatch, with the whole-operation context and
    * before any matched row is resolved, for guards that refuse an operation
-   * SHAPE — "a `multi: true` update with no `where` at all". These two are not
-   * shape guards: they read the PAYLOAD, which the per-row fan-out delivers
+   * SHAPE — "a `multi: true` update with no `where` at all". The feeds gate is
+   * not a shape guard: it reads the PAYLOAD, which the per-row fan-out delivers
    * verbatim to every matched row (#5574 / ADR-0058 Addendum II D1–D2 builds a
    * fresh context per row per phase, carrying the same payload object). So an
-   * unscoped multi update that re-points onto a walled parent is already
+   * unscoped multi update that re-threads into a walled object is already
    * refused on the first matched row, without the flag — pinned in
    * `capability-gate-update-verb.test.ts`.
    *
    * Declaring it would narrow further than the declaration justifies: the one
    * case it would ADD is a ZERO-MATCH unscoped write, where nothing is written
    * and therefore nothing ever comes to target the walled object. Refusing
-   * that is an operation-shape policy — the #4757 `sys_attachment` and #4630
-   * `sys_comment` guards' territory, declared on their own registrations — not
-   * the capability opt-in this card restores.
+   * that is an operation-shape policy — the #4630 `sys_comment` guard's
+   * territory, declared on its own registration — not the capability gate.
+   * (The storage service's `enable.files` gate reads the payload the same way,
+   * for the same reason.)
    */
 
   /** Said once: a writer composed without the mention gate emits no mention notification. */

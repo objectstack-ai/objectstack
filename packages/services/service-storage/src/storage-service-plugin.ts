@@ -515,9 +515,8 @@ export class StorageServicePlugin implements Plugin {
     // [#23306] The engine the `kernel:ready` hook below installs this plugin's
     // `sys_attachment` gates on. The attach verb is armed with it only at
     // `kernel:bootstrapped`, once EVERY plugin's `kernel:ready` handler has run —
-    // other plugins install their gates on the same insert from theirs (the
-    // `enable.files` gate among them), so a verb armed any earlier could write
-    // a row one of them never judged.
+    // other plugins may install their gates on the same insert from theirs, so
+    // a verb armed any earlier could write a row one of them never judged.
     let gatedEngine: FileAttachmentEngine | null = null;
     ctx.hook('kernel:bootstrapped', async () => {
       this.attachmentEngine = gatedEngine;
@@ -623,9 +622,14 @@ export class StorageServicePlugin implements Plugin {
         // and the write rule above, the read-visibility gate just installed,
         // and the download door's parent-record check, which binds wherever an
         // auth service and a queryable engine exist (`buildFileReadAuthorizer`,
-        // the same binding `composeStorageRoutes` makes). Each flag is the
-        // installation's own answer, and every gate is this service's, so no
-        // other plugin's order is involved. On a kernel lacking any of them the
+        // the same binding `composeStorageRoutes` makes). Three flags are their
+        // installation's own answer: the opt-in installer's return, the
+        // middleware seam the read-visibility gate was installed on, and the
+        // download binding. The write-rule flag is a literal `true`, true
+        // because this line is reached only inside the branch that has just
+        // installed the write rule on the hook seam (its installer returns
+        // nothing to read). Every gate is this service's, so no other plugin's
+        // order is involved. On a kernel lacking any of them the
         // object grant would judge the rows alone, so nothing is contributed
         // and members stay refused (maintainer ruling; the reasoning is in
         // `attachment-member-grant.ts`).

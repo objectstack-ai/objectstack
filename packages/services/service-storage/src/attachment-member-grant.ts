@@ -71,8 +71,12 @@ export const ATTACHMENT_MEMBER_PERMISSION_SET = Object.freeze({
 export const ATTACHMENT_MEMBER_GRANT_CONTRIBUTOR = 'com.objectstack.service.storage';
 
 /**
- * Which of the attachment gates this kernel has, each as its installation
- * answered. All four must be `true` for the grant to be contributed.
+ * Which of the attachment gates this kernel has. All four must be `true` for
+ * the grant to be contributed. Three are their installation's own answer
+ * (`filesOptIn`, `readVisibility`, `downloadCheck`); `writeRule` is a literal
+ * `true` at the one call site that reaches it, the branch that has just
+ * installed the write rule on the engine's hook seam, and a literal `false`
+ * on an engine without that seam.
  */
 export interface AttachmentRowGates {
   /** The write rule: the insert, update and delete gates on `sys_attachment` rows. */

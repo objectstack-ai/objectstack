@@ -472,7 +472,7 @@ describe('[#5860] the skip list is declared on the registration face', () => {
     expect(globalPreImage).toEqual([]);
   });
 
-  it('[#10170] the two capability gates are declared on insert AND update, each scoped to one object', () => {
+  it('[#10170] the feeds capability gate is declared on insert AND update, scoped to one object; no gate on sys_attachment', () => {
     // The other half of the case above: the reason a `beforeUpdate`
     // registration is admissible here is that it names ONE object. Assert that
     // rather than leaving it to the negative filter — a future gate that
@@ -491,11 +491,14 @@ describe('[#5860] the skip list is declared on the registration face', () => {
         .sort();
 
     expect(gateEvents('sys_comment')).toEqual(['beforeInsert', 'beforeUpdate']);
-    expect(gateEvents('sys_attachment')).toEqual(['beforeInsert', 'beforeUpdate']);
+    // `enable.files` has one enforcer, the storage service's own gate
+    // (`attachment-files-opt-in.ts`, ruling on #32754, route A): this capability
+    // judges no `sys_attachment` write at all.
+    expect(gateEvents('sys_attachment')).toEqual([]);
 
-    // …and neither of them widened into the global allow half.
+    // …and it did not widen into the global allow half.
     for (const r of registrations) {
-      if (r.options?.object === 'sys_comment' || r.options?.object === 'sys_attachment') {
+      if (r.options?.object === 'sys_comment') {
         expect(r.options?.excludeObjects).toBeUndefined();
       }
     }

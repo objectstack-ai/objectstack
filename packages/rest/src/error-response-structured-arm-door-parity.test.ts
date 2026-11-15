@@ -226,7 +226,7 @@ const CASES: readonly Case[] = [
     },
     {
         covers: ['FILES_DISABLED'],
-        what: "plugin-audit's enable.files gate (`err.status = 403`, `err.object`)",
+        what: "service-storage's enable.files opt-in gate (`err.status = 403`, `err.object`)",
         error: () => {
             const err: any = new Error("File attachments are not enabled for object 'account'");
             err.code = 'FILES_DISABLED';

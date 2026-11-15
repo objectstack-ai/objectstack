@@ -19,9 +19,10 @@
  * grant on it (`attachment-member-grant.ts`) only where every gate that
  * judges the rows is present. So the declaration is enforced by the service
  * that registers the object, and holds wherever the object does (maintainer
- * ruling on #32754, route A). Another gate that enforces the same declaration
- * on the same writes may also run; both read the one live definition and
- * refuse with the one code, so they cannot disagree.
+ * ruling on #32754, route A). It is the declaration's ONE enforcer: no other
+ * package judges `enable.files` on these writes, so the refusal is the same
+ * with or without the audit capability installed, and there is no second copy
+ * to drift from this one.
  *
  * Not gated: a file-class field (`Field.file` / `Field.image`). It stores the
  * file reference in the record's own column and writes no `sys_attachment`

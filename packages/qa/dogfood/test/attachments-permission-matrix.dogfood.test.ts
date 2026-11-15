@@ -80,8 +80,8 @@ function bootFixture(extra: { multiTenant?: boolean; orgContext?: boolean } = {}
       security: attachmentsFixtureSecurity(),
       extraPlugins: [
         // The real `objectstack dev` pairing for the attachments surface:
-        // storage (sys_file/sys_attachment + routes + lifecycle hooks) and
-        // audit (the #2727 enable.files FILES_DISABLED gate).
+        // storage (sys_file/sys_attachment + routes + lifecycle hooks + the
+        // #2727 enable.files FILES_DISABLED gate, its one enforcer) and audit.
         // `bindToSettings:false` keeps the constructor rootDir — the settings
         // live-wire would swap in a './storage' adapter and the fs asserts
         // below would point at the wrong directory.
