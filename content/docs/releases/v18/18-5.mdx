@@ -20,8 +20,9 @@ CHANGELOG entry under that commit carries the whole before and after. The new
 capabilities are listed one line each, the changeset's own summary. The 146
 other fixes are counted by area, and the ones that bear on an upgrade are
 named. Areas are placed mechanically, from the words of each summary and the
-packages the entry touches, for finding your way. One summary is reworded to
-plain words; nothing else is. The
+packages the entry touches, for finding your way. Two new-capability
+summaries are shortened or put in plain words; the breaking lines and the
+自动迁移 rows are written from their changesets. The
 [upgrade checklist](#upgrade-checklist) is compiled from the changesets and
 has not been walked.
 </Callout>
@@ -554,3 +555,192 @@ The 70 entries that add to the metadata protocol (`Metadata-protocol: added`) or
 - An irreversible operation the agent applied through its declared confirmation gate, on an explicit instruction, meets `pending_confirmation` (temporary) (`83cf892`, #33706)
 - A recorded replay re-sends each turn's recorded writes, so an applied operation reads back what the run wrote (`b76df9a`, #33764)
 
+
+### 语义变化 — semantic changes [#semantic-changes]
+
+The 1 entry that declares `Metadata-protocol: semantic` and breaks nothing.
+
+- A package that holds a bundle's name only through its own stored row lists the App pair's added member its exact read already serves (ADR-0150 D4) (`1fd5d8a`, #33220)
+
+### 其他修复 — other fixes [#other-fixes]
+
+The 146 entries that the classifier reads no breaking change and no protocol
+kind in. They are not listed here: read them in the CHANGELOG of the package
+they touch, or in that package's GitHub Release under 其他修复. By area:
+
+| Area | Entries |
+| :--- | ---: |
+| Console and the `@object-ui/*` packages | 28 |
+| Security, identity, sign-in and approvals | 18 |
+| Flows, connectors, mail and messaging | 4 |
+| Metadata the build, lint and publish doors judge | 8 |
+| Namespaces, packages and metadata reads | 11 |
+| The data engine, formulas, seeds and import | 9 |
+| REST, MCP and the HTTP server | 8 |
+| Analytics and datasets | 2 |
+| Files and storage | 2 |
+| The CLI, deployment and audit | 2 |
+| Skills, spec docs and test tooling | 54 |
+
+Among them, grouped by what they fix:
+
+- **Dates stored before 18.4.0 on PostgreSQL.** A `date` field that a
+  `datetime` → `date` publish converted on a release before 18.4.0 can hold
+  values one day early on PostgreSQL; the platform does not repair them, and
+  the `@objectstack/driver-sql` CHANGELOG entry says how an operator finds and
+  corrects them. On SQLite and MySQL, such a field whose column stayed a
+  date-time column now filters by its calendar day (`01d206d`, #33270).
+- **Installs, upgrades and package state take effect without a restart.** An
+  upgrade or re-install withdraws the items the new version no longer ships
+  (`7adb1b5`, #33304); the install and enable routes re-read the metadata they
+  bring into service (`e3f0cfd`, #33448); disabling or uninstalling a package
+  withdraws its flows at once (`c43bffd`, #33546); and an install-local
+  package keeps its flows after a restart (`6455104`, #33095). After a
+  restart the package registry serves the manifest written last (`9562643`,
+  #33295) and the stored install dates (`426bb46`, #33610).
+- **Access is judged per object and per operation.** Each data operation reads
+  at its own object's access depth when sibling operations share a request
+  (`86c18df`, #33303); operations running at once on one request wait for the
+  row-level membership resolver instead of compiling against an empty set
+  (`d01f514`, #33474); a declared position rename carries its holders after a
+  hot install too (`4a0c480`, #33245); and a directory deactivation suspends
+  the AI service accounts the person is accountable for (`7c36f52`, #33109).
+- **Refusals and advisories in every platform locale.** Permission refusals
+  speak the caller's language (`a1e0402`, #33290), and the save door's
+  dashboard, data-model, form-layout, flow, approval, connector,
+  permission-set and security-posture advisories carry a sentence in every
+  platform locale (`5c005e0`, `dd4ce50`, `6e4a203`, `a83c366`, `796e9d4`,
+  `c09320d`).
+- **Boot and readiness.** `GET /api/v1/ready` reports whether the boot seed
+  has landed, and `os serve` prints the seed result (`218b012`, #33337); a
+  boot the organization-ownership guard refuses names a complete apply
+  command (`67725f1`, #33408); on an upgraded MySQL 8 database the old,
+  narrower connector-connection key retires as on PostgreSQL (`c94a4da`,
+  #33514).
+- **Files.** A file uploaded through an upload link that named no record, and
+  that no record took, is reclaimed (`a3a3cea`, #33209).
+- **Two widenings the classifier files here.** Two changesets open with their
+  `Clause-②: yes (widening)` line instead of a summary, so the classifier
+  reads no declaration in them: the MCP read tools admit a system object whose
+  author declared `enable.aiReadable: true` (`3eac63a`, #33117), and
+  organization invitation refusals read in the Console's language (`5604aeb`,
+  #33679). No narrowing opens that way in this release.
+
+### Console (Studio) [#console]
+
+18.5.0 ships the Console and the `@object-ui/*` packages from this repository,
+at the commit it releases. Every Console change is listed once, in its section
+above: 53 of the 283 entries touch an `@object-ui/*` package or
+`@objectstack/console`, 4 under [需手动处理](#action-required), 21 under
+[新增能力](#new-capabilities) and 28 under [其他修复](#other-fixes). What a
+Console user notices first:
+
+- **Sign-in says why.** A refused SSO sign-in names a domain or email refusal
+  instead of an expired link (`f530d25`); an `access_denied` return says the
+  account has no access to this environment (`8ed2b89`); and a refused account
+  link says why on the page the person lands on (`a9da547`, `6446935`). With
+  single sign-on configured, a signed-out visit can go straight to the
+  identity provider and come back to the page it asked for (`4dbcbdd`).
+- **Saves speak the user's language.** A metadata save's advisories and
+  refusals show the server's sentence in the user's language (`d95ddeb`).
+- **Lists and records.** A row or card whose click opens nothing no longer
+  looks clickable (`beff1fb`, `bea3328`); a row action's `disabled` predicate
+  greys its inline button and gives its reason (`d574341`); a multi-field save
+  conflict lists each field (`159dbe3`, `f06f064`); and fields no field group
+  claims render under their own "Other" heading (`de476f1`).
+- **The AI chats.** The AI build chat's plan card follows the build, and a
+  message typed during a reply waits instead of being lost (`ba32e79`); a
+  failed conversation create gives back every message sent while it waited
+  (`030ce02`, `b654135`, `baf9f3b`).
+- **A lighter first load.** The first load no longer downloads the Setup
+  pages, the package form, the view config panel, the object list, the record
+  and list views or the Studio designer strings (`2a86e51`, `68cee82`,
+  `6603978`).
+- **For a host that imports it.** `clearSharedDiscoveryCache` leaves the
+  `@object-ui/data-objectstack` entry (`854d383`).
+
+---
+
+## Upgrade checklist
+
+⚠️ For an 18.4.0 app. From 18.3.0, walk the
+[18.4.0 checklist](/docs/releases/v18/18-4#upgrade-checklist) first, and so
+on back to the [18.0.0 checklist](/docs/releases/v18/18-0#upgrade-checklist)
+from 17.x.
+
+### 18.5.0
+
+<Callout type="warn">
+**This list has not been walked.** It is compiled from the changesets, ahead
+of the cut; each step names the entry it comes from.
+</Callout>
+
+#### 1. Move the pins
+
+- **Move every `@objectstack/*` dependency, and every `@object-ui/*` one, to
+  `18.5.0` together**, with `@objectstack/skills` and `create-objectstack`
+  where you use them. Pin the exact version: a caret range takes every later
+  18.x by itself, and a patch can break a non-protocol surface. No package
+  joins or leaves npm in this release.
+
+#### 2. Run the build, and fix what it refuses
+
+```bash
+os validate
+os build
+os migrate meta --from 17     # the protocol-18 step, with this release's entries
+```
+
+Fix each refusal with its line in [需手动处理](#action-required) or
+[自动迁移](#migrated-for-you). The ones an app is most likely to meet:
+
+- an object that shows two visible fields under one label, a field of your
+  own labelled like the injected `owner_id` the common case (`3cbf1f2`);
+- a `nameField`, `displayNameField` or `activityMilestones[].field` naming no
+  field of the object (`6222ecb`);
+- a cycle of formulas, on the object or through an object extension
+  (`6482c08`, `0ba30eb`), and an extension's computed field, validation rule,
+  lookup leaf or record-mode amount that the object's own passes refuse
+  (`3e19223`, `27d042f`, `bc50d11`, `06e53a7`);
+- a `connector_action` whose input holds a key its action does not declare
+  (`89defde`), which fails at run time, not at the build;
+- a `packages[]` stack whose second app, or whose body objects' namespace
+  prefixes, strict `defineStack` now judges per body (`2c98485`, `5b2ec82`),
+  and a dashboard widget whose dataset sits outside the reader's declared
+  dependencies (`40c73a8`).
+
+#### 3. Before the first boot
+
+- **Raise the request-body limit if your clients send bodies over 10 MiB**:
+  `maxRequestBodyBytes`, or `OS_HTTP_MAX_BODY_BYTES` (`67274ac`).
+- **Without the better-auth admin plugin, unban who should keep signing in.**
+  Ban is enforced there from this release; list the users whose
+  `sys_user.banned` is true, platform administrators first, and unban each one
+  through the admin plugin before upgrading (`cbb876c`).
+- **With SSO domain verification on, list and verify every subdomain** your
+  people's existing accounts use before they next sign in through the
+  provider, and rewrite a stored provider's domain entries as bare host names
+  (`de5eb08`, `3c42e63`).
+- **Declare `OS_PLATFORM_OWNER_EMAIL`** if you may need to switch
+  `admin_full_access` off on a deployment whose platform administrators all
+  hold it through the Default Organization (`d4cfbfb`).
+
+#### 4. After the boot
+
+- **Run `os migrate audit-side-copies`, a dry run first, then `--apply`.** It
+  removes the side-copy columns that audit and activity copies written before
+  this release still carry, on the live tables and the archive. Until it runs,
+  the read-time redaction drops them, so it is cleanup, not a gate
+  (`4e1d327`).
+- **Update API clients for the doors that answer differently**: a bare read of
+  a connector, tool, function or stored-row name two packages hold answers
+  `409` naming each holder (`322ded7`, `c747cf0`, `5ea8ce5`, `d635599`); the
+  history and rollback doors take `?package=` (`b462444`); a path with a
+  backslash is `400` (`d4fbb4d`); an in-app message that reached nobody is
+  refused (`118d37a`); and `query_dataset` needs a measure (`bf02d33`).
+- **Check seed hooks under a walled posture**: a hook on a seeded row reads as
+  the load's organization, so a hook that needs every organization's rows says
+  so with `ctx.api.sudo()` (`47a3b95`).
+- **On PostgreSQL, check `date` fields converted from `datetime` on a release
+  before 18.4.0** for values stored one day early, as the `driver-sql`
+  CHANGELOG entry describes (`01d206d`).
