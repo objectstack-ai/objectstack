@@ -41,14 +41,15 @@
 - dev 开 PR 前自查申报:os-dev.md〈Definition of done〉,BREAKING/ADR-0087 照 AGENTS.md Post-Task 第 3 条。
 - 席线程只协调,⛔ 不读 diff 与日志;ACCEPT 欠的自读(`contract-review.md`、〈路径分叉〉)除外。
   所落 PR 欠的红检查读日志(`platform-readings.md`)派子代理读,一读兼守本条与该文。
-- 每区恒 4 dev 在开发:裁定例外,超默认 `batch` 3 而在天花板内;额度墙照 `execution-duties.md`。
-- 席每轮逐区查;先落建成 PR,空槽补 p3,新 p1/p2 先占;p3 ⛔ 改 p1/p2 在改或将改的热文件。
+- 每区至多 2 个 dev 代理;上张 PR 已入合并队列才领下一张;额度墙照 `execution-duties.md`。
+- 席每轮逐区查;⛔ 不单做 p3:只搭碰同文件的 p1/p2 PR(每 PR ≤5 卡),已领未动工的释放回队。
 - 同函数互相牵连的卡合一 PR,准入照 `execution-duties.md` 折叠五门。
 - 留道:修法已清的卡碰 `ui/**`、`packages/spec/**` 仍在本道开发、本席复审;他道席在线只通知
   「如果车道有人在线，只需要通知他就可以。」本条先于条款②行(`execution-duties.md`)、
   移道的 `lanes/spec.md` 与 `--tier` 提示;交出闭集:他道在线席已认领、cloud 路由、安全、ADR。
 - 送审:≤50 行、只改文本或测试、`Clause-②: no` 且无他契约面的 PR 由区照 `review-checklist.md`
   自审落地,ACCEPT 点名自审;余者由复核线程 ACCEPT 读;契约记录只欠 `contract-review.md` 四面。
+- 复审只取区定稿的绿 head,⛔ 不审移动中的;修后只 delta;同 patch-id 的干净合 main 保 PASS。
 - 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 区照 `landing-operations.md` 自己落地。
 - PASS 且全绿的非受管 PR 10 分钟内落地;挂前先查 PR 上已有落地评论,有即 ⛔ 不再挂。
 - 受管面与超 3,000 行 PR 区 ⛔ 不落,交席位;席位照 SKILL.md〈路径分叉〉①–④ 一笔交棒。
@@ -58,7 +59,8 @@
 - 仅呈维护者选项组过独立 `CONTRACT_REVIEW_TIER` 评审,多卡一批;席自裁 ⛔ 不起评审,自读码。
   均带 `Prior rulings read:` 行,开工前呈 ⛔ 不在施工中途;对维护者「应该用中文和我沟通」。
 - 席信箱只收:待裁、待落地受管 PR、跨区冲突、阻塞、交接完成;安全照 `security-findings.md`。
-- 线程到约 150k 上下文即在干净点轮换,⛔ 不在复审中途;交接照下节落 GitHub。
+- 线程约 150k 上下文即在干净点轮换(⛔ 不在复审中途),写 `handover-<区>.md`,交接照下节。
+- 省耗:dev 推前只验所触包与直接依赖方,全量归 CI;跨线程只传指针;线程与 dev effort high。
 - 每读一次用量,在座位贴评论记一行:用量 %、关卡数、合并 PR 数。
 
 ## 交接与换号

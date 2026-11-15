@@ -1395,7 +1395,16 @@ export const CEILINGS = new Map([
   // or tests and declares `Clause-②: no` with no other contract face is self-reviewed by the
   // area against review-checklist.md and lands; every other PR goes to the seat's review
   // thread. Measured delta +1; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/area-lease.md', 69],
+  // Raised 69 → 71 by the area throughput and cost rules (an ORDINARY ruled raise; ruling of
+  // record: the maintainer, 2026-11-15T16:09Z, verbatim: 「同意他的建议：每区先开 2 个开发代理，
+  // 上一个 PR 进了合并队列再领下一张卡；不单独做 p3；只复审已经变绿、不再改的提交；线程 effort
+  // 用 high。」, adopting server seat 6's proposals on #28677 (comments 6897257549 and
+  // 6897338574), built in the scope of card #34007): the review-discipline line (final green
+  // head only, delta after fixes, a same patch-id main merge keeps the PASS) and the cost line
+  // (touched packages only before push, pointer-only cross-thread messages, effort high); the
+  // 2-dev, merge-queue gate and p3 ride-along lines replace the old ones in place. Measured
+  // delta +2; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/area-lease.md', 71],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
   // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
