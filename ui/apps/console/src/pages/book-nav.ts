@@ -453,10 +453,14 @@ function humanizePackageId(pkg: string): string {
  * navigation entry opens the page in its book's context (objectui#10188, the
  * card's addendum). Only a doc no book of its package claims falls back to the
  * package's first book in display order, as before.
+ *
+ * Two packages may ship one doc name (objectstack#34070). `packageId` then
+ * names whose copy is meant, so the home book is that package's; without it
+ * the package is the first listed doc of the name's, as before.
  */
-export function homeBook(docName: string, portalBooks: Book[], docs: ResolverDoc[]): Book | null {
+export function homeBook(docName: string, portalBooks: Book[], docs: ResolverDoc[], packageId?: string): Book | null {
   const doc = docs.find((d) => d.name === docName);
-  const pkg = doc ? pkgOf(doc) : namePrefix(docName);
+  const pkg = packageId ?? (doc ? pkgOf(doc) : namePrefix(docName));
   const ownBooks = sortBooks(portalBooks).filter((b) => pkgOfBook(b) === pkg);
   return findBookContainingDoc(ownBooks, docs, docName)?.book ?? ownBooks[0] ?? null;
 }

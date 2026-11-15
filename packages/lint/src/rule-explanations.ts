@@ -3336,9 +3336,10 @@ const MANAGER_ONLY_ROUTES =
   'write, which bypasses the managed-update whitelist. SCIM provisioning and directory sync can ' +
   'populate it too, but only through a provisioning path your own deployment supplies: this ' +
   'platform declares the SCIM \'manager\' attribute without projecting it onto the column — and ' +
-  'where an identity carries source \'idp_provisioned\' the admin operation refuses, the import\'s ' +
+  'where a SCIM directory holds an identity the admin operation refuses, the import\'s ' +
   'manager_id column included, leaving that directory the one surface that authors its ' +
-  'manager. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
+  'manager. An identity that only signs in through SSO, with no SCIM directory behind it, is set ' +
+  'through the admin operation like any other. Or declare onEmptyApprovers: \'fallback\' on the node, with a ' +
   'fallbackApprovers list: an empty manager rung then opens the request on those people instead ' +
   'of on the organization\'s administrators, which needs no write to the column at all.';
 

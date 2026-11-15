@@ -344,6 +344,7 @@ export async function ensureOverlayStateIndex(
     exec: IndexExec | undefined,
     state: OverlayIndexState,
     logger?: IndexMigrationLogger,
+    opts: { client?: string } = {},
 ): Promise<EnsureOverlayIndexResult> {
     if (!exec) return { status: 'no-driver', fallback: 'not-attempted' };
 
@@ -352,6 +353,15 @@ export async function ensureOverlayStateIndex(
         indexName,
         probeIndexName: OVERLAY_PROBE_INDEX_NAMES[state],
         buildSql: (name) => buildOverlayIndexSql(name, state),
+        // The table and the dialect select PostgreSQL's drop and read-back.
+        // There the declared `…_active` name is held by a UNIQUE CONSTRAINT
+        // (knex's `table.unique()`), which `DROP INDEX` cannot remove (2BP01);
+        // without them the NULL-distinct constraint stayed and 'created' was
+        // reported for a no-op `CREATE … IF NOT EXISTS`. A verdict the read-back
+        // cannot confirm comes back 'failed' at 'verify' and is reported below.
+        // `exec` must hand back the statement's result for that read-back.
+        table: OVERLAY_TABLE,
+        client: opts.client,
     });
 
     if (outcome.status === 'created') return { status: 'created', fallback: 'not-attempted' };
@@ -401,10 +411,11 @@ export async function ensureOverlayStateIndex(
 export async function ensureMetadataOverlayIndexes(
     exec: IndexExec | undefined,
     logger?: IndexMigrationLogger,
+    opts: { client?: string } = {},
 ): Promise<Record<OverlayIndexState, EnsureOverlayIndexResult>> {
     return {
-        active: await ensureOverlayStateIndex(exec, 'active', logger),
-        draft: await ensureOverlayStateIndex(exec, 'draft', logger),
+        active: await ensureOverlayStateIndex(exec, 'active', logger, opts),
+        draft: await ensureOverlayStateIndex(exec, 'draft', logger, opts),
     };
 }
 

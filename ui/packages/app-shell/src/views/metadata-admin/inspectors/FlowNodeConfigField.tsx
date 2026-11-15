@@ -730,6 +730,9 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
           // objectui#11789 — one verdict: the scope note this field renders
           // below replaces the raw editor's "Valid CEL", never sits under it.
           scopeIssue={unknownRefs.length > 0}
+          // A subject reads by its field label, its CEL spelling beside it
+          // (`ux-conventions.labels-over-machine-names`).
+          labelSubjects
         />
       );
     }
