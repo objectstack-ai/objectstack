@@ -525,6 +525,25 @@ describe('[#33593] an extension\'s record-mode amount on a single save and in th
         expect(activeRow(h, 'object_extension', 'ledger_line', P)).toBeUndefined();
     });
 
+    it('single save: an object_extension adding a `sum` roll-up of an amount in its rows\' own currency is refused 422 by D6\'s roll-up door, and stores nothing', async () => {
+        const h = await boot();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await h.protocol.installPackage({ manifest: { id: P, name: 'Ledger', type: 'app' } });
+        await saveObject(h, invoice('ledger'));
+        await saveObject(h, ownCurrencyLine('ledger'));
+
+        const err = await caught(() => h.protocol.saveMetaItem({
+            type: 'object_extension', name: 'ledger_invoice', packageId: P, mode: 'publish', writeFace: 'meta-envelope',
+            item: { extend: 'ledger_invoice', fields: {
+                own_total: { name: 'own_total', type: 'summary', label: 'Own total', summaryOperations: { object: 'ledger_own_line', field: 'amount', function: 'sum' } },
+            } },
+        }));
+
+        expect(err).toMatchObject({ status: 422, code: 'INVALID_METADATA' });
+        expect(registered(h, 'ledger_invoice')?.fields?.own_total).toBeUndefined();
+        expect(activeRow(h, 'object_extension', 'ledger_invoice', P)).toBeUndefined();
+    });
+
     it('single save CONTROL: the same extension following the parent\'s code is saved and served', async () => {
         const h = await boot();
         vi.spyOn(console, 'warn').mockImplementation(() => {});

@@ -937,4 +937,25 @@ describe('[#33593] an extension\'s record-mode amount is judged against its obje
     expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.1');
     expect(ql.registry.getPackage(BILLING)?.manifest?.version).toBe('1.0.1');
   });
+
+  it('R7: …and so is the extension package\'s own no-change upgrade over the amount the cold boot admitted', async () => {
+    const { ql, manifest } = await bootWith([ledger('currency_code'), billing([line()]), extender({ ext_amount: follows('invoice.title') })]);
+
+    await manifest.register(extender({ ext_amount: follows('invoice.title') }, '1.0.1'));
+
+    expect(ql.registry.getPackage(EXTENDER)?.manifest?.version).toBe('1.0.1');
+    expect(extraOf(ql)?.currencyConfig?.currencyField).toBe('invoice.title');
+  });
+
+  it('R7: a parent upgrade that only adds an unrelated code field installs over a pair it leaves as it found it', async () => {
+    // The cold boot admits an amount following the parent's text field; the
+    // refusal sentence lists the parent's code fields, so it moves when the
+    // upgrade adds one, while the pair does not.
+    const { ql, manifest } = await bootWith([ledger(), billing([line('invoice.title')])]);
+
+    await manifest.register({ ...ledger('cc'), version: '2.0.0' });
+
+    expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('2.0.0');
+    expect(fieldOf(ql, 'suite_invoice', 'cc')?.valueDomain).toBe('iso_4217_currency');
+  });
 });
