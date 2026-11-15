@@ -1,11 +1,12 @@
 ---
+'@objectstack/spec': patch
 '@objectstack/core': patch
 '@objectstack/service-messaging': patch
 '@objectstack/service-automation': patch
 '@objectstack/plugin-webhooks': patch
 ---
 
-feat(core, service-messaging, service-automation, plugin-webhooks)!: webhook deliveries and the flow `http` node reach only public addresses unless the operator allowlists the target, and never a link-local or cloud metadata address
+feat(spec, core, service-messaging, service-automation, plugin-webhooks)!: webhook deliveries and the flow `http` node reach only public addresses unless the operator allowlists the target, and never a link-local or cloud metadata address
 
 Clause-②: no (narrowing) — webhook deliveries and flow `http` node requests aimed at a loopback, private, carrier-grade NAT, link-local, unique-local, multicast, broadcast or unspecified address are refused unless `OS_EGRESS_ALLOWED_TARGETS` lists the target; link-local and cloud metadata addresses are refused whatever it lists; a malformed or over-broad allowlist fails the boot.
 Metadata-protocol: none
@@ -20,4 +21,4 @@ Metadata-protocol: none
 
 **The boot.** One line says the guard is active and how many targets `OS_EGRESS_ALLOWED_TARGETS` lists. The webhook plugin then logs once how many stored `sys_webhook` rows target an address the guard will refuse. A malformed or over-broad allowlist (an entry with a scheme, port, path or wildcard, host bits set, a prefix under `/8` such as `0.0.0.0/0`, or a link-local or metadata address) fails the boot, naming every bad entry.
 
-**For hosts.** `@objectstack/core/egress` exports the policy seam (`EgressPolicy`, decided per connected address, host name, organization and source), the open-core default (`createEnvEgressPolicy`) and the guarded fetch. `MessagingServicePlugin`, `AutomationServicePlugin` and `WebhookOutboxPlugin` take an `egressPolicy` option for a stricter policy. The guard connects directly to the judged address, so an HTTP proxy configured through the environment is not used for these requests.
+**For hosts.** `@objectstack/core/egress` exports the policy seam (`EgressPolicy`, decided per connected address, host name, organization and source), the open-core default (`createEnvEgressPolicy`) and the guarded fetch. The error-code ledger registers `EGRESS_REFUSED` and `EGRESS_ALLOWLIST_INVALID` under `@objectstack/core`. `MessagingServicePlugin`, `AutomationServicePlugin` and `WebhookOutboxPlugin` take an `egressPolicy` option for a stricter policy. The guard connects directly to the judged address, so an HTTP proxy configured through the environment is not used for these requests.

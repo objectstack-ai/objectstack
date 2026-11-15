@@ -1236,6 +1236,15 @@ export const ERROR_CODE_LEDGER = {
     // the hosted `/automation` domain (`runtime/domains/automation-hooks.ts`)
     // for a qualified address its qualifier does not admit. Provenance only.
     'INVALID_SIGNATURE',          // hook secret did not verify the request body
+    // The outbound-request guard (`@objectstack/core/egress`). Neither reaches
+    // a wire envelope: `EGRESS_REFUSED` is the named reason a webhook
+    // delivery dead-letters with and a flow `http` node fails with, when its
+    // target is not public and not allowlisted (`EgressRefusedError`,
+    // `egress/guarded-fetch.ts`); `EGRESS_ALLOWLIST_INVALID` is the boot's
+    // refusal of a malformed or over-broad `OS_EGRESS_ALLOWED_TARGETS`
+    // (`EgressAllowlistError`, `egress/policy.ts`).
+    'EGRESS_REFUSED',
+    'EGRESS_ALLOWLIST_INVALID',
   ],
   '@objectstack/types': [
     // [#20919] The REST door's error CLASSIFICATION half
