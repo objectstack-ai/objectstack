@@ -1447,12 +1447,22 @@ export interface ConnectorConnectionCallbackRequest {
  * resolves the named user's own, so a caller cannot run a dry run with grants
  * the user does not hold.
  */
-export interface FlowDryRunOptions extends Pick<AutomationContext, 'record' | 'previous' | 'object' | 'event' | 'params' | 'locale' | 'tenantId'> {
+export interface FlowDryRunOptions extends Pick<AutomationContext, 'record' | 'previous' | 'object' | 'event' | 'params' | 'locale'> {
     /**
      * The acting user, a `sys_user` id. Required: a dry run always acts as a
      * named user, so it never meets `AUTOMATION_UNSCOPED_RUN_DATA_ACCESS`.
      */
     userId: string;
+    /**
+     * The organization the run is in, read as {@link AutomationContext.tenantId}.
+     * It must be an organization the named user is a member of; any other is
+     * refused before any node runs (`status: 'refused'`,
+     * `PERMISSION_DENIED`). That refusal is the dry run's own: a live run's
+     * setup refuses no organization, it only resolves none of the user's
+     * grants there. Absent, the run is in no organization, as a by-name start
+     * that carries none.
+     */
+    tenantId?: string;
 }
 
 /**
@@ -1461,23 +1471,36 @@ export interface FlowDryRunOptions extends Pick<AutomationContext, 'record' | 'p
  *  - `'completed'`: the run reached an `end` node. An `end` node declaring
  *    `outcome: 'refused'` completes too; its step carries the rendered
  *    `refusalMessage`.
+ *  - `'condition_not_met'`: the start node's `condition` did not hold for the
+ *    supplied `record` / `previous`, so no node ran and there are no steps.
+ *    It mirrors the live run's skip exit (`execute` answers
+ *    `output: { skipped: true, reason: 'condition_not_met' }`); the result
+ *    carries the condition in {@link FlowDryRunResult.startCondition}.
  *  - `'stopped'`: the run reached a node it does not go past (see
  *    {@link FlowDryRunStopStep}); that node is the last step.
- *  - `'failed'`: a node failed or met a refusal that no `fault` edge or
- *    `try_catch` region contains, so the live run would fail there too; that
- *    node is the last step.
+ *  - `'failed'`: the dry run could not continue past a step. A node failed, or
+ *    met a refusal, that no `fault` edge or `try_catch` region contains; that
+ *    node is the last step. It is the dry run's own answer, not a prediction:
+ *    a dry run can fail where the live run would not (a later node reads an
+ *    outbound node's output, which a dry run leaves unset; a `runAs: 'system'`
+ *    draft, which a dry run never elevates, meets a refusal; a filtered read
+ *    misses a simulated write), and pass where the live run would fail (a
+ *    validation rule, a uniqueness constraint, a required field, or any refusal
+ *    a dry run does not judge).
  *  - `'refused'`: the run never started (see {@link FlowDryRunResult.refusal}).
  *    ⛔ Not {@link AutomationResult.status}'s `'refused'`, which is an `end`
  *    node's outcome; here that case is `'completed'`.
  */
-export type FlowDryRunStatus = 'completed' | 'stopped' | 'failed' | 'refused';
+export type FlowDryRunStatus = 'completed' | 'condition_not_met' | 'stopped' | 'failed' | 'refused';
 
 /**
  * Why a dry run never started: existing {@link AutomationResult.code} members
  * only, each with the meaning it has there. ⛔ No new code is minted for a dry
- * run.
+ * run. (`FLOW_NO_START_NODE` is not among them: a definition with no `start`
+ * node is one {@link IAutomationService.registerFlow} refuses, so a dry run
+ * throws for it before it could answer.)
  */
-export type FlowDryRunRefusalCode = Extract<NonNullable<AutomationResult['code']>, 'PERMISSION_DENIED' | 'FLOW_NO_START_NODE' | 'FLOW_INPUT_SCHEMA_INVALID'>;
+export type FlowDryRunRefusalCode = Extract<NonNullable<AutomationResult['code']>, 'PERMISSION_DENIED' | 'FLOW_INPUT_SCHEMA_INVALID'>;
 
 /** What every step of a dry run reports. */
 export interface FlowDryRunStepBase {
@@ -1486,9 +1509,9 @@ export interface FlowDryRunStepBase {
     /** The node's `type` as the definition declares it. */
     nodeType: string;
     /**
-     * The refusal this node met, as a failed live run reports it
-     * ({@link AutomationResult.innerRefusal}): the permission refusal the named
-     * user would meet, for example. Absent when the node met none.
+     * A refusal this node met, as a failed live run reports it
+     * ({@link AutomationResult.innerRefusal}): a read refused in the named
+     * user's scope, for example. Absent when the node met none.
      */
     refusal?: FlowInnerRefusal;
     /** The node's failure text when it failed for a reason other than a refusal. */
@@ -1496,8 +1519,8 @@ export interface FlowDryRunStepBase {
 }
 
 /**
- * A node that only routes the run: `start`, `end`, `loop`,
- * `parallel_gateway`, `join_gateway` and `try_catch`.
+ * A node that only routes the run: `start`, `end`, `loop`, `parallel` and
+ * `try_catch`.
  */
 export interface FlowDryRunRouteStep extends FlowDryRunStepBase {
     kind: 'route';
@@ -1521,22 +1544,39 @@ export interface FlowDryRunDecisionStep extends FlowDryRunStepBase {
      */
     branch?: string;
     /**
-     * Why: the authored expression that held (the condition entry's, or the
-     * out-edge's). Absent when the run took the default branch because none
-     * held.
+     * Why: every authored expression that held, in declaration order. One for
+     * a `config.conditions` entry or an exclusive decision's out-edge; one per
+     * branch taken for `mode: 'inclusive'`. Empty when the run took the
+     * default branch because none held.
      */
-    expression?: string;
+    expressions: string[];
     /** The ids of the nodes the run went on to; more than one only for `mode: 'inclusive'`. */
     next: string[];
 }
 
-/** A `get_record` node: the live rows it read, in the named user's scope. */
+/** A `get_record` node: the rows it read, in the named user's scope. */
 export interface FlowDryRunReadStep extends FlowDryRunStepBase {
     kind: 'read';
     object: string;
     /** The ids of the rows the read answered, placeholder ids included. */
     recordIds: string[];
 }
+
+/**
+ * Whether the named user may make a simulated write, as far as a dry run can
+ * judge it without writing.
+ *
+ *  - `'allowed'` / `'refused'`: the answer of the object-level write check
+ *    (`canWriteObject`, insert or update) for the named user. `'allowed'` says
+ *    that check admits the write, never that the write would succeed.
+ *  - `'not_judged'`: what that check does not judge. Every delete (the check
+ *    has no delete arm). For an insert or update, nothing else is judged
+ *    either: row-level and post-image rules (the RLS `using` pre-image and
+ *    `check` post-image), controlled-by-parent, the tenant post-image,
+ *    provenance gates and the `owner_id` forge are never reported. ⛔
+ *    `'not_judged'` never means allowed.
+ */
+export type FlowDryRunWritePermission = 'allowed' | 'refused' | 'not_judged';
 
 /**
  * A `create_record`, `update_record` or `delete_record` node: the write it
@@ -1556,6 +1596,8 @@ export interface FlowDryRunWriteStep extends FlowDryRunStepBase {
      * The field values as the node computed them; absent for a delete.
      */
     values?: Record<string, unknown>;
+    /** The named user's permission for this write, as far as a dry run judges it. */
+    permission: FlowDryRunWritePermission;
 }
 
 /**
@@ -1579,12 +1621,18 @@ export interface FlowDryRunOutboundStep extends FlowDryRunStepBase {
 export interface FlowDryRunStopStep extends FlowDryRunStepBase {
     kind: 'stop';
     /**
-     * `'pause'`: the node type's descriptor declares `supportsPause: true`
-     * (`approval`, `wait`, `screen`, `subflow` and `map` among the shipped
-     * ones). `'not_simulated'`: a node type outside every class this contract
-     * names, whose effect a dry run cannot know.
+     * What the node would do that a dry run does not:
+     *  - `'approval'`: ask people to decide (the approvals plugin's `approval`
+     *    and `approval_revise` nodes);
+     *  - `'wait'`: wait for a timer or a signal (`wait`);
+     *  - `'screen'`: ask the person for input (`screen`);
+     *  - `'starts_flow'`: start another flow (`subflow`, `map`);
+     *  - `'suspends'`: suspend the run for another reason (any other node type
+     *    whose descriptor declares `supportsPause: true`);
+     *  - `'not_simulated'`: something a dry run cannot know (a node type
+     *    outside every class this contract names).
      */
-    reason: 'pause' | 'not_simulated';
+    reason: 'approval' | 'wait' | 'screen' | 'starts_flow' | 'suspends' | 'not_simulated';
     /** An approval node: the ids of the users it would ask, when the run can resolve them. */
     approvers?: string[];
     /** A `wait` node: what would resume it, from its `waitEventConfig`. */
@@ -1609,12 +1657,24 @@ export type FlowDryRunStep =
 export interface FlowDryRunResult {
     status: FlowDryRunStatus;
     /**
-     * One entry per node execution, in the order the run executed them: a node
-     * inside a loop appears once per pass. Empty when `status` is `'refused'`.
+     * One entry per node execution: a node inside a loop appears once per
+     * pass. Empty when `status` is `'refused'` or `'condition_not_met'`.
+     * Branches that run side by side (a `parallel` node's branches, a node's
+     * several unconditional out-edges) are listed one branch after another, in
+     * declaration order (`config.branches`, then out-edges), each branch's
+     * steps together; an inclusive decision's branches likewise, as the live
+     * run takes them one at a time. Otherwise steps are in the order the run
+     * executed them.
      */
     steps: FlowDryRunStep[];
     /** Set exactly when `status` is `'refused'`: why the run never started. */
     refusal?: { code: FlowDryRunRefusalCode; message: string };
+    /**
+     * Set exactly when `status` is `'condition_not_met'`: the start node's
+     * `condition` as authored (its `source`, for an expression envelope) and
+     * what it evaluated to against the supplied `record` / `previous`.
+     */
+    startCondition?: { expression: string; result: false };
     /** Set exactly when `status` is `'failed'`: the run's failure text. */
     error?: string;
 }
@@ -1708,14 +1768,27 @@ export interface IAutomationService {
      * **In what order it answers.**
      *  - `options.userId` that is not a non-empty string: throws a `TypeError`
      *    before the definition is read.
-     *  - A definition {@link registerFlow} would refuse: throws what
-     *    {@link registerFlow} throws for the same definition. Nothing is
+     *  - A definition {@link registerFlow} would refuse under the definition's
+     *    own `name`: throws what {@link registerFlow} throws for it. Nothing is
      *    registered.
-     *  - Admission, then the trigger-time refusals {@link execute} classifies
-     *    before dispatch (`FLOW_NO_START_NODE`, `FLOW_INPUT_SCHEMA_INVALID`):
+     *  - A `tenantId` naming an organization the named user is not a member
+     *    of, then admission, then the trigger-time refusal {@link execute}
+     *    classifies before dispatch (`FLOW_INPUT_SCHEMA_INVALID`):
      *    `status: 'refused'` with that code in `refusal` and no steps. No node
      *    has run.
+     *  - A start node whose `condition` does not hold for the supplied `record`
+     *    / `previous`: `status: 'condition_not_met'`, the condition and its
+     *    value in `startCondition`, and no steps. This mirrors the live run's
+     *    skip exit, which evaluates the same condition at the same point
+     *    (`execute`, `output: { skipped: true, reason: 'condition_not_met' }`,
+     *    `engine.ts` in `@objectstack/service-automation`).
      *  - Otherwise the nodes run, as described below.
+     *
+     * **The name.** The definition's own `name` is the flow's name for the
+     * call: the name registration judges, and the one nodes read their per-flow
+     * keys under (the `flows.<flow>.…` translation keys). It is never looked
+     * up among registered flows, and a registered flow of that name is neither
+     * read nor touched.
      *
      * **Unarmed and unregistered.**
      *  - The definition is never registered: {@link listFlows} and
@@ -1759,24 +1832,37 @@ export interface IAutomationService {
      *    write it would make ({@link FlowDryRunWriteStep}).
      *  - A create binds a placeholder id to the new row: opaque, unique within
      *    the call, and never the id of a live row.
-     *  - A later read by id of a row the run created or updated answers the
-     *    simulated values, and of a row the run deleted answers nothing.
+     *  - A later read by id of a row the run updated answers the live row with
+     *    the simulated fields laid over it; of a row the run deleted, nothing.
+     *  - A row the run created holds only the fields the flow set. The fields
+     *    the engine sets on a real insert (defaults, autonumbers, formulas, the
+     *    owner, timestamps) are absent from it, so a later node that reads one
+     *    finds it unset.
      *  - A read that filters rather than names an id answers the live rows the
      *    named user can read, and does not see the run's simulated writes.
      *  - Since nothing is written, nothing a write sets off runs: no record
      *    hook, no record-change trigger, no other flow, no audit row.
      *  - The data engine does not judge a simulated write, so a write it would
      *    refuse for a validation rule, a uniqueness constraint or a required
-     *    field reports as it would be made. A permission refusal is the
-     *    exception: the step carries, in `refusal`, the refusal the named user
-     *    would meet for that operation on that object or row.
+     *    field reports as it would be made.
+     *  - Each write step carries a three-way `permission`
+     *    ({@link FlowDryRunWritePermission}): `'allowed'` or `'refused'` from
+     *    the object-level write check (`canWriteObject`, insert or update) for
+     *    the named user, and `'not_judged'` for every delete and for every
+     *    refusal that check does not judge (row-level and post-image rules,
+     *    controlled-by-parent, the tenant post-image, provenance gates, the
+     *    `owner_id` forge). `'not_judged'` never means allowed. A `'refused'`
+     *    write is a refusal the step met (below).
      *
      * **Reads.** `get_record` reads live data, in the named user's scope.
      *
      * **A node that meets a refusal or fails.** It is reported, never skipped
      * silently: its step carries the refusal or the failure, and the run goes
-     * on as the live run would, along a `fault` edge or out of a `try_catch`
-     * region that contains it, or else it ends `'failed'`.
+     * on along a `fault` edge or out of a `try_catch` region that contains it,
+     * or else it ends `'failed'`: the dry run could not continue past this
+     * step. That is the dry run's own answer, in both directions: it can fail
+     * where the live run would not, and pass where the live run would fail
+     * ({@link FlowDryRunStatus}).
      *
      * **Side effects outside the data.** `notify`, `http`, `connector_action`,
      * `script` and `save_notice` never send or call anything. Each reports the
@@ -1786,15 +1872,22 @@ export interface IAutomationService {
      * **Approval nodes and waits: the run stops.** At the first node whose type's
      * descriptor declares `supportsPause: true` (an approval, a `wait`, a
      * `screen`, a `subflow`, a `map`), the run stops with `status: 'stopped'`
-     * and reports the node: who it would ask, how long or for what it would
-     * wait, the screen it would show, or the flow it would start
-     * ({@link FlowDryRunStopStep}). No approval request is created, no resume
-     * is scheduled, and no child run starts. A node type outside every class
-     * named here also stops the run (`reason: 'not_simulated'`).
+     * and reports the node and what it would do: who it would ask, how long or
+     * for what it would wait, the screen it would show, or the flow it would
+     * start ({@link FlowDryRunStopStep}). No approval request is created, no
+     * resume is scheduled, and no child run starts. A node type outside every
+     * class named here also stops the run (`reason: 'not_simulated'`).
      *
      * **Nodes that route or compute** (`start`, `end`, `decision`,
-     * `assignment`, `loop`, `parallel_gateway`, `join_gateway`, `try_catch`)
-     * run as the live run runs them, and report what they did.
+     * `assignment`, `loop`, `parallel`, `try_catch`) run as the live run runs
+     * them, and report what they did.
+     *
+     * **Step order.** One list ({@link FlowDryRunResult.steps}). Branches that
+     * run side by side (a `parallel` node's branches, a node's several
+     * unconditional out-edges) are listed one branch after another in
+     * declaration order, each branch's steps together, as the `parallel` node's
+     * own run record lists them; an inclusive decision's branches likewise, as
+     * the live run takes them one at a time.
      *
      * @param definition - The flow definition (raw, pre-parse), as
      *   {@link registerFlow} takes it
