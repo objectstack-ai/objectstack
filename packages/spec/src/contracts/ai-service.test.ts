@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type {
   IAIService,
   AIResult,
@@ -443,5 +446,65 @@ describe('approvePendingAction held outcome', () => {
     expect(outcome.status).toBe('held');
     const status: PendingActionStatus = outcome.status;
     expect(status).toBe('held');
+  });
+});
+
+/**
+ * The in-app assistant door's three points, stated on the pending-action
+ * members themselves (#33689 Q1, ruled B: one rule for every AI door, the
+ * in-app queue kept as its own channel). The members' signatures do not move,
+ * so what is pinned is the docblock text an implementer reads beside them:
+ * who decides, which credential, and as whom the approved action runs.
+ */
+describe('IAIService pending-action members state the in-app door\'s three points', () => {
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const SOURCE = readFileSync(join(HERE, 'ai-service.ts'), 'utf8');
+
+  /** The docblock above `    <member>?(`, comment gutters folded into spaces. */
+  function memberDoc(member: string): string {
+    const at = SOURCE.indexOf(`    ${member}?(`);
+    expect(at, `\`${member}\` moved — re-anchor this pin`).toBeGreaterThan(-1);
+    const open = SOURCE.lastIndexOf('/**', at);
+    const close = SOURCE.indexOf('*/', open);
+    expect(close, `\`${member}\` has no docblock directly above it`).toBeLessThan(at);
+    return SOURCE.slice(open, close).replace(/\n\s*\*\s?/g, ' ').replace(/\s+/g, ' ');
+  }
+
+  it('proposePendingAction names the channel and binds all three points from the moment it is recorded', () => {
+    const doc = memberDoc('proposePendingAction');
+    expect(doc).toMatch(/in-app assistant door's channel of the confirmation rule/);
+    expect(doc).toMatch(/\*\*Who decides:\*\* only the person the call ran as, recorded as `proposedBy`; no other user decides it, whatever permission they hold, `ai:approve` included/);
+    expect(doc).toMatch(/\*\*Which credential:\*\* the item is decided on that person's signed-in session to the app, never on an API key, token or AI identity/);
+    expect(doc).toMatch(/\*\*As whom it runs:\*\* once approved, as that person, every gate and permission re-checked/);
+    // A declared-gated action is queued, not only the destructive heuristic.
+    expect(doc).toMatch(/declares `ai\.requiresConfirmation: true`/);
+  });
+
+  it('approvePendingAction refuses another user and a non-session credential, and runs as the person', () => {
+    const doc = memberDoc('approvePendingAction');
+    expect(doc).toMatch(/`actorId` must be the person the call ran as \(the row's `proposed_by`\)\. Another user is refused whatever permission they hold, `ai:approve` included/);
+    expect(doc).toMatch(/admits only a person's signed-in session to the app; an API key, a delegated or OAuth token, any other service credential and an AI identity are refused/);
+    expect(doc).toMatch(/the re-dispatch runs as that person, through the same admitted sequence as any action call, every gate and permission re-checked at this moment/);
+    // The second-person path is `held`, never a second decider.
+    expect(doc).toMatch(/second person to approve the write does not let that person decide the item: it uses `held`/);
+    // Control: the held outcome text this pin sits beside is still there, so
+    // the anchor read the right docblock.
+    expect(doc).toMatch(/`held` is the third outcome/);
+  });
+
+  it('rejectPendingAction binds the deciding points and runs nothing', () => {
+    const doc = memberDoc('rejectPendingAction');
+    expect(doc).toMatch(/Nothing runs\./);
+    expect(doc).toMatch(/`actorId` must be the person the call ran as \(the row's `proposed_by`\), whatever permission another user holds, `ai:approve` included/);
+    expect(doc).toMatch(/admits only that person's signed-in session to the app, never an API key, token or AI identity/);
+  });
+
+  it('the read member is not a deciding door: listPendingActions carries none of the three points', () => {
+    // Control leg: the helper does not answer every member with the same
+    // text. Listing is not deciding, and the ruling moved no read.
+    const doc = memberDoc('listPendingActions');
+    expect(doc).toMatch(/Inbox query/);
+    expect(doc).not.toMatch(/Who decides/);
+    expect(doc).not.toMatch(/signed-in session/);
   });
 });

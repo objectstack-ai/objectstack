@@ -2803,6 +2803,22 @@ export class AppPlugin implements Plugin {
             ctx.logger.debug('[i18n] Set fallback locale', { appId, locale: i18nConfig.fallbackLocale });
         }
 
+        // [#33634] Thread the declared `i18n.sourceLocale` — the language the
+        // inline labels are written in — the same way and for the same reason:
+        // only this layer sees the stack artifact, and every document-translator
+        // caller (the REST metadata reads, formula `label()`, email option
+        // holes, analytics, upload-link pages) holds only the i18n service. They
+        // pass `getSourceLocale()`, else `getDefaultLocale()`, as the authored
+        // language, so an `en` request on an English-authored stack that
+        // defaults its users to `zh-CN` answers the inline label instead of
+        // walking the fallback chain to the `zh-CN` row. Guarded on "declared
+        // something" like the two above: an app that declares no `sourceLocale`
+        // must not clear one another app on the same kernel declared.
+        if (i18nConfig?.sourceLocale && typeof i18nService.setSourceLocale === 'function') {
+            i18nService.setSourceLocale(i18nConfig.sourceLocale);
+            ctx.logger.debug('[i18n] Set source locale', { appId, locale: i18nConfig.sourceLocale });
+        }
+
         // [#7679] Narrow what `getLocales()` REPORTS to the locales the app
         // declared. This is the only layer that can: `getLocales()` sees the
         // loaded set, and what is loaded is not the app's decision — every

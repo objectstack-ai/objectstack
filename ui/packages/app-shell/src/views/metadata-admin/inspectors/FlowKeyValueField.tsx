@@ -271,6 +271,13 @@ export interface FlowKeyValueFieldProps {
    * {@link valueEnvelope}.
    */
   valueRefusal?: (value: unknown) => string[] | null;
+  /**
+   * objectstack#33838: the judge of one KEY — what the cell says under a row
+   * whose key the consumer refuses (a connector input key the action does not
+   * declare), or `null` when the key is accepted. The row stays as it is: a
+   * refused key is marked, never dropped. Omitted, no key is judged.
+   */
+  keyRefusal?: (key: string) => string | null;
 }
 
 /**
@@ -308,6 +315,7 @@ export function FlowKeyValueField({
   keysByLabel,
   valueMode,
   valueRefusal = valueEnvelopeRefusal,
+  keyRefusal,
 }: FlowKeyValueFieldProps) {
   const keyListId = React.useId();
   const suggestsKeys = !!keyOptions && keyOptions.length > 0;
@@ -406,6 +414,7 @@ export function FlowKeyValueField({
           const shownRefusal = refusal
             ? [...new Set(refusal.map((m) => (blankText && isBlankExpressionRefusal(m) ? blankText : m)))]
             : null;
+          const keyRefused = keyRefusal && row.key.trim() !== '' ? keyRefusal(row.key.trim()) : null;
           return (
             <div key={row.id} className="space-y-1">
               {/*
@@ -454,6 +463,11 @@ export function FlowKeyValueField({
                   <X className="h-3.5 w-3.5" />
                 </Button>
               </div>
+              {keyRefused && (
+                <p className="text-[11px] leading-snug text-destructive" role="alert" data-testid="flow-kv-key-refusal">
+                  {keyRefused}
+                </p>
+              )}
               <div className="flex items-center gap-1.5" data-testid="flow-kv-value-line">
                 <VariableTextInput
                   mode={hole ? 'hole' : 'expression'}

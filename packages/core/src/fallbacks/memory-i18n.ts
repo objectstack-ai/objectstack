@@ -106,6 +106,12 @@ export function createMemoryI18n() {
   // must leave `t()` answering exactly as it did before this existed — an app
   // that never wrote a `fallbackLocale` is not opting into a longer chain.
   let fallbackLocale: string | undefined;
+  // [#33634] The app's DECLARED `i18n.sourceLocale` — the language its inline
+  // labels are written in — injected by `AppPlugin.loadTranslations` beside
+  // the other three. `undefined` means the app declared nothing, and the
+  // serving layer then reads `defaultLocale` as the authored language, as it
+  // always has. It changes no `t()` lookup.
+  let sourceLocale: string | undefined;
 
   /**
    * Resolve a dot-notation key from a nested object.
@@ -256,6 +262,23 @@ export function createMemoryI18n() {
      */
     setFallbackLocale(locale: string): void {
       fallbackLocale = locale;
+    },
+
+    /**
+     * @see II18nService.getSourceLocale — [#33634]
+     *
+     * Unlike the fallback pair, the accessor IS implemented here: it answers
+     * only what {@link setSourceLocale} was told, `undefined` otherwise, so it
+     * never has to derive a value — the collapse to `defaultLocale` is the
+     * serving layer's, not this provider's.
+     */
+    getSourceLocale(): string | undefined {
+      return sourceLocale;
+    },
+
+    /** @see II18nService.setSourceLocale — [#33634] */
+    setSourceLocale(locale: string): void {
+      sourceLocale = locale;
     },
   };
 }
