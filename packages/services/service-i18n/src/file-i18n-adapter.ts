@@ -132,6 +132,13 @@ export class FileI18nAdapter implements II18nService {
   private defaultLocale: string;
   private readonly fallbackLocale: string | undefined;
   /**
+   * [#33634] The app's DECLARED `i18n.sourceLocale`, injected by
+   * `AppPlugin.loadTranslations` the same way `defaultLocale` is. `undefined`
+   * means the app declared nothing (the serving layer then reads
+   * `defaultLocale` as the authored language). It changes no `t()` lookup.
+   */
+  private sourceLocale: string | undefined;
+  /**
    * [#7679] The app's DECLARED `i18n.supportedLocales`, injected by
    * `AppPlugin.loadTranslations` the same way `defaultLocale` is. `undefined`
    * means the app declared nothing, which must keep reporting every loaded
@@ -277,6 +284,28 @@ export class FileI18nAdapter implements II18nService {
    */
   getFallbackLocale(): string | undefined {
     return this.fallbackLocale;
+  }
+
+  /**
+   * The language the app's inline metadata labels are written in — the
+   * `i18n.sourceLocale` `AppPlugin` threaded in, `undefined` when it declared
+   * none. Answers only what {@link setSourceLocale} was told; the collapse to
+   * {@link getDefaultLocale} is the serving layer's.
+   *
+   * [#33634] Read by the REST metadata reads and the other document-translator
+   * callers as `ResolveOptions.defaultLocale`, so an `en` request on an
+   * English-authored stack that defaults its users to `zh-CN` answers the
+   * inline label instead of walking the fallback chain to the `zh-CN` row.
+   *
+   * @see II18nService.getSourceLocale
+   */
+  getSourceLocale(): string | undefined {
+    return this.sourceLocale;
+  }
+
+  /** @see II18nService.setSourceLocale — [#33634] */
+  setSourceLocale(locale: string): void {
+    this.sourceLocale = locale;
   }
 
   /**
