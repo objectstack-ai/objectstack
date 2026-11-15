@@ -226,6 +226,18 @@ Every other `refused` create or update is graded the same way, a permission over
 included: an agent that declines without touching the door passes its half, and the
 runner's own write says whether the platform refused it.
 
+A write the card gives a persona that the build denies it is charged to the build, never to
+the operation. When the agent's own write on an `applied` create or update is refused 403
+`PERMISSION_DENIED` and nothing is written, the runner sends the declared write itself as that
+persona; when the door denies that too, the operation is **not measured: the build denies the
+persona this write** (out of passed and total), and the scorecard carries a Build finding
+naming the persona, the object and the verb. The `write_validation` probe that meets the same
+403 is reported the same way: its platform half is not measured, and so is the agent half
+when the agent's own write met the 403. A 403 the card declares (`refused`
+`PERMISSION_DENIED`) still grades as a pass of that refusal, and a `pending_confirmation`
+operation grades as before: the MCP delete door asks for confirmation before it checks
+permission, so a 403 there follows the agent's own `confirm: true`.
+
 ## The library
 
 The library holds nine scenarios. The three **simple controls**, tier `control`, are here:
