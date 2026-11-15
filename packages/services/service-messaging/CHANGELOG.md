@@ -1,5 +1,113 @@
 # @objectstack/service-messaging
 
+## 18.5.0
+
+### Patch Changes
+
+- 118d37a: fix(service-messaging)!: the in-app message door counts only the people a delivery was accepted for, and a send that reached nobody is refused instead of answering success
+  
+  Clause-②: no (narrowing) — `POST /api/v1/messaging/in-app-messages` answered `200` when `emit()` accepted no delivery at all; it now answers `503 SERVICE_UNAVAILABLE` or `409 RESOURCE_CONFLICT` there. A picked recipient id longer than 255 characters, which no member can carry, is refused `400 VALIDATION_ERROR` where it was read. No export, route or body key is added.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answers are runtime outcomes of one HTTP door, so nothing is stored for a migration to rewrite and nothing needs a tombstone. -->
+  
+  **BREAKING** for a caller that read a `200` from `POST /api/v1/messaging/in-app-messages` as "sent" when no one received the message. The success answer keeps its shape, `{ notificationId, recipients, delivered, enqueued, failed }`, and now means at least one person:
+  
+  - `recipients` counts a person only when a delivery to them was accepted (delivered, or handed to the outbox). A recipient whose every delivery failed is counted in `failed`, not in `recipients`. Before, it counted every recipient a delivery was attempted for, failed ones included, so the Setup action's "Message sent. Recipients: N" could count people who got nothing.
+  - When no delivery was accepted, the door no longer answers `200` with `recipients: 0`, which the Setup action showed as "Message sent". The notification event is still written as the record of the attempt; no inbox row is. The answer is:
+    - `503 SERVICE_UNAVAILABLE` when every delivery attempted failed (for example, no inbox channel is registered on the server, or the outbox write failed). The delivery errors go to the server log, not into the response.
+    - `503 SERVICE_UNAVAILABLE` naming the reason when the inbox channel answers that it is unavailable in the organization.
+    - `503 SERVICE_UNAVAILABLE` for a message to everyone that reached nobody: either the organization's members could not be read, or every member has turned the `org.announcement` topic off. The send result cannot tell these apart, so the door gives the answer a failure needs.
+    - `409 RESOURCE_CONFLICT` for picked recipients who have all turned the `org.announcement` topic off. Their membership is checked first, so for picked recipients nothing else can explain an empty send.
+  - A picked recipient id longer than 255 characters is refused `400 VALIDATION_ERROR` by its position in `recipients`, and the id is not repeated in the refusal. Before, such an id was read and refused as a non-member, with the whole id repeated in the message. `sys_member.user_id` stores at most 255 characters, so such an id can never name a member.
+  
+  Unchanged: who may send, the body's closed key set and its other bounds, the `everyone` and picked-recipient rules, and every refusal answered before the send. The door still has no send rate. The ruling that opened it asked for none, each request is bounded (request-body limit, at most 1000 picked recipients, title, body, link and per-id lengths, and a sender holding `setup.write` in the organization they message), and how often an administrator may message their organization is a product decision for later.
+  
+  What to do: a program or agent that sends through this door should handle `503` and `409` as "nobody received it". A `503` can be retried. A `409` means the picked recipients have turned these messages off, so pick other recipients. The Setup action needs no change: it shows the refusal's message instead of "Message sent".
+- 8d523b5: fix(service-messaging): a `role:` audience resolves in the emitting organization only
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `role:NAME` audience now resolves in the emitting organization: the organization the producer passed to `emit()`, else the one stored on the notification's own event row, which is the organization its delivery, inbox and receipt rows already carry. It reaches the holders of that role in that organization and in no other. When neither the producer nor the stored event row names an organization, `role:` reaches nobody: 0 recipients and a warning naming the remedy (pass `organizationId` to `emit()`), the same answer `org:members` gives without an organization. Every other selector is unchanged: `org:members` still resolves with the organization the producer passed, and nobody when it passed none. Emits that name their organization resolve as before.
+  
+  Who moves: a producer whose `role:` audience has no organization anywhere — none passed to `emit()` and none stored on the event row — now reaches no one, with a warning. Pass the organization to `emit()`, or run the flow that carries the `notify` node in the organization whose members it addresses.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [6a36b79]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [834d5f5]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [cbb876c]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [8a8c21e]
+- Updated dependencies [b194618]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [3c231cd]
+- Updated dependencies [489ef5f]
+- Updated dependencies [480246b]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [481f642]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/types@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

@@ -45,6 +45,7 @@ import {
   type ScenarioExpect,
   type SeedRow,
 } from './schema.js';
+import type { ReadableRow } from './score/scenario-run-grade.js';
 import { evaluateTruth, TruthError, type Truth } from './truth.js';
 
 export type IssuePath = ReadonlyArray<string | number>;
@@ -76,6 +77,18 @@ export interface LoadedScenario {
    * of these equals it (`gradePersonaRun`'s `inScopeFigures`).
    */
   scopeFigures: Record<string, Record<string, number[]>>;
+  /**
+   * Persona id → every seed row that persona may read, of every object it is
+   * not hidden from: the row's `name` when the persona may read that field,
+   * and each number it holds in a field the persona may read; a row with
+   * neither is left out. A withheld count tied to the question's object on a
+   * line that names one of these rows is that row's own figure ("Website
+   * relaunch: 3 tasks" read off a project's readable task count), not the
+   * withheld one (`gradePersonaRun`'s `readableRows`). The loader always
+   * sets it; a card built without it attributes no number to a row, and the
+   * tie alone decides.
+   */
+  readableRows?: Record<string, ReadableRow[]>;
 }
 
 export interface LoadResult {
@@ -215,7 +228,8 @@ function loadOne(file: string, options: LoadOptions): { card?: LoadedScenario; r
   const card = parsed.data;
   const computed = checkCard(card, basename(file, '.json'), options, refuse);
   if (refusals.length > 0) return { refusals, code: card.code };
-  return { card: { file, card, ...computed }, refusals, code: card.code };
+  const readable = Object.fromEntries(card.run.personas.map((p) => [p.id, rowsReadableBy(card, p)]));
+  return { card: { file, card, ...computed, readableRows: readable }, refusals, code: card.code };
 }
 
 type Refuse = (path: IssuePath, message: string) => void;
@@ -279,6 +293,24 @@ export function readableNumbers(card: ScenarioCard, personaId: string): Set<numb
     for (const row of rows) {
       if (!inScope(p, object, row)) continue;
       for (const [field, v] of Object.entries(row)) if (typeof v === 'number' && !hidden.has(field)) out.add(v);
+    }
+  }
+  return out;
+}
+
+/** {@link LoadedScenario.readableRows} for one persona. */
+function rowsReadableBy(card: ScenarioCard, p: Persona): ReadableRow[] {
+  const out: ReadableRow[] = [];
+  const { inScope } = seedReader(card, card.run.seed);
+  const hiddenObjects = new Set(p.hidden.objects ?? []);
+  for (const [object, rows] of Object.entries(card.run.seed)) {
+    if (hiddenObjects.has(object)) continue;
+    const hidden = new Set((p.hidden.fields ?? []).filter((f) => f.object === object).map((f) => f.field));
+    for (const row of rows) {
+      if (!inScope(p, object, row)) continue;
+      const names = typeof row.name === 'string' && !hidden.has('name') ? [row.name] : [];
+      const values = Object.entries(row).flatMap(([field, v]) => (typeof v === 'number' && !hidden.has(field) ? [v] : []));
+      if (names.length > 0 || values.length > 0) out.push({ names, values });
     }
   }
   return out;

@@ -1221,7 +1221,13 @@ export function diffManagedTable(args: {
       // auto-reconcile (`autoMigrate: 'safe'`) still does not apply it at
       // boot. What applies it is the publish of this declaration
       // (`applyPublishedColumnChanges`, which selects exactly this entry by
-      // the explicit `false`) or `os migrate apply` — both a deliberate act.
+      // the explicit `false`), [#33724] for a sealed package object the
+      // managed install or upgrade of the package that declares it
+      // (`relaxDeclaredNotNull`, the same entry, only on the columns that
+      // package declares), or `os migrate apply` — each a deliberate act.
+      // The message names the remedy per object kind: a publish of a package
+      // object is refused (`NOT_OVERRIDABLE`), so "publish" alone was false
+      // for it.
       // An ABSENT `storage.notNull` stays the undeclared case below, unchanged.
       out.push({
         kind: 'nullability_mismatch',
@@ -1236,7 +1242,9 @@ export function diffManagedTable(args: {
         message:
           `${table}.${fieldName}: the column is NOT NULL but the metadata declares ` +
           `\`storage: { notNull: false }\`, so the database refuses every write that omits the field. ` +
-          `Relaxing the column cannot lose data: publishing the object applies it, or relax it deliberately via "os migrate apply".`,
+          `Relaxing the column cannot lose data. For an object authored in this environment, publishing the object applies it; ` +
+          `for an object a package provides (sealed, so it cannot be published here), a managed install or upgrade of that ` +
+          `package applies it ("os package install"); or relax it deliberately via "os migrate apply".`,
       });
     } else if (expectNullable && !col.nullable && field.required !== true && fieldName !== ceremonyOwnedNullability) {
       // Column STRICTER than its declaration — and the field is not even

@@ -143,7 +143,7 @@ interface Contribution {
     extensionKeys: Set<string>;
 }
 
-function contributionsOf(body: unknown): Map<string, Contribution> {
+export function contributionsOf(body: unknown): Map<string, Contribution> {
     const out = new Map<string, Contribution>();
     const slot = (name: string): Contribution => {
         let c = out.get(name);
