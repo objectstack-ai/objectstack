@@ -2798,6 +2798,7 @@ const pt = {
         ssoSwitchAccount: "Trocar de conta",
         ssoBackToConsole: "Voltar ao console",
         ssoSwitchAccountHint: "Trocar de conta abre seu serviço de login em uma nova aba e encerra sua sessão lá. Depois, entre aqui novamente com uma conta que tenha acesso.",
+        linkEmailMismatch: "A conta não foi vinculada: o endereço de e-mail dela não corresponde ao da conta com a qual você entrou. Vincule uma conta que use o mesmo endereço de e-mail.",
         twoFactorInvalidCode: "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
         twoFactorInvalidBackupCode: "Esse código de backup não é válido ou já foi usado.",
         twoFactorTooManyAttempts: "Muitos códigos incorretos. Faça login novamente com sua senha.",

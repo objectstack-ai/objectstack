@@ -397,3 +397,65 @@ describe('kernel:ready index pre-flight (#8725)', () => {
         expect(active.keyParts).toEqual(runtimeIndexProbes()[0]!.keyParts);
     });
 });
+
+/**
+ * A database an earlier release wrote, before the schema sync that adds a
+ * package-less guard's scope column: `sys_user_permission_set` without
+ * `permission_set_package` (an 18.3.0 file, read by `os migrate plan` before
+ * any boot of this release). The seam is shaped like `SqlDriver.execute`, which
+ * prints one raw `DATABASE_ERROR` line per statement the backend refuses, so
+ * `refused` counts the lines an operator would read beside the plan's answer.
+ */
+describe('a package-less guard whose scope column is not there yet', () => {
+    let db: DatabaseSync;
+    let refused: string[];
+    let exec: IndexExec;
+    const GRANT_INDEX = 'uniq_sys_user_permission_set_packageless';
+
+    beforeEach(() => {
+        db = new DatabaseSync(':memory:');
+        db.exec(`CREATE TABLE sys_user_permission_set (
+            id TEXT PRIMARY KEY, user_id TEXT, permission_set TEXT, organization_id TEXT
+        );`);
+        refused = [];
+        exec = async (sql: string) => {
+            try {
+                return db.prepare(sql).all();
+            } catch (e) {
+                // Only the grant table's statements: the other probes' tables
+                // are not in this fixture, and their presence reads are theirs.
+                if (sql.includes('sys_user_permission_set')) refused.push(sql);
+                throw e;
+            }
+        };
+    });
+
+    afterEach(() => db.close());
+
+    const grantEntry = (results: RuntimeIndexPreflight[]) => results.find((r) => r.index === GRANT_INDEX)!;
+
+    it('answers unreadable, naming the missing column, and sends no statement the backend refuses', async () => {
+        const results = await collectRuntimeIndexPreflight(exec, { client: 'better-sqlite3' });
+
+        expect(grantEntry(results)).toMatchObject({ status: 'unreadable', groups: [] });
+        expect(grantEntry(results).detail).toContain('has no permission_set_package column yet');
+        expect(refused).toEqual([]);
+    });
+
+    it('CONTROL: once the column is there, the listing runs and answers', async () => {
+        db.exec('ALTER TABLE sys_user_permission_set ADD COLUMN permission_set_package TEXT');
+
+        const results = await collectRuntimeIndexPreflight(exec, { client: 'better-sqlite3' });
+
+        expect(grantEntry(results)).toMatchObject({ status: 'clear', groups: [] });
+        expect(refused).toEqual([]);
+    });
+
+    it('CONTROL: with no catalog arm for the client, the listing runs as before and its refusal is the answer', async () => {
+        const results = await collectRuntimeIndexPreflight(exec);
+
+        expect(grantEntry(results).status).toBe('unreadable');
+        expect(grantEntry(results).detail).toMatch(/no such column: permission_set_package/);
+        expect(refused.some((sql) => sql.includes('permission_set_package IS NULL'))).toBe(true);
+    });
+});

@@ -3392,6 +3392,8 @@ const en = {
         ssoSwitchAccount: "Switch account",
         ssoBackToConsole: "Back to console",
         ssoSwitchAccountHint: "Switch account opens your sign-in service in a new tab and signs you out there. Then sign in here again with an account that has access.",
+        // A signed-in person's link refused by the callback (`email_does_not_match`), shown where they land.
+        linkEmailMismatch: "The account was not linked: its email address doesn't match the one on the account you're signed in with. Link an account that uses the same email address.",
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
         // server's code (`signInRefusalMessages`).
         twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',

@@ -38,7 +38,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildTablePresenceSql, readTablePresence, type ReadProbeExec } from './read-probe.js';
+import {
+  buildColumnPresenceSql,
+  buildTablePresenceSql,
+  readColumnPresence,
+  readTablePresence,
+  type ReadProbeExec,
+} from './read-probe.js';
 import { SEQUENCES_TABLE } from './seed-tenancy-backfill.js';
 
 const TABLE = SEQUENCES_TABLE;
@@ -262,5 +268,39 @@ describe('[#17175] readTablePresence — the fallback arm, on a dialect with no 
 
     expect(result.probe).toBe('catalog');
     expect(seen).not.toContain(FALLBACK_SQL);
+  });
+});
+
+describe('readColumnPresence — a column asked of the catalog, never by a refused statement', () => {
+  it('answers present, absent, and absent for a table that is not there, on real SQLite', async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(':memory:');
+    db.exec('CREATE TABLE t (id TEXT PRIMARY KEY, a TEXT)');
+    const refused: string[] = [];
+    const exec = async (sql: string) => {
+      try {
+        return db.prepare(sql).all();
+      } catch (e) {
+        refused.push(sql);
+        throw e;
+      }
+    };
+    try {
+      expect(await readColumnPresence(exec, { table: 't', column: 'a', client: 'better-sqlite3' })).toBe('present');
+      expect(await readColumnPresence(exec, { table: 't', column: 'b', client: 'better-sqlite3' })).toBe('absent');
+      expect(await readColumnPresence(exec, { table: 'missing', column: 'a', client: 'better-sqlite3' })).toBe('absent');
+      expect(refused).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('is unknown, never absent, when it cannot ask: no catalog arm, a refused read, no result set', async () => {
+    expect(await readColumnPresence(async () => [], { table: 't', column: 'a' })).toBe('unknown');
+    expect(
+      await readColumnPresence(async () => { throw new Error('refused'); }, { table: 't', column: 'a', client: 'pg' }),
+    ).toBe('unknown');
+    expect(await readColumnPresence(async () => null, { table: 't', column: 'a', client: 'mysql2' })).toBe('unknown');
+    expect(buildColumnPresenceSql('t; drop', 'a', 'pg')).toBeUndefined();
   });
 });
