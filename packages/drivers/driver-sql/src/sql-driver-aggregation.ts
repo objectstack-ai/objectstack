@@ -30,6 +30,7 @@
 
 import { coreSqlDialectOf } from './sql-driver-oracle-dialect.js';
 import { emptyGroupValueFor } from '@objectstack/spec/data';
+import type { Knex } from 'knex';
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { AGGREGATE_ACCUMULATION, AGGREGATE_ANSWER_KIND, aggregandOperandSql } from '@objectstack/core';
@@ -123,7 +124,7 @@ export class AggregationFacet {
     // reference's, or whose predicate's `?` placeholders do not pair one to
     // one with its own bindings (a `??` or an escaped `\?` would be re-read by
     // `knex.raw`), is refused (NOT_IMPLEMENTED/501), never guessed at.
-    const compileMeasureFilter = (filter: NonNullable<DriverQuery['where']>, alias: string): { sql: string; bindings: readonly unknown[] } | undefined => {
+    const compileMeasureFilter = (filter: NonNullable<DriverQuery['where']>, alias: string): { sql: string; bindings: readonly Knex.Value[] } | undefined => {
       const reference = this.getBuilder(object, options);
       this.applyTenantScope(reference, object, options);
       const filtered = this.getBuilder(object, options);
@@ -310,7 +311,7 @@ export class AggregationFacet {
         // predicate's bindings precede the column's `??` in the text, so they
         // precede it in the bindings too.
         const operand = measureFilter ? `CASE WHEN (${measureFilter.sql}) THEN ${argExpr} END` : argExpr;
-        const filterBindings = measureFilter ? [...measureFilter.bindings] : [];
+        const filterBindings: Knex.Value[] = measureFilter ? [...measureFilter.bindings] : [];
         const rawFunc = lowering.distinct
           ? `${lowering.sql}(distinct ${operand})`
           : `${lowering.sql}(${operand})`;
