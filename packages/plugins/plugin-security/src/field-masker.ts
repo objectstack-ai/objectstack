@@ -2,9 +2,135 @@
 
 import type { FieldPermission } from '@objectstack/spec/security';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
+import { analyzeRelationshipTraversals, parseCelToAst } from '@objectstack/formula';
 
 /** The one masking character partial masks are built from (#8993). */
 export const MASK_CHAR = '*';
+
+/**
+ * The fields of its own object a computed field's value is computed from, by
+ * computed field name: every field that declares an `expression` — a
+ * `formula`, computed on read, and a stored computed field, computed on write.
+ * `null` where the reads cannot be named (see {@link computedFieldReads}).
+ */
+export type ComputedFieldReads = Readonly<Record<string, ReadonlySet<string> | null>>;
+
+/** The scope root a field's `expression` reads its own record through. */
+const RECORD_ROOT = 'record';
+const MEMBER_OPS = new Set(['.', '.?']);
+const INDEX_OPS = new Set(['[]', '[?]']);
+
+/**
+ * Does the expression use its `record` root other than as the receiver of a
+ * member it names literally (`record.x`, `record.?x`, `record['x']`)? A
+ * computed key (`record[record.k]`), a method or macro on the root
+ * (`record.size()`, `record.exists(…)`) or the root handed whole to a function
+ * reads members nobody can name before evaluation. Counted against every
+ * `record` identifier in the parse, so a spelling not recognised here counts
+ * as such a use — the answer errs toward hiding, never toward serving.
+ */
+function readsRecordOpaquely(ast: unknown): boolean {
+  let roots = 0;
+  let named = 0;
+  const isRoot = (node: unknown): boolean =>
+    !!node && typeof node === 'object'
+    && (node as { op?: unknown }).op === 'id' && (node as { args?: unknown }).args === RECORD_ROOT;
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) { for (const child of node) walk(child); return; }
+    if (!node || typeof node !== 'object') return;
+    if (isRoot(node)) { roots++; return; }
+    const { op, args } = node as { op?: unknown; args?: unknown };
+    if (typeof op === 'string' && Array.isArray(args) && args.length >= 2 && isRoot(args[0])) {
+      const key = args[1] as { op?: unknown; args?: unknown } | undefined;
+      if ((MEMBER_OPS.has(op) && typeof args[1] === 'string')
+        || (INDEX_OPS.has(op) && !!key && typeof key === 'object' && key.op === 'value' && typeof key.args === 'string')) {
+        named++;
+      }
+    }
+    for (const value of Object.values(node as Record<string, unknown>)) walk(value);
+  };
+  walk(ast);
+  return roots > named;
+}
+
+/**
+ * The fields of its own record a field's declared `expression` reads — as the
+ * platform's one member reader names them (`analyzeRelationshipTraversals`,
+ * the reader the engine plans and orders formula evaluation by): every field
+ * read as a value and every reference field read through.
+ *
+ * `undefined` when the field declares no expression (it is not computed);
+ * `null` when the reads cannot be named — another dialect, a source that does
+ * not parse, or a read of the record no member name describes
+ * ({@link readsRecordOpaquely}). A `null` reads as "may read any field".
+ */
+export function computedFieldReads(def: unknown): ReadonlySet<string> | null | undefined {
+  if (!def || typeof def !== 'object') return undefined;
+  const raw = (def as { expression?: unknown }).expression;
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (typeof raw !== 'string' && typeof raw !== 'object') return null;
+  const expr = (typeof raw === 'string' ? { dialect: 'cel', source: raw } : raw) as { dialect?: unknown; source?: unknown };
+  if ((expr.dialect !== undefined && expr.dialect !== 'cel') || typeof expr.source !== 'string') return null;
+  const analysis = analyzeRelationshipTraversals(expr.source, RECORD_ROOT);
+  const ast = analysis ? parseCelToAst(expr.source) : null;
+  if (!analysis || ast == null || readsRecordOpaquely(ast)) return null;
+  return new Set([...analysis.bareFields, ...analysis.traversals.keys()]);
+}
+
+/**
+ * Field-level security covers what a field's value is computed from: the
+ * computed fields a caller may not read because they read a field in
+ * `withheld` — a field the caller may not read, or is served only partially
+ * masked — directly or through another computed field.
+ *
+ * A computed field whose reads cannot be named is withheld whenever any other
+ * field is. A computed field that is itself served partially masked is
+ * withheld whole when it reads a withheld field: a mask written for the field
+ * does not describe what it is computed from.
+ */
+export function computedFieldsReadingWithheld(
+  reads: ComputedFieldReads | undefined,
+  withheld: ReadonlySet<string>,
+): Set<string> {
+  const out = new Set<string>();
+  if (!reads || withheld.size === 0) return out;
+  const all = new Set(withheld);
+  const readsWithheld = (field: string, fieldReads: ReadonlySet<string> | null): boolean => {
+    if (fieldReads === null) return [...all].some((name) => name !== field);
+    for (const name of fieldReads) if (name !== field && all.has(name)) return true;
+    return false;
+  };
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [field, fieldReads] of Object.entries(reads)) {
+      if (out.has(field) || !readsWithheld(field, fieldReads)) continue;
+      out.add(field);
+      all.add(field);
+      grew = true;
+    }
+  }
+  return out;
+}
+
+/**
+ * `perms` with every computed field {@link computedFieldsReadingWithheld}
+ * names marked non-readable — the field map its readers then mask by — and
+ * those fields. `alsoWithheld` adds the fields served partially masked, which
+ * `perms` may not mark. Returns `perms` itself when no field is withheld.
+ */
+export function foldComputedFieldReads(
+  perms: Record<string, { readable: boolean; editable: boolean }>,
+  reads: ComputedFieldReads | undefined,
+  alsoWithheld: Iterable<string> = [],
+): { perms: Record<string, { readable: boolean; editable: boolean }>; withheld: Set<string> } {
+  const denied = new Set<string>(alsoWithheld);
+  for (const [field, perm] of Object.entries(perms)) if (perm?.readable === false) denied.add(field);
+  const withheld = computedFieldsReadingWithheld(reads, denied);
+  if (withheld.size === 0) return { perms, withheld };
+  const out = { ...perms };
+  for (const field of withheld) out[field] = { readable: false, editable: perms[field]?.editable ?? false };
+  return { perms: out, withheld };
+}
 
 /**
  * Keep the first `keepHead` and last `keepTail` characters (code points) of

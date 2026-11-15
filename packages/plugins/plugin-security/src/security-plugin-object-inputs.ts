@@ -49,6 +49,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { MatchesFilterOptions } from '@objectstack/formula';
 import type { FieldConditionVerdict } from '@objectstack/core';
 import { intersectFieldMasks } from './explain-engine.js';
+import { foldComputedFieldReads } from './field-masker.js';
 import { storedFormCheckJudge } from './rls-check-stored-form.js';
 import type { FieldConditionJudge } from './permission-evaluator.js';
 import type { RlsFieldGuard } from './rls-compiler.js';
@@ -257,7 +258,7 @@ export function computePartialMaskRules(
 export function computeQueryGuardFieldPerms(
   this: Pick<ObjectInputsHost, 'computePartialMaskRules' | 'foldFieldRequiredPermissions' | 'permissionEvaluator'>,
   objectName: string,
-  secMeta: Pick<ObjectSecurityMeta, 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
+  secMeta: Pick<ObjectSecurityMeta, 'computedFieldReads' | 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
   permissionSets: PermissionSet[],
   delegatorSets: PermissionSet[] | null,
 ): Record<string, { readable: boolean; editable: boolean }> {
@@ -274,7 +275,9 @@ export function computeQueryGuardFieldPerms(
       out[f] = { readable: false, editable: out[f]?.editable ?? false };
     }
   }
-  return out;
+  // Field-level security covers what a value is computed from: a computed
+  // field reading a field withheld here is not queryable either.
+  return foldComputedFieldReads(out, secMeta.computedFieldReads).perms;
 }
 
 /**
@@ -475,6 +478,13 @@ export function maskOperationResult(
     const partialRules = this.computeReadPartialMaskRules(
       secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
     );
+    // Field-level security covers what a value is computed from: a computed
+    // field reading a field this caller may not read, or is served partially
+    // masked, directly or through another computed field, is deleted as well —
+    // whole, even where a masking rule of its own would have applied.
+    const folded = foldComputedFieldReads(fieldPerms, secMeta.computedFieldReads, Object.keys(partialRules));
+    fieldPerms = folded.perms;
+    for (const f of folded.withheld) delete partialRules[f];
     if (Object.keys(fieldPerms).length > 0 || Object.keys(partialRules).length > 0) {
       opCtx.result = this.fieldMasker.maskResults(opCtx.result, fieldPerms, opCtx.object, partialRules);
     }

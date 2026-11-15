@@ -270,6 +270,7 @@ export async function resolveCallerPosture(
     requiredPermissions: EMPTY_REQUIRED_PERMISSIONS,
     fieldRequiredPermissions: posture.fieldRequiredPermissions,
     fieldMaskingRules: posture.fieldMaskingRules,
+    computedFieldReads: posture.computedFieldReads,
     unresolved: posture.unresolved,
     // [#10401] Explanation only, and present only on the refusing path.
     unresolvedCause: posture.unresolvedCause,

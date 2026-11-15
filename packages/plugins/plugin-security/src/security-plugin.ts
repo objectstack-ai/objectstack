@@ -311,7 +311,7 @@ import {
 import {
   type MatchesFilterOptions,
 } from '@objectstack/formula';
-import { FieldMasker } from './field-masker.js';
+import { FieldMasker, computedFieldReads, type ComputedFieldReads } from './field-masker.js';
 import {
   PermissionDeniedError,
 } from './errors.js';
@@ -530,6 +530,15 @@ interface ObjectSecurityMeta {
    * an access-narrowing declaration, the #3545 stance one axis over).
    */
   fieldMaskingRules: Record<string, FieldMaskingRule>;
+  /**
+   * The fields of this object each computed field (a `formula`, or a stored
+   * field declaring an `expression`) reads, `null` where they cannot be named
+   * ({@link computedFieldReads}). Field-level security covers what a value is
+   * computed from: the result masker and the query guard withhold a computed
+   * field from a caller who may not read a field it reads, directly or
+   * through another computed field (`foldComputedFieldReads`).
+   */
+  computedFieldReads: ComputedFieldReads;
   /**
    * [#3545] The object's posture could NOT be resolved — neither the live
    * ObjectQL schema nor the metadata service returned it. Every other field is
@@ -5832,6 +5841,12 @@ export class SecurityPlugin implements Plugin {
     const fieldRequiredPermissions: Record<string, string[]> = {};
     // [#8993] Per-field partial-masking rules: { fieldName -> FieldMaskingRule }.
     const fieldMaskingRules: Record<string, FieldMaskingRule> = {};
+    // What each computed field reads: { fieldName -> its own fields read }.
+    const computedReads: Record<string, ReadonlySet<string> | null> = {};
+    const collectComputedReads = (fname: string, fdef: unknown) => {
+      const reads = computedFieldReads(fdef);
+      if (reads !== undefined) computedReads[fname] = reads;
+    };
     const collectMaskingRule = (fname: string, fdef: any) => {
       const raw = fdef?.maskingRule;
       if (raw === undefined || raw === null) return;
@@ -5858,12 +5873,14 @@ export class SecurityPlugin implements Plugin {
           fieldRequiredPermissions[String(f.name)] = f.requiredPermissions.map(String);
         }
         if (f?.name) collectMaskingRule(String(f.name), f);
+        if (f?.name) collectComputedReads(String(f.name), f);
       }
     } else if (fields && typeof fields === 'object') {
       for (const [fname, fdef] of Object.entries(fields)) {
         const rp = (fdef as any)?.requiredPermissions;
         if (Array.isArray(rp) && rp.length > 0) fieldRequiredPermissions[fname] = rp.map(String);
         collectMaskingRule(fname, fdef);
+        collectComputedReads(fname, fdef);
       }
     }
     const meta = {
@@ -5910,6 +5927,7 @@ export class SecurityPlugin implements Plugin {
       requiredPermissions: normalizeRequiredPermissions((obj as any)?.requiredPermissions),
       fieldRequiredPermissions,
       fieldMaskingRules,
+      computedFieldReads: computedReads,
       unresolved: !obj,
       // [#10401 / #10424] Explanation only, and only on the path that is already
       // refusing. All causes deny identically — see the field's TSDoc.
@@ -6101,6 +6119,12 @@ export class SecurityPlugin implements Plugin {
    * unlike the read path's {@link computeReadPartialMaskRules}: masked and
    * hidden fields answer a query probe identically (refuse).
    *
+   * A computed field that reads a field this map withholds, directly or
+   * through another computed field, is withheld as well
+   * (`foldComputedFieldReads`): field-level security covers what a value is
+   * computed from, so filtering or aggregating by it is refused as it is by
+   * the field it reads.
+   *
    * Three readers, one derivation, so they cannot drift apart: the predicate
    * guard (step 2.9), the aggregate-input guard (step 2.5b) and
    * {@link getQueryableFields}, the published answer a door that compiles its
@@ -6108,7 +6132,7 @@ export class SecurityPlugin implements Plugin {
    */
   private computeQueryGuardFieldPerms(
     objectName: string,
-    secMeta: Pick<ObjectSecurityMeta, 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
+    secMeta: Pick<ObjectSecurityMeta, 'computedFieldReads' | 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
     permissionSets: PermissionSet[],
     delegatorSets: PermissionSet[] | null,
   ): Record<string, { readable: boolean; editable: boolean }> {
@@ -6219,7 +6243,9 @@ export class SecurityPlugin implements Plugin {
    * caller may not read in the records an operation returns (reads, and the
    * record a write echoes back), deleting a field the caller's field map
    * denies and serving a field whose masking rule applies masked
-   * ({@link computeReadPartialMaskRules}).
+   * ({@link computeReadPartialMaskRules}). A computed field that reads a field
+   * either withholds, directly or through another computed field, is deleted
+   * too (`foldComputedFieldReads`).
    *
    * [#21062] ONE masker, two readers: the middleware's step 4, for the caller
    * it resolved, and the ADR-0056 public-form grant branch, for the caller the
