@@ -132,7 +132,7 @@
         "id": "add_line",
         "kind": "create",
         "object": "invoice_line",
-        "ask": {"en": "Add 2 Widgets to INV-003, 10 in total."},
+        "ask": {"en": "Add a line to INV-003: 2 Widgets, amount 10."},
         "values": {"invoice": "i3", "product": "Widget", "quantity": 2, "amount": 10},
         "actingAs": "sales_rep",
         "outcome": {
