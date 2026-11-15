@@ -45,6 +45,11 @@
  * the id (a link's GET answering; a new conversation's create answering), with
  * the cursor at its end and nothing sent. CONTROLS: a draft in an open
  * conversation stays put; opening another conversation leaves a draft behind.
+ *
+ * objectstack#33685 — a send held while a linked conversation loads is given
+ * back with the not-sent notice when that load fails (5xx or network), joined
+ * parts included, and the next send loads the conversation again and sends
+ * once. CONTROLS: a load that answers sends once; a 404 creates a new one.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -108,6 +113,8 @@ const CACHE_KEY = 'objectstack:ai-chat-conversation-id:u1:build';
 
 interface Held {
   answer: (r: Response) => void;
+  /** Fails the request as a network error does (held GETs only). */
+  fail?: (e: Error) => void;
 }
 
 const state = {
@@ -166,7 +173,9 @@ beforeEach(() => {
       }
       const one = /\/conversations\/([^/?]+)$/.exec(url);
       if (one && method === 'GET') {
-        if (state.holdGet) return new Promise<Response>((resolve) => state.gets.push({ answer: resolve }));
+        if (state.holdGet) {
+          return new Promise<Response>((resolve, reject) => state.gets.push({ answer: resolve, fail: reject }));
+        }
         return json({ id: decodeURIComponent(one[1]), messages: [] });
       }
       return json({ success: true, data: [] });
@@ -600,5 +609,117 @@ describe('useComposerDraftHandoff — which remount carries the composer text (o
     });
     rerender(<Host conversationId="conv-1" />);
     expect(box().value).toBe('');
+  });
+});
+
+/** Fails the oldest held `GET /conversations/:id`: an HTTP status, or a network error. */
+async function failGet(how: number | 'network'): Promise<void> {
+  await waitFor(() => expect(state.gets.length).toBeGreaterThan(0));
+  const held = state.gets.shift()!;
+  await act(async () => {
+    if (how === 'network') held.fail!(new TypeError('Failed to fetch'));
+    else held.answer(new Response('upstream busy', { status: how }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+}
+
+describe.each([
+  ['the full-page chat (/ai/build/conv-7)', () => mount('/ai/build/conv-7')],
+  [
+    'the console dock (resuming conv-7)',
+    () => {
+      window.localStorage.setItem(CACHE_KEY, 'conv-7');
+      mountDock();
+    },
+  ],
+])('%s — a send held while the conversation loads, when the load fails (objectstack#33685)', (_host, mountLinked) => {
+  it.each([[503 as const], ['network' as const]])('GET %s: the held message is given back with the notice, nothing is sent', async (how) => {
+    state.holdGet = true;
+    mountLinked();
+    await waitFor(() => expect(state.gets.length).toBe(1));
+    await typeAndSend('add a due date field');
+    expect(drawn('add a due date field')).toBe(1);
+
+    await failGet(how);
+
+    const box = await composer();
+    await waitFor(() => expect(drawn('add a due date field')).toBe(0));
+    await waitFor(() => expect(box.value).toBe('add a due date field'));
+    expect(screen.getByTestId('chat-send-error')).toBeInTheDocument();
+    expect(state.sent).toEqual([]);
+    expect(state.creates).toHaveLength(0);
+  });
+
+  it('two sends while it loads, then a failed load: both parts come back, first part first', async () => {
+    state.holdGet = true;
+    mountLinked();
+    await waitFor(() => expect(state.gets.length).toBe(1));
+    await typeAndSend('first part');
+    await typeAndSend('second part');
+
+    await failGet(503);
+
+    const box = await composer();
+    await waitFor(() => expect(box.value).toBe('first part\n\nsecond part'));
+    expect(drawn('first part')).toBe(0);
+    expect(screen.getByTestId('chat-send-error')).toBeInTheDocument();
+    expect(state.sent).toEqual([]);
+  });
+
+  it('a retry after the failed load loads the conversation again and sends once into it', async () => {
+    state.holdGet = true;
+    mountLinked();
+    await waitFor(() => expect(state.gets.length).toBe(1));
+    await typeAndSend('add a due date field');
+    await failGet(503);
+    const box = await composer();
+    await waitFor(() => expect(box.value).toBe('add a due date field'));
+
+    await typeAndSend(box.value);
+    expect(drawn('add a due date field')).toBe(1);
+    expect(screen.queryByTestId('chat-send-error')).not.toBeInTheDocument();
+    await waitFor(() => expect(state.gets.length).toBe(1));
+    await act(async () => {
+      state.gets.shift()!.answer(json({ id: 'conv-7', messages: [] }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    await waitFor(() => expect(state.sent).toEqual(['add a due date field']));
+    await settle();
+    expect(state.sent).toHaveLength(1);
+    expect(state.creates).toHaveLength(0);
+    expect(drawn('add a due date field')).toBe(1);
+  });
+
+  it('CONTROL: a load that answers sends the held message once into the conversation', async () => {
+    state.holdGet = true;
+    mountLinked();
+    await waitFor(() => expect(state.gets.length).toBe(1));
+    await typeAndSend('add a due date field');
+    await act(async () => {
+      state.gets.shift()!.answer(json({ id: 'conv-7', messages: [] }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    await waitFor(() => expect(state.sent).toEqual(['add a due date field']));
+    await settle();
+    expect(state.sent).toHaveLength(1);
+    expect(state.creates).toHaveLength(0);
+  });
+
+  it('CONTROL: a 404 on the load (the conversation is gone) creates a new one and sends the held message once into it, as before', async () => {
+    state.holdGet = true;
+    mountLinked();
+    await waitFor(() => expect(state.gets.length).toBe(1));
+    await typeAndSend('add a due date field');
+
+    await failGet(404);
+    expect(state.creates).toHaveLength(1);
+    await answerCreate(json({ id: 'conv-1', messages: [] }));
+
+    await waitFor(() => expect(state.sent).toEqual(['add a due date field']));
+    await settle();
+    expect(state.sent).toHaveLength(1);
+    expect(screen.queryByTestId('chat-send-error')).not.toBeInTheDocument();
   });
 });
