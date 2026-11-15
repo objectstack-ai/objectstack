@@ -1525,12 +1525,16 @@ jobs:
   #     MEASURED: nothing can be read for it, and a re-run reads it the same way.
   #
   # A ruled row is never re-announced. Closing the card is the maintainer's
-  # "every BREACH row here is ruled" when an account in the queue guard's
-  # `GOVERNED_APPROVERS` closed it by hand — read off the card's last `closed`
-  # event, never assumed: a close signed by a GitHub App (how a seat session
-  # writes, whichever account it is on), any other account's close, a closing
-  # keyword (the event names a commit), the stale bot or an unreadable event
-  # rules nothing. The keys of
+  # "every BREACH row here is ruled" only when the actor login of the card's
+  # last `closed` event is in the queue guard's `GOVERNED_APPROVERS` and the
+  # event carries no commit — read off the event, never assumed: any other
+  # account's close (the relay bot, the stale bot), a closing keyword (the
+  # event names a commit) or an unreadable event rules nothing. ⚠️ It is a
+  # LOGIN test: a seat session on an approver's account reads as that
+  # approver's close. The event's `performed_via_github_app` is read
+  # best-effort, by presence (an object rules nothing, an absent key is
+  # unreadable); the platform serves it null on every close event today
+  # (measured 2026-11-15, issue events and timeline). The keys of
   # EVERY such card (its BREACH and already-ruled sections; closed within the
   # script's `AUDIT_CARD.ruledHorizonDays`, and not as a duplicate) are read as
   # ruled: a later run that reads one again inside the 7-day window (a dispatch
@@ -1792,9 +1796,8 @@ jobs:
             const prior = !existing ? (closed.find((i) => i.state_reason !== 'duplicate') ?? null) : null;
 
             // ── Ruled: every closed card an authorized approver closed by hand ──
-            // Each candidate's LAST `closed` event says who closed it, whether a
-            // commit did (a closing keyword) and whether an app signed it (a seat
-            // session). An unreadable event rules nothing.
+            // Each candidate's LAST `closed` event says who closed it and whether a
+            // commit did (a closing keyword). An unreadable event rules nothing.
             const now = Date.now();
             const accounts = await audit.loadAuditRulingAccounts();
             if (!accounts.available) core.warning(`governed-merges audit: no closed card is read as ruled — ${accounts.reason}`);
@@ -1804,7 +1807,8 @@ jobs:
               try {
                 const events = await github.paginate(github.rest.issues.listEvents, { owner, repo, issue_number: card.number, per_page: 100 });
                 const last = [...events].reverse().find((e) => e.event === 'closed');
-                if (last) close = { actor: last.actor?.login ?? null, commitId: last.commit_id ?? null, app: last.performed_via_github_app?.slug ?? last.performed_via_github_app?.name ?? null };
+                // `app` is passed AS SERVED: absent, null or an object (read by presence).
+                if (last) close = { actor: last.actor?.login ?? null, commitId: last.commit_id ?? null, app: 'performed_via_github_app' in last ? last.performed_via_github_app : undefined };
               } catch (error) {
                 core.warning(`governed-merges audit: card #${card.number}'s close event could not be read (${String(error?.message ?? error).split('\n')[0]}), so it rules nothing`);
               }
