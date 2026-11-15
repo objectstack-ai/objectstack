@@ -347,13 +347,24 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * replaces; the in-product AI's write carries the person's own.
    *
    * Server-constructed only, never client-supplied — exactly like
-   * {@link isSystem}. No request header, body member or model output may set
-   * any key of it.
+   * {@link isSystem}. A request header, body member or model output never
+   * sets a key of it. The in-product AI path's ids can START as values a
+   * request named (the `:agentName` of the chat route, the conversation a
+   * caller continues, the pending item an approval names), so that producer
+   * owes one thing more: it stamps such an id only after the server resolved
+   * it in its own store for the person in {@link userId} — {@link agentId}
+   * the agent it actually ran, {@link conversationId} a conversation that
+   * person owns, {@link confirmationId} a pending item that person's approval
+   * decided for this operation. An id the server did not resolve is not
+   * stamped. That keeps the envelope's refusal of caller-controlled ids
+   * (ADR-0090 D10's 2026-09-20 note: `traceId`, `requestId`) whole.
    *
    * Surfaced to hooks as `HookContext.provenance.performedByClientId`,
    * `performedByAgentId`, `performedByConversationId` and
-   * `performedByConfirmationId`, and recorded by the audit writer in
-   * `sys_audit_log.metadata` as `performed_by` beside `on_behalf_of`. ⛔ It
+   * `performedByConfirmationId`. The audit writer records {@link clientId} in
+   * `sys_audit_log.metadata` as `performed_by` beside `on_behalf_of`; the
+   * in-product AI keys are carried for the audit writer, which records them
+   * under #33694 (at this revision it reads `performedByClientId` only). ⛔ It
    * does NOT move `actor`: ADR-0118 D1/D5 keeps that column two-valued (a user
    * id, or `null` for the system) and answers "which non-user acted" with an
    * ADDED attribution field — this one — never with a second actor
@@ -375,25 +386,30 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
      * The in-product AI agent that performed the operation for the signed-in
      * person — the agent the chat runs as, the same value as
      * `ToolExecutionContext.agentId`. Set by the server-constructed in-product
-     * AI path only; never a `sys_user` id and never an OAuth client id.
+     * AI path only, and only once the server resolved it as the agent it
+     * actually ran; never a `sys_user` id and never an OAuth client id.
      */
-    agentId: z.string().optional().describe('The in-product AI agent that performed the operation for the signed-in person in userId: the agent the chat runs as (the same value as ToolExecutionContext.agentId). Set by the server-constructed in-product AI path only; never a sys_user id or an OAuth client id.'),
+    agentId: z.string().optional().describe('The in-product AI agent that performed the operation for the signed-in person in userId: the agent the chat runs as (the same value as ToolExecutionContext.agentId). Set by the server-constructed in-product AI path only, and only after the server resolved it as the agent it actually ran; never a sys_user id or an OAuth client id.'),
     /**
      * The AI conversation the operation was performed in — the same id as
-     * `ToolExecutionContext.conversationId`. Set beside {@link agentId}.
+     * `ToolExecutionContext.conversationId`. Set beside {@link agentId}, and
+     * only once the server resolved it as a conversation the person in
+     * {@link userId} owns.
      */
-    conversationId: z.string().optional().describe('The AI conversation the operation was performed in (the same id as ToolExecutionContext.conversationId). Set beside agentId by the in-product AI path.'),
+    conversationId: z.string().optional().describe('The AI conversation the operation was performed in (the same id as ToolExecutionContext.conversationId). Set beside agentId by the in-product AI path, and only after the server resolved it as a conversation the person in userId owns.'),
     /**
      * The confirmation the person gave before the operation ran — the id of
      * the pending item their approval decided: the in-app pending action
      * (`IAIService.proposePendingAction`'s `id`) or the pending-confirmation
-     * service's item (`ActionConfirmationPending.pendingId`). Absent when the
-     * operation needed no confirmation.
+     * service's item (`ActionConfirmationPending.pendingId`). Stamped only once
+     * the server resolved it as a pending item that person's approval decided
+     * for this operation; absent when the operation needed no confirmation.
+     * Which store it names follows from the performer key beside it.
      */
-    confirmationId: z.string().optional().describe('The confirmation the person gave before the operation ran: the id of the pending item their approval decided (the in-app pending action id, or the pending-confirmation service item id). Absent when the operation needed no confirmation.'),
+    confirmationId: z.string().optional().describe('The confirmation the person gave before the operation ran: the id of the pending item their approval decided (the in-app pending action id, or the pending-confirmation service item id). Stamped only after the server resolved it as a pending item the person in userId decided for this operation; absent when the operation needed no confirmation.'),
   }).refine(requiredOneOf(['clientId', 'agentId']), {
     message: 'performedBy names its performer: clientId (the /mcp OAuth door) or agentId (the in-product AI path)',
-  }).optional().describe('ADR-0090 D10 rule 4 dual attribution: what PERFORMED this operation, when the performer is not the principal the write is authorized as. Two server-side producers set it: the /mcp OAuth door names the agent client in clientId, on the same branch that decides principalKind: agent and onBehalfOf; the server-constructed in-product AI path, acting for the signed-in person and running as them, names its agent in agentId with conversationId and, when the person confirmed the call, confirmationId. Absent everywhere else, and the absence is the record that the principal acted for itself; when present it names its performer, at least one of clientId and agentId, each set only by its own producer. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied. Surfaced to hooks as HookContext.provenance.performedByClientId / performedByAgentId / performedByConversationId / performedByConfirmationId and recorded by the audit writer as sys_audit_log.metadata.performed_by beside on_behalf_of; it does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
+  }).optional().describe('ADR-0090 D10 rule 4 dual attribution: what PERFORMED this operation, when the performer is not the principal the write is authorized as. Two server-side producers set it: the /mcp OAuth door names the agent client in clientId, on the same branch that decides principalKind: agent and onBehalfOf; the server-constructed in-product AI path, acting for the signed-in person and running as them, names its agent in agentId with conversationId and, when the person confirmed the call, confirmationId. Absent everywhere else, and the absence is the record that the principal acted for itself; when present it names its performer, at least one of clientId and agentId, each set only by its own producer. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied: an id a request named (an agent name, a conversation, a pending item) is stamped only after the server resolved it in its own store for the person in userId, and an unresolved id is not stamped. Surfaced to hooks as HookContext.provenance.performedByClientId / performedByAgentId / performedByConversationId / performedByConfirmationId. The audit writer records clientId as sys_audit_log.metadata.performed_by beside on_behalf_of; the in-product AI keys are carried for the audit writer, which does not record them yet. It does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
 
   /**
    * [#27908 — ruling 6513869839 on #27681, parameter 3] WHICH DOOR an action
