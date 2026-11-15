@@ -2801,6 +2801,21 @@ export interface SecurityCatalogNameConflict {
 }
 
 /**
+ * The rule both wordings of {@link SecurityCatalogNameConflictError} state, in
+ * the words the permission set `name` describe (`@objectstack/spec`) and the
+ * permission sets guide use. [ADR-0150 D2/D9] A permission set is identified
+ * by its package and name, so its name has one holder per namespace, judged by
+ * `permissionSetHoldersMeet` (`@objectstack/core`); positions and capabilities
+ * keep one name per deployment. Text only: which holders are refused is decided
+ * by the doors, never by this sentence.
+ */
+const SECURITY_CATALOG_NAME_RULE =
+  'Positions and capabilities each hold one name per deployment. A permission set holds one name per ' +
+  'namespace: packages of two namespaces may each hold a set of one name, while two packages of one ' +
+  'namespace, a package with no namespace, a platform package (`base`, `system`, `sys`), the environment ' +
+  'and the platform-requested `guest_portal` share one set of it.';
+
+/**
  * The cold-boot wording of {@link SecurityCatalogNameConflictError}: every
  * package registered before the environment catalog hydrated, so each line
  * names the package that declares the name and the holder it meets, and the
@@ -2815,9 +2830,9 @@ function coldBootConflictMessage(conflicts: readonly SecurityCatalogNameConflict
   return (
     `Security catalog name conflict at boot: ${conflicts.length === 1 ? 'a name' : `${conflicts.length} names`} ` +
     `a configured package declares ${conflicts.length === 1 ? 'is' : 'are'} already held by another holder — ` +
-    `${lines.join('; ')}. Positions, permission sets and capabilities each hold one name per deployment: an ` +
-    `assignment names a position or a permission set by its bare name, so with two holders the environment's ` +
-    `stored item would be served in place of the package's definition. The environment catalog loads from ` +
+    `${lines.join('; ')}. ${SECURITY_CATALOG_NAME_RULE} Under that rule the environment's item and the ` +
+    `package's share one definition of the name, so with two holders the environment's stored item would be ` +
+    `served in place of the package's definition. The environment catalog loads from ` +
     `sys_metadata before this check, so the boot is refused. Rename the item in the package, or rename or ` +
     `delete the environment's item (its environment-wide sys_metadata row: \`os migrate security-catalog-overlays\` ` +
     `lists every such row with no server running, and with --apply deletes them), then restart. ` +
@@ -2876,10 +2891,10 @@ export class SecurityCatalogNameConflictError extends Error {
         ? coldBootConflictMessage(conflicts)
         : `Security catalog name conflict: package "${first.incomingPackageId}" cannot register ` +
           `${conflicts.length === 1 ? 'a name' : `${conflicts.length} names`} another holder ` +
-          `already holds — ${lines.join('; ')}. Positions, permission sets and capabilities each ` +
-          `hold one name per deployment: an assignment names a position or a permission set by ` +
-          `its bare name, with no package to tell two definitions apart, so with two holders ` +
-          `which definition grants would depend on registration order. Rename the item in ` +
+          `already holds — ${lines.join('; ')}. ${SECURITY_CATALOG_NAME_RULE} Under that rule ` +
+          `"${first.incomingPackageId}" and each holder named here share one definition of the ` +
+          `name, with nothing to tell two definitions of it apart, so with two holders which ` +
+          `definition grants would depend on registration order. Rename the item in ` +
           `"${first.incomingPackageId}"${
             first.existingHolder.kind === 'package'
               ? `, rename it in "${first.existingHolder.packageId}", or uninstall one of the two packages`
@@ -8677,9 +8692,11 @@ export class SchemaRegistry {
     // composite keys and each caller resolves to its own. What the original
     // guard flagged as a collision is now the supported marketplace case.
     // ⚠️ Except for the three security catalog types, refused at the top of this
-    // method: an assignment names a position or a permission set with no
-    // package context, so there a second holder is an ambiguity no caller can
-    // resolve (maintainer ruling Q4 = A on #15196). ⚠️ And except for the
+    // method: a position or a capability is named with no package context, and
+    // a permission set's name has one holder per namespace (ADR-0150 D2/D9,
+    // `permissionSetHoldersMeet`), so there a second holder that meets the
+    // first is an ambiguity no caller can resolve (maintainer ruling Q4 = A on
+    // #15196). ⚠️ And except for the
     // bare-name types, refused (once the cold boot has sealed) at the top of
     // this method too: a field's picklist, an import's mapping and a dashboard's
     // dataset are resolved by name with no package (ruling C on #30798;

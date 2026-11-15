@@ -404,7 +404,10 @@ way. A provider saved before this rule may still hold such an entry: it is not
 rewritten, and it names no domain. To correct one, send the bare host names as
 `domain` to `POST /api/v1/auth/sso/update-provider` (`https://acme.com` becomes
 `acme.com`; the console has no action that edits a provider's domain), then
-verify the domain again, since writing the list clears the verified flag.
+verify the domain again, since writing the list clears the verified flag. To
+find them, read the server log at boot: each such provider gets one warning
+naming its `provider_id` and the entry. The warning only reads; it changes no
+row.
 
 ### Why an OIDC sign-in was refused
 

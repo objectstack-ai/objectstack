@@ -118,6 +118,7 @@ Toggle system behaviours per object:
 | `feeds` | `true` | Social feed, comments, mentions — **opt-out**: explicit `false` hides the feed UI and rejects new comments |
 | `activities` | `true` | Activity timeline (`sys_activity` mirror of CRUD) — **opt-out**: explicit `false` stops mirroring and hides the timeline |
 | `clone` | `true` | Record deep cloning |
+| `aiReadable` | — | Platform `sys_*` objects only (not `sys_metadata`, `sys_metadata_history`): read-only AI access (query, get, aggregate, describe, list; no write). App objects never declare it, `false` included: refused at parse |
 
 ---
 

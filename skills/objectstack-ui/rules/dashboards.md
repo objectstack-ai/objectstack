@@ -304,13 +304,13 @@ defineDataset({
 // measure `currency` → the field's `defaultCurrency` (`fixed` only) →
 // tenant `localization.currency`; omit it for counts. A
 // `currencyMode: 'record'` amount refuses `currency`, and sum/avg/min/max
-// unless grouped by its code field; then the column carries
-// `currencyField` (the per-row code column); a `count` never does. A `fixed`
+// unless grouped by its code field (a parent-path `currencyField` admits
+// none, objectstack-data → Field Types → Currency: measure its `homeAmount`
+// field or the parent's `summary`). A `fixed`
 // field, or a derived sum/difference over one `fixed` code, refuses another
 // `currency` (delete it, the column takes that code; restating is fine); a
 // derived measure refuses operands in two `fixed` codes (derive from one
-// currency or drop one). Not judged: `currency` over a `dynamic` field, a
-// `fixed` code against the tenant's.
+// currency or drop one).
 
 // The widget just selects the dimension by name:
 const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
