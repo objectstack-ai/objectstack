@@ -1,5 +1,95 @@
 # @object-ui/plugin-dashboard
 
+## 18.5.0
+
+### Patch Changes
+
+- 68972cd: fix(plugin-dashboard): drill-down and auto-derived table columns head each column with the field's own label and leave out hidden fields
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dashboard drill-down drawer that names no columns derives them from the object. Its headers used to fall back to the humanized field key, so a field whose label was written only on the field (no translation bundle entry) showed an English, key-made header, and fields the object declares `hidden: true` were listed as columns. Headers now resolve as list views resolve them: a translation bundle entry first, then the field's declared `label` (an inline locale map is picked in the UI language), then the humanized key. Auto-derived columns skip `hidden: true` fields. An explicit `columns` list is never filtered, and a header written on a column still wins; a column listed only by its key, as a string or as a drill column, falls back to the field's label the same way an auto-derived one does.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [f530d25]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [f5121e8]
+- Updated dependencies [b462444]
+- Updated dependencies [82838e8]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [ba32e79]
+- Updated dependencies [9317833]
+- Updated dependencies [8ed2b89]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [a9da547]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [4c32b96]
+- Updated dependencies [12d090d]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [d574341]
+- Updated dependencies [bc50d11]
+- Updated dependencies [de476f1]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [020ce3d]
+- Updated dependencies [ee627c6]
+- Updated dependencies [6446935]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [f06f064]
+- Updated dependencies [06e53a7]
+- Updated dependencies [5604aeb]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @object-ui/i18n@18.5.0
+  - @object-ui/fields@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

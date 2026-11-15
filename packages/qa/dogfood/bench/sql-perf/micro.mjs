@@ -19,6 +19,9 @@
  * Output: `<work-dir>/results/micro-<dialect>-<scale>.{json,md}`, stamped with the
  * `git rev-parse --short HEAD` of this checkout: the "today" SQL is hand-copied
  * from one tree, and a reading describes only the engine of that commit.
+ * `--only m0,r9,r10` runs a subset of the groups (I1–I8, I9, I10) and adds the
+ * groups to the file name. I9 writes nothing; I10 rewrites the summary values
+ * the seed already holds, so it leaves the database as it was.
  */
 
 import { execSync } from 'node:child_process';
@@ -31,7 +34,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG_DIR = resolve(HERE, '../..');
 const driverRequire = createRequire(realpathSync(join(PKG_DIR, 'node_modules/@objectstack/driver-sql/package.json')));
 
-const args = { dialect: 'sqlite', scale: 100_000, runs: 7, pgUrl: process.env.OS_BENCH_PG_URL ?? 'postgres://postgres@127.0.0.1:5432/postgres', workDir: resolve(process.env.TMPDIR ?? '/tmp', 'os-sql-perf-bench'), timeoutMs: 120_000 };
+const args = { dialect: 'sqlite', scale: 100_000, runs: 7, pgUrl: process.env.OS_BENCH_PG_URL ?? 'postgres://postgres@127.0.0.1:5432/postgres', workDir: resolve(process.env.TMPDIR ?? '/tmp', 'os-sql-perf-bench'), timeoutMs: 120_000, only: undefined };
 for (let i = 2; i < process.argv.length; i++) {
   const [flag, inline] = process.argv[i].split('=');
   const val = () => (inline !== undefined ? inline : process.argv[++i]);
@@ -41,6 +44,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (flag === '--pg-url') args.pgUrl = val();
   else if (flag === '--work-dir') args.workDir = resolve(val());
   else if (flag === '--timeout-ms') args.timeoutMs = Number(val());
+  else if (flag === '--only') args.only = val().split(','); // groups: m0 (I1–I8), r9 (I9), r10 (I10)
   else throw new Error(`unknown argument: ${process.argv[i]}`);
 }
 
@@ -56,6 +60,7 @@ async function open() {
     return {
       all: async (sql, binds = []) => db.prepare(sql).all(binds),
       run: async (sql) => db.exec(sql),
+      write: async (sql, binds = []) => db.prepare(sql).run(binds),
       close: async () => db.close(),
     };
   }
@@ -68,6 +73,7 @@ async function open() {
   return {
     all: async (sql, binds = []) => { n = 0; const text = sql.replace(/\?/g, () => `$${++n}`); return (await c.query(text, binds)).rows; },
     run: async (sql) => c.query(sql),
+    write: async (sql, binds = []) => { n = 0; const text = sql.replace(/\?/g, () => `$${++n}`); return c.query(text, binds); },
     close: async () => c.end(),
   };
 }
@@ -78,13 +84,121 @@ async function time(db, sql, binds) {
   await db.all(sql, binds); // warm
   const ms = [];
   let rows = 0;
+  let first;
   for (let i = 0; i < args.runs; i++) {
     const t0 = performance.now();
     const r = await db.all(sql, binds);
     ms.push(performance.now() - t0);
     rows = r.length;
+    first = r[0];
   }
-  return { ms: Math.round(median(ms) * 100) / 100, rows };
+  return { ms: Math.round(median(ms) * 100) / 100, rows, first };
+}
+
+/**
+ * I10 (R10): the roll-up recompute after one batch child write on `bench_roll2`
+ * (two summary fields) that touched 10 distinct parents. Today, per parent per
+ * summary field: one aggregate, two full reads of the parent, one update (the
+ * statements `bench.mjs --sql-log` captured for `rollup2_insert_p10`). Target:
+ * one grouped aggregate for both fields and every parent, then one update per
+ * parent. Both write the values the seed already holds, so the database is left
+ * as it was; the target's answer is checked against today's.
+ */
+async function rollupPairs(db) {
+  const parents = Array.from({ length: 10 }, (_, i) => `r2p${pad(i)}`);
+  const seeded = await db.all('select count(*) as n from bench_roll2 where id = ?', [parents[0]]);
+  if (!Number(seeded[0]?.n ?? 0)) return { results: [], note: 'no roll-up rows: run bench.mjs at this scale first' };
+  const today = async () => {
+    const out = {};
+    for (const p of parents) {
+      const sum = (await db.all('select sum(quantity) as value from bench_roll2_item where parent = ?', [p]))[0].value;
+      await db.all('select * from bench_roll2 where id = ? limit 1', [p]);
+      await db.all('select * from bench_roll2 where id = ? limit 1', [p]);
+      await db.write('update bench_roll2 set total_quantity = ? where id = ?', [sum, p]);
+      const count = (await db.all('select count(*) as value from bench_roll2_item where parent = ?', [p]))[0].value;
+      await db.all('select * from bench_roll2 where id = ? limit 1', [p]);
+      await db.all('select * from bench_roll2 where id = ? limit 1', [p]);
+      await db.write('update bench_roll2 set item_count = ? where id = ?', [count, p]);
+      out[p] = [Number(sum), Number(count)];
+    }
+    return out;
+  };
+  const target = async () => {
+    const rows = await db.all(`select parent, sum(quantity) as total_quantity, count(*) as item_count from bench_roll2_item where parent in (${parents.map(() => '?').join(', ')}) group by parent`, parents);
+    const out = {};
+    for (const r of rows) {
+      await db.write('update bench_roll2 set total_quantity = ?, item_count = ? where id = ?', [r.total_quantity, r.item_count, r.parent]);
+      out[r.parent] = [Number(r.total_quantity), Number(r.item_count)];
+    }
+    return out;
+  };
+  const a = await today();
+  const b = await target();
+  const key = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]));
+  const same = key(a) === key(b);
+  const seq = async (fn) => {
+    await fn();
+    const ms = [];
+    for (let i = 0; i < args.runs; i++) { const t0 = performance.now(); await fn(); ms.push(performance.now() - t0); }
+    return Math.round(median(ms) * 100) / 100;
+  };
+  return {
+    results: [{
+      item: 'I10 roll-up recompute, 10 parents x 2 summary fields: 80 statements (aggregate + 2 parent reads + update, per parent per field) vs 11 (one grouped aggregate + one update per parent)',
+      today: '10 x [select sum(quantity) … where parent = ?; select * from bench_roll2 where id = ? x2; update bench_roll2 set total_quantity = ?; select count(*) … where parent = ?; select * x2; update … set item_count = ?]',
+      target: 'select parent, sum(quantity), count(*) from bench_roll2_item where parent in (?×10) group by parent; then 10 x update bench_roll2 set total_quantity = ?, item_count = ? where id = ?',
+      todayMs: await seq(today), targetMs: await seq(target),
+      todayAnswer: 'per-parent values', targetAnswer: same ? 'same values' : 'DIFFERENT values', sameAnswer: same,
+      todayStatements: 80, targetStatements: 11,
+    }],
+  };
+}
+
+/**
+ * I9 (R9): the sharing read scope. Today the sharing service reads the
+ * member's grants (`limit 5000`) and the engine binds every `record_id` into
+ * `id in (…)`, once for the page and once again for the total; the target folds
+ * the grants into the statement as a subquery. The "today" text is copied from
+ * the statements `bench.mjs --sql-log` captured for the member; it needs a
+ * database `bench.mjs --shares N` seeded. Each pair also compares the ANSWER
+ * (page row count, the total): a faster statement that answers differently is
+ * not a rewrite. Where the member holds more than 5000 grants the two differ by
+ * design, and the row says so.
+ */
+async function sharePairs(db, memberId) {
+  const grantsSql = 'select record_id, access_level from sys_record_share where object_name = ? and recipient_type = ? and recipient_id = ? order by id asc limit 5000';
+  const grantBinds = ['bench_account', 'user', memberId];
+  const held = (await db.all('select count(*) as n from sys_record_share where object_name = ? and recipient_type = ? and recipient_id = ?', grantBinds))[0];
+  const heldN = Number(held?.n ?? held?.count ?? 0);
+  if (heldN === 0) return { held: 0, results: [], note: 'no shares seeded: run bench.mjs --shares N at this scale first' };
+  const grants = await time(db, grantsSql, grantBinds);
+  const ids = (await db.all(grantsSql, grantBinds)).map((r) => r.record_id);
+  const inIds = `(${ids.map(() => '?').join(', ')})`;
+  const sub = '(select record_id from sys_record_share where object_name = ? and recipient_type = ? and recipient_id = ?)';
+  const scopeToday = `((owner_id = ?) or (id in ${inIds}))`;
+  const scopeTarget = `((owner_id = ?) or (id in ${sub}))`;
+  const todayBinds = [memberId, ...ids];
+  const targetBinds = [memberId, ...grantBinds];
+  const chain = (scope) => `opportunity in (select id from bench_opportunity where account in (select id from bench_account where ${scope}))`;
+  const rows = [
+    ['I9 member account page', (sc) => `select * from bench_account where ${sc} order by created_at desc, id desc limit 50`],
+    ['I9b member account total', (sc) => `select count(*) as n from bench_account where ${sc}`],
+    ['I9c member line-item page (the controlled-by-parent chain carries the share scope)', (sc) => `select * from bench_line_item where ${chain(sc)} order by created_at desc, id desc limit 50`],
+    ['I9d member line-item total', (sc) => `select count(*) as n from bench_line_item where ${chain(sc)}`],
+  ];
+  const out = [{ item: `I9r the grants read itself (${heldN} held, ${ids.length} returned), run before the page and again before the total`, today: grantsSql, todayMs: grants.ms, todayRows: grants.rows, target: '(none: folded into the statement)', targetMs: null }];
+  for (const [item, sql] of rows) {
+    const today = await time(db, sql(scopeToday), todayBinds);
+    const target = await time(db, sql(scopeTarget), targetBinds);
+    const answer = (t) => (t.first && ('n' in t.first || 'count' in t.first) ? Number(t.first.n ?? t.first.count) : t.rows);
+    const same = answer(today) === answer(target);
+    out.push({
+      item, today: sql(scopeToday).replace(inIds, `(?×${ids.length})`), target: sql(scopeTarget),
+      todayMs: today.ms, targetMs: target.ms, todayAnswer: answer(today), targetAnswer: answer(target), sameAnswer: same,
+      note: same ? undefined : `answers differ: today ${answer(today)}, target ${answer(target)} — the ${heldN - ids.length} grants past the 5000 read limit`,
+    });
+  }
+  return { held: heldN, returned: ids.length, results: out };
 }
 
 async function dropIndex(db, name, table) {
@@ -174,6 +288,24 @@ async function main() {
   ];
 
   const results = [];
+  const group = (g) => !args.only || args.only.includes(g);
+  if (group('r9')) {
+    const r9 = await sharePairs(db, memberId);
+    for (const r of r9.results) {
+      results.push(r);
+      console.log(`${r.item}\n  today ${r.todayMs} ms${r.todayAnswer !== undefined ? ` (answer ${r.todayAnswer})` : ''} · target ${r.targetMs ?? 'n/a'} ms${r.targetAnswer !== undefined ? ` (answer ${r.targetAnswer})` : ''}${r.note ? ` · ${r.note}` : ''}`);
+    }
+    if (r9.note) console.log(`I9: ${r9.note}`);
+  }
+  if (group('r10')) {
+    const r10 = await rollupPairs(db);
+    for (const r of r10.results) {
+      results.push(r);
+      console.log(`${r.item}\n  today ${r.todayMs} ms · target ${r.targetMs} ms · ${r.targetAnswer}`);
+    }
+    if (r10.note) console.log(`I10: ${r10.note}`);
+  }
+  if (!group('m0')) return finish(db, commit, results);
   for (const p of pairs) {
     const today = p.today ? await time(db, p.today, p.binds) : null;
     const target = await time(db, p.target, p.targetBinds ?? (p.today ? p.binds : undefined));
@@ -229,15 +361,19 @@ async function main() {
   results.push({ item: 'I8c the same admin page with R4 (vacuous chain dropped)', today: adminPageR4Sql, todayMs: sortBefore.adminR4.ms, targetMs: sortAfter.adminR4.ms, target: withIndex, plans: { before: plans.before.adminR4, after: plans.after.adminR4 } });
   console.log(`I8 member page: ${sortBefore.member.ms} -> ${sortAfter.member.ms} ms; admin page (chained) ${sortBefore.admin.ms} -> ${sortAfter.admin.ms} ms; admin page with R4 ${sortBefore.adminR4.ms} -> ${sortAfter.adminR4.ms} ms`);
   for (const [k, v] of Object.entries(plans)) console.log(`  plan ${k} chained: ${v.admin}\n  plan ${k} with R4: ${v.adminR4}`);
+  return finish(db, commit, results);
+}
+
+async function finish(db, commit, results) {
   await db.close();
 
   const outDir = join(args.workDir, 'results');
   mkdirSync(outDir, { recursive: true });
-  const base = join(outDir, `micro-${args.dialect}-${args.scale}`);
+  const base = join(outDir, `micro-${args.dialect}-${args.scale}${args.only ? `-${args.only.join('-')}` : ''}`);
   const measuredAt = new Date().toISOString();
   writeFileSync(`${base}.json`, JSON.stringify({ dialect: args.dialect, scale: args.scale, runs: args.runs, commit, measuredAt, accounts, opportunities, results }, null, 2));
-  const md = [`# SQL pairs — ${args.dialect}, ${args.scale} line items (median of ${args.runs})`, '', `commit \`${commit}\` · ${measuredAt}`, '', '| item | today ms | target ms |', '|:--|--:|--:|',
-    ...results.map((r) => `| ${r.item} | ${r.todayMs ?? (r.item.startsWith('I3b') ? 'refused' : 'n/a')} | ${r.targetMs} |`)].join('\n') + '\n';
+  const md = [`# SQL pairs — ${args.dialect}, ${args.scale} line items (median of ${args.runs})`, '', `commit \`${commit}\` · ${measuredAt}${args.only ? ` · groups ${args.only.join(', ')}` : ''}`, '', '| item | today ms | target ms | answer today / target |', '|:--|--:|--:|:--|',
+    ...results.map((r) => `| ${r.item} | ${r.todayMs ?? (r.item.startsWith('I3b') ? 'refused' : 'n/a')} | ${r.targetMs ?? 'n/a'} | ${r.todayAnswer !== undefined ? `${r.todayAnswer} / ${r.targetAnswer}${r.sameAnswer ? '' : ' (differ)'}` : ''} |`)].join('\n') + '\n';
   writeFileSync(`${base}.md`, md);
   console.log(`wrote ${base}.json and ${base}.md`);
 }
