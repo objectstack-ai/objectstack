@@ -2837,7 +2837,7 @@ async function servedPackagelessSaveAddress(
     if (judged?.kind === 'refused') {
         const served = judged.error.refusal.candidates
             .map((candidate) => (candidate as { packageId?: unknown }).packageId)
-            .filter((id): id is string => typeof id === 'string' && !disabled(id));
+            .filter((id): id is string => typeof id === 'string');
         throw packagelessAddressAmbiguityRefusal('save', type, name, served);
     }
     if (!address.candidates.some(disabled)) return undefined;
