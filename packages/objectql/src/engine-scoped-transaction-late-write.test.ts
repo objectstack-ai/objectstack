@@ -208,7 +208,7 @@ describe('#22855 — un-awaited work does not keep a finished unit\'s handle', (
  * as a blocking hook doing real work lets it, and that statement runs behind
  * the unit's commit: the order the real failure took is fixed, not raced.
  */
-async function makeUpdateEngine(legs: { blocking?: boolean; secondAsync?: boolean; asyncLeg?: boolean } = {}) {
+async function makeUpdateEngine(legs: { blocking?: boolean; secondAsync?: boolean; asyncLeg?: boolean; ownUnit?: boolean } = {}) {
   const log = () => {};
   const engine = new ObjectQL({ logger: { debug: log, info: log, warn: log, error: log } } as any);
   const driver = makeDriver();
@@ -218,14 +218,16 @@ async function makeUpdateEngine(legs: { blocking?: boolean; secondAsync?: boolea
   const commitLanded = new Promise<void>((r) => { landed = r; });
   const commit = driver.commit;
   driver.commit = async (h: object) => { await commit(h); landed(); };
-  // The async hook's statement, issued on a unit's handle, runs once that
-  // unit's commit has landed: a knex query queued on the unit's connection
-  // behind its COMMIT. Outside any unit it runs at once.
+  // The async hook's statement, issued on the handle of a unit open when the
+  // hook started, runs once that unit's commit has landed: a knex query queued
+  // on the unit's connection behind its COMMIT. Outside any unit, or in a unit
+  // the hook opened itself, it runs at once.
+  let openAtDispatch = new Set<object>();
   const create = driver.create.bind(driver);
   driver.create = async (o: string, data: Record<string, unknown>, options: any) => {
     if (o === 'note' && data.name === 'drafted') {
       reached();
-      if (options?.transaction !== undefined) await commitLanded;
+      if (openAtDispatch.has(options?.transaction)) await commitLanded;
     }
     return create(o, data, options);
   };
@@ -239,8 +241,13 @@ async function makeUpdateEngine(legs: { blocking?: boolean; secondAsync?: boolea
   const draftNote = {
     name: 'draft_note', object: 'rec', events: ['afterUpdate'], async: true, runAs: 'system', onError: 'log',
     handler: async (ctx: any) => {
+      openAtDispatch = new Set(driver.begun);
       try {
-        await ctx.api.object('note').insert({ name: 'drafted' });
+        if (legs.ownUnit) {
+          await ctx.api.transaction(async (tx: any) => { await tx.object('note').insert({ name: 'drafted' }); });
+        } else {
+          await ctx.api.object('note').insert({ name: 'drafted' });
+        }
         report('stored');
       } catch (e) {
         report((e as Error).message);
@@ -282,6 +289,30 @@ describe('an async after-hook beside a blocking one writes outside the door\'s u
     expect(driver.begun).toHaveLength(1);
     expect(noteUnenrolled(driver).sort()).toEqual([false, true]);
     expect(driver.rowsOf('note').map((r: any) => r.name).sort()).toEqual(['blocking', 'drafted']);
+  });
+
+  it('inside a caller\'s ctx.api.transaction, the write threaded through the unit\'s own context: the async hook\'s write is stored outside it', async () => {
+    const { driver, api, drafted } = await makeUpdateEngine();
+    await api.transaction(async (tx) => { await tx.object('rec').update('r1', { name: 'accepted' }); });
+    expect(await drafted).toBe('stored');
+    expect(driver.begun).toHaveLength(1);
+    expect(noteUnenrolled(driver)).toEqual([true]);
+  });
+
+  it('inside a caller\'s engine transaction(), the write enrolled only ambiently: the async hook\'s write is stored outside it', async () => {
+    const { engine, driver, api, drafted } = await makeUpdateEngine();
+    await engine.transaction(async () => { await api.object('rec').update('r1', { name: 'accepted' }); });
+    expect(await drafted).toBe('stored');
+    expect(driver.begun).toHaveLength(1);
+    expect(noteUnenrolled(driver)).toEqual([true]);
+  });
+
+  it('a unit the async hook opens itself is its own: its write is enrolled in it and stored', async () => {
+    const { driver, api, drafted } = await makeUpdateEngine({ ownUnit: true });
+    await api.object('rec').update('r1', { name: 'accepted' });
+    expect(await drafted).toBe('stored');
+    expect(driver.begun).toHaveLength(1);
+    expect(noteUnenrolled(driver)).toEqual([false]);
   });
 
   it('CONTROL async only: no unit, the write is stored outside any, unchanged', async () => {
