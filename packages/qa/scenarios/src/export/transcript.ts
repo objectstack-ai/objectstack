@@ -96,7 +96,7 @@ export function buildTranscript(original: LoadedScenario, record: ScenarioRunRec
         if (q.notMeasured) turn.notMeasured = q.notMeasured;
         if (q.error) turn.error = q.error;
         if (q.grade) {
-          const ref: StepRef = { card: card.id, mode: mode.mode, phase, step: q.question, ...(q.persona ? { persona: q.persona } : {}) };
+          const ref: StepRef = { card: card.id, mode: mode.mode, phase, step: q.question, ...(q.persona ? { persona: q.persona } : {}), ...(q.repeat !== undefined ? { repeat: q.repeat } : {}) };
           const key = stepKey(ref);
           const recorded = turns.get(key);
           if (!recorded) throw new TranscriptRefusal(`no recorded reply for \`${key}\`: the transcript would show a grade without its answer`);

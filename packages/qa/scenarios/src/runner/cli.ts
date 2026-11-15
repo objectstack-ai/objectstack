@@ -31,6 +31,12 @@
  *                        half not measured
  *   --ask-max-turns N    the live driver's turn cap per question or operation
  *                        turn (default 12)
+ *   --ask-repeats N      ask each (question, persona) turn N times on the same
+ *                        booted app, each ask a fresh agent session, and score
+ *                        k/N per turn (default 1); operations run once. Any
+ *                        driver: a replay (`recorded:`) reads the first N asks
+ *                        the recording holds of each question turn, and an N
+ *                        it holds fewer of is refused before any card runs
  *   --model M            the model every live turn asks for, an alias (`sonnet`)
  *                        or a name (`claude-sonnet-4-5`), as `claude --model`
  *                        takes it (default: the login's own)
@@ -110,6 +116,8 @@ export interface CliArgs {
   authorMaxTurns?: number;
   /** Turns per question or operation turn (`--ask-max-turns`); the driver's default when absent. */
   askMaxTurns?: number;
+  /** How many times each (question, persona) turn is asked (`--ask-repeats`); once when absent. Not a live-only flag: a replay reads that many recorded asks. */
+  askRepeats?: number;
   /** The model every live turn asks for (`--model`); the login's default when absent. */
   model?: string;
   /** The model an authoring turn asks for (`--author-model`), in place of `model`. */
@@ -172,6 +180,12 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     }
     else if (flag === '--author-max-turns') a.authorMaxTurns = turns();
     else if (flag === '--ask-max-turns') a.askMaxTurns = turns();
+    else if (flag === '--ask-repeats') {
+      const raw = val();
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n <= 0) throw new Error(`--ask-repeats takes a whole number of asks above 0, not \`${raw}\``);
+      a.askRepeats = n;
+    }
     else if (flag === '--model') a.model = model();
     else if (flag === '--author-model') a.authorModel = model();
     else if (flag === '--ask-model') a.askModel = model();
@@ -296,6 +310,8 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   const live = makeDriver(args.driver, args);
+  // A replay reads the first N asks of each question turn: refused here, before any card runs, when it holds fewer.
+  if (args.askRepeats !== undefined && live instanceof RecordedDriver) live.assertAskRepeats(args.askRepeats, chosen.map((c) => c.card));
   const driver = args.record ? new RecordingDriver(live) : live;
   const info = driver.info();
   console.log(
@@ -308,6 +324,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       (info.authorEffort ? ` · author effort: ${info.authorEffort}` : '') +
       (info.askEffort ? ` · ask effort: ${info.askEffort}` : ''),
   );
+  if (args.askRepeats !== undefined && args.askRepeats > 1) console.log(`ask repeats: each question turn asked ${args.askRepeats} times, operations once`);
 
   // Built and packed once, before the first card: every scaffold of this run installs the same tarballs.
   const workspace = args.packages === 'workspace' ? await prepareWorkspacePackages(repo, join(work, 'workspace-packages')) : undefined;
@@ -355,7 +372,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       console.log(`dates: the card's ${loaded.card.asOf} is run as ${scenario.card.asOf}, every card date moved by the same days`);
     }
     publishedVersions = new Set();
-    const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}) });
+    const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}), ...(args.askRepeats !== undefined ? { askRepeats: args.askRepeats } : {}) });
     const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
     const record = runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work }, cardRun);
     const file = join(outDir, `${date}-scenario-${scenario.card.id}.json`);
