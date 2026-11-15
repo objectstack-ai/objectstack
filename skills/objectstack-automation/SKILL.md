@@ -105,9 +105,8 @@ Built-in (plugins register more):
 
 ### `notify`
 
-`NotifyConfigSchema` is `strictObject` — an undeclared key is a named parse
-error. **RAW** keys are read as written: a
-`{token}` in one is refused.
+An undeclared key is a named parse error. **RAW** keys are read as written:
+a `{token}` in one is refused.
 
 <!-- os:check -->
 ```ts
@@ -130,8 +129,8 @@ const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owne
 A recipient string, written or evaluated, may be an audience selector:
 
 - `team:ID` — that team's members.
-- `owner_of:OBJECT:ID` — that record's owner.
-- `org:members` — every member of the run's organization, else that of the record the notification is about; any other `org:` value reaches nobody, with a warning.
+- `owner_of:OBJECT:ID` — that record's owner; a computed id: `source: "'owner_of:crm_case:' + record.case_id"`.
+- `org:members` — every member of the run's organization, else that of the record the notification is about, else nobody (a `schedule` flow declaring no organization, no record). Any other `org:` value reaches nobody too. Each warns in the server log only; the node succeeds.
 
 An option label in a notice: `{{ stage | option:opportunity.stage }}` in the mail
 `template` (each recipient's language; mail-only, refused in inline `title` /
@@ -190,11 +189,11 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > writes across every tenant; filter on the platform-injected tenant column, never
 > re-declare it per object.
 
-> **Who may START a flow: `requiredPermissions: ['…']` on the flow** (ADR-0066
-> D4) — the four entrances above refuse a non-system caller missing any named
-> capability with `403 PERMISSION_DENIED`; an action starting it inherits the
-> list, a `subflow` node is not an entrance. Gate an elevated `screen` / `api`
-> flow here, never on `current_user.positions` inside it.
+> **Who may START a flow: `requiredPermissions: ['…']` on the flow** — the
+> four entrances above refuse a non-system caller missing any named capability
+> with `403 PERMISSION_DENIED`; an action starting it inherits the list, a
+> `subflow` node is not an entrance. Gate an elevated `screen` / `api` flow
+> here, never on `current_user.positions` inside it.
 
 > **A hook elevates itself with `runAs`, never with `sudo`.** An object hook
 > (objectstack-data) declares its own `runAs: 'system' | 'user' | 'inherit'` —
@@ -292,9 +291,6 @@ Most are caught by `objectstack build`:
    } },
    ```
 
-   Data-lifecycle **side effects** (read/write other records) are an L2 **hook**
-   (objectstack-data).
-
    A function that writes where the platform cannot see **declares** it, so the
    run reports "cannot say" rather than `acted: 0`:
 
@@ -322,7 +318,7 @@ Most are caught by `objectstack build`:
 `assignmentRules` on the stack routes each inserted
 row of an `ownership: 'user'` object whose `owner_id` and `queue` are both still
 empty — once, after every `beforeInsert` hook, never on update, never refusing the
-insert (ADR-0142 D5). Entries are ordered; the first whose `criteria` (CEL over
+insert. Entries are ordered; the first whose `criteria` (CEL over
 `record.*`) match decides:
 
 <!-- os:check -->
@@ -347,7 +343,7 @@ names one owner, who holds the row only while an active member of its organizati
 for the same people is a `queue` approver ([Approver Types](./references/state-machines-and-approvals.md#approver-types)).
 ⛔ Never a `beforeInsert` hook that picks an owner, nor a round-robin counter field.
 
-**A packaged rule's queue** (ADR-0150 D3) is its package's own, else the one holder
+**A packaged rule's queue** is its package's own, else the one holder
 in its `dependencies` closure plus `sys`: `acme.helpdesk` naming `acme.crm`'s queue
 declares `dependencies: { 'acme.crm': '^1.0.0' }`. Else refused — `outside-closure`
 (an undeclared package's or environment-only queue), `ambiguous-in-closure` (two
