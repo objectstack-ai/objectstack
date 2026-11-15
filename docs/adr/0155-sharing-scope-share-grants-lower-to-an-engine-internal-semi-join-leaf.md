@@ -250,7 +250,8 @@ Name the set once, so every later sentence can point at it:
 - **Above it the answer is the corrected one**: every member of G counts.
 - **Nothing else moves.** No row enters or leaves a scope through the owner match or its depth, the queue arm, the
   approval arm, the org-wide default, the external floor, the guest denial, the phantom-anchor narrowing, the
-  delegation intersection or the outer read's tenant wall.
+  delegation intersection or the outer read's tenant wall. On a host with a registration that names no object, this
+  holds by telling the host, not by a check (D4's boundary; the price is among Q2's costs).
 - **An outer key of another type answers the same rows.** Where an object's `id` column is not a string, the subquery
   answers the rows today's list answers (O2). A refusal there would narrow this invariant on that object, so it is no
   driver card's to choose: a card that cannot keep the same rows stops, and the case goes to the maintainer under ②.
@@ -433,13 +434,14 @@ After the switch the read scope is:
   (`packages/objectql/src/engine.ts#hasObjectMiddleware`). A registration keyed to no object says nothing the engine
   can read about one table, and platform plugins in this repository register middleware that names no object
   (`packages/plugins/organizations/src/organizations-plugin.ts` is one), so a class that took them in would refuse
-  every host that runs such a plugin. The rule this record keeps for them: a sharing-scoped read answers the same rows before and after the
-  switch on every host, or the host is told. The host is told twice: the contract prose of plan step 1 says that a
-  narrowing of reads of `sys_record_share` is honoured for the share arm only when it is registered for that table by
-  name, which places it in the second class; and the switch card's changeset says the same, in the release where the
-  subquery starts. O8's census reads registrations that name no object as well, and records any that changes a system
-  read of the table; none was found in this repository at the review of record `6902450506`. The maintainer rules
-  this boundary with Q2's host row.
+  every host that runs such a plugin. The rule this record keeps for them: a sharing-scoped read answers the same
+  rows before and after the switch on every host, or the host is told. The contract prose of plan step 1 and the
+  switch card's changeset (plan step 6) tell it one thing: a narrowing of reads of `sys_record_share` registered for
+  that table by name is never read around, and the host gets the answer ② rules for the second class; a narrowing
+  that names no object is not run on the share arm. That line has a price, stated among Q2's costs: on such a host
+  D-0's same rows rest on the telling alone. O8's census reads registrations that name no object as well, and records
+  any that changes a system read of the table; this record's own reading at `e9fb0987` (Provenance) found none in
+  this repository. The maintainer rules this boundary with Q2's host row.
 - **The refusal** is ADR-0139 D3's envelope wherever it occurs: status 500, `INTERNAL_ERROR`, a message naming the
   evaluator, the leaf and the remedy, logged at `error` once per evaluator
   (`packages/core/src/utils/readable-ids-driver-refusal.ts#refuseReadableIdsOnce` is the device). ⛔ It is not
@@ -619,6 +621,11 @@ recognises second. It is here because the same three answers apply to it.
   registration that declares it skips system reads. Such a host then starts and keeps its auditing, and the price is
   one more contract: a declaration on hook registration, which the engine enforces by not dispatching that hook on a
   system read, and which the seam and the boot check read. The maintainer rules which, with the host row.
+- **On a host with a registration that names no object, D-0's same rows rest on the telling alone.** Under the
+  recommended line nothing at run time refuses, reports or logs such a registration: the seam and the boot check read
+  a registration by the object it names, and this one names none. A host that does not act on what plan steps 1 and
+  6 tell it can get an answer that differs from today's. The other line refuses every such host at boot (the host
+  row). The maintainer rules which, with the host row.
 - **It consults a driver declaration**, so ADR-0139 D3's "⛔ No `DriverCapabilities` bit returns" is revisited for
   this leaf as ADR-0147 D-d revisits it for its own, and ADR-0111 D7 gains an arm.
 - **A later compile lifts R2 for that evaluator** with no amendment here: a `$lookup` form on MongoDB (O9), or a
@@ -787,9 +794,9 @@ The card sizes the whole program L, about 2.5–4k lines over 5–7 PRs, and ②
 
 1. **Spec: the leaf.** The brand, its factory and guard beside `ReadableIds`; the comparand door's option; the fixed
    inner read's description; the conformance case-set; the `ISharingService` and `ISecurityService` prose. The
-   `ISharingService` prose says what a host does for a narrowing of reads of `sys_record_share` to be honoured by the
-   share arm: it registers the narrowing for that table by name (D4's boundary). The shared pieces take the two-leaf
-   shape (D4).
+   `ISharingService` prose tells a host that a narrowing of reads of `sys_record_share` registered for that table by
+   name is never read around and gets the second class's answer, as ② is ruled, and that a narrowing which names no
+   object is not run on the share arm (D4's boundary). The shared pieces take the two-leaf shape (D4).
 2. **Engine: the seam.** Door admission, pass-through, the position rule, the verb rule (③ as ruled) and the
    recipient rule, the two recognised classes (② as ruled), the descent into composed scopes, the refusal, and the
    declaration's consult if ② rules one. The recipient rule is pinned on its four cases: the context's user, its
@@ -799,20 +806,20 @@ The card sizes the whole program L, about 2.5–4k lines over 5–7 PRs, and ②
    caller or in its organization, or a context that carries none, each refused.
 3. **`driver-sql` and the Turso remote transport: the compile.** The subquery and its tenant scope (① as ruled), the
    update path (③ as ruled), the pins per dialect, O2, O3, and D6's reading for a caller with no grant. Under ③'s
-   A the update card pins the rows each of a predicate update's two statements answers, the prior-row read and the
+   A this card pins the rows each of a predicate update's two statements answers, the prior-row read and the
    write, each evaluating the share arm for itself (Consequences, Freshness).
 4. **`driver-memory`: the in-process evaluation**, on reads and on the update path (③ as ruled).
 5. **The rest of the census, as ② is ruled**: the storage rows' refusal for this brand, the analytics compilers, the
    explainer's record pass. The native compiler's card carries the recognition of D4's two classes and the decline to
    the engine strategy. ⛔ No card up to here refuses a boot.
 6. **plugin-sharing: the switch.** The seat that cuts this card first produces O8's census and records it in the
-   card's body; without the census the card is not cut. `buildReadFilter` and
-   `buildWriteFilter` write the leaf, and the approval ids become a disjunct of their own. Each tightening lands
-   here, at the moment it takes effect: under R2 the inert arm and its report, when those grants stop counting, and
-   under the host row's recommended answer the boot check, when a producer first writes the leaf. Its changeset tells
-   a host whose narrowing of the grant table names no object to register it for that table by name (D4's
-   boundary). The middleware also
-   mirrors its scope under the AST's `filter` key, which the executor seam does not walk and no driver in this
-   repository reads; the card stops mirroring the leaf there or pins that the key stays unread. The card carries
-   D6's pins and the narrow figure, and #33787 ends with it. ⛔ It lands last: landed earlier, it hands the leaf to an
-   evaluator that has no answer for it yet.
+   card's body; without the census the card is not cut. `buildReadFilter` and `buildWriteFilter` write the leaf, and
+   the approval ids become a disjunct of their own. Each tightening lands here, at the moment it takes effect: under
+   R2 the inert arm and its report, when those grants stop counting, and under the host row's recommended answer the
+   boot check, when a producer first writes the leaf. Its changeset tells a host what plan step 1's prose tells it: a
+   narrowing of reads of `sys_record_share` registered for that table by name is never read around and gets the
+   second class's answer, as ② is ruled, and one which names no object is not run on the share arm (D4's boundary).
+   The middleware also mirrors its scope under the AST's `filter` key, which the executor seam does not walk and no
+   driver in this repository reads; the card stops mirroring the leaf there or pins that the key stays unread. The
+   card carries D6's pins and the narrow figure, and #33787 ends with it. ⛔ It lands last: landed earlier, it hands
+   the leaf to an evaluator that has no answer for it yet.
