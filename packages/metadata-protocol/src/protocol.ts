@@ -4208,7 +4208,9 @@ export class ObjectStackProtocolImplementation implements
      * `409 RESOURCE_CONFLICT`, the holders sorted and the `?package=`
      * prescription), asked of the same resolution
      * ({@link packagelessAddress} at `active`, at the addressed bundle member,
-     * read in full): one answer to one ambiguity. `undefined` for a name one
+     * read in full): one answer to one ambiguity. [#32622] It also carries
+     * its holders as a package-scoped refusal (`refusal.candidates`), so both
+     * transports answer them as `details.candidates`. `undefined` for a name one
      * package holds, none does, or only the package-unbound row does, and for
      * every request that names a package (the caller asks only without one).
      *
@@ -4222,7 +4224,10 @@ export class ObjectStackProtocolImplementation implements
      * `createMetaLayeredAnswer`), ⛔ never inside {@link getMetaItemLayered}:
      * its in-process resolution readers (the security catalog echo, the
      * packaged-permission-set lock gate, `/published`) read the layers of a
-     * name with no package and keep the answer they had.
+     * name with no package and keep the answer they had. [#32914] Those
+     * readers do meet the registry's own refusal of a name two packages
+     * register in code, which {@link getMetaItemLayered} asks as
+     * `getMetaItem` does.
      *
      * [#32354, ADR-0150 D3] While a package is disabled, a name the stored
      * rows of two or more served packages hold beside it is refused here
