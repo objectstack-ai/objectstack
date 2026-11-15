@@ -10,7 +10,7 @@ Clause-②: no (narrowing) — at the runtime `object_extension` publish door (S
 Metadata-protocol: narrowed
 Skills-docs: none owed — this PR edits `content/docs/deployment/validating-metadata.mdx` (the object extension paragraph states the door's fold); the skills teach `defineObjectExtension({ extend, fields, priority })` and formula fields, and say nothing of how the door read a field two packages add.
 
-<!-- adr-0087: registered object-extension-formula-cycle-refused -->
+<!-- adr-0087: not-required (already-registered object-extension-formula-cycle-refused) the unreleased entry this PR updates states the door's fold and covers each changed shape -->
 
 **BREAKING** accept-set change of the runtime `object_extension` publish door (narrowing in one shape, widening in two).
 
