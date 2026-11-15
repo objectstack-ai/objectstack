@@ -481,6 +481,29 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
             }
         });
 
+        // [#33385, review S1] CONTROL — the door judges the read it admits. A
+        // draft read (`?state=draft`, `?preview=draft`) and the deprecated
+        // layered view (`?layers=`) are not the read naming no package that
+        // judged the name, so a marked refusal stands for them: `main`'s 409,
+        // never an enabled package's draft or stored row at `_env`.
+        it(`${type}: only a disabled holder in the registry — \`_env\` with a draft or layered switch refuses 409, as on main, never an enabled package's draft or row`, async () => {
+            const refusedAtEnv = async (query: Record<string, string>) => {
+                const env = await read(`/${type}/_env/solo`, query);
+                expect([env.status, env.body?.error?.code, query], JSON.stringify(env.body)).toEqual([409, 'RESOURCE_CONFLICT', query]);
+                for (const label of [`gamma draft ${type}`, `gamma row ${type}`]) expect(JSON.stringify(env.body ?? null)).not.toContain(label);
+            };
+            ship(type, 'solo', B);
+            registry.disablePackage(B);
+            // An enabled package's draft row, and no active row of the name.
+            storedRows.push({ id: 'draft_gamma', type, name: 'solo', state: 'draft', package_id: C,
+                metadata: JSON.stringify({ name: 'solo', label: `gamma draft ${type}` }) });
+            for (const query of [{ state: 'draft' }, { state: 'DRAFT' }, { preview: 'draft' }]) await refusedAtEnv(query);
+            // An enabled package's unhydrated active row: the layered view.
+            storedRows = [{ id: 'row_gamma', type, name: 'solo', state: 'active', package_id: C,
+                metadata: JSON.stringify({ name: 'solo', label: `gamma row ${type}` }) }];
+            await refusedAtEnv({ layers: 'true' });
+        });
+
         it(`${type}: only disabled holders — the layered view serves none of their layers, at any address`, async () => {
             admitSecondPermissionHolder(type);
             ship(type, 'solo', B);

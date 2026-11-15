@@ -1141,15 +1141,24 @@ const DISABLED_HOLDERS_ONLY_REFUSAL = Symbol.for('objectstack.metadata-protocol.
  * answers the read's own 404, naming no package. When that read serves an
  * item or refuses, a package holds the name through a stored row the
  * registry has not read, and the refusal stands.
+ *
+ * [#33385, review S1] Only the read that judged the name is admitted this way:
+ * for a draft read (`?state=draft`, `?preview=draft`) or the deprecated layered
+ * view (`?layers=`), read off the raw query as `RestServer`'s route reads it,
+ * the marked refusal stands, as on `main`. The raw query, so the answer never
+ * depends on whether the caller may read drafts, nor on whether a draft exists.
  */
 async function admitEnvironmentAddress(
     protocol: MetaDomainProtocol | undefined,
     request: { type: string; name: string; member?: string },
+    query: Readonly<Record<string, unknown>> | undefined,
 ): Promise<void> {
     try {
         protocol?.admitEnvironmentQualifier?.(request);
     } catch (refusal) {
+        const draft = (value: unknown) => typeof value === 'string' && value.toLowerCase() === 'draft';
         if ((refusal as Record<symbol, unknown> | null)?.[DISABLED_HOLDERS_ONLY_REFUSAL] !== true
+            || draft(query?.state) || draft(query?.preview) || wantsMetaItemLayers(query)
             || typeof protocol?.getMetaItem !== 'function') throw refusal;
         let withheld: boolean;
         try {
@@ -2186,7 +2195,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // a name only disabled packages hold answers its 404, #33385).
             if (environmentQualified) {
                 const qualifierProtocol = await resolveProtocol(deps, _context);
-                await admitEnvironmentAddress(qualifierProtocol, { type: singularType, name, ...memberSelector });
+                await admitEnvironmentAddress(qualifierProtocol, { type: singularType, name, ...memberSelector }, query);
             }
 
             // [#5882 · #20478] The DEPRECATED spelling of the layered view,
