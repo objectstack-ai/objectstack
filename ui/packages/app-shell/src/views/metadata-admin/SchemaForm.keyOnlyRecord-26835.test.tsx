@@ -310,3 +310,20 @@ describe('a refusal entry offers `reasons` and `params` (objectstack#33657)', ()
     expect(within(card).getByText('state', { selector: 'span' })).toBeInTheDocument();
   });
 });
+
+describe('removing the last entry of a record row (objectstack#33657)', () => {
+  const ONE_CODE = { ...HOOK_BASE, refusals: { CONTRACT_LOCKED: { message: 'This contract is locked.' } } };
+
+  it('an optional row is written absent, not as an empty map', () => {
+    const sink = renderHook(refusalsRow(), ONE_CODE);
+    fireEvent.click(within(entryCard('CONTRACT_LOCKED')).getByRole('button', { name: 'Remove' }));
+    expect(sink.value).not.toHaveProperty('refusals');
+    expect(HookSchema.safeParse(sink.value).success).toBe(true);
+  });
+
+  it('CONTROL: a required row keeps the empty map, as before', () => {
+    const sink = renderHook({ ...refusalsRow(), required: true } as FormRow, ONE_CODE);
+    fireEvent.click(within(entryCard('CONTRACT_LOCKED')).getByRole('button', { name: 'Remove' }));
+    expect(sink.value.refusals).toEqual({});
+  });
+});

@@ -156,6 +156,11 @@ async function save(): Promise<Record<string, unknown>> {
   return JSON.parse(JSON.stringify(mockClient.save.mock.calls[0]![2])) as Record<string, unknown>;
 }
 
+/** The card of one reason inside a refusal entry's card. */
+function reasonCard(entry: HTMLElement, reason: string): HTMLElement {
+  return within(entry).getByText(reason, { selector: 'span' }).closest('.rounded-md') as HTMLElement;
+}
+
 describe('the Studio hook editor authors a refusal\'s reasons and params (objectstack#33657)', () => {
   it('offers Reasons and Params on a refusal entry, beside Message and Status', async () => {
     const card = await openRefusal();
@@ -200,6 +205,64 @@ describe('the Studio hook editor authors a refusal\'s reasons and params (object
     fireEvent.change(document.getElementById('mdf-label') as HTMLInputElement, { target: { value: 'Sign the contract' } });
     const body = await save();
     expect(body).toEqual({ ...WITH_REASONS, label: 'Sign the contract' });
+  });
+
+  // An empty `reasons` is not an absent one: under `reasons: {}` every reason
+  // the body throws is refused (at save when literal, at run time otherwise),
+  // while an absent `reasons` does not read a thrown reason at all. Both draw
+  // the same empty list, so removing the last reason must leave it absent.
+  it('removing the only reason leaves the entry with no reasons, not an empty one', async () => {
+    const card = await openRefusal();
+    fireEvent.change(within(card).getByPlaceholderText('Key'), { target: { value: 'plan_locked' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Add' }));
+    fireEvent.click(within(reasonCard(card, 'plan_locked')).getByRole('button', { name: 'Remove' }));
+    // Add-then-remove alone returns the draft to what is stored, so the page
+    // has nothing to save; an edit elsewhere makes the save happen.
+    fireEvent.change(document.getElementById('mdf-label') as HTMLInputElement, { target: { value: 'Sign the contract' } });
+
+    const body = await save();
+    expect(body.refusals).toEqual({ CONTRACT_LOCKED: { message: 'This contract is locked.', status: 409 } });
+    expect(Object.keys((body.refusals as Record<string, object>).CONTRACT_LOCKED)).toEqual(['message', 'status']);
+  });
+
+  it('removing the last stored reason leaves reasons absent too', async () => {
+    stored = WITH_REASONS;
+    const card = await openRefusal();
+    fireEvent.click(within(reasonCard(card, 'plan_locked')).getByRole('button', { name: 'Remove' }));
+
+    const body = await save();
+    const { reasons: _dropped, ...rest } = WITH_REASONS.refusals.CONTRACT_LOCKED;
+    expect(body.refusals).toEqual({ CONTRACT_LOCKED: rest });
+  });
+
+  it('CONTROL: removing one of two reasons stores the other, as before', async () => {
+    stored = WITH_REASONS;
+    const card = await openRefusal();
+    fireEvent.change(within(card).getByPlaceholderText('Key'), { target: { value: 'plan_archived' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Add' }));
+    fireEvent.change(within(reasonCard(card, 'plan_archived')).getByLabelText(/Message/), {
+      target: { value: 'The plan is archived.' },
+    });
+    fireEvent.click(within(reasonCard(card, 'plan_locked')).getByRole('button', { name: 'Remove' }));
+
+    const body = await save();
+    expect(body.refusals).toEqual({
+      CONTRACT_LOCKED: {
+        ...WITH_REASONS.refusals.CONTRACT_LOCKED,
+        reasons: { plan_archived: { message: 'The plan is archived.' } },
+      },
+    });
+  });
+
+  // The same rule one level up: `refusals: {}` declares a catalogue with no
+  // codes (every code the body throws is refused), an absent one leaves the
+  // hook's throws answered as they always were.
+  it('removing the only refusal code leaves the hook with no catalogue, not an empty one', async () => {
+    const card = await openRefusal();
+    fireEvent.click(within(card).getAllByRole('button', { name: 'Remove' })[0]!);
+
+    const body = await save();
+    expect(body).not.toHaveProperty('refusals');
   });
 
   it('CONTROL: a refusal with only message and status saves exactly as it was', async () => {
