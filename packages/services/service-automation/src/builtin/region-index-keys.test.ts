@@ -34,7 +34,8 @@
  *     head, and `branch` refuses negative / fractional values at the `branch`
  *     path (⛔ not a positives-only gate);
  *   - a TYPE-LEVEL pin holding the engine's local `StepLogEntry` region keys
- *     equal to the spec type's. The engine interface is NOT derived from the
+ *     (and its advisory `warnings` / `droppedFields`) equal to the spec
+ *     type's. The engine interface is NOT derived from the
  *     spec — the card asks for the two to be kept in step "by a pin, not by
  *     prose", and this is that pin. ⚠️ It is compiled by
  *     `pnpm --filter @objectstack/service-automation typecheck` (both
@@ -54,12 +55,14 @@ import { registerTryCatchNode } from './try-catch-node.js';
 
 // ── Type-level pin: engine `StepLogEntry` ↔ spec `ExecutionStepLog` ─────────
 //
-// Region-grouping keys only. The engine's interface legitimately carries
-// engine-local fields the contract does not (`nodeLabel`, `warnings`), and the
-// contract carries fields the engine never writes (`input`, `output`), so
-// pinning the WHOLE shape would pin noise. What must not drift is the set of
-// keys this card is about and the type of each.
+// The region-grouping keys, plus the two advisory members both sides publish
+// (`warnings`, `droppedFields`). The engine's interface legitimately carries an
+// engine-local field the contract does not (`nodeLabel`), and the contract
+// carries fields the engine never writes (`input`, `output`), so pinning the
+// WHOLE shape would pin noise. What must not drift is the set of keys below and
+// the type of each.
 type RegionKeys = 'parentNodeId' | 'iteration' | 'branch' | 'regionKind' | 'retryAttempt';
+type AdvisoryKeys = 'warnings' | 'droppedFields';
 
 // Both `Pick`s fail to compile if either side is missing a key — that is half
 // the pin. `Eq` is the invariant (not merely assignable) comparison, so a
@@ -68,6 +71,9 @@ type Eq<A, B> = (<G>() => G extends A ? 1 : 2) extends <G>() => G extends B ? 1 
 type Assert<T extends true> = T;
 export type _RegionKeysInStep = Assert<
     Eq<Pick<StepLogEntry, RegionKeys>, Pick<ExecutionStepLog, RegionKeys>>
+>;
+export type _AdvisoryKeysInStep = Assert<
+    Eq<Pick<StepLogEntry, AdvisoryKeys>, Pick<ExecutionStepLog, AdvisoryKeys>>
 >;
 
 function silentLogger(): any {

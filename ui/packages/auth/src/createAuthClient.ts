@@ -802,7 +802,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       // page holds instead of starting a direct sign-in (objectstack#33183).
       const url = providerLogoutURL(data);
       if (url && typeof window !== 'undefined') {
-        markSignOutRoundTrip();
+        markSignOutRoundTrip(resolveSpaRoute('/login'));
         window.location.assign(url);
       }
     },

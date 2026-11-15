@@ -971,11 +971,23 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "refusals.message": {
         label: "Message",
-        helpText: "La phrase que lit l’utilisateur lorsque le corps lève ce code — texte brut, sans espaces réservés"
+        helpText: "La phrase que lit l’utilisateur lorsque le corps lève ce code. Texte brut, sauf si l’entrée déclare des params : un espace réservé {{ name }} reçoit alors un paramètre déclaré"
       },
       "refusals.status": {
         label: "Statut",
         helpText: "Statut HTTP du refus (400–499). Absent : 400"
+      },
+      "refusals.reasons": {
+        label: "Motifs",
+        helpText: "D’autres phrases sous ce même code, indexées par le motif snake_case que le corps lève avec le code ({ code, reason }). Le code et le statut transmis restent ceux de cette entrée ; un motif non déclaré ici est refusé. Absent : un motif levé n’est pas lu"
+      },
+      "refusals.reasons.message": {
+        label: "Message",
+        helpText: "La phrase que lit l’utilisateur lorsque le corps lève ce motif sous ce code. Ses espaces réservés {{ }} suivent les params de l’entrée"
+      },
+      "refusals.params": {
+        label: "Paramètres",
+        helpText: "Les noms que les phrases peuvent remplir (par ex. state) : le corps lève { code, params: { state } }, et un espace réservé {{ state }} en affiche la valeur. Absent : les phrases sont du texte brut"
       },
       handler: {
         label: "Gestionnaire",

@@ -115,6 +115,7 @@ import {
   DATA_ACTION_TO_API_OPERATION,
   type EnableLike,
 } from '@objectstack/spec/data';
+import type { EngineDeleteOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 // [#21207] The stored-metadata-body family's ONE projection and its object set,
 // from where every other surface of the family takes them (the data door, the
@@ -304,6 +305,18 @@ function unwrapRows(res: unknown): Array<Record<string, unknown>> {
       : res;
   if (Array.isArray(rows)) return rows as Array<Record<string, unknown>>;
   return rows ? [rows as Record<string, unknown>] : [];
+}
+
+/**
+ * [ADR-0148 D1] The recycle-bin half of the engine's delete options, as
+ * `@objectstack/objectql` declares it (`RecycleBinDeleteObservability`):
+ * called with the id of the entry a by-id delete wrote, once the driver
+ * reports the row removed, and not called when the delete wrote none. Named
+ * structurally because this package does not depend on the engine at run
+ * time; the protocol's `deleteData` hands the engine the same member.
+ */
+interface RecycleBinEntryNotice {
+  onRecycleBinEntry?: (entryId: string) => void;
 }
 
 /** The one row this id names, or `null`. */
@@ -1365,13 +1378,25 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // [#28844] As `update`, above: a delete applied under a failing roll-up
       // answers the delete it is.
       let stale: SummaryRecomputeRefusal | undefined;
+      // [ADR-0148 D1] The engine names the recycle-bin entry this delete
+      // wrote, as the protocol's `deleteData` behind the HTTP bridge asks it,
+      // so both transports answer `recycleBinEntryId`: the entry a person
+      // restores the record from. Absent when the delete wrote none (a
+      // platform object, or a composition with no bin), which is the one
+      // delete over MCP that is permanent.
+      let recycleBinEntryId: string | undefined;
+      const options: EngineDeleteOptions & RecycleBinEntryNotice = {
+        where: { id },
+        context,
+        onRecycleBinEntry: (entryId) => { recycleBinEntryId = entryId; },
+      };
       try {
-        await engine.delete(object, { where: { id }, context });
+        await engine.delete(object, options);
       } catch (e) {
         stale = staleSummaryRefusalOrThrow(e);
       }
       // `success`, not `deleted` — the spec's `DeleteDataResponse` key (#5581).
-      const answer = { object, id, success: true };
+      const answer = { object, id, success: true, ...(recycleBinEntryId !== undefined ? { recycleBinEntryId } : {}) };
       if (stale) throw withEarnedAnswer(stale, answer);
       return answer;
     },
