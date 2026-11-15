@@ -308,9 +308,9 @@ describe('a list with no declared primary keeps its actions labelled (objectstac
     headerWidth = width;
     principal = { create: false };
     const { cluster, labelled, openMenu } = renderList(CONTRACTS);
-    expect(cluster.hasAttribute('data-folded')).toBe(false);
     expect(labelled()).toEqual(['Launch Contract']);
     expect(openMenu()).toEqual(['Add to favorites']);
+    expect(cluster.hasAttribute('data-folded')).toBe(false);
   });
 
   it('CONTROL: authored `variant: primary`, the same list still folds at a 600 px header, keeping it labelled', () => {
