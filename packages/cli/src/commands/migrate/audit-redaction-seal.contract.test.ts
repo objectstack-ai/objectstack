@@ -33,10 +33,15 @@ const COMMANDS: Record<string, readonly string[]> = {
   'audit-metadata-bodies.ts': ['migrateStoredMetadataBodyCopies'],
 };
 
-/** Each command's list of the objects it rewrites, as plugin-audit exports it. */
+/**
+ * Each command's list of the objects it rewrites, as plugin-audit exports it —
+ * or, for `audit-side-copies`, the run's selection of `SIDE_COPY_TABLES`
+ * (`--object` narrows it), the same list its hot and archive runs are handed.
+ */
 const REWRITTEN: Record<string, string> = {
   'audit-mail-bodies.ts': 'MAIL_LOG_BODY_COPY_OBJECTS',
   'audit-key-material.ts': 'KEY_MATERIAL_COPY_TABLES',
+  'audit-side-copies.ts': 'objects',
   'audit-metadata-bodies.ts': 'STORED_METADATA_BODY_REWRITTEN_OBJECTS',
 };
 
