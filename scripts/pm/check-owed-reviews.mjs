@@ -37,10 +37,14 @@
  *   head       the current head and the minutes it has waited: since its commit's
  *              committer date, or since the pull request was opened when that is
  *              later (a head committed long before its PR existed has not waited).
- *   record     `current` (a record on this head — PASS / FAIL as the record's
- *              VERDICT line states it, and by whom), `stale` (the newest record
- *              names an earlier head: the delta re-review stays with that
- *              reviewer), `none`, or `unjudged` (the read could not be made).
+ *   record     `current` (a record on this head — PASS / FAIL as its one
+ *              VERDICT line states it, `unstated` with none, `ambiguous` with
+ *              two or more, and by whom), `stale` (the newest record names an
+ *              earlier head: the delta re-review stays with that reviewer),
+ *              `none`, or `unjudged` (the read could not be made). Read as the
+ *              queue guard reads it: only comments by the relay or an account
+ *              in `GOVERNED_APPROVERS`, and the verdict lines counted, never
+ *              the first match (card #33705).
  *   hand-off   the newest `Contract-review-handoff:` line, as `contractReviewHandoff`
  *              reads it: `handed` (it names the current head, and the seat it hands
  *              to: `review#N` or `domain:<lane>#N`), `stale`, `absent`, `unreadable`
@@ -98,8 +102,10 @@
 import process from 'node:process';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { CLAIM_COMMENT_MARKER, CONTRACT_REVIEW_HEADING_MARKER, latestMarkedComment, markerMatches, readSignatureLine } from './check-half-states.mjs';
+import { CLAIM_COMMENT_MARKER, CONTRACT_REVIEW_HEADING_MARKER, contractReviewVerdictLines, latestMarkedComment, markerMatches, readSignatureLine } from './check-half-states.mjs';
 import { repoIdForSlug } from './check-governed-merges.mjs';
+import { GOVERNED_APPROVERS, recordAuthorTrusted, recordTrustedAuthors } from './check-governed-queue-guard.mjs';
+import { FLEET_BOT_LOGIN } from './check-handover.mjs';
 import { readClause2Line } from './clause2-line.mjs';
 import { parseSeat } from './fleet-roster.mjs';
 import { ghApi, readAllPages } from './gh-pages.mjs';
@@ -131,7 +137,14 @@ export const REVIEW_LANE = 'review';
 export const LANE_JOINS_AFTER_ROUNDS = 2;
 
 const REPO_SHAPE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const VERDICT_LINE = /^[ \t>]*(?:\*\*)?VERDICT:[ \t]*(PASS|FAIL)\b/im;
+/**
+ * Who may post a record this list reads: the queue guard's own author binding (card #33705) — the
+ * relay's identity and `GOVERNED_APPROVERS`, assembled by the guard's `recordTrustedAuthors` and
+ * asked with its `recordAuthorTrusted`, ⛔ never a second login list. A comment by anyone else is
+ * not read, so it is never the record and never shadows one: on a public repository anyone can
+ * post a body shaped like a record, and the guard refuses to land on it.
+ */
+export const RECORD_AUTHORS = recordTrustedAuthors(FLEET_BOT_LOGIN);
 const labelNames = (x) => (Array.isArray(x?.labels) ? x.labels.map((l) => (typeof l === 'string' ? l : l?.name)).filter(Boolean) : []);
 
 // ---------------------------------------------------------------------------
@@ -206,36 +219,53 @@ export function reviewedByOf(body) {
   return null;
 }
 
-/** PASS / FAIL as the record's own `VERDICT:` line states it — a display, never a judgment. Pure. */
+/**
+ * The record's verdict as the queue guard reads it (card #33705): the word of its ONE `VERDICT:`
+ * line, counted by the fleet's reader `contractReviewVerdictLines` — `unstated` with none (a
+ * heading-inline or bare word alone included), `ambiguous` with two or more (a quoted earlier
+ * verdict, a FAIL appended under a PASS), which the guard refuses because a record states exactly
+ * one. ⛔ Never the first match. A display, never a judgment. Pure.
+ */
 export function verdictOf(body) {
-  return VERDICT_LINE.exec(String(body ?? ''))?.[1] ?? 'unstated';
+  const words = contractReviewVerdictLines(body);
+  if (words.length === 0) return 'unstated';
+  return words.length === 1 ? words[0] : 'ambiguous';
 }
 
 /**
  * The record on this head, or the newest one on another head, or none. Pure
  * over the threads. `locateReviewOfRecord` decides "on this head" — the queue
  * guard's own reading; it is handed no git reader, so a `Regen-provenance:`
- * carry is `unjudged` here rather than guessed.
+ * carry is `unjudged` here rather than guessed. As the guard does, a comment
+ * whose author `trusted` does not hold is dropped from both threads BEFORE the
+ * locator reads them (card #33705); `ignored` counts the drops.
  */
-export function recordReading(pull) {
+export function recordReading(pull, trusted = RECORD_AUTHORS) {
+  let ignored = 0;
+  const kept = (rows) => {
+    if (!Array.isArray(rows)) return rows;
+    const out = rows.filter((row) => recordAuthorTrusted(row, trusted));
+    ignored += rows.length - out.length;
+    return out;
+  };
   const pair = {
     pr: pull.number,
     card: pull.card ?? null,
     headSha: pull.head?.sha ?? null,
-    prComments: pull.comments,
-    cardComments: pull.card === null || pull.card === undefined ? [] : pull.cardComments,
+    prComments: kept(pull.comments),
+    cardComments: pull.card === null || pull.card === undefined ? [] : kept(pull.cardComments),
   };
   const located = locateReviewOfRecord(pair);
-  if (located.state === 'unreadable') return { state: 'unjudged', gaps: located.gaps };
+  if (located.state === 'unreadable') return { state: 'unjudged', gaps: located.gaps, ignored };
   const rows = [...(Array.isArray(pair.prComments) ? pair.prComments : []), ...(Array.isArray(pair.cardComments) ? pair.cardComments : [])];
   if (located.state === 'found' || located.state === 'unsigned') {
     const row = rows.find((r) => (r?.id ?? null) === located.id) ?? null;
-    return { state: 'current', id: located.id, where: located.where, by: reviewedByOf(row?.body), verdict: verdictOf(row?.body), signed: located.state === 'found' };
+    return { state: 'current', id: located.id, where: located.where, by: reviewedByOf(row?.body), verdict: verdictOf(row?.body), signed: located.state === 'found', ignored };
   }
   const newest = latestMarkedComment(rows, CONTRACT_REVIEW_HEADING_MARKER);
-  if (!newest) return { state: 'none' };
+  if (!newest) return { state: 'none', ignored };
   const row = rows[newest.index];
-  return { state: 'stale', id: row?.id ?? null, by: reviewedByOf(row?.body), verdict: verdictOf(row?.body) };
+  return { state: 'stale', id: row?.id ?? null, by: reviewedByOf(row?.body), verdict: verdictOf(row?.body), ignored };
 }
 
 /**
@@ -417,6 +447,8 @@ export function renderRow(row) {
   const record = row.record.state === 'current' || row.record.state === 'stale'
     ? `${row.record.state} ${row.record.verdict} by ${row.record.by ?? 'nobody named'} (${row.record.id})`
     : row.record.state;
+  // The comments the author binding dropped are printed, never silent (card #33705).
+  const untrusted = row.record.ignored > 0 ? ` (${row.record.ignored} by an untrusted author not read)` : '';
   const holder = row.claim.holder;
   const claim = holder === null
     ? row.claim.state
@@ -425,7 +457,7 @@ export function renderRow(row) {
     `${row.status}  #${row.pr} ${row.draft ? 'draft' : 'ready'}`,
     `face ${row.face.join('+')}`,
     `head ${short(row.head)} (${row.waited === null ? '? min' : `${row.waited} min`})`,
-    `record ${record}`,
+    `record ${record}${untrusted}`,
     `hand-off ${row.handoff.state}${row.handoff.to ? ` ${row.handoff.to}` : ''}${row.handoff.id === null ? '' : ` (${row.handoff.id})`}`,
     `claim ${claim}`,
     `hold ${holdText(row.hold)}`,
@@ -581,7 +613,9 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: modes and every refusal': 6,
   'the owed face: paths, the Clause-② line, the label — drafts included, nothing else owes': 9,
-  'the record: on this head (by whom, as stated), on an earlier head, none, unjudged': 8,
+  // 8 → 13 (#33705): the queue guard's author binding (an untrusted PASS unread, unable to shadow a trusted FAIL, an
+  // approver's read) and its counted verdict reading (two lines `ambiguous`, an inline word alone `unstated`).
+  'the record: on this head (by whom, as stated), on an earlier head, none, unjudged': 13,
   'the triggers: (a) hand-off or label the same round, (b) a full round, (c) the lane seat': 10,
   // 10 → 14 → 16: S2 and S4 of PR #29967's contract review — a review seat on the PR's own account is barred (`lanes/review.md` 独立性); an unread card thread leaves the bar unjudged.
   'review-seat first: a seated review seat takes before the lane, the lane joins after a further round, and takes alone while none is seated': 16,
@@ -615,7 +649,8 @@ export function selfTest() {
   const REVIEWER = 'session_01ReviewSeatFixture7Qx';
   const handoff = (head, at, to = 'review#1') => ({ id: 6463525633, created_at: at, body: `## Seat note · contract review owed\n\nContract-review-handoff: ${to} — CONTRACT_REVIEW_TIER unavailable (ceiling model out for the fleet since 2026-10-27, seat runs at TIER_DEFAULT, ${at.slice(0, 16)}Z) · head \`${head}\`` });
   const claimRow = (session, head, at, sig) => ({ id: 6468788431, created_at: at, body: `${sig}\n\nContract-review-claim: \`${session}\` · head \`${head}\` · ${at.slice(0, 16)}Z\n\nTaking the review.` });
-  const recordRow = (head, verdict = 'PASS', id = 6469007202) => ({ id, created_at: '2026-10-28T12:29:43Z', body: `## Contract review\n\nServed-tier: \`CONTRACT_REVIEW_TIER\`\nHead-sha: \`${head}\`\nLocal-runs: none\n\nReviewed-by: \`${TRIAGE}\`\n\n**VERDICT: ${verdict}**` });
+  // Records are posted through the relay, so the fixtures carry its login: the author binding reads no other (#33705).
+  const recordRow = (head, verdict = 'PASS', id = 6469007202, login = FLEET_BOT_LOGIN) => ({ id, created_at: '2026-10-28T12:29:43Z', user: { login }, body: `## Contract review\n\nServed-tier: \`CONTRACT_REVIEW_TIER\`\nHead-sha: \`${head}\`\nLocal-runs: none\n\nReviewed-by: \`${TRIAGE}\`\n\n**VERDICT: ${verdict}**` });
   const pull = (o = {}) => ({
     number: 27136,
     draft: true,
@@ -666,9 +701,17 @@ export function selfTest() {
   // ⭐ #27979, the measured instance (PR #27964, record 6516042954): a DELTA record on an earlier head whose prose
   // names this head three times. The whole-body span scan read it as `current` here and the queue guard cleared on
   // it; the `Head-sha:` line alone decides now, through the one locator both share.
-  const deltaRow = { id: 6516042954, created_at: '2026-10-30T05:53:38Z', body: `## Contract review\n\nServed-tier: \`CONTRACT_REVIEW_TIER\`\nHead-sha: \`${HEAD2}\`\nLocal-runs: none\n\nThis is a DELTA record. The PR has since moved to \`${HEAD.slice(0, 8)}\` (seat comment 6515952505); this record judges \`${HEAD2.slice(0, 8)}\` alone. The runs were cancelled by the push of \`${HEAD.slice(0, 8)}\`; landing waits on \`${HEAD}\` and that head's record.\n\nReviewed-by: \`${TRIAGE}\`\n\n**VERDICT: PASS**` };
+  const deltaRow = { id: 6516042954, created_at: '2026-10-30T05:53:38Z', user: { login: FLEET_BOT_LOGIN }, body: `## Contract review\n\nServed-tier: \`CONTRACT_REVIEW_TIER\`\nHead-sha: \`${HEAD2}\`\nLocal-runs: none\n\nThis is a DELTA record. The PR has since moved to \`${HEAD.slice(0, 8)}\` (seat comment 6515952505); this record judges \`${HEAD2.slice(0, 8)}\` alone. The runs were cancelled by the push of \`${HEAD.slice(0, 8)}\`; landing waits on \`${HEAD}\` and that head's record.\n\nReviewed-by: \`${TRIAGE}\`\n\n**VERDICT: PASS**` };
   t('⛔ #27979: a delta record on an EARLIER head whose PROSE names this head is STALE for this head — the review is owed again', (() => { const r = row({ comments: [deltaRow] }); return r.record.state === 'stale' && r.record.id === 6516042954 && r.status !== 'DONE'; })());
   t('⭐ #27979: …and CURRENT for the head its `Head-sha:` line names', row({ head: { sha: HEAD2, ref: 'claude/project-thread-6d34fw' }, comments: [deltaRow] }).record.state === 'current');
+  // #33705: the queue guard's author binding and its counted verdict reading, imported, never copied.
+  const untrusted = row({ comments: [recordRow(HEAD, 'PASS', 6469007203, 'drive-by-commenter')] });
+  t('⛔ #33705: a PASS record on this head posted by an author outside the relay and GOVERNED_APPROVERS is NOT read — none, still owed, and the drop is printed', untrusted.record.state === 'none' && untrusted.status !== 'DONE' && untrusted.record.ignored === 1 && renderRow(untrusted).includes('record none (1 by an untrusted author not read)'), JSON.stringify(untrusted.record));
+  t('⛔ #33705: …nor does a newer untrusted PASS shadow a trusted FAIL on the same head, on either thread', (() => { const r = row({ card: 25922, comments: [recordRow(HEAD, 'FAIL', 11)], cardComments: [{ ...recordRow(HEAD, 'PASS', 12, 'drive-by-commenter'), created_at: '2026-10-28T12:50:00Z' }] }); return r.record.state === 'current' && r.record.id === 11 && r.record.verdict === 'FAIL' && r.record.ignored === 1; })());
+  t('#33705: a record an account in GOVERNED_APPROVERS posted is read, and the binding is the guard\'s own set, relay first', row({ comments: [recordRow(HEAD, 'PASS', 13, GOVERNED_APPROVERS[0])] }).record.state === 'current' && JSON.stringify(RECORD_AUTHORS) === JSON.stringify([FLEET_BOT_LOGIN, ...GOVERNED_APPROVERS]));
+  const twoLines = { ...recordRow(HEAD), body: `${recordRow(HEAD).body}\n\n> **VERDICT: FAIL**` };
+  t('⛔ #33705: a record stating TWO `VERDICT:` lines reads `ambiguous` as the guard counts them, never its first match PASS', (() => { const r = row({ comments: [twoLines] }); return r.record.state === 'current' && r.record.verdict === 'ambiguous' && renderRow(r).includes('record current ambiguous by'); })());
+  t('#33705: …a heading-inline word alone is `unstated` (the guard reads no `VERDICT:` line), and one line reads its word', [verdictOf('## Contract review (clause ②) — **PASS**\n\nPASS'), verdictOf(recordRow(HEAD).body), verdictOf(recordRow(HEAD, 'FAIL').body)].join() === 'unstated,PASS,FAIL');
 
   battery('the triggers: (a) hand-off or label the same round, (b) a full round, (c) the lane seat');
   const fresh = '2026-10-28T12:30:00Z';
@@ -815,7 +858,7 @@ export function selfTest() {
   }
   console.log(
     `✓ check-owed-reviews self-test: ${cases.length} cases pass in ${declared.length} batteries (the owed face from paths, `
-      + 'the Clause-② line and the label, drafts included; the record on this head, an earlier head, none, unjudged; '
+      + 'the Clause-② line and the label, drafts included; the record on this head, an earlier head, none, unjudged, read by the queue guard\'s author binding with its verdict lines counted; '
       + 'the (a) / (b) / (c) triggers and the taker — the named seat, the lane seat or a review seat, never triage; claims holding and lapsing, the earliest live claim holding; the two live drafts as TAKE; '
       + 'every read through one reader with failures as gaps; the report, exit 0; a lane\'s live hold holding (b) alone, '
       + 'cleared by a new head, an unreadable hold line voiding nothing and printed, listed at 24 hours and still WAIT).',
