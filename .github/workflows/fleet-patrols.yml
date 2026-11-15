@@ -1543,12 +1543,13 @@ jobs:
   # reading breach on every re-run until it ages out of the window. A BREACH row
   # is closed by the maintainer's ruling on it, recorded on the card; only a
   # NOT MEASURED row is answered by a clean manual re-run — and only one this
-  # runner can read at all. ⚠️ Known gap: a row it can never read (an arm
-  # landing whose record was carried over a regeneration hop, because the
-  # single-branch mirror holds no pull-request head commits; a landing whose
-  # subject names no pull request) reads NOT MEASURED on every re-run until it
-  # leaves the window. A seat's local sweep from a full clone reads the first
-  # kind; record what it read on the card.
+  # runner can read at all. ⚠️ Known gap: a row it can never read reads the
+  # same on every re-run until it leaves the window — an arm landing whose
+  # record was carried over a regeneration hop (the single-branch mirror holds
+  # no pull-request head commits, so the hop diff cannot be taken and the row's
+  # reason says so), and a landing whose subject names no pull request. A
+  # seat's local sweep from a full clone reads the first kind; record what it
+  # read on the card.
   #
   # ## What it reads, and how
   #
