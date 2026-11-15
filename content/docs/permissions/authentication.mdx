@@ -1290,6 +1290,11 @@ sign-in through any other one leaves the person pending. Their positions, permis
 from the moment they are added, so seed data and approval flows can name them
 before they sign in. Off a managed environment both doors answer `409`.
 
+Signing in does not lock the manager: a platform administrator still changes
+it with **Set Manager** (`POST /api/v1/auth/admin/set-user-manager`). That
+endpoint refuses only a person a SCIM directory holds, whose manager is changed
+in the directory.
+
 A host can be told about people as they come and go: the `environmentUserHost`
 option of the auth plugin is called after a person is added, and before a
 person is deactivated (`admin/ban-user`) or reactivated (`admin/unban-user`).

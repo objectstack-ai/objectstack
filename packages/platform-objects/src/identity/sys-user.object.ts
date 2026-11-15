@@ -675,23 +675,22 @@ export const SysUser = ObjectSchema.create({
       recordIdParam: 'userId',
       successMessage: 'Manager updated',
       refreshAfter: true,
-      // Hidden for a directory-managed identity, whose manager the IdP owns:
-      // the endpoint's refusal 5 answers 403 / `idp_provisioned`, so the
-      // button would be an affordance the server side refuses by design.
-      // This carries the SAME `record.source` term the three self-service
-      // identity actions below carry — and only that term: this is an admin
-      // action on someone else's row, so their `record.id == ctx.user.id`
-      // half is deliberately NOT copied (it would hide the button from every
-      // admin). `has()` per operand for the sparse action face (#8990) — the
-      // rationale is on the self-service block below.
+      // Offered on every row, `idp_provisioned` ones included, and the
+      // endpoint refuses the one case it must. Its refusal 5 answers 403 /
+      // `idp_provisioned` only for an identity a SCIM directory HOLDS (a
+      // `sys_scim_subject` row, maintainer ruling record 6895645364, option
+      // A); a person who only signs in through SSO carries the same `source`
+      // with no directory behind them, and their manager is set here. No
+      // column on this row says "held by SCIM", so ⛔ a `record.source` term
+      // would hide the button from every SSO-only person — the defect this
+      // predicate used to carry — and a SCIM-held row is answered by the
+      // server's refusal, which names the directory to go to.
       //
-      // ANDed ahead of it, the platform-admin standing the door's gate judges
-      // (ADR-0068 D4, the admin block header above): without it the button
-      // was offered to every caller who could open a user row, and the door
-      // refused each one 403 `PERMISSION_DENIED`. One flat conjunction, the
-      // principal term first, the way the self-service predicates below lead
-      // with theirs.
-      visible: 'current_user.isPlatformAdmin == true && has(record.source) && record.source != "idp_provisioned"',
+      // The platform-admin standing the door's gate judges (ADR-0068 D4, the
+      // admin block header above): without it the button was offered to every
+      // caller who could open a user row, and the door refused each one 403
+      // `PERMISSION_DENIED`.
+      visible: 'current_user.isPlatformAdmin == true',
       // The action collects a param, so its explanatory line rides
       // `description` and ⛔ never `confirmText` — pairing the two shows two
       // dialogs for one decision (#7278/#7309).
