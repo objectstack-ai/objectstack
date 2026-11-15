@@ -27,7 +27,7 @@ import { formatCurrency } from '../widgets/number-format';
 
 afterEach(cleanup);
 
-const text = (s: string | null | undefined) => (s ?? '').replace(/ /g, ' ');
+const text = (s: string | null | undefined) => (s ?? '').replace(/\u00a0/g, ' ');
 
 /** The child's stored home field, as the spec ships it: a currency field in `dynamic` mode. */
 const HOME_FIELD = { name: 'amount_home', type: 'currency', currencyConfig: { currencyMode: 'dynamic' } } as any;
