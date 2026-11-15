@@ -18,7 +18,7 @@ import userEvent from '@testing-library/user-event';
 // Hoisted so the vi.mock factories below can close over them, and so the
 // adapter is a STABLE singleton (a fresh object per render loops the page's
 // fetch effects).
-const { execute, ADAPTER, authFetch } = vi.hoisted(() => {
+const { execute, getRun, ADAPTER, authFetch } = vi.hoisted(() => {
   const flow = {
     name: 'reassign_wizard',
     label: 'Reassign',
@@ -38,11 +38,22 @@ const { execute, ADAPTER, authFetch } = vi.hoisted(() => {
       fields: [{ name: 'new_assignee', label: 'New Assignee', type: 'text', required: true }],
     },
   }));
+  // The run row as the server records it once the resume finished it.
+  const getRun = vi.fn(async () => ({
+    id: 'run_1',
+    flowName: 'reassign_wizard',
+    status: 'completed',
+    trigger: { type: 'manual' },
+    steps: [],
+    startedAt: '2026-11-15T00:00:00.000Z',
+    completedAt: '2026-11-15T00:00:01.000Z',
+    durationMs: 1000,
+  }));
   const ADAPTER = {
     getClient: () => ({
       // The served list item IS the flow definition (objectui#12829).
       meta: { getItems: async (type: string) => (type === 'flow' ? [flow] : []) },
-      automation: { execute, listRuns: async () => ({ runs: [] }) },
+      automation: { execute, getRun, listRuns: async () => ({ runs: [] }) },
     }),
   };
   const authFetch = vi.fn(async () =>
@@ -51,7 +62,7 @@ const { execute, ADAPTER, authFetch } = vi.hoisted(() => {
       headers: { 'Content-Type': 'application/json' },
     }),
   );
-  return { execute, ADAPTER, authFetch };
+  return { execute, getRun, ADAPTER, authFetch };
 });
 
 vi.mock('@object-ui/app-shell', async (importOriginal) => {
@@ -76,6 +87,7 @@ import { FlowRunsPage } from './FlowRunsPage';
 
 beforeEach(() => {
   execute.mockClear();
+  getRun.mockClear();
   authFetch.mockClear();
 });
 afterEach(cleanup);
@@ -144,5 +156,31 @@ describe('Flow Runs — screen flows are completable from the Test Run panel', (
     const reopened = within(await screen.findByRole('dialog'));
     expect(reopened.getByText('Reassign')).toBeInTheDocument();
     expect(reopened.queryByText('reassign_wizard')).not.toBeInTheDocument();
+  });
+});
+
+describe('Flow Runs — a screen run completed from the Test Run panel stops reading as paused', () => {
+  it('shows the completed run and drops "Waiting for input" and "Continue run"', async () => {
+    const user = userEvent.setup();
+    render(<FlowRunsPage />);
+
+    await screen.findByRole('button', { name: /Run Flow/i });
+    await user.click(screen.getByRole('button', { name: /Run Flow/i }));
+    await screen.findByRole('dialog');
+    // The pause is what the panel reads before the run is finished.
+    expect(screen.getByText('Waiting for input')).toBeInTheDocument();
+
+    const textboxes = screen.getAllByRole('textbox');
+    await user.type(textboxes[textboxes.length - 1], 'ada@example.com');
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    // The panel re-reads the run the runner finished and shows it as the result.
+    await waitFor(() => expect(getRun).toHaveBeenCalledWith('reassign_wizard', 'run_1'));
+    expect(await screen.findByText('Result')).toBeInTheDocument();
+    expect(screen.getByText(/"status": "completed"/)).toBeInTheDocument();
+    expect(screen.queryByText('Waiting for input')).not.toBeInTheDocument();
+    expect(screen.queryByText(/This run is paused at screen/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Continue run/i })).not.toBeInTheDocument();
   });
 });
