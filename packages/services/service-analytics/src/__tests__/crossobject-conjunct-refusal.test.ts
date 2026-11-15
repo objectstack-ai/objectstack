@@ -855,10 +855,10 @@ describe('[#33335] a one-hop cross-object where leaf reaches the engine as its n
     expect(two.execute, String(two.execute?.message)).toBeUndefined();
     expect(two.calls[0]?.filter).toEqual({ $and: [{ cb_order: { customer: { tier: 'gold' } } }] });
     const three = await planRun(planQuery({
-      'cb_order.customer.region.name': { $ne: 'EU' }, 'cb_order.customer.region.code': 'x', 'cb_order.status': 'open',
+      'cb_order.customer.region.name': { $ne: 'EU' }, 'cb_order.customer.region.iso': 'x', 'cb_order.status': 'open',
     }));
     expect(three.calls[0]?.filter).toEqual({
-      $and: [{ cb_order: { customer: { region: { name: { $ne: 'EU' }, code: 'x' } } } }, { cb_order: { status: 'open' } }],
+      $and: [{ cb_order: { customer: { region: { name: { $ne: 'EU' }, iso: 'x' } } } }, { cb_order: { status: 'open' } }],
     });
     // The echo refuses in the where-door envelope, spelling the nested form.
     expect({ code: three.echo?.code, status: three.echo?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
