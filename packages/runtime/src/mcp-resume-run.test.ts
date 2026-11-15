@@ -863,6 +863,38 @@ describe('MCP resumeRun — a run of a flow name two namespaces hold (ADR-0150 D
         expect(hr.engine.resume).not.toHaveBeenCalled();
     });
 
+    /**
+     * [ADR-0150 D3, #33386; seat ruling 6884403301, amendments 3 and 4] CRM
+     * disabled: a run filed under CRM's slot key is no served holder's. CRM's
+     * own action reaches no flow (a disabled caller's own holding answers
+     * none), so it cannot resume CRM's run; HR's action reaches HR's flow,
+     * never CRM's run. HR's run is still resumed through HR's own action.
+     */
+    const withCrmDisabled = {
+        ...registry,
+        isPackageDisabled: (id: string) => id === CRM,
+        // The registry's served read: a disabled package holds no name, but the caller's own holding stays.
+        packageScopedHoldersOf: (type: string, name: string, caller?: string | null, read?: { includeDisabledPackages?: boolean }) =>
+            registry.packageScopedHoldersOf(type, name).filter((id) => read?.includeDisabledPackages === true || id === caller || id !== CRM),
+    };
+    it('[#33386] CRM disabled: CRM\'s paused run is resumed by no action (FROM: CRM\'s own action resumed it), and stays parked', async () => {
+        for (const objectPackage of [CRM, HR]) {
+            const h = makeHarness({ actions: [SCHEDULE], objectPackage, registry: withCrmDisabled });
+            const runId = parkedRunOf(h, CRM);
+            const refusal = await refusalOf(h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } }));
+            expect(refusal.status, objectPackage).toBe(403);
+            expect([h.engine.resume.mock.calls.length, h.engine.runs.get(runId)?.status], objectPackage).toEqual([0, 'paused']);
+        }
+    });
+
+    it('[#33386] CONTROL — CRM disabled: HR\'s paused run is resumed through HR\'s own action, as before', async () => {
+        const h = makeHarness({ actions: [SCHEDULE], objectPackage: HR, registry: withCrmDisabled });
+        const runId = parkedRunOf(h, HR);
+        const resumed = await h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } });
+        expect(resumed).toMatchObject({ ok: true, action: SCHEDULE.name });
+        expect(h.engine.resume.mock.calls.map((c: unknown[]) => c[0])).toEqual([runId]);
+    });
+
     for (const [filed, what] of [[[], 'no holder\'s slot'], [[CRM, HR], 'both holders\' slots (CONTROL)']] as const) {
         it(`[R3-B] a run under a key ${what} is filed under is refused 409 naming every holder, and stays parked`, async () => {
             const h = makeHarness({ actions: [SCHEDULE], objectPackage: CRM, registry });
