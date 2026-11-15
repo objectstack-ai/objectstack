@@ -88,7 +88,8 @@ describe('#33891 — the hosted projection table', () => {
     const declared = keysOf(aiSettingsManifest);
     const served = new Set(CLOUD_MANAGED_SERVED_AI_KEYS);
     for (const key of declared) expect(HIDDEN_AI.includes(key) !== served.has(key), key).toBe(true);
-    for (const key of [...HIDDEN_AI, ...served]) expect(declared, key).toContain(key);
+    for (const key of served) expect(declared, key).toContain(key);
+    for (const key of HIDDEN_AI) expect(served.has(key), key).toBe(false);
     // The ruled split: provider, model, credentials, temperature, max output
     // and timeout hidden; titles and observability served.
     expect(HIDDEN_AI).toEqual(expect.arrayContaining(['provider', 'openai_model', 'openai_api_key', 'temperature', 'max_tokens', 'request_timeout_ms']));
