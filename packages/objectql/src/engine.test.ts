@@ -746,7 +746,7 @@ describe('ObjectQL Engine', () => {
         beforeEach(async () => {
             engine.registerDriver(mockDriver, true);
             await engine.init();
-            vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', fields: {} } as any);
+            vi.mocked((SchemaRegistry as any).getObject).mockReturnValue({ name: 'task', fields: {} } as any);
         });
 
         const capture = () => {
