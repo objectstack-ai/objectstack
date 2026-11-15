@@ -101,22 +101,27 @@
  * the announcement names as registered at that moment
  * (`positionRenameReloadScope`), so condition 2 holds on the reload path
  * exactly as on the boot path: a reload never re-judges another package's
- * standing claim. Read from the payload's `changed` list:
+ * standing claim. Read from the payload's `changed` list; an entry in one of
+ * the two spellings below counts whichever announcer sends it:
  *
- *  - `app/ID` where `ID` is a package the registry holds now: the positions
- *    of that package. The marketplace install-local door announces this after
- *    a hot install or upgrade has registered the package. Its uninstall
- *    announces the same spelling after the package is withdrawn, so the
- *    registry no longer holds it and nothing is judged: a withdrawal carries
- *    nothing;
- *  - `position/NAME` where `NAME` is a position the catalog serves now: that
- *    position. The per-item publish (`ObjectQLPlugin`) and the package
- *    publish-drafts route (one entry per published item) announce this;
+ *  - `app/ID` where `ID` is a package the registry holds now, by any
+ *    announcer: the positions of that package. The marketplace install-local
+ *    door announces this after a hot install or upgrade has registered the
+ *    package. Its uninstall announces the same spelling after the package is
+ *    withdrawn, so the registry no longer holds it and nothing is judged: a
+ *    withdrawal carries nothing. publish-drafts names each app it unhid as
+ *    `app/NAME`, which counts only when `NAME` is also a held package id;
+ *  - `position/NAME` where `NAME` is in the position-name grammar: the claims
+ *    whose new name is `NAME` (a name no position serves has none). The
+ *    per-item publish (`ObjectQLPlugin`) and the package publish-drafts route
+ *    (one entry per published item) announce this;
  *  - anything else is not a scope: another item type, an `app/NAME` that is
- *    no package the registry holds (publish-drafts names the apps it unhid by
- *    app name), and the file path an artifact reload announces. A reload that
- *    names no scope reads nothing and carries nothing; its renames wait for
- *    the boot run.
+ *    no package the registry holds, and a file path. An artifact reload
+ *    announces its file path from the file watcher, but the dev HMR POST
+ *    announces the `changed` list its caller sent (the file path when it sent
+ *    none), so an entry there in either spelling above counts too. A reload
+ *    that names no scope reads nothing and carries nothing; its renames wait
+ *    for the boot run.
  *
  * Within that scope the judgement is the boot's own, over the whole catalog:
  * every refusal below reads every position the environment holds, not only

@@ -102,6 +102,7 @@ import { useObjectGridMobile } from './objectGridMobile';
 import { useObjectGridGenerateColumns } from './objectGridGenerateColumns';
 import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns';
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
+import { useInlineRowActionFold } from './objectGridInlineActionFold';
 import { BULK_SELECT_ALL_MATCHING_CAP } from './bulkSelectAllMatchingCap';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
 export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps, ObjectGridRowGroup } from './objectGridProps';
@@ -756,6 +757,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // Column state persistence: the seed, the external sync and the save, in
   // hook order (`./objectGridColumnState`).
   const { columnState, saveColumnState } = useObjectGridColumnState({ schema, onColumnStateChange });
+
+  // objectstack#33230 — the inline primary row actions fold into the row's
+  // "⋮" menu while the table overflows its scroll box with them, so the
+  // pinned Actions column never widens over a data column for them
+  // (`./objectGridInlineActionFold`). Read off the flat table's scroll box;
+  // read afresh when the rows or the columns change.
+  const inlineActionFold = useInlineRowActionFold(data, JSON.stringify([schema.columns ?? null, columnState ?? null]));
 
   // Pull to refresh and the card-view breakpoint, in hook order (`./objectGridMobile`).
   const { pullRef, isRefreshing, pullDistance } = useObjectGridMobile({
@@ -1716,7 +1724,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
     wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
     recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
-    setRefreshKey, t,
+    setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
   });
 
   // Density-driven cell padding/font (applied to every column so it actually reaches <td>).
@@ -3850,7 +3858,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     </div>
   ) : (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex flex-col flex-1 min-h-0">
+      <div
+        ref={inlineActionFold.hostRef}
+        className="flex flex-col flex-1 min-h-0"
+        data-row-actions-inline={inlineActionFold.folded ? 'folded' : undefined}
+      >
         <SchemaRenderer schema={dataTableSchema} />
       </div>
       {summaryFooter}

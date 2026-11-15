@@ -1,4 +1,4 @@
-# Platform — bootstrap examples and composition notes (moved verbatim from SKILL.md)
+# Platform — bootstrap examples and composition notes
 
 ### Minimal Example
 
@@ -37,12 +37,12 @@ All named collections support **map format** where the key becomes the `name` fi
 
 ```typescript
 export default defineStack({
-  // Array format (traditional)
+  // Array format
   objects: [
     { name: 'task', fields: { title: Field.text() } },
   ],
 
-  // Map format (key becomes name) — preferred for readability
+  // Map format — preferred
   objects: {
     task: { fields: { title: Field.text() } },
     project: { fields: { name: Field.text() } },
@@ -51,8 +51,6 @@ export default defineStack({
 ```
 
 ### Barrel Import Pattern
-
-Use barrel exports to keep config clean:
 
 ```typescript
 // src/objects/index.ts
@@ -117,20 +115,20 @@ const kernel = runtime.getKernel();
 
 ## Multi-App Composition
 
-Host several apps in one runtime by registering an `AppPlugin` per app — this is
-how real multi-app composition happens (`packages/cli/src/commands/serve.ts`).
-Each app contributes its objects under their canonical `name`; names are
-globally unique and equal the physical table name, so use them directly in
-queries, hooks, formulas, and REST URLs.
+Host several apps in one runtime by registering an `AppPlugin` per app
+(`packages/cli/src/commands/serve.ts`). Each app contributes its objects under
+their globally unique `name`; use it directly in queries, hooks, formulas, and
+REST URLs.
 
-A merge-at-authoring-time alternative, `composeStacks()`, exists in
-`@objectstack/spec` (`stack.zod.ts`) with `objectConflict` /
-`manifest` strategies. No app in this repo uses it — read the schema before
-reaching for it.
+`composeStacks()` (`@objectstack/spec`) merges stacks at authoring time, with
+`objectConflict` / `manifest` strategies. A suite (an app package plus module
+packages, one app each) composes with
+`composeStacks(stacks, { manifest: 'preserve' })`, which keeps each package's
+own id (`examples/app-multi-package`). A flat `manifest` (`'last'`, the
+default, `'first'` or an index) keeps one, so two or more apps under one `app`
+or `module` package id are refused (`STACK_SINGLE_APP_VIOLATION`, 422).
 
 ## Complete Working Example
-
-A minimal but complete project from scratch:
 
 **`package.json`**:
 ```json

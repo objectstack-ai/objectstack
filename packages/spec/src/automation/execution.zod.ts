@@ -239,6 +239,13 @@ export const FlowRunNodeSummarySchema = lazySchema(() => z.object({
   selected: z.number().int().min(0).optional().describe('Records read across every execution — omitted for a node that reads none'),
   acted: z.number().int().min(0).optional().describe('Records written / effects dispatched across every execution — omitted for a node that writes none'),
   unmeasured: z.number().int().min(0).optional().describe('Executions that may have caused an effect the platform cannot count (see ExecutionStepMetrics.unmeasuredEffect)'),
+  // The step log's own advisory `warnings`, folded per node, so a caller that
+  // reads only the run summary (a trigger response, a run row) is told what a
+  // step that still succeeded did not do — e.g. a `notify` whose only channel
+  // was refused, which otherwise reads as a clean `success` with `acted: 0`.
+  // Same element shape as `ExecutionStepLogSchema.warnings`: no new vocabulary.
+  warnings: z.array(z.string()).optional()
+    .describe('Advisory warnings the node\'s executions raised (`ExecutionStepLog.warnings`), distinct texts in first-seen order. A `success` node may carry them — e.g. a `notify` whose channel was refused, or a write whose requested fields the data engine stripped — so a node that partly did not do its job never reads as a clean success. Bounded per node like the rest of the summary: past the bound a final entry says how many distinct warnings were left out, and the run\'s step log holds each execution\'s own. Absent when no execution raised one'),
 }));
 export type FlowRunNodeSummary = z.input<typeof FlowRunNodeSummarySchema>;
 

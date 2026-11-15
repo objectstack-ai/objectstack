@@ -259,6 +259,46 @@ describe('the lock refusal carries its guidance as `userMessage` on the wire env
     expect(String(rejection.message)).toContain('registry unavailable');
   });
 
+  // [#32656] Ruling C on #32440: the producer composes the sentence in the
+  // request's language, else the workspace default, else `en`. The write door
+  // states the two locales on the gate's context (`userTextLocales`).
+  it('[#32656] the refusal speaks the caller\'s language: request locale, then the workspace default, then en', async () => {
+    const gate = lockGate(makeQl([shippedArtifact()]));
+    const refuse = (userTextLocales?: string[]) => gate({
+      type: 'permission', name: SET_NAME, body: packagedSet(), ...(userTextLocales ? { userTextLocales } : {}),
+    } as any).then(() => null, (e: any) => e);
+
+    const zh = await refuse(['zh-CN', 'en']);
+    expect(zh).toBeInstanceOf(PackagedPermissionSetLockedError);
+    expect(zh.userMessage).toContain('此权限集由已安装的软件包提供');
+    expectEndUserCopy(zh.userMessage, SET_NAME, PACKAGE_ID);
+    const ja = await refuse(['ja-JP', 'zh-CN']);
+    expect(ja.userMessage, 'the request language wins when it has text').toContain('この権限セット');
+    const workspace = await refuse(['tlh', 'zh-TW']);
+    expect(workspace.userMessage, 'an unsupported request language falls back to the workspace default').toContain('此權限集');
+    const floor = await refuse(['tlh', 'tlh']);
+    const unstated = await refuse();
+    expect(floor.userMessage).toBe(unstated.userMessage);
+    expect(String(unstated.userMessage)).toMatch(/clone it instead/i);
+    // Only the user's half moves: code, status and the diagnostic are the same in every language.
+    for (const r of [zh, ja, workspace, floor]) {
+      expect(r.code).toBe('NOT_OVERRIDABLE');
+      expect(r.status).toBe(403);
+      expect(r.message).toBe(unstated.message);
+    }
+  });
+
+  it('[#32656] the provenance-unknown refusal follows the same ladder', async () => {
+    const ql = makeQl([]);
+    ql.registry = { listItems: () => { throw new Error('registry unavailable'); } };
+    const gate = lockGate(ql, async () => { throw new Error('metadata store unavailable'); });
+    const rejection = await gate({ type: 'permission', name: 'unknown_provenance', body: {}, userTextLocales: ['de-DE'] } as any)
+      .then(() => null, (e: any) => e);
+    expect(rejection).toBeInstanceOf(PackagedPermissionSetProvenanceUnknownError);
+    expect(rejection.userMessage).toContain('kann gerade nicht gespeichert werden');
+    expectEndUserCopy(rejection.userMessage, 'unknown_provenance', 'registry unavailable', 'metadata store unavailable');
+  });
+
   it('a SchemaRegistry that answers with a NON-LIST is the same ambiguity: the save is refused, not read as "nothing declared"', async () => {
     const ql = makeQl([]);
     ql.registry = { listItems: () => undefined as any };

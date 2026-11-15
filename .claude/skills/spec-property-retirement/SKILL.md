@@ -27,11 +27,10 @@ flow。ADR-0049 说这样的属性必须**被强制执行**、标 **`experimenta
 
 删掉键本身也许只占 5% 的工作。其余 95% 在于:一个键可以在 ~14 个地方被编写,而**守
 着每个地方的门禁是分别地、串行地失败的** —— 一个过期面遮住其余全部,于是你得到的
-是
-每个面一轮红构建,而不是一轮报出全部。
+是每个面一轮红构建,而不是一轮报出全部。
 
 先读验证侧:`packages/spec/liveness/README.md`(裁定怎么得出、`verifiedAt`、为什么
-preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(八个生成产
+preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(六个生成产
 物)。本文不重复它们。
 
 ## 0. 动手删之前:删除是正确的处置吗?

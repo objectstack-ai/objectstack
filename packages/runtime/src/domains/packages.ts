@@ -76,7 +76,7 @@ import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES, refuseNamespaceObjectNameC
 import { customizationPairManifestRefusal, runtimeNavigationContributionsRefusal } from '@objectstack/metadata-protocol';
 // [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
 // shared with the registry's co-owner gate.
-import { declaredDependencyIds } from '@objectstack/core';
+import { declaredDependencyIds, userTextLocalesOf } from '@objectstack/core';
 // [#28914, ADR-0141 D5] The one sorter of installed packages by their declared
 // dependencies: the order a boot hydrates them in is the order the
 // whole-deployment export lists them in.
@@ -919,6 +919,43 @@ async function writePackageStateAfterChange(
 async function summaryRefreshSettled(engine: unknown): Promise<void> {
     const host = engine as { summaryRefreshSettled?: () => Promise<void> } | null | undefined;
     if (typeof host?.summaryRefreshSettled === 'function') await host.summaryRefreshSettled();
+}
+
+/**
+ * [#33302] Announce a package the install door (`POST /packages`) or the
+ * enable door (`PATCH /packages/:id/enable`) has just put into service as
+ * `metadata:reloaded`, the platform's one post-boot re-sync signal, in the
+ * spelling the marketplace install-local door announces a hot install with
+ * (`changed: ['app/ID']`, `announceHotInstall` in `@objectstack/cloud-connection`).
+ * Every subscriber then re-reads what the package holds without a restart, as
+ * it does for that door: `plugin-security` carries the holders of the
+ * positions the package renamed (`renamedFrom`), the automation engine
+ * re-syncs flows, and the authored hooks, actions and translations re-sync.
+ *
+ * Called only after the registry write has landed, so a subscriber reading the
+ * registry finds the package there (a scope of `app/ID` names a package the
+ * registry holds NOW). Never throws: the package is installed or enabled and
+ * served either way, so a failed re-sync is a FUNCTIONAL degradation, said
+ * once at `warn` with the restart that repairs it — the level the
+ * publish-drafts door and the install-local door use for the same announce.
+ */
+async function announcePackageReload(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    id: string,
+    door: 'installed' | 'enabled',
+): Promise<void> {
+    try {
+        await deps.announceKernelEvent(context, 'metadata:reloaded', { changed: [`app/${id}`] });
+    } catch (e: any) {
+        (deps.logger ?? console).warn(
+            `[Packages] package '${id}' is ${door}, but the 'metadata:reloaded' announce FAILED — boot-cached consumers `
+            + 'keep their earlier view of it until this process restarts: holders of the positions it renamed stay '
+            + 'on the old names, its record-triggered flows do not bind, and its authored hooks, actions and '
+            + 'translations are not re-synced. Nothing retries this announce; restart the process to rebuild every '
+            + `subscriber from storage. Cause: ${e?.message ?? String(e)}`,
+        );
+    }
 }
 
 /**
@@ -2736,6 +2773,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             } catch (err) {
                 console.warn('[handlePackages] failed to persist enableOnInstall', { id: pkgId, disabled: rowDisabled, error: (err as Error)?.message });
             }
+            // [#33302] The install has landed in the registry (the row this
+            // door returns), so announce it the way the marketplace
+            // install-local door announces a hot install. On BOTH answers
+            // below: a lifecycle refusal refuses the `enableOnInstall` switch
+            // only, never the install, whose row is already served.
+            await announcePackageReload(deps, _context, pkgId, 'installed');
             if (installLifecycleRefusal !== undefined) {
                 return {
                     handled: true,
@@ -2795,9 +2838,22 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 if (err instanceof HostPackageStateRefusal) return hostPackageStateRefused(deps, err, 'enabled');
                 console.warn('[handlePackages] failed to persist enable state', { id, error: (err as Error)?.message });
             }
+            // [#33302] Whether this enable puts the package back into service,
+            // read by the registry's own predicate before it switches (the one
+            // `enablePackage` asks before telling its enable listeners). The
+            // registry view the contract declares does not carry it; a registry
+            // that cannot say is announced to, since every subscriber is
+            // idempotent.
+            const isPackageDisabled = (registry as { isPackageDisabled?: (packageId: string) => boolean }).isPackageDisabled;
+            const wasDisabled = typeof isPackageDisabled !== 'function' || isPackageDisabled.call(registry, id) === true;
             const pkg = registry.enablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             await summaryRefreshSettled(qlService);
+            // [#33302] A disabled package's positions, flows and other items
+            // serve again from here on: announce it, as the install door does.
+            // An enable of a package already enabled changes nothing served,
+            // so it announces nothing.
+            if (wasDisabled) await announcePackageReload(deps, _context, id, 'enabled');
             return { handled: true, response: deps.success(pkg) };
         }
 
@@ -2997,6 +3053,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         // its shape and what it names, and refuses the whole
                         // request before anything is published.
                         ...(body?.backfill !== undefined ? { backfill: body.backfill } : {}),
+                        // [#32656] The languages the findings' `userMessage` is
+                        // composed in: the request's locale, then the workspace
+                        // default, off THIS caller's execution context.
+                        userTextLocales: userTextLocalesOf(_context?.executionContext),
                         // THIS caller's execution context, never a system one:
                         // the backfill writes run as it, and [#25484] so do the
                         // build probes' dashboard-widget reads — the renderer's
