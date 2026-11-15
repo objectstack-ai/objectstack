@@ -1162,6 +1162,49 @@ describe('reconcileManagedApiMethods', () => {
         }
     });
 
+    // [ADR-0153 D4/D5] The remedy branches on the bucket: `userActions` cannot
+    // open a write on `synced` (the parse refuses it), so the warning names the
+    // verbs to drop and points writes at a declared action instead.
+    it('on a synced object, the warning names the verbs to drop and a declared action, never userActions', () => {
+        const warn = vi.fn<(msg: string) => void>();
+        reconcileManagedApiMethods(
+            {
+                name: 'erp_order_copy',
+                managedBy: 'synced',
+                enable: { apiEnabled: true, apiMethods: ['get', 'list', 'create', 'update'] },
+            } as ServiceObject,
+            { warn },
+        );
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toBe(
+            `[Registry] Object "erp_order_copy" is managedBy:'synced' but advertised generic write verb(s) ` +
+                `[create, update] in enable.apiMethods its resolved affordances do not permit — stripping them ` +
+                `(ADR-0092/ADR-0103). userActions cannot open a write on this bucket (ADR-0153 D4): remove ` +
+                `[create, update] from enable.apiMethods and send writes through a declared action (ADR-0153 D5). ` +
+                `Kept: [get, list]. \`os lint\` reports the same contradiction as ` +
+                `\`object/managed-api-method-unaffordable\` with full authoring context.`,
+        );
+    });
+
+    it('control: every other bucket keeps the userActions sentence unchanged', () => {
+        const warn = vi.fn<(msg: string) => void>();
+        reconcileManagedApiMethods(
+            {
+                name: 'sys_automation_run',
+                managedBy: 'engine-owned',
+                enable: { apiEnabled: true, apiMethods: ['get', 'list', 'create', 'update'] },
+            } as ServiceObject,
+            { warn },
+        );
+        expect(warn.mock.calls[0][0]).toBe(
+            `[Registry] Object "sys_automation_run" is managedBy:'engine-owned' but advertised generic write verb(s) ` +
+                `[create, update] in enable.apiMethods its resolved affordances do not permit — stripping them ` +
+                `(ADR-0092/ADR-0103). Declare userActions to open a verb the object legitimately takes from a ` +
+                `user context. Kept: [get, list]. \`os lint\` reports the same contradiction as ` +
+                `\`object/managed-api-method-unaffordable\` with full authoring context.`,
+        );
+    });
+
     it('twin: a synced object advertising reads only is left as it is', () => {
         const warn = vi.fn();
         const readOnly: any = {

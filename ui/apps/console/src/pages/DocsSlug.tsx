@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Navigate, useParams } from 'react-router-dom';
+import { Navigate, useLocation, useParams } from 'react-router-dom';
 import { FileQuestion, Loader2 } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useAdapter } from '@object-ui/app-shell';
@@ -74,6 +74,9 @@ export default function DocsSlug() {
   const { t } = useObjectTranslation();
   const { books, docs, state } = useBookData();
   const adapter = useAdapter();
+  // A flat permalink may name a section (`…/docs/<name>#section`); the redirect
+  // to the canonical in-book URL carries that fragment, and DocPage scrolls to it.
+  const { hash } = useLocation();
 
   // Answered by the member's own lists: a book slug, a readable doc, a book NAME.
   const unanswered =
@@ -113,7 +116,7 @@ export default function DocsSlug() {
   const base = appName ? `/apps/${appName}/docs` : '/docs';
   const hb = slug ? homeBook(slug, books, docs) : null;
   if (hb && slug && docs.some((d) => d.name === slug)) {
-    return <Navigate to={`${base}/${bookSlug(hb)}/${slug}`} replace />;
+    return <Navigate to={{ pathname: `${base}/${bookSlug(hb)}/${slug}`, hash }} replace />;
   }
 
   // A book NAME that is not its slug → the book's canonical URL (objectui#11197).
@@ -132,7 +135,7 @@ export default function DocsSlug() {
 
   // The name-prefix fallback for a name no installed doc carries (unchanged).
   if (hb && slug) {
-    return <Navigate to={`${base}/${bookSlug(hb)}/${slug}`} replace />;
+    return <Navigate to={{ pathname: `${base}/${bookSlug(hb)}/${slug}`, hash }} replace />;
   }
 
   return (

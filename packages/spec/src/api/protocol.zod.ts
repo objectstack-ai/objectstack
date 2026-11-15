@@ -79,6 +79,7 @@ import type {
 } from '../kernel/package-registry.zod';
 
 import { lazySchema } from '../shared/lazy-schema';
+import { canonicalMetaUrlType } from '../meta-spelling/metadata-url-spelling';
 export const AutomationTriggerRequestSchema = lazySchema(() => z.object({
   trigger: z.string(),
   payload: z.record(z.string(), z.unknown())
@@ -1067,6 +1068,27 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * The two locales a write door states for the user-facing sentences its
+ * findings carry (`RuntimeAuthoringIssueSchema.userMessage`), in ladder order:
+ * the locale the request names, then the workspace default. A write door holds
+ * both (`ExecutionContext.locale` and `ExecutionContext.workspaceLocale`); the
+ * metadata protocol that composes the sentences never sees the request. Two
+ * values, not their fold: once a request names a locale the fold has lost the
+ * workspace default, and the ladder needs it as its second rung (see
+ * `ApiErrorSchema.userMessage`, "Language").
+ */
+const userTextLocalesMember = () => z.array(z.string()).max(2).optional().describe(
+  'The locales the user-facing sentences of this write\'s findings (`advisories[].userMessage`, and '
+  + '`issues[].userMessage` on its 422) are composed in, in ladder order: the locale the request names, '
+  + 'then the workspace default. Each is read against the platform locale table, whole and then one '
+  + 'subtag shorter at a time; a value that names no table language is passed over, and `en` is the '
+  + 'last rung. Stated by the door that holds the request (the REST door and the dispatcher state '
+  + '`[ExecutionContext.locale, ExecutionContext.workspaceLocale]`), never read from a wire body. '
+  + 'ABSENT ⇒ the sentences are composed in `en`. It selects a language only: what is judged, refused '
+  + 'or saved does not depend on it.',
+);
+
+/**
  * Save Metadata Item Request
  * Create or update a metadata item — the request shape for
  * `PUT /api/v1/meta/:type/:name` (the `saveMetaItem` protocol method).
@@ -1232,6 +1254,7 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'dispatcher build this request member by member, so a `client` in a wire body or query is never '
     + 'read.',
   ),
+  userTextLocales: userTextLocalesMember(),
 }));
 
 /**
@@ -1432,6 +1455,7 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     + '`no_draft`.',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  userTextLocales: userTextLocalesMember(),
 }));
 
 /**
@@ -1774,9 +1798,10 @@ export const PublishPackageDraftsRequestSchema = lazySchema(() => z.object({
  * `success: false` on a 200 with `publishedCount: 0`, `published: []` and the
  * whole batch in `failed[]` (`BATCH_ABORTED` marks the non-causal items).
  * `success: false` alone does NOT mean a refusal — a publish with no pending
- * drafts answers it too, with `failed: []`; `outcome` (#10462) names which of
- * the three exits answered, so no consumer has to reverse-engineer that from
- * `failed.length`.
+ * drafts answers it too, with `failed: []`, and so does a publish whose drafts
+ * landed while the runtime registry refused an object among them (#33277);
+ * `outcome` (#10462) names which of the four exits answered, so no consumer
+ * has to reverse-engineer that from `failed.length`.
  *
  * **`probes` is deliberately OPAQUE** — see its own note below. Do not model
  * it here without a consumer-driven card (#9406 ruling).
@@ -1788,13 +1813,22 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     + 'rollback answers false on a 200 — but so does a publish with nothing '
     + 'to promote, so false alone is NOT a refusal: read `outcome`, '
     + 'not this boolean or the HTTP status. Always equal to '
-    + '`outcome === \'published\'` (pinned). It does NOT cover the '
-    + 'best-effort receipts below, each of which reports its own `success`.',
+    + '`outcome === \'published\'` (pinned), so it is also false on '
+    + '`published_unregistered`, where the drafts landed but an object is not '
+    + 'served. It does NOT cover the best-effort receipts below, each of '
+    + 'which reports its own `success`.',
   ),
-  outcome: z.enum(['published', 'refused', 'nothing_to_publish']).describe(
+  outcome: z.enum(['published', 'published_unregistered', 'refused', 'nothing_to_publish']).describe(
     'First-class discriminant for WHICH exit answered — the fact '
     + '`success` compresses into one boolean. `published`: at least one draft '
-    + 'promoted and none refused. `refused`: the batch was refused — a '
+    + 'promoted, none refused, and the runtime registry took every promoted '
+    + 'object. `published_unregistered`: the drafts landed exactly as '
+    + 'on `published` — the metadata is live and stays live — but the runtime '
+    + 'registry refused at least one promoted object, so that object is not '
+    + 'served: until something registers it, data reads, writes and seed '
+    + 'loads against it answer OBJECT_NOT_FOUND. `unregistered[]` names each '
+    + 'such object; do not seed or read it before it is registered (publish '
+    + 'it again, or restart). `refused`: the batch was refused — a '
     + 'pre-flight violation or the ADR-0067 D2 all-or-nothing rollback; the '
     + 'per-item story is in `failed[]`, which is non-empty exactly on this '
     + 'outcome (the invariant consumers previously had to reverse-engineer, '
@@ -1805,8 +1839,10 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     + 'invariants, pinned in the conformance suites: '
     + '`success === (outcome === \'published\')`; `refused` if and only if '
     + '`failed.length > 0`; `nothing_to_publish` if and only if '
-    + '`published.length === 0 && failed.length === 0`. Values are lowercase '
-    + 'snake, matching the `sys_metadata_audit` outcome vocabulary.',
+    + '`published.length === 0 && failed.length === 0`; '
+    + '`published_unregistered` if and only if `unregistered` is present. '
+    + 'Values are lowercase snake, matching the `sys_metadata_audit` outcome '
+    + 'vocabulary.',
   ),
   publishedCount: z.number().int().describe(
     'Number of drafts promoted to active — `published.length`. 0 on every '
@@ -1879,6 +1915,24 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     'Items that did not publish. Because the batch is all-or-nothing '
     + '(ADR-0067 D2), a non-empty list means NOTHING landed: '
     + '`published: []`, `publishedCount: 0`.',
+  ),
+  unregistered: z.array(z.object({
+    type: z.string().describe('Metadata type of the published item the registry refused (`object`).'),
+    name: z.string().describe('Name of the object that is published but not served.'),
+    rule: z.enum(['object-registry-refused']).describe(
+      'Why it is not served, as a stable rule id: the same id as the '
+      + 'warning on this object\'s `published[]` element, whose `message` '
+      + 'and `hint` say what happened and how to fix it.',
+    ),
+  })).optional().describe(
+    'Present ONLY on `outcome: \'published_unregistered\'`, and then '
+    + 'non-empty: each promoted object the runtime registry refused, in '
+    + 'publish order. Every entry also appears in `published[]` — '
+    + 'its metadata IS live, nothing was rolled back (ADR-0067 D2 runs the '
+    + 'registration after the metadata commit) — but the object is not '
+    + 'served until something registers it, so a caller about to seed or '
+    + 'read it should publish it again or restart first. Absent on every '
+    + 'other outcome; an empty array is never emitted.',
   ),
   seedApplied: z.object({
     success: z.boolean().describe(
@@ -2158,11 +2212,14 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
  * delete did not happen", and `projectionApplied` absent means "no projector
  * ran", never "the projection failed" — the same reading its siblings declare.
  *
- * Two keys the siblings carry are deliberately NOT declared, because this
- * branch provably never sends them: `version` (a delete mints no new content
- * hash — the row is gone, so there is no ADR-0008 OCC token to echo) and
- * `advisories` (the #4463 runtime authoring gate runs on the two WRITE doors
- * by D1; a delete submits no body for it to judge).
+ * One key the siblings carry is deliberately NOT declared, because this
+ * branch provably never sends it: `version` (a delete mints no new content
+ * hash — the row is gone, so there is no ADR-0008 OCC token to echo).
+ * `advisories` is declared, and carries none of the #4463 runtime authoring
+ * gate's findings (that gate runs on the two WRITE doors by D1; a delete
+ * submits no body for it to judge): only the stored-expression fill of the
+ * object a removal hands back its underlying definition (#32958), on the
+ * repository path's row-deleted return alone.
  */
 export const DeleteMetaItemResponseSchema = lazySchema(() => z.object({
   success: z.boolean(),
@@ -2196,6 +2253,21 @@ export const DeleteMetaItemResponseSchema = lazySchema(() => z.object({
     + 'check `projectionApplied.success` rather than rely on the 200.',
   ),
   message: z.string().optional(),
+  advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+    'What the delete did to the rows of the object it changed, in the same '
+    + 'element shape and omitted-when-empty discipline as '
+    + '`SaveMetaItemResponseSchema.advisories`. Present ONLY when at least one '
+    + 'entry was raised: an empty array is never emitted, so a clean answer\'s '
+    + 'bytes are unchanged and a caller that ignores this key behaves exactly '
+    + 'as before. A removal that hands an object back the definition beneath '
+    + 'it (an `object_extension` that re-declared a field) can make a stored '
+    + 'computed field (a '
+    + 'non-`formula` field declaring `expression`) compute something new; per '
+    + 'such field, the fill of the object\'s existing rows the save door also '
+    + 'runs: `stored-expression-filled` (`info`, the rows written) or '
+    + '`stored-expression-fill-incomplete` (`warning`, what is left and how to '
+    + 'fill it). The delete itself SUCCEEDED either way.',
+  ),
 }));
 
 /**
@@ -2290,6 +2362,45 @@ export const AuditMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * [ADR-0150 D3/D4, #32905] The `?package=` selector of the history and
+ * rollback doors, shared by their request schemas.
+ */
+const HISTORY_PACKAGE_SELECTOR_DESCRIPTION =
+  'Optional package ID (`?package=` on the REST door, the `/layers` spelling) — '
+  + 'for a type stored per (package, name), the holder whose versions to address: '
+  + 'the slot of the row a read naming the package serves (its own row, its `.custom` '
+  + 'pair\'s declared override, or the package-less row that read falls back to), '
+  + 'else the package\'s own empty slot when it ships the name; a package that neither '
+  + 'holds nor ships the name is refused 409 `not-held-by-qualifier` (ADR-0150 D3/D4). '
+  + 'Versions attributed to no package, or to the environment, are that slot\'s only '
+  + 'while it is the name\'s sole slot. Absent, a name two holders hold (in stored rows '
+  + 'or in code) is refused 409 naming every holder. Refused with 400 `VALIDATION_ERROR` '
+  + 'on a type not stored per (package, name).';
+
+/**
+ * [ADR-0150 D3/D4, #32905] The metadata types stored per `(package, name)`:
+ * one row per package for a name, so a name can have several holders. These
+ * are the types whose history and rollback doors take `?package=` (see
+ * {@link HistoryMetaItemRequestSchema}`.packageId`); on every other type the
+ * doors refuse it `400`. The one list: `@objectstack/metadata`'s
+ * `PACKAGE_SLOTTED_STORE_TYPES` is built from it, and a client names a
+ * package on those doors only for a type it holds
+ * ({@link isPackageSlottedMetaType}).
+ */
+export const PACKAGE_SLOTTED_METADATA_TYPES: readonly string[] = Object.freeze([
+  'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
+  'webhook', 'tool', 'connector',
+]);
+
+/**
+ * Whether `type`, in any `/meta/:type` spelling (`flows` folds to `flow`), is
+ * stored per `(package, name)` ({@link PACKAGE_SLOTTED_METADATA_TYPES}).
+ */
+export function isPackageSlottedMetaType(type: string): boolean {
+  return PACKAGE_SLOTTED_METADATA_TYPES.includes(canonicalMetaUrlType(type));
+}
+
+/**
  * History Metadata Item Request
  *
  * Request shape for `GET /api/v1/meta/:type/:name/history` (the
@@ -2327,6 +2438,7 @@ export const HistoryMetaItemRequestSchema = lazySchema(() => z.object({
     + 'verb accepts.)',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  packageId: z.string().optional().describe(HISTORY_PACKAGE_SELECTOR_DESCRIPTION),
 }));
 
 /**
@@ -2576,6 +2688,30 @@ export const FindReferencesToMetaResponseSchema = lazySchema(() => z.object({
     path: z.string().describe('Where inside the referring item the reference sits (dot path).'),
     kind: z.string().describe('What kind of reference this is (e.g. which key carries it).'),
   })).describe('Every found reference to the addressed item.'),
+}));
+
+/**
+ * Rollback Metadata Item Request
+ *
+ * Request shape for `POST /api/v1/meta/:type/:name/rollback` (the
+ * `rollbackMetaItem` protocol method): `toVersion` from the body (or its
+ * `version` alias) or the query, all three read through this declaration,
+ * `member` and `package` from the query, `message` from the body.
+ * Mirrors the implementation's parameter type in
+ * `@objectstack/metadata-protocol` (`RollbackMetaItemRequest`) member for
+ * member, less the actor the door fills from the session — a
+ * declared-surface catch-up (#32905), as `HistoryMetaItemRequestSchema` is.
+ */
+export const RollbackMetaItemRequestSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name'),
+  name: z.string().describe('Item name'),
+  toVersion: z.number().int().min(1).describe(
+    'The history version whose body is restored as the new live row: a whole number of at least 1, '
+    + 'as the history lists it. The rollback door reads this declaration and refuses anything else `400`.',
+  ),
+  message: z.string().optional().describe('Rollback note, recorded on the new history row.'),
+  member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  packageId: z.string().optional().describe(HISTORY_PACKAGE_SELECTOR_DESCRIPTION),
 }));
 
 /**
@@ -4435,6 +4571,9 @@ export type GetMetaDiagnosticsResponseParsed = z.infer<typeof GetMetaDiagnostics
 export type FindReferencesToMetaResponse = z.input<typeof FindReferencesToMetaResponseSchema>;
 /** Post-parse shape of {@link FindReferencesToMetaResponse} — defaults applied, transforms run (ADR-0122). */
 export type FindReferencesToMetaResponseParsed = z.infer<typeof FindReferencesToMetaResponseSchema>;
+export type RollbackMetaItemRequest = z.input<typeof RollbackMetaItemRequestSchema>;
+/** Post-parse shape of {@link RollbackMetaItemRequest} — defaults applied, transforms run (ADR-0122). */
+export type RollbackMetaItemRequestParsed = z.infer<typeof RollbackMetaItemRequestSchema>;
 export type RollbackMetaItemResponse = z.input<typeof RollbackMetaItemResponseSchema>;
 /** Post-parse shape of {@link RollbackMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
 export type RollbackMetaItemResponseParsed = z.infer<typeof RollbackMetaItemResponseSchema>;

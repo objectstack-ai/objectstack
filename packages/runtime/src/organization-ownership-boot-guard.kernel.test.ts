@@ -24,7 +24,12 @@
  *     identity-objects plugin (the Default Organization, `AuthPlugin`'s twin
  *     invariant) — are `use()`d BEFORE the guard, the hostile slot, and the
  *     refused file holds no organization and no seed row; the same composition
- *     over a fresh file writes both (the probe can see a write).
+ *     over a fresh file writes both (the probe can see a write);
+ *  6. ⭐ a refused boot rotates no telemetry shard away: a restored shard past
+ *     its rotation window still holds every row after the refusal (the
+ *     engine's schema sync runs before the guard judges, and it drops no
+ *     shard); on a served boot the lifecycle sweep still drops it (the probe
+ *     can see a drop).
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -38,6 +43,9 @@ import { ObjectQLPlugin } from '@objectstack/objectql';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { ORGANIZATION_OWNERSHIP_SHAPE_GENERATION } from '@objectstack/spec/system';
 import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
+// The real plugin chain loads `@objectstack/metadata` lazily (AppPlugin); paid
+// here, at collection, so no case's clocked window pays the first load.
+import '@objectstack/metadata';
 import { AppPlugin } from './app-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
 import {
@@ -212,7 +220,7 @@ describe('the v18 boot refusal on a real kernel (ADR-0131 D10 item 5)', () => {
     expect(refusal?.code, String(error)).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
     expect(refusal?.tables).toEqual([]);
     expect(refusal?.message).toMatch(/^The organization-ownership ceremony has not finished on this database: its marker/);
-    expect(refusal?.message).toContain("os migrate organization-ownership --apply --plan-file PLAN --backup-taken");
+    expect(refusal?.message).toContain("os migrate organization-ownership --apply --plan-file PLAN --backup-taken --out REPORT");
     expect(kernel.getState()).not.toBe('running');
   });
 
@@ -255,5 +263,89 @@ describe('a refused boot writes nothing (ADR-0131 D10 item 5: the guard judges b
     expect(sql<{ slug: string }>(file, 'SELECT slug FROM sys_organization').map((o) => o.slug)).toEqual(['default']);
     expect(sql<{ subject: string }>(file, 'SELECT subject FROM guard_event ORDER BY subject').map((r) => r.subject)).toEqual(['one', 'two']);
     expect(kernel.getState()).toBe('running');
+  });
+});
+
+/**
+ * A rotation-declared telemetry object (ADR-0057 P2, `sys_activity`'s shape):
+ * day shards `guard_activity__rYYYYMMDD` behind a read view under the base name.
+ */
+const telemetryApp = () => new AppPlugin({
+  id: 'com.test.guard_telemetry',
+  name: 'guard_telemetry',
+  version: '1.0.0',
+  type: 'app',
+  objects: [{
+    name: 'guard_activity',
+    label: 'Activity',
+    fields: { summary: { name: 'summary', type: 'text', label: 'Summary' } },
+    lifecycle: { class: 'telemetry', storage: { strategy: 'rotation', shards: 14, unit: 'day' } },
+  }],
+});
+
+const DAY_MS = 86_400_000;
+const dayKey = (ms: number): string => new Date(ms).toISOString().slice(0, 10).replace(/-/g, '');
+
+/**
+ * What a restore left: a shard a dump taken `ageDays` ago carries, holding
+ * `rows` rows, and the read view over it. Older than the 14-day window, it is
+ * a shard the Rotator expires.
+ */
+function restoreShard(file: string, ageDays: number, rows: number): string {
+  const shard = `guard_activity__r${dayKey(Date.now() - ageDays * DAY_MS)}`;
+  const db = new DatabaseSync(file);
+  db.exec(`CREATE TABLE "${shard}" (id TEXT PRIMARY KEY, created_at TEXT, updated_at TEXT, summary TEXT)`);
+  const insert = db.prepare(`INSERT INTO "${shard}" (id, created_at, updated_at, summary) VALUES (?, ?, ?, ?)`);
+  const at = new Date(Date.now() - ageDays * DAY_MS).toISOString();
+  for (let i = 0; i < rows; i++) insert.run(`a${i}`, at, at, `restored ${i}`);
+  db.exec(`CREATE VIEW "guard_activity" AS SELECT id, created_at, updated_at, summary FROM "${shard}"`);
+  db.close();
+  return shard;
+}
+
+/** Boot the data spine with the telemetry app, the guard composed. */
+async function bootTelemetry(file: string): Promise<{ kernel: ObjectKernel; error: unknown }> {
+  const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+  kernels.push(kernel);
+  await kernel.use(telemetryApp());
+  await kernel.use(new DriverPlugin(new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: file },
+    useNullAsDefault: true,
+  })));
+  await kernel.use(new ObjectQLPlugin());
+  await kernel.use(new OrganizationOwnershipBootGuardPlugin());
+  await kernel.use(new PlatformObjectsPlugin() as never);
+  try {
+    await kernel.bootstrap();
+    return { kernel, error: null };
+  } catch (error) {
+    return { kernel, error };
+  }
+}
+
+describe('a refused boot rotates no telemetry shard away (fail-closed: the guard refuses before retention runs)', () => {
+  it('⭐ a restored shard past the rotation window survives the refused boot, every row in it', async () => {
+    const file = databaseFile();
+    seedV17Shape(file);
+    const shard = restoreShard(file, 20, 66);
+    const { kernel, error } = await bootTelemetry(file);
+    expect(refusalIn(error)?.code, String(error)).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
+    expect(kernel.getState()).not.toBe('running');
+    expect(sql<{ n: number }>(file, `SELECT count(*) AS n FROM "${shard}"`)[0]?.n).toBe(66);
+  });
+
+  it('control: on a served boot the Rotator, the lifecycle sweep, still expires that shard', async () => {
+    const file = databaseFile();
+    seedV17Shape(file, { verifiedAt: '2026-10-14T01:00:00.000Z' });
+    const shard = restoreShard(file, 20, 66);
+    const { kernel, error } = await bootTelemetry(file);
+    expect(error).toBeNull();
+    // The boot's schema sync left it for the sweep, readable through the view.
+    expect(sql<{ n: number }>(file, `SELECT count(*) AS n FROM "${shard}"`)[0]?.n).toBe(66);
+    expect(sql<{ n: number }>(file, 'SELECT count(*) AS n FROM "guard_activity"')[0]?.n).toBe(66);
+    const lifecycle = kernel.getService('lifecycle') as { sweep(): Promise<unknown> };
+    await lifecycle.sweep();
+    expect(sql(file, `SELECT name FROM sqlite_master WHERE name = '${shard}'`)).toEqual([]);
   });
 });

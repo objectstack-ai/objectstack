@@ -302,51 +302,72 @@ contradicts it, and correct it here when it does.
   **Check:** fetch `/api/v1/meta/app` with no query first and read the names it actually
   returns, then filter.
 
-- **A boot on its own non-3000 port breaks the showcase's self-pinging connectors
-  unless you export `OS_PORT` — `-p` alone is not enough, and the symptom impersonates an
-  egress block.** The showcase's REST/OpenAPI connector instances point at the running
-  server itself, resolved by `resolveShowcaseSelfUrl()`
+- **The showcase's self-pinging connectors dial the self-URL the artifact was COMPILED
+  with — on a `--no-compile` boot an exported `OS_PORT` does not move it, and the symptom
+  impersonates an egress block.** The showcase's REST/OpenAPI connector instances point at
+  the running server itself, resolved by `resolveShowcaseSelfUrl()`
   (`examples/app-showcase/src/system/self-url.ts`) in this order: `SHOWCASE_SELF_URL` →
-  `OS_PORT` → `PORT` → the literal `http://127.0.0.1:3000`. Those are **environment**
-  reads. The CLI's `-p` flag is only a *default sourced from* `OS_PORT`
-  (`packages/cli/src/commands/serve.ts`: `port: Flags.string({ char: 'p', … default:
-  readEnvWithDeprecation('OS_PORT','PORT') ?? '3000' })`) and nothing writes the variable
-  back, so the dogfood §0 boot on its own port — `objectstack dev … -p <port>` with the env
-  untouched — listens on `<port>` while every declarative connector dials **3000**. Every
-  dispatch then fails `connector_action(showcase_status_api.request) failed: fetch failed`.
+  `OS_PORT` → `PORT` → the literal `http://127.0.0.1:3000`. Those are environment reads
+  made when the config is evaluated, which for the served connectors is the compile into
+  `dist/objectstack.json`. A default `os dev` compiles under the boot's own environment
+  first (#26130; the `compile` flag of `packages/cli/src/commands/dev.ts`, default on), and
+  exports its `-p` for that compile (`portFlagEnv`, `packages/cli/src/utils/port-contract.ts`),
+  so a default boot dials its own port. A `--no-compile` boot serves the artifact as last
+  built, which is the behaviour `self-url.ts`'s header documents: its connectors dial the
+  port that compile saw — `3000` when it saw none, another runner's when another runner
+  compiled last. Measured at `e0ce1b52`: an artifact compiled with no `OS_PORT`, booted
+  `--no-compile -p 41781` with `OS_PORT=41781` exported, failed the
+  `showcase_declarative_connector_ping` run with
+  `connector_action(showcase_status_api.request) failed: fetch failed`, and
+  `GET /api/v1/meta/connector/showcase_status_api` answered `baseUrl`
+  `http://127.0.0.1:3000` (QA runs #33048 and #33093 met the same).
   ⚠️ **That string is not evidence of a sandbox network restriction**, and reading it as
   one is the expensive mistake: the module's own header records that #7516 burned a run
-  proving it was an address problem by putting a TCP forwarder on 3000, and #7538 fixed
-  the resolution but could not fix a boot that never exports the variable. **Check:**
-  before scoring any connector clause, prove where the live dispatch lands: create a
-  `showcase_task`, read the `showcase_declarative_connector_ping` run it fires, and confirm
-  it completed with a `ping.body` whose uptime matches THIS boot, not another server's.
-  ⛔ Do not read the instance metadata for it: an `os dev --no-compile` boot serves the
-  existing `dist/objectstack.json` as built, so `GET /api/v1/meta/connector/showcase_status_api`'s
-  `item.providerConfig.baseUrl` can carry the build-time value. Since #26130 a default
-  `os dev` compiles the config under the boot's own environment first
-  (`packages/cli/src/commands/dev.ts`, the `compile` flag, default on), so on a default
-  boot that read can follow an exported `OS_PORT` — the dispatch check above stays the
-  proof on either boot. Before #26130 `os dev` booted the prebuilt artifact unless
-  `--compile` was passed, and QA run #25817 at `6679644a` measured that old default: with `OS_PORT=41302`
-  exported, that read still answered `http://127.0.0.1:3000`, while the live
-  `connector_action` reached 41302 (`ping.body` uptime matched the boot, and nothing
-  listened on 3000) — so the metadata read misreports the fixture in both directions.
-  ⛔ Nor `GET /api/v1/automation/connectors`: that route lists registry descriptors —
-  `name`, `label`, `type`, `description`, `icon`, `origin`, `state`, `degradedReason`,
-  `actions` (`getConnectorDescriptors()`,
+  proving it was an address problem by putting a TCP forwarder on 3000.
+
+  **Two routes work, each measured at `e0ce1b52`; only the first is safe on a shared
+  checkout.**
+  1. **Compile in a private copy.** Make the scratch copy the `rsync` entry below
+     describes, and boot the COPY without `--no-compile`, with `OS_PORT=<port>` exported
+     beside `-p <port>` and `--no-watch`: `os dev` compiles into the copy's own
+     `dist/objectstack.json`. With `-p 41782` the ping run completed, the
+     metadata read answered `http://127.0.0.1:41782`, and the tree's
+     `dist/objectstack.json` was byte-identical before and after (`-p 41786` with
+     `OS_PORT` unset measured the same).
+  2. **The default compile on the tree**, the canonical line without `--no-compile`: with
+     `-p 41785` the ping completed and the metadata read answered `41785`, but the boot
+     rewrote the tree's `dist/objectstack.json` with that port baked in, so every later
+     `--no-compile` boot on the tree dials it. ⛔ Only on a checkout no other runner boots.
+
+  ⛔ Exporting `OS_PORT` or `SHOWCASE_SELF_URL` for a `--no-compile` boot is not a fix:
+  neither is read until the next compile.
+
+  **A held port moves the boot, not your shell's `OS_PORT`.** When the requested port is
+  in use, `os dev` takes the next free one before it compiles and says so twice:
+  `⚠ Port <port> is in use — serving on <next> instead.` at the top of its log, and
+  `↪ server bound to port <next> (requested <port>)` once it listens
+  (`formatDevPortShiftNotice()` in `packages/cli/src/commands/serve.ts`, then
+  `packages/cli/src/commands/dev.ts`'s listening handler). The compile
+  follows the shifted port, so the connectors still reach the boot (41783 held: served on
+  41784, metadata `41784`, ping completed, at `e0ce1b52`), but the runner's shell keeps
+  the `OS_PORT` it exported, and that port answers whatever holds it. **So:** read the
+  port from the boot log's `server bound to port` line, or confirm no shift was printed,
+  before the first request.
+
+  **Check:** before scoring any connector clause, prove where the live dispatch lands:
+  create a `showcase_task`, read the `showcase_declarative_connector_ping` run it fires
+  (`GET /api/v1/automation/showcase_declarative_connector_ping/runs`), and confirm it
+  completed with a `ping.body` whose uptime matches THIS boot, not another server's. On
+  every boot measured at `e0ce1b52` the metadata read above agreed with the dispatch, but
+  the dispatch stays the proof. ⛔ Nor `GET /api/v1/automation/connectors`: that route
+  lists registry descriptors — `name`, `label`, `type`, `description`, `icon`, `origin`,
+  `state`, `degradedReason`, `actions` (`getConnectorDescriptors()`,
   `packages/services/service-automation/src/engine.ts`) — and carries no `baseUrl` at all.
-  An older measurement, on `main` at `2889760a`, read the metadata as following the
-  serving environment: `-p 47311`
-  alone answered `http://127.0.0.1:3000`, and `showcase_declarative_connector_ping`
-  (fired by a `showcase_task` create) failed `fetch failed`; `OS_PORT=47312` with
-  `-p 47312` answered `http://127.0.0.1:47312` and the same flow completed, while
-  `dist/objectstack.json` still held `http://127.0.0.1:3000`. The `self-url.ts` header
-  still says only an artifact-only boot (`os start --artifact`) freezes the value at build
-  time; at `6679644a` the served metadata was frozen on `os dev` too, which is why the
-  Check reads the dispatch. If the ping does not complete, or its uptime belongs to
-  another server, the fixture is misconfigured, not blocked. **Fix:** boot with `OS_PORT=<port>` exported (or
-  `SHOWCASE_SELF_URL=http://127.0.0.1:<port>`) *in addition to* `-p <port>`. ⛔ Do not
+  An older reading does not hold: QA run #25817 at `6679644a`, before #26130 made the
+  compile the `os dev` default, measured an exported `OS_PORT=41302` reaching the live
+  dispatch while the metadata read answered `3000`; at `87330e89` and `e0ce1b52` a
+  `--no-compile` boot fails the dispatch instead. If the ping does not complete, or its
+  uptime belongs to another server, the fixture is misconfigured, not blocked. ⛔ Do not
   record a connector clause as `blocked(environment)` on the strength of `fetch failed`
   alone.
 
@@ -373,21 +394,26 @@ contradicts it, and correct it here when it does.
   beside `OS_PORT`. ⛔ Do not score a clock-driven clause on a default boot, and do not
   file the unbound flow: it is the deployment policy working, not a trigger defect.
 
-- **A per-boot `OS_HOME` and `OS_STORAGE_LOCAL_ROOT` do NOT isolate a package install —
-  boot every item that installs a package from a scratch copy of the app, never from the
-  shared tree.** install-local caches each installed manifest under the server's
-  **working directory**, `.objectstack/installed-packages/`
-  (`packages/cloud-connection/src/local-manifest-source.ts`, `DEFAULT_INSTALLED_PACKAGES_DIR`
-  resolved against `process.cwd()`; the CLI mounts the plugin with no `storageDir`), so
-  a boot started in `examples/app-showcase` writes into the checked-out tree, and every
-  later boot from that tree rehydrates the package. **Check:** `ls
+- **A package install lands in the install ledger of the boot's `OS_HOME` — and the
+  canonical boot sets none, so it writes into the shared tree; boot every item that
+  installs a package with its own `OS_HOME`, or from a scratch copy of the app.**
+  install-local (the door `os package install` calls, `POST /api/v1/marketplace/install-local`)
+  caches each installed manifest in `<OS_HOME>/installed-packages/` when `OS_HOME` is set,
+  and otherwise in the server's **working directory**, `.objectstack/installed-packages/`
+  (`resolveInstalledPackagesDir()` in `packages/cloud-connection/src/local-manifest-source.ts`;
+  the CLI mounts the plugin with no `storageDir`). So a boot started in
+  `examples/app-showcase` with no `OS_HOME` writes into the checked-out tree, and every
+  later such boot from that tree re-registers the package (QA run #33025 met it through
+  `os package install`). A boot with `OS_HOME` set copies the tree ledger's entries into its
+  own once on first boot unless it is an `os dev --fresh` run, so check the tree ledger is
+  empty before relying on the home. `OS_STORAGE_LOCAL_ROOT` moves nothing here.
+  `DELETE /api/v1/marketplace/install-local/<id>` deletes the entry's ledger file (#23163
+  removed a CRM manifest from the tree that way). **Check:** `ls
   examples/app-showcase/.objectstack/installed-packages/` after the install leg — any
   file there means the install escaped. ⚠️ `git status` cannot see it: `.objectstack` is
   in the root `.gitignore`, so a clean status is no evidence either way. Items this applies to:
   `platform-core.marketplace-install-local-lifecycle` and
-  `platform-core.marketplace-console-honesty`. A QA run that installed from the tree
-  wrote a CRM manifest there for 25 s before removing it through
-  `DELETE /api/v1/marketplace/install-local/<id>` (#23163).
+  `platform-core.marketplace-console-honesty`.
 
 - **A per-boot `-d file:…` database does NOT isolate the showcase's upload root or its
   external datasource either — the same class as the install-local entry above.** Two
@@ -422,7 +448,11 @@ contradicts it, and correct it here when it does.
   the showcase's `objectstack dev`), or as
   `pnpm -C examples/app-showcase exec objectstack dev --fresh --no-compile -p PORT`.
   `--no-compile` serves the existing artifact as built; it still compiles when the artifact
-  is missing, and warns at boot when the artifact is older than the sources. Add
+  is missing, and warns at boot when the artifact is older than the sources. "As built"
+  means under the environment of whichever run compiled it last, not this boot's: every
+  value the config reads from the environment at compile time is that run's, which is how
+  a `--no-compile` boot in QA run #33025 sent the showcase's self-pinging connector to
+  another runner's port (the connector entry above names the routes that work). Add
   `--no-watch` too while anyone may edit the app's sources: `--no-compile` stops only the
   boot compile, not the watch loop's recompiles. This one rule covers every item whose
   `fixtures.requires` carries that boot line; an item need not repeat it (QA run #27481).
@@ -437,6 +467,13 @@ contradicts it, and correct it here when it does.
   negative from a command that never ran is not evidence.
 
 - **`rsync` is not installed in these containers — copy a scratch app with `tar` or `cp -a`.** QA run #24841 met it.
+  ⚠️ A plain copy of `examples/app-showcase` outside the tree does not boot: pnpm links the
+  app's workspace dependencies relatively (`node_modules/@objectstack/cli` →
+  `../../../../packages/cli`), so in the copy they point at nothing and the binary dies
+  with `Cannot find module …/@objectstack/cli/bin/run.js` (QA runs #33048 and #33096).
+  **So:** copy the app into `WS/examples/<app>` and symlink `WS/packages` and
+  `WS/node_modules` to the tree's, or replace the copy's `node_modules` with an absolute
+  symlink to the tree's `examples/app-showcase/node_modules`.
 
 - **A SIGTERM to the `pnpm` wrapper does not stop the server under it — start a
   backgrounded boot with `setsid` and stop its process group.** The canonical boot (in the
@@ -451,7 +488,9 @@ contradicts it, and correct it here when it does.
   where `parent.js` forwards SIGTERM to an HTTP child as `os dev` does: two seconds after a
   SIGTERM to the pnpm pid the child still answered 200, and a SIGTERM to the process group
   stopped all four processes. ⚠️ `$!` is not the group id: a backgrounded `setsid` forks
-  when the shell made it a group leader, so `$!` names a process that has already exited.
+  when the shell made it a group leader, so `$!` names a process that has already exited,
+  and `cd APP && setsid … &` backgrounds the whole list, so its `$!` names a subshell
+  (QA run #33092 met the second).
   **So:** `setsid pnpm -C … exec objectstack dev … > LOG 2>&1 &`; once the port answers,
   read the group from the listener, `PGID=$(ps -o pgid= -p "$(lsof -ti tcp:PORT)" | tr -d ' ')`;
   stop it with `kill -TERM -- -$PGID`, and confirm `lsof -ti tcp:PORT` then prints nothing.
@@ -461,6 +500,14 @@ contradicts it, and correct it here when it does.
   `grep` and also kills, judged over the whole command rather than per pipeline (its
   header says why), so a stop chained after a `ps … | grep` look at the process table is
   refused although its `kill` is group-scoped (QA run #26476 met it).
+
+- **Address a boot as `http://localhost:PORT`, never `http://127.0.0.1:PORT` — the auth
+  doors refuse that origin.** `POST /api/v1/auth/sign-in/email` sent to `127.0.0.1`, or
+  carrying `Origin: http://127.0.0.1:PORT` to either host, answers **403
+  `INVALID_ORIGIN`**, while the same request with `localhost` as host and origin answers
+  200 (QA run #33081). A browser opened on `127.0.0.1` sends that origin on every sign-in.
+  With curl, an empty request header takes a `;`: `-H 'If-Match:'` sends no `If-Match` at
+  all, and `-H 'If-Match;'` sends it empty (curl 8.5.0, QA run #33081).
 
 - **Console session auth is a bearer token in `localStorage`, and a form sign-in ALSO
   sets a cookie — you need both halves.** The console's auth client stores the session
@@ -538,7 +585,11 @@ contradicts it, and correct it here when it does.
      have the persona `POST /api/v1/auth/change-password` before driving it.
 
   The worked example is the shared recipe `search:qa-contributor-bound-member`
-  (`areas/search.json`), whose `requires` carries the invite ahead of its step-1 sign-up.
+  (`areas/search.json`), whose `requires` carries the invite ahead of its step-1 sign-up;
+  `node scripts/qa/qa-fixture.mjs contributor-member` replays it in one command, and
+  `--position NAME` binds one more position through the same `sys_user_position` write
+  after the subset proof (`--position showcase_finance` mints the approvals persona, a
+  pending approver on the invoice sign-off).
   Wherever an item still says "fresh sign-up", read it as an identity minted one of these
   two ways. ⛔ Do not record a member clause `blocked(fixture)` on the strength of the 403,
   and do not file it: the refusal is the posture working. The seeded demo personas
@@ -589,7 +640,12 @@ contradicts it, and correct it here when it does.
 
   `--ui` on `dev` is a no-op forwarder onto `serve`'s `default: true` (`dev` forwards
   `--ui` only when set, and never forwards a negation), so it is written out for intent,
-  not effect. Use the line as-is and the off switch never comes up.
+  not effect. Use the line as-is and the off switch never comes up. On a shared checkout a
+  run adds what the entries above name: `OS_PORT=<port>` and
+  `OS_STORAGE_LOCAL_ROOT=/tmp/<run>/uploads` exported, and `--no-compile --no-watch` after
+  `dev` (a boot without the uploads root wrote nine files into the tree's
+  `.objectstack/data/uploads/`, QA run #33081). A run that scores a self-pinging connector
+  boots a private copy that compiles instead (the connector entry).
 
   ⚠️ **Why this is briefed rather than left to the error message: backgrounded — which is
   how a runner boots a server — a rejected flag looks exactly like a server that booted
@@ -625,7 +681,14 @@ contradicts it, and correct it here when it does.
   which `ui/vitest.config.mts` calls) refuses any run whose Vitest root is not `ui/` (QA
   run #27409 met it). A live e2e spec
   runs from `ui/` with `pnpm test:e2e:live <spec>` against a live backend and the console
-  dev server (`ui/playwright.live.config.ts` names both). Items whose `automated.ref`
+  dev server (`ui/playwright.live.config.ts` names both). Start that dev server with
+  `DEV_PROXY_TARGET=http://localhost:<port>` so it proxies `/api` to your boot
+  (`ui/apps/console/vite.config.ts`; the default is `http://localhost:3000`), never with
+  `VITE_SERVER_URL`: that sends the console's calls cross-origin, and QA run #33096 saw an
+  action-door POST answer 401 `UNAUTHENTICATED` that way and 200 through the proxy. The
+  config sets no test timeout, so Playwright's 30 s default applies, and
+  `studio-customize-journey.spec.ts` alone took 41 s on a loaded 4-CPU box: pass
+  `--timeout=120000` (QA runs #33048 and #33096). Items whose `automated.ref`
   names an objectui spec **alongside** a framework pin (`packages/qa/dogfood/**`,
   `packages/objectql/**`) still score the two halves separately, never one for the other.
 
@@ -721,7 +784,9 @@ contradicts it, and correct it here when it does.
 
   **One command provisions it:** `node scripts/qa/qa-fixture.mjs walled-boot` (`--posture
   group` for the other wall; default `isolated`). It boots the showcase from this tree
-  through `os dev` on a free port and its own file DB under `/tmp`, with the three variables
+  through `os dev --no-compile --no-watch` (so it serves an existing artifact as last
+  compiled and writes nothing into it: the `--no-compile` entry above) on a free port and its own file DB
+  under `/tmp`, with the three variables
   above exported (the operator is the `--seed-admin` address, the policy `invite-only`),
   waits for the ready banner, and proves the wall took rather than assuming it: it fails on a
   DEGRADED banner, and unless `GET /api/v1/auth/config` answers
@@ -775,8 +840,21 @@ contradicts it, and correct it here when it does.
   `pnpm build --concurrency=2` first (it builds the console too); then
   `pnpm console:build --concurrency=2` (pnpm appends it to the turbo command), which after that
   build is a cache hit plus a copy; vitest one package at a time with
-  `--maxWorkers=1`. ⛔ An exit 137 is the container's memory limit, not a failing test or a
-  broken build — re-run narrower before reading anything into it.
+  `--maxWorkers=1`, and `packages/qa/dogfood` one file per invocation (QA runs #33081 and
+  #33092: no OOM kill with four runners that way, repeated kills with eight at
+  `--maxWorkers=2`). The worker cap is `--maxWorkers`: vitest 4 has no `--poolOptions`
+  option and refuses it (`CACError: Unknown option --poolOptions`, vitest 4.1.12). ⛔ An
+  exit 137 is the container's memory limit, not a failing test or a broken build — re-run
+  narrower before reading anything into it.
+
+  ⚠️ **A pin that type-checks against `@objectstack/spec` needs the spec built WITH
+  declarations.** `OS_SKIP_DTS=1` skips the spec's `.d.ts` pass (`packages/spec`'s `build`
+  script), and a pin that spawns `tsc` over a fixture importing `@objectstack/spec/api` then
+  fails every case, control included, with `TS7016`: the `tsc` block of
+  `packages/qa/dogfood/test/rest-route-generation-tombstones.test.ts` and the draft
+  typecheck of `integration-system.external-schema-introspection` A2 (QA run #33081). Build
+  the spec without `OS_SKIP_DTS` before scoring either, and read a `TS7016` there as the
+  build, not the item.
 
 - **`OS_TEST_TIERS` narrows `packages/cli`'s vitest population, and only that package's —
   a cli pin named under the wrong setting runs no test at all.** `scripts/nightly-tiers.mjs`
@@ -867,7 +945,10 @@ the report carries the one row
 A clause whose oracle was a screenshot is recorded as a one-line text description of what it
 showed, not a link.
 
-The in-environment JSON scratch (RUNNER shape, never committed):
+The in-environment JSON scratch (RUNNER shape, never committed). Write it item by item as
+each verdict lands, never once at the end: a container restart kills every process in it
+and keeps only what is on disk (QA runs #32953 and #33096 each lost in-flight runners to
+one).
 
 ```jsonc
 {

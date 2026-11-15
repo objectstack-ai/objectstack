@@ -134,6 +134,7 @@ const zhHant = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: '僅顯示 {{total}} 條記錄中的前 {{shown}} 條。請縮小篩選範圍。',
     rowCeilingNoteUnknownTotal: '僅顯示前 {{shown}} 條記錄。請縮小篩選範圍。',
+    ungroupedSection: '其他',
   },
   actions: {
     decisionOutput: {
@@ -2777,6 +2778,10 @@ const zhHant = {
       noAccountText: '還沒有賬戶？',
       signUpText: '註冊',
       signingIn: '正在登入…',
+      directSignIn: {
+        description: "使用你所在組織的單點登入。",
+        retry: "繼續單點登入",
+      },
       ssoHandoff: '繼續前往 {{target}}',
       devAdminHint: {
         title: '本地開發實例',
@@ -2791,8 +2796,20 @@ const zhHant = {
         ssoAccountNotInvited: "你的賬號尚未在本系統中開通。請聯絡管理員邀請你。",
         ssoAccountNotLinked: "本系統中已有使用你郵箱的賬號，但它尚未關聯單點登入。請改用其他方式登入，或請管理員為你關聯。",
         ssoResponseRejected: "你所在組織的登入服務返回了本系統無法接受的響應。請聯絡管理員檢查單點登入配置。",
+        ssoEmailDomainNotAllowed: "未建立賬號：你的郵箱不屬於本系統接受新賬號的域名。請使用你的組織郵箱，或聯絡管理員。",
+        ssoEmailNotAnAddress: "未建立賬號：你所在組織的登入服務沒有提供可用的郵箱地址。請聯絡管理員檢查單點登入配置。",
         ssoStartFromLoginPage: "登入需要從本系統的登入頁發起。請在此輸入你的工作郵箱，然後選擇“使用 SSO 登入”。",
         ssoTechnicalDetails: "技術詳情",
+        directSignInIncomplete: "登入沒有完成：你從單點登入返回時仍未登入。請確認瀏覽器允許本站點的 Cookie，然後重試。",
+        directSignInUnavailable: "無法為本系統發起單點登入。請聯絡管理員檢查本系統使用的登入服務。",
+        directSignInRateLimited: "剛剛從此網路發起的登入過多。請等待幾秒後再試。",
+        ssoAccessDenied: "你登入所用的賬號無權訪問本系統。請使用有權訪問的賬號登入，或請本系統所屬組織的管理員將你新增為成員。",
+        ssoSwitchAccount: "切換賬號",
+        ssoBackToConsole: "返回控制台",
+        ssoSwitchAccountHint: "“切換賬號”會在新標籤頁中開啟你的登入服務並在那裡退出登入。之後請在此處使用有權訪問的賬號重新登入。",
+        linkEmailMismatch: "該賬號未關聯：它的郵箱地址與你當前登入賬號的郵箱地址不一致。請關聯使用相同郵箱地址的賬號。",
+        linkAlreadyLinkedToOtherUser: "該賬號未關聯：它已關聯到本系統中的另一個使用者。請關聯其他賬號，或先以它所關聯的使用者登入，在那裡解除關聯。",
+        linkUnableToLink: "無法關聯該賬號。請確認它的郵箱地址已在該登入服務中完成驗證，然後重試。如果仍然失敗，請聯絡管理員。",
         twoFactorInvalidCode: '驗證碼無效，請檢查身份驗證器應用後重試。',
         twoFactorInvalidBackupCode: '該備用碼無效或已被使用。',
         twoFactorTooManyAttempts: '錯誤次數過多，請重新使用密碼登入。',
@@ -3476,6 +3493,11 @@ const zhHant = {
     back: '返回',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: '釋出後這裡會顯示記錄',
+      message: '你正在預覽一個尚未釋出的物件，它在釋出前還沒有任何記錄。釋出後即可開始錄入資料，或載入示例資料。',
+    },
     empty: {
       loadFailedTitle: '草稿預覽載入失敗',
       loadFailedDescription: '無法讀取草稿資料。請重試，或檢查網路連線。',
@@ -4203,6 +4225,11 @@ const zhHant = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: '傳送訊息',
     scrollToBottom: '滾動到最新訊息',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: '當前回覆結束後傳送',
+      queuedCancel: '取消',
+    },
     answer: {
       showFull: '展開全文',
       collapse: '收起',
@@ -4296,6 +4323,9 @@ const zhHant = {
       countSeedData: '示例資料',
       extendTarget: '新增到現有應用：{{app}}',
       awaitingConfirm: '等待確認',
+      // objectstack#32984 — the plan card's build states.
+      confirmed: '已確認',
+      buildFailed: '未搭建成功 · 沒有建立任何內容',
       iterateOrNew: {
         question: '這個方案和你已有的應用「{{app}}」重疊。要在它上面繼續完善，還是另建一個獨立應用？',
         questionUnnamed: '這個方案和你已有的一個應用重疊。要在那個應用上繼續完善，還是另建一個獨立應用？',
@@ -4306,6 +4336,7 @@ const zhHant = {
       objectsAndFields: '物件與欄位',
       views: '檢視',
       suggestedField: '補充',
+      suggestedFieldLegend: '標「{{mark}}」的欄位是 AI 自行補充的，你沒有要求。',
       nameField: '名稱：{{field}}',
     },
     build: {
@@ -4328,6 +4359,15 @@ const zhHant = {
       verifying: '正在檢查改動…',
       verifyStep: '第 {{n}} 步',
       verified: '已檢查改動',
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: '{{count}} 處待修復',
+      issuesSummary: '這次搭建有部分內容需要修復後才能使用。回覆「修復這些問題」，助手會幫你處理。',
+      warningsSummary: '應用已搭建好，有幾處值得檢查。想進一步完善的話，可以問問助手具體是哪些。',
+      issuesDetails: '技術詳情',
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: '{{count}} 項需要處理',
+      needsAttention_one: '{{count}} 項需要處理',
+      needsAttention_other: '{{count}} 項需要處理',
       unknownPhase: '未知的構建階段',
       nextStepsLead: '接下來可以說：{{steps}}',
       nextStepQuote: '「{{step}}」',
@@ -4816,6 +4856,7 @@ const zhHant = {
     disableAppNamed: '停用 {{name}}',
     setDefault: '設為預設',
     setDefaultNamed: '將 {{name}} 設為預設',
+    alreadyDefault: '已是預設應用',
     deleteApp: '刪除應用',
     deleteAppNamed: '刪除 {{name}}',
     confirmDelete: '再次點選以確認刪除',

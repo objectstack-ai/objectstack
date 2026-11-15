@@ -127,6 +127,7 @@ const pt = {
     // `pnpm check:eager-closure` prints it.
     rowCeilingNote: "Mostrando os primeiros {{shown}} de {{total}} registros. Restrinja o filtro.",
     rowCeilingNoteUnknownTotal: "Mostrando os primeiros {{shown}} registros. Restrinja o filtro.",
+    ungroupedSection: "Outros",
   },
   actions: {
     decisionOutput: {
@@ -2763,6 +2764,10 @@ const pt = {
     },
     login: {
       signingIn: "Entrando…",
+      directSignIn: {
+        description: "Entre com o login único da sua organização.",
+        retry: "Continuar com login único",
+      },
       ssoHandoff: "Continuar para {{target}}",
       devAdminHint: {
         title: "Instância de desenvolvimento local",
@@ -2784,8 +2789,20 @@ const pt = {
         ssoAccountNotInvited: "Sua conta ainda não está configurada neste sistema. Peça ao seu administrador para convidar você.",
         ssoAccountNotLinked: "Já existe uma conta com seu e-mail aqui, mas ela não está conectada ao logon único. Entre de outra forma ou peça ao seu administrador para conectá-la.",
         ssoResponseRejected: "O serviço de login da sua organização enviou uma resposta que este sistema não pôde aceitar. Peça ao seu administrador para verificar a configuração do logon único.",
+        ssoEmailDomainNotAllowed: "Nenhuma conta foi criada: seu endereço de e-mail não pertence a um domínio do qual este sistema aceita novas contas. Use o e-mail da sua organização ou fale com o seu administrador.",
+        ssoEmailNotAnAddress: "Nenhuma conta foi criada: o serviço de login da sua organização não enviou um endereço de e-mail utilizável para você. Peça ao seu administrador para verificar a configuração do logon único.",
         ssoStartFromLoginPage: "O login precisa começar pela página de acesso deste sistema. Informe aqui seu e-mail de trabalho e escolha “Entrar com SSO”.",
         ssoTechnicalDetails: "Detalhes técnicos",
+        directSignInIncomplete: "O login não foi concluído: você voltou do login único sem estar conectado. Verifique se este navegador permite cookies para este site e tente novamente.",
+        directSignInUnavailable: "Não foi possível iniciar o login único para este sistema. Peça ao seu administrador para verificar qual serviço de login ele usa.",
+        directSignInRateLimited: "Muitos logins foram iniciados a partir desta rede agora há pouco. Aguarde alguns segundos e tente novamente.",
+        ssoAccessDenied: "A conta com a qual você entrou não tem acesso a este ambiente. Entre com uma conta que tenha acesso ou peça a um administrador da organização deste ambiente para adicionar você como membro.",
+        ssoSwitchAccount: "Trocar de conta",
+        ssoBackToConsole: "Voltar ao console",
+        ssoSwitchAccountHint: "Trocar de conta abre seu serviço de login em uma nova aba e encerra sua sessão lá. Depois, entre aqui novamente com uma conta que tenha acesso.",
+        linkEmailMismatch: "A conta não foi vinculada: o endereço de e-mail dela não corresponde ao da conta com a qual você entrou. Vincule uma conta que use o mesmo endereço de e-mail.",
+        linkAlreadyLinkedToOtherUser: "A conta não foi vinculada: ela já está vinculada a outro usuário deste sistema. Vincule outra conta ou entre como o usuário ao qual ela está vinculada e desvincule-a lá primeiro.",
+        linkUnableToLink: "Não foi possível vincular a conta. Verifique se o endereço de e-mail dela está confirmado nesse serviço de login e tente novamente. Se continuar falhando, fale com seu administrador.",
         twoFactorInvalidCode: "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
         twoFactorInvalidBackupCode: "Esse código de backup não é válido ou já foi usado.",
         twoFactorTooManyAttempts: "Muitos códigos incorretos. Faça login novamente com sua senha.",
@@ -4040,6 +4057,11 @@ const pt = {
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Enviar mensagem',
     scrollToBottom: 'Ir para a mensagem mais recente',
+    // objectstack#32984 — a message typed while a reply is running waits above the composer.
+    composer: {
+      queued: "Será enviada quando a resposta atual terminar",
+      queuedCancel: "Cancelar",
+    },
     answer: {
       showFull: 'Mostrar resposta completa',
       collapse: 'Recolher',
@@ -4137,6 +4159,9 @@ const pt = {
       countSeedData: "dados de exemplo",
       extendTarget: "Adicionando ao app existente: {{app}}",
       awaitingConfirm: "Aguardando confirmação",
+      // objectstack#32984 — the plan card's build states.
+      confirmed: "Confirmado",
+      buildFailed: "Não construído — nada foi criado",
       iterateOrNew: {
         question: "Isto se sobrepõe a “{{app}}”, um app que você já tem. Continuar melhorando esse app ou criar um app separado?",
         questionUnnamed: "Isto se sobrepõe a um app que você já tem. Continuar melhorando esse app ou criar um separado?",
@@ -4147,6 +4172,7 @@ const pt = {
       objectsAndFields: "Objetos e campos",
       views: "Visões",
       suggestedField: "sugerido",
+      suggestedFieldLegend: "Os campos marcados como “{{mark}}” foram adicionados pela IA; você não os pediu.",
       nameField: "Nome: {{field}}",
     },
     build: {
@@ -4169,6 +4195,16 @@ const pt = {
       verifying: "Verificando a alteração…",
       verifyStep: "etapa {{n}}",
       verified: "Alteração verificada",
+      // objectstack#32984 — the build card's issues line, in the customer's words.
+      issuesCount: "{{count}} para corrigir",
+      issuesSummary: "Algumas partes desta construção precisam ser corrigidas antes de ficarem prontas. Responda \"corrija os problemas\" e o assistente vai repará-las.",
+      warningsSummary: "O app está construído, com alguns pontos que vale a pena verificar. Pergunte ao assistente quais são se quiser melhorá-lo.",
+      issuesDetails: "Detalhes técnicos",
+      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
+      needsAttention: "{{count}} precisam de atenção",
+      needsAttention_one: "{{count}} precisa de atenção",
+      needsAttention_many: "{{count}} de itens precisam de atenção",
+      needsAttention_other: "{{count}} precisam de atenção",
       unknownPhase: "Fase de criação desconhecida",
       nextStepsLead: "Em seguida, você pode dizer: {{steps}}",
       nextStepQuote: "“{{step}}”",
@@ -4524,6 +4560,11 @@ const pt = {
     daysAgo_other: 'há {{count}} dias',
   },
   preview: {
+    // objectstack#32984 — the list of an object the draft preview shows before its first publish.
+    unpublishedList: {
+      title: "Os registros aparecem aqui depois da publicação",
+      message: "Você está pré-visualizando um objeto que ainda não foi publicado, por isso ele não tem registros. Publique para começar a adicionar registros ou carregar os dados de exemplo.",
+    },
     empty: {
       loadFailedTitle: 'Falha ao carregar a pré-visualização do rascunho',
       loadFailedDescription: 'Não foi possível ler a camada de rascunho. Tente novamente ou verifique sua conexão.',
@@ -4893,6 +4934,7 @@ const pt = {
     disableAppNamed: "Desabilitar {{name}}",
     setDefault: "Definir como padrão",
     setDefaultNamed: "Definir {{name}} como padrão",
+    alreadyDefault: "Já é o aplicativo padrão",
     deleteApp: "Excluir aplicativo",
     deleteAppNamed: "Excluir {{name}}",
     confirmDelete: "Clique novamente para confirmar a exclusão",

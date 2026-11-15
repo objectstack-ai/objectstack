@@ -880,7 +880,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (65)...
+  → Running author-time rules (67)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -1167,8 +1167,8 @@ performed. So `plan` really is a dry run, and everything `apply` is about to do
   In place (existing rows converged when you apply)
     ~ crm_contact [normalize_datetime_storage: signed_at — 1,240 row update(s)]
 
-  Safe (loosening — applied without --allow-destructive)
-    ✓ crm_contact.email [relax_not_null]
+  Needs confirmation
+    ~ crm_contact.email [relax_not_null]
 ```
 
 Answering `n` leaves every table and row exactly as it was. The boot's first
@@ -1214,11 +1214,10 @@ Once a guard stands, the next safe sync (or `os migrate apply`) retires the key
 it stands beside — the grant's `(user_id, permission_set, organization_id)`, the
 connection's `(organization_id, connector_name)` — as one `replace_unique_index`
 categorized safe, created before it is dropped. Until then that key stays and
-keeps refusing a second package's grant or connection of one name. On an
-upgraded MySQL database both old keys stay, because `driver-sql` does not read a
-guard's functional key part as a guard there, so a second package's grant or
-connection of one name stays refused on MySQL. A database created fresh on
-MySQL never has the old keys.
+keeps refusing a second package's grant or connection of one name. On MySQL 8
+the guard is a functional key part, and `driver-sql` reads it as the guard it is,
+so an upgraded MySQL database retires both old keys the same way. A database
+created fresh on MySQL never has the old keys.
 
 Under `--json` the section is the `schemaSyncIndexes` array, whose entries carry
 `table`, `index`, `keyParts`, `rowScope` and a `status` of `build`, `blocked` or
@@ -1274,9 +1273,15 @@ occupancy on its own.
 
 | Category | Examples | Applied by |
 |----------|----------|------------|
-| `safe` | relax `NOT NULL` → nullable, widen a `varchar`, create a declared index (a `UNIQUE` one only when its duplicate pre-flight comes back clean), replace a legacy installation-wide unique with its per-organization composite | `os migrate apply` (and dev auto-reconcile) |
-| `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_column_type_change` (only `os migrate multi-value-columns --apply` runs it), and `manual_widen_varchar_to_text` and `unbuildable_index`, which nothing applies |
+| `safe` | widen a `varchar`, widen a `date` column to the declared `datetime` (`widen_date_to_datetime`), create a declared index (a `UNIQUE` one only when its duplicate pre-flight comes back clean), replace a legacy installation-wide unique with its per-organization composite | `os migrate apply` (and dev auto-reconcile) |
+| `needs_confirm` | relax `NOT NULL` → nullable (`relax_not_null`, ADR-0113 D5), non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_column_type_change` (only `os migrate multi-value-columns --apply` runs it), and `manual_widen_varchar_to_text` and `unbuildable_index`, which nothing applies. Never dev auto-reconcile |
 | `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE`, create a `UNIQUE` index existing rows already violate | `os migrate apply --allow-destructive` |
+
+Publishing an object (a save in publish mode, a publish, or a package's publish-drafts) also applies
+its column changes to the existing table: every `safe` column change, and a `relax_not_null` whose
+field declares `storage: { notNull: false }`, since that declaration is the deliberate relax. Index
+changes stay with `os migrate apply`. A column change the database could not apply leaves the publish
+a success with an `object-column-changes-not-applied` warning on its answer naming each column.
 
 On a Turso remote primary (`libsql://`), a tightened or relaxed `NOT NULL` and a dropped DEFAULT stay drift, because that transport runs no SQLite table rebuild. `os migrate plan` and `os migrate apply` list each such entry with `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.`, offer `--allow-destructive` only for the destructive changes that database can apply, and count the rest as drift a re-run cannot apply.
 
@@ -1318,9 +1323,9 @@ drift, and `--allow-destructive` will not delete it.
 
 <Callout type="tip">
 **Dev self-heal.** `os dev` runs the SQL driver with `autoMigrate: 'safe'`, so
-safe changes (you just made a field optional; a `unique` field became
-organization-scoped) are applied to your existing dev database automatically on
-restart — no `os migrate` needed, no data loss. Auto-reconcile is **dev-only and
+safe changes (a `unique` field became organization-scoped) are applied to your
+existing dev database automatically on restart — no `os migrate` needed, no data
+loss. Relaxing a `NOT NULL` column is not one of them: it is `needs_confirm`. Auto-reconcile is **dev-only and
 never destructive**; it is force-disabled under `NODE_ENV=production`, where
 every change is shown by `os migrate plan` before you apply it deliberately.
 </Callout>
@@ -1476,6 +1481,7 @@ where the data lives.
 | `os migrate activity-changed-fields` | Stamp the two read-rule columns (`changed_fields`, `milestone_key`) on the `sys_activity` rows written before they existed. Until it runs, those rows are withheld from every reader but the system, so run it at once after upgrading. No flag; idempotent |
 | `os migrate audit-mail-bodies` | Mask the mail bodies (`body_text`, `body_html`) that `sys_audit_log` and `sys_activity` copies of `sys_email` / `sys_identity_email` rows still hold in clear, written before the audit writer masked them. Covers the `archive` datasource `sys_audit_log` archives to as well. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-mail-bodies) |
 | `os migrate audit-key-material` | Remove the encrypted key-material columns from the `sys_audit_log` and `sys_activity` copies written before the audit writer omitted them. Covers the `archive` datasource `sys_audit_log` archives to as well. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-key-material) |
+| `os migrate audit-side-copies` | Remove the side-copy columns (another record's field values, such as an approval request's `payload_json`) from the `sys_audit_log` and `sys_activity` copies written before the audit writer omitted them. Covers the `archive` datasource `sys_audit_log` archives to as well. `--object` narrows it to one copy table. Reports counts only, per table and store. No flag; idempotent. See [below](#os-migrate-audit-side-copies) |
 | `os migrate comment-parent-pair` | Stamp the parent pair (`object_name`, `record_id`) on the `sys_comment` rows written before it existed. Until it runs, a broad comment read past 2,000 candidate rows omits comments the reader may see, and its total agrees with the short list, so run it at once after upgrading. No flag; idempotent |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate security-catalog-overlays` | List the environment-wide permission-set and position rows (the legacy plurals `permissions` / `positions` included) stored over a name a configured package holds — the rows a v18 cold boot refuses — each with the package that holds its name; `--apply` deletes them, one history tombstone per row. Run it before the first v18 boot, with the flags and environment the deployment boots with: the platform security plugin's sets are held only where `os serve` composes it (an auth secret set, and the `auth` tier on), and the step takes `serve`'s `--preset` and `--dev` with `serve`'s meaning. Adopts nothing; exits 1 while it lists a row |
@@ -1496,7 +1502,7 @@ holds nothing, and answers with empty work and exit 0. `os migrate value-shapes`
 clean over zero records and names the objects it did not read. `os migrate
 recorded-by` has nothing to convert and `os migrate resume` no interrupted runs.
 `os migrate meta --stored` has no stored metadata to examine, `os migrate
-audit-metadata-bodies`, `os migrate audit-mail-bodies` and `os migrate audit-key-material` no audit copy to rewrite, and
+audit-metadata-bodies`, `os migrate audit-mail-bodies`, `os migrate audit-key-material` and `os migrate audit-side-copies` no audit copy to rewrite, and
 `os migrate account-issuer` no account to collide. `os secret orphans`, `os secret rewrap` and `os storage orphans`
 report no secret and no file. A read the command cannot avoid and that fails for any
 other reason still refuses and exits 1. Point `--database-url` at the deployment's
@@ -1727,8 +1733,9 @@ by: `3` as `"3"`, `true` as `"true"`. Rows written before that rule keep the
 form the database stored: the raw number or boolean on driver-memory with
 persistence, the text `"3.0"`, `"1.0"` or `"0.0"` on SQLite, and raw elements
 inside a multi-value array on every driver. A filter on `"3"` does not find
-those rows, a read hands back the old form, and a unique field admits a new
-`"3"` beside an old `"3.0"`.
+those rows, nor does a filter on `3`, which a filter reads as `"3"` (a number or
+boolean compared with an option field compares as its string); a read hands
+back the old form, and a unique field admits a new `"3"` beside an old `"3.0"`.
 
 ```bash
 os migrate option-codes                  # Dry run: counts per object and field, writes no rows
@@ -1753,9 +1760,10 @@ A number or a boolean written to a text field (`text`, `textarea`, `email`,
 `signature`, `qrcode`) is stored as its string: `42` as `"42"`, `true` as
 `"true"`. Rows written before that rule keep the form the database stored: the
 raw number or boolean on driver-memory with persistence, the text `"42.0"`,
-`"1.0"` or `"0.0"` on SQLite. A filter on `"42"` does not find those rows, a
-read hands back the old form, and a unique field admits a new `"42"` beside an
-old `42` or `"42.0"`.
+`"1.0"` or `"0.0"` on SQLite. A filter on `"42"` does not find those rows, nor
+does a filter on `42`, which a filter reads as `"42"` (a number or boolean
+compared with a text field compares as its string); a read hands back the old
+form, and a unique field admits a new `"42"` beside an old `42` or `"42.0"`.
 
 ```bash
 os migrate text-scalars                  # Dry run: counts per object and field, writes no rows
@@ -2108,10 +2116,47 @@ carries the same `archive` entries with the same `status` values and exit
 codes. A declared archive this boot does not connect, or an active runtime
 datasource row of that name, reads `not-connected` and exits `1`.
 
+#### `os migrate audit-side-copies`
+
+Some columns hold another record's field values, which that record's own row
+serves only through its owner's per-reader narrowing: today the approval
+request's `payload_json`, its snapshot of the record under approval. An audit
+copy (`sys_audit_log.new_value` / `old_value`, both halves of
+`sys_activity.metadata`) cannot be narrowed that way, so new copies omit those
+columns. This command removes them from the copies written before that.
+
+```bash
+os migrate audit-side-copies                         # Dry run: counts, writes no rows
+os migrate audit-side-copies --object sys_audit_log  # Only one copy table (repeatable)
+os migrate audit-side-copies --apply                 # Remove the columns (prompts)
+os migrate audit-side-copies --apply --yes --json    # CI / scripts
+```
+
+The report gives, per copy table, the copies it read and the copies it
+rewrote (or, in a dry run, would rewrite), for the hot tables and for the
+archive datasource each. Only the listed keys of a copy are removed: every
+other key, and every other column of the row (its `updated_at` included),
+stays as it was. A column of the same name in a copy of any other object is
+left alone. The report holds counts only and never prints a value.
+
+The flags are `os migrate audit-key-material`'s, one for one, plus
+`--object`, which takes `sys_audit_log` or `sys_activity` and narrows the run,
+hot and archive, to the tables it names. Any other name is refused with
+`OBJECT_NOT_FOUND`, exit `1`, before anything is read.
+
+**Idempotent**: a copy without the columns has nothing to remove, so a second
+run rewrites nothing, and re-running is how an interrupted run is finished. A
+failed read or write exits `1`. Run it once after upgrading, with the server
+stopped. Until it has run, the served copies are still safe: the read-time
+redaction drops the columns and the query guard treats a query naming one as
+reaching every object. **The archive datasource** is covered exactly as for
+[`os migrate audit-mail-bodies`](#os-migrate-audit-mail-bodies), with the same
+`archive` entries, `status` values and exit codes.
+
 #### Sealed audit rows (`os migrate audit-*`)
 
-`os migrate audit-metadata-bodies`, `os migrate audit-mail-bodies` and
-`os migrate audit-key-material` rewrite value columns of ledger rows, which an
+`os migrate audit-metadata-bodies`, `os migrate audit-mail-bodies`,
+`os migrate audit-key-material` and `os migrate audit-side-copies` rewrite value columns of ledger rows, which an
 object can seal (`lifecycle.seal`, ADR-0154). Before a row that a checkpoint
 seals is rewritten, the command writes a signed **redaction amendment**
 (`sys_audit_amendment`): the checkpoint, the row and column, the commitment the

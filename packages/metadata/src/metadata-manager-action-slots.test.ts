@@ -149,13 +149,13 @@ describe('[#31697] the in-memory action store keeps one slot per (package, name)
 
   it('CONTROL — a type outside the slotted set is unchanged: the later write replaces the earlier', async () => {
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
-    // A connector: `flow` (#31696) and `webhook` (#31699 PR 2) joined the slotted set.
-    manager.registerInMemory('connector', 'digest', { name: 'digest', _packageId: ALPHA });
+    // A job: `flow` (#31696), `webhook` (#31699 PR 2) and `connector` (#31699 PR 3) joined the slotted set.
+    manager.registerInMemory('job', 'digest', { name: 'digest', _packageId: ALPHA });
     const later = { name: 'digest', _packageId: BETA };
-    manager.registerInMemory('connector', 'digest', later);
-    expect(await manager.get('connector', 'digest')).toBe(later);
-    expect(await manager.get('connector', 'digest', ALPHA)).toBe(later);
-    expect(await manager.list('connector')).toEqual([later]);
+    manager.registerInMemory('job', 'digest', later);
+    expect(await manager.get('job', 'digest')).toBe(later);
+    expect(await manager.get('job', 'digest', ALPHA)).toBe(later);
+    expect(await manager.list('job')).toEqual([later]);
   });
 });
 

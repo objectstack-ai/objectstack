@@ -272,7 +272,7 @@ import {
   proxyRoute,
   resolveSweepRepo,
 } from './check-half-states.mjs';
-import { EXIT_UNCONFIRMED as DISPATCH_EXIT_UNCONFIRMED, exitForResult, packRequest, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { EXIT_UNCONFIRMED as DISPATCH_EXIT_UNCONFIRMED, exitForResult, packRequest, resolveRoute, sendFleetWrite, stateGuardRows, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { CLIENT_PAYLOAD_MAX_BYTES, TRANSPORT_ENV } from './fleet-write/ops.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
 import {
@@ -970,6 +970,9 @@ export function packCard({ repo, session, issue, body, labels, reason, commentOn
   if (expectState && !(labels?.removeCalls ?? []).includes(expectState)) {
     return refuse(`the label plan does not strip \`${expectState}\`, so the pm-state this run acts on is not on the card`);
   }
+  // The stateless write (label-write's header): a strip that does not close its card is judged on a read; every pack
+  // here closes the card it strips, so the relay door's own row picker must answer "nothing to judge".
+  if (stateGuardRows(actions).length > 0) return refuse('the pack takes a pm-state off a card it does not close, which the stateless write refuses');
   const packed = packRequest({ repo, session, actions, requestId, now });
   return { ...packed, actions };
 }
@@ -1434,7 +1437,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the unreadable card: a verdict taken from nothing is not taken': 7,
   'the dry run: a plan that proves it wrote nothing': 7,
   'the sibling tools: driven, never re-implemented': 10,
-  'the relay pack: ONE card, ONE dispatch — comment → labels_remove → issue_patch — ONE write on the throttle': 12,
+  'the relay pack: ONE card, ONE dispatch — comment → labels_remove → issue_patch — ONE write on the throttle': 13,
   'the size ceiling: a payload over 64KB is refused before it is packed, zero writes': 6,
   'the read-back: step ④ reads the BOARD — comment, labels and close — and must MATCH': 9,
   'the relay miss: a refused, failed or unconfirmed run is read back, never retried, never fallen back from': 8,
@@ -1937,6 +1940,7 @@ export async function selfTest() {
     t('…the comment is the card`s own text, stamped on the act`s clock', ok.sent[0].actions[0], { op: 'comment', issue: 61, body: 'Closed #61 2026-09-23T12:00Z — ruling for this card.' });
     t('…the strip is the pm-state, the close carries the row`s reason', [ok.sent[0].actions[1], ok.sent[0].actions[2]], [{ op: 'labels_remove', issue: 61, labels: ['pm:queue'] }, { op: 'issue_patch', issue: 61, state: 'closed', state_reason: 'not_planned' }]);
     t('…the envelope carries the session and the target', [ok.sent[0].session, ok.sent[0].repo], [SELF_TEST_SESSION, 'objectstack-ai/objectstack']);
+    t('the stateless write: the pack closes the card it strips, so the relay door judges nothing — and the same strip without its close would be judged', [stateGuardRows(ok.sent[0].actions).length, stateGuardRows(ok.sent[0].actions.filter((a) => a.op !== 'issue_patch')).length], [0, 1]);
     t('⛔ no write verb left this process — the reads (card, timeline, thread), then the read-back reads', ok.api.calls.map((c) => c.kind), ['read', 'timeline', 'comments', 'read', 'comments']);
     t('the summary counts one dispatch — one throttle write — per closed card', /1 closed \(not_planned 1\) · 1 dispatch\(es\) sent — 1 write\(s\) on the throttle/.test(ok.text));
     const two = await driveOffline({ rows: [ROW(62), ROW(63, { reason: 'completed' })] }, { cards: { ...QUEUED(62), ...QUEUED(63) } }, { route: dispatchRoute(), relay: 'success' });

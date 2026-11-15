@@ -166,6 +166,39 @@ describe('[#32250] resolveThrownHttpError carries a package-scoped refusal\'s ca
         }
     });
 
+    it('[#32744] a holder of each of the four kinds passes the element check', () => {
+        const every = [
+            { kind: 'package', packageId: 'com.acme.crm' },
+            { kind: 'environment' },
+            { kind: 'platform' },
+            { kind: 'residual', ownerId: 'com.acme.stack' },
+        ];
+        const thrown = () => Object.assign(shaped(), { refusal: { ...REFUSAL, candidates: every } });
+        expect(packageScopedRefusalCandidates(thrown())).toEqual(every);
+        expect(resolveThrownHttpError(thrown()).details).toEqual({ candidates: every });
+        expect(mapDataError(thrown(), 'acct').body.details).toEqual({ candidates: every });
+    });
+
+    it('[#32744] a list with any element that is not a holder carries none, on all three exits alike', () => {
+        const lists: Array<[string, unknown[]]> = [
+            ['a package holder with no packageId', [{ kind: 'package' }]],
+            ['a bare string', ['com.acme.crm']],
+            ['a kind that is no package-scoped holder', [{ kind: 'built-in' }]],
+            ['one good holder beside a null', [{ kind: 'package', packageId: 'com.acme.crm' }, null]],
+            ['a residual holder with a numeric ownerId', [{ kind: 'residual', ownerId: 7 }]],
+        ];
+        for (const [name, candidates] of lists) {
+            const thrown = () => Object.assign(shaped(), { refusal: { ...REFUSAL, candidates } });
+            expect(packageScopedRefusalCandidates(thrown()), name).toBeUndefined();
+            expect(resolveThrownHttpError(thrown()).details, name).toBeUndefined();
+            expect(thrownAnswerOf(thrown(), 500).details, name).toBeUndefined();
+            expect(mapDataError(thrown(), 'acct').body.details, name).toBeUndefined();
+            // The refusal itself answers as before: only the member is withheld.
+            expect(resolveThrownHttpError(thrown()).status, name).toBe(409);
+            expect(resolveThrownHttpError(thrown()).code, name).toBe('RESOURCE_CONFLICT');
+        }
+    });
+
     it('CONTROL: a refusal\'s candidates sit beside the context the resolver already carried', () => {
         const thrown = Object.assign(shaped(), { issues: [{ path: ['x'], message: 'y' }] });
         expect(resolveThrownHttpError(thrown).details).toEqual({ issues: [{ path: ['x'], message: 'y' }], candidates: CANDIDATES });

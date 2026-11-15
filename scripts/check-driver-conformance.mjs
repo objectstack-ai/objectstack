@@ -276,6 +276,11 @@ const CASE_SETS = [
     what: 'the comparand-type door: the six accepted types compile everywhere, everything else is refused loudly — #7872',
   },
   {
+    file: 'filter-comparand-type-conformance.ts',
+    marker: 'FILTER_STRING_STORED_COMPARAND_CASES',
+    what: 'a number or boolean comparand on a text- or option-family field matches the string the write stored, as the engine door hands it — #29486',
+  },
+  {
     file: 'value-roundtrip-conformance.ts',
     marker: 'VALUE_ROUNDTRIP_CASES',
     what: 'value storage round-trip: what you wrote is what you read back, type included — #12393',

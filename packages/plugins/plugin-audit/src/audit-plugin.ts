@@ -47,6 +47,7 @@ import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { createActionInvocationAuditWriter } from './action-invocation-audit.js';
 import { createDataExportAuditWriter } from './data-export-audit.js';
+import { createDatasetQueryAuditWriter, type DatasetQueryAuditWriter } from './dataset-query-audit.js';
 import { createPackageLifecycleAuditWriter } from './package-lifecycle-audit.js';
 import {
   createCredentialUseAuditWriter,
@@ -66,7 +67,7 @@ import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction } from './activity-field-redaction.js';
 import { installActivitySummaryLocale } from './activity-summary-message.js';
 import { installAuditLogFieldRedaction } from './audit-log-field-redaction.js';
-import { installAuditLogReadVisibility } from './audit-log-read-visibility.js';
+import { installAuditLogReadVisibility, LEDGER_AUDIT_CAPABILITY } from './audit-log-read-visibility.js';
 import type { FieldVisibilitySource } from './served-fields.js';
 import { installParentFieldQueryGuards } from './parent-field-query-guard.js';
 import type { ParentObjectReadAdmission } from './parent-record-read-gate.js';
@@ -99,10 +100,34 @@ export interface AuditPluginReadAuditOptions {
   flushIntervalMs?: number;
 }
 
+/**
+ * Dataset-query auditing configuration — the per-dataset opt-in, closed, with
+ * the record-view writer's shape and for its reasons
+ * ({@link AuditPluginReadAuditOptions}).
+ */
+export interface AuditPluginDatasetQueryAuditOptions {
+  /**
+   * Saved datasets whose queries through the analytics dataset door are
+   * recorded as `dataset_query` rows in `sys_audit_log`: who, which dataset,
+   * the dimensions and measures selected, the filtered field names (never the
+   * values), the row count and the outcome. Absent or empty records nothing
+   * and buffers nothing. A name covers every package that holds a dataset of
+   * that name (ADR-0150 D3); each row records the holder it read in
+   * `metadata.dataset_package`.
+   */
+  datasets?: readonly string[];
+  /** Flush once this many rows are buffered. Default 50. */
+  maxBatchSize?: number;
+  /** Flush this long after the first row of a batch. Default 2000ms. */
+  flushIntervalMs?: number;
+}
+
 /** Constructor options for {@link AuditPlugin}. */
 export interface AuditPluginOptions {
   /** [#8992] Record-view auditing. Off unless objects are named. */
   readAudit?: AuditPluginReadAuditOptions;
+  /** Dataset-query auditing (`dataset_query` rows). Off unless datasets are named. */
+  datasetQueryAudit?: AuditPluginDatasetQueryAuditOptions;
   /**
    * Host locale resolver: the language this plugin writes the title of the
    * @mention notification it emits in. Called with the write's organization
@@ -311,6 +336,7 @@ export class AuditPlugin implements Plugin {
    * succeeded.
    */
   private readAuditWriter: ReadAuditWriterHandle | null = null;
+  private datasetQueryWriter: DatasetQueryAuditWriter | null = null;
   /** [ADR-0154 D3] The sealer, started at `kernel:ready` and stopped by `destroy()`. */
   private sealer: AuditSealer | null = null;
 
@@ -325,8 +351,33 @@ export class AuditPlugin implements Plugin {
    * at `kernel:ready`; the activity door's writer reads it at each call.
    */
   private actorSnapshotOf: ((api: unknown, userId: string) => Promise<AuditActorSnapshot>) | undefined;
+  /** [ADR-0154 D2, D6] The provider a host handed over, for an instance composed with none. */
+  private hostCryptoProvider: (() => ICryptoProvider | undefined) | undefined;
+  /** [ADR-0154 D3] Set when a host that handed its provider over is a one-shot boot. */
+  private hostDisarmsSealer = false;
 
   constructor(private readonly options: AuditPluginOptions = {}) {}
+
+  /**
+   * [ADR-0154 D2, D6; seat ruling 6884540128 item 3] A host hands an instance
+   * the app composed (a stack `plugins` entry) the host's own crypto provider,
+   * which the sealer then seals under. It is taken only when this instance was
+   * composed with no `cryptoProvider`: one the app composed is never
+   * overridden. `armSealer: false` — the host's one-shot boot — keeps the
+   * sealer off; `true` leaves this instance's own `armSealer` standing, so an
+   * app's `armSealer: false` is never turned on.
+   *
+   * The provider is read when the sealer starts (`kernel:ready`), so a host
+   * hands it over before then. Resolves whether it was taken. A provider that
+   * answers `undefined` is an absent one: the sealer reports it once, at
+   * `error`, and seals nothing; the boot is never refused.
+   */
+  adoptHostCryptoProvider(provider: () => ICryptoProvider | undefined, host: { armSealer: boolean }): boolean {
+    if (this.options.cryptoProvider !== undefined) return false;
+    this.hostCryptoProvider = provider;
+    if (!host.armSealer) this.hostDisarmsSealer = true;
+    return true;
+  }
 
   async init(ctx: PluginContext): Promise<void> {
     // Register audit system objects via the manifest service.
@@ -350,7 +401,15 @@ export class AuditPlugin implements Plugin {
       pages: [SysAuditLogDetailPage],
       // ADR-0029 D7 — contribute the one Audit Log entry into the Setup app's
       // `group_diagnostics` slot. The plugin owns sys_audit_log (K2), so the
-      // entry lives and dies with this plugin and needs no item gate.
+      // entry lives and dies with this plugin.
+      //
+      // The entry is gated on `view_all_audit_log`, the ledger's own read
+      // capability (`LEDGER_AUDIT_CAPABILITY`), not on the slot's: the slot
+      // carries no gate, because a group gate prunes every child before the
+      // child is judged, and `manage_platform_settings` there hid the entry
+      // from an auditor who holds the read capability and no platform-settings
+      // power (separation of duties). Platform administrators hold both by
+      // default (`ADMIN_FULL_ACCESS_CAPABILITIES`), so they still see it.
       //
       // #23890 — ONE entry, and it opens the console's audit browser (the
       // `audit:log` registry key, objectui `registerSystemComponents.tsx`):
@@ -372,7 +431,7 @@ export class AuditPlugin implements Plugin {
           group: 'group_diagnostics',
           priority: 100,
           items: [
-            { id: 'nav_audit_logs', type: 'component', label: 'Audit Log', componentRef: 'audit:log', icon: 'scroll-text' },
+            { id: 'nav_audit_logs', type: 'component', label: 'Audit Log', componentRef: 'audit:log', icon: 'scroll-text', requiredPermissions: [LEDGER_AUDIT_CAPABILITY] },
           ],
         },
       ],
@@ -427,6 +486,27 @@ export class AuditPlugin implements Plugin {
     // this slot, from plugin-auth's OAuth stamp point
     // (`credential-use-audit.ts`).
     this.credentialUseWriter = createCredentialUseAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger });
+    //
+    // And the dataset-query writer (`recordDatasetQuery`): the analytics
+    // dataset door hands it one event per saved-dataset query that reached
+    // the read; it records only the datasets named in
+    // `datasetQueryAudit.datasets`, batched off the request path
+    // (`dataset-query-audit.ts`). Named nothing, it records nothing.
+    const datasetQueryAudit = this.options.datasetQueryAudit;
+    const datasetQueryWriter = createDatasetQueryAuditWriter({
+      getEngine: getLedgerEngine,
+      logger: ctx.logger,
+      datasets: datasetQueryAudit?.datasets ?? [],
+      ...(datasetQueryAudit?.maxBatchSize !== undefined ? { maxBatchSize: datasetQueryAudit.maxBatchSize } : {}),
+      ...(datasetQueryAudit?.flushIntervalMs !== undefined ? { flushIntervalMs: datasetQueryAudit.flushIntervalMs } : {}),
+    });
+    this.datasetQueryWriter = datasetQueryWriter;
+    if (datasetQueryWriter.auditedDatasets.length > 0) {
+      ctx.logger.info(
+        `AuditPlugin: dataset-query auditing on ${datasetQueryWriter.auditedDatasets.length} dataset(s) — `
+          + `${datasetQueryWriter.auditedDatasets.join(', ')}`,
+      );
+    }
     ctx.registerService('audit', {
       ...createAuthEventAuditSink({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...createActionInvocationAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
@@ -434,6 +514,7 @@ export class AuditPlugin implements Plugin {
       ...createPackageLifecycleAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...this.credentialUseWriter,
       ...createScimRefusalAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      recordDatasetQuery: datasetQueryWriter.recordDatasetQuery,
       // The activity door's writer: one timeline entry an app adds through
       // `ctx.activity.append` (`app-activity-door.ts`).
       ...createAppActivityWriter({ getEngine: getLedgerEngine, getActorSnapshot: () => this.actorSnapshotOf }),
@@ -760,11 +841,11 @@ export class AuditPlugin implements Plugin {
    * command's boot (`armSealer: false`).
    */
   private startSealer(engine: IDataEngine, ctx: PluginContext): void {
-    if (this.options.armSealer === false) return;
+    if (this.options.armSealer === false || this.hostDisarmsSealer) return;
     const storage = engine as unknown as Partial<AuditSealerEngine>;
     if (typeof storage.getDriverForObject !== 'function' || typeof storage.registry?.getAllObjects !== 'function') return;
     const sealEngine = storage as AuditSealerEngine;
-    const option = this.options.cryptoProvider;
+    const option = this.options.cryptoProvider ?? this.hostCryptoProvider;
     const crypto = typeof option === 'function' ? option() : option;
     const localSigner = crypto ? new LocalCheckpointSigner({ engine: sealEngine, crypto }) : undefined;
     const optional = <T>(name: string): T | undefined => {
@@ -1001,6 +1082,9 @@ export class AuditPlugin implements Plugin {
     const writer = this.readAuditWriter;
     this.readAuditWriter = null;
     if (writer) await writer.stop();
+    const datasetQueryWriter = this.datasetQueryWriter;
+    this.datasetQueryWriter = null;
+    if (datasetQueryWriter) await datasetQueryWriter.stop();
   }
 }
 

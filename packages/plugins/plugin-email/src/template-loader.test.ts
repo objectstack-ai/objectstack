@@ -31,7 +31,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { SchemaRegistry, assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import {
   BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID,
   EmailTemplateAmbiguousError,
@@ -464,154 +465,351 @@ describe('createRegistryEmailTemplateLoader — the send resolves the name from 
 });
 
 /**
- * [ADR-0150 D3, #32183, epic ruling R4-A] The send door counts every holder, a
- * disabled package's included, so a reversible disable moves neither the
- * address the door asks the list for nor the refusal it throws: the door
- * answers as before this change. Judging the served holders here is #32670,
- * because the door reads a flat list after the resolve.
+ * [ADR-0150 D3, #32670] A disabled package holds no name at the send. When a
+ * holder of the name is disabled, the name is resolved over the served
+ * holders, so a disabled package is never the answer and a refusal names only
+ * the packages that serve the name; and the bundle is read only where no
+ * member of a disabled holder's side is listed: the resolved holder's own
+ * address, or the environment-wide list for the environment's own item. A
+ * caller whose own holding is disabled, or that no served holder answers,
+ * finds no template. With no holder disabled, every answer is the one it was.
  *
- * The parity pin: each state, in both registration orders and on both reads
- * the loader takes, with every set of its holders disabled, gives every
- * caller the same ask as the same registry with nothing disabled. The ask is
- * spied, never the list's answer, so no stored row is needed: on the protocol
- * read it is the request's address; on the registry read, a probe list (an
- * environment-wide sentinel first, then one item per package) shows which
- * address the loader kept.
+ * The world is real: a `SchemaRegistry`, the protocol's execution list over
+ * it with stored `sys_metadata` rows (ALPHA's customization pair `.custom`
+ * stores an fr-FR member), and a dependent (ADDER, depending on ALPHA only)
+ * adding fr-FR. Every case runs in both registration orders and on both reads
+ * the loader takes: the protocol's, and the registry's own list (which reads
+ * no stored row). Each caller is asked for en-US and fr-FR; an answer is the
+ * sent template's subject (who stores it, and its locale), `no template`, or
+ * the refusal with its candidates. The rows named per case are the PR's
+ * declaration table.
  */
-describe('createRegistryEmailTemplateLoader — a disabled holder still counts at the send (ADR-0150 D3, #32183)', () => {
+describe('createRegistryEmailTemplateLoader — a disabled package holds no name at the send (ADR-0150 D3, #32670)', () => {
   const ALPHA = 'com.example.alpha';
   const BETA = 'com.example.beta';
   const BOTH = 'com.example.both';
-  const VIA_BETA = 'com.example.viabeta';
+  const VIA_ALPHA = 'com.example.viaalpha';
   const NEITHER = 'com.example.neither';
-  const DEPENDENT = 'com.example.dependent';
-  const PACKAGES: Array<[string, string[]]> = [
-    [ALPHA, []], [BETA, []], [BOTH, [ALPHA, BETA]], [VIA_BETA, [BETA]], [NEITHER, []], [DEPENDENT, [ALPHA]],
-  ];
-  /** None (omitted, null), each holder, a closure holding both, a closure through BETA only, neither, the dependent. */
+  const ADDER = 'com.example.adder';
+  const PAIR = `${ALPHA}.custom`;
+  const BUILTIN = BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID;
+  const AUTH_NAME = 'auth.password_reset';
+  const SHORT: Record<string, string> = {
+    [ALPHA]: 'ALPHA', [BETA]: 'BETA', [ADDER]: 'ADDER', [BUILTIN]: 'BUILTIN',
+  };
+  /** None (omitted, null), each holder, a closure holding both, a closure through ALPHA only, neither, the dependent, the built-in package. */
   const CALLERS: ReadonlyArray<[string, string | null | undefined]> = [
     ['omitted', undefined], ['null', null], ['ALPHA', ALPHA], ['BETA', BETA], ['BOTH', BOTH],
-    ['VIA_BETA', VIA_BETA], ['NEITHER', NEITHER], ['DEPENDENT', DEPENDENT],
-  ];
-  /** The `welcome` members each state ships, as `[package, locale]`; the dependent's is an added locale. */
-  const STATES: Array<[string, Array<[string, string]>]> = [
-    ['one holder', [[ALPHA, 'en-US']]],
-    ['one holder and a dependent\'s addition', [[ALPHA, 'en-US'], [DEPENDENT, 'fr-FR']]],
-    ['two holders', [[ALPHA, 'en-US'], [BETA, 'en-US']]],
-    ['two holders and a dependent\'s addition', [[ALPHA, 'en-US'], [BETA, 'en-US'], [DEPENDENT, 'fr-FR']]],
+    ['VIA_ALPHA', VIA_ALPHA], ['NEITHER', NEITHER], ['ADDER', ADDER], ['BUILTIN', BUILTIN],
   ];
   const ORDERS: Array<[string, boolean]> = [['as listed', false], ['reversed', true]];
   const READS = ['protocol', 'registry'] as const;
-  const ENVIRONMENT_WIDE = 'environment-wide';
 
-  /** A real registry: PACKAGES installed and `shipped` registered in order (or reversed), then `disabled` disabled. */
-  function registryOf(shipped: Array<[string, string]>, reversed: boolean, disabled: readonly string[]): SchemaRegistry {
-    const reg = new SchemaRegistry();
+  type State = {
+    holders: string[];
+    besideRow: 'none' | 'environment item first' | 'environment item last' | 'stored row';
+    adderDisabled: boolean;
+    auth: boolean;
+  };
+  const STATES: Record<string, State> = {
+    'two holders': { holders: [ALPHA, BETA], besideRow: 'none', adderDisabled: false, auth: false },
+    'two holders, the dependent disabled': { holders: [ALPHA, BETA], besideRow: 'none', adderDisabled: true, auth: false },
+    'one holder beside the environment\'s item, registered first': { holders: [ALPHA], besideRow: 'environment item first', adderDisabled: false, auth: false },
+    'one holder beside the environment\'s item, registered last': { holders: [ALPHA], besideRow: 'environment item last', adderDisabled: false, auth: false },
+    'one holder beside a package-less stored row': { holders: [ALPHA], besideRow: 'stored row', adderDisabled: false, auth: false },
+    'an auth name one package overrides': { holders: [ALPHA], besideRow: 'stored row', adderDisabled: false, auth: true },
+  };
+
+  // The engine double the protocol reads `sys_metadata` through: equality
+  // and `$in`, and nothing else — any other operator is refused loudly. It
+  // carries no write verb: the send writes nothing.
+  const matches = (row: AnyRecord, where: AnyRecord | undefined) => Object.entries(where ?? {}).every(([k, v]) => {
+    if (k.startsWith('$')) throw new Error(`engine double: logical operator ${k} is not implemented`);
+    if (v !== null && typeof v === 'object') {
+      if (Object.keys(v).join() !== '$in' || !Array.isArray(v.$in)) throw new Error(`engine double: operator ${Object.keys(v).join(', ')} is not implemented`);
+      return (v.$in as unknown[]).includes(row[k]);
+    }
+    return (row[k] ?? null) === v;
+  });
+
+  /** The registry and the protocol over it, with `disabled` disabled. */
+  function worldOf(state: State, disabled: readonly string[], reversed: boolean) {
+    const name = state.auth ? AUTH_NAME : 'welcome';
+    const rows: AnyRecord[] = [];
+    const reg = new SchemaRegistry({ multiTenant: false } as never);
     reg.logLevel = 'silent';
-    const packages = reversed ? [...PACKAGES].reverse() : PACKAGES;
-    for (const [id, deps] of packages) {
+    const packages: Array<[string, string[]]> = [
+      [ALPHA, []], [BETA, []], [BOTH, [ALPHA, BETA]], [VIA_ALPHA, [ALPHA]], [NEITHER, []], [ADDER, [ALPHA]], [PAIR, []], [BUILTIN, []],
+    ];
+    for (const [id, deps] of reversed ? [...packages].reverse() : packages) {
       reg.installPackage({
-        id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+        id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop()!,
         ...(deps.length ? { dependencies: Object.fromEntries(deps.map((d) => [d, '^1.0.0'])) } : {}),
       } as never, 'code');
     }
-    for (const [id, locale] of reversed ? [...shipped].reverse() : shipped) {
-      reg.registerItem('email_template', {
-        name: 'welcome', label: 'Welcome', locale, subject: `${id} ${locale}`, bodyHtml: '<p>hi</p>',
-      }, 'name' as never, id);
-    }
-    for (const id of disabled) reg.disablePackage(id);
-    return reg;
-  }
-
-  /** Every non-empty set of `ids`. */
-  function nonEmptySets(ids: readonly string[]): string[][] {
-    return ids.reduce<string[][]>((sets, id) => [...sets, ...sets.map((s) => [...s, id]), [id]], [])
-      .sort((a, b) => a.length - b.length);
-  }
-
-  type Ask = { address: string | null } | { refused: number; candidates: string[]; message: string };
-
-  /** What the door asks for one caller: the list's address (`null`: the environment-wide list), or its refusal. */
-  async function askOf(reg: SchemaRegistry, read: (typeof READS)[number], caller: string | null | undefined): Promise<Ask> {
-    const requested: Array<string | null> = [];
-    const probe = [
-      { name: 'welcome', label: 'Welcome', subject: ENVIRONMENT_WIDE, bodyHtml: '<p>e</p>' },
-      ...PACKAGES.map(([id]) => ({ name: 'welcome', label: 'Welcome', subject: id, bodyHtml: '<p>p</p>', _packageId: id })),
+    const ship = (packageId: string | undefined, locale: string, subject: string) => () => reg.registerItem('email_template', {
+      name, label: subject, locale, subject, bodyHtml: '<p>x</p>', ...(packageId === undefined ? { _provenance: 'org' } : {}),
+    }, 'name' as never, packageId as never);
+    const shipped = [
+      ...(state.besideRow === 'environment item first' ? [ship(undefined, 'en-US', 'ENV en-US')] : []),
+      ...(state.auth ? [ship(BUILTIN, 'en-US', 'BUILTIN en-US'), ship(BUILTIN, 'fr-FR', 'BUILTIN fr-FR')] : []),
+      ...state.holders.map((id) => ship(id, 'en-US', `${SHORT[id]} en-US`)),
+      ship(ADDER, 'fr-FR', 'ADDER fr-FR'),
+      ...(state.besideRow === 'environment item last' ? [ship(undefined, 'en-US', 'ENV en-US')] : []),
     ];
-    const scoped = Object.fromEntries((['getPackage', 'getAllPackages', 'packageScopedHoldersOf', 'getPackageScopedItem', 'getEnvironmentScopedItem'] as const)
-      .map((method) => [method, (reg[method] as (...args: unknown[]) => unknown).bind(reg)]));
-    const loader = createRegistryEmailTemplateLoader(read === 'protocol'
-      ? {
-        registry: reg,
-        protocol: {
-          async getMetaItemsForExecution(request: { type: string; packageId?: string }) {
-            requested.push(request.packageId ?? null);
-            return { items: [] };
-          },
-        },
-      }
-      : { registry: { ...scoped, listItems: () => probe.map((i) => ({ ...i })) } as never });
+    for (const register of reversed ? [...shipped].reverse() : shipped) register();
+    const stored = (id: string, packageId: string | null, subject: string) => ({
+      id, type: 'email_template', name, state: 'active', package_id: packageId, bundle_member: 'fr-FR',
+      metadata: JSON.stringify({ name, label: subject, locale: 'fr-FR', subject, bodyHtml: '<p>s</p>' }),
+    });
+    rows.push(stored('row_pair', PAIR, 'PAIR fr-FR'));
+    if (state.besideRow === 'stored row') rows.push(stored('row_env', null, 'STORED fr-FR'));
+    if (reversed) rows.reverse();
+    for (const id of disabled) reg.disablePackage(id);
+    if (state.adderDisabled) reg.disablePackage(ADDER);
+    const pick = (opts?: { where?: AnyRecord; limit?: number }) => rows.filter((r) => matches(r, opts?.where)).slice(0, opts?.limit ?? rows.length);
+    const engine = {
+      registry: reg,
+      find: async (_object: string, opts?: { where?: AnyRecord; limit?: number }) => pick(opts),
+      findOne: async (object: string, opts?: { where?: AnyRecord }) => {
+        assertEngineFindOnePredicate(object, opts as never);
+        return pick(opts)[0] ?? null;
+      },
+      count: async () => 0,
+      aggregate: async () => [],
+    };
+    return { name, reg, protocol: new ObjectStackProtocolImplementation(engine as never) };
+  }
+
+  /** One send's answer: the sent subject, `no template`, or the refusal and its candidates. */
+  async function answerOf(loader: ReturnType<typeof createRegistryEmailTemplateLoader>, name: string, caller: string | null | undefined, locale: string): Promise<string> {
     try {
-      const row = await loader.load('welcome', 'en-US', caller === undefined ? undefined : { callerPackageId: caller });
-      if (read === 'protocol') {
-        expect(requested).toHaveLength(1);
-        return { address: requested[0] };
-      }
-      return { address: row?.subject === ENVIRONMENT_WIDE ? null : (row?.subject ?? 'NO ROW') };
+      const row = await loader.load(name, locale, caller === undefined ? undefined : { callerPackageId: caller });
+      return row?.subject ?? 'no template';
     } catch (e) {
       if (!(e instanceof EmailTemplateAmbiguousError)) throw e;
-      expect(requested).toEqual([]);
-      return {
-        refused: e.status,
-        candidates: e.candidates.map((c) => (c.kind === 'package' ? c.packageId : c.kind)),
-        message: e.message,
-      };
+      expect([e.code, e.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+      const candidates = e.candidates.map((c) => (c.kind === 'package' ? SHORT[c.packageId] ?? c.packageId : c.kind)).sort();
+      return `409 ${e.message.includes('outside') ? 'outside-closure ' : ''}[${candidates.join(',')}]`;
     }
   }
 
-  const asksOf = async (reg: SchemaRegistry, read: (typeof READS)[number]) => {
-    const asks: Record<string, Ask> = {};
-    for (const [label, caller] of CALLERS) asks[label] = await askOf(reg, read, caller);
-    return asks;
-  };
-
-  /** The asks with nothing disabled, as `main` answers them (refusal candidates sorted, message left out). */
-  const refused = (...candidates: string[]) => ({ refused: 409, candidates: [...candidates].sort() });
-  const at = (address: string | null) => ({ address });
-  const ONE_HOLDER = {
-    omitted: at(null), null: at(null), ALPHA: at(null), BETA: refused(ALPHA), BOTH: at(null),
-    VIA_BETA: refused(ALPHA), NEITHER: refused(ALPHA), DEPENDENT: at(null),
-  };
-  const TWO_HOLDERS = {
-    omitted: refused(ALPHA, BETA), null: refused(ALPHA, BETA), ALPHA: at(ALPHA), BETA: at(BETA),
-    BOTH: refused(ALPHA, BETA), VIA_BETA: at(BETA), NEITHER: refused(ALPHA, BETA), DEPENDENT: at(ALPHA),
-  };
-  /** A dependent's addition holds no name for anyone else, so it moves no ask. */
-  const MAIN = (state: string) => (state.startsWith('one holder') ? ONE_HOLDER : TWO_HOLDERS);
+  type Answers = Record<string, [string, string]>;
+  /** Per caller, the en-US and the fr-FR answer; `registry` lists only the callers whose registry-read answer differs. */
+  const CASES: Array<{ state: string; disabled: string[]; protocol: Answers; registry?: Partial<Answers> }> = [
+    { // CONTROL: nothing disabled
+      state: 'two holders', disabled: [],
+      protocol: {
+        omitted: ['409 [ALPHA,BETA]', '409 [ALPHA,BETA]'],
+        null: ['409 [ALPHA,BETA]', '409 [ALPHA,BETA]'],
+        ALPHA: ['ALPHA en-US', 'PAIR fr-FR'],
+        BETA: ['BETA en-US', 'no template'],
+        BOTH: ['409 [ALPHA,BETA]', '409 [ALPHA,BETA]'],
+        VIA_ALPHA: ['ALPHA en-US', 'PAIR fr-FR'],
+        NEITHER: ['409 outside-closure [ALPHA,BETA]', '409 outside-closure [ALPHA,BETA]'],
+        ADDER: ['ALPHA en-US', 'PAIR fr-FR'],
+        BUILTIN: ['409 outside-closure [ALPHA,BETA]', '409 outside-closure [ALPHA,BETA]'],
+      },
+      registry: {
+        ALPHA: ['ALPHA en-US', 'no template'],
+        VIA_ALPHA: ['ALPHA en-US', 'no template'],
+        ADDER: ['ALPHA en-US', 'no template'],
+      },
+    },
+    { // rows 27-30 and 36
+      state: 'two holders', disabled: [ALPHA],
+      protocol: {
+        omitted: ['BETA en-US', 'no template'],
+        null: ['BETA en-US', 'no template'],
+        ALPHA: ['no template', 'no template'],
+        BETA: ['BETA en-US', 'no template'],
+        BOTH: ['BETA en-US', 'no template'],
+        VIA_ALPHA: ['409 outside-closure [BETA]', '409 outside-closure [BETA]'],
+        NEITHER: ['409 outside-closure [BETA]', '409 outside-closure [BETA]'],
+        ADDER: ['409 outside-closure [BETA]', '409 outside-closure [BETA]'],
+        BUILTIN: ['409 outside-closure [BETA]', '409 outside-closure [BETA]'],
+      },
+    },
+    { // rows 27, 28 and 30, the pair's row the enabled holder's own
+      state: 'two holders', disabled: [BETA],
+      protocol: {
+        omitted: ['ALPHA en-US', 'PAIR fr-FR'],
+        null: ['ALPHA en-US', 'PAIR fr-FR'],
+        ALPHA: ['ALPHA en-US', 'PAIR fr-FR'],
+        BETA: ['no template', 'no template'],
+        BOTH: ['ALPHA en-US', 'PAIR fr-FR'],
+        VIA_ALPHA: ['ALPHA en-US', 'PAIR fr-FR'],
+        NEITHER: ['409 outside-closure [ALPHA]', '409 outside-closure [ALPHA]'],
+        ADDER: ['ALPHA en-US', 'PAIR fr-FR'],
+        BUILTIN: ['409 outside-closure [ALPHA]', '409 outside-closure [ALPHA]'],
+      },
+      registry: {
+        omitted: ['ALPHA en-US', 'no template'],
+        null: ['ALPHA en-US', 'no template'],
+        ALPHA: ['ALPHA en-US', 'no template'],
+        BOTH: ['ALPHA en-US', 'no template'],
+        VIA_ALPHA: ['ALPHA en-US', 'no template'],
+        ADDER: ['ALPHA en-US', 'no template'],
+      },
+    },
+    { // rows 31 and 36
+      state: 'two holders', disabled: [ALPHA, BETA],
+      protocol: {
+        omitted: ['no template', 'no template'],
+        null: ['no template', 'no template'],
+        ALPHA: ['no template', 'no template'],
+        BETA: ['no template', 'no template'],
+        BOTH: ['no template', 'no template'],
+        VIA_ALPHA: ['no template', 'no template'],
+        NEITHER: ['no template', 'no template'],
+        ADDER: ['no template', 'no template'],
+        BUILTIN: ['no template', 'no template'],
+      },
+    },
+    { // rows 27-30 and 36, the addition disabled
+      state: 'two holders, the dependent disabled', disabled: [ALPHA],
+      protocol: {
+        omitted: ['BETA en-US', 'no template'],
+        null: ['BETA en-US', 'no template'],
+        ALPHA: ['no template', 'no template'],
+        BETA: ['BETA en-US', 'no template'],
+        BOTH: ['BETA en-US', 'no template'],
+        VIA_ALPHA: ['409 outside-closure [BETA]', '409 outside-closure [BETA]'],
+        NEITHER: ['409 outside-closure [BETA]', '409 outside-closure [BETA]'],
+        ADDER: ['409 outside-closure [BETA]', '409 outside-closure [BETA]'],
+        BUILTIN: ['409 outside-closure [BETA]', '409 outside-closure [BETA]'],
+      },
+    },
+    { // row 37
+      state: 'one holder beside the environment\'s item, registered first', disabled: [ALPHA],
+      protocol: {
+        omitted: ['no template', 'no template'],
+        null: ['no template', 'no template'],
+        ALPHA: ['no template', 'no template'],
+        BETA: ['no template', 'no template'],
+        BOTH: ['no template', 'no template'],
+        VIA_ALPHA: ['no template', 'no template'],
+        NEITHER: ['no template', 'no template'],
+        ADDER: ['no template', 'no template'],
+        BUILTIN: ['no template', 'no template'],
+      },
+    },
+    { // row 37
+      state: 'one holder beside the environment\'s item, registered last', disabled: [ALPHA],
+      protocol: {
+        omitted: ['no template', 'no template'],
+        null: ['no template', 'no template'],
+        ALPHA: ['no template', 'no template'],
+        BETA: ['no template', 'no template'],
+        BOTH: ['no template', 'no template'],
+        VIA_ALPHA: ['no template', 'no template'],
+        NEITHER: ['no template', 'no template'],
+        ADDER: ['no template', 'no template'],
+        BUILTIN: ['no template', 'no template'],
+      },
+    },
+    { // CONTROL: one holder
+      state: 'one holder beside a package-less stored row', disabled: [],
+      protocol: {
+        omitted: ['ALPHA en-US', 'STORED fr-FR'],
+        null: ['ALPHA en-US', 'STORED fr-FR'],
+        ALPHA: ['ALPHA en-US', 'STORED fr-FR'],
+        BETA: ['409 outside-closure [ALPHA]', '409 outside-closure [ALPHA]'],
+        BOTH: ['ALPHA en-US', 'STORED fr-FR'],
+        VIA_ALPHA: ['ALPHA en-US', 'STORED fr-FR'],
+        NEITHER: ['409 outside-closure [ALPHA]', '409 outside-closure [ALPHA]'],
+        ADDER: ['ALPHA en-US', 'STORED fr-FR'],
+        BUILTIN: ['409 outside-closure [ALPHA]', '409 outside-closure [ALPHA]'],
+      },
+      registry: {
+        omitted: ['ALPHA en-US', 'ADDER fr-FR'],
+        null: ['ALPHA en-US', 'ADDER fr-FR'],
+        ALPHA: ['ALPHA en-US', 'ADDER fr-FR'],
+        BOTH: ['ALPHA en-US', 'ADDER fr-FR'],
+        VIA_ALPHA: ['ALPHA en-US', 'ADDER fr-FR'],
+        ADDER: ['ALPHA en-US', 'ADDER fr-FR'],
+      },
+    },
+    { // row 37
+      state: 'one holder beside a package-less stored row', disabled: [ALPHA],
+      protocol: {
+        omitted: ['no template', 'no template'],
+        null: ['no template', 'no template'],
+        ALPHA: ['no template', 'no template'],
+        BETA: ['no template', 'no template'],
+        BOTH: ['no template', 'no template'],
+        VIA_ALPHA: ['no template', 'no template'],
+        NEITHER: ['no template', 'no template'],
+        ADDER: ['no template', 'no template'],
+        BUILTIN: ['no template', 'no template'],
+      },
+    },
+    { // CONTROL: an auth name
+      state: 'an auth name one package overrides', disabled: [],
+      protocol: {
+        omitted: ['ALPHA en-US', 'STORED fr-FR'],
+        null: ['ALPHA en-US', 'STORED fr-FR'],
+        ALPHA: ['ALPHA en-US', 'STORED fr-FR'],
+        BETA: ['ALPHA en-US', 'STORED fr-FR'],
+        BOTH: ['ALPHA en-US', 'STORED fr-FR'],
+        VIA_ALPHA: ['ALPHA en-US', 'STORED fr-FR'],
+        NEITHER: ['ALPHA en-US', 'STORED fr-FR'],
+        ADDER: ['409 [ADDER,ALPHA]', '409 [ADDER,ALPHA]'],
+        BUILTIN: ['ALPHA en-US', 'STORED fr-FR'],
+      },
+      registry: {
+        omitted: ['ALPHA en-US', 'ADDER fr-FR'],
+        null: ['ALPHA en-US', 'ADDER fr-FR'],
+        ALPHA: ['ALPHA en-US', 'ADDER fr-FR'],
+        BETA: ['ALPHA en-US', 'ADDER fr-FR'],
+        BOTH: ['ALPHA en-US', 'ADDER fr-FR'],
+        VIA_ALPHA: ['ALPHA en-US', 'ADDER fr-FR'],
+        NEITHER: ['ALPHA en-US', 'ADDER fr-FR'],
+        BUILTIN: ['ALPHA en-US', 'ADDER fr-FR'],
+      },
+    },
+    { // row 38
+      state: 'an auth name one package overrides', disabled: [ALPHA],
+      protocol: {
+        omitted: ['BUILTIN en-US', 'STORED fr-FR'],
+        null: ['BUILTIN en-US', 'STORED fr-FR'],
+        ALPHA: ['no template', 'no template'],
+        BETA: ['BUILTIN en-US', 'STORED fr-FR'],
+        BOTH: ['BUILTIN en-US', 'STORED fr-FR'],
+        VIA_ALPHA: ['BUILTIN en-US', 'STORED fr-FR'],
+        NEITHER: ['BUILTIN en-US', 'STORED fr-FR'],
+        ADDER: ['BUILTIN en-US', 'STORED fr-FR'],
+        BUILTIN: ['BUILTIN en-US', 'STORED fr-FR'],
+      },
+      registry: {
+        omitted: ['BUILTIN en-US', 'BUILTIN fr-FR'],
+        null: ['BUILTIN en-US', 'BUILTIN fr-FR'],
+        BETA: ['BUILTIN en-US', 'BUILTIN fr-FR'],
+        BOTH: ['BUILTIN en-US', 'BUILTIN fr-FR'],
+        VIA_ALPHA: ['BUILTIN en-US', 'BUILTIN fr-FR'],
+        NEITHER: ['BUILTIN en-US', 'BUILTIN fr-FR'],
+        ADDER: ['BUILTIN en-US', 'BUILTIN fr-FR'],
+        BUILTIN: ['BUILTIN en-US', 'BUILTIN fr-FR'],
+      },
+    },
+  ];
 
   describe.each(READS)('read: %s', (read) => {
-    describe.each(STATES)('%s', (state, shipped) => {
-      describe.each(ORDERS)('registered %s', (_order, reversed) => {
-        it('CONTROL — nothing disabled: each caller\'s ask is main\'s', async () => {
-          const asks = await asksOf(registryOf(shipped, reversed, []), read);
-          const comparable = Object.fromEntries(Object.entries(asks).map(([label, ask]) => [label,
-            'refused' in ask ? refused(...ask.candidates) : ask]));
-          expect(comparable).toEqual(MAIN(state));
-        });
-
-        const holders = [...new Set(shipped.map(([id]) => id))];
-        it.each(nonEmptySets(holders).map((set): [string, string[]] => [set.join(' + '), set]))(
-          '%s disabled: every caller asks the same address, or is refused the same, as with nothing disabled',
-          async (_label, disabled) => {
-            const enabled = await asksOf(registryOf(shipped, reversed, []), read);
-            expect(await asksOf(registryOf(shipped, reversed, disabled), read)).toEqual(enabled);
-          },
-        );
-      });
+    describe.each(ORDERS)('registered %s', (_order, reversed) => {
+      it.each(CASES.map((c): [string, typeof c] => [`${c.state}, ${c.disabled.length ? `${c.disabled.map((id) => SHORT[id]).join(' + ')} disabled` : 'nothing disabled'}`, c]))(
+        '%s: every caller\'s answer',
+        async (_label, c) => {
+          const { name, reg, protocol } = worldOf(STATES[c.state], c.disabled, reversed);
+          const loader = createRegistryEmailTemplateLoader(read === 'protocol' ? { protocol, registry: reg } : { registry: reg });
+          const answers: Answers = {};
+          for (const [label, caller] of CALLERS) {
+            answers[label] = [await answerOf(loader, name, caller, 'en-US'), await answerOf(loader, name, caller, 'fr-FR')];
+          }
+          expect(answers).toEqual(read === 'protocol' ? c.protocol : { ...c.protocol, ...c.registry });
+        },
+      );
     });
   });
-
   /**
    * [epic ruling R4-F] The built-in package as the caller, with nothing
    * disabled: a name the built-in and one package hold sends the package's

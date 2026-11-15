@@ -527,6 +527,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.currency.rateField': 'Rate field',
   'designer.field.currency.rateFieldNone': '— Pick a number field —',
   'designer.field.currency.homeAmountHint': "When a record is saved, the server converts this amount into the organization's home currency at the exchange rate in force on the document date, and stores the result and the rate it used. Lists the read-only fields that can hold them: a dynamic-mode currency field for the amount, a number field for the rate.",
+  'designer.field.currency.homeAmountHeld': 'Not saved yet: a home currency amount needs all three fields, or none. Still to pick: {missing}.',
   // Object basics (no-selection default inspector)
   'designer.object.kind': 'Object',
   'designer.object.section.basic': 'Basic info',
@@ -2622,6 +2623,8 @@ const STUDIO_EN: Record<string, string> = {
     'A save notice in this flow comes after a subflow that can pause, so this flow does not start. Move the save notice ahead of that step, or use a notify step.',
   'engine.studio.auto.unboundCause.suspending_subflow_in_region':
     'A subflow inside a loop, parallel branch or error handler calls a flow that can pause, so this flow does not start. Move that call onto the main path of the flow.',
+  'engine.studio.auto.unboundCause.retried_callout_in_subflow':
+    'This flow runs after a record is saved, and a subflow it calls retries a call to an outside service, so a save could wait through every retry. This flow does not start. In that subflow, send the request in the background or remove the retry.',
   'engine.studio.auto.unboundCause.missing_trigger':
     'This deployment does not run flows started by this kind of trigger. A developer can add the trigger package to the app, and the flow will start running.',
   'engine.studio.auto.unboundCause.binding_failure':

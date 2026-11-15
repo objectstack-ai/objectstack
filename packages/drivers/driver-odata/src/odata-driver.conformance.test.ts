@@ -45,6 +45,8 @@ import {
   FILTER_COMPARAND_TYPE_ROWS,
   FILTER_LOGIC_CASES,
   FILTER_LOGIC_ROWS,
+  FILTER_STRING_STORED_COMPARAND_CASES,
+  FILTER_STRING_STORED_COMPARAND_ROWS,
   FILTER_TEXT_CASES,
   FILTER_TEXT_ROWS,
   PAGINATION_ALL_IDS,
@@ -200,6 +202,25 @@ for (const version of VERSIONS) {
             expect(err, c.note).toMatchObject({ code: c.code, status: 400 });
             for (const mention of c.mustMention) expect((err as Error).message).toContain(mention);
           }
+        });
+      }
+    });
+
+    // [#29486] Through the engine, as written: the engine's declared-type door narrows a number
+    // or boolean comparand on the text and select fields to the stored string before the
+    // OData filter is built, so the as-written filter answers the case's rows end to end.
+    describe('FILTER_STRING_STORED_COMPARAND_CASES', () => {
+      const setup = () => boot({
+        version,
+        collation,
+        properties: [STRING('id', false), STRING('code'), STRING('stage')],
+        rows: FILTER_STRING_STORED_COMPARAND_ROWS,
+        fields: { code: text, stage: { type: 'select' } },
+      });
+      for (const c of FILTER_STRING_STORED_COMPARAND_CASES) {
+        it(c.name, async () => {
+          const { engine } = await setup();
+          expect(sortedIds(await engine.find(OBJECT, { where: c.filter(), ...SYSTEM } as never)), c.note).toEqual([...c.expected]);
         });
       }
     });

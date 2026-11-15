@@ -65,6 +65,15 @@ export const PENDING_AUTHORIZATION_TTL_SECONDS = 600;
 /** What a begun connect remembers until its callback. ⛔ Never leaves the server. */
 export interface PendingAuthorization {
     readonly connector: string;
+    /**
+     * [ADR-0150 D4, #31699] The package of the instance the connect was begun
+     * for: a package id, or `null` for an instance the environment authored or
+     * a plugin registers (never omitted for those, so "no package" is told
+     * apart from "not recorded"). The callback completes exactly that
+     * instance. Absent only on a record written before the package was
+     * recorded; such a record resolves the name, for the TTL it has left.
+     */
+    readonly packageId?: string | null;
     readonly organizationId: string;
     readonly userId: string;
     /** The PKCE verifier (RFC 7636 §4.1) — sent only to the token endpoint, with the code. */

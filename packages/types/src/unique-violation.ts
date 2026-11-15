@@ -306,6 +306,26 @@ function bareIdentifier(raw: string): string {
 const IMPLIED_ORGANIZATION_KEY_PART = 'organization_id';
 
 /**
+ * One dialect's list of constraint targets as the key's column names, or
+ * `undefined` when any part is not determinably a column (an expression part,
+ * a quoted oddity).
+ *
+ * `setAsideOrganization` is {@link uniqueViolationField}'s question: the
+ * implied organization key part is dropped first, so
+ * `(organization_id, invoice_no)` answers `['invoice_no']`, and a key whose
+ * ONLY part is `organization_id` still answers that column.
+ */
+function keyColumns(targets: string, setAsideOrganization: boolean): string[] | undefined {
+    const names = targets.split(',').map(bareIdentifier);
+    const counted =
+        setAsideOrganization && names.length > 1
+            ? names.filter((name) => name !== IMPLIED_ORGANIZATION_KEY_PART)
+            : names;
+    if (counted.length === 0 || !counted.every((name) => PLAIN_IDENTIFIER.test(name))) return undefined;
+    return counted;
+}
+
+/**
  * Reduce one dialect's list of constraint targets to THE conflicting column,
  * or `undefined` when there is not exactly one that is determinably a column.
  *
@@ -314,33 +334,38 @@ const IMPLIED_ORGANIZATION_KEY_PART = 'organization_id';
  * returning an index name — it points a form at `tenant_id` when what the user
  * typed twice was `email`.
  *
- * `setAsideOrganization` is {@link uniqueViolationField}'s question: the
- * implied organization key part is dropped before counting, so
- * `(organization_id, invoice_no)` answers `invoice_no`, while
- * `(organization_id, department, code)` still answers `undefined` and a key
- * whose ONLY part is `organization_id` still answers that column.
+ * With `setAsideOrganization`, `(organization_id, invoice_no)` answers
+ * `invoice_no`, while `(organization_id, department, code)` still answers
+ * `undefined` — see {@link keyColumns}.
  */
 function soleColumn(targets: string, setAsideOrganization: boolean): string | undefined {
-    const names = targets.split(',').map(bareIdentifier);
-    const counted =
-        setAsideOrganization && names.length > 1
-            ? names.filter((name) => name !== IMPLIED_ORGANIZATION_KEY_PART)
-            : names;
-    if (counted.length !== 1) return undefined;
-    const [name] = counted;
-    return PLAIN_IDENTIFIER.test(name) ? name : undefined;
+    const columns = keyColumns(targets, setAsideOrganization);
+    return columns !== undefined && columns.length === 1 ? columns[0] : undefined;
 }
 
-function columnFromText(text: string, setAsideOrganization: boolean): string | undefined {
+/**
+ * The composite reading of one dialect's targets: the key's columns when there
+ * are AT LEAST TWO and every one is determinably a column, else `undefined`.
+ * A single column is {@link soleColumn}'s answer, never this one's.
+ */
+function compositeColumns(targets: string, setAsideOrganization: boolean): readonly string[] | undefined {
+    const columns = keyColumns(targets, setAsideOrganization);
+    return columns !== undefined && columns.length > 1 ? columns : undefined;
+}
+
+/** The reading a text's constraint targets are reduced by — {@link soleColumn} or {@link compositeColumns}. */
+type TargetReading<T> = (targets: string, setAsideOrganization: boolean) => T | undefined;
+
+function columnFromText<T>(text: string, setAsideOrganization: boolean, read: TargetReading<T>): T | undefined {
     const sqlite = SQLITE_TARGETS.exec(text);
     if (sqlite) {
         const targets = sqlite[1].trim();
         // `index 'idx_email_unique'` is an index name, not a column. Refuse.
-        return SQLITE_INDEX_FORM.test(targets) ? undefined : soleColumn(targets, setAsideOrganization);
+        return SQLITE_INDEX_FORM.test(targets) ? undefined : read(targets, setAsideOrganization);
     }
 
     const postgres = POSTGRES_DETAIL_TARGETS.exec(text);
-    if (postgres) return soleColumn(postgres[1], setAsideOrganization);
+    if (postgres) return read(postgres[1], setAsideOrganization);
 
     // MySQL deliberately has no limb here — see the doc comment on
     // `uniqueViolationColumn`. `Duplicate entry 'x' for key 'i'` names `i`,
@@ -348,26 +373,31 @@ function columnFromText(text: string, setAsideOrganization: boolean): string | u
     return undefined;
 }
 
-function findUniqueViolationColumn(error: unknown, depth: number, setAsideOrganization: boolean): string | undefined {
+function findUniqueViolationColumn<T>(
+    error: unknown,
+    depth: number,
+    setAsideOrganization: boolean,
+    read: TargetReading<T>,
+): T | undefined {
     if (error === null || error === undefined || depth > MAX_CAUSE_DEPTH) return undefined;
 
-    if (typeof error === 'string') return columnFromText(error, setAsideOrganization);
+    if (typeof error === 'string') return columnFromText(error, setAsideOrganization, read);
     if (typeof error !== 'object') return undefined;
 
     const err = error as { message?: unknown; detail?: unknown; cause?: unknown };
 
     if (typeof err.message === 'string') {
-        const fromMessage = columnFromText(err.message, setAsideOrganization);
+        const fromMessage = columnFromText(err.message, setAsideOrganization, read);
         if (fromMessage !== undefined) return fromMessage;
     }
     // node-postgres keeps the `DETAIL:` line off the message and on its own
     // field, so for the driver we actually ship this is where the column is.
     if (typeof err.detail === 'string') {
-        const fromDetail = columnFromText(err.detail, setAsideOrganization);
+        const fromDetail = columnFromText(err.detail, setAsideOrganization, read);
         if (fromDetail !== undefined) return fromDetail;
     }
 
-    return findUniqueViolationColumn(err.cause, depth + 1, setAsideOrganization);
+    return findUniqueViolationColumn(err.cause, depth + 1, setAsideOrganization, read);
 }
 
 /**
@@ -439,7 +469,7 @@ function findUniqueViolationColumn(error: unknown, depth: number, setAsideOrgani
  */
 export function uniqueViolationColumn(error: unknown): string | undefined {
     if (!isUniqueViolationError(error)) return undefined;
-    return findUniqueViolationColumn(error, 0, false);
+    return findUniqueViolationColumn(error, 0, false, soleColumn);
 }
 
 /**
@@ -490,5 +520,36 @@ export function uniqueViolationColumn(error: unknown): string | undefined {
  */
 export function uniqueViolationField(error: unknown): string | undefined {
     if (!isUniqueViolationError(error)) return undefined;
-    return findUniqueViolationColumn(error, 0, true);
+    return findUniqueViolationColumn(error, 0, true, soleColumn);
+}
+
+/**
+ * The columns of a COMPOSITE unique key the driver named, organization part
+ * set aside exactly as {@link uniqueViolationField} sets it aside — or
+ * `undefined` when the refusal is not determinably a composite of columns.
+ *
+ * This is the reading {@link uniqueViolationField} refuses to reduce to one
+ * field: SQLite's `UNIQUE constraint failed: t.organization_id, t.plant,
+ * t.cost_week` and Postgres' `Key (organization_id, plant, cost_week)=(…)`
+ * both answer `['plant', 'cost_week']`. It answers only where every part is a
+ * plain column name and at least two remain, so it never overlaps
+ * {@link uniqueViolationField}: a key that reduces to one field is that
+ * function's answer, and this one's `undefined`.
+ *
+ * ⛔ **Driver text is evidence, not a verdict.** The columns are what the store
+ * printed, and a column is not yet a field the writer can be told about: an
+ * object keyed on a `tenancy.tenantField` other than `organization_id` prints
+ * that column beside the authored ones, and the text cannot tell them apart.
+ * So a caller names these to a writer ONLY after matching the whole set to a
+ * unique index the object DECLARES (the engine's `DuplicateRecordError` does
+ * exactly that) — never by printing them as they come. Index names (MySQL,
+ * SQLite's `index 'x'`, a Postgres constraint name) and expression parts name
+ * nothing here either, for the reason {@link uniqueViolationColumn} gives.
+ *
+ * @param error - the thrown value, of any shape.
+ * @returns the composite key's columns in the driver's order, or `undefined`.
+ */
+export function uniqueViolationColumns(error: unknown): readonly string[] | undefined {
+    if (!isUniqueViolationError(error)) return undefined;
+    return findUniqueViolationColumn(error, 0, true, compositeColumns);
 }

@@ -16,8 +16,9 @@ import {
 } from '@objectstack/lint';
 
 import { applyInjectedSystemColumns } from '@objectstack/metadata-core';
+import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from '@objectstack/objectql/core';
 
-import { MCPServerRuntime } from './mcp-server-runtime.js';
+import { MCPServerRuntime, describeServedObject } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 
 /**
@@ -235,6 +236,10 @@ describe('validate_expression MCP tool (#1928)', () => {
         // [#33147] The start condition describes a flow; the field, a formula's.
         { site: 'validation', startCondition: 'true' },
         { startCondition: 'true' },
+        // [#33176] …and so do the flow's declared variables.
+        { site: 'validation', variables: [{ name: 'title', type: 'text' }] },
+        { site: 'template', variables: [{ name: 'title', type: 'text' }] },
+        { variables: [] },
         { site: 'validation', field: 'title' },
         { site: 'flow_condition', field: 'title' },
         { site: 'template', field: 'title' },
@@ -655,7 +660,11 @@ describe("validate_expression answers the gate's own passes at validation and fo
   const flowGateOn = (
     objectName: string,
     expression: string,
-    { kind = 'record', startCondition }: { kind?: 'record' | 'schedule'; startCondition?: string } = {},
+    {
+      kind = 'record',
+      startCondition,
+      variables,
+    }: { kind?: 'record' | 'schedule'; startCondition?: string; variables?: Array<Record<string, unknown>> } = {},
   ) => {
     const { validations: _own, ...subject } = OBJECTS[objectName]!;
     const others = Object.keys(OBJECTS).filter((n) => n !== objectName).map((n) => OBJECTS[n]!);
@@ -667,6 +676,7 @@ describe("validate_expression answers the gate's own passes at validation and fo
       flows: [{
         name: 'g',
         type: 'autolaunched',
+        ...(variables ? { variables } : {}),
         nodes: [
           {
             id: 'start',
@@ -731,6 +741,68 @@ describe("validate_expression answers the gate's own passes at validation and fo
     expect(flowGateOn('gp_req', 'record.days > 3', { kind: 'schedule' }).filter(nullGuard)).toEqual([]);
     const r = await validate(runtime, gateBridge(), { objectName: 'gp_req', expression: 'record.days > 3', site: 'flow_condition', triggerKind: 'schedule' });
     expect([r.ok, r.errors, r.warnings]).toEqual([true, [], []]);
+  });
+
+  // ── [#33176] The flow's declared variables ──
+
+  /** A variable named like the text field `title`, which the run binds before it flattens the record. */
+  const SHADOWING = [{ name: 'title', type: 'number' }];
+
+  it("site flow_condition: given the flow's variables, a bare read of one is the variable — the gate's whole verdict", async () => {
+    const expression = 'title * 2 > 10';
+    // The gate, on a flow declaring `title`, its shared validator included:
+    // the shadowed-read warning, and no type verdict, since the bare name
+    // holds the variable, not the text field.
+    const gate = flowGateOn('gp_req', expression, { variables: SHADOWING });
+    expect(gate.map(([level]) => level)).toEqual(['warning']);
+    const r = await validate(runtime, gateBridge(), { objectName: 'gp_req', expression, site: 'flow_condition', variables: SHADOWING });
+    expect(r.ok).toBe(true);
+    expect(r.errors).toEqual([]);
+    expect(verdicts(r)).toEqual(gate);
+    // The finding names the variable and the object whose field it shadows.
+    expect([r.warnings[0].message.includes('`title`'), r.warnings[0].message.includes('`gp_req`')]).toEqual([true, true]);
+  });
+
+  it('site flow_condition: CONTROL — without the variables the bare name is the field, as before', async () => {
+    const args = { objectName: 'gp_req', expression: 'title * 2 > 10', site: 'flow_condition' };
+    const r = await validate(runtime, gateBridge(), args);
+    expect(r.ok).toBe(false);
+    expect(r.errors.map((e: { code: string }) => e.code)).toEqual(['type-mismatch-run-fails']);
+    expect(r.warnings).toEqual([]);
+    // …the answer the shared validator alone gives, the gate adding nothing.
+    expect(r).toEqual(await validate(runtime, gateBridge(false), args));
+  });
+
+  it('site flow_condition: the shadowed-read warning is the gate\'s after a start condition too', async () => {
+    const startCondition = 'record.days != null';
+    const gate = flowGateOn('gp_req', "title == 'x'", { startCondition, variables: SHADOWING });
+    expect(gate.map(([level]) => level)).toEqual(['warning']);
+    const r = await validate(runtime, gateBridge(), {
+      objectName: 'gp_req', expression: "title == 'x'", site: 'flow_condition', startCondition, variables: SHADOWING,
+    });
+    expect(verdicts(r)).toEqual(gate);
+  });
+
+  it('site flow_condition: a variable named like no field of the object gets no warning', async () => {
+    const variables = [{ name: 'threshold', type: 'number' }];
+    for (const expression of ['threshold > 3', "record.title == 'x' && threshold > 3"]) {
+      expect(flowGateOn('gp_req', expression, { variables }), expression).toEqual([]);
+      const r = await validate(runtime, gateBridge(), { objectName: 'gp_req', expression, site: 'flow_condition', variables });
+      expect([r.ok, r.errors, r.warnings], expression).toEqual([true, [], []]);
+    }
+  });
+
+  it('site flow_condition: a variable is judged by the spec\'s own flow-variable shape', async () => {
+    for (const variable of [{ name: 'title' }, { name: '$record', type: 'object' }, { name: 'title', type: 'text', input: true }]) {
+      const { json } = await call(
+        runtime,
+        toolsCall(1, 'validate_expression', { objectName: 'gp_req', expression: "title == 'x'", site: 'flow_condition', variables: [variable] }),
+        gateBridge(),
+      );
+      const { result } = json as { result: { isError?: boolean; content: { text: string }[] } };
+      expect(result.isError, JSON.stringify(variable)).toBe(true);
+    }
+    expect(reads).toEqual([]);
   });
 
   it('site flow_condition: CONTROL — a clean condition answers as the definition-less bridge does', async () => {
@@ -846,5 +918,63 @@ describe('validate_expression judges the field being authored at the formula sit
       bridge(),
     );
     expect((json as { result: { isError?: boolean } }).result.isError).toBe(true);
+  });
+});
+
+describe('validate_expression keeps the hidden search companion out of scope', () => {
+  // A field-scoped search object as the registry serves it with pinyin search
+  // on: the companion stamped beside the declared fields, then projected the
+  // way the transports project it.
+  const authored = {
+    name: 'sc_contact',
+    label: 'Contact',
+    fields: {
+      name: { type: 'text', label: 'Name', required: true },
+      email: { type: 'email', label: 'Email' },
+    },
+  };
+  const served = provisionSearchCompanion(applyInjectedSystemColumns(authored));
+  const bridge = (): McpDataBridge => ({
+    ...makeBridge(),
+    async listObjects() {
+      return [{ name: 'sc_contact', label: 'Contact', fieldCount: Object.keys(served.fields).length }];
+    },
+    async describeObject(name: string) {
+      return name === 'sc_contact' ? describeServedObject(served as never) : null;
+    },
+  });
+
+  let runtime: MCPServerRuntime;
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
+  });
+
+  it('the served object really carries the companion (precondition)', () => {
+    expect(Object.keys(served.fields)).toContain(SEARCH_COMPANION_FIELD);
+  });
+
+  it('inScope.fields lists the ordinary fields and no companion', async () => {
+    const r = await validate(runtime, bridge(), { objectName: 'sc_contact', expression: "record.name != ''", site: 'validation' });
+    expect(r.ok).toBe(true);
+    expect(r.inScope.fields).toContain('name');
+    expect(r.inScope.fields).toContain('email');
+    expect(r.inScope.fields).toContain('created_at');
+    expect(r.inScope.fields).not.toContain(SEARCH_COMPANION_FIELD);
+  });
+
+  it('a read of the companion is refused as a field the object does not have, as os validate refuses it', async () => {
+    const expression = `record.${SEARCH_COMPANION_FIELD} != ''`;
+    const gate = validateStackExpressions({
+      objects: [{ ...authored, validations: [{ name: AUTHORED_RULE_NAME, type: 'script', condition: expression, message: 'm' }] }],
+    }).filter((i) => i.where.includes(`'${AUTHORED_RULE_NAME}'`));
+    expect(gate.map((i) => i.severity ?? 'error')).toEqual(['error']);
+    expect(gate[0]!.message).toContain(SEARCH_COMPANION_FIELD);
+
+    for (const site of ['validation', 'formula', 'flow_condition'] as const) {
+      const r = await validate(runtime, bridge(), { objectName: 'sc_contact', expression, site });
+      expect(r.ok, site).toBe(false);
+      const refused = r.errors.filter((e: { code?: string }) => e.code === 'unknown-field');
+      expect(refused.map((e: { params?: { field?: string } }) => e.params?.field), site).toEqual([SEARCH_COMPANION_FIELD]);
+    }
   });
 });

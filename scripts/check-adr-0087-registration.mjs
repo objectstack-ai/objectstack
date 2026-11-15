@@ -503,6 +503,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'IX (#26220): predicate 4 reads an `any` index signature; the entry may be `src/index.tsx`': 52,
   'WP (#26220): a deleted published package is retired whole, `<package>#*`': 59,
   'DX (#26324): an export named `default` is reached through an import, never through the word': 19,
+  'SP (#30598): a LITERAL subpath key of the `exports` map, `<package>/<subpath>#...`': 80,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -4514,6 +4515,24 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
 // is the package itself and predicate 1 is proven about the package (see
 // `verifyWholePackageRetired`); its FROM -> TO block names the package on one line.
 //
+// The same three, on a LITERAL subpath key of the package's `exports` map (D9,
+// amended 2026-11-14: the maintainer's decision A, narrowed, on #30598, record
+// 6885400963 -- "only literal subpath keys"):
+//
+//   <package>/<subpath>#<Export>          a retired export of the `./<subpath>` entry
+//   <package>/<subpath>#<Type>.<member>   a retired member of a type it exports
+//   <package>/<subpath>#*                 the `./<subpath>` key LEFT the map at HEAD,
+//                                         the package staying (`verifySubpathRetired`);
+//                                         its FROM line names `<package>/<subpath>`
+//
+// The key's entry is read exactly as the root's is, through `resolveTypesEntry`
+// and tsup's convention generalised from `index` to the key's file: `dist/<p>.d.ts`
+// (or a twin) from exactly one of `src/<p>.ts` / `src/<p>.tsx`. A WILDCARD key
+// (`./locales/*`) is refused BY NAME -- an operand that only a wildcard reaches, and
+// an operand spelling a `*` in its subpath -- and so is a key whose entry is not a
+// TypeScript declaration (`./style.css`, `./openapi.json`) and one that cannot be
+// mapped. Nothing resolves a wildcard pattern; that waits on a second case.
+//
 // The PACKAGE is named, never a file: "reachable from the published entry" is a
 // fact about the package, and a declaration can move between files without the
 // export moving. ⛔ A member is addressed by that canonical spelling ONLY. Nothing
@@ -4576,9 +4595,11 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
 // inferring that set is the cross-package retirement detector the 2026-08-07 ruling
 // routes around.
 //
-// **A subpath entry (`@scope/pkg/sub`).** Only the root entry is read; a retirement
-// from a subpath names no operand this category can verify, so it is refused at the
-// mapping step rather than assumed.
+// **A wildcard subpath key (`@scope/pkg/locales/*`).** Only the root entry and
+// literal subpath keys are read; an operand only a wildcard key reaches is refused
+// at the mapping step, by name, rather than resolved or assumed (#30598, ruling A
+// narrowed). Nor is a re-export of ANOTHER package's subpath followed: as before,
+// it is an `export *` this reader cannot follow, which refuses an absence claim.
 //
 // **A static member of a class.** A member operand reads the declared (instance)
 // type of a class, interface or type alias, and the value type of anything else.
@@ -4599,29 +4620,71 @@ const PACKAGE_NAME_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 /** `Export` or `Type.member` -- one level deep, never more. */
 const EXPORT_SPELLING_RE = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?$/;
 
+/** One segment of a literal subpath key: no `*`, no empty, `.` or `..` segment. */
+const SUBPATH_SEGMENT_RE = /^[A-Za-z0-9_~-][A-Za-z0-9._~-]*$/;
+
 /**
- * `<package>#<Export>` / `<package>#<Type>.<member>` / `<package>#*` -> its parts,
- * or a refusal.
+ * A bare import specifier -> the package it names and the `exports` key it reads,
+ * or null. `@scope/pkg` and `pkg` read `.`; `@scope/pkg/a/b` reads `./a/b`. Only
+ * the shape is judged here; whether the key exists is `sourceEntryAt`'s question.
+ *
+ * @param {string} specifier
+ * @returns {{ pkg: string, subpath: string } | null}
+ */
+export function splitPackageSpecifier(specifier) {
+  const segments = specifier.split('/');
+  const n = specifier.startsWith('@') ? 2 : 1;
+  if (segments.length < n) return null;
+  const pkg = segments.slice(0, n).join('/');
+  if (!PACKAGE_NAME_RE.test(pkg)) return null;
+  const rest = segments.slice(n);
+  return { pkg, subpath: rest.length === 0 ? '.' : `./${rest.join('/')}` };
+}
+
+/**
+ * `<package>[/<subpath>]#<Export>` / `#<Type>.<member>` / `#*` -> its parts, or a
+ * refusal.
  *
  * `<package>#*` is a WHOLE package (D9, amended 2026-10-27): its `spelling` is the
- * package name, because that is what its one FROM line names.
+ * package name, because that is what its one FROM line names. `<package>/<subpath>#*`
+ * is a whole subpath KEY (D9, amended 2026-11-14, #30598): its `spelling` is the
+ * specifier `<package>/<subpath>`, for the same reason. `subpath` is the `exports`
+ * key the operand reads: `.` for the root, `./<subpath>` for a literal key. A
+ * subpath spelling a `*` is a WILDCARD key and is refused by name (the ruling's
+ * "only literal subpath keys").
  *
  * @param {string} ref
- * @returns {{ pkg: string, spelling: string, exportName: string|null, member: string|null, whole: boolean } | { refusal: string }}
+ * @returns {{ pkg: string, subpath: string, specifier: string, spelling: string, exportName: string|null,
+ *             member: string|null, whole: boolean } | { refusal: string }}
  */
 export function parseExportOperand(ref) {
   const at = ref.lastIndexOf('#');
-  const pkg = at > 0 ? ref.slice(0, at) : '';
+  const specifier = at > 0 ? ref.slice(0, at) : '';
   const spelling = at > 0 ? ref.slice(at + 1) : '';
-  if (at <= 0 || !PACKAGE_NAME_RE.test(pkg)) {
+  const split = at > 0 ? splitPackageSpecifier(specifier) : null;
+  const FORMS = '`<package>#<Export>`, `<package>#<Type>.<member>` or `<package>#*` reference, with an optional\n' +
+    '      literal `exports` key after the package (`<package>/<subpath>#<Export>`)';
+  const namesFile = /[\\/][^#]*\.[cm]?tsx?(?:#|$)/.test(ref);
+  if (split === null || (split.subpath !== '.' && namesFile)) {
     return {
-      refusal: /[\\/][^#]*\.[cm]?tsx?(?:#|$)/.test(ref)
-        ? `names a FILE (${pkg || ref}). This category names the PACKAGE whose published entry exported the operand,\n` +
+      refusal: namesFile
+        ? `names a FILE (${specifier || ref}). This category names the PACKAGE whose published entry exported the operand,\n` +
           '      because "reachable from the published entry" is a fact about the package, not about a file'
-        : 'is not a `<package>#<Export>`, `<package>#<Type>.<member>` or `<package>#*` reference',
+        : `is not a ${FORMS}`,
     };
   }
-  if (spelling === '*') return { pkg, spelling: pkg, exportName: null, member: null, whole: true };
+  const { pkg, subpath } = split;
+  if (subpath !== '.') {
+    const segments = subpath.slice(2).split('/');
+    if (segments.some((s) => s.includes('*'))) {
+      return {
+        refusal: `names the WILDCARD subpath \`${subpath}\` of \`${pkg}\`. Only a LITERAL key of the package's \`exports\`\n` +
+          '      map is read (ADR-0087 D9, amended 2026-11-14: wildcard keys are refused by name, never resolved)',
+      };
+    }
+    if (!segments.every((s) => SUBPATH_SEGMENT_RE.test(s))) return { refusal: `is not a ${FORMS}` };
+  }
+  if (spelling === '*') return { pkg, subpath, specifier, spelling: specifier, exportName: null, member: null, whole: true };
   if (!EXPORT_SPELLING_RE.test(spelling)) {
     return {
       refusal: /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*){2,}$/.test(spelling)
@@ -4631,7 +4694,7 @@ export function parseExportOperand(ref) {
     };
   }
   const [exportName, member = null] = spelling.split('.');
-  return { pkg, spelling, exportName, member, whole: false };
+  return { pkg, subpath, specifier, spelling, exportName, member, whole: false };
 }
 
 /**
@@ -4824,6 +4887,8 @@ export async function loadExportReader() {
 
 /** tsup's declaration entry, and the `.d.mts` / `.d.cts` twins it writes beside it. */
 const TSUP_DTS_ENTRY_RE = /^dist\/index\.d\.[cm]?ts$/;
+/** The same convention for a subpath key (#30598): `dist/<p>.d.ts` or a twin, `<p>` captured. */
+const SUBPATH_DTS_ENTRY_RE = /^dist\/(.+)\.d\.[cm]?ts$/;
 /** The source files that entry may be generated from: exactly one must exist (D9, amended 2026-10-27, #26220). */
 const SOURCE_ENTRY_NAMES = Object.freeze(['src/index.ts', 'src/index.tsx']);
 /** Where a rev's blobs live inside the compiler's file system. Never a real path. */
@@ -4831,7 +4896,27 @@ const VIRTUAL_ROOT = '/__adr0087__/';
 const TS_SOURCE_RE = /\.(?:d\.)?[cm]?tsx?$/;
 
 /**
- * The repo-relative SOURCE entry of a workspace package at a rev, or a refusal.
+ * The WILDCARD keys of an `exports` map that match `subpath` (Node's one-`*`
+ * pattern: the text before the `*` opens it, the text after closes it), in map
+ * order. Read only to REFUSE by name (#30598): a wildcard key is never resolved.
+ *
+ * @param {unknown} map the manifest's `exports`
+ * @param {string} subpath `./<subpath>`
+ * @returns {string[]}
+ */
+export function wildcardKeysMatching(map, subpath) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return [];
+  return Object.keys(map).filter((key) => {
+    if (!key.startsWith('./') || !key.includes('*')) return false;
+    const star = key.indexOf('*');
+    const [pre, post] = [key.slice(0, star), key.slice(star + 1)];
+    return subpath.length > pre.length + post.length - 1 && subpath.startsWith(pre) && subpath.endsWith(post);
+  });
+}
+
+/**
+ * The repo-relative SOURCE entry of a workspace package at a rev -- of its root
+ * entry, or of one LITERAL subpath key -- or a refusal.
  *
  * Only the mapping the ruling names: the package's `exports` map, read by
  * `resolveTypesEntry`, lands on `dist/index.d.ts` (or its tsup twin), generated
@@ -4840,8 +4925,19 @@ const TS_SOURCE_RE = /\.(?:d\.)?[cm]?tsx?$/;
  * the `.tsx`). Anything else -- no types entry, another file name, neither
  * source, BOTH sources -- is refused by name rather than guessed. The build tool
  * is never asked: the source file's name is the fact read here.
+ *
+ * A subpath key (`./<sub>`, D9 amended 2026-11-14, #30598) reads the same way with
+ * the key's own file in place of `index`: its types entry `dist/<p>.d.ts` (or a
+ * twin) is generated from exactly one of `src/<p>.ts` / `src/<p>.tsx`. Refused by
+ * name: a key reached only through a WILDCARD key, a key absent from the map
+ * (`keyAbsent: true`, which is what a retired key looks like at HEAD; `noExportsMap: true`
+ * beside it when the manifest has no `exports` map or `"exports": null`), a key whose
+ * entry is no TypeScript declaration (`./style.css`), and a key that cannot be
+ * mapped or maps ambiguously.
+ *
+ * @returns {{ refusal: string, keyAbsent?: boolean, noExportsMap?: boolean } | { entry: string, dir: string }}
  */
-function sourceEntryAt(rev, cwd, pkgName, pkgs, kit) {
+export function sourceEntryAt(rev, cwd, pkgName, pkgs, kit, subpath = '.') {
   const info = pkgs.get(pkgName);
   if (!info) return { refusal: `no workspace manifest at ${rev.slice(0, 12)} is named \`${pkgName}\`` };
   if (info.private) {
@@ -4852,8 +4948,9 @@ function sourceEntryAt(rev, cwd, pkgName, pkgs, kit) {
   }
   let manifest;
   try { manifest = JSON.parse(showOrNull(rev, info.file, cwd) ?? ''); } catch { return { refusal: `${info.file} does not parse at ${rev.slice(0, 12)}` }; }
-  const declared = kit.resolveTypesEntry(manifest, '.').entry?.replace(/^\.\//, '') ?? null;
   const dir = info.file.slice(0, -'package.json'.length);
+  if (subpath !== '.') return subpathSourceEntry(rev, cwd, pkgName, manifest, dir, subpath, kit);
+  const declared = kit.resolveTypesEntry(manifest, '.').entry?.replace(/^\.\//, '') ?? null;
   const present = SOURCE_ENTRY_NAMES.map((name) => `${dir}${name}`).filter((p) => showOrNull(rev, p, cwd) !== null);
   if (declared !== null && TSUP_DTS_ENTRY_RE.test(declared) && present.length > 1) {
     return {
@@ -4869,6 +4966,61 @@ function sourceEntryAt(rev, cwd, pkgName, pkgs, kit) {
         `      names ${declared === null ? 'no types entry' : `\`${declared}\``}, and the only mapping this gate reads is\n` +
         `      \`dist/index.d.ts\` (or its \`.d.mts\` / \`.d.cts\` twin) -> \`src/index.ts\` or \`src/index.tsx\`` +
         (declared !== null && TSUP_DTS_ENTRY_RE.test(declared) ? `, and neither ${dir}src/index.ts nor ${dir}src/index.tsx exists there` : '') + '.\n' +
+        '      An entry this gate cannot map is refused, never guessed',
+    };
+  }
+  return { entry: present[0], dir };
+}
+
+/** `sourceEntryAt` for a literal subpath key (#30598). */
+function subpathSourceEntry(rev, cwd, pkgName, manifest, dir, subpath, kit) {
+  const short = rev.slice(0, 12);
+  const { entry, declared } = kit.resolveTypesEntry(manifest, subpath);
+  if (!declared) {
+    const wild = wildcardKeysMatching(manifest.exports, subpath);
+    if (wild.length > 0) {
+      return {
+        refusal: `\`${pkgName}\` reaches \`${subpath}\` at ${short} only through the WILDCARD key ${wild.map((k) => `\`${k}\``).join(', ')} of its\n` +
+          '      `exports` map. Only a LITERAL key is read (ADR-0087 D9, amended 2026-11-14): a wildcard key is\n' +
+          '      refused by name, never resolved',
+      };
+    }
+    // `"exports": null` is no map, exactly as an absent field is: Node and
+    // TypeScript both read it as absent, and every file is importable by path.
+    const noExportsMap = manifest.exports == null;
+    return {
+      keyAbsent: true,
+      noExportsMap,
+      refusal: `the \`exports\` map of \`${pkgName}\` has no \`${subpath}\` key at ${short}` +
+        (noExportsMap ? ` (it declares no \`exports\` map at all${manifest.exports === null ? ': `"exports": null` reads as absent' : ''})` : ''),
+    };
+  }
+  if (entry === null) {
+    return {
+      refusal: `the \`${subpath}\` key of \`${pkgName}\` names no TypeScript declaration entry at ${short}\n` +
+        `      (${JSON.stringify(manifest.exports[subpath]).slice(0, 100)}): none of its conditions names a \`.d.ts\`,\n` +
+        '      `.d.mts` or `.d.cts` file -- a stylesheet, a JSON file or a TS SOURCE file is not one -- so this gate has\n' +
+        '      no declaration entry to map to a source and nothing on it to read. Refused by name',
+    };
+  }
+  const declaredEntry = entry.replace(/^\.\//, '');
+  const m = SUBPATH_DTS_ENTRY_RE.exec(declaredEntry);
+  const stem = m ? m[1] : null;
+  const names = stem === null ? [] : [`src/${stem}.ts`, `src/${stem}.tsx`];
+  const present = names.map((name) => `${dir}${name}`).filter((p) => showOrNull(rev, p, cwd) !== null);
+  if (present.length > 1) {
+    return {
+      refusal: `the \`${subpath}\` entry of \`${pkgName}\` is AMBIGUOUS at ${short}: its \`exports\` key names \`${declaredEntry}\`,\n` +
+        `      and the package carries BOTH ${present.join(' and ')}. The mapping reads ONE source entry\n` +
+        '      (ADR-0087 D9, amended 2026-11-14). Delete the stale one. Refused, never guessed',
+    };
+  }
+  if (present.length === 0) {
+    return {
+      refusal: `the \`${subpath}\` entry of \`${pkgName}\` cannot be mapped to its source at ${short}: its \`exports\` key\n` +
+        `      names \`${declaredEntry}\`, and the only mapping this gate reads for a subpath key is \`dist/<p>.d.ts\` (or\n` +
+        '      its `.d.mts` / `.d.cts` twin) -> `src/<p>.ts` or `src/<p>.tsx`' +
+        (stem !== null ? `, and neither ${dir}src/${stem}.ts nor ${dir}src/${stem}.tsx exists there` : '') + '.\n' +
         '      An entry this gate cannot map is refused, never guessed',
     };
   }
@@ -4939,6 +5091,54 @@ function verifyWholePackageRetired(pkg, { base, head, cwd, packagesAt, kit }) {
 }
 
 /**
+ * Predicate 1 for a whole SUBPATH KEY, `<package>/<subpath>#*` (D9, amended
+ * 2026-11-14: the maintainer's decision A, narrowed, on #30598): the key LEFT the
+ * package's `exports` map at HEAD while the package stayed.
+ *
+ * At the merge base the key is a LITERAL key whose entry maps (`sourceEntryAt`,
+ * read by the caller as `at`): a wildcard-only, non-TS or unmappable key is refused
+ * there as it is for any operand. At HEAD the package is still a workspace member
+ * (a deleted one is `<package>#*`), it declares an `exports` map (without one every
+ * file is importable by path, so no key's absence proves anything), the key is not
+ * in that map, and no wildcard key reaches it. Every one that fails is named.
+ *
+ * @returns {{ refusal: string } | { file: string, dir: string }}
+ */
+function verifySubpathRetired(op, at, { head, cwd, packagesAt }) {
+  if (at.refusal) return { refusal: `\`${op.specifier}\` has no published entry this gate can read at the merge base:\n      ${at.refusal}` };
+  const info = packagesAt(head).get(op.pkg);
+  if (!info) {
+    return {
+      refusal: `the package \`${op.pkg}\` itself is gone from the workspace at HEAD. A published package DELETED at HEAD\n` +
+        `      is retired whole, on one operand: \`${op.pkg}#*\` (ADR-0087 D9, amended 2026-10-27)`,
+    };
+  }
+  let manifest;
+  try { manifest = JSON.parse(showOrNull(head, info.file, cwd) ?? ''); } catch { return { refusal: `${info.file} does not parse at HEAD` }; }
+  const map = manifest.exports;
+  // `"exports": null` reads as absent to Node and TypeScript alike (#30598 review).
+  if (map == null) {
+    return {
+      refusal: `\`${op.pkg}\` declares no \`exports\` map at HEAD${map === null ? ' (`"exports": null` reads as absent)' : ''}, so every file in it is\n` +
+        `      importable by path and the absence of a \`${op.subpath}\` key proves nothing left the published surface`,
+    };
+  }
+  const present = [];
+  if (map && typeof map === 'object' && !Array.isArray(map) && Object.prototype.hasOwnProperty.call(map, op.subpath)) {
+    present.push(`its \`exports\` map (${info.file}) still has the \`${op.subpath}\` key`);
+  }
+  const wild = wildcardKeysMatching(map, op.subpath);
+  if (wild.length > 0) present.push(`the WILDCARD key ${wild.map((k) => `\`${k}\``).join(', ')} still reaches it`);
+  if (present.length > 0) {
+    return {
+      refusal: `\`${op.specifier}\` is still published at HEAD -- the proof is that the \`${op.subpath}\` key left the\n` +
+        `      \`exports\` map of \`${op.pkg}\`, and here:\n` + present.map((p) => `        - ${p}`).join('\n'),
+    };
+  }
+  return { file: info.file, dir: at.dir.replace(/\/$/, '') };
+}
+
+/**
  * Predicate 2 for a whole package: the first metadata surface OUTSIDE `pkgDir` whose
  * CODE names `pkg`, or null -- D9's "no metadata surface references it in code",
  * read as `metadataSurfaceReference` reads an export: comment spans blanked, string
@@ -4979,7 +5179,8 @@ export function packageReference(pkg, pkgDir, surfaceTexts) {
 }
 
 /**
- * What a package's published entry exports at a rev, read by the compiler.
+ * What a package's published entry -- its root, or one literal subpath key
+ * (#30598) -- exports at a rev, read by the compiler.
  *
  * A Program is built over the package's source entry with a CompilerHost that
  * serves the rev's BLOBS (never the working tree), so the base and HEAD readings
@@ -4990,12 +5191,12 @@ export function packageReference(pkg, pkgDir, surfaceTexts) {
  * -- an unresolved `export *` is recorded instead, because a name could hide
  * behind it.
  *
- * @returns {{ refusal: string } | { pkg: string, entry: string, names: Map<string, object>,
+ * @returns {{ refusal: string } | { pkg: string, entry: string, dir: string, sourceFiles: string[], names: Map<string, object>,
  *            unresolvedStars: {file: string, specifier: string}[], checker: object, entryFile: object,
  *            fromVirtual: (f: string) => string|null }}
  */
-function readExportSurface(rev, cwd, pkgName, pkgs, kit) {
-  const mapped = sourceEntryAt(rev, cwd, pkgName, pkgs, kit);
+function readExportSurface(rev, cwd, pkgName, pkgs, kit, subpath = '.') {
+  const mapped = sourceEntryAt(rev, cwd, pkgName, pkgs, kit, subpath);
   if (mapped.refusal) return mapped;
   const { ts } = kit;
   const texts = new Map();
@@ -5081,7 +5282,11 @@ function readExportSurface(rev, cwd, pkgName, pkgs, kit) {
     }
   };
   walk(entryFile);
-  return { pkg: pkgName, entry: mapped.entry, names, unresolvedStars, checker, entryFile, fromVirtual };
+  // The package's own files the entry's Program reached: what a whole SUBPATH key
+  // retires (#30598), read by predicate 2 as a whole package's files are.
+  const sourceFiles = program.getSourceFiles().map((sf) => fromVirtual(sf.fileName))
+    .filter((f) => f !== null && f.startsWith(mapped.dir));
+  return { pkg: pkgName, entry: mapped.entry, dir: mapped.dir, names, unresolvedStars, checker, entryFile, fromVirtual, sourceFiles };
 }
 
 /** The symbol an export resolves to, through every re-export alias. */
@@ -5144,7 +5349,7 @@ const FROM_BLOCK_READS =
  * Verify one `runtime-export-retired` claim: the three predicates, all three, by
  * name, every failure reported (the `verifyTypeSurfaceOnly` discipline).
  *
- * @param {string[]} refs the `<package>#<Export>` / `<package>#<Type>.<member>` operands
+ * @param {string[]} refs the `<package>[/<subpath>]#<Export>` / `#<Type>.<member>` / `#*` operands
  * @param {{ base: string, head: string, cwd: string, body: string,
  *           packagesAt: (rev: string) => Map<string, {private: boolean, file: string}>,
  *           kit?: object }} ctx `kit` defaults to the loaded `exportReaderKit`
@@ -5158,7 +5363,8 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
   const HOW =
     '      fix: name each retired operand by the package that published it, e.g.\n' +
     '        <!-- adr-0087: not-required (runtime-export-retired @objectstack/plugin-email#mapTemplateToRow,\n' +
-    '             @objectstack/plugin-email#EmailServicePluginOptions.seedTemplates) why -->';
+    '             @objectstack/plugin-email#EmailServicePluginOptions.seedTemplates) why -->\n' +
+    '      and an export of a LITERAL `exports` key after the package: `@objectstack/cli/console#Name`.';
   if (!kit) throw new Error('verifyRuntimeExportRetired: the export reader is not loaded -- await loadExportReader() first');
   const { ts } = kit;
 
@@ -5181,9 +5387,9 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
   // ---- predicate 1: retired from the published entry --------------------------
   P('retired-from-entry');
   const read = new Map();
-  const surfaceAt = (rev, pkg) => {
-    const key = `${rev} ${pkg}`;
-    if (!read.has(key)) read.set(key, readExportSurface(rev, cwd, pkg, packagesAt(rev), kit));
+  const surfaceAt = (rev, pkg, subpath = '.') => {
+    const key = `${rev} ${pkg} ${subpath}`;
+    if (!read.has(key)) read.set(key, readExportSurface(rev, cwd, pkg, packagesAt(rev), kit, subpath));
     return read.get(key);
   };
   const tag = (op) => `\`runtime-export-retired ${op.ref}\` [predicate 1: retired-from-entry]`;
@@ -5192,21 +5398,32 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
     '      which this reader cannot follow -- a name could sit behind it.';
   const retired = [];
   for (const op of operands) {
+    if (op.whole && op.subpath !== '.') {
+      const at = surfaceAt(base, op.pkg, op.subpath);
+      const proof = verifySubpathRetired(op, at, { head, cwd, packagesAt });
+      if (proof.refusal) { problems.push(`${tag(op)} is not proven:\n      ${proof.refusal}.`); continue; }
+      retired.push({ op, at, symbol: null, member: null, pkgFile: proof.file, pkgDir: proof.dir });
+      continue;
+    }
     if (op.whole) {
       const proof = verifyWholePackageRetired(op.pkg, { base, head, cwd, packagesAt, kit });
       if (proof.refusal) { problems.push(`${tag(op)} is not proven:\n      ${proof.refusal}.`); continue; }
       retired.push({ op, at: null, symbol: null, member: null, pkgFile: proof.file, pkgDir: proof.dir });
       continue;
     }
-    const at = surfaceAt(base, op.pkg);
+    const at = surfaceAt(base, op.pkg, op.subpath);
     if (at.refusal) { problems.push(`${tag(op)} cannot be read at the merge base:\n      ${at.refusal}.`); continue; }
-    const now = surfaceAt(head, op.pkg);
+    const now = surfaceAt(head, op.pkg, op.subpath);
     if (now.refusal) {
       const deleted = !packagesAt(head).has(op.pkg);
       problems.push(
         `${tag(op)} cannot be read at HEAD:\n      ${now.refusal}.` +
         (deleted ? `\n      A published package DELETED at HEAD is retired whole, on one operand: \`${op.pkg}#*\`\n` +
-          '      (ADR-0087 D9, amended 2026-10-27), with one FROM line naming the package.' : ''),
+          '      (ADR-0087 D9, amended 2026-10-27), with one FROM line naming the package.'
+          : now.keyAbsent && now.noExportsMap ? `\n      With no \`exports\` map at HEAD every file of \`${op.pkg}\` is importable by path, so neither this\n` +
+            `      operand nor \`${op.specifier}#*\` can prove the retirement.`
+          : now.keyAbsent ? `\n      A subpath key that LEFT the \`exports\` map at HEAD is retired whole, on one operand:\n` +
+            `      \`${op.specifier}#*\` (ADR-0087 D9, amended 2026-11-14), with one FROM line naming \`${op.specifier}\`.` : ''),
       );
       continue;
     }
@@ -5250,7 +5467,7 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
     if (after.state === 'not-exported') {
       problems.push(
         `${tag(op)}: the type \`${op.exportName}\` itself is no longer exported at HEAD. A retired TYPE is\n` +
-        `      named as an export (\`${op.pkg}#${op.exportName}\`), not through one of its members.`,
+        `      named as an export (\`${op.specifier}#${op.exportName}\`), not through one of its members.`,
       );
       continue;
     }
@@ -5283,6 +5500,36 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
   for (const r of surfacePaths.length > 0 ? retired : []) {
     const { op, at, symbol, member } = r;
     const t = `\`runtime-export-retired ${op.ref}\` [predicate 2: no-metadata-surface]`;
+    if (op.whole && op.subpath !== '.') {
+      // A whole subpath key (#30598) asks what a whole package asks, of the
+      // package's OWN files its entry reaches (`sourceFiles`, filtered to the
+      // package directory) and of the specifier `<package>/<subpath>`. Another
+      // workspace package's file the entry re-exports is that package's: a name
+      // re-exported from it is judged as an export operand, where predicate 2
+      // refuses it when its declaration is a metadata surface (SP-G6 / SP-R20).
+      const site = at.sourceFiles.find((f) => metadataSurfaceKind(f) !== null);
+      if (site) {
+        problems.push(
+          `${t} is false: the \`${op.subpath}\` entry of \`${op.pkg}\` reaches ${site} (${metadataSurfaceKind(site)}) at the\n` +
+          '      merge base. A metadata surface is what `objectstack migrate meta` reaches, so the ledger IS a channel here.\n' +
+          '      fix: register the migration.',
+        );
+        continue;
+      }
+      metadataTexts ??= showManyOrNull(base, surfacePaths, cwd);
+      const hit = packageReference(op.specifier, r.pkgDir, metadataTexts);
+      if (hit) {
+        problems.push(
+          `${t} is false: ${hit.hitPath} (${metadataSurfaceKind(hit.hitPath)}) ` +
+          `${hit.kind === 'import' ? 'IMPORTS' : 'names'} \`${op.specifier}\` IN CODE:\n` +
+          `        ${hit.line.slice(0, 140)}\n` +
+          '      A subpath a metadata surface reaches HAS a metadata surface (comment spans are already excluded).',
+        );
+        continue;
+      }
+      verified.push({ ref: op.ref, kind: 'subpath', declared: at.entry });
+      continue;
+    }
     if (op.whole) {
       // The same question, asked of the PACKAGE: none of its files is a metadata
       // surface, and no metadata surface outside it names it in code.
@@ -5356,12 +5603,13 @@ export function verifyRuntimeExportRetired(refs, { base, head, cwd, body, packag
   for (const u of block.unread) {
     problems.push(`${t3}: the body carries ${u.shape}, which this category does not read:\n        ${u.text.slice(0, 160)}\n${FROM_BLOCK_READS}`);
   }
-  // A whole package's FROM side is the package name, which is no identifier: read
-  // it as that operand's spelling exactly when the marker names it with `#*`.
-  const wholeNames = new Set(operands.filter((o) => o.whole).map((o) => o.pkg));
+  // A whole package's FROM side is the package name -- a whole subpath key's, the
+  // specifier `<package>/<subpath>` (#30598) -- which is no identifier: read it as
+  // that operand's spelling exactly when the marker names it with `#*`.
+  const wholeNames = new Set(operands.filter((o) => o.whole).map((o) => o.spelling));
   const wholeNote = wholeNames.size === 0 ? '' :
-    '\n      A package retired whole (`<package>#*`) is named on ONE FROM line, by the package name; its\n' +
-    '      exports take no line of their own.';
+    '\n      A package retired whole (`<package>#*`) is named on ONE FROM line, by the package name, and a\n' +
+    '      subpath key retired whole (`<package>/<subpath>#*`) by its specifier; its exports take no line of their own.';
   const seen = new Set();
   const reported = new Set();
   for (const raw of block.sides) {
@@ -8563,6 +8811,181 @@ function selfTest() {
     assert(['/repo/node_modules/plugin-x/dist/index.js', 'https://npm.im/plugin-x']
       .every((v) => mentionIn('plugin-x', `export const E = { v: '${v}' };`)?.kind === 'mention'),
       'WP-U9: an unscoped `plugin-x` in a path or a URL is still a mention (the `/` refused is only a scope\'s)');
+  }
+
+  // ---- SP (#30598): a LITERAL subpath key of the `exports` map ---------------
+  //
+  // D9, amended 2026-11-14 (the maintainer's decision A, narrowed, on #30598, record
+  // 6885400963 -- "only literal subpath keys"): the three operands gain a subpath,
+  // `<package>/<subpath>#<Export>`, `#<Type>.<member>` and `#*` (the key LEFT the
+  // map at HEAD, the package staying). The key's entry maps `dist/<p>.d.ts` to
+  // exactly one of `src/<p>.ts` / `src/<p>.tsx`; a wildcard key, a non-TS key and an
+  // unmappable key are refused BY NAME. The fixture carries one key of each shape
+  // the measurement on main found: literal (68 of 78), wildcard (`@object-ui/i18n`
+  // `./locales/*`), non-TS (`./style.css`) and unmappable (`@objectstack/scenarios`
+  // `./score`). Every red differs from its green in the one thing it must refuse.
+  battery('SP (#30598): a LITERAL subpath key of the `exports` map, `<package>/<subpath>#...`');
+  {
+    const TPL = `${REX_PKG}/templates`;
+    const SP_EXPORTS = {
+      '.': { types: './dist/index.d.ts', import: './dist/index.mjs', require: './dist/index.js' },
+      './templates': { types: './dist/templates.d.ts', import: './dist/templates.mjs' },
+      './style.css': './dist/style.css',
+      './locales/*': { types: './dist/locales/*.d.ts', import: './dist/locales/*.mjs' },
+      './score': { types: './dist/score.d.ts', import: './dist/score.mjs' },
+    };
+    const SP_MANIFEST = (exports = SP_EXPORTS) => REX_MANIFEST({ exports });
+    const { './templates': _dropped, ...SP_EXPORTS_GONE } = SP_EXPORTS;
+    const SP_TPL_BASE =
+      'export interface TemplateOptions { locale?: string; legacy?: boolean }\n' +
+      'export function renderTemplate(name: string, options?: TemplateOptions) { return { name, options }; }\n' +
+      'export const KEEP_TEMPLATES = 1;\n';
+    const SP_TPL_HEAD =
+      'export interface TemplateOptions { locale?: string }\n' +
+      'export const KEEP_TEMPLATES = 1;\n';
+    const SP_BASE = {
+      [rexPath('package.json')]: SP_MANIFEST(),
+      [rexPath('src/templates.ts')]: SP_TPL_BASE,
+      [rexPath('src/locales/zh.ts')]: 'export const zh = {};\n',
+    };
+    // The key leaves the map and its module goes; the package stays.
+    const SP_GONE = { [rexPath('package.json')]: SP_MANIFEST(SP_EXPORTS_GONE), [rexPath('src/templates.ts')]: null };
+    const SP_CS = (operands, lines) => CS({
+      bumps: [[REX_PKG, 'minor']],
+      body: 'feat(plugin-email)!: templates resolve from the registry\n\n**BREAKING**: retired exports.\n\n' +
+        `${lines}\n\n<!-- adr-0087: not-required (runtime-export-retired ${operands.join(', ')}) ${REX_WHY} -->\n`,
+    });
+    const sp = (operands, lines, { base = {}, head = { [rexPath('src/templates.ts')]: SP_TPL_HEAD } } = {}) => run(mk({
+      pkgs: REX_PKGS,
+      baseFiles: { ...REX_BASE_FILES, ...SP_BASE, ...base },
+      files: { ...head, '.changeset/x.md': SP_CS(operands, lines) },
+    }));
+    const RENDER_LINE = '- FROM `renderTemplate(name, options?)` TO `createRegistryEmailTemplateLoader(sources)`, then `.load(name, locale)`.';
+    const WHOLE_LINE = `- FROM \`${TPL}\` TO nothing: the subpath is gone; import what you still need from \`${REX_PKG}\`.`;
+    const TPL_P1 = /`runtime-export-retired @objectstack\/plugin-email\/templates#\*` \[predicate 1: retired-from-entry\] is not proven/;
+    const TPL_P2 = /`runtime-export-retired @objectstack\/plugin-email\/templates#\*` \[predicate 2: no-metadata-surface\] is false/;
+
+    const g1 = sp([`${TPL}#renderTemplate`], RENDER_LINE);
+    green('SP-G1 an export retired from a literal subpath key is admitted', g1);
+    assert(/templates#renderTemplate \(export, packages\/plugins\/plugin-email\/src\/templates\.ts\)/.test(g1.judged[0]?.detail ?? ''),
+      `SP-G1b: the export is read through the key's own source entry, \`src/templates.ts\`. Got: ${g1.judged[0]?.detail}`);
+    const g2 = sp([`${TPL}#TemplateOptions.legacy`], '- FROM `TemplateOptions.legacy` TO nothing: there is no legacy mode. Delete the option.');
+    green('SP-G2 a member of a type the subpath key exports is admitted', g2);
+    assert(/templates#TemplateOptions\.legacy \(member, packages\/plugins\/plugin-email\/src\/templates\.ts\)/.test(g2.judged[0]?.detail ?? ''),
+      `SP-G2b: the member verdict names the subpath's declaring file. Got: ${g2.judged[0]?.detail}`);
+    const g3 = sp([`${TPL}#*`], WHOLE_LINE, { head: SP_GONE });
+    green('SP-G3 a subpath KEY that left the `exports` map at HEAD, the package staying, retired whole on one FROM line', g3);
+    assert(/templates#\* \(subpath, packages\/plugins\/plugin-email\/src\/templates\.ts\)/.test(g3.judged[0]?.detail ?? ''),
+      `SP-G3b: the verdict names the subpath operand and the entry it was read from. Got: ${g3.judged[0]?.detail}`);
+    green('SP-G4 a root operand and a subpath operand in ONE marker', sp(
+      [`${REX_PKG}#LogTransport`, `${TPL}#renderTemplate`],
+      `- FROM \`LogTransport\` TO nothing: the mailer logs itself.\n${RENDER_LINE}`,
+      { head: { [rexPath('src/templates.ts')]: SP_TPL_HEAD, [rexPath('src/index.ts')]: REX_INDEX_BASE.replace("export { LogTransport } from './log-transport.js';\n", '') } },
+    ));
+    green('SP-G5 the whole-subpath line written as an arrow removal', sp([`${TPL}#*`],
+      `- \`${TPL}\` → delete the import`, { head: SP_GONE }));
+
+    red('SP-R1 an operand only a WILDCARD key reaches is refused by name', sp([`${REX_PKG}/locales/zh#zh`], '- FROM `zh` TO nothing.'),
+      [/cannot be read at the merge base/, /reaches `\.\/locales\/zh` at [0-9a-f]{12} only through the WILDCARD key `\.\/locales\/\*`/]);
+    red('SP-R2 an operand spelling a `*` in its subpath is refused by name', sp([`${REX_PKG}/locales/*#zh`], '- FROM `zh` TO nothing.'),
+      [/names the WILDCARD subpath `\.\/locales\/\*` of `@objectstack\/plugin-email`/]);
+    red('SP-R3 a NON-TS key (`./style.css`) is refused by name', sp([`${REX_PKG}/style.css#Theme`], '- FROM `Theme` TO nothing.'),
+      [/the `\.\/style\.css` key of `@objectstack\/plugin-email` names no TypeScript declaration entry/]);
+    red('SP-R4 an UNMAPPABLE key (`dist/score.d.ts`, no `src/score.ts`) is refused by name', sp([`${REX_PKG}/score#score`], '- FROM `score` TO nothing.'),
+      [/the `\.\/score` entry of `@objectstack\/plugin-email` cannot be mapped to its source/,
+        /neither packages\/plugins\/plugin-email\/src\/score\.ts nor packages\/plugins\/plugin-email\/src\/score\.tsx exists there/]);
+    red('SP-R5 a key the map does not have at the merge base', sp([`${REX_PKG}/nope#X`], '- FROM `X` TO nothing.'),
+      [/cannot be read at the merge base/, /has no `\.\/nope` key/]);
+    red('SP-R6 an export the subpath STILL exports at HEAD', sp([`${TPL}#renderTemplate`], RENDER_LINE, { head: {} }),
+      [/`renderTemplate` is STILL exported by packages\/plugins\/plugin-email\/src\/templates\.ts at HEAD/]);
+    red('SP-R7 an EXPORT operand on a key that left the map points at the whole-subpath spelling', sp([`${TPL}#renderTemplate`], RENDER_LINE, { head: SP_GONE }),
+      [/cannot be read at HEAD/, /LEFT the `exports` map at HEAD is retired whole/, /`@objectstack\/plugin-email\/templates#\*` \(ADR-0087 D9, amended 2026-11-14\)/]);
+    red('SP-R8 `#*` while the key is STILL in the map at HEAD', sp([`${TPL}#*`], WHOLE_LINE, { head: { [rexPath('src/templates.ts')]: null } }),
+      [TPL_P1, /still has the `\.\/templates` key/]);
+    red('SP-R9 `#*` while a WILDCARD key still reaches the subpath at HEAD', sp([`${TPL}#*`], WHOLE_LINE, {
+      head: { ...SP_GONE, [rexPath('package.json')]: SP_MANIFEST({ ...SP_EXPORTS_GONE, './*': { types: './dist/*.d.ts', import: './dist/*.mjs' } }) },
+    }), [TPL_P1, /the WILDCARD key `\.\/\*` still reaches it/]);
+    red('SP-R10 `#*` on a subpath of a package DELETED at HEAD points at `<package>#*`', sp([`${TPL}#*`], WHOLE_LINE, {
+      head: { [rexPath('package.json')]: null },
+    }), [TPL_P1, /the package `@objectstack\/plugin-email` itself is gone from the workspace at HEAD/, /`@objectstack\/plugin-email#\*`/]);
+    red('SP-R11 `#*` on a package with NO `exports` map at HEAD: every file is importable, absence proves nothing', sp([`${TPL}#*`], WHOLE_LINE, {
+      head: { ...SP_GONE, [rexPath('package.json')]: REX_MANIFEST({ exports: undefined }) },
+    }), [TPL_P1, /declares no `exports` map at HEAD/]);
+    red('SP-R16 `#*` on a package whose HEAD `exports` is NULL: read as absent, as Node and TypeScript read it', sp([`${TPL}#*`], WHOLE_LINE, {
+      head: { ...SP_GONE, [rexPath('package.json')]: REX_MANIFEST({ exports: null }) },
+    }), [TPL_P1, /declares no `exports` map at HEAD \(`"exports": null` reads as absent\)/]);
+    const r17 = sp([`${TPL}#renderTemplate`], RENDER_LINE, { head: { ...SP_GONE, [rexPath('package.json')]: REX_MANIFEST({ exports: null }) } });
+    red('SP-R17 an EXPORT operand on a package with no `exports` map at HEAD is NOT pointed at the whole-key spelling', r17,
+      [/cannot be read at HEAD/, /neither this\n\s+operand nor `@objectstack\/plugin-email\/templates#\*` can prove the retirement/]);
+    assert(!/LEFT the `exports` map at HEAD is retired whole/.test(messages(r17)),
+      `SP-R17b: no whole-key hint where the whole-key form is refused too. Got:\n${messages(r17)}`);
+    red('SP-R18 a key whose `types` condition names a TS SOURCE file is refused as no declaration entry', sp([`${REX_PKG}/raw#X`], '- FROM `X` TO nothing.', {
+      base: { [rexPath('package.json')]: SP_MANIFEST({ ...SP_EXPORTS, './raw': { types: './src/raw.ts', import: './dist/raw.mjs' } }), [rexPath('src/raw.ts')]: 'export const X = 1;\n' },
+    }), [/the `\.\/raw` key of `@objectstack\/plugin-email` names no TypeScript declaration entry/, /a TS SOURCE file is not one/]);
+    // A1 (#30598 at-tier review 6886775383): a subpath entry that RE-EXPORTS another
+    // workspace package's root reaches that package's files, which are not this
+    // package's. The whole-key form judges the package's own files, as `<package>#*`
+    // does; the re-exported name is judged when it is named, and refused there.
+    const SPEC_ROOT = {
+      'packages/spec/package.json': JSON.stringify({ name: '@objectstack/spec', version: '1.0.0', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.mjs' } } }),
+      'packages/spec/src/index.ts': "export { TemplateSchema } from './ui/template.zod.js';\n",
+      'packages/spec/src/ui/template.zod.ts': 'export const TemplateSchema = {};\n',
+      [rexPath('src/templates.ts')]: `export { TemplateSchema } from '@objectstack/spec';\n${SP_TPL_BASE}`,
+    };
+    green('SP-G6 `#*` on a key whose entry re-exports ANOTHER workspace package\'s root: that package\'s files are not this key\'s', sp(
+      [`${TPL}#*`], WHOLE_LINE, { base: SPEC_ROOT, head: SP_GONE }));
+    red('SP-R20 ...while the re-exported NAME, named as an export operand, is refused at predicate 2', sp(
+      [`${TPL}#TemplateSchema`], '- FROM `TemplateSchema` TO `TemplateSchema` from `@objectstack/spec`.', { base: SPEC_ROOT, head: { [rexPath('src/templates.ts')]: SP_TPL_BASE } }),
+    [/`runtime-export-retired @objectstack\/plugin-email\/templates#TemplateSchema` \[predicate 2: no-metadata-surface\] is false: `TemplateSchema` is declared in packages\/spec\/src\/ui\/template\.zod\.ts \(a Zod schema\)/]);
+    const r17c = sp([`${TPL}#renderTemplate`], RENDER_LINE, { head: { ...SP_GONE, [rexPath('package.json')]: REX_MANIFEST({ exports: undefined }) } });
+    red('SP-R17c the same with the `exports` FIELD missing at HEAD (not null): no whole-key hint either', r17c,
+      [/it declares no `exports` map at all\)/, /neither this\n\s+operand nor `@objectstack\/plugin-email\/templates#\*` can prove the retirement/]);
+    assert(!/LEFT the `exports` map at HEAD is retired whole/.test(messages(r17c)) && !/"exports": null/.test(messages(r17c)),
+      `SP-R17d: a missing field is reported as missing, with no whole-key hint. Got:\n${messages(r17c)}`);
+    red('SP-R19 a member operand whose TYPE left the subpath entry is pointed at the SUBPATH export spelling', sp([`${TPL}#TemplateOptions.legacy`],
+      '- FROM `TemplateOptions.legacy` TO nothing.', { head: { [rexPath('src/templates.ts')]: 'export const KEEP_TEMPLATES = 1;\n' } }),
+    [/named as an export \(`@objectstack\/plugin-email\/templates#TemplateOptions`\)/]);
+    red('SP-R12 `#*` while a metadata surface OUTSIDE the package imports the subpath at the merge base', sp([`${TPL}#*`], WHOLE_LINE, {
+      head: SP_GONE, base: { 'packages/spec/src/ui/tpl.zod.ts': `import { renderTemplate } from '${TPL}';\nexport const T = renderTemplate;\n` },
+    }), [TPL_P2, /packages\/spec\/src\/ui\/tpl\.zod\.ts \(a Zod schema\) IMPORTS `@objectstack\/plugin-email\/templates` IN CODE/]);
+    red('SP-R13 `#*` while the subpath\'s entry reaches a metadata surface at the merge base', sp([`${TPL}#*`], WHOLE_LINE, {
+      head: { ...SP_GONE, [rexPath('src/templates.zod.ts')]: null },
+      base: {
+        [rexPath('src/templates.ts')]: `import { TemplateSchema } from './templates.zod.js';\nexport const T = TemplateSchema;\n${SP_TPL_BASE}`,
+        [rexPath('src/templates.zod.ts')]: 'export const TemplateSchema = {};\n',
+      },
+    }), [TPL_P2, /reaches packages\/plugins\/plugin-email\/src\/templates\.zod\.ts \(a Zod schema\)/]);
+    red('SP-R14 `#*` with one FROM line per EXPORT instead of the specifier line', sp([`${TPL}#*`], RENDER_LINE, { head: SP_GONE }),
+      [/names `renderTemplate`, which the marker does not name -- out of range/, /subpath key retired whole \(`<package>\/<subpath>#\*`\) by its specifier/,
+        /`@objectstack\/plugin-email\/templates#\*` has no FROM side/]);
+    red('SP-R15 BOTH `src/templates.ts` and `src/templates.tsx`: ambiguous, refused rather than picked', sp([`${TPL}#renderTemplate`], RENDER_LINE, {
+      base: { [rexPath('src/templates.tsx')]: SP_TPL_BASE },
+    }), [/the `\.\/templates` entry of `@objectstack\/plugin-email` is AMBIGUOUS/]);
+
+    const lit = parseExportOperand(`${TPL}#renderTemplate`);
+    assert(lit.pkg === REX_PKG && lit.subpath === './templates' && lit.specifier === TPL && lit.spelling === 'renderTemplate' && lit.whole === false,
+      `SP-U1: \`<package>/<subpath>#<Export>\` parses to the package, the \`./<subpath>\` key and the export (${JSON.stringify(lit)})`);
+    const whole = parseExportOperand(`${TPL}#*`);
+    assert(whole.whole === true && whole.subpath === './templates' && whole.spelling === TPL,
+      `SP-U2: \`<package>/<subpath>#*\` is a whole KEY whose spelling is the specifier (${JSON.stringify(whole)})`);
+    assert(parseExportOperand(`${REX_PKG}#X`).subpath === '.' && parseExportOperand(`${REX_PKG}#*`).spelling === REX_PKG,
+      'SP-U3: a root operand reads the `.` key, and `<package>#*` keeps the package name as its spelling');
+    const deep = parseExportOperand('@a/b/c/d#X.y');
+    const bare = parseExportOperand('lodash/fp#map');
+    assert(deep.pkg === '@a/b' && deep.subpath === './c/d' && deep.member === 'y' && bare.pkg === 'lodash' && bare.subpath === './fp',
+      `SP-U4: a deep subpath and an unscoped package split at the package name (${JSON.stringify({ deep, bare })})`);
+    assert(['/../x', '//x', '/./x', '/x/'].every((sub) => /is not a `<package>#<Export>`/.test(parseExportOperand(`${REX_PKG}${sub}#X`).refusal ?? '')),
+      'SP-U5: an empty, `.` or `..` segment is no literal key, and is refused');
+    assert(/names the WILDCARD subpath `\.\/a\*b`/.test(parseExportOperand(`${REX_PKG}/a*b#X`).refusal ?? ''),
+      'SP-U6: a `*` anywhere in the subpath is a wildcard, refused by name');
+    assert(/names a FILE/.test(parseExportOperand(`${REX_PKG}/src/templates.ts#X`).refusal ?? ''),
+      'SP-U7: a subpath spelling a TS source file names a FILE, refused as before');
+    assert(splitPackageSpecifier('@scope') === null && splitPackageSpecifier('Bad/x') === null,
+      'SP-U8: a bare scope, and a name npm refuses, are no package');
+    const wk = wildcardKeysMatching({ '.': {}, './locales': {}, './locales/*': {}, './x/*.js': {} }, './locales/zh');
+    assert(wk.length === 1 && wk[0] === './locales/*' && wildcardKeysMatching({ './locales/*': {} }, './locales').length === 0 &&
+      wildcardKeysMatching({ './x/*.js': {} }, './x/a.js').length === 1 && wildcardKeysMatching({ './x/*.js': {} }, './x/a.ts').length === 0,
+      `SP-U9: a wildcard key matches by its prefix and suffix, never a literal key (${JSON.stringify(wk)})`);
   }
 
   // ---- DX (#26324): an export named `default` ------------------------------

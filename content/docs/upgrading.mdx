@@ -487,6 +487,8 @@ the protocol-18 step, which `os migrate meta --from 17` lists for your sources
 
 **Upgrading from 18.2.0 or earlier:** run [`os migrate audit-key-material`](/docs/deployment/cli#os-migrate-audit-key-material) once, a dry run first and then `--apply`; it removes the encrypted key-material columns from the audit-ledger copies those releases wrote.
 
+**Upgrading from 18.4.0 or earlier:** run [`os migrate audit-side-copies`](/docs/deployment/cli#os-migrate-audit-side-copies) once, a dry run first and then `--apply`; it removes the side-copy columns (an approval request's `payload_json`) from the audit-ledger copies those releases wrote. Served copies are redacted at read time until it runs, so it is cleanup, not a gate.
+
 The v17 and v18 lines are broken out per release. Each v17 minor shipped
 breaking changes under the repo's launch-window convention — which ships a
 breaking change as `minor` rather than `major`, so the version number is not the

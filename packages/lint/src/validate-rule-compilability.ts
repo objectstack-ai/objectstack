@@ -98,6 +98,19 @@
  * recurses into those and reaches the very same `checkFormat` /
  * `checkJsonSchema`. Nothing else in the stack is judged here.
  *
+ * [#33217] "Object validation rules" includes the `validations[]` an
+ * `objectExtensions` entry adds: the registry merges them onto the target by
+ * name, so every save of the target runs them through the same
+ * `checkFormat` / `checkJsonSchema`. They are read through the shared
+ * extension fold (`objectExtensionsByTarget`, the one the expression pass's
+ * extension walk reads), so the entries judged are the ones the registry
+ * keeps, and located at the entry (`object 'T' · objectExtensions[i] ·
+ * validation 'N'`, path `objectExtensions[i].validations.N`), with the rule
+ * ids the object's own rules get. On the `object_extension` publish door the
+ * written entry is the snapshot's sole extension; the target's own rules the
+ * door's live objects carry are judged in the gate's baseline too, so they
+ * cancel and only the written entry's verdicts reach the write.
+ *
  * ### The keys read, and the one deliberately NOT read (#5096)
  *
  * This rule is registered `input: 'parsed'` (`authoring-rules.ts`), so on the
@@ -109,6 +122,7 @@
  * | Read                                        | Declared by                          |
  * |---------------------------------------------|--------------------------------------|
  * | `objects[].validations[]`                   | `ObjectSchema`                       |
+ * | `objectExtensions[].validations[]` (#33217) | `ObjectExtensionSchema`, through `objectExtensionsByTarget` |
  * | `validations[].type` / `.name`              | every `*ValidationSchema` variant    |
  * | `validations[].regex`                       | `FormatValidationSchema`             |
  * | `validations[].schema`                      | `JSONValidationSchema`               |
@@ -144,7 +158,7 @@ import { createRequire } from 'node:module';
 // a sharper reason: it `require`s `ajv/dist/compile/codegen`, so importing it
 // eagerly would drag ajv onto the boot path through the back door.
 import type { Options as AjvOptions } from 'ajv';
-import { recordsOf } from './object-graph.js';
+import { objectExtensionsByTarget, recordsOf } from './object-graph.js';
 
 export type RuleCompilabilitySeverity = 'error';
 
@@ -396,19 +410,28 @@ function flattenRules(
 export interface WalkedValidationRule {
   /** The rule record itself — a top-level entry, or a `conditional` branch. */
   rule: AnyRec;
-  /** The declaring object's `name`, or `(unnamed object)`. */
+  /** The declaring object's `name` (an extension's target), or `(unnamed object)`. */
   objectName: string;
   /** The nesting-aware rule name as prose: `'outer' → 'inner'`. */
   label: string;
-  /** Human-readable location: `object 'account' · validation 'outer' → 'inner'`. */
+  /**
+   * Human-readable location: `object 'account' · validation 'outer' → 'inner'`;
+   * for a rule an extension adds, `object 'account' · objectExtensions[0] ·
+   * validation 'outer'` (#33217).
+   */
   where: string;
-  /** Config path of the rule: `objects.account.validations.outer.then.inner`. */
+  /**
+   * Config path of the rule: `objects.account.validations.outer.then.inner`;
+   * for a rule an extension adds, the entry's path in place of the object's
+   * (`objectExtensions[0].validations.outer`, #33217).
+   */
   basePath: string;
 }
 
 /**
  * Every object validation rule an author declared, `conditional` branches
- * flattened in, each carrying the location strings a finding needs.
+ * flattened in, each carrying the location strings a finding needs: the
+ * objects' own, then (#33217) those each `objectExtensions` entry adds.
  *
  * Exported because #5178's format-NAME gate judges exactly this set. A second
  * walker there would be a second opinion about which rules EXIST — the same
@@ -437,6 +460,28 @@ export function walkObjectValidationRules(stack: unknown): WalkedValidationRule[
           where: `object '${objectName}' · validation ${label}`,
           basePath: `objects.${objectName}.validations.${path}`,
         });
+      }
+    }
+  }
+
+  // [#33217] Each rule an `objectExtensions` entry adds, through the shared
+  // fold (one entry per package per target, as the registry keeps them),
+  // whether or not the stack declares the target: a regex or a schema needs
+  // no field of the target to judge. Destructured, so the #5096 receiver scan
+  // sees no new receiver: the fold hands back `ObjectExtensionSchema`'s
+  // `validations` as records, read through `recordsOf` there.
+  for (const [target, entries] of objectExtensionsByTarget(stack)) {
+    for (const { path: entryPath, validations: rules } of entries) {
+      for (const authored of rules) {
+        for (const { rule, label, path } of flattenRules(authored, '', '')) {
+          walked.push({
+            rule,
+            objectName: target,
+            label,
+            where: `object '${target}' · ${entryPath} · validation ${label}`,
+            basePath: `${entryPath}.validations.${path}`,
+          });
+        }
       }
     }
   }

@@ -11,6 +11,7 @@ import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from 're
 import { cn } from '../../lib/utils';
 import { resolveIcon } from '../action/resolve-icon';
 import { hasDeclaredVisibilityGate } from '../action/visibility-gate';
+import { DisabledReasonMenuLabel, menuItemReasonAria, useDisabledReason } from '../action/disabled-reason';
 import { useGridFieldAuthoring } from '../../context/gridFieldAuthoring';
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
@@ -661,6 +662,10 @@ export const DataTableRowActionItem: React.FC<{
   const isVisible = useMemo(() => isCustomRowActionVisible(action, row, scope), [action, row, scope]);
   const disabledVerdict = useRowPredicate(action.disabled, row, { fallback: true, warnOnError: true, label: `${action.name}:disabled` });
   const isDisabled = hasDeclaredPredicate(action.disabled) && disabledVerdict;
+  // The reason the record header gives for the same verdict: the declared
+  // `disabledReason`, else the generic sentence, as the item's second line and
+  // its accessible description. Only the declared `disabled` earns it.
+  const disabledReason = useDisabledReason(isDisabled, action.disabledReason);
   if (!isVisible) return null;
   const ActionIcon = resolveIcon(action.icon);
   return (
@@ -668,6 +673,7 @@ export const DataTableRowActionItem: React.FC<{
       disabled={isDisabled}
       onClick={() => { if (!isDisabled) void onActionDef?.(action, row); }}
       data-testid={`row-action-${action.name}`}
+      {...menuItemReasonAria(disabledReason)}
       className={cn(
         action.variant === 'danger' && 'text-destructive focus:text-destructive',
       )}
@@ -675,7 +681,10 @@ export const DataTableRowActionItem: React.FC<{
       {/* Dynamic icon resolution from Lucide, not component creation during render */}
       {/* eslint-disable-next-line react-hooks/static-components */}
       {ActionIcon && <ActionIcon className="mr-2 h-4 w-4" />}
-      {action.label || action.name}
+      {/* An item with no reason keeps its bare label, as before. */}
+      {disabledReason
+        ? <DisabledReasonMenuLabel reason={disabledReason}>{action.label || action.name}</DisabledReasonMenuLabel>
+        : action.label || action.name}
     </DropdownMenuItem>
   );
 };

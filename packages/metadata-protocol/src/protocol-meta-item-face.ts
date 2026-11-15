@@ -95,6 +95,30 @@ function isStoredUnder(item: unknown, packageId: string): boolean {
 }
 
 /**
+ * [#32814] Whether `item` is a row of a customization pair (`pairsOf`) of a
+ * package holding `(type, name)`, a disabled one included: stamped
+ * (`_packageId`) with such a pair, and with no holder of the name. A pair row
+ * is bound over every holder it is a pair of, never a holder of its own
+ * (#32354 contract review N2, #32408), so on the read naming no package it is
+ * judged as the name's holders are ({@link disabledOnlyHolderOf}): when only
+ * disabled packages hold the name, it is their customization and withheld
+ * with them, as the exact address of such a pair is (ruling (c),
+ * `disabledExactAddressHolder`). A row stamped with a holder is that holder's
+ * item ({@link isItemOfDisabledPackage} judges it); a row of no holder's pair
+ * (a package-less row, another package's row) is not judged here.
+ */
+function isHoldersPairRow(engine: unknown, type: string, name: string, item: unknown): boolean {
+    const stamp = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (typeof stamp !== 'string' || stamp === '') return false;
+    const registry: any = (engine as { registry?: unknown } | undefined)?.registry;
+    if (typeof registry?.packageScopedHoldersOf !== 'function') return false;
+    const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+    if (every.includes(stamp)) return false;
+    const installed = installedManifestsOfEngine(engine);
+    return every.some((holder) => pairsOf(holder, installed).includes(stamp));
+}
+
+/**
  * [#32183] The package whose stack a read naming no package takes, for a
  * name a disabled package also holds: the one holder ADR-0150 D3 resolves
  * over the served set. `undefined` leaves the read as it was: a type the
@@ -279,7 +303,7 @@ async function storedRowHoldersRefusal(
     every: readonly string[],
     activeRows: Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>,
     bound: readonly string[],
-): Promise<{ kind: 'refused'; error: PackageScopedNameRefusedError } | undefined> {
+): Promise<{ kind: 'served'; packageId: string } | { kind: 'refused'; error: PackageScopedNameRefusedError } | undefined> {
     const registry: any = host.engine?.registry;
     if ([...shippingPackageIds(host.shippedArtifactsOf(type, name))].some((id) => registry.isPackageDisabled(id) !== true)) return undefined;
     const installed = installedManifestsOfEngine(host.engine);
@@ -288,7 +312,18 @@ async function storedRowHoldersRefusal(
         && known.some((holder) => holder !== row.package_id && pairsOf(holder, installed).includes(row.package_id as string));
     const holding = await host.packagelessAddress(type, name, member, 'active', activeRows.filter((row) =>
         !host.declinesStoredRow(type, name, row) && !pairOfAnother(row)));
-    if (holding.unbound || holding.candidates.length < 2) return undefined;
+    if (holding.unbound) return undefined;
+    // [#32662 scope note (b), ADR-0150 D3] One holder whose rows are its own
+    // and its customization pair's: the read is that holder's, at its address,
+    // as `/published` reads it, so the layer served is its own row in both
+    // save orders. Read as it was, it served the row stored first.
+    if (holding.candidates.length === 1) {
+        const [holder] = holding.candidates;
+        const ownAndPair = bound.length > 1 && bound.includes(holder)
+            && bound.every((id) => id === holder || pairsOf(holder, installed).includes(id));
+        return ownAndPair ? { kind: 'served', packageId: holder } : undefined;
+    }
+    if (holding.candidates.length < 2) return undefined;
     const base = {
         status: 'refused' as const,
         reason: 'ambiguous-in-environment' as const,
@@ -419,10 +454,18 @@ export async function readMetaItemFace(
     // only disabled packages hold, unless the read reached a row stored under
     // that address's own package: a sibling module's address must not serve a
     // disabled holder's pair row (row 17).
+    // [#32814] …and the read naming no package that reached a row of a
+    // holder's customization pair ({@link isHoldersPairRow}) judges the
+    // name's holders too, as it does when it reached nothing: a pair row of a
+    // name only disabled packages hold is their withheld item, the answer the
+    // same read gives with no row stored.
     const withheldHolder = request.type === 'object' || request.type === 'package'
         ? undefined
         : (request.packageId ? disabledExactAddressHolder(this, { type: request.type, name: request.name, packageId: request.packageId }) : undefined)
-            ?? (answer?.item == null || (request.packageId && !isStoredUnder(answer.item, request.packageId))
+            ?? (answer?.item == null
+                || (request.packageId
+                    ? !isStoredUnder(answer.item, request.packageId)
+                    : isHoldersPairRow(this.engine, request.type, request.name, answer.item))
                 ? disabledOnlyHolderOf(this.engine?.registry, request.type, request.name)
                 : undefined);
     if (withheldHolder === undefined && (request.type === 'object' || request.type === 'package'

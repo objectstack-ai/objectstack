@@ -449,12 +449,24 @@ export function registerSecurityService(
         const grants = Object.entries(admitted.set.objects ?? {})
           .map(([object, p]) => `${object} (${[p.allowRead ? 'read' : '', p.allowCreate ? 'create' : ''].filter(Boolean).join(', ')})`)
           .join(', ');
+        // [#33132] What the host's platformBaselineOverrides changed, said on the same line.
+        const overridden = admitted.overridden.length > 0
+          ? ` The host's platformBaselineOverrides narrowed it: ${admitted.overridden.join('; ')}.`
+          : '';
         ctx.logger.info(
-          `[security] platform baseline set '${admitted.set.name}' from '${admitted.contributor}': ${grants} — ` +
+          `[security] platform baseline set '${admitted.set.name}' from '${admitted.contributor}': ${grants || 'nothing'} — ` +
             (admitted.joined
               ? 'joined the member baseline every signed-in member holds through the everyone anchor.'
-              : 'registered, and handed to no one: this deployment declares no member baseline (fallbackPermissionSet: null).'),
-          { contributor: admitted.contributor, set: admitted.set.name, joined: admitted.joined },
+              : grants === ''
+                ? 'declined by the host, handed to no one.'
+                : 'registered, and handed to no one: this deployment declares no member baseline (fallbackPermissionSet: null).') +
+            overridden,
+          {
+            contributor: admitted.contributor,
+            set: admitted.set.name,
+            joined: admitted.joined,
+            ...(admitted.overridden.length > 0 ? { overridden: admitted.overridden } : {}),
+          },
         );
         if (admitted.joined) this.epoch.bump('metadata');
         return { name: admitted.set.name, joined: admitted.joined };

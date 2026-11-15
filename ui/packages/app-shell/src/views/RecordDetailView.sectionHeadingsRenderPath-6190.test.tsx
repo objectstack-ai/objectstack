@@ -64,6 +64,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vite
 import { render, waitFor, cleanup, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
+import { I18nProvider } from '@object-ui/i18n';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -203,8 +204,8 @@ function makeMetadata() {
  * assertions are scoped to the body rather than to page chrome that happens to
  * carry similar text.
  */
-async function renderDetailsBlock(objectName: string, def: any, record: any): Promise<HTMLElement> {
-  const { container } = render(
+async function renderDetailsBlock(objectName: string, def: any, record: any, language?: string): Promise<HTMLElement> {
+  const page = (
     <MemoryRouter initialEntries={[`/app/demo/${objectName}/${REC}`]}>
       <MetadataCtx.Provider value={makeMetadata()}>
         <RecordDetailView
@@ -216,7 +217,12 @@ async function renderDetailsBlock(objectName: string, def: any, record: any): Pr
           embedded
         />
       </MetadataCtx.Provider>
-    </MemoryRouter>,
+    </MemoryRouter>
+  );
+  const { container } = render(
+    language
+      ? <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>{page}</I18nProvider>
+      : page,
   );
 
   // Harness guard, not the pin: if the synthesized record page ever stops
@@ -316,5 +322,63 @@ describe("app-shell's rendered record page — section headings reach the DOM (#
       'every heading and group member must be on screen',
     ).toEqual([]);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+});
+
+/**
+ * objectstack#33229 — the fields no declared group claims (the keyless
+ * trailing bucket of `deriveFieldGroupLayout`) render under their own
+ * translated "Other" heading after the declared groups. Headerless, they read
+ * as members of the last group, and as its hidden contents once it collapsed.
+ */
+describe("app-shell's rendered record page — the ungrouped bucket's own heading (objectstack#33229)", () => {
+  const OTHER_HEADING = 'Other';
+  /** The last declared group collapsed: the shape the card measured. */
+  const collapsedLastDef = {
+    ...groupedDef,
+    fieldGroups: [DECLARED_GROUPS[0], { ...DECLARED_GROUPS[1], collapse: 'collapsed' }],
+  };
+
+  /** The smallest ancestor of `heading` that also holds `needle`'s text. */
+  const blockHolding = (heading: HTMLElement, needle: string): HTMLElement | null => {
+    let el: HTMLElement | null = heading;
+    while (el && !(el.textContent ?? '').includes(needle)) el = el.parentElement;
+    return el;
+  };
+
+  it('under a collapsed last group, the ungrouped field sits under "Other", never under that group', async () => {
+    const block = await renderDetailsBlock(GROUPED_OBJECT, collapsedLastDef, GROUPED_RECORD);
+
+    const other = within(block).getByText(OTHER_HEADING);
+    // The collapsed group's member is folded away; the ungrouped one is not.
+    expect(within(block).queryByText('Credit Terms')).not.toBeInTheDocument();
+    expect(within(block).getByText('Owner Name')).toBeInTheDocument();
+    // The smallest block holding the "Other" heading and the ungrouped field
+    // does not hold the collapsed group's heading: they are two sections.
+    const bucket = blockHolding(other, 'Owner Name');
+    expect(bucket).not.toBeNull();
+    expect(bucket!.textContent).not.toContain('Financial Details');
+    // Reading order: the declared groups, then "Other", then its field.
+    const text = block.textContent ?? '';
+    const order = ['Basic Information', 'Financial Details', OTHER_HEADING, 'Owner Name'].map((n) => text.indexOf(n));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // Long-form ungrouped fields still go under "More details", after it.
+    expect(text.indexOf(MORE_DETAILS_HEADING)).toBeGreaterThan(text.indexOf(OTHER_HEADING));
+  });
+
+  it('zh-CN reads the heading 其他', async () => {
+    const block = await renderDetailsBlock(GROUPED_OBJECT, collapsedLastDef, GROUPED_RECORD, 'zh-CN');
+
+    const other = within(block).getByText('其他');
+    expect(blockHolding(other, 'Owner Name')!.textContent).not.toContain('Financial Details');
+    expect(within(block).queryByText(OTHER_HEADING)).not.toBeInTheDocument();
+  });
+
+  it('CONTROL: an object with no declared groups gets no "Other" heading', async () => {
+    const block = await renderDetailsBlock(FLAT_OBJECT, flatDef, FLAT_RECORD);
+
+    expect(within(block).getByText('Priority')).toBeInTheDocument();
+    expect(within(block).queryByText(OTHER_HEADING)).not.toBeInTheDocument();
   });
 });
