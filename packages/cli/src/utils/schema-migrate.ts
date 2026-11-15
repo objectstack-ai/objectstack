@@ -67,6 +67,7 @@ import {
 import { describeDriverConnection, describeDriverSqliteFile } from './connection-display.js';
 import { reserveStdoutForJson } from './json-stdout.js';
 import { acquireSchemaMigrationLock } from './schema-migration-lock.js';
+import { composeOwnershipQueueProvider } from './migrate-ownership-queue.js';
 import {
   buildSchemaMigrationPlugins,
   measureComposedCoverage,
@@ -1448,6 +1449,20 @@ export async function bootSchemaStack(
   }
   for (const plugin of opts.extraPlugins ?? []) {
     await kernel.use(plugin as any);
+  }
+  // [ADR-0142 D1] The ownership-queue service `os serve` registers, so a stack
+  // declaring `queues` / `assignmentRules` boots here as it serves — the
+  // service alone (no sharing object, no armed sharing runtime), and only when
+  // nothing above already brought its provider (`./migrate-ownership-queue.ts`).
+  // Released like the composition above when it throws.
+  const ownershipQueueProvider = await composeOwnershipQueueProvider(
+    [...stack.plugins, ...composition.plugins, ...(opts.extraPlugins ?? [])],
+  ).catch((error: unknown) => {
+    releaseStdout();
+    throw error;
+  });
+  if (ownershipQueueProvider) {
+    await kernel.use(ownershipQueueProvider as any);
   }
   // [#24120] The publisher `AppPlugin` connects declared datasources through,
   // unless the composition already brought one.

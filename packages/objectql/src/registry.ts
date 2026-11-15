@@ -8684,6 +8684,17 @@ export class SchemaRegistry {
     // `packageId` is the environment catalog — the ADR-0005 overlay — and is
     // never judged; nor is a type's overridable baseline (the email service's
     // built-in templates), which holds nothing and is refused nothing.
+    //
+    // [ADR-0150 D9] For a bundled type this seam judges each arrival on the
+    // holding as it stands: the members the package already holds, plus the one
+    // arriving. ⛔ It never reads members still to come. A dependent declares
+    // its members of another package's bundle in its manifest. The package door
+    // then judges them as one set, and the claim it records exempts every later
+    // arrival here, so the members are admitted alike in either order. Undeclared
+    // members registered one by one are judged per arrival, which is
+    // order-dependent under D9's addition test: a dependent's `de-DE` alone is
+    // an addition to its base's `en-US` and is refused, while the same `de-DE`
+    // after the dependent's own `en-US` joins a template of its own.
     if (packageId && isBareNameRegistryType(type) && holdsBareName(type, item) && !isOverridableBaseline(type, packageId)) {
       const gateDisc = ITEM_KEY_DISCRIMINATORS[type];
       const arriving = gateDisc ? new Set([discriminatorValue(item, gateDisc.field) || gateDisc.canonical]) : undefined;
