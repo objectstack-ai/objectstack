@@ -90,9 +90,9 @@ beforeEach(() => {
     }
     const engine = {
         registry,
-        // [#33385] Stored `sys_metadata` rows: equality on each `where` key, nothing else.
+        // [#33385] Stored `sys_metadata` rows for `find`: equality on each `where` key, nothing else.
         find: vi.fn(async (_object: string, opts?: { where?: Record<string, unknown> }) => storedRowsMatching(opts?.where)),
-        findOne: vi.fn(async (_object: string, opts?: { where?: Record<string, unknown> }) => storedRowsMatching(opts?.where)[0] ?? null),
+        findOne: vi.fn().mockResolvedValue(null),
         insert: vi.fn(),
         update: vi.fn(),
         delete: vi.fn(),
