@@ -100,7 +100,7 @@ describe("start condition under errorHandling.strategy: 'retry' — evaluated on
         const result = await engine.execute('gated', { record: { id: 'r1', amount: 20 } } as any);
 
         expect(result.success).toBe(true);
-        expect(result.output?.skipped).toBeUndefined();
+        expect((result.output as { skipped?: unknown } | undefined)?.skipped).toBeUndefined();
         expect(runs.count).toBe(1);
         expect(evaluate).toHaveBeenCalledTimes(2);
     });
