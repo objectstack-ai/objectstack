@@ -865,3 +865,97 @@ describe('CONTROL: a session presented that is no longer of record exempts nothi
     expect(liveRows(), 'no live session was issued').toBe(0);
   }, 60_000);
 });
+
+describe('where the endpoint context does not reach the database hooks (the WebContainer runtime), the request state judges the request', () => {
+  // WebContainer's `node:async_hooks` does not carry better-auth's endpoint
+  // context across `await`, so the session hooks run without it there, while
+  // the request state rides `auth-manager.ts`'s polyfill. Stood up here by
+  // emptying the endpoint-context store for the request under test only.
+  const withoutEndpointContext = async <T>(run: () => Promise<T>): Promise<T> => {
+    const global = (globalThis as any)[Symbol.for('better-auth:global')];
+    const saved = global.context.endpointContextAsyncStorage;
+    global.context.endpointContextAsyncStorage = { run: (_store: unknown, fn: () => unknown) => fn(), getStore: () => undefined };
+    try {
+      return await run();
+    } finally {
+      global.context.endpointContextAsyncStorage = saved;
+    }
+  };
+
+  it.each([
+    ['/sign-in/email', (rig: Rig) => rig.post('/sign-in/email', { email: PLAIN.email, password: PASSWORD })],
+    ['/sign-in/phone-number', (rig: Rig) => rig.post('/sign-in/phone-number', { phoneNumber: PLAIN.phone, password: PASSWORD })],
+  ] as const)('%s: the correct password on the attempt that reaches the threshold signs in, and clears the count', async (_door, signIn) => {
+    const rig = await arrange('explicit');
+    rig.userRow(PLAIN.email).failed_login_count = THRESHOLD - 1;
+    const rowsBefore = rig.sessionRows(rig.plainId);
+
+    const res = await withoutEndpointContext(() => signIn(rig));
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(rig.sessionRows(rig.plainId)).toBe(rowsBefore + 1);
+    expect(Number(rig.userRow(PLAIN.email).failed_login_count) || 0).toBe(0);
+  }, 60_000);
+
+  it('a locked, signed-in account changes its password and ends its other sessions', async () => {
+    const rig = await arrange('explicit');
+    rig.lock(PLAIN.email);
+
+    const res = await withoutEndpointContext(() =>
+      rig.post(
+        '/change-password',
+        { currentPassword: PASSWORD, newPassword: 'N3w!Passw0rd-locked-Q9', revokeOtherSessions: true },
+        { cookie: rig.plainCookie },
+      ),
+    );
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(rig.sessionRows(rig.plainId)).toBe(1);
+  }, 60_000);
+
+  it.each(['explicit', 'uniform'] as const)('a code door still refuses a locked account (lockoutRefusal: %s)', async (refusal) => {
+    const rig = await arrange(refusal);
+    rig.lock(PLAIN.email);
+    const reference = await passwordSignInAnswer(rig, PLAIN.email);
+    const code = await smsCode(rig, PLAIN.phone);
+    const rowsBefore = rig.sessionRows(rig.plainId);
+
+    const res = await withoutEndpointContext(() => rig.post('/phone-number/verify', { phoneNumber: PLAIN.phone, code }));
+
+    expect(await answerOf(res)).toEqual(reference);
+    expect(rig.sessionRows(rig.plainId), 'no session row was written').toBe(rowsBefore);
+  }, 60_000);
+});
+
+describe('the address-change confirmation opened without a session', () => {
+  const confirmationUrl = async () => {
+    const { createEmailVerificationToken } = await import('better-auth/api');
+    const token = await createEmailVerificationToken(SECRET, PLAIN.email, 'plain-moved@example.com', 3600, {
+      requestType: 'change-email-verification',
+    });
+    return `/verify-email?token=${token}`;
+  };
+
+  it.each(['explicit', 'uniform'] as const)('a locked account gets no session, and its address is not moved (lockoutRefusal: %s)', async (refusal) => {
+    const rig = await arrange(refusal);
+    rig.lock(PLAIN.email);
+    const reference = await passwordSignInAnswer(rig, PLAIN.email);
+    const rowsBefore = rig.sessionRows(rig.plainId);
+
+    const res = await rig.get(await confirmationUrl());
+
+    expect(await answerOf(res)).toEqual(reference);
+    expect(rig.sessionRows(rig.plainId), 'no session row was written').toBe(rowsBefore);
+    expect(rig.userRow(PLAIN.email).email).toBe(PLAIN.email);
+  }, 60_000);
+
+  it('CONTROL: an unlocked account confirms the change and is signed in', async () => {
+    const rig = await arrange();
+    const rowsBefore = rig.sessionRows(rig.plainId);
+
+    const res = await rig.get(await confirmationUrl());
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(rig.sessionRows(rig.plainId)).toBe(rowsBefore + 1);
+  }, 60_000);
+});

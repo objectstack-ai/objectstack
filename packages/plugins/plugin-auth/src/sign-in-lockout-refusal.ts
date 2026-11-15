@@ -111,50 +111,34 @@ export async function lockedAccountRefusal(lockoutRefusal: unknown): Promise<Err
 }
 
 /**
- * The account whose live session of record (its stored `sys_session` row,
- * unexpired) the running request presented, read before the endpoint runs
- * (`auth-manager-sign-in-lockout.ts`, `recordRequestSessionOfRecord`).
- * `undefined` when the request presented none or it could not be read.
+ * What the running request is, as the global before-hook read it before the
+ * endpoint ran (`auth-manager-sign-in-lockout.ts`, `recordLockoutRequest`):
+ * its endpoint `path`, and `holder`, the account whose live session of record
+ * (its stored `sys_session` row, unexpired) the request presented, when it
+ * presented one that could be read. The session-creation refusal reads this
+ * record, so it judges the same request where the endpoint context does not
+ * reach the database hooks.
  */
-const sessionOfRecordState = defineRequestState<{ userId: string } | undefined>(() => undefined);
+export interface LockoutRequest {
+  readonly path: string;
+  readonly holder?: string;
+}
 
-/** Record the account of the session the running request presented. Never throws. */
-export async function recordSessionOfRecord(holder: { userId: string } | undefined): Promise<void> {
+const lockoutRequestState = defineRequestState<LockoutRequest | undefined>(() => undefined);
+
+/** Record what the running request is. Never throws. */
+export async function recordLockoutRequestState(request: LockoutRequest): Promise<void> {
   try {
-    await sessionOfRecordState.set(holder);
+    await lockoutRequestState.set(request);
   } catch {
     /* no request state is open: nothing is recorded, so nothing is exempted */
   }
 }
 
-/** The account of the session the running request presented, if one was read. Never throws. */
-export async function readSessionOfRecord(): Promise<{ userId: string } | undefined> {
+/** What the running request is, if the before-hook recorded it. Never throws. */
+export async function readLockoutRequestState(): Promise<LockoutRequest | undefined> {
   try {
-    return await sessionOfRecordState.get();
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Record the gate's verdict for the request that is running (`undefined`: this
- * attempt has none, whatever an earlier call recorded). `false` when no request
- * state is open, which the gate treats as "the verifier cannot carry the
- * refusal" and refuses by itself instead.
- */
-export async function recordSignInAttempt(attempt: SignInAttempt | undefined): Promise<boolean> {
-  try {
-    await signInAttemptState.set(attempt);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** The verdict the gate recorded for the request that is running, if any. Never throws. */
-export async function readSignInAttempt(): Promise<SignInAttempt | undefined> {
-  try {
-    return await signInAttemptState.get();
+    return await lockoutRequestState.get();
   } catch {
     return undefined;
   }
