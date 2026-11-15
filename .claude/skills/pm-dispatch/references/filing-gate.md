@@ -32,8 +32,8 @@
 - 「动手的读者」与 Acceptance notes 同一问:说得出具体 PR 或人 ⇒ 写进去,说不出 ⇒ 不立卡。
 - 说不出的形态:`.changeset/*`、无人在改的文档页、生成物、已扫完的批次,兜底不成立。
 - 配额:每 fire 不限张数,逐缺陷各立一张、各过本门;折清单卡可选、不强制;守批量写间隔。
-- 例外:复核后续(nit、接受的偏差、同车道 diff 外发现)每 PR 合一卡 `review follow-ups of PR #N`,
-  逐项勾,后轮复核追加 ⛔ 不另立;p3 文案/文档 nit 入该区 `<area> loose ends` 卡,无则才立。
+- 例外:复核后续(nit、接受偏差、同车道 diff 外发现)每 PR 一卡 `review follow-ups of PR #N`逐项勾,
+  后轮追加 ⛔ 不另立;① 缺陷仍各立;p3 文案/文档 nit 入该区 `<area> loose ends` 卡,无则才立。
 - 复核立卡前搜 open 卡 `PR #N` 与文件路径,同一发现追加;技能/ADR 文本卡照 `triage-duties.md`。
 - 分诊席的存量清理仍走维护者确认的十张一组、只备下一组,⛔ 不因本门改批量。
 - 读到 `User` ⇒ 记座位贴、本 fire ⛔ 不立新卡;认领仍靠 assignee,署名仍是文本的 session ID。
