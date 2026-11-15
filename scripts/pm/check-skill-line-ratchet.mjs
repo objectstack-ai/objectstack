@@ -1994,10 +1994,11 @@ export const CEILINGS = new Map([
   ['.claude/skills/spec-property-retirement/SKILL.md', 337],
   // #34012: the fifth playbook, `scenario-eval`, landed without a row — the map
   // is an enumeration, so nothing derived it from the tree. Seeded at its
-  // measured count on `origin/main` after its 26 over-120-byte lines were
-  // re-wrapped whitespace-only to `wrapLine`'s canonical form (131 → 157 lines,
-  // byte-identical after whitespace normalization). Landed count, headroom 0.
-  ['.claude/skills/scenario-eval/SKILL.md', 157],
+  // landed count after two edits in the same PR: one stale two-line sentence
+  // reworded to one line (131 → 130), then its 26 over-120-byte lines re-wrapped
+  // whitespace-only to `wrapLine`'s canonical form (130 → 156, byte-identical
+  // after whitespace normalization). Headroom 0.
+  ['.claude/skills/scenario-eval/SKILL.md', 156],
   // #9792: root AGENTS.md is the largest, most-read, most binding instruction
   // file in the repo and had no ceiling — the hole the oversized 39-line
   // read-layer clause (compacted by #9715) entered through. Set at its line
