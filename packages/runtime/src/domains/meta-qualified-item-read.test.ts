@@ -497,7 +497,8 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
             // An enabled package's draft row, and no active row of the name.
             storedRows.push({ id: 'draft_gamma', type, name: 'solo', state: 'draft', package_id: C,
                 metadata: JSON.stringify({ name: 'solo', label: `gamma draft ${type}` }) });
-            for (const query of [{ state: 'draft' }, { state: 'DRAFT' }, { preview: 'draft' }]) await refusedAtEnv(query);
+            const draftReads: Record<string, string>[] = [{ state: 'draft' }, { state: 'DRAFT' }, { preview: 'draft' }];
+            for (const query of draftReads) await refusedAtEnv(query);
             // An enabled package's unhydrated active row: the layered view.
             storedRows = [{ id: 'row_gamma', type, name: 'solo', state: 'active', package_id: C,
                 metadata: JSON.stringify({ name: 'solo', label: `gamma row ${type}` }) }];
