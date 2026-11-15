@@ -29,4 +29,4 @@ Metadata-protocol: none
 
 The remedy for each is one host option: `new StorageServicePlugin({ maxUploadMb: 500 })` for another bound, or `maxUploadMb: 'unlimited'` to keep accepting uploads of any size (boot then says so at `warn`). Pass the same option to `mountStorageRoutes` for that mount's doors.
 
-**Unchanged.** A settings-bound host with nothing saved, which is the default `os serve`, already enforced the manifest's 100 MB and still does. A saved `max_upload_mb` still wins over every host option. The "with `max_upload_mb` unset a byte door states no bound" note in this release's byte-door changeset is superseded: a byte door states no bound only under an explicit host `'unlimited'`.
+**Unchanged.** A settings-bound host with nothing saved, which is the default `os serve`, already enforced the manifest's 100 MB and still does. A saved `max_upload_mb` still wins over every host option. The 18.5.0 note "with `max_upload_mb` unset a byte door states no bound and reads the whole body" no longer holds: with `max_upload_mb` unset a byte door states the host's bound or else the built-in 100 MB, and it states no bound only under an explicit host `'unlimited'`.
