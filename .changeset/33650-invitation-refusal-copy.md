@@ -4,7 +4,7 @@
 '@object-ui/i18n': patch
 ---
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Organization invitation refusals now read in the console's language. Opening an
@@ -16,3 +16,9 @@ says the invitation may already have been used and where an accepted
 invitation's organization is. Inviting someone who is already a member shows a
 translated sentence instead of "User is already a member of this organization".
 Errors thrown by `@object-ui/auth` now also carry the HTTP `status`.
+
+Widening, nothing removed or narrowed: `@object-ui/i18n` gains the key
+`organization.errors.alreadyMember` in all eleven locale packs (and rewords
+`organization.errors.invitationNotFound`), and errors thrown by
+`@object-ui/auth` gain a numeric `status` property beside the existing
+`message` and `code`.
