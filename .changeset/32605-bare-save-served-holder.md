@@ -4,7 +4,7 @@
 
 fix(metadata-protocol): a bare save of a name an enabled and a disabled package both hold writes the enabled holder's row, where the bare read serves it
 
-Clause-②: no
+Clause-②: yes (widening) — a bare save of a name an enabled and a disabled package both hold, refused 409 naming both when each held a stored row, now writes the enabled holder's row; nothing the save door accepted is refused
 Metadata-protocol: none
 
 A save that names no package (`PUT /meta/:type/:name` with no `?package=`, or `saveMetaItem` with no `packageId`) now resolves its address the way the read at the same address does (ADR-0150 D3/D5). A disabled package holds nothing an address reaches. Before this fix the save door still counted a disabled package as a holder of the name. So when an enabled package E and a disabled package D both held the name, the save could:
