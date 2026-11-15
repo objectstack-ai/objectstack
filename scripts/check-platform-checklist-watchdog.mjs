@@ -59,15 +59,17 @@
  * PURPOSE is untouched; only its letter changed. Widen the filter by one path
  * and that stops being true, which is exactly what clause 4 refuses.
  *
- * ## Why the allowed list is more than one entry (four patrols, one file)
+ * ## Why the allowed list is more than one entry (five jobs, one file)
  *
- * The watchdog is one of four jobs in `fleet-patrols.yml` (the ruling that
- * folded the four daily patrols into one workflow), and a workflow has ONE
- * `pull_request:` trigger, so its filter is the UNION of the four retired
- * files' own: this file, plus the scripts the three sibling patrol jobs run. A
- * pull request editing one of those scripts therefore runs the watchdog job
- * too -- a job that publishes no required context and never reds on checklist
- * drift, so no pull request is blocked by it, which is the decision's purpose.
+ * The watchdog is one of five jobs in `fleet-patrols.yml`: the four daily
+ * patrols the ruling folded into one workflow, and the weekly
+ * `governed-merges-audit` born there, which names no path of its own. A
+ * workflow has ONE `pull_request:` trigger, so its filter is the UNION of the
+ * four retired files' own: this file, plus the scripts the three sibling
+ * patrol jobs run. A pull request editing one of those scripts therefore runs
+ * the watchdog job too -- a job that publishes no required context and never
+ * reds on checklist drift, so no pull request is blocked by it, which is the
+ * decision's purpose.
  * What clause 4 keeps is the LETTER: the declared list is compared as a set to
  * `PR_TRIGGER_ALLOWED_PATHS`, so adding a path to the workflow without the
  * same reviewed edit here is refused exactly as before.
@@ -96,7 +98,7 @@
  *
  * ## Clause 7: one cron, spelled twice
  *
- * The workflow is four patrols on four clocks. A `schedule` event carries the
+ * The workflow is five jobs on five clocks. A `schedule` event carries the
  * cron that fired it (`github.event.schedule`), and each job's `if:` compares
  * against its own, so one cron string lives in two places: under
  * `on.schedule`, and in exactly one job's `if:`. Edit one side alone and

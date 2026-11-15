@@ -15,7 +15,7 @@
  *                                         content: string | [{type:"text",text}…],
  *                                         is_error?}]}}
  *   {"type":"result","subtype":"success"|…,"is_error","num_turns","result",
- *    "total_cost_usd"}
+ *    "total_cost_usd","duration_ms","duration_api_ms"}
  *
  * A tool call is paired with its result by id; a call that never got a result
  * keeps `output: undefined` (the turn was cut short — reported, not hidden).
@@ -97,6 +97,19 @@ export interface ParsedTurn extends RunTranscript {
      * login ran. Absent ⇒ the turn reported none: never read as zero.
      */
     reportedCostUsd?: number;
+    /**
+     * The turn's duration as the CLI itself states it (the result line's
+     * `duration_ms`), ms. The runner's own clock is `process.elapsedMs` (spawn
+     * to exit, so it also holds the CLI's start-up); this is the CLI's reading
+     * beside it, never a replacement. Absent ⇒ the stream stated none (no result
+     * line, a driver whose stream has no such field): never read as zero.
+     */
+    reportedDurationMs?: number;
+    /**
+     * The part of {@link reportedDurationMs} the CLI spent waiting on the model
+     * API (the result line's `duration_api_ms`), ms. Absent ⇒ the stream stated none.
+     */
+    reportedApiDurationMs?: number;
     /** The input tokens the turn used, as an external command reported them; absent ⇒ none reported. */
     inputTokens?: number;
     /** The output tokens the turn used, as an external command reported them; absent ⇒ none reported. */
@@ -144,6 +157,8 @@ export function parseStreamJson(stream: string | readonly string[]): ParsedTurn 
       if (typeof ev.is_error === 'boolean') meta.isError = ev.is_error;
       if (typeof ev.num_turns === 'number') meta.numTurns = ev.num_turns;
       if (typeof ev.total_cost_usd === 'number') meta.reportedCostUsd = ev.total_cost_usd;
+      if (typeof ev.duration_ms === 'number') meta.reportedDurationMs = ev.duration_ms;
+      if (typeof ev.duration_api_ms === 'number') meta.reportedApiDurationMs = ev.duration_api_ms;
     } else if ((ev.type === 'assistant' || ev.type === 'user') && isBag(ev.message) && Array.isArray(ev.message.content)) {
       for (const block of ev.message.content) {
         if (!isBag(block)) continue;

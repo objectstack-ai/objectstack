@@ -90,6 +90,40 @@ import { snapshotRoleChangeGrants, UPDATE_MEMBER_ROLE_PATH } from './role-change
 import { refuseVisitorResendWithoutLiveTransport } from './visitor-verification-resend.js';
 
 /**
+ * Every client an `/oauth2/authorize` request names, for the ADR-0069 D5.1
+ * environment-access gate: the query's `client_id` first, then the body's,
+ * each a string or an array of them, de-duplicated in that order. An empty
+ * value names nothing; any other present value is judged by its string form
+ * rather than skipped, so the gate is never asked about fewer clients than
+ * the request names.
+ */
+function authorizeRequestClientIds(ctx: any): string[] {
+  const named = new Set<string>();
+  const collect = (source: unknown): void => {
+    if (typeof source !== 'object' || source === null || Array.isArray(source)) return;
+    const value = (source as Record<string, unknown>).client_id;
+    for (const one of Array.isArray(value) ? value : [value]) {
+      if (one === undefined || one === null || one === '') continue;
+      named.add(String(one));
+    }
+  };
+  collect(ctx?.query);
+  collect(ctx?.body);
+  return [...named];
+}
+
+/**
+ * [#33203] The self-service reset doors a cloud-managed environment refuses:
+ * the two that set the password and the two that send their link or code.
+ */
+const CLOUD_MANAGED_RESET_DOORS: ReadonlySet<string> = new Set([
+  RESET_PASSWORD_PATH,
+  PHONE_RESET_PASSWORD_PATH,
+  '/request-password-reset',
+  '/phone-number/request-password-reset',
+]);
+
+/**
  * The `AuthManager` members the function below reads — every one of them, and
  * no other. Each is typed AS the class member (an indexed access on the
  * class), so a change to a member's signature on the class is a change here
@@ -179,6 +213,29 @@ export async function globalBeforeHook(
   // read nothing, so they keep their place. `one-account-per-request.ts`
   // states the rule and how each credential is read.
   await refuseRequestNamingDifferentAccounts(ctx);
+
+  // ── [#33203] Cloud-managed: no reset door sets a local password ──
+  // A hosted environment sets no local password for anyone, a platform
+  // administrator included (ruling 10 of cloud#4465, `cloud-managed.ts`).
+  // Both reset doors create the credential account when the user holds
+  // none (better-auth's `resetCredentialPassword`), so each is refused
+  // here, ahead of the vendor's handler, with the two doors that send
+  // their link or code: nobody is sent a link the reset door would
+  // refuse. Every request on these paths is refused alike, whatever it
+  // carries, before any record is read, so the answer says nothing about
+  // any account. Asked ahead of the per-number send guard (it spends
+  // nothing) and of the SSO-only reset judge below, which this answers
+  // for on a managed environment.
+  if (CLOUD_MANAGED_RESET_DOORS.has(ctx?.path ?? '') && isCloudManaged()) {
+    const { APIError } = await import('better-auth/api');
+    const door = ctx.path === RESET_PASSWORD_PATH || ctx.path === PHONE_RESET_PASSWORD_PATH
+      ? 'resetPassword'
+      : 'requestPasswordReset';
+    throw new APIError('CONFLICT', {
+      message: CLOUD_MANAGED_REFUSAL_MESSAGES[door],
+      code: CLOUD_MANAGED_REFUSAL_CODE,
+    });
+  }
 
   // ── #2780: per-number OTP send guard (admission control) ─────
   // MUST run BEFORE the phone-number endpoints: better-auth's
@@ -516,9 +573,14 @@ export async function globalBeforeHook(
   // read as unauthenticated and this env-access check never evaluated
   // at all. Two resolution sites are what let them diverge, so the fix
   // is to delete one, not to correct it in place.
+  //
+  // The gate judges EVERY client the request names — the query's and the
+  // body's `client_id`, each a string or an array, de-duplicated
+  // ({@link authorizeRequestClientIds}) — and refuses if any one of them
+  // is refused. A request that names no client anywhere is not judged here.
   if (ctx?.path === '/oauth2/authorize' && this.config.oidcAuthorizeGate) {
-    const clientId = ctx?.query?.client_id;
-    if (clientId) {
+    const clientIds = authorizeRequestClientIds(ctx);
+    if (clientIds.length > 0) {
       const actor = await this.resolveActor(ctx);
       // Unauthenticated → fall through, per the contract above. Only an
       // AUTHENTICATED subject is gated here. `resolveActor` also returns
@@ -526,10 +588,11 @@ export async function globalBeforeHook(
       // D5.1 host contract is `(userId, clientId)` and the control plane
       // derives org membership / app assignment from the user itself.
       if (actor?.userId) {
-        const allowed = await this.config.oidcAuthorizeGate({
-          userId: actor.userId,
-          clientId: String(clientId),
-        });
+        let allowed = true;
+        for (const clientId of clientIds) {
+          allowed = await this.config.oidcAuthorizeGate({ userId: actor.userId, clientId });
+          if (!allowed) break;
+        }
         if (!allowed) {
           // The refusal, delivered by who is asking (`oauth-authorize-refusal.ts`):
           // the `403` envelope for a fetch or an API client, unchanged; for a

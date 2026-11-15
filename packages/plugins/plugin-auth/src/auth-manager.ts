@@ -960,7 +960,10 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * D5.1 — OIDC OP authorization gate (cloud-as-IdP app-assignment).
    * When set, it is called for an AUTHENTICATED subject on
    * `/oauth2/authorize` before an authorization code is issued, with the
-   * subject + the requesting `clientId`. Return `false` to DENY (no code).
+   * subject + a `clientId` the request names. Return `false` to DENY (no code).
+   * It can be called once for each distinct client the request names (the
+   * query's and the body's `client_id`); if any one call answers `false`,
+   * the request is refused and no further client is asked about.
    * The cloud control plane uses it to require org-membership: a cloud user
    * may only obtain a code for an env client (`project_<envId>`) of an org
    * they belong to. Unset (open editions / self-host, where the OP is not a
@@ -5580,8 +5583,11 @@ export class AuthManager {
    * Under SSO-only ({@link resolveSsoOnly}), and [#25083] on a cloud-managed
    * environment, whose people the hosting organisation invites in the cloud.
    * Read by the wiring and by `getPublicConfig()` alike, so the advertised
-   * flag cannot disagree with the wired one. Break-glass is untouched: neither
-   * case disables `emailAndPassword.enabled`.
+   * flag cannot disagree with the wired one. Neither case disables
+   * `emailAndPassword.enabled`: a password held before still signs in. Under
+   * SSO-only that keeps ADR-0135 D5.2's break-glass; a cloud-managed
+   * environment keeps none, and its password doors refuse everyone
+   * (`cloud-managed.ts`, #33203).
    */
   private signUpForcedOff(): boolean {
     return this.resolveSsoOnly() || isCloudManaged();

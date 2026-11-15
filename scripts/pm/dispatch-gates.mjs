@@ -15967,10 +15967,27 @@ function runGit(args, cwd) {
   return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: (r.stderr ?? '').trim() };
 }
 
-function gitLines(args, cwd) {
+/**
+ * A path list from git, read NUL-separated: `git <subcommand> -z <rest…>`.
+ *
+ * The `-z` is spliced in here rather than written at each call site, so no
+ * caller can list paths the other way. Without it git C-quotes any path that
+ * holds a non-ASCII byte, a double quote or a control character
+ * (`"skills/x/\346\226\207.md"` for a file named in Chinese), and the quoted
+ * spelling begins with a quote mark, so it matches no glob: a governed
+ * `skills/**` file read as no tier at all, every derived gate watching it went
+ * unnamed, and an untracked one was counted as an unreadable file of 0 lines.
+ * ⛔ `core.quotePath=false` alone is no repair: it unquotes the non-ASCII bytes
+ * only, and a newline in a path still splits one name into two on a line
+ * read. Split on NUL and never trim: a leading or trailing space is part of
+ * the name. Same reader shape as `trackedFiles` and the landing gates'
+ * `enumerateRows`.
+ */
+function gitPathList([subcommand, ...rest], cwd) {
+  const args = [subcommand, '-z', ...rest];
   const r = runGit(args, cwd);
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed — ${r.stderr || `exit ${r.status}`}`);
-  return r.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  return r.stdout.split('\0').filter(Boolean);
 }
 
 /**
@@ -16046,9 +16063,11 @@ export function changedPathsFromGit({ cwd = ROOT, base = DEFAULT_BASE_REF } = {}
   // --no-renames so a moved file contributes BOTH names. Rename detection
   // prints only the new one, and a gate watching the old directory is exactly
   // as implicated by the move as one watching the new.
-  const committed = gitLines(['diff', '--name-only', '--no-renames', mergeBase, 'HEAD'], cwd);
-  const worktree = gitLines(['diff', '--name-only', '--no-renames', 'HEAD'], cwd);
-  const untracked = gitLines(['ls-files', '--others', '--exclude-standard'], cwd);
+  // Every list is read NUL-separated (`gitPathList`), so a name git would
+  // C-quote reaches the tier and the gate match spelled as it is on disk.
+  const committed = gitPathList(['diff', '--name-only', '--no-renames', mergeBase, 'HEAD'], cwd);
+  const worktree = gitPathList(['diff', '--name-only', '--no-renames', 'HEAD'], cwd);
+  const untracked = gitPathList(['ls-files', '--others', '--exclude-standard'], cwd);
 
   const paths = [...new Set([...committed, ...worktree, ...untracked])].sort();
   const size = changedLinesFromGit({ cwd, mergeBase, untracked });
@@ -16084,7 +16103,7 @@ export function changedLinesFromGit({ cwd = ROOT, mergeBase, untracked = null })
     throw new Error(`git diff --numstat ${mergeBase.slice(0, 9)} failed — ${tracked.stderr || `exit ${tracked.status}`}; the changed-line count cannot be answered, and an unanswered count is never zero`);
   }
   const counted = parseNumstat(tracked.stdout);
-  const others = untracked ?? gitLines(['ls-files', '--others', '--exclude-standard'], cwd);
+  const others = untracked ?? gitPathList(['ls-files', '--others', '--exclude-standard'], cwd);
   let untrackedLines = 0;
   let untrackedBinary = 0;
   let unreadable = 0;

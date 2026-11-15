@@ -183,6 +183,7 @@
     "data/DocumentSchemaValidation:jsonSchema",
     "data/DocumentSchemaValidation:validationAction",
     "data/DocumentSchemaValidation:validationLevel",
+    "data/DriverCapabilities:aggregationFilter",
     "data/DriverCapabilities:arrayFields [RETIRED]",
     "data/DriverCapabilities:autonumber",
     "data/DriverCapabilities:batchSchemaSync",

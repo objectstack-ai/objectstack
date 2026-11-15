@@ -77,7 +77,8 @@ import type { StepLogEntry } from './engine.js';
  * whose only channel was refused said `acted: 0` and nothing else, so a caller
  * reading the trigger response's summary could not tell "nothing to send"
  * from "nobody could be reached". The list is bounded per node
- * ({@link MAX_NODE_SUMMARY_WARNINGS}), like the rest of the detail. A
+ * ({@link MAX_NODE_SUMMARY_WARNINGS}) and each text in it is bounded too
+ * ({@link MAX_NODE_SUMMARY_WARNING_LENGTH}), like the rest of the detail. A
  * `subflow` child's warnings stay on the child's own run row, as its `skipped`
  * gates do.
  */
@@ -151,7 +152,7 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
                 seen = new Set<string>();
                 warningsSeen.set(step.nodeId, seen);
             }
-            for (const warning of step.warnings) seen.add(warning);
+            for (const warning of step.warnings) seen.add(boundedWarning(warning));
         }
 
         const metrics = step.metrics;
@@ -225,12 +226,44 @@ export function summarizeRun(steps: readonly StepLogEntry[]): FlowRunSummary {
  *
  * The summary's detail is bounded by the flow's STATIC shape, never by how
  * often a node ran — that is what keeps a 5000-row sweep's persisted
- * `summary_json` under its byte cap (`serializeSummaryBounded`). A warning
- * text can embed a per-execution count (a `notify` names how many deliveries
- * failed), so a long loop could raise many distinct texts; the row lists the
- * first few and says how many it left out.
+ * `summary_json` under its byte cap (`serializeSummaryBounded`). A producer
+ * keeps its text stable per cause (a `notify` names the failed channels and
+ * their reasons, never a count), so repeated executions fold into one entry;
+ * a node that still raises many distinct texts lists the first few and says
+ * how many it left out.
  */
 export const MAX_NODE_SUMMARY_WARNINGS = 5;
+
+/**
+ * The longest one warning text in a node's summary row may be, in UTF-16 code
+ * units, the cut marker included.
+ *
+ * The count bound above sizes the list; this one sizes each entry, so a node
+ * row's warnings stay a few hundred bytes per entry whatever a producer passed
+ * through (a delivery reason, a field list). Without it a handful of nodes with
+ * long texts could push the summary past its byte cap, and the cap's fallback
+ * drops the whole node list (`detailOmitted`). The step log keeps every text
+ * whole.
+ */
+export const MAX_NODE_SUMMARY_WARNING_LENGTH = 300;
+
+/** Ends a warning text cut to {@link MAX_NODE_SUMMARY_WARNING_LENGTH}. */
+export const NODE_SUMMARY_WARNING_CUT_MARKER = ' [... cut; the step log holds the full text]';
+
+/**
+ * One warning text as a summary row carries it: unchanged up to
+ * {@link MAX_NODE_SUMMARY_WARNING_LENGTH}, else cut so that it ends with
+ * {@link NODE_SUMMARY_WARNING_CUT_MARKER} at exactly that length. The cut never
+ * splits a surrogate pair. Applied before the distinct-text fold, so two long
+ * texts that agree up to the cut fold into one entry.
+ */
+function boundedWarning(text: string): string {
+    if (text.length <= MAX_NODE_SUMMARY_WARNING_LENGTH) return text;
+    let end = MAX_NODE_SUMMARY_WARNING_LENGTH - NODE_SUMMARY_WARNING_CUT_MARKER.length;
+    const last = text.charCodeAt(end - 1);
+    if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+    return text.slice(0, end) + NODE_SUMMARY_WARNING_CUT_MARKER;
+}
 
 /**
  * The `warnings` a node's summary row publishes: the distinct texts its

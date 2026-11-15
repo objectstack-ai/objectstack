@@ -100,11 +100,13 @@ row's `manager` result: a link it cannot make never fails the user it imported.
 The column is also written by a seed, or by any other system-context write, which bypasses the
 managed-update whitelist. SCIM provisioning and directory sync can populate it too, but only
 through a provisioning path your own deployment supplies: this platform declares the SCIM
-`manager` attribute without projecting it onto the column. Where an identity carries
-`source: 'idp_provisioned'` the admin operation **refuses**, so that directory stays the one
-surface that authors its manager. A user a SCIM connection provisions carries that value from its
-creation unless it holds a local password, so for such a user the column is written only by that
-deployment-supplied path, and a value the column already holds stays as it is.
+`manager` attribute without projecting it onto the column. Where a SCIM directory holds an
+identity (it carries `source: 'idp_provisioned'` and the directory has provisioned or linked it)
+the admin operation **refuses**, the import's `manager_id` column included, so that directory
+stays the one surface that authors its manager; for such a user the column is written only by that
+deployment-supplied path, and a value the column already holds stays as it is. A person who only
+signs in through SSO also carries `source: 'idp_provisioned'`, but no directory holds them: their
+manager is set with **Set Manager** or the import like anyone else's.
 
 Setting the column is still something you have to *do*. Where `manager_id` is unset the rung
 expands to nobody, and under the default `onEmptyApprovers: 'admin_rescue'` the request opens on

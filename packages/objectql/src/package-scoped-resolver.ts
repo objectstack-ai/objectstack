@@ -118,11 +118,16 @@ export interface PackageScopedQuery extends PackageScopedHoldersQuery {
   readonly includeDisabledPackages?: boolean;
 }
 
-/** The registry slice the registry adapter reads — every member of it, and no other. */
+/**
+ * The registry slice the registry adapter reads — every member of it, and no other.
+ * [ADR-0150 D4] `getEnvironmentScopedActions`, where a registry has it, is the
+ * environment-scoped `action` items of a name, one per owner key: the
+ * owner-key view (`actionOwnerScopedRegistry`) reads the item on its own key.
+ */
 export type PackageScopedRegistry = Pick<
   SchemaRegistry,
   'getPackage' | 'getAllPackages' | 'packageScopedHoldersOf' | 'getPackageScopedItem' | 'getEnvironmentScopedItem'
->;
+> & Partial<Pick<SchemaRegistry, 'getEnvironmentScopedActions'>>;
 
 /**
  * Resolve a bare name by ADR-0150 D3 over the registry's holders: the rule
