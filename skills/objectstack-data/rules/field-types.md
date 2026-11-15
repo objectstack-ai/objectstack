@@ -49,7 +49,7 @@ const fields = {
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
 | `number` | Generic numeric value | `min`, `max`, `precision`, `scale` |
-| `currency` | Monetary amounts | `currencyConfig` (currencyMode, defaultCurrency, currencyField, homeAmount) |
+| `currency` | Monetary amounts | `currencyConfig` (§ Currency) |
 | `percent` | Percentage; stored as a fraction (0-1) unless the field declares `max` above 1 (`max: 100`), then whole points; seeds, defaults, API values use that scale | `min`, `max`, `precision`, `percentDisplay` — the read-only face: unset or `'bar'` draws a progress bar, `'plain'` the number alone, for a rate or a probability |
 
 ## Date & Time
@@ -176,6 +176,19 @@ home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
 (`date`/`datetime`) rate, and that rate in `rateField` (`number`), both
 `readonly: true`. Cross-currency totals sum `field`.
 
+**A roll-up of the home field.** A `sum` / `min` / `max` / `avg` `summary` over a
+child's `homeAmount.field` declares `currencyMode: 'dynamic'`, no `defaultCurrency`
+(ADR-0144: metadata never names the home currency, so never `'fixed'` with it).
+It shows in `localization.currency`; without it, as a bare number. `defineStack`
+(`os validate`, the build) refuses `'dynamic'` on any other roll-up, and any
+`currencyConfig` on a `count`.
+
+```typescript
+// on project; expense.amount_home is the expense amount's homeAmount.field
+actual_cost: Field.summary({ summaryOperations: { object: 'expense', field: 'amount_home', function: 'sum' },
+  currencyConfig: { currencyMode: 'dynamic' } }),
+```
+
 **A line in its parent's currency.** On a `master_detail` child, `currencyField`
 may be `'<master_detail field>.<parent code field>'`: one hop (a `lookup` path
 is refused) to the parent's `iso_4217_currency` field. The line stores no code:
@@ -220,13 +233,6 @@ const total = {
 ```
 
 ### Autonumber
-
-```typescript
-{
-  type: 'autonumber',
-  format: 'CASE-{0000}',
-}
-```
 
 The `format` is literal text interleaved with `{...}` tokens:
 
