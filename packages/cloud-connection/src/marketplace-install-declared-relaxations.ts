@@ -72,7 +72,7 @@ export interface InstallRelaxEngine {
 export interface InstallRelaxReport {
     applied: Array<InstallRelaxEntry & { object: string }>;
     skipped: Array<InstallRelaxEntry & { object: string }>;
-    /** Objects with a declared relax whose driver has no `relaxDeclaredNotNull` (a non-SQL driver, a federated object). */
+    /** Objects with a declared relax whose driver has no `relaxDeclaredNotNull` (a non-SQL driver). A federated object is skipped, not listed. */
     unsupported: string[];
 }
 

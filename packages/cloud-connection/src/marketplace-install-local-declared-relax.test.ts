@@ -35,6 +35,7 @@ type Row = Record<string, any>;
 const VENDOR = 'com.acme.crm';
 const OTHER = 'com.acme.addons';
 const INSTALLER = 'usr_installer';
+const REGISTER_FAILURE = 'object acme_product: the runtime could not bind a handler';
 
 const body = (id: string, version: string, extra: Row): Row => ({ id, namespace: id === VENDOR ? 'acme' : 'addons', version, ...extra });
 const product = (fields: Row): Row => ({ name: 'acme_product', label: 'Product', fields });
@@ -88,21 +89,42 @@ beforeEach(async () => {
 afterEach(async () => {
     await driver.disconnect().catch(() => {});
     rmSync(dir, { recursive: true, force: true });
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
 });
+
+/** Serve one manifest snapshot from the cloud leg; the public fast-path is off. */
+function serveSnapshot(manifest: Row) {
+    vi.stubEnv('OS_MARKETPLACE_PUBLIC_BASE_URL', 'off');
+    // A non-empty service key, so the credential read never reaches the
+    // developer's own on-disk binding.
+    vi.stubEnv('OS_CLOUD_API_KEY', 'svc-test-key');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+        JSON.stringify({ data: { manifest, version: manifest.version, version_id: `ver_${manifest.version}` } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )));
+}
 
 /**
  * Mount the door over the real driver. `served` is what the registry serves,
  * by object: the register writes the registering package's own objects into
  * it, and an extension's fields onto the object it extends.
  */
-async function mount(options: { served?: Record<string, Row>; relax?: 'missing' } = {}) {
+async function mount(options: { served?: Record<string, Row>; relax?: 'missing'; controlPlaneUrl?: string; failRegisterOf?: string } = {}) {
     const served: Record<string, Row> = options.served ?? {};
     const register = vi.fn(async (registered: any) => {
         for (const o of registered.objects ?? []) served[o.name] = { ...o, fields: { ...o.fields } };
         for (const e of registered.objectExtensions ?? []) {
             const target = served[e.extend];
             if (target) target.fields = { ...target.fields, ...e.fields };
+        }
+        // A register that fails AFTER it wrote the body's objects: the
+        // registry then serves the new declaration although the install does
+        // not count as hot-loaded. An undeclared throw (no 4xx status) is the
+        // lenient path's fault, not a refusal.
+        if (options.failRegisterOf !== undefined && registered.version === options.failRegisterOf) {
+            throw new Error(REGISTER_FAILURE);
         }
     });
     const syncSchemas = vi.fn(async () => {
@@ -133,7 +155,7 @@ async function mount(options: { served?: Record<string, Row>; relax?: 'missing' 
         registerService: (name: string, service: unknown) => { services[name] = service; },
         logger,
     };
-    const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
+    const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: options.controlPlaneUrl ?? 'off', storageDir: dir });
     await plugin.init(ctx as any);
     await plugin.start(ctx as any);
     await hooks.get('kernel:ready')?.();
@@ -193,12 +215,35 @@ describe('a package upgrade relaxes the NOT NULL its own declaration makes nulla
         expect((await nullable('acme_product')).list_price).toBe(false);
     });
 
+    it('the lenient path relaxes nothing: a cloud upgrade whose register throws (no 4xx) leaves the column NOT NULL', async () => {
+        // The running kernel does not serve v2 as installed (`hotLoaded:
+        // false`), and the restart that loads it is a boot, which never relaxes
+        // a column (ADR-0113 D5) — though the failed register already wrote
+        // v2's declaration, so the served object says `notNull: false`.
+        const door = await mount({ controlPlaneUrl: 'http://cloud.test', failRegisterOf: '2.0.0' });
+        expect((await door.install(makeC({ manifest: V1 }))).status).toBe(200);
+        serveSnapshot(V2);
+
+        const res = await door.install(makeC({ packageId: VENDOR }));
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.hotLoaded).toBe(false);
+        expect(res.payload.data.hotLoadError).toBe(REGISTER_FAILURE);
+        // The fixture is real: what the registry serves would be relaxed.
+        expect(door.served.acme_product!.fields.list_price.storage).toEqual({ notNull: false });
+        expect((await nullable('acme_product')).list_price).toBe(false);
+        await expect(driver.create('acme_product', { name: 'p', sku: 's' })).rejects.toThrow();
+    });
+
     it('a driver with no relax door installs as before, and the column stays NOT NULL', async () => {
         const door = await mount({ relax: 'missing' });
         await door.install(makeC({ manifest: V1 }));
         const res = await door.install(makeC({ manifest: V2 }));
         expect(res.status).toBe(200);
         expect((await nullable('acme_product')).list_price).toBe(false);
+        expect(door.logger.warn).toHaveBeenCalledWith(expect.stringContaining(
+            "acme_product declares `storage: { notNull: false }` on list_price, and its driver has no NOT NULL relax",
+        ));
     });
 });
 

@@ -6,7 +6,7 @@
 
 fix: a package upgrade that makes a field `storage: { notNull: false }` relaxes the NOT NULL column the earlier version built
 
-Clause-②: no
+Clause-②: yes (widening) — new root exports of @objectstack/cloud-connection (relaxInstallDeclaredNotNull, declaredNullableColumns, types InstallRelaxDriver/InstallRelaxEngine/InstallRelaxEntry/InstallRelaxReport) and the public method SqlDriver.relaxDeclaredNotNull
 Metadata-protocol: none
 
 A package field that was `storage: { notNull: true }` and is now `storage: { notNull: false }` kept its NOT NULL column on every database an earlier version built, so every write that left the field empty was refused by the database. The install's schema sync is additive, the boot never relaxes a column, and the publish that applies the relax for an environment-authored object is refused for a sealed package object (`NOT_OVERRIDABLE`), so only `os migrate apply` on the environment's own database could fix it.

@@ -321,7 +321,7 @@ import {
     SCHEMA_UPGRADE_CONFIRMATION_STATUS,
     type SchemaUpgradeVerdict,
 } from '@objectstack/metadata-core';
-import { relaxInstallDeclaredNotNull, type InstallRelaxEngine } from './marketplace-install-declared-relaxations.js';
+import { declaredNullableColumns, relaxInstallDeclaredNotNull, type InstallRelaxEngine } from './marketplace-install-declared-relaxations.js';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
@@ -4341,8 +4341,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * [#33724] Step 4b″ of {@link handleInstall}: relax the NOT NULL columns
      * the installing package's own body declares nullable
      * ({@link relaxInstallDeclaredNotNull}). Reports what it did in the log:
-     * each relax applied (the driver's own line), each one the database could
-     * not take, and any failure — never the install's answer, which the
+     * each relax applied (the driver's own line), each object whose driver has
+     * no relax door, each one the database could not take, and any failure — never the install's answer, which the
      * schema sync above does not fail either.
      */
     private relaxDeclaredNotNull = async (ctx: PluginContext, manifestId: string, converted: unknown): Promise<void> => {
@@ -4350,6 +4350,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try { engine = ctx.getService('objectql') as InstallRelaxEngine | undefined; } catch { /* no data engine */ }
         try {
             const report = await relaxInstallDeclaredNotNull({ manifestId, incoming: converted, engine });
+            const declared = declaredNullableColumns(converted);
+            for (const object of report.unsupported) {
+                ctx.logger?.warn?.(
+                    `[MarketplaceInstallLocal] ${manifestId}: ${object} declares \`storage: { notNull: false }\` on `
+                    + `${(declared.get(object) ?? []).join(', ')}, and its driver has no NOT NULL relax, so the column stays `
+                    + `as the database has it; relax it with "os migrate apply" if it is NOT NULL`,
+                );
+            }
             for (const d of report.skipped) {
                 ctx.logger?.warn?.(
                     `[MarketplaceInstallLocal] ${manifestId}: ${d.object}.${d.column ?? ''} declares \`storage: { notNull: false }\`, `
