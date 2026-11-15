@@ -572,18 +572,33 @@ describe('[#32780] two namespaces\' stored permission sets of one name: each ser
         }
     }
 
-    it('crm declares a set, hr saves one of the name, then crm saves its own and a third namespace saves one: each lands and each is served at its own package, also after a restart (FROM: crm\'s and fin\'s saves refused naming hr)', async () => {
+    it('crm declares a set, hr saves one of the name, then crm saves its own and a third namespace saves one: each lands and each is served at its own package (FROM: crm\'s and fin\'s saves refused naming hr)', async () => {
         const stores: Stores = new Map();
         const { engine, protocol } = await boot(stores, [CRM, HR, FIN], undefined, { [CRM]: [N] });
         expect((await save(protocol, HR, 'cap_hr')).success, 'hr\'s save beside crm\'s declared set').toBe(true);
-        expect((await save(protocol, CRM, 'cap_crm')).success, 'crm\'s own save').toBe(true);
         expect((await save(protocol, FIN, 'cap_fin')).success, 'a third namespace\'s save').toBe(true);
+        const othersOnly: Stores = new Map([...stores].map(([table, rows]) => [table, new Map(rows)]));
+        expect((await save(protocol, CRM, 'cap_crm')).success, 'crm\'s own save').toBe(true);
         const served = { [CRM]: ['cap_crm'], [HR]: ['cap_hr'], [FIN]: ['cap_fin'] };
         expect(await grants(engine, [CRM, HR, FIN]), 'the running kernel').toEqual(served);
         expect(await confers(engine, null)).toEqual([]);
-        for (const rows of [stores, reversedRows(stores)]) {
+        // The other namespaces' stored sets are their own packages': a restart beside crm's declared set boots and serves each.
+        for (const rows of [othersOnly, reversedRows(othersOnly)]) {
             const restarted = await boot(rows, [CRM, HR, FIN], undefined, { [CRM]: [N] });
-            expect(await grants(restarted.engine, [CRM, HR, FIN]), 'after a restart').toEqual(served);
+            expect(await grants(restarted.engine, [HR, FIN]), 'after a restart').toEqual({ [HR]: ['cap_hr'], [FIN]: ['cap_fin'] });
+        }
+    });
+
+    it('CONTROL (ADR-0048 N.3) — a stored set bound to the package that declares the name is the environment\'s at the cold boot, as before: the restart is refused naming that package alone', async () => {
+        const stores: Stores = new Map();
+        const first = await boot(stores, [CRM, HR], undefined, { [CRM]: [N] });
+        expect((await save(first.protocol, HR, 'cap_hr')).success).toBe(true);
+        expect((await save(first.protocol, CRM, 'cap_crm')).success).toBe(true);
+        for (const rows of [stores, reversedRows(stores)]) {
+            const error: any = await refusal(() => boot(rows, [CRM, HR], undefined, { [CRM]: [N] }));
+            const envelope = error?.cause ?? error;
+            expect([envelope?.code, envelope?.status]).toEqual(['NAMESPACE_CONFLICT', 422]);
+            expect(envelope?.conflicts).toEqual([{ catalogType: 'permission', name: N, incomingPackageId: CRM, existingHolder: { kind: 'environment' } }]);
         }
     });
 

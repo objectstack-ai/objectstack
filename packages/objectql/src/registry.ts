@@ -5201,6 +5201,10 @@ export class SchemaRegistry {
    *   boot hydration grafts the package's envelope onto the stored row (the
    *   protocol's artifact-protection merge), so the stamp names the very
    *   package the row collides with.
+   *   A stored row bound to the declaring package itself is the environment's
+   *   too where it sits in that package's own overlay slot ({@link overlaySlotKey};
+   *   a stored permission set bound to a package takes it, #32780): it counts
+   *   against that package alone, and a row in another package's slot does not.
    * - **A package holds a name** through an item registered under it (its
    *   composite slot) or its install claim — never through the bare slot.
    * - **Built-in names are skipped**, as the item seam skips the environment
@@ -5225,11 +5229,16 @@ export class SchemaRegistry {
   private environmentHeldSecurityCatalogConflicts(): SecurityCatalogNameConflict[] {
     const conflicts: SecurityCatalogNameConflict[] = [];
     for (const { catalogType, name, packageIds } of this.packageHeldSecurityCatalogNames()) {
+      const collection = this.metadata.get(catalogType);
       // The environment's item: the bare slot, whatever `_packageId` it wears.
       // A held name never contains `:` and is never a built-in, so this is the
       // bare-slot reading the method header states.
-      if (!this.metadata.get(catalogType)?.has(name)) continue;
+      const bare = collection?.has(name) === true;
       for (const packageId of packageIds) {
+        // [ADR-0048 N.3, #32780] A stored row bound to the declaring package
+        // itself is the environment's too, also where it took that package's
+        // own overlay slot (a stored permission set does since #32780).
+        if (!bare && collection?.has(overlaySlotKey(packageId, name)) !== true) continue;
         conflicts.push({ catalogType, name, incomingPackageId: packageId, existingHolder: { kind: 'environment' } });
       }
     }
