@@ -28,7 +28,8 @@
  * same `assistant` and `attachment` entries; none of the extra kinds carries a model, so they are not judged.
  *
  * JSON Lines, one entry per line. An entry with `type: 'assistant'` is one model turn: `message.model` is the
- * model that SERVED it and `requestedModel` the one the harness asked for. An entry with `type: 'attachment'`
+ * model that SERVED it, `requestedModel` the one the harness asked for and `advisorModel` the one it consults
+ * (measured equal to the served model on every turn). An entry with `type: 'attachment'`
  * whose `attachment.type` is `model` carries `attachment.identity.modelId`, the model the run was told it is.
  * The model-fallback notice ("switched to … because its earlier model could not be used") was seen only in the
  * parent's completion notification, never in the sub-agent's file; a mid-run switch shows in the file as a turn
@@ -41,14 +42,22 @@
  *   - the file reads, is non-empty, and every non-blank line parses as a JSON object;
  *   - at least one assistant turn exists, and every one names a served model equal to `CONTRACT_REVIEW_TIER`
  *     (a turn with no model field refuses: a turn nobody can attribute is not a turn at the tier);
- *   - every `requestedModel` and every `model` attachment present names the same value;
+ *   - every `requestedModel`, every `advisorModel` and every `model` attachment present names the same value;
+ *   - no assistant turn calls a tool that runs or drives ANOTHER agent (`SUB_AGENT_TOOLS`): that agent's turns
+ *     live in its own file, so this one cannot show them at the tier, nor which agent served the review — the
+ *     evidence is the transcript of the agent that RAN the review, one that ran no other (a seat that reviewed
+ *     in-seat while it ran unrelated agents passes the review's own sub-agent file, or reviews in a fresh agent);
  *   - no `system` entry carries the fallback notice.
+ *
+ * Model values are compared EXACTLY. A context-window suffix on an id would refuse an at-tier run, which fails
+ * closed; measured: a session configured with a suffixed id records every model field without it.
  *
  * ⛔ Output carries no model identifier and no transcript content: a seat may quote it, and AGENTS.md keeps model
  * identifiers out of every GitHub artefact. A turn served elsewhere is named by its line number only.
  *
- * Boundary: this catches honest failure (a missing model parameter, a mid-run fallback). It does not stop a seat
- * writing a false record or passing another run's transcript; that is the post-merge audit's job.
+ * Boundary: this catches honest failure (a missing model parameter, a mid-run fallback, a review handed on to a
+ * sub-agent). It does not stop a seat writing a false record, passing another run's transcript or cutting one
+ * short; that is the post-merge audit's job, and it reads the record, not the run.
  *
  * Exit: 0 served at the tier · 1 refused (the reason is printed) · 2 usage.
  */
@@ -64,6 +73,12 @@ export const EXIT_USAGE = 2;
 
 /** The harness's model-fallback notice, as the completion notification words it. */
 export const FALLBACK_NOTICE = /\bswitched to\b[^\n]*\bbecause its earlier model could not be used\b/i;
+
+/**
+ * The tools that run or drive another agent, whose turns land in that agent's own transcript: the harness's
+ * sub-agent spawn (and its older name), a workflow of sub-agents, and a message to a running agent.
+ */
+export const SUB_AGENT_TOOLS = Object.freeze(['Agent', 'Task', 'Workflow', 'SendMessage']);
 
 /** Every string inside a value, flattened — for the notice scan of a harness `system` entry. */
 function stringsOf(value, out = []) {
@@ -108,6 +123,14 @@ export function judgeReviewTranscript(text, tier = CONTRACT_REVIEW_TIER) {
       if ('requestedModel' in entry && entry.requestedModel !== tier) {
         return { ok: false, reason: `${at} is an assistant turn whose requested model is not ${name}` };
       }
+      if (entry.advisorModel !== undefined && entry.advisorModel !== null && entry.advisorModel !== tier) {
+        return { ok: false, reason: `${at} is an assistant turn whose advisor model is not ${name}` };
+      }
+      const content = Array.isArray(entry.message?.content) ? entry.message.content : [];
+      const spawn = content.find((c) => c?.type === 'tool_use' && SUB_AGENT_TOOLS.includes(c?.name));
+      if (spawn) {
+        return { ok: false, reason: `${at} calls ${spawn.name}, so this file cannot show which agent served the review, and part of the run is in a file this one does not name — pass the transcript of the agent that ran the review, one that called no other agent: a review sub-agent's own output file, or a session that reviewed without running any other agent` };
+      }
     } else if (entry.type === 'attachment' && entry.attachment?.type === 'model') {
       if (entry.attachment?.identity?.modelId !== tier) {
         return { ok: false, reason: `${at} tells the run it is a model other than ${name}` };
@@ -148,11 +171,12 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'passes: every turn at the tier': 4,
   'refuses: a turn, a request or an identity off the tier': 5,
+  'refuses: an advisor off the tier, and a run that hands work to another agent': 7,
   'refuses: the fallback notice in a harness entry, and only there': 3,
   'refuses: no model field, empty, unparseable or unreadable': 6,
   'output: no model identifier and no path in any verdict line': 2,
 });
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 
 function selfTest() {
   const TIER = CONTRACT_REVIEW_TIER;
@@ -195,6 +219,23 @@ function selfTest() {
   t('a turn served at the tier but requested as another model refuses', !judgeReviewTranscript(jl(user, turn(TIER, OTHER))).ok);
   t('a model attachment naming another model refuses', !judgeReviewTranscript(jl(user, ident(OTHER), turn(TIER))).ok);
   t('⛔ a SESSION transcript with one turn at another tier (a session that switched, or ran its own work elsewhere) refuses', !judgeReviewTranscript(session(turn(TIER), turn(OTHER), turn(TIER))).ok);
+
+  battery('refuses: an advisor off the tier, and a run that hands work to another agent');
+  const advised = (advisor) => ({ ...turn(TIER), advisorModel: advisor });
+  const calls = (name) => ({ ...turn(TIER), message: { role: 'assistant', model: TIER, content: [{ type: 'tool_use', name, input: {} }] } });
+  t('an advisor model equal to the tier passes, and a null one is no advisor', judgeReviewTranscript(jl(user, advised(TIER), advised(null))).ok);
+  t('an advisor model off the tier refuses, naming its line', (() => {
+    const v = judgeReviewTranscript(jl(user, turn(TIER), advised(OTHER)));
+    return !v.ok && v.reason.startsWith('line 3 ') && v.reason.includes('advisor');
+  })());
+  t('⛔ a review that spawns a sub-agent refuses: its turns are in another file (a nested reviewer)', !judgeReviewTranscript(jl(user, calls('Agent'), turn(TIER))).ok);
+  t('⛔ a SESSION transcript that delegated its review refuses, whatever served the sub-agent', !judgeReviewTranscript(session(turn(TIER), calls('Agent'), turn(TIER))).ok);
+  t('⛔ the older spawn name, a workflow and a message to a running agent refuse too', ['Task', 'Workflow', 'SendMessage'].every((n) => !judgeReviewTranscript(jl(user, calls(n))).ok));
+  t('the refusal names the REVIEWING agent\'s transcript, not the spawned one (a seat that reviewed in-seat beside unrelated agents)', (() => {
+    const v = judgeReviewTranscript(session(calls('Agent'), turn(TIER)));
+    return !v.ok && v.reason.includes('the transcript of the agent that ran the review') && !v.reason.includes("that agent's own transcript");
+  })());
+  t('a tool that runs in this agent (Read, Bash) passes', judgeReviewTranscript(jl(user, calls('Read'), calls('Bash'))).ok);
 
   battery('refuses: the fallback notice in a harness entry, and only there');
   t('a system entry carrying the fallback notice refuses', !judgeReviewTranscript(jl(user, turn(TIER), { type: 'system', content: NOTICE })).ok);

@@ -191,6 +191,19 @@ type OmitEntry = { kind: 'omit'; type: string; path: string; key: string; why: s
 type SubsetEntry = { kind: 'subset'; type: string; path: string; why: string };
 
 const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
+  // #33214 (ruling 6879477573, S1 and params) — a hook refusal's further
+  // sentences under one code and the names its holes fill. The hook form lays
+  // out a refusal as message + status, which is all a Studio-authored hook
+  // needs to refuse by code; `reasons` and `params` are authored in code
+  // beside the throw that names them. Offering them in the form is a Studio
+  // change of its own (a record nested in a key-only record, and a name list).
+  ...(['reasons', 'params'] as const).map((key): OmitEntry => ({
+    kind: 'omit',
+    type: 'hook',
+    path: 'refusals',
+    key,
+    why: "authored in code beside the throw that names it — a `reason` or a `params` value is spelled in the hook's throw, which a Studio-authored body writes in the same code; the form lays out a refusal as message + status, and offering a nested reasons record and a params list is a Studio change of its own",
+  })),
   {
     kind: 'omit',
     type: 'page',
