@@ -96,7 +96,7 @@ function harness(opts: {
     stored?: Array<Record<string, unknown>>;
 }) {
     const writes: unknown[] = [];
-    const handler = vi.fn(async () => ({ status: 200, ok: true, body: [] }) as Record<string, unknown>);
+    const handler = vi.fn(async (_input: Record<string, unknown>) => ({ status: 200, ok: true, body: [] }) as Record<string, unknown>);
     const mapping = incrementalMapping(opts.input);
     const deps: ConnectorPullDeps = {
         protocol: {
