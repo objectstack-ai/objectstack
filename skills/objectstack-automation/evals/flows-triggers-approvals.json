@@ -405,6 +405,21 @@
           "objectName: 'sys_user'"
         ]
       }
+    },
+    {
+      "id": 23,
+      "prompt": "Our `record-after-update` flow on `order` calls the `sync_carrier` flow through a `subflow` node. `sync_carrier` wraps an `http` POST to the carrier in a `try_catch` with `retry: { maxRetries: 3 }`. Publishing reported no error, but editing an order never runs the flow. Why, and what do I change?",
+      "expected_output": "Nothing was refused, and that is the trap: the caller runs after a record change, the save waits for the run and the run for its child, so a retried inline `http` in the child would hold the save through every attempt. Written in the caller's own graph that is refused when the flow is saved; reached through a `subflow` / `map` child it is silent: the caller saves but is never armed. `GET /api/v1/automation/_status` shows it `bound: false` with `unboundCause: retried_callout_in_subflow`. Fix the child: `durable: true` on its `http` node (or remove the `retry`), and the caller arms. Not a missing `requires` token, not a second retry or a `fault` edge on the caller, and not the `http` node moved into the caller under the same retry (refused at save).",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "retried_callout_in_subflow",
+          "durable: true"
+        ],
+        "must_not_contain": [
+          "STACK_TRIGGER_CAPABILITY_REQUIRED"
+        ]
+      }
     }
   ]
 }

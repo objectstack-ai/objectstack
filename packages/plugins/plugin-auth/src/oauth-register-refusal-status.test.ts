@@ -31,6 +31,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { Hono } from 'hono';
 import { envelopeViolations } from '@objectstack/spec/api';
+import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import type { PluginContext } from '@objectstack/core';
 import { AuthManager } from './auth-manager';
 import { AuthPlugin } from './auth-plugin';
@@ -59,6 +60,7 @@ let engine: ReturnType<typeof createMemoryEngine>;
 let manager: AuthManager;
 let app: Hono;
 let cookie: string;
+let pluginCtx: PluginContext;
 
 const clientRows = (): number => (engine.tables.get(CLIENTS) ?? []).length;
 
@@ -116,6 +118,7 @@ beforeAll(async () => {
 
   app = new Hono();
   const ctx = mockCtx();
+  pluginCtx = ctx;
   const plugin = new AuthPlugin({ secret: SECRET });
   await plugin.init(ctx);
   (plugin as unknown as { authManager: AuthManager }).authManager = manager;
@@ -199,5 +202,54 @@ describe('[#24773] control — an accepted registration', () => {
     expect(envelopeViolations(body)).toEqual([]);
     expect(typeof body.data?.client?.client_id).toBe('string');
     expect(clientRows()).toBe(before + 1);
+  });
+});
+
+describe('an unclassified internal failure is answered with the generic message and logged once', () => {
+  const MARKER = 'unclassified-failure-marker-a6c9';
+  const ROUTE_LOG = '[AuthPlugin] sys-oauth-application/register failed';
+  const routeLogCalls = () =>
+    (pluginCtx.logger.error as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(([message]) => message === ROUTE_LOG);
+
+  it('a client-creation call that throws with no declared status answers 500 in the generic words, and logs the error once', async () => {
+    const api = (await manager.getApi()) as unknown as { createOAuthClient(input: unknown): Promise<unknown> };
+    const original = api.createOAuthClient;
+    const thrown = new Error(`client store failed ${MARKER}`);
+    api.createOAuthClient = async () => { throw thrown; };
+    const logsBefore = routeLogCalls().length;
+    try {
+      const res = await register({ name: 'Fault', redirectURLs: 'https://app.example.com/callback' });
+      const text = await res.text();
+      expect(res.status).toBe(500);
+      expect(text).not.toContain(MARKER);
+      const body = JSON.parse(text) as Answer;
+      expect(envelopeViolations(body)).toEqual([]);
+      expect(body.error).toEqual({ code: 'OAUTH_REGISTER_FAILED', message: INTERNAL_ERROR_MESSAGE });
+      const logged = routeLogCalls().slice(logsBefore);
+      expect(logged).toHaveLength(1);
+      expect(logged[0][1]).toBe(thrown);
+    } finally {
+      api.createOAuthClient = original;
+    }
+  });
+
+  it('CONTROL: a vendor refusal keeps its own description and status, and is not logged', async () => {
+    const api = (await manager.getApi()) as unknown as { createOAuthClient(input: unknown): Promise<unknown> };
+    const vendor = await api
+      .createOAuthClient({
+        body: { client_name: 'control', redirect_uris: ['http://localhost:4001/callback'], application_type: 'web' },
+        headers: new Headers({ cookie }),
+      })
+      .then(() => undefined, (e: unknown) => e as { body?: { error_description?: unknown } });
+    const description = vendor?.body?.error_description;
+    expect(typeof description, 'the vendor refusal carries a description').toBe('string');
+    const logsBefore = routeLogCalls().length;
+    const res = await register({ name: 'Local Dev', redirectURLs: 'http://localhost:4001/callback', type: 'web' });
+    const body = (await res.json()) as Answer;
+    expect(res.status).toBe(400);
+    expect(body.error?.code).toBe('OAUTH_REGISTER_FAILED');
+    expect(body.error?.details?.upstreamError).toBe('invalid_redirect_uri');
+    expect(body.error?.message).toBe(description);
+    expect(routeLogCalls().length).toBe(logsBefore);
   });
 });

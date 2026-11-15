@@ -14,7 +14,8 @@
  * that differs from the record's refuses the export — a recording from some
  * other run never reaches the gallery as this run's answers. An asked turn
  * with no recorded reply refuses it too: a transcript with holes in it is not
- * a proof.
+ * a proof. An ask mode the record holds is not shown, and the transcript
+ * says so ({@link Transcript.notShown}).
  */
 
 import type { LoadedScenario } from '../loader.js';
@@ -24,6 +25,7 @@ import { stepKey, type Recording, type StepRef } from '../runner/driver.js';
 import { citationLabels, namespacedScenario } from '../runner/namespace.js';
 import { hiddenValues, type QuestionResult } from '../runner/orchestrate.js';
 import type { ParsedTurn } from '../runner/transcript.js';
+import { ASK_MODE_NOT_EXPORTED } from './pass.js';
 import type { ScenarioRunRecord } from './record.js';
 
 export interface TranscriptTurn {
@@ -47,6 +49,8 @@ export interface TranscriptHalf {
 
 export interface Transcript {
   card: string;
+  /** Each mode of the record the transcript does not show, with why: an ask mode ({@link ASK_MODE_NOT_EXPORTED}). Absent when it shows every mode. */
+  notShown?: Array<{ mode: 'ask'; reason: string }>;
   questions: Array<{ id: string; ask: { zh?: string; en?: string }; object: string; personas: string[] }>;
   personas: Array<{ id: string; role: string }>;
   halves: TranscriptHalf[];
@@ -81,7 +85,12 @@ export function buildTranscript(original: LoadedScenario, record: ScenarioRunRec
   const labels = citationLabels(original);
   const card = original.card;
   const halves: TranscriptHalf[] = [];
+  const notShown: NonNullable<Transcript['notShown']> = [];
   for (const mode of record.cardRun.modes) {
+    if (mode.mode === 'ask') {
+      notShown.push({ mode: 'ask', reason: ASK_MODE_NOT_EXPORTED });
+      continue;
+    }
     const runs: Array<[TranscriptHalf['phase'], { questions: QuestionResult[] } | undefined]> = [
       ['run', mode.run],
       ['iterate-run', mode.iterate?.run],
@@ -122,6 +131,7 @@ export function buildTranscript(original: LoadedScenario, record: ScenarioRunRec
     questions: card.run.questions.map((q) => ({ id: q.id, ask: q.ask, object: q.object, personas: q.personas ?? [] })),
     personas: card.run.personas.map((p) => ({ id: p.id, role: p.role })),
     halves,
+    ...(notShown.length ? { notShown } : {}),
   };
 }
 
@@ -191,5 +201,6 @@ export function renderTranscript(t: Transcript, title: string): string {
       }
     }
   }
+  for (const m of t.notShown ?? []) lines.push('', `_${m.mode} mode: ${m.reason}._`);
   return `${lines.join('\n')}\n`;
 }

@@ -18,9 +18,11 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 import {
   RecentItemsProvider,
+  useDropDeletedRecordsFromRecents,
   useRecentItems,
   type RecentItem,
 } from '../RecentItemsProvider';
+import type { DataSourceMutationEvent } from '@object-ui/types';
 import { recentViewId } from '../../hooks/useTrackRouteAsRecent';
 import {
   UserStateAdaptersProvider,
@@ -483,5 +485,110 @@ describe('RecentItemsProvider — one entry per target (objectui#12604)', () => 
     );
     const { result } = renderHook(() => useRecentItems(), { wrapper });
     expect(result.current.recentItems.map((r) => r.id)).toEqual(['view:z']);
+  });
+});
+
+/**
+ * objectstack#33826 — a deleted record leaves the recents. The data source's
+ * mutation bus reports the delete; one subscriber drops the record's entry, so
+ * neither the command palette nor Home offers a record that is gone.
+ */
+describe('RecentItemsProvider — a deleted record leaves the recents (objectstack#33826)', () => {
+  const KEY = 'objectui-recent-items:u:user-1';
+
+  beforeEach(() => {
+    localStorage.clear();
+    mockUser.current = { id: 'user-1', name: 'Alice', email: 'a@x' };
+  });
+
+  /** A data source that only reports mutations, and the means to report one. */
+  function makeMutationSource() {
+    const listeners = new Set<(e: DataSourceMutationEvent) => void>();
+    return {
+      onMutation: (cb: (e: DataSourceMutationEvent) => void) => {
+        listeners.add(cb);
+        return () => {
+          listeners.delete(cb);
+        };
+      },
+      emit: (e: DataSourceMutationEvent) => listeners.forEach((cb) => cb(e)),
+    };
+  }
+
+  const record = (object: string, id: string, label: string) =>
+    ({ id: `record:${object}:${id}`, type: 'record', label, href: `/apps/crm/${object}/record/${id}` }) as const;
+
+  async function mount() {
+    const source = makeMutationSource();
+    const adapter = makeAdapter([]);
+    const view = renderHook(
+      () => {
+        useDropDeletedRecordsFromRecents(source);
+        return useHarness();
+      },
+      { wrapper },
+    );
+    act(() => view.result.current.attach('recent', adapter));
+    await waitFor(() => expect(adapter.loadMock).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => view.result.current.recent.addRecentItem({ id: 'object:crm_account', type: 'object', name: 'crm_account', href: '/apps/crm/crm_account' }));
+    act(() => view.result.current.recent.addRecentItem(record('crm_account', 'a1', 'Browser Test Co')));
+    act(() => view.result.current.recent.addRecentItem(record('crm_account', 'b2', 'Globex')));
+    // The visits' own debounced save lands first, so the counts below start at zero.
+    await waitFor(() => expect(adapter.saveMock).toHaveBeenCalled(), { timeout: 1500 });
+    adapter.saveMock.mockClear();
+    return { ...view, source, adapter };
+  }
+
+  const ids = (items: RecentItem[]) => items.map((r) => r.id);
+
+  it('the deleted record is gone from the list, localStorage and the saved row', async () => {
+    const { result, source, adapter } = await mount();
+    act(() => source.emit({ type: 'delete', resource: 'crm_account', id: 'a1' }));
+
+    expect(ids(result.current.recent.recentItems)).toEqual(['record:crm_account:b2', 'object:crm_account']);
+    expect(ids(JSON.parse(localStorage.getItem(KEY)!))).toEqual(['record:crm_account:b2', 'object:crm_account']);
+    await waitFor(() => expect(adapter.saveMock).toHaveBeenCalledTimes(1), { timeout: 1500 });
+    expect(ids(adapter.saveMock.mock.calls[0][0])).toEqual(['record:crm_account:b2', 'object:crm_account']);
+  });
+
+  it('control: deleting another record leaves this one listed, and writes nothing', async () => {
+    const { result, source, adapter } = await mount();
+    const before = ids(result.current.recent.recentItems);
+    act(() => source.emit({ type: 'delete', resource: 'crm_account', id: 'zz9' }));
+    act(() => source.emit({ type: 'delete', resource: 'crm_contact', id: 'a1' }));
+
+    expect(ids(result.current.recent.recentItems)).toEqual(before);
+    await new Promise((r) => setTimeout(r, 700));
+    expect(adapter.saveMock).not.toHaveBeenCalled();
+  });
+
+  it('control: an update of the record, or a delete that names no record (a bulk delete), drops nothing', async () => {
+    const { result, source } = await mount();
+    const before = ids(result.current.recent.recentItems);
+    act(() => source.emit({ type: 'update', resource: 'crm_account', id: 'a1' }));
+    act(() => source.emit({ type: 'delete', resource: 'crm_account' }));
+
+    expect(ids(result.current.recent.recentItems)).toEqual(before);
+  });
+
+  it('after an undo, the visit to the restored record lists it again', async () => {
+    const { result, source } = await mount();
+    act(() => source.emit({ type: 'delete', resource: 'crm_account', id: 'a1' }));
+    expect(ids(result.current.recent.recentItems)).not.toContain('record:crm_account:a1');
+
+    // The record page's Undo restores the record and returns to it; that visit records it.
+    act(() => result.current.recent.addRecentItem(record('crm_account', 'a1', 'Browser Test Co')));
+    expect(ids(result.current.recent.recentItems)[0]).toBe('record:crm_account:a1');
+  });
+
+  it('unsubscribes when unmounted', async () => {
+    const { result, source, unmount } = await mount();
+    const before = ids(result.current.recent.recentItems);
+    unmount();
+    act(() => source.emit({ type: 'delete', resource: 'crm_account', id: 'a1' }));
+    expect(ids(JSON.parse(localStorage.getItem(KEY)!))).toEqual(before);
   });
 });

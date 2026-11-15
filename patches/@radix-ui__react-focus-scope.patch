@@ -1,8 +1,17 @@
 diff --git a/dist/index.js b/dist/index.js
-index e8906db3b1e87bfc568b75d72b7ed3d8d1d3c09a..7a05e0e4cffba466301ba1fb67067c0861af0a4d 100644
+index e8906db3b1e87bfc568b75d72b7ed3d8d1d3c09a..551c30c1ca1bc1297ffc756c3673602990cddb26 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -110,6 +110,10 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
+@@ -89,6 +89,8 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
+         }, handleMutations2 = function(mutations) {
+           const focusedElement = document.activeElement;
+           if (focusedElement !== document.body) return;
++          const lastFocusedElement = lastFocusedElementRef.current;
++          if (lastFocusedElement && container.contains(lastFocusedElement)) return;
+           for (const mutation of mutations) {
+             if (mutation.removedNodes.length > 0) focus(container);
+           }
+@@ -110,6 +112,10 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
      }, [trapped, container, focusScope.paused]);
      React.useEffect(() => {
        if (container) {
@@ -13,7 +22,7 @@ index e8906db3b1e87bfc568b75d72b7ed3d8d1d3c09a..7a05e0e4cffba466301ba1fb67067c08
          focusScopesStack.add(focusScope);
          const previouslyFocusedElement = document.activeElement;
          const hasFocusedCandidate = container.contains(previouslyFocusedElement);
-@@ -126,7 +130,8 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
+@@ -126,7 +132,8 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
          }
          return () => {
            container.removeEventListener(AUTOFOCUS_ON_MOUNT, onMountAutoFocus);
@@ -24,10 +33,19 @@ index e8906db3b1e87bfc568b75d72b7ed3d8d1d3c09a..7a05e0e4cffba466301ba1fb67067c08
              container.addEventListener(AUTOFOCUS_ON_UNMOUNT, onUnmountAutoFocus);
              container.dispatchEvent(unmountEvent);
 diff --git a/dist/index.mjs b/dist/index.mjs
-index 030ff1a4d2383c9a0a1ba850aa4591890f028784..3dd39a90db9886bc495014a6e4136773e3548448 100644
+index 030ff1a4d2383c9a0a1ba850aa4591890f028784..4dfa11db5c8c6e68f38fcf96025822b825b9c036 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
-@@ -75,6 +75,10 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
+@@ -54,6 +54,8 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
+         }, handleMutations2 = function(mutations) {
+           const focusedElement = document.activeElement;
+           if (focusedElement !== document.body) return;
++          const lastFocusedElement = lastFocusedElementRef.current;
++          if (lastFocusedElement && container.contains(lastFocusedElement)) return;
+           for (const mutation of mutations) {
+             if (mutation.removedNodes.length > 0) focus(container);
+           }
+@@ -75,6 +77,10 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
      }, [trapped, container, focusScope.paused]);
      React.useEffect(() => {
        if (container) {
@@ -38,7 +56,7 @@ index 030ff1a4d2383c9a0a1ba850aa4591890f028784..3dd39a90db9886bc495014a6e4136773
          focusScopesStack.add(focusScope);
          const previouslyFocusedElement = document.activeElement;
          const hasFocusedCandidate = container.contains(previouslyFocusedElement);
-@@ -91,7 +95,8 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
+@@ -91,7 +97,8 @@ var FocusScope = /* @__PURE__ */ React.forwardRef(
          }
          return () => {
            container.removeEventListener(AUTOFOCUS_ON_MOUNT, onMountAutoFocus);

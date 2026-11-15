@@ -17746,9 +17746,13 @@ export function h66ReleasedNonDispatchableRemainder(issue, commentRows) {
 // and the cap eats the tail a seat reaches LAST.
 //
 // ⛔ It models the full 取卡全序 only in part, and says so rather than implying
-// otherwise: `target:` board membership is a board read this file does not
-// make, and the same-priority 「先 `Bug`」 tiebreak is not taken. The author leg
-// IS taken: within one rank a non-fleet card sorts before a fleet card, and ⛔
+// otherwise: the 功能点位次 leg (a parent card's place on the North Star's
+// 「Features on the road」) and the two legs above the label order (a
+// maintainer's direct dispatch, a contract-surface card) are reads this file
+// does not make, and the same-priority 「先 `Bug`」 tiebreak is not taken. A
+// release blocker needs no leg of its own: it is `priority:p0` inside the
+// release window and nothing else, which the first rank already reads.
+// The author leg IS taken: within one rank a non-fleet card sorts before a fleet card, and ⛔
 // it never lifts a card out of its rank. A card is the fleet's when an App
 // opened it (`user.type` `Bot`, every `[bot]` login) OR its body opens with a
 // seat signature (`readSignatureLine`), since seat-operated human accounts file
@@ -17787,9 +17791,10 @@ export const H67_QUOTE_LIMIT = 220;
 
 /**
  * The selection-order legs this row can read for free off the label page, in
- * rank order. ⛔ NOT the whole 取卡全序: `target:` board membership needs a board
- * read this file does not make, and the same-priority 「先 `Bug`」 tiebreak is
- * not taken. Everything not listed shares the last rank and is then ordered by
+ * rank order. ⛔ NOT the whole 取卡全序: the 功能点位次 leg and the two legs above
+ * the label order need reads this file does not make, and the same-priority
+ * 「先 `Bug`」 tiebreak is not taken. A release blocker rides `priority:p0`
+ * inside the release window, so the first rank below already carries it. Everything not listed shares the last rank and is then ordered by
  * age, which is the order in force 「清不空的那一刻起」.
  */
 export const H67_SELECTION_ORDER_LABELS = Object.freeze([
@@ -19278,7 +19283,8 @@ export function summaryLine(counts, findingCount) {
     'file caches a timeline. Candidates are ordered OLDEST-FIRST — the OPPOSITE of H66\'s — ' +
     'because the order in force is 「清不空的那一刻起改最老优先」 and the cards a seat reaches ' +
     'NEXT are the ones that must have been read; the plan models the priority and age legs of ' +
-    '取卡全序 only, ⛔ not `target:` board membership and ⛔ not the 「先 `Bug`」 tiebreak. ' +
+    '取卡全序 only — a release blocker is `priority:p0` inside the release window, so the ' +
+    'priority leg carries it — ⛔ not the 功能点位次 leg and ⛔ not the 「先 `Bug`」 tiebreak. ' +
     '⚠️ Rows are a LOWER BOUND: a delivery that left NO cross-reference is invisible to this ' +
     'instrument (the filer\'s own declared blind spot). A DECORATED `**Release:**` line WAS a ' +
     'second way and is no longer — the ownership marker this row shares with H2/H47/H66 reads it ' +
@@ -36592,7 +36598,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY67, 'H67 quadruple: …and the cap still renders from the constant on a zero run', q67({}).includes(`cap ${H67_TIMELINE_READ_CAP} page(s)`), true);
   b(BATTERY67, 'H67 quadruple: the clause declares there is NO free half', FULL67.includes('this row has no free half at all'), true);
   b(BATTERY67, 'H67 quadruple: …and the OLDEST-FIRST order with its reason', FULL67.includes('清不空的那一刻起改最老优先'), true);
-  b(BATTERY67, 'H67 quadruple: ⛔ …and what the order does NOT model', FULL67.includes('⛔ not `target:` board membership'), true);
+  b(BATTERY67, 'H67 quadruple: ⛔ …and what the order does NOT model', FULL67.includes('⛔ not the 功能点位次 leg'), true);
   b(BATTERY67, 'H67 quadruple: the anchor is UNIQUE in the rendered line', (summaryLine({}, 0).match(/Queued cards with a merged delivery \(H67\): /g) ?? []).length, 1);
   b(BATTERY67, 'H67 quadruple: every count key rides the enumerated forwarding contract', ['queueDeliveryCandidates', 'queueDeliveryRead', 'queueDeliveryCap', 'queueDeliveryDeferred', 'queueDeliveryUnjudged', 'queueDeliveryRows'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
 
