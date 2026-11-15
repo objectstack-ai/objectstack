@@ -236,6 +236,8 @@ test.describe('list toolbar keeps the view name readable on a phone (objectstack
         for (const [name, b] of [['queue', r.queue], ['cluster', r.cluster]] as const) {
           expect(within(b, r.row), `${name} leaves the row`).toBe(true);
         }
+        // The tools keep the row's right edge (its `px-2` padding) on whichever line they land.
+        expect(r.row.right - r.cluster.right, 'the tool cluster left the right edge').toBeLessThanOrEqual(8.5);
       });
     }
   }
