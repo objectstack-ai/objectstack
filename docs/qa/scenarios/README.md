@@ -118,7 +118,11 @@ rows of its `object`:
 
 - `kind` is closed: `count | sum | avg | min | max | topN`.
 - `kind` `unanswerable` (with a `reason`) states the seed cannot answer: a correct reply
-  says so rather than inventing a figure.
+  says so rather than inventing a figure. It may show what it did read: every number it
+  states must be one some tool output of its turn carries (an identifier such as `INV-002`
+  or an ISO date is no number). A reply that declines and adds a figure no tool output
+  carries ("probably 13%") is not correct: `stated a figure the data cannot support`. An
+  invented figure that happens to equal a number in a tool output is not caught.
 - `filter` is a list of `{ field, op, value }`, all of which must hold. `op` is
   `eq | ne | gt | gte | lt | lte | in | in_window`; `gt`…`lte` compare two numbers or two
   strings (so ISO dates compare by date), `in` takes a list, and `eq null` matches an empty
