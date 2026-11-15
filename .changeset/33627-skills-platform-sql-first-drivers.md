@@ -1,0 +1,10 @@
+---
+'@objectstack/skills': patch
+---
+
+docs(skills): the platform Driver Selection Guide says Memory and MongoDB may refuse a query capability SQL serves
+
+Clause-②: no
+Metadata-protocol: none
+
+`objectstack-platform`'s Driver Selection Guide now opens with one sentence: Memory and MongoDB may loudly refuse a query capability the SQL drivers serve, with no slower fallback. Query capabilities are built for the SQL drivers first, at their fastest shape, and a driver that cannot run that shape answers with an error rather than a slower path kept for parity. To pay for the sentence, the same section drops the replaced lead "Drivers are the storage layer:", the SQL row's "Knex.js under the hood" aside, and the "no example app does" aside on keeping drivers out of `plugins:`. No schema or runtime change.

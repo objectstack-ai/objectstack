@@ -197,12 +197,12 @@ The five retired remote templates (`todo`, `compliance`, `content`,
 
 ## Driver Selection Guide
 
-Drivers are the storage layer:
+Memory and MongoDB may loudly refuse a query capability SQL serves (no slower fallback).
 
 | Driver | Package | Best For | Notes |
 |:-------|:--------|:---------|:------|
 | **Memory** | `@objectstack/driver-memory` | Dev, testing, prototyping | `InMemoryDriver` — data lost on restart |
-| **SQL** | `@objectstack/driver-sql` | Production (PostgreSQL, MySQL, SQLite) | `SqlDriver` — Knex.js under the hood (`pg` / `mysql` / `better-sqlite3` clients) |
+| **SQL** | `@objectstack/driver-sql` | Production (PostgreSQL, MySQL, SQLite) | `SqlDriver` (`pg` / `mysql` / `better-sqlite3` clients) |
 | **MongoDB** | `@objectstack/driver-mongodb` | Production (document store) | `MongoDBDriver` |
 | **SQLite WASM** | `@objectstack/driver-sqlite-wasm` | Browser / WebContainer | `SqliteWasmDriver` — in-process, no server |
 | **Turso** | `@objectstack/driver-turso` | Edge, serverless, multi-tenant | **Cloud / EE only**. The open-core CLI recognizes `libsql://` URLs but **fails loudly** (`UnsupportedDriverError`) |
@@ -211,7 +211,7 @@ Drivers are the storage layer:
 
 Under `os dev` / `os serve` / `os start` the CLI **resolves the driver itself**
 from the database URL and registers `DriverPlugin` for you. Do **not** put a
-driver in your config's `plugins:` array: no example app does, and the
+driver in your config's `plugins:` array: the
 `plugins:` key is for plugins the CLI cannot infer (connector executors, your
 own plugins).
 
