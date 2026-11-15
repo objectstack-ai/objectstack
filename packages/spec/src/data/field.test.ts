@@ -2970,15 +2970,15 @@ describe('FieldSchema.lookupFilters — { $record } comparand and orEmpty', () =
     expect(LookupFilterRecordReferenceSchema.safeParse({ $field: 'cb_market' }).success).toBe(false);
   });
 
-  it('is refused by the shared filter door when it reaches a server unresolved — never compared as a literal', () => {
-    // The two shapes the picker's flat lowering produces for an unresolved
-    // entry: the eq shorthand and an operator comparand. Either way the
-    // query is refused, so a missing picker resolution can never answer rows.
-    expect(() => parseFilterAST({ cb_market: { $record: 'account.cb_market' } })).toThrow();
-    expect(() => parseFilterAST({ valid_from: { $lte: { $record: 'date' } } })).toThrow();
-    let envelope: unknown;
-    try { parseFilterAST({ valid_from: { $lte: { $record: 'date' } } }); } catch (e) { envelope = e; }
-    expect(envelope).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+  it('is refused by the shared filter door as an operator comparand when it reaches a server unresolved', () => {
+    // What today's picker sends for an unresolved ordering entry. The shared
+    // door refuses it in the INVALID_FILTER envelope, so a picker that does
+    // not resolve { $record } can never answer rows with it.
+    for (const operator of ['$eq', '$ne', '$gt', '$lt', '$gte', '$lte']) {
+      let envelope: unknown;
+      try { parseFilterAST({ valid_from: { [operator]: { $record: 'date' } } }); } catch (e) { envelope = e; }
+      expect(envelope).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+    }
   });
 
   /**
