@@ -17,6 +17,17 @@ Directive #14); the execution cards under [Execution plan](#execution-plan-after
 and ⛔ never before it. Until then the platform stayed in the ruling's letter D state, and letter C (a located 400 at
 the bound, after objectui#12081 item 8) is the `domain:services` lane's interim on
 [#22590](https://github.com/objectstack-ai/objectstack/issues/22590).
+**Amended** (2026-11-15): D6's ⛔ on "interim removal of the predicate for an unrestricted master scope"
+([#24932](https://github.com/objectstack-ai/objectstack/issues/24932) ruling B, item 4) is lifted **for one reader class
+and nothing else** — a reader who holds view-all on the detail AND whose every master hop answers unrestricted (the
+engine's per-hop scope, not `hasSuperuserReadBypass`), with a required master FK. For that reader the parent chain is
+dropped, and it sees null and dangling-FK rows inside its own tenant wall; every other reader, members included, keeps
+the chain unchanged, and D6's other ⛔ (an interim with two spellings of one scope) stands (the maintainer's re-ruling
+「只对管理员去掉」, drop the chain for administrators only: ruling record
+[`6893666857`](https://github.com/objectstack-ai/objectstack/issues/33696#issuecomment-6893666857) on
+[#33696](https://github.com/objectstack-ai/objectstack/issues/33696)). D6 carries the ruling's binding bullets verbatim,
+and ADR-0055 is noted in step, as the ruling orders. This amendment declares; #33696's change lands only after it
+merges.
 **Decided by**: the maintainer, 「同意」 to the director seat's batch #312 item 2 (ruling
 [`6097072172`](https://github.com/objectstack-ai/objectstack/issues/22590#issuecomment-6097072172), 2026-10-10T11:34Z):
 **A is the end state, its first deliverable an ADR**; B (an unbounded `$in`) and a raised cap are ⛔ not taken. The
@@ -297,6 +308,32 @@ things the ruling ⛔ does not take: an interim with two spellings of one scope,
 an unrestricted master scope: it would expose rows with a null or dangling foreign key (measured)". ADR-0055 §2's
 mechanism (b) therefore stands until the switch lands, and ADR-0055's own text moves only in that switch's edit, never
 here.
+
+**Amended 2026-11-15 — the second of the two things above that the ruling ⛔ does not take is lifted for one reader
+class and nothing else, by the maintainer's re-ruling 「只对管理员去掉」 (drop the chain for administrators only):
+ruling record [`6893666857`](https://github.com/objectstack-ai/objectstack/issues/33696#issuecomment-6893666857) on
+[#33696](https://github.com/objectstack-ai/objectstack/issues/33696), 2026-11-15T11:31Z, replacing record `6893097935`.
+Its bullets that bind this record, verbatim:**
+
+> - The parent chain is dropped only for a reader who holds view-all on the detail AND whose every master hop answers
+>   unrestricted (the engine's per-hop scope, not `hasSuperuserReadBypass`), with a required master FK. That reader sees
+>   null and dangling-FK rows inside its own tenant wall, consistent with #30905 ruling A. Every other reader, members
+>   included, keeps the chain unchanged.
+> - This deliberately lifts #24932 ruling B item 4 and ADR-0139 D6's ⛔ for that reader class only. **The PR must not
+>   land before the ADR-0139 status-line amendment** (citing this record; ADR-0055's 10-22 note in step) merges. That
+>   amendment is a docs/adr/** card for the skills lane, which the seat files.
+> - Multi-tenant deployments: a tenant admin's master scope is the tenant wall, so it is not unrestricted. No speed-up
+>   there, by design; widening that is a separate decision.
+
+What moves is the second of those two things, item 4 of ruling `6303721609`, and only for the reader the first bullet
+names, all three conditions together. A reader who meets part of them keeps the predicate: a member whose master hops
+are unrestricted but who holds no view-all on the detail, and a holder of view-all on the detail with a restricted
+master hop. The first (an interim with two spellings of one scope) stands as written. The 2026-10-21 sentence
+"ADR-0055's own text moves only in that switch's edit, never here" kept ADR-0055 out of that edit and in the switch's,
+its 2026-10-22 amendment; this edit does carry an ADR-0055 note, and the reason is the ruling's own order — "citing this
+record; ADR-0055's 10-22 note in step". That note states the row rule beside ruling A of #30905. The record's two other
+bullets (pins, a release note) bind the code card and are not restated here. This amendment implements nothing: the
+change is #33696's, and by the ruling it lands only after this amendment merges.
 
 ## Consequences
 
