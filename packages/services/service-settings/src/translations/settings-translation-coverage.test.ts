@@ -15,7 +15,8 @@
  * the banner's `id` under `settings.<namespace>.banners`), each
  * `action_button`'s label (keyed by the button's `id` under
  * `settings.<namespace>.actions`), and each `map` setting's table headers
- * (`keys.<key>.keyColumn.label`, `keys.<key>.columns.<name>.label`).
+ * (`keys.<key>.keyColumn.label`, `keys.<key>.columns.<name>.label`), and each
+ * field's help (`keys.<key>.help`) when the field declares a `description`.
  * Dropdown *option* labels are intentionally excluded: several must not be "translated" (the `timezone` option "UTC" is a
  * code; each `locale` option names its language in that language), and
  * option-level parity is filled per-locale on a best-effort basis.
@@ -63,6 +64,23 @@ const LOCALES: Array<[string, { settings?: Record<string, any> }]> = [
   ['ko', ko],
 ];
 
+/**
+ * Field help (`keys.<key>.help`, the copy of a specifier's `description`) that
+ * is known to be untranslated in every locale, owed by its own card rather than
+ * by the PR that started holding help to coverage. Shrink-only: an entry leaves
+ * the moment its help is translated, and the test below reds while an entry
+ * lists help that no locale is missing any more.
+ */
+const HELP_OWED: Record<string, readonly string[]> = {
+  access_policy: [
+    'allowed_ip_ranges',
+    'session_idle_timeout_minutes',
+    'session_absolute_max_hours',
+    'max_concurrent_sessions_per_user',
+    'mfa_required',
+  ],
+};
+
 function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifest): string[] {
   const tr = (data.settings ?? {})[m.namespace];
   const missing: string[] = [];
@@ -90,6 +108,11 @@ function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifes
       if (tr?.actions?.[s.id]?.label == null) missing.push(`action:${s.id}`);
     } else if (s.key) {
       if (tr?.keys?.[s.key]?.label == null) missing.push(`key:${s.key}`);
+      // A field's help is its `description`, rendered under the control: one
+      // with no `help` copy shows that paragraph in English (objectstack#33834).
+      if (s.description && !HELP_OWED[m.namespace]?.includes(s.key) && tr?.keys?.[s.key]?.help == null) {
+        missing.push(`key:${s.key}.help`);
+      }
       // A toggle's turn-off question is the toggle's own copy, so it is held to
       // the label's coverage: an untranslated one asks in English (#30418).
       if (s.confirmOffText !== undefined && tr?.keys?.[s.key]?.confirmOffText == null) {
@@ -182,6 +205,19 @@ describe('settings translation coverage', () => {
       });
     }
   }
+
+  it('every owed help entry is a described field that some locale still leaves untranslated', () => {
+    const stale: string[] = [];
+    for (const [ns, keys] of Object.entries(HELP_OWED)) {
+      const m = manifests.find((x) => x.namespace === ns);
+      for (const key of keys) {
+        const s = m?.specifiers.find((x) => x.key === key);
+        const stillMissing = LOCALES.some(([, data]) => (data.settings ?? {})[ns]?.keys?.[key]?.help == null);
+        if (!s?.description || !stillMissing) stale.push(`${ns}.${key}`);
+      }
+    }
+    expect(stale, `remove these from HELP_OWED: ${stale.join(', ')}`).toEqual([]);
+  });
 
   for (const [locale, data] of [['en', en], ...LOCALES] as typeof LOCALES) {
     it(`${locale} carries no copy for a group, key, banner or action no manifest declares`, () => {
@@ -310,4 +346,33 @@ describe('zh-CN settings.auth uses full-width punctuation inside Chinese sentenc
       .map(([path, marks]) => `${path} @ ${marks.join(' ')}`);
     expect(hits, `half-width punctuation in zh-CN Chinese copy:\n${hits.join('\n')}`).toEqual([]);
   });
+});
+
+/**
+ * The AI page's 会话标题 toggle reads its help in the admin's language. Its
+ * manifest description is the paragraph under the switch, and with no
+ * `keys.title_generation_enabled.help` copy every locale showed it in English.
+ */
+describe('settings.ai title generation help is translated', () => {
+  const source = bundledManifests
+    .find((m) => m.namespace === 'ai')
+    ?.specifiers.find((s) => s.key === 'title_generation_enabled')?.description;
+
+  it('reads the real English source', () => {
+    expect(source).toMatch(/^When on, the LLM is asked to produce a short title/);
+  });
+
+  it('zh-CN serves the help in Chinese, not the English source', () => {
+    const help = zhCN.settings?.ai?.keys?.title_generation_enabled?.help;
+    expect(help).toMatch(/[一-鿿]/);
+    expect(help).not.toBe(source);
+  });
+
+  for (const [locale, data] of LOCALES) {
+    it(`${locale} carries its own help copy, not the English source`, () => {
+      const help = data.settings?.ai?.keys?.title_generation_enabled?.help;
+      expect(typeof help).toBe('string');
+      expect(help).not.toBe(source);
+    });
+  }
 });

@@ -64,9 +64,9 @@ import { FLOW_CREDENTIAL_CLEARED, HTTP_SIGNING_SECRET_KEY } from '../flow-creden
  * durable outbox and the inline call start from the same url, headers and
  * body value, and nothing renders at delivery. The bytes sent can still
  * differ: the outbox serializes the body itself (a string verbatim, no body
- * as `{}`) and adds `Content-Type: application/json`, while the inline call
- * JSON-encodes a body it has and sends none otherwise (see the no-outbox
- * fallback below). Until #19939 the whole config went through the
+ * as `{}`, and nothing at all for a GET or HEAD) and adds `Content-Type:
+ * application/json` when it sends a body, while the inline call JSON-encodes
+ * a body it has and sends none otherwise (see the no-outbox fallback below). Until #19939 the whole config went through the
  * single-brace `interpolate()` first; a `{…}` token is refused now, by the
  * contract parse below and, before a run starts, by `registerFlow` and
  * `objectstack validate`.
@@ -434,9 +434,11 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                 // which sends the verb the outbox would have. It sends and signs
                 // its own serialization (see `sendInline`), which is the
                 // outbox's bytes for a non-string body only: with no body it sends
-                // none and signs '' (the outbox sends and signs '{}'), a string
+                // none and signs '' (the outbox sends and signs '{}', except for a
+                // GET or HEAD, where it too sends none and signs ''), a string
                 // body goes out JSON-encoded (the outbox sends it verbatim), and
-                // it adds no `Content-Type: application/json` (the outbox does).
+                // it adds no `Content-Type: application/json` (the outbox does
+                // when it sends a body).
                 if (onSavePath(context)) {
                     // Ruling 6810500711, letter D: the record save never waits on
                     // an external system. A run after a record change holds the

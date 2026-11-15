@@ -45,28 +45,69 @@ const RUN_DATES = ['2026-11-15', '2026-11-30', '2026-12-31', '2027-01-01', '2027
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
-// ── an independent working-day reading: one calendar day at a time, skipping Saturday and Sunday ──
+// ── an independent working-day reading: the calendar walked one day at a time, skipping Saturday and Sunday ──
 const weekday = (d: string) => new Date(`${d.slice(0, 10)}T00:00:00Z`).getUTCDay();
 const isWorking = (d: string) => weekday(d) !== 0 && weekday(d) !== 6;
-/** The working day on or before `d`. */
-const onOrBefore = (d: string): string => (isWorking(d) ? d : onOrBefore(shiftDate(d, -1)));
-/** The working day on or after `d`. */
-const onOrAfter = (d: string): string => (isWorking(d) ? d : onOrAfter(shiftDate(d, 1)));
-/** Working days from `from` to `to`, both working days, counted by walking the calendar. */
-function walkCount(from: string, to: string): number {
+
+// The walk, step by step: the reading itself, kept to check the calendar table below against.
+/** The working day on or before `d`, stepping back a day at a time. */
+const stepOnOrBefore = (d: string): string => (isWorking(d) ? d : stepOnOrBefore(shiftDate(d, -1)));
+/** The working day on or after `d`, stepping on a day at a time. */
+const stepOnOrAfter = (d: string): string => (isWorking(d) ? d : stepOnOrAfter(shiftDate(d, 1)));
+/** Working days from `from` to `to`, counted by stepping through the calendar. */
+function stepCount(from: string, to: string): number {
   let n = 0;
   for (let d = from; d < to; d = shiftDate(d, 1)) if (isWorking(shiftDate(d, 1))) n++;
   for (let d = from; d > to; d = shiftDate(d, -1)) if (isWorking(d)) n--;
   return n;
 }
-/** `d`, a working day, `n` working days on, by walking the calendar. */
-function walkShift(d: string, n: number): string {
+/** `d` moved `n` working days, by stepping through the calendar. */
+function stepShift(d: string, n: number): string {
   let t = d.slice(0, 10);
   for (let k = n; k !== 0; ) {
     t = shiftDate(t, Math.sign(k));
     if (isWorking(t)) k -= Math.sign(k);
   }
   return t + d.slice(10);
+}
+
+// The same walk taken once: every calendar day from CALENDAR[0] to CALENDAR[1], stepped a day at a
+// time, numbering the working days in order. Every card date of every run date falls well inside it.
+const CALENDAR = ['1960-01-01', '2040-12-31'] as const;
+let table: { days: string[]; atOrBefore: Map<string, number> } | undefined;
+function calendar() {
+  if (table) return table;
+  const days: string[] = [];
+  const atOrBefore = new Map<string, number>();
+  for (let d: string = CALENDAR[0]; d <= CALENDAR[1]; d = shiftDate(d, 1)) {
+    if (isWorking(d)) days.push(d);
+    atOrBefore.set(d, days.length - 1);
+  }
+  return (table = { days, atOrBefore });
+}
+/** The number of the working day on or before `d`. */
+function numberOf(d: string): number {
+  const i = calendar().atOrBefore.get(d.slice(0, 10));
+  if (i === undefined || i < 0) throw new Error(`${d} is outside the walked calendar ${CALENDAR.join('..')}`);
+  return i;
+}
+/** Working day number `i`. */
+function dayOf(i: number): string {
+  const d = calendar().days[i];
+  if (d === undefined) throw new Error(`working day ${i} is outside the walked calendar ${CALENDAR.join('..')}`);
+  return d;
+}
+/** The working day on or before `d`. */
+const onOrBefore = (d: string): string => dayOf(numberOf(d)) + d.slice(10);
+/** The working day on or after `d`. */
+const onOrAfter = (d: string): string => (isWorking(d) ? d : dayOf(numberOf(d) + 1) + d.slice(10));
+/** Working days from `from` to `to`, read off the walked calendar. */
+const walkCount = (from: string, to: string): number => numberOf(to) - numberOf(from);
+/** `d` moved `n` working days, read off the walked calendar: a weekend `d` counts from the next working day back, the last one on. */
+function walkShift(d: string, n: number): string {
+  if (n === 0) return d;
+  const i = numberOf(d);
+  return dayOf((isWorking(d) || n > 0 ? i : i + 1) + n) + d.slice(10);
 }
 
 /**
@@ -155,6 +196,25 @@ describe('whole working days', () => {
     expect(workingDaysBetween('2026-11-16', '2026-09-30')).toBe(-33);
     for (const d of RUN_DATES) expect(workingDaysBetween('2026-09-30', d), d).toBe(walkCount('2026-09-30', onOrBefore(d)));
     expect([onWorkingDay('2026-11-13'), onWorkingDay('2026-11-14'), onWorkingDay('2026-11-15T09:00:00Z')]).toEqual([true, false, false]);
+  });
+
+  it('the calendar walked once reads the same as stepping through it, across the epoch week, a year end and a leap day', () => {
+    const around = (d: string) => Array.from({ length: 15 }, (_, k) => shiftDate(d, k - 7));
+    const days = ['1970-01-01', '2026-12-31', '2028-02-29'].flatMap(around);
+    days.push('2026-12-31T08:30:00Z', '2028-02-26T09:00:00Z');
+    for (const d of days) {
+      expect([onOrBefore(d), onOrAfter(d)], d).toEqual([stepOnOrBefore(d), stepOnOrAfter(d)]);
+      for (const n of [-6, -1, 0, 1, 6]) expect(walkShift(d, n), `${d} + ${n}`).toBe(stepShift(d, n));
+    }
+    for (const [d, n] of [['1969-12-31', 7], ['2026-09-30', 380], ['2027-01-01', -380], ['2028-02-26', -260], ['2028-02-29', 260]] as const) {
+      expect(walkShift(d, n), `${d} + ${n}`).toBe(stepShift(d, n));
+    }
+    for (const [from, to] of [['1969-12-27', '1970-01-05'], ['2026-09-30', '2028-03-31'], ['2028-03-04', '2026-12-26'], ['2028-02-26', '2028-03-04']] as const) {
+      expect(walkCount(from, to), `${from} → ${to}`).toBe(stepCount(from, to));
+      expect(walkCount(to, from), `${to} → ${from}`).toBe(stepCount(to, from));
+    }
+    expect(() => walkShift('1959-12-31', 1)).toThrow(/outside the walked calendar/);
+    expect(() => walkShift('2040-12-31', 1)).toThrow(/outside the walked calendar/);
   });
 });
 
