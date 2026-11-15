@@ -1,5 +1,6 @@
 ---
 '@objectstack/plugin-auth': patch
+'@objectstack/runtime': patch
 ---
 
 fix(plugin-auth)!: a locked account is refused on every door that ends in a session for it
@@ -13,3 +14,5 @@ Metadata-protocol: none
 
 - **Now.** While the lock holds, `POST /phone-number/verify`, `GET /magic-link/verify` (JSON and `callbackURL` lanes), `GET /verify-email` when it signs the caller in, and the second-factor step (`/two-factor/verify-totp`, `/two-factor/verify-backup-code`) issue no session and answer as `POST /sign-in/email` does: `403 ACCOUNT_LOCKED` under `lockoutRefusal: 'explicit'`, `401 INVALID_EMAIL_OR_PASSWORD` otherwise. `POST /sign-in/phone-number` checks the lock before the password and answers a locked account the same whatever password it is sent: `403 ACCOUNT_LOCKED` under `'explicit'`, that door's own wrong-password answer (`401 INVALID_PHONE_NUMBER_OR_PASSWORD`) otherwise. Its wrong passwords count toward the account's one lock and a correct one resets the count, as at `/sign-in/email`. Each refused attempt writes its `login_failed` row with the reason `ACCOUNT_LOCKED`. An administrator's impersonation, a signed-in account's own new session (enrolling a second factor, a password change that ends the other sessions) and the server's in-process principal session are not sign-ins and are unchanged.
 - **Who moves.** A client that signs an account in through a one-time code, a sign-in link, the second-factor step or the phone-number password door: while the account is locked it now receives the lockout refusal, and phone-number password failures now lock the account after `lockoutThreshold` attempts. An administrator clears a lock early with the **Unlock** action, as before.
+
+`@objectstack/runtime`: the dispatcher error-vocabulary ledger classifies the `INVALID_EMAIL_OR_PASSWORD` stamp in `@objectstack/plugin-auth` as better-auth's own vocabulary; no behaviour changes.
