@@ -6410,10 +6410,7 @@ async function environmentOwnerOfUnheldRoute(
     if (reading === undefined) return none;
     if (reading.degraded) return { action: undefined, obj, degraded: true, reason: reading.reason };
     if (reading.owners.served.length > 0 || reading.owners.disabled.length > 0) return none;
-    if (reading.rung.environment.length === 1) return { action: reading.rung.environment[0], obj };
-    // [ADR-0150 D4] Binding first, then owner: the platform's item bound to
-    // the routed object is the route's own key, beside no package holder there.
-    return platformItemOnBoundRung(reading) ?? none;
+    return reading.rung.environment.length === 1 ? { action: reading.rung.environment[0], obj } : none;
 }
 
 /**
@@ -6592,6 +6589,13 @@ export async function resolveAddressedRouteActionDeclaration(deps: ActionExecuti
             : await deps.resolveService(requestContext, 'metadata', envId);
         const resolved = await resolveActionByName(deps, meta, actionName, objectName, objects, actions, qualifier);
         if (!resolved) return { action: undefined, obj };
+        // [ADR-0150 D4] Binding first, then owner: the environment's
+        // object-less item does not reach a route another package-less
+        // action of its name is bound to — that route's key is the other
+        // item's, and so is the handler the dispatch reaches there.
+        if ('environment' in qualifier && packagelessActionOnRouteBeside(ql, objectName, actionName, resolved.action) !== undefined) {
+            throw addressedActionNotFoundError(actionName, objectName, actionAddressScope(qualifier));
+        }
         return {
             action: resolved.action,
             obj: obj ?? resolved.obj,

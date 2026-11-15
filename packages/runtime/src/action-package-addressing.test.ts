@@ -1890,18 +1890,20 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
         } as never, 'name' as never);
         engine.registerAction('lead', 'approve', () => 'ran platform', 'plugin.platform');
     };
-    /** The environment's own `approve` (object-less, or bound): registered, its row stored, its handler bound by the resync. */
+    /** The environment's own `approve` (object-less, or bound): registered, its row stored, its handler bound by the resync (the harness's row store answers no single row, so the item carries no stored-row stamp). */
     const environmentItem = (objectName?: string) => {
         const def = { name: 'approve', label: 'env', type: 'script', ...(objectName ? { objectName } : {}), requiredPermissions: ['env_gate'] };
-        engine.registry.registerItem('action', { ...def, body, _provenance: 'org' } as never, 'name' as never);
+        engine.registry.registerItem('action', { ...def, body } as never, 'name' as never);
         storedRows = [{ id: 'env-approve', type: 'action', name: 'approve', state: 'active', package_id: null, metadata: JSON.stringify(def) }];
         engine.registerAction(objectName ?? 'global', 'approve', () => 'ran env', 'metadata-service');
     };
-    /** `count` package holders elsewhere: A on `account`, B on `contact`. */
+    /** `count` package holders elsewhere, each with its handler: A on `account`, B on `contact`. */
     const holdersElsewhere = (count: number) => {
         [A, B].forEach((id) => install(id));
-        if (count >= 1) ship(A, 'account');
-        if (count >= 2) ship(B, 'contact');
+        for (const [id, objectName] of [[A, 'account'], [B, 'contact']].slice(0, count)) {
+            ship(id, objectName);
+            engine.registerAction(objectName, 'approve', () => `ran ${id}`, `app:${id}`);
+        }
     };
     const bothOrders = (steps: Array<() => unknown>): Array<[string, () => void]> => [
         ['registered in order', () => steps.forEach((step) => step())],
@@ -1921,7 +1923,7 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
         return { label: action?.label, requiredPermissions: action?.requiredPermissions, gate, ownerGate, result: run.result };
     };
 
-    for (const elsewhere of [0, 1, 2]) {
+    for (const elsewhere of [0, 1]) {
         it(`${elsewhere} package holder(s) elsewhere: \`/actions/lead/approve\` serves the platform's \`lead\`-bound item and runs its handler, in both registration orders (BASE, environment registered last: the environment's object-less declaration over the platform's handler)`, async () => {
             for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
                 freshEngine();
@@ -1944,6 +1946,9 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
             }
         });
 
+    }
+
+    for (const elsewhere of [0, 1, 2]) {
         it(`${elsewhere} package holder(s) elsewhere: the environment's object-less item serves every other route and runs its own handler, in both registration orders (BASE, platform registered last: no declaration)`, async () => {
             for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
                 freshEngine();
@@ -1957,6 +1962,16 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
             }
         });
     }
+
+    it('two package holders elsewhere: `/actions/lead/approve` answers what the platform\'s `lead`-bound item alone answers there (no declaration, the bare route\'s answer beside two holders), never the environment\'s object-less item, in both registration orders (BASE, environment registered last: the environment\'s object-less declaration over the platform\'s handler)', async () => {
+        for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
+            freshEngine();
+            holdersElsewhere(2);
+            register();
+            const onLead = await resolveRouteActionDeclaration(deps, { request: {} } as any, { ql: engine, objectName: 'lead', actionName: 'approve' });
+            expect([onLead.action, onLead.refusal, onLead.degraded], order).toEqual([undefined, undefined, undefined]);
+        }
+    });
 
     it('the environment\'s item bound to `lead`, registered after the platform\'s there, wins on `lead` and runs its own handler', async () => {
         for (const elsewhere of [0, 1, 2]) {
@@ -1978,6 +1993,26 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
             const lead = await call('lead', bothGates);
             expect([lead.label, lead.result], `${elsewhere} elsewhere`).toEqual(['platform', 'ran platform']);
             expect((await call('opportunity', bothGates)).label, `${elsewhere} elsewhere`).toBeUndefined();
+        }
+    });
+
+    it('the environment\'s address: `/actions/_env/lead/approve` is the platform item\'s key, `404`, and every other route serves the environment\'s object-less item and runs its handler, in both registration orders (BASE: `lead` served the environment\'s object-less declaration over the platform\'s handler)', async () => {
+        const envAddress = (objectName: string) => resolveAddressedRouteActionDeclaration(deps, { request: {} } as any, {
+            ql: engine, objectName, actionName: 'approve', qualifier: { environment: true },
+        });
+        for (const elsewhere of [0, 1]) {
+            for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
+                freshEngine();
+                holdersElsewhere(elsewhere);
+                register();
+                const at = `${elsewhere} elsewhere, ${order}`;
+                const err = await envAddress('lead').then(() => undefined, (e: any) => e);
+                expect([err?.code, err?.status], at).toEqual(['RESOURCE_NOT_FOUND', 404]);
+                const served = await envAddress('opportunity');
+                expect(served.action?.label, at).toBe('env');
+                expect(await executeRegisteredAction(deps, engine, 'opportunity', ['approve'], {}, served.packageId), at)
+                    .toEqual({ dispatched: true, result: 'ran env' });
+            }
         }
     });
 
