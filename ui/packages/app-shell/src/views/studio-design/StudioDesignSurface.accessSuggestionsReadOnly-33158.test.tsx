@@ -74,7 +74,7 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import { toast } from 'sonner';
-import { t } from '../metadata-admin/i18n';
+import { t, tFormat } from '../metadata-admin/i18n';
 import { AccessPillar } from './StudioDesignSurface';
 
 window.matchMedia = ((query: string) => ({
@@ -162,5 +162,79 @@ describe('objectstack#33158 — the suggested-bindings strip on a read-only pack
     expect(screen.queryByTestId('suggested-bindings-panel')).toBeNull();
     expect(screen.queryByText(/manage_metadata/)).toBeNull();
     expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#33864 — the strip names the suggested set by the label the rail
+ * reads for it (`ux-conventions.labels-over-machine-names`), never by its
+ * machine name: the banner, the Accept and Dismiss toasts, and the state line
+ * a resolved row keeps. The suggestion row carries the machine name only; the
+ * double's set list (`crm_user` → "CRM user") is where the label comes from.
+ */
+describe('objectstack#33864 — the suggested-bindings strip names its set by label', () => {
+  const fmt = (key: string, set: string, anchor?: string) =>
+    tFormat(key, 'en', anchor === undefined ? { set } : { set, anchor });
+
+  it('the pending banner names the set by its label', async () => {
+    api.list.mockResolvedValue([PENDING]);
+    renderAccess(false);
+    const row = await screen.findByTestId('suggested-binding-crm_user', undefined, { timeout: 8000 });
+    await waitFor(() =>
+      expect(row).toHaveTextContent(fmt('engine.studio.access.suggestPromptEveryone', 'CRM user')),
+    );
+    expect(row).not.toHaveTextContent('"crm_user"');
+  });
+
+  it('the Accept toast and the accepted state line name the set by its label', async () => {
+    api.list.mockResolvedValue([PENDING]);
+    api.confirm.mockResolvedValue({
+      suggestion: { ...PENDING, status: 'confirmed', deployment_decision: true },
+      bindingCreated: true,
+    });
+    renderAccess(false);
+    const row = await screen.findByTestId('suggested-binding-crm_user', undefined, { timeout: 8000 });
+    await waitFor(() => expect(row).toHaveTextContent('CRM user'));
+    within(row).getByTestId('suggested-binding-confirm-crm_user').click();
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        fmt('engine.studio.access.suggestConfirmedToast', 'CRM user', 'everyone'),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('suggested-binding-crm_user')).toHaveTextContent(
+        fmt('engine.studio.access.suggestAcceptedState', 'CRM user'),
+      ),
+    );
+  });
+
+  it('the Dismiss toast and the dismissed state line name the set by its label', async () => {
+    api.list.mockResolvedValue([PENDING]);
+    api.dismiss.mockResolvedValue({ ...PENDING, status: 'dismissed', deployment_decision: true });
+    renderAccess(false);
+    const row = await screen.findByTestId('suggested-binding-crm_user', undefined, { timeout: 8000 });
+    await waitFor(() => expect(row).toHaveTextContent('CRM user'));
+    within(row).getByTestId('suggested-binding-dismiss-crm_user').click();
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(fmt('engine.studio.access.suggestDismissedToast', 'CRM user')),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('suggested-binding-crm_user')).toHaveTextContent(
+        fmt('engine.studio.access.suggestDismissedState', 'CRM user'),
+      ),
+    );
+  });
+
+  it('CONTROL: a set the rail holds no label for is named by its machine name', async () => {
+    client.list.mockImplementationOnce(async (type: string) =>
+      type === 'permission' ? [{ name: 'crm_user', label: '', isDefault: true }] : [],
+    );
+    api.list.mockResolvedValue([PENDING]);
+    renderAccess(false);
+    const row = await screen.findByTestId('suggested-binding-crm_user', undefined, { timeout: 8000 });
+    await screen.findByTestId('studio-rail-access');
+    await waitFor(() =>
+      expect(row).toHaveTextContent(fmt('engine.studio.access.suggestPromptEveryone', 'crm_user')),
+    );
   });
 });

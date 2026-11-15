@@ -50,6 +50,7 @@
     "lucide-react": "^1.43.0",
     "motion": "^13.2.0",
     "nanoid": "^6.0.1",
+    "remark-cjk-friendly": "^2.3.4",
     "shiki": "^4.4.2",
     "streamdown": "^2.5.0",
     "use-stick-to-bottom": "^1.1.6"
