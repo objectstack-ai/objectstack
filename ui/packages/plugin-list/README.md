@@ -241,13 +241,22 @@ the baseline.
 ### Host prop: `rowOpensRecord`
 
 A host whose `onRowClick` opens nothing for these rows passes
-`rowOpensRecord={false}`. The list hands it to the grid as the grid's own
-`rowOpensRecord` (see `@object-ui/plugin-grid`): the grid draws its record-link
-cells as plain text and its row context menu offers no Open, while the row
-click still reaches `onRowClick`. Only the grid is handed it. This is a React
-prop for the host app, not a schema key: list metadata cannot set it. Without
-it every row is unchanged. The console passes `false` for a view authored
-`navigation: { mode: 'none' }` and for a list-only object.
+`rowOpensRecord={false}`. The list hands it to the view it draws, as that
+view's own `rowOpensRecord`:
+
+- the grid (see `@object-ui/plugin-grid`) draws its record-link cells as plain
+  text and its row context menu offers no Open; on a phone its row cards draw no
+  pointer and no hover wash;
+- the gallery's cards draw no pointer and no hover lift;
+- the board's cards (see `@object-ui/plugin-kanban`) draw no pointer, and no
+  hover lift where the card cannot be dragged either.
+
+The click still reaches `onRowClick` on every face, and row and card actions
+stay. No other view type is handed it. This is a React prop for the host app,
+not a schema key: list metadata cannot set it. Without it every row and card is
+unchanged. The console passes `false` for a view authored
+`navigation: { mode: 'none' }` and for a list-only object (objectstack#33317,
+objectstack#33548).
 
 ### Host prop: `viewDefaults`
 

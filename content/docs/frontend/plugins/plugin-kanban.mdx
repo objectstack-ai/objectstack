@@ -155,6 +155,17 @@ export function useBoard(initialColumns: KanbanColumn[]) {
 }
 ```
 
+### Cards that open nothing
+
+A host that owns the card click (`onRowClick`) and knows it opens nothing for
+these cards passes the React prop `rowOpensRecord={false}` to `ObjectKanban`: a
+card that cannot be dragged then draws no pointer and no hover lift, and a card
+that can keeps its grab cursor. The click still reaches `onRowClick`. Absent
+(or `true`), every card is drawn as before. It is a host prop, not a schema
+key: list metadata cannot set it. The console passes `false` for a view
+authored `navigation: { mode: 'none' }` and for an object whose data API serves
+no single-record read (objectstack#33548).
+
 ### Quick Add is a React-host capability, not a document one
 
 The Quick Add button at the bottom of a lane is gated on **both** halves of a

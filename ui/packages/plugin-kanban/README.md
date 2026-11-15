@@ -209,6 +209,14 @@ custom pages, record pages and list views. Under a host that publishes none,
 such as an embedded renderer, there is no record page to open and the click
 opens nothing.
 
+A host that owns the card click (`onRowClick`) and knows it opens nothing for
+these cards passes the React prop `rowOpensRecord={false}` (objectstack#33548):
+a card that cannot be dragged then draws no pointer and no hover lift, and a
+card that can keeps its grab cursor. The click still reaches `onRowClick`.
+Absent (or `true`), every card is drawn as before. It is a host prop, not a
+schema key: `ListView` hands it down, and the console passes `false` for a view
+authored `navigation: { mode: 'none' }` and for a list-only object.
+
 ## Features
 
 - **Drag and Drop**: Drag cards between columns — the column change is persisted.

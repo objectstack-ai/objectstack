@@ -21,7 +21,8 @@
  * `MePermissionsProvider`, one differential per case: the same object and
  * rows, only the view's `navigation` or the served operation set differs.
  * CONTROL: a row that opens (the default drawer, an authored `page`) keeps
- * its link and its Open item. The bare data page (`ObjectDataPage`) routes
+ * its link and its Open item. objectstack#33548: an authored `none` row opens
+ * nothing on a ⌘, Ctrl or middle click either; a row that opens still does. The bare data page (`ObjectDataPage`) routes
  * its own row clicks, so its list-only face is pinned too.
  *
  * The record body is not what this file reads, so `RecordDetailView` is a
@@ -272,14 +273,31 @@ describe('objectstack#33317 — the console object list: a row that opens nothin
     expect(menu.labels).toContain('Revoke');
   });
 
-  it('authored `none` still hands the row click to the host: a ⌘-click on the row opens the record in a new tab, as before', async () => {
+  it('authored `none` opens no record by any click: a ⌘, Ctrl or middle click on the row opens no new tab (objectstack#33548)', async () => {
     await mountList({ navigation: { mode: 'none' } });
-    // A cell outside the record link: the row's own click, with the modifier.
+    // A cell outside the record link: the row's own click, with each modifier.
     fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
-    expect(openSpy).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText('scim_ab12'), { ctrlKey: true });
+    fireEvent.click(screen.getByText('scim_ab12'), { button: 1 });
     // The name cell, no longer a link of its own, hands its click to the row too.
     fireEvent.click(screen.getByText('okta-staging'), { metaKey: true });
-    expect(openSpy).toHaveBeenCalledTimes(2);
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('left-the-list')).toBeNull();
+  });
+
+  it('a list-only object opens no new tab on a ⌘ or middle click either', async () => {
+    await mountList({ apiOperations: LIST_ONLY_OPERATIONS });
+    fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
+    fireEvent.click(screen.getByText('scim_ab12'), { button: 1 });
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL — the default drawer: a ⌘, Ctrl or middle click on the row opens the record in a new tab', async () => {
+    await mountList({});
+    fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
+    fireEvent.click(screen.getByText('scim_ab12'), { ctrlKey: true });
+    fireEvent.click(screen.getByText('scim_ab12'), { button: 1 });
+    expect(openSpy).toHaveBeenCalledTimes(3);
   });
 
   it('a list-only object: the name cell is plain text, and the right-click menu has no Open but keeps Revoke', async () => {
