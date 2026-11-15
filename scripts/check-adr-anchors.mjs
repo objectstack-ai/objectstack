@@ -1185,7 +1185,7 @@ function collectAnchorLetterCitations(anchorList) {
   return out;
 }
 
-// dispatch-gates: whole-tree-population -- collectCitations below runs `git grep --untracked` with no pathspec, so every tracked and every untracked-not-ignored text file is read for an ADR-NNNN citation and a card adding one anywhere implicates this gate; the literals elsewhere in this file name the registry and the two release-owned changelogs its excuse list holds, never this scan's population.
+// dispatch-gates: whole-tree-population -- `collectCitations` runs `git grep --untracked` with no pathspec, so every tracked and every untracked-not-ignored text file is read for an ADR-NNNN citation and a card adding one anywhere implicates this gate; the literals elsewhere in this file name the registry and the two release-owned changelogs its excuse list holds, never this scan's population.
 //
 // Why the marker and not a narrower scan (#34086): the whole-tree read is the
 // third check's whole point (#6634 — a citation nobody resolves rots wherever it

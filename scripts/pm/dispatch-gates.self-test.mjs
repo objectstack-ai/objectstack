@@ -6871,6 +6871,15 @@ export function selfTest({ tier = 'full' } = {}) {
     repoRootWalkSpelling('export function collectSources(root = REPO_ROOT) { return walk(root); }')
       === REPO_ROOT_WALK_SPELLINGS[2].label,
   );
+  t(
+    'limb D reads a git grep of the tracked corpus in the execFile shape (check-adr-anchors)',
+    repoRootWalkSpelling("out = execFileSync('git', ['grep', '--untracked', '-IonE', pattern], { cwd: ROOT });")
+      === REPO_ROOT_WALK_SPELLINGS[3].label,
+  );
+  t(
+    'the system grep over one named file is not a walk — limb D needs git as the command (check-skill-compatibility-version)',
+    repoRootWalkSpelling("const r = spawnSync('grep', ['-vxF', '-f', listFile, movedFile], { encoding: 'utf8' });") === null,
+  );
   // The measured tightening. Written to accept a trailing argument, limb B
   // selected `resolve(REPO_ROOT, maskerPath)` — a path BUILD — and would have
   // vouched for practically any gate holding a REPO_ROOT constant, which is a
