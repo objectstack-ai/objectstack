@@ -66,7 +66,7 @@ export function MobileAppPage() {
             <AlertDescription>{t('mobileApp.loadFailed')}</AlertDescription>
           </Alert>
         ) : load.target.kind === 'ready' ? (
-          <ConnectCard connectLink={load.target.connectLink} />
+          <ConnectCard key={load.target.connectLink} connectLink={load.target.connectLink} />
         ) : (
           <Alert variant="destructive" data-testid="mobile-app-refusal">
             <AlertTitle>
@@ -96,7 +96,6 @@ function ConnectCard({ connectLink }: { connectLink: string }) {
   // Rendered here, client side: the link never leaves the browser to draw it.
   useEffect(() => {
     let cancelled = false;
-    setSvg(null);
     renderQrSvg(connectLink, { type: 'svg', margin: 1 })
       .then((markup) => {
         if (!cancelled) setSvg(markup);
