@@ -14,7 +14,7 @@
  * keeps a read-only preview from ever being confused with the live app.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Eye, X, Rocket, GitCompareArrows, Sparkles } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
@@ -22,7 +22,14 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { usePreviewDrafts, markPreviewExit, PREVIEW_QUERY_FLAG } from './PreviewModeContext.js';
 import { usePendingDrafts } from './usePendingDrafts.js';
 import { usePublishAllDrafts } from './usePublishAllDrafts.js';
-import { DraftChangesPanel } from './DraftChangesPanel.js';
+// objectstack#33582: the Pending changes sheet loads with the bar, not with the
+// console. The bar is in every route's EAGER graph (`ConsoleLayout`), and the
+// sheet, closed until asked for, held the metadata form strings and the object
+// field reader there by value. Drawn only in preview mode, the bar fetches it
+// as it appears, before anyone can open it.
+const DraftChangesPanel = lazy(() =>
+  import('./DraftChangesPanel.js').then((m) => ({ default: m.DraftChangesPanel })),
+);
 import { draftSurfaceOf, draftsOnSurface } from './draftSurface.js';
 
 export function DraftPreviewBar() {
@@ -182,7 +189,9 @@ export function DraftPreviewBar() {
                 : t('preview.draftBar.publishCta', { defaultValue: 'Publish to see it live' })}
             </Button>
           </div>
-          <DraftChangesPanel open={changesOpen} onOpenChange={setChangesOpen} />
+          <Suspense fallback={null}>
+            <DraftChangesPanel open={changesOpen} onOpenChange={setChangesOpen} />
+          </Suspense>
         </>
       )}
     </div>

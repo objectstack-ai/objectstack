@@ -1,7 +1,5 @@
 # 契约复核细则(按面)
 
-见 landing-operations.md 〈入队与落地〉的条款②闸门;本文只放复核归属、资格与等复核标记。
-
 ## 复核归属与资格(按面;复核席章程见 `lanes/review.md`)
 
 - 欠不欠按面判 ⛔ 不按车道:diff 或认领申报碰下列任一面即欠达档复核,交付后当轮完成。
@@ -34,14 +32,16 @@
 - 逾 24 小时条件未满的 hold 列入分诊轮次记录(`check-owed-reviews.mjs` 标出)。
 - 复核记录 = 一条评论落 PR 或卡,席内与各子代理同形;散文、dev 自评、`os-dev-report` 不算。
 - 同形 = `## Contract review` 题头之下 `Head-sha:` 行独占码段、①②③逐项、独立性对、PASS/FAIL。
-- 同形含首行 `Served-tier:`:值写该面所定档的常量名 `CONTRACT_REVIEW_TIER` 或 `TIER_DEFAULT`;
-  无此行不成裁决;模板 `node scripts/pm/record-recognisers.mjs --template`,申报面加 `--face declaration`。
-- ④ 设计判断欠 schema、governed 规则文本、收窄三面,spec、skills、ADR 皆已在内 ⛔ 不另立面:
-  逐 `hits` 文件判改动对所引代码与验收场景是否成立,ADR 另判首个消费者与执行计划;
-  实现文件审合契约、diff 外只读;①–④ 合称完整复核,余面同形无 ④,⛔ 无第二条记录。
+- 同形含首行 `Served-tier:`:值为该面所定档常量名 `CONTRACT_REVIEW_TIER` 或 `TIER_DEFAULT`;无此行不
+  成裁决;模板 `node scripts/pm/record-recognisers.mjs --template`;前者只经写工具带 `--tier-evidence=`
+  贴:子代理(调用显式传该档 model)给其输出文件,卡线程或席内复核给本会话
+  `~/.claude/projects/*/<id>.jsonl`;`verify-review-tier.mjs` 拒即重跑 ⛔ 不改档名。
+- ④ 设计判断欠 schema、governed 规则文本、收窄三面:逐 `hits` 文件判改动对所引代码与
+  验收场景是否成立,ADR 另判首个消费者与执行计划;①–④ 合称完整复核,余面同形无 ④。
 - 实质 head 各欠一轮完整复核,发现逐条定 must-fix/should-fix/nit(无碍正确性与契约);有前两级
   才由同一复核者 delta 复核修复;仅 nit 即终轮,nit 记接受的偏差、转后续卡或只改散文面。
 - 另记作者:PR `user.login` 非 `objectstack-fleet[bot]` ⇒ ③ 注点名该 login(脱中继写),落地前读。
+- ③ 恒查(席位自读同):SQL 可下推处新增 id 物化或应用内 join 而无因由 ⇒ 记发现(AGENTS.md)。
 - 简报从 `record-recognisers.mjs --brief-template` 起稿:只读条款与输入集内建,⛔ 不删 ⛔ 行。
 - 独立性对:`Implemented-by:`/`Reviewed-by:` 取值同见 `--template`;子代理记采纳它的席位。
 - ④ 恒由起草者之外的 agent 达档跑,起草已达档不免;喂入同上,⛔ 不喂起草者的结论。

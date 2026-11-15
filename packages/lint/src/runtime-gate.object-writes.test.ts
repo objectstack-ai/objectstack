@@ -166,6 +166,10 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       // and its child object against the deployment's names; the door
       // controls are in the roll-up describe below.
       'lintSummaryRollups',
+      // Joins as the card's ruling names it (error at the author door): two
+      // visible fields an object serves under one label. The door cases are
+      // in the duplicate-label describe below.
+      'lintDuplicateFieldLabels',
       'validateSecurityPosture', // #8310 — at this door before #4716
       // [#19370] `security-role-word` joins this door, and NOT silently —
       // which is the distinction this pin exists to draw. The maintainer
@@ -554,6 +558,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateTitleFormatRetired', // [#29007] — see the roster pin above
       'lintAutonumberFormats',
       'lintSummaryRollups', // see the roster pin above
+      'lintDuplicateFieldLabels', // see the roster pin above
       'validateSecurityPosture',
       'validateSecurityRoleWord', // [#19370] — see the roster pin above
       'validateRlsPredicateEnforceability', // [#25234] — see the roster pin above
@@ -599,6 +604,40 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     const advisory = result.advisories.find((a) => a.rule === 'autonumber-references-optional-field');
     expect(advisory, JSON.stringify(result.advisories)).toBeDefined();
     expect(advisory!.severity).toBe('warning');
+  });
+});
+
+describe('the object write door refuses a write that serves two visible fields under one label', () => {
+  /** The staging pair: an author's `user` field labelled like the injected `owner_id` in zh-CN. */
+  const withAssignee = (assignee: Record<string, unknown> = {}) =>
+    cleanObject({ fields: { owner: { type: 'text' }, assignee: { type: 'user', label: '负责人', ...assignee } } });
+
+  it('refuses the write that adds the clash', () => {
+    const result = expectSingleRefusal(withAssignee(), 'field-label-duplicate');
+    const f = result.errors.find((e) => e.rule === 'field-label-duplicate')!;
+    expect(f.path).toBe('objects.leave_request.fields');
+    expect(f.message).toContain("'assignee' and 'owner_id'");
+  });
+
+  it('publishes the same write with the field hidden or labelled apart (the controls)', () => {
+    for (const item of [withAssignee({ hidden: true }), withAssignee({ label: '处理人' })]) {
+      const result = gateObject(item);
+      expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+    }
+  });
+
+  it('does not charge a stored clash to a sibling write; a re-save of the object itself is judged on its body', () => {
+    const stored = [withAssignee()];
+    // Every gating rule at this door judges a re-save on the body it sends.
+    const resave = gateObject(withAssignee({ description: 'edited' }), { objects: stored });
+    expect(resave.errors.map((e) => e.rule)).toEqual(['field-label-duplicate']);
+    const healed = gateObject(withAssignee({ label: '处理人' }), { objects: stored });
+    expect(healed.errors, JSON.stringify(healed.errors)).toEqual([]);
+    const sibling = gateObject(
+      { name: 'leave_type', label: 'Leave Type', sharingModel: 'private', fields: { code: { type: 'text' } } },
+      { objects: stored },
+    );
+    expect(sibling.errors, JSON.stringify(sibling.errors)).toEqual([]);
   });
 });
 

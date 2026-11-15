@@ -210,6 +210,33 @@ describe('ADR-0150 D4 — the owner gate judges the handler the package call run
     });
 });
 
+describe('removeActionsByPackage hands an emptied key back — the door reaches that entry and its owner gates (Clause-② narrowing)', () => {
+    it('reaches host code\'s handed-back entry, where the rotation fell through to `global`, and that entry\'s owner refuses 403', async () => {
+        install(A);
+        install(B);
+        ship(A);
+        // B's `approve_all` asks a capability the caller lacks; its rotation is OBJECT:approve_all,
+        // OBJECT:approve (its target), then global:approve_all, the one key held under its own name.
+        engine.registry.registerItem('action', {
+            name: 'approve_all', label: 'Approve all', type: 'script', objectName: OBJECT, target: 'approve', requiredPermissions: ['approve_everything'],
+            body: { language: 'js', source: 'return 1;', capabilities: [] },
+        } as never, 'name' as never, B);
+        engine.registerAction(OBJECT, 'approve', () => 'host');
+        bind(A);
+        engine.registerAction('global', 'approve_all', () => 'all', `app:${B}`);
+        engine.registerAction('global', 'approve', () => 'global');
+        engine.removeActionsByPackage(`app:${A}`);
+        // Before the hand-back OBJECT:approve was empty: this ran global:approve, and approve_all
+        // reached global:approve_all, so it owned nothing the call ran.
+        expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {})).result).toBe('host');
+        const declaration = await resolve();
+        expect(await actionHandlerOwnerRefusal(deps, { request: {} } as any, {
+            ql: engine, action: declaration.action, objectName: OBJECT, candidates: ['approve'],
+            ec: { isSystem: false, permissions: [], positions: [] },
+        })).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    });
+});
+
 describe('[#31697] a caller that names no package', () => {
     it('is refused naming both packages when two hold the name on the object — at the declaration (D5) and at the dispatch (409), never the last registered', async () => {
         install(A);
@@ -1744,4 +1771,84 @@ describe('[#32681] /actions/account/approve judges and runs one item over the st
             });
         }
     }
+});
+
+/**
+ * ADR-0150 D4: executing an action resolves the action its own package
+ * declared on its owner key, never a same-named action of another object, and
+ * the gates run on that resolved declaration. A package-less action on
+ * another object is the environment's own item (or the platform's), never the
+ * customization of the one package that holds the name.
+ *
+ * Each pin was ablated once (the owner-key test removed from the registry
+ * binding, rebuilt, the pin read red, restored and rebuilt); the readings are
+ * in the PR body.
+ */
+describe('ADR-0150 D4 — the action route resolves the declaration its own package declared on its owner key', () => {
+    const shipAt = (packageId: string | undefined, label: string, objectName: string | undefined, requiredPermissions: string[]) =>
+        engine.registry.registerItem('action', {
+            name: 'approve', label, type: 'script', ...(objectName ? { objectName } : {}), target: 'approve', requiredPermissions,
+            body: { language: 'js', source: 'return 1;', capabilities: [] },
+        } as never, 'name' as never, packageId);
+    const storeEnvironmentRow = (objectName: string) => {
+        storedRows = [{
+            id: 'env-approve', type: 'action', name: 'approve', state: 'active', package_id: null,
+            metadata: JSON.stringify({ name: 'approve', label: 'env', type: 'script', objectName, requiredPermissions: ['env_gate'] }),
+        }];
+    };
+    const routeTo = (objectName: string, callerPackageId?: string) => resolveRouteActionDeclaration(deps, { request: {} } as any, {
+        ql: engine, objectName, actionName: 'approve', ...(callerPackageId !== undefined ? { callerPackageId } : {}),
+    });
+    const answerOf = (d: Awaited<ReturnType<typeof routeTo>>) =>
+        [d.refusal?.reason, d.degraded, d.packageId, d.action?.label, d.action?.requiredPermissions];
+    /** A on `account`, P depending on A, and a package-less `approve` on `contact` (the environment's, or the platform's). */
+    const compose = (whose: 'env' | 'platform', packagelessFirst: boolean) => {
+        install(A);
+        install(P, [A]);
+        const packageless = () => shipAt(undefined, whose, 'contact', [`${whose}_gate`]);
+        if (packagelessFirst) packageless();
+        shipAt(A, 'alpha', 'account', ['alpha_gate']);
+        if (!packagelessFirst) packageless();
+        if (whose === 'env') storeEnvironmentRow('contact');
+        engine.registerAction('account', 'approve', () => `ran ${A}`, `app:${A}`);
+        engine.registerAction('contact', 'approve', () => 'ran package-less', 'metadata-service');
+    };
+    const COMPOSITIONS = (['env', 'platform'] as const).flatMap((whose) =>
+        [false, true].map((packagelessFirst) => ({ whose, packagelessFirst, name: `${whose} on contact, registered ${packagelessFirst ? 'first' : 'last'}` })));
+
+    for (const { whose, packagelessFirst, name } of COMPOSITIONS) {
+        it(`${name}: a caller of A, or of a package depending on A, resolves A's own declaration on account under A's coordinate and runs A's handler (BASE: the declaration came back with no package)`, async () => {
+            compose(whose, packagelessFirst);
+            for (const caller of [A, P]) {
+                const declaration = await routeTo('account', caller);
+                expect(answerOf(declaration), caller).toEqual([undefined, undefined, A, 'alpha', ['alpha_gate']]);
+                expect(await executeRegisteredAction(deps, engine, 'account', ['approve'], {}, declaration.packageId), caller)
+                    .toEqual({ dispatched: true, result: `ran ${A}` });
+            }
+        });
+
+        it(`${name}: a package caller on contact is refused naming the package-less holder, never answered as A's (BASE: no declaration under A's coordinate)`, async () => {
+            compose(whose, packagelessFirst);
+            for (const caller of [A, P]) {
+                const declaration = await routeTo('contact', caller);
+                expect(answerOf(declaration), caller).toEqual(['outside-closure', undefined, undefined, undefined, undefined]);
+                expect(declaration.refusal?.candidates, caller).toEqual([{ kind: 'environment' }]);
+            }
+        });
+
+        it(`${name}: CONTROL — a caller naming no package keeps each route's own declaration and its gates`, async () => {
+            compose(whose, packagelessFirst);
+            expect(answerOf(await routeTo('account'))).toEqual([undefined, undefined, undefined, 'alpha', ['alpha_gate']]);
+            expect(answerOf(await routeTo('contact'))).toEqual([undefined, undefined, undefined, whose, [`${whose}_gate`]]);
+        });
+    }
+
+    it('CONTROL — a package-less action on A\'s own object is A\'s customization for A\'s caller, as before', async () => {
+        install(A);
+        shipAt(A, 'alpha', 'account', ['alpha_gate']);
+        shipAt(undefined, 'env', 'account', ['env_gate']);
+        storeEnvironmentRow('account');
+        const declaration = await routeTo('account', A);
+        expect([declaration.refusal, declaration.packageId]).toEqual([undefined, A]);
+    });
 });

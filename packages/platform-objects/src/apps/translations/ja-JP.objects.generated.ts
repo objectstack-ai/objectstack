@@ -120,7 +120,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "この ID の作成方法 — idp_provisioned（フェデレーション SSO の JIT）または env_native（ローカルサインアップ／アプリのエンドユーザー）。システム管理のため編集しないでください。",
         options: {
           idp_provisioned: "IdP プロビジョニング",
-          env_native: "ローカルアカウント"
+          env_native: "ローカルアカウント",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
@@ -2265,6 +2266,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             label: "マッピング: グループ属性",
             helpText: "任意。ユーザーのグループを含むアサーション属性。サインインのたびに、それらのグループにマッピングされた権限セットが付与されます。空欄の場合、グループはマッピングされません。",
             placeholder: "groups"
+          },
+          mapAccountKey: {
+            label: "Map: Account key attribute",
+            helpText: "Optional. Assertion attribute with one stable value per person that the IdP sets and the user cannot edit (Entra ID object id, Okta user id; never an email, name or other attribute a user can change), used as the account key instead of the NameID, so a sign-in from your sign-in page and one from the IdP’s app portal reach the same account, and an email change keeps it. Leave blank for the default: Microsoft Entra ID (IdP Entity ID on sts.windows.net or login.microsoftonline.com) uses http://schemas.microsoft.com/identity/claims/objectidentifier, every other IdP the NameID. Set it when the provider is registered: accounts already made keep the key they were made with.",
+            placeholder: "http://schemas.microsoft.com/identity/claims/objectidentifier"
           }
         }
       },

@@ -13,6 +13,7 @@ import {
   PACKAGE_TABLE_STATEMENTS,
   nextPackageWriteInstant,
   packageRowStamp,
+  packageStampToIso,
   packageWriteStamp,
   probePackageTable,
   resolvePackageTableDialect,
@@ -452,6 +453,24 @@ interface PackageStorageDeclaration {
 }
 
 /**
+ * Carry a `sys_packages` row's stored times onto the registry record its boot
+ * hydration just installed: `created_at` as `installedAt`, `updated_at` as
+ * `updatedAt`. The registry keeps and hands out that record object, so it is
+ * set in place, and only for a stamp the row holds in a readable form
+ * ({@link packageStampToIso}). The lifecycle state the install carried
+ * (`status` / `enabled` / `statusChangedAt`) is left as the registry decided
+ * it: `sys_packages` stores no such stamp to carry.
+ */
+function carryStoredLifecycleStamps(installed: unknown, row: Pick<PackageRecord, 'created_at' | 'updated_at'>): void {
+  if (typeof installed !== 'object' || installed === null) return;
+  const record = installed as { installedAt?: string; updatedAt?: string };
+  const installedAt = packageStampToIso(row.created_at);
+  const updatedAt = packageStampToIso(row.updated_at);
+  if (installedAt !== undefined) record.installedAt = installedAt;
+  if (updatedAt !== undefined) record.updatedAt = updatedAt;
+}
+
+/**
  * Package Management Service Plugin
  *
  * Provides package publishing, retrieval, and management capabilities.
@@ -848,8 +867,21 @@ export class PackageServicePlugin implements Plugin {
             // and keep hydrating as stored. The tolerance is this READ's only:
             // a new write of the same manifest is refused at the primitive
             // (pinned in `install-primitive-declaration.test.ts`).
+            //
+            // A rehydrated row is not a fresh install, so it keeps the times
+            // the store holds: `installPackage` stamps `installedAt` /
+            // `updatedAt` with the moment it runs, and a restart used to serve
+            // the boot time as both. The install time is the row's
+            // `created_at` (its version's first write) and the last change is
+            // its `updated_at`, carried onto the record the registry keeps and
+            // serves (`GET /packages/:id` projects it as-is). A stamp the row
+            // does not hold in a readable form leaves the registry's own.
             try {
-              registry.installPackage(convertForward ? convertForward(rec.manifest) : rec.manifest, 'authored');
+              const installed = registry.installPackage(
+                convertForward ? convertForward(rec.manifest) : rec.manifest,
+                'authored',
+              );
+              carryStoredLifecycleStamps(installed, rec);
               hydrated++;
             } catch (refusal) {
               logger.error(

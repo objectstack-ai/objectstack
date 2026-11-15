@@ -7,6 +7,7 @@ import {
   renderTranslationModule,
   stackAuthoredSubtree,
 } from '../src/utils/i18n-bundle-extract.js';
+import { resolveSourceLocale, withGatedDefaultLocale } from '../src/utils/i18n-coverage.js';
 
 const config: any = {
   objects: [
@@ -590,5 +591,74 @@ describe('stackAuthoredSubtree', () => {
   it('is a no-op on data that never had a baseline', () => {
     const input = { objects: { a: { label: 'A' } } } as any;
     expect(stackAuthoredSubtree(input)).toEqual(input);
+  });
+});
+
+// The locale `os i18n extract` fills from the inline text: `--default-locale`,
+// else `resolveSourceLocale(config.i18n)` — `i18n.sourceLocale`, else
+// `i18n.defaultLocale`, else 'en'. Shared with `os lint` / `os i18n check`.
+describe('resolveSourceLocale — the inline text\'s language', () => {
+  it('reads sourceLocale ahead of the users\' defaultLocale', () => {
+    expect(resolveSourceLocale({ defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['zh-CN'] })).toBe('en');
+  });
+
+  it('falls back to defaultLocale, then to en', () => {
+    expect(resolveSourceLocale({ defaultLocale: 'zh-CN', supportedLocales: ['zh-CN'] })).toBe('zh-CN');
+    expect(resolveSourceLocale({ defaultLocale: '', sourceLocale: '' })).toBe('en');
+    expect(resolveSourceLocale(undefined)).toBe('en');
+  });
+
+  it('an English-authored stack defaulting users to zh-CN fills en from the source and merges zh-CN', () => {
+    const cfg: any = {
+      i18n: { defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
+      objects: [{ name: 'crm_account', label: 'Account', fields: { name: { label: 'Account Name' } } }],
+      translations: [{ 'zh-CN': { objects: { crm_account: { label: '客户' } } } }],
+    };
+    const { bundles } = extractTranslations(cfg, {
+      defaultLocale: resolveSourceLocale(cfg.i18n),
+      locales: cfg.i18n.supportedLocales,
+      mergeExisting: true,
+    });
+    // en is the source: filled from the inline text.
+    expect(bundles.en.objects?.crm_account?.label).toBe('Account');
+    expect(bundles.en.objects?.crm_account?.fields?.name?.label).toBe('Account Name');
+    // zh-CN is a translated locale: its row is kept, its gap is left empty —
+    // never overwritten with the English source.
+    expect(bundles['zh-CN'].objects?.crm_account?.label).toBe('客户');
+    expect(bundles['zh-CN'].objects?.crm_account?.fields?.name?.label).toBe('');
+  });
+});
+
+// The locale list `os i18n extract` scaffolds when no `--locales` is given:
+// `withGatedDefaultLocale(supportedLocales || undefined, config.i18n)` — the
+// same rule `os i18n check` gates by.
+describe('withGatedDefaultLocale — the users\' default is scaffolded beside sourceLocale', () => {
+  const declared = { defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['en', 'es-ES'] };
+
+  it('appends defaultLocale when sourceLocale is declared and the list omits it', () => {
+    expect(withGatedDefaultLocale(['en', 'es-ES'], declared)).toEqual(['en', 'es-ES', 'zh-CN']);
+    expect(withGatedDefaultLocale(undefined, { ...declared, supportedLocales: [] })).toEqual(['zh-CN']);
+  });
+
+  it('returns the list unchanged when it already carries it, or when no sourceLocale is declared', () => {
+    const list = ['en', 'zh-CN'];
+    expect(withGatedDefaultLocale(list, declared)).toBe(list);
+    const supported = ['en', 'es-ES'];
+    expect(withGatedDefaultLocale(supported, { defaultLocale: 'zh-CN', supportedLocales: supported })).toBe(supported);
+    expect(withGatedDefaultLocale(undefined, { defaultLocale: 'zh-CN' })).toBeUndefined();
+  });
+
+  it('scaffolds an empty zh-CN bundle for an English-authored stack that left zh-CN out of supportedLocales', () => {
+    const cfg: any = {
+      i18n: declared,
+      objects: [{ name: 'crm_account', label: 'Account', fields: {} }],
+    };
+    const { bundles } = extractTranslations(cfg, {
+      defaultLocale: resolveSourceLocale(cfg.i18n),
+      locales: withGatedDefaultLocale(cfg.i18n.supportedLocales, cfg.i18n),
+      mergeExisting: false,
+    });
+    expect(Object.keys(bundles).sort()).toEqual(['en', 'es-ES', 'zh-CN']);
+    expect(bundles['zh-CN'].objects?.crm_account?.label).toBe('');
   });
 });

@@ -120,7 +120,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Cómo se creó esta identidad: idp_provisioned (JIT de SSO federado) o env_native (registro local / usuario final de la aplicación). Gestionado por el sistema; no editar.",
         options: {
           idp_provisioned: "Aprovisionada por IdP",
-          env_native: "Cuenta local"
+          env_native: "Cuenta local",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
@@ -2265,6 +2266,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             label: "Mapeo: atributo de grupos",
             helpText: "Opcional. Atributo de la aserción que contiene los grupos del usuario. Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para no asignar grupos.",
             placeholder: "groups"
+          },
+          mapAccountKey: {
+            label: "Map: Account key attribute",
+            helpText: "Optional. Assertion attribute with one stable value per person that the IdP sets and the user cannot edit (Entra ID object id, Okta user id; never an email, name or other attribute a user can change), used as the account key instead of the NameID, so a sign-in from your sign-in page and one from the IdP’s app portal reach the same account, and an email change keeps it. Leave blank for the default: Microsoft Entra ID (IdP Entity ID on sts.windows.net or login.microsoftonline.com) uses http://schemas.microsoft.com/identity/claims/objectidentifier, every other IdP the NameID. Set it when the provider is registered: accounts already made keep the key they were made with.",
+            placeholder: "http://schemas.microsoft.com/identity/claims/objectidentifier"
           }
         }
       },

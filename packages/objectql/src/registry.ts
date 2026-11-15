@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, materializeTreeSelfReferences, BASE_FIELD_DISPLAY_WHITELIST, type ObjectExtensionParsed } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, MANAGED_BY_WRITE_LOCKED_BUCKETS, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, materializeTreeSelfReferences, BASE_FIELD_DISPLAY_WHITELIST, type ObjectExtensionParsed } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -2011,12 +2011,19 @@ export function reconcileManagedApiMethods(
   const kept = methods.filter((_m, i) => !strippedIndexes.has(i));
   const stripped = conflicts.map((c) => c.verb);
 
+  const managedBy = (schema as any).managedBy;
+  // [ADR-0153 D4] On a write-locked bucket (`synced`) `userActions` cannot open
+  // a write — the parse refuses it — so the remedy is to drop the verbs and
+  // write through a declared action (D5). Every other bucket keeps its sentence.
+  const remedy = MANAGED_BY_WRITE_LOCKED_BUCKETS.has(managedBy)
+    ? `userActions cannot open a write on this bucket (ADR-0153 D4): remove [${stripped.join(', ')}] ` +
+      `from enable.apiMethods and send writes through a declared action (ADR-0153 D5).`
+    : `Declare userActions to open a verb the object legitimately takes from a user context.`;
   const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
   warn(
-    `[Registry] Object "${schema.name}" is managedBy:'${(schema as any).managedBy}' but advertised ` +
+    `[Registry] Object "${schema.name}" is managedBy:'${managedBy}' but advertised ` +
       `generic write verb(s) [${stripped.join(', ')}] in enable.apiMethods its resolved affordances ` +
-      `do not permit — stripping them (ADR-0092/ADR-0103). Declare userActions to open a verb the ` +
-      `object legitimately takes from a user context. Kept: [${kept.join(', ')}]. ` +
+      `do not permit — stripping them (ADR-0092/ADR-0103). ${remedy} Kept: [${kept.join(', ')}]. ` +
       `\`os lint\` reports the same contradiction as \`object/managed-api-method-unaffordable\` ` +
       `with full authoring context.`,
   );
@@ -9466,13 +9473,23 @@ export class SchemaRegistry {
    *
    * `holders` is the composite holder set, passed in when the caller already
    * has it.
+   *
+   * [ADR-0150 D4] An `action` is identified by `(package, owning object,
+   * name)`, so for a package-less action the holders counted above are only
+   * those whose own item has the same owner key ({@link standaloneActionOwnerKey},
+   * the router's own test; every object-less spelling is one key): a
+   * package-less action on another object customizes no holder's action. It
+   * is the environment's own item (`null`) when no holder shares its owner
+   * key, that holder's customization when exactly one does, and no package's
+   * (`undefined`) when two or more do.
    */
   private overlaySlotBinding(type: string, item: unknown, name: string, collection: Map<string, any>, holders?: ReadonlySet<string>): string | null | undefined {
     const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
     const composite = holders ?? new Set(this.compositeHoldersOf(collection, name));
     if (typeof stamped !== 'string' || stamped === '' || stamped === 'sys_metadata') {
-      if (composite.size === 0) return null;
-      return composite.size === 1 ? [...composite][0] : undefined;
+      const customized = type === 'action' ? actionHoldersOnOwnerKeyOf(item, name, collection, composite) : [...composite];
+      if (customized.length === 0) return null;
+      return customized.length === 1 ? customized[0] : undefined;
     }
     if (composite.has(stamped)) return stamped;
     const paired = this.pairRowBinding(type, stamped, item, name, collection, composite);
@@ -12216,6 +12233,25 @@ function pairRowDeclaresAnotherHolder(item: unknown, packageId: string, holders:
   if (typeof stamped !== 'string' || customizationBasePackageId(stamped) === null) return false;
   const declared = declaredOverrideBase(item);
   return declared !== undefined && declared !== packageId && holders.has(declared);
+}
+
+/**
+ * [ADR-0150 D4] The packages among `holders` whose own `action` item of `name`
+ * (its composite slot) has the owner key of the package-less action `item`
+ * ({@link standaloneActionOwnerKey}; every object-less spelling is one key):
+ * the holders that action can customize, in `holders`' order.
+ */
+function actionHoldersOnOwnerKeyOf(item: unknown, name: string, collection: Map<string, any>,
+  holders: ReadonlySet<string>): string[] {
+  const ownerKey = (action: unknown): string => {
+    const owner = standaloneActionOwnerKey(action);
+    return isObjectLessActionKey(owner) ? GLOBAL_ACTION_OBJECT_KEY : owner;
+  };
+  const key = ownerKey(item);
+  return [...holders].filter((holder) => {
+    const own = collection.get(`${holder}:${name}`);
+    return own !== null && typeof own === 'object' && ownerKey(own) === key;
+  });
 }
 
 /** The base a row's body declares it customizes (`overrides.package`, ADR-0146 D2), or `undefined`. */

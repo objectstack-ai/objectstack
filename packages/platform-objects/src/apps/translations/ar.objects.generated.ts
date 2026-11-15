@@ -120,7 +120,8 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         help: "طريقة إنشاء هذه الهوية — idp_provisioned (توفير فوري عبر SSO الموحَّد) أو env_native (تسجيل محلي / مستخدم نهائي للتطبيق). يديره النظام؛ لا تعدّله.",
         options: {
           idp_provisioned: "مُوفَّر من مزوّد الهوية",
-          env_native: "حساب محلي"
+          env_native: "حساب محلي",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
@@ -1941,7 +1942,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "المعرّف"
       },
       identifier: {
-        label: "المعرّف",
+        label: "معرّف URI للمورد",
         help: "معرّف URI لمؤشر المورد المقدَّم في معامل resource وفق RFC 8707"
       },
       name: {
@@ -2265,6 +2266,11 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             label: "التعيين: سمة المجموعات",
             helpText: "اختياري. سمة التأكيد التي تحمل مجموعات المستخدم. يمنح كل تسجيل دخول مجموعات الأذونات المعيَّنة لتلك المجموعات. اتركه فارغًا لعدم تعيين أي مجموعات.",
             placeholder: "groups"
+          },
+          mapAccountKey: {
+            label: "Map: Account key attribute",
+            helpText: "Optional. Assertion attribute with one stable value per person that the IdP sets and the user cannot edit (Entra ID object id, Okta user id; never an email, name or other attribute a user can change), used as the account key instead of the NameID, so a sign-in from your sign-in page and one from the IdP’s app portal reach the same account, and an email change keeps it. Leave blank for the default: Microsoft Entra ID (IdP Entity ID on sts.windows.net or login.microsoftonline.com) uses http://schemas.microsoft.com/identity/claims/objectidentifier, every other IdP the NameID. Set it when the provider is registered: accounts already made keep the key they were made with.",
+            placeholder: "http://schemas.microsoft.com/identity/claims/objectidentifier"
           }
         }
       },

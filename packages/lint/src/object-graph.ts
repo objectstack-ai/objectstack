@@ -396,6 +396,32 @@ export interface VisibleObjectExtension {
    */
   label: unknown;
   fieldPatches: Record<string, AnyRec>;
+  /**
+   * [#33494] Set on an entry the host's registry already holds
+   * ({@link StoredObjectExtension}), folded in at its priority but never
+   * located: its fields are no field of the stack, so no walk names one.
+   */
+  stored?: true;
+}
+
+/**
+ * [#33494] Another package's published extension of an object, as the host's
+ * registry holds it (each `extend` contribution of the object: its package,
+ * its merge priority, its fields). The `object_extension` publish door states
+ * them for the written entry's target, so {@link objectExtensionsByTarget}
+ * folds the written entry among them by priority, as the build folds every
+ * package's entry, instead of over their fields carried as plain fields with
+ * no priority. Never stated by the build, whose stack carries every entry.
+ */
+export interface StoredObjectExtension {
+  /** The object it extends. */
+  extend: string;
+  /** Its merge priority; absent reads as the registry's default, 200. */
+  priority?: number;
+  /** Its field records (a record keyed by name, or an array). */
+  fields?: unknown;
+  /** The package it belongs to, for the record; the fold reads only the order. */
+  packageId?: string;
 }
 
 /**
@@ -428,17 +454,25 @@ export interface VisibleObjectExtension {
  *   earlier one whole, its fields included.
  * - Fold order: ascending `priority` (default 200), equal priorities in
  *   package order. Each list is returned in that order.
+ * - [#33494] `stored`: the entries the host's registry already holds for
+ *   another package (the `object_extension` door states them, the build never
+ *   does), each its own package, registered before every entry of the stack
+ *   and marked `stored`. They fold as any entry does, so the stack's entry
+ *   that one outranks is not the one served and a tie between them is a tie.
  *
  * Which targets to judge is the caller's question: an entry is listed here
  * whether or not the stack declares its target.
  */
-export function objectExtensionsByTarget(stack: unknown): Map<string, VisibleObjectExtension[]> {
+export function objectExtensionsByTarget(
+  stack: unknown,
+  stored: readonly StoredObjectExtension[] = [],
+): Map<string, VisibleObjectExtension[]> {
   const byTarget = new Map<string, VisibleObjectExtension[]>();
   if (!isRec(stack)) return byTarget;
   // The receivers are named as `validate-security-posture.test.ts`'s key-read
   // meta-test tables them (`stack`, `entry`, `body`, `ext`, `obj`, `f`): that
   // scan reads this fold as part of the rules that read through it.
-  const collect = (entries: unknown, carrier: number, at: string) => {
+  const collect = (entries: unknown, carrier: number, at: string, held = false) => {
     if (!Array.isArray(entries)) return;
     entries.forEach((ext: unknown, i: number) => {
       if (!isRec(ext) || typeof ext.extend !== 'string') return;
@@ -455,10 +489,14 @@ export function objectExtensionsByTarget(stack: unknown): Map<string, VisibleObj
             Object.entries(ext.fieldPatches).filter((pair): pair is [string, AnyRec] => isRec(pair[1])),
           )
           : {},
+        ...(held ? { stored: true as const } : {}),
       });
       byTarget.set(ext.extend, kept);
     });
   };
+  // [#33494] Registered before the stack's own entries: carriers below 0, one
+  // per stored entry, in the order the host states them.
+  stored.forEach((entry, k) => collect([entry], k - stored.length, `stored[${k}].`, true));
   if (Array.isArray(stack.packages)) {
     stack.packages.forEach((entry: unknown, j: number) => {
       const body = isRec(entry) ? entry.manifest : undefined;
@@ -492,6 +530,9 @@ export function objectExtensionsByTarget(stack: unknown): Map<string, VisibleObj
  * verdict depends on which definition wins: registration order decides that,
  * and a stack does not state it.
  *
+ * [#33494] `stored` ({@link objectExtensionsByTarget}): the host's registered
+ * entries of other packages, folded in among the stack's own by priority.
+ *
  * Contract, which `indexObjectFields` (validate-hook-body-writes.ts) joins on
  * by position: `objects` is one to one and in order with
  * `recordsOf(stack.objects)`. `objectsAsServed(stack).objects[i]` is the
@@ -499,10 +540,13 @@ export function objectExtensionsByTarget(stack: unknown): Map<string, VisibleObj
  * extends anything: the declared array itself) as on the fold. No object is
  * dropped, added or reordered.
  */
-export function objectsAsServed(stack: unknown): { objects: AnyRec[]; tied: Map<string, Set<string>> } {
+export function objectsAsServed(
+  stack: unknown,
+  stored: readonly StoredObjectExtension[] = [],
+): { objects: AnyRec[]; tied: Map<string, Set<string>> } {
   const objects = isRec(stack) ? recordsOf(stack.objects) : [];
   const tied = new Map<string, Set<string>>();
-  const extensions = objectExtensionsByTarget(stack);
+  const extensions = objectExtensionsByTarget(stack, stored);
   if (extensions.size === 0) return { objects, tied };
 
   const served = objects.map((obj) => {

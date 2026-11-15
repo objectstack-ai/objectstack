@@ -22,9 +22,9 @@ import { render, screen, act } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import {
   ObjectStackAdapter,
-  clearSharedDiscoveryCache,
   type ConnectionState,
 } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../../data-objectstack/src/sharedDiscovery';
 import { ConnectionStatus } from '../ConnectionStatus';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({

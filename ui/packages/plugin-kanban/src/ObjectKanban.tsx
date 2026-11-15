@@ -421,6 +421,19 @@ export interface ObjectKanbanComponentProps {
    */
   onCardClick?: (record: any, event?: any) => void;
   /**
+   * Whether a click on a card opens anything, as the host that owns the click
+   * (`onRowClick`) knows it — the grid's `rowOpensRecord`, handed down by
+   * `ListView` (objectstack#33548). `false` ⇒ a card that cannot be dragged
+   * is no control (no `button` role, tab stop, key activation, pointer or
+   * hover); the click still reaches `onRowClick`, and a draggable card keeps
+   * its grab cursor and drag semantics. Absent (or `true`) ⇒ every card is drawn as
+   * before.
+   *
+   * A RUNTIME prop, never authored metadata: the host resolves it, and no node
+   * key reaches it.
+   */
+  rowOpensRecord?: boolean;
+  /**
    * The host asks the board to query each LANE itself (objectui#12619): the
    * first {@link KANBAN_LANE_PAGE_SIZE} records of every lane, in the node's
    * `sort`, under the node's `filter`, with the lane's count and a "Load more"
@@ -493,6 +506,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   loading: externalLoading,
   onRowClick,
   onCardClick,
+  rowOpensRecord,
   lanePaging,
   ownerField,
   onRowGroupsChange,
@@ -2067,6 +2081,9 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         // and the cards are drawn not movable otherwise (see `cardMoveGranted`).
         onCardMove={cardMoveGranted ? handleCardMove : undefined}
         cardsMovable={cardMoveGranted}
+        // objectstack#33548 — the host's answer to "does a card click open
+        // anything"; absent ⇒ every card as before.
+        rowOpensRecord={rowOpensRecord}
         // #25933: the lanes a dragged card may enter — see `canDropCard`.
         canDropCard={canDropCard}
         // #27099: why a closed lane is closed — see `dropBlockedReason`.

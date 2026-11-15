@@ -574,6 +574,16 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   isLoading?: boolean;
   /** Current streaming/API error */
   error?: Error;
+  /**
+   * objectstack#33562 — the text a not-sent `error` gives back to the
+   * composer, when the host, not the composer, holds what was not sent: e.g.
+   * two messages the host joined into one while it waited to send them. Read
+   * once per not-sent error and only into an empty box, like the composer's
+   * own text, but restored whichever way it was sent: a suggestion chip the
+   * host held comes back too, where the composer alone restores only typed
+   * text. Absent = the text the composer last typed and submitted.
+   */
+  unsentText?: string;
   showTimestamp?: boolean;
   /**
    * Render avatars beside each message (assistant gets a bot glyph, the user
@@ -2433,6 +2443,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       readOnly = false,
       isLoading = false,
       error,
+      unsentText,
       showTimestamp = false,
       showAvatars = false,
       userAvatarUrl,
@@ -3245,13 +3256,19 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
           });
         }
       }
-      // Only text the user TYPED here is restorable. `lastSubmittedRef` is
-      // written by `handleSubmit` alone and cleared by every card-driven send,
-      // because those send a canned message the user never typed — leaving the
-      // ref stale refilled the composer with the user's PREVIOUS prompt, a
-      // message that had already been delivered and answered, reading as
-      // "resend this" (objectui#7253).
-      const text = lastSubmittedRef.current;
+      // What is restored is what was NOT sent, never an older delivered prompt.
+      // On its own the composer knows only text the user TYPED here:
+      // `lastSubmittedRef` is written by `handleSubmit` alone and cleared by
+      // every card-driven send (a chip, a plan or changes card), because those
+      // send a canned message — leaving the ref stale refilled the composer
+      // with the user's PREVIOUS prompt, a message that had already been
+      // delivered and answered, reading as "resend this" (objectui#7253).
+      // A host that held the message itself names it as `unsentText`
+      // (objectstack#33562), and that text is restored too, whichever way it
+      // was sent: what the composer last submitted may be only part of it,
+      // and a suggestion chip's text the host held for a create that then
+      // failed is the message that was not sent, not a stale one.
+      const text = unsentText ?? lastSubmittedRef.current;
       if (!text) return;
       const textarea = promptInputWrapRef.current?.querySelector('textarea');
       if (textarea && textarea.value.trim() === '') {
@@ -3260,7 +3277,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
         textarea.focus();
       }
-    }, [error]);
+    }, [error, unsentText]);
 
     const handleCopy = React.useCallback((message: ChatbotEnhancedMessage) => {
       void navigator.clipboard?.writeText(message.content);
@@ -6154,7 +6171,8 @@ function BlueprintProgressPanel({
  * objectui#12724 — the plan card's object rows from `planCard.objects` (the
  * AiBuild artboard): the object's label, one chip per field with the format its
  * sample data is held to in mono type (`format.label`), a dashed 「补充」 chip for
- * a field the user's words did not name (`suggested`), the stage field's
+ * a field the user's words did not name (`suggested`, with one legend line
+ * under the rows saying what the mark means, #33419), the stage field's
  * lifecycle beside its label (`lifecycle.label`, objectui#12994), and
  * 「名称：FIELD」 under the chips when the object declares its name field
  * (`nameField`). Each of those four is drawn only when its key is present. When
@@ -6170,6 +6188,9 @@ function PlanCardObjectRows({
 }) {
   const { t } = useObjectTranslation();
   const suggestedMark = t('chatbot.plan.suggestedField', { defaultValue: 'suggested' });
+  // #33419 — the mark alone does not say what it means, so a card with any
+  // suggested field draws one legend line under its rows.
+  const anySuggested = objects.some((o) => o.fields.some((f) => f.suggested));
   return (
     <div className="flex flex-col" data-testid="proposed-plan-objects">
       <span className="text-[11px] font-medium text-foreground/70">{heading}</span>
@@ -6232,6 +6253,14 @@ function PlanCardObjectRows({
           </div>
         </div>
       ))}
+      {anySuggested ? (
+        <span className="pt-1 text-[11px] text-muted-foreground" data-testid="proposed-plan-suggested-legend">
+          {t('chatbot.plan.suggestedFieldLegend', {
+            mark: suggestedMark,
+            defaultValue: 'Fields marked “{{mark}}” were added by the AI; you didn’t ask for them.',
+          })}
+        </span>
+      ) : null}
     </div>
   );
 }
