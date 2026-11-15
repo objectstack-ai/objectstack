@@ -426,6 +426,7 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
             expect(labelOf(bare) === `gamma row ${type}`, JSON.stringify(bare.body)).toBe(ROW_SERVED_TYPES.includes(type));
             if (ROW_SERVED_TYPES.includes(type)) {
                 expect([env.status, codeOf(env)], JSON.stringify(env.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+                expect(env.body?.details?.candidates, JSON.stringify(env.body)).toEqual([{ kind: 'package', packageId: B }]);
             } else {
                 expect([bare.status, env.status], JSON.stringify([bare.body, env.body])).toEqual([404, 404]);
             }
@@ -440,6 +441,9 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
             const refusedAtEnv = async (query: Record<string, string>) => {
                 const env = await drive(QUALIFIED, { type, ns: '_env', name: 'solo' }, query);
                 expect([env.status, codeOf(env), query], JSON.stringify(env.body)).toEqual([409, 'RESOURCE_CONFLICT', query]);
+                // [review#2 S4] Its candidate is the disabled registry holder, as on main;
+                // the enabled package holding the name through its row is not named.
+                expect(env.body?.details?.candidates, JSON.stringify(env.body)).toEqual([{ kind: 'package', packageId: B }]);
                 for (const label of [`gamma draft ${type}`, `gamma row ${type}`]) expect(JSON.stringify(env.body ?? null)).not.toContain(label);
             };
             ship(type, 'solo', B);
