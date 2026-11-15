@@ -16,7 +16,18 @@
  */
 
 import { registerMetadataResource } from '../registry.js';
-import { DatasourceResourcePage } from './DatasourceResourcePage.js';
+import { lazyPage } from '../../../services/lazyPage.js';
+
+/**
+ * Registered by reference to its module (objectstack#33582): this module runs
+ * at load (`register-builtins.ts` is a side-effect import of the package
+ * entry), so the page by value held it, `metadata-admin/i18n.ts` with the
+ * Studio `en` string namespace, and the JSON-schema field reader in the
+ * console's eager closure, on every route.
+ */
+const DatasourceResourcePage = lazyPage('datasources', () =>
+  import('./DatasourceResourcePage.js').then((m) => m.DatasourceResourcePage),
+);
 
 let registered = false;
 
