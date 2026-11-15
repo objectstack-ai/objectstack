@@ -83,6 +83,8 @@ import { flowStartRefusal, isAiServiceAccount } from '../flow-start-admission.js
 import {
     apiForwardCredentialKind,
     callData,
+    collectActionDeclarations,
+    readMergedItems,
     refuseUnreadableFlowStartRecords,
     type FlowStartRecordKeys,
 } from '../action-execution.js';
@@ -3005,6 +3007,37 @@ async function unregisterAndDeleteFlow(
 }
 
 /**
+ * [ADR-0151 D3 rule 3] The action declarations the request's environment
+ * serves, read the way the `/actions` door reads them
+ * (`collectActionDeclarations` over the protocol's merged object and action
+ * listings, else the metadata service's): what flow start admission's rule 2b
+ * reads, for an AI service account only, to find an action that targets the
+ * flow and declares `ai.requiresConfirmation: true`
+ * (`../flow-start-admission.ts`). A host with neither listing serves no action
+ * declaration, so none is found; a listing that throws travels to the caller,
+ * which refuses the start rather than admitting it.
+ */
+async function servedActionDeclarations(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<Array<{ action: unknown; objectName: string }>> {
+    const resolved = async (name: string): Promise<any> => {
+        try {
+            return await deps.resolveService(context, name, context?.environmentId);
+        } catch {
+            return undefined;
+        }
+    };
+    const protocol = await resolved('protocol');
+    if (typeof protocol?.getMetaItems === 'function') {
+        const objects = await readMergedItems(protocol, 'object');
+        const actions = await readMergedItems(protocol, 'action');
+        return collectActionDeclarations(deps, undefined, objects, actions);
+    }
+    return collectActionDeclarations(deps, await resolved('metadata'));
+}
+
+/**
  * [#9378] The ONE mapper both trigger doors answer through — `POST
  * /:name/trigger` and the legacy `POST /trigger/:name`, which
  * `client.automation.trigger()` calls. Extracted rather than written twice:
@@ -3136,12 +3169,23 @@ async function respondToFlowTrigger(
     // account is therefore refused an elevated (`runAs: 'system'`) flow at
     // this route, and told where the opt-in stands: an `ai.exposed` action
     // that targets the flow, run through `/actions` or MCP `run_action`.
-    const startRefusal = await flowStartRefusal(automationService, flowName, context?.executionContext, { aiExposed: false });
+    //
+    // [ADR-0151 D3 rule 3] And the confirmation an action declares travels
+    // with what it starts: this door states the environment's action
+    // declarations, read as the `/actions` door reads them, so an account's
+    // start of a flow that a confirmation-gated action targets is refused with
+    // that door's own `428`, whatever the request carries.
+    const startRefusal = await flowStartRefusal(automationService, flowName, context?.executionContext, {
+        aiExposed: false,
+        actionDeclarations: () => servedActionDeclarations(deps, context),
+    });
     if (startRefusal) {
+        const details = 'details' in startRefusal ? startRefusal.details : undefined;
         return {
             handled: true,
             response: deps.error(startRefusal.message, startRefusal.status, {
                 code: startRefusal.code,
+                ...(details ?? {}),
             }),
         };
     }
