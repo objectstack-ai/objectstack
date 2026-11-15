@@ -4254,6 +4254,9 @@ const zh = {
       aggregations: '汇总',
       records: '记录',
       visibleToYou: '仅包含你可见的记录',
+      dataset: '数据集',
+      metrics: '指标',
+      noAddedFilter: '未在数据集定义之外添加筛选条件',
     },
     tool: {
       aggregate_data: '汇总相关数据',

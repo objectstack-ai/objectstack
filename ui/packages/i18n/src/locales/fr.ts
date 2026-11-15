@@ -4087,6 +4087,9 @@ const fr = {
       aggregations: 'Agrégations',
       records: 'Enregistrements',
       visibleToYou: 'Uniquement les enregistrements que vous pouvez voir',
+      dataset: 'Jeu de données',
+      metrics: 'Indicateurs',
+      noAddedFilter: 'Aucun filtre ajouté à la définition du jeu de données',
     },
     tool: {
       aggregate_data: "Synthétiser les données",

@@ -4086,6 +4086,9 @@ const pt = {
       aggregations: 'Agregações',
       records: 'Registros',
       visibleToYou: 'Somente os registros que você pode ver',
+      dataset: 'Conjunto de dados',
+      metrics: 'Métricas',
+      noAddedFilter: 'Nenhum filtro adicionado à definição do conjunto de dados',
     },
     tool: {
       aggregate_data: "Resumir os dados",

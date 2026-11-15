@@ -4185,6 +4185,9 @@ const ru = {
       aggregations: 'Агрегаты',
       records: 'Записи',
       visibleToYou: 'Только записи, которые вам доступны',
+      dataset: 'Набор данных',
+      metrics: 'Метрики',
+      noAddedFilter: 'Без фильтров сверх определения набора данных',
     },
     tool: {
       aggregate_data: "Агрегировать данные",

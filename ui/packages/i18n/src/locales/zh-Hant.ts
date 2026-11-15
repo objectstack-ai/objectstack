@@ -4254,6 +4254,9 @@ const zhHant = {
       aggregations: '彙總',
       records: '記錄',
       visibleToYou: '僅包含你可見的記錄',
+      dataset: '資料集',
+      metrics: '指標',
+      noAddedFilter: '未在資料集定義之外新增篩選條件',
     },
     tool: {
       aggregate_data: '彙總相關資料',

@@ -4006,6 +4006,9 @@ const de = {
       aggregations: 'Aggregationen',
       records: 'Datensätze',
       visibleToYou: 'Nur Datensätze, die Sie sehen können',
+      dataset: 'Datenset',
+      metrics: 'Kennzahlen',
+      noAddedFilter: 'Kein zusätzlicher Filter zur Datenset-Definition',
     },
     tool: {
       aggregate_data: "Die Daten zusammenfassen",

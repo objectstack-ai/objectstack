@@ -4091,6 +4091,9 @@ const es = {
       aggregations: 'Agregaciones',
       records: 'Registros',
       visibleToYou: 'Solo los registros que puede ver',
+      dataset: 'Conjunto de datos',
+      metrics: 'Métricas',
+      noAddedFilter: 'Sin filtro añadido a la definición del conjunto de datos',
     },
     tool: {
       aggregate_data: "Resumir los datos",
