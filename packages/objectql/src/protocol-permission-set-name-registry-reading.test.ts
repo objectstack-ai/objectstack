@@ -469,13 +469,14 @@ describe('[#32780] two namespaces\' stored permission sets of one name: each ser
         ({ id, name: id, version: '1.0.0', namespace: NS[id], ...(sets.length ? { permissions: sets.map(permissionSet) } : {}) }) as any;
 
     /** Boot over `stores`, with `installs` installed before the boot hydration reads the stored rows. */
-    async function boot(stores: Stores, installs: readonly string[]): Promise<{ engine: ObjectQL; protocol: any }> {
+    async function boot(stores: Stores, installs: readonly string[], before?: (engine: ObjectQL) => void): Promise<{ engine: ObjectQL; protocol: any }> {
         const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
         live.push(kernel);
         const engine = new ObjectQL();
         engine.registry.logLevel = 'silent';
         engine.registerDriver(makeMemoryDriver(stores), true);
         for (const id of installs) engine.registry.installPackage(manifestOf(id), 'authored');
+        before?.(engine);
         await kernel.use(new ObjectQLPlugin({ ql: engine }));
         await kernel.bootstrap();
         engine.registry.logLevel = 'silent';
@@ -568,9 +569,9 @@ describe('[#32780] two namespaces\' stored permission sets of one name: each ser
 
     it('crm ships a set, hr saves one of the name, then crm saves its own and a third namespace saves one: each lands and each is served at its own package, also after a restart (FROM: crm\'s and fin\'s saves refused naming hr)', async () => {
         const stores: Stores = new Map();
-        const { engine, protocol } = await boot(stores, [CRM, HR, FIN]);
+        // crm's set is registered before the boot hydration, as a cold boot registers a package's items.
         const ship = (target: ObjectQL) => target.registry.registerItem('permission', setOf('cap_crm_shipped') as any, 'name', CRM);
-        ship(engine);
+        const { engine, protocol } = await boot(stores, [CRM, HR, FIN], ship);
         expect(await grants(engine, [CRM]), 'the shipped set').toEqual({ [CRM]: ['cap_crm_shipped'] });
         expect((await save(protocol, HR, 'cap_hr')).success).toBe(true);
         // Each package's grant confers its own package's set.
@@ -584,8 +585,7 @@ describe('[#32780] two namespaces\' stored permission sets of one name: each ser
             { packageId: FIN, tenantAuthored: true }, { packageId: HR, tenantAuthored: true },
         ]);
         for (const rows of [stores, reversedRows(stores)]) {
-            const restarted = await boot(rows, [CRM, HR, FIN]);
-            ship(restarted.engine);
+            const restarted = await boot(rows, [CRM, HR, FIN], ship);
             expect(await grants(restarted.engine, [CRM, HR, FIN]), 'after a restart').toEqual(served);
         }
     });
