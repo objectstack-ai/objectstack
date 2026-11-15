@@ -9,12 +9,12 @@
 - 分区阈值(经验):可认领 p1/p2 ≥15 张且跨 ≥3 个互不相干的模块簇;不足即照常按卡认领。
 - 边界按卡触及的文件与包聚类,让两区极少改同一函数;⛔ 不按卡标题或词汇分。
 - 队列排空的区并入邻区,积压的区拆开;拆并即改租约表。
-- 租约表(区 → 路径前缀 → 线程 → 复核席)住座位贴,任一列变即重写,是租约唯一记录。
+- 租约表(区→路径→线程会话→复核席)住座位贴,任一列变或线程轮换即重写,为唯一记录。
 - 复核席约每 3 活跃区一席,由他账号坐(`lanes/review.md`);同账号坐须维护者本线程亲字。
 - 队列值守只照 `lanes/queue.md`(含其无席时的兜底),⛔ 不在此另派。
 - 例:server 车道 2026-11-14 的八区,只作起点、每班重推;别的车道自推,⛔ 不套此表:
   - A1 plugin-auth;A2 plugin-security/audit/email/notify/Setup;A3 storage/approvals/analytics 等;
-  - A4 drivers/seed/formula/filter 编译/schema sync;A5 runtime/hono/automation/cli/打包;
+  - A4 drivers/seed/formula/filter 编译/schema sync;A5 runtime(action 路由除外)/hono/automation/cli/打包;
   - E1 metadata-protocol(`protocol.ts` 串行);E2 security 目录/webhooks/元数据历史与 loader;
   - E2b runtime action 路由/objectql 函数持有者。
 
@@ -33,7 +33,7 @@
 
 ## 区内规则
 
-- 区会话署本席签名,`Session:` 填区会话 ID;租约表所列会话的 `Claim:` 不算开轮互斥读数三。
+- 区会话署本席签名,`Session:` 填区会话 ID;开轮互斥读法照 `seat-lifecycle.md`。
 - 认领前重读标签、assignee 与末条评论:他人 assignee、他人 `Claim:` 或他区 `lease:*` ⇒ 不碰。
 - 认领照 `execution-duties.md` 派发原子对,同笔加 `lease:<区>`;`Branch:` 照 AGENTS.md 命名。
 - 认领后回读标签(SKILL.md 标签写四步):缺 `lease:` 或 `pm:dispatched` 即重挂;首推即开 draft PR。
