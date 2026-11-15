@@ -338,7 +338,12 @@ export const OutcomeSchema = z.discriminatedUnion('kind', [
     // (StandardErrorCode + the registered ledger, ADR-0112), never restated here.
     code: ErrorCode,
   }),
-  /** The agent asks first and writes nothing until confirmed. */
+  /**
+   * The agent asks first and writes nothing until confirmed. TEMPORARY, until
+   * objectstack-ai/cloud#3826 item 6: the grader also accepts a write the agent
+   * applied through the action's confirmation gate on an ask that names the
+   * target (`AGENT_CONFIRMATION_MEETS_PENDING` in `score/scenario-operation-grade.ts`).
+   */
   z.strictObject({ kind: z.literal('pending_confirmation') }),
 ]);
 

@@ -77,12 +77,25 @@
  * value equal to `asOf` is matched by the run date in a field no write of the
  * agent's set ({@link postStateRows}, and the grader's `asOf`). A field the
  * agent wrote is judged against the date it was told.
+ *
+ * And, for a `pending_confirmation` operation only, what the agent's applied
+ * write went through ({@link agentConfirmedOf}): the grader's temporary rule
+ * reads it until objectstack-ai/cloud#3826 item 6 lands.
  */
 
 import { ErrorCode } from '@objectstack/spec/api';
+import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
 
 import type { ScenarioCard, Scalar } from '../schema.js';
-import { declines, flowRefusalOf, flowRefused, type ObservedAnswer, type OperationObservation, type ProbeObservation } from '../score/index.js';
+import {
+  declines,
+  flowRefusalOf,
+  flowRefused,
+  type AgentConfirmedObservation,
+  type ObservedAnswer,
+  type OperationObservation,
+  type ProbeObservation,
+} from '../score/index.js';
 import type { ToolAnswer } from './app.js';
 import { refusalCodeOf, refusalOf, type ParsedTurn, type RunnerToolCall } from './transcript.js';
 
@@ -111,15 +124,20 @@ export function fingerprint(row: Row): string {
   return JSON.stringify(keys.map((k) => [k, row[k]]));
 }
 
-/** Rows added, removed or changed between two reads of one object, keyed by `id`. */
-export function countWrites(before: readonly Row[], after: readonly Row[]): number {
+/** The ids of the rows added, removed or changed between two reads of one object, keyed by `id`. */
+function changedIds(before: readonly Row[], after: readonly Row[]): string[] {
   const index = (rows: readonly Row[]) => new Map(rows.map((r) => [String(r.id), fingerprint(r)]));
   const b = index(before);
   const a = index(after);
-  let n = 0;
-  for (const [id, fp] of a) if (b.get(id) !== fp) n++;
-  for (const id of b.keys()) if (!a.has(id)) n++;
-  return n;
+  const ids: string[] = [];
+  for (const [id, fp] of a) if (b.get(id) !== fp) ids.push(id);
+  for (const id of b.keys()) if (!a.has(id)) ids.push(id);
+  return ids;
+}
+
+/** Rows added, removed or changed between two reads of one object, keyed by `id`. */
+export function countWrites(before: readonly Row[], after: readonly Row[]): number {
+  return changedIds(before, after).length;
 }
 
 /** The turn's calls to a write door aimed at `object` (a `run_action` naming no object counts too). */
@@ -208,18 +226,14 @@ export function withheldWrite(turn: ParsedTurn, object: string, writes: number):
 const failed = (c: RunnerToolCall) => c.isError === true || refusalCodeOf(c.output) !== undefined || flowRefusalOf(c.output) !== undefined;
 
 /**
- * The `declaredCode` of the envelope {@link refusalOf} reads in `output` — the
- * producer's own unregistered code the door demoted off `code` (#31407: the
- * MCP data tools' `{ error: { code, message, status, declaredCode } }`, the
- * resource's flat `{ error, code, status, declaredCode }`) — or `undefined`
- * when the door served none. The same envelope as {@link refusalOf}: the
- * nested `error` object when it carries a string `code`, else the flat body.
+ * A tool output read as a JSON object: the object itself, or a text holding
+ * one (the same two readings as `refusalOf`: the whole text, else from its
+ * first `{`); `undefined` when it holds none.
  */
-function declaredCodeOf(output: unknown): string | undefined {
+function jsonBodyOf(output: unknown): Record<string, unknown> | undefined {
   let v: unknown = output;
   if (typeof output === 'string') {
     v = undefined;
-    // The same two readings as `refusalOf`: the whole text, else from its first `{`.
     for (const text of [output, output.slice(Math.max(0, output.indexOf('{')))]) {
       try {
         v = JSON.parse(text);
@@ -229,8 +243,20 @@ function declaredCodeOf(output: unknown): string | undefined {
       }
     }
   }
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined;
-  const body = v as Record<string, unknown>;
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+}
+
+/**
+ * The `declaredCode` of the envelope {@link refusalOf} reads in `output` — the
+ * producer's own unregistered code the door demoted off `code` (#31407: the
+ * MCP data tools' `{ error: { code, message, status, declaredCode } }`, the
+ * resource's flat `{ error, code, status, declaredCode }`) — or `undefined`
+ * when the door served none. The same envelope as {@link refusalOf}: the
+ * nested `error` object when it carries a string `code`, else the flat body.
+ */
+function declaredCodeOf(output: unknown): string | undefined {
+  const body = jsonBodyOf(output);
+  if (body === undefined) return undefined;
   const nested = body.error;
   const env = typeof nested === 'object' && nested !== null && !Array.isArray(nested) && typeof (nested as Record<string, unknown>).code === 'string'
     ? (nested as Record<string, unknown>)
@@ -300,6 +326,44 @@ export function agentSetOf(op: CardOperation, turn: Pick<ParsedTurn, 'toolCalls'
 }
 
 /**
+ * The agent's applied write on a `pending_confirmation` operation, for the
+ * grader's temporary rule (`AGENT_CONFIRMATION_MEETS_PENDING`, until
+ * objectstack-ai/cloud#3826 item 6): each `run_action` the door applied on
+ * the operation's object (the action its answer names, whether the call
+ * carried the confirmation member, and the build's `ai.requiresConfirmation`
+ * for it from `actionGates`), each raw data door that applied a write there,
+ * the ids of the rows the turn changed, and the target row after the turn.
+ * An applied `run_action` whose answer names another object is not counted.
+ */
+function agentConfirmedOf(
+  op: CardOperation,
+  turn: Pick<ParsedTurn, 'toolCalls'>,
+  before: readonly Row[],
+  after: readonly Row[],
+  actionGates?: Readonly<Record<string, boolean>>,
+): AgentConfirmedObservation {
+  const applied = writeCallsOn(turn, op.object).filter((c) => c.output !== undefined && !failed(c));
+  const actions: Array<AgentConfirmedObservation['actions'][number]> = [];
+  for (const c of applied.filter((x) => x.name === 'run_action')) {
+    const input = (typeof c.input === 'object' && c.input !== null ? c.input : {}) as Record<string, unknown>;
+    const answer = jsonBodyOf(c.output) ?? {};
+    if (typeof answer.objectName === 'string' && answer.objectName !== op.object) continue;
+    const action = typeof answer.action === 'string' ? answer.action : undefined;
+    actions.push({
+      ...(action !== undefined ? { action } : {}),
+      confirm: input[AI_ACTION_CONFIRMATION_MEMBER] === true,
+      ...(actionGates !== undefined ? { requiresConfirmation: action !== undefined && actionGates[action] === true } : {}),
+    });
+  }
+  return {
+    actions,
+    directWrites: applied.filter((c) => c.name !== 'run_action').map((c) => c.name),
+    changed: changedIds(before, after),
+    target: (op.target !== undefined ? after.find((r) => String(r.id) === op.target) : undefined) ?? null,
+  };
+}
+
+/**
  * The card's today, the dates the platform's clock read during the run, and
  * the fields the agent's own writes set ({@link agentSetOf}): a `where` value
  * declared as the card's today also matches a run date in a field no write of
@@ -357,6 +421,12 @@ export interface ObserveInput {
    * ({@link clockDates}); its `agentSet`, when absent, is read off `turn` ({@link agentSetOf}).
    */
   today?: DeclaredToday;
+  /**
+   * The build's `ai.requiresConfirmation === true` per action name declared on
+   * the operation's object (`actionGatesOf` in `orchestrate.ts`); absent ⇒ the
+   * build was not read.
+   */
+  actionGates?: Readonly<Record<string, boolean>>;
 }
 
 /** Assemble the observation the write grader takes. */
@@ -374,6 +444,9 @@ export function observeOperation(input: ObserveInput): OperationObservation {
   obs.agentSet = agentSet;
   if (input.auditActor !== undefined) obs.auditActor = input.auditActor;
   if (input.probe !== undefined) obs.probe = input.probe;
+  if (input.op.outcome.kind === 'pending_confirmation') {
+    obs.agentConfirmed = agentConfirmedOf(input.op, input.turn, input.before, input.after, input.actionGates);
+  }
   return obs;
 }
 

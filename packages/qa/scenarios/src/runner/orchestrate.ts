@@ -508,6 +508,30 @@ export function buildLockOf(built: unknown, card: Card, op: Operation): string |
   return `${setName} locks ${locked.join(', ')} and the build declares the action${actions.length > 1 ? 's' : ''} ${actions.join(', ')} on ${op.object}`;
 }
 
+/**
+ * The build's confirmation gate per action on an operation's object, read from
+ * the built artifact: each action name declared there, `true` when it carries
+ * `ai.requiresConfirmation: true`. `undefined` when the artifact cannot be
+ * read. The grader's temporary rule reads it (`AGENT_CONFIRMATION_MEETS_PENDING`,
+ * until objectstack-ai/cloud#3826 item 6).
+ */
+export function actionGatesOf(built: unknown, op: Operation): Record<string, boolean> | undefined {
+  if (built === undefined) return undefined;
+  let facts: ReturnType<typeof readArtifactFacts>;
+  try {
+    facts = readArtifactFacts(built);
+  } catch {
+    return undefined;
+  }
+  const gates: Record<string, boolean> = {};
+  for (const { object, action } of facts.actions) {
+    if (object !== op.object) continue;
+    const ai = typeof action.ai === 'object' && action.ai !== null ? (action.ai as { requiresConfirmation?: unknown }) : undefined;
+    gates[String(action.name)] = ai?.requiresConfirmation === true;
+  }
+  return gates;
+}
+
 function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[], adminId: string): string | null {
   if (userId === null) return null;
   const hit = accounts.find((a) => a.userId === userId);
@@ -758,7 +782,8 @@ export async function runHalf(
           const id = touchedRowId(op, rowsByObject, today);
           auditActor = id === undefined ? null : personaOfUser(await app.auditActorUserId(op.object, id), accounts, app.adminUserId());
         }
-        const observed = { op, turn, before, after, rowsByObject, today, ...(auditActor !== undefined ? { auditActor } : {}) };
+        const actionGates = op.outcome.kind === 'pending_confirmation' ? actionGatesOf(built, op) : undefined;
+        const observed = { op, turn, before, after, rowsByObject, today, ...(auditActor !== undefined ? { auditActor } : {}), ...(actionGates ? { actionGates } : {}) };
         // The runner's probe: it sends the declared write itself, as the same
         // persona through the same MCP door, after the turn. A probed operation
         // (the validation operation, or a permission overstep) is always

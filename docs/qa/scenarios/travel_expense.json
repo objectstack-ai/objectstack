@@ -932,7 +932,7 @@
     "personas": [
       {
         "id": "employee",
-        "role": "Employee (claimant), Sales, grade g2 — e02",
+        "role": "Employee (claimant), Sales, grade g2 — e02, who may not approve approval steps on their own claims",
         "record": {"object": "employee", "id": "e02"},
         "hidden": {"fields": [{"object": "department", "field": "travel_budget"}]},
         "scope": [

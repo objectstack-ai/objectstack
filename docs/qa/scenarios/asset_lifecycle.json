@@ -766,7 +766,7 @@
     "personas": [
       {
         "id": "employee",
-        "role": "Employee (asset holder), Sales - e06",
+        "role": "Employee (asset holder), Sales - e06, who may not approve their own disposal requests",
         "record": {"object": "employee", "id": "e06"},
         "hidden": {
           "objects": ["depreciation_entry"],
@@ -802,7 +802,7 @@
       },
       {
         "id": "asset_admin",
-        "role": "IT asset administrator, organization-wide - e12",
+        "role": "IT asset administrator, organization-wide - e12, who registers assets",
         "hidden": {"fields": [{"object": "department", "field": "asset_budget"}]}
       }
     ],
