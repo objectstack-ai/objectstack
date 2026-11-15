@@ -58,6 +58,17 @@ import '@objectstack/runtime';
 import '@objectstack/objectql';
 import '@objectstack/plugin-audit';
 import '@objectstack/platform-objects/plugin';
+import '@objectstack/cloud-connection';
+import '@objectstack/driver-turso';
+import '@objectstack/metadata';
+import '@objectstack/metadata-protocol';
+import '@objectstack/plugin-hono-server';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/service-automation';
+import '@objectstack/service-datasource';
+import '@objectstack/service-settings';
+import '@objectstack/service-storage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
