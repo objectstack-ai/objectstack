@@ -494,4 +494,20 @@ describe('register: an unclassified membership failure is answered with the gene
     });
     expect(logError).not.toHaveBeenCalled();
   });
+
+  it('CONTROL: a membership throw whose status addresses the caller (4xx) keeps its own answer, and is not logged', async () => {
+    refuseMembership = Object.assign(new Error('Seat check refused.'), { statusCode: 402 });
+    const r = await register();
+    expect(r).toEqual({
+      status: 402,
+      body: {
+        success: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'The AI service account could not be added to the organization, so it was not registered: Seat check refused.',
+        },
+      },
+    });
+    expect(logError).not.toHaveBeenCalled();
+  });
 });

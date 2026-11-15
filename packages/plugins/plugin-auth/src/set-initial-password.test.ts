@@ -125,4 +125,12 @@ describe('an unclassified internal failure is answered with the generic message 
     });
     expect(logger.error).not.toHaveBeenCalled();
   });
+
+  it('CONTROL: a throw whose status addresses the caller (4xx) keeps its own answer, and is not logged', async () => {
+    const setPassword = vi.fn().mockRejectedValue(Object.assign(new Error('Sign in first'), { statusCode: 401 }));
+    const logger = { error: vi.fn() };
+    const res = await runSetInitialPassword({ setPassword }, makeRequest({ newPassword: 'x'.repeat(12) }), { logger });
+    expect(res).toEqual({ status: 401, body: { success: false, error: { code: 'INTERNAL_ERROR', message: 'Sign in first' } } });
+    expect(logger.error).not.toHaveBeenCalled();
+  });
 });

@@ -113,11 +113,12 @@ export async function runSetInitialPassword(
  * flows. `PASSWORD_ALREADY_SET` is normalised to 409 so callers can tell
  * "already has a password → use change-password" apart from validation errors.
  *
- * A refusal the vendor classifies (it carries a body code) keeps its own
- * message. A failure that carries no vendor code is unclassified: it is
- * answered `INTERNAL_ERROR` in the generic words every route catch in
- * `auth-plugin.ts` uses, and the error is logged once — the thrown error's own
- * text never reaches the caller. The status is read the same way in both.
+ * A refusal keeps its own answer: one the vendor classifies (it carries a
+ * body code), and one whose status says it is addressed to the caller (4xx).
+ * Anything else is an unclassified internal failure: it is answered
+ * `INTERNAL_ERROR` in the generic words every route catch in `auth-plugin.ts`
+ * uses, and the error is logged once — the thrown error's own text never
+ * reaches the caller. The status is read the same way in every case.
  */
 function mapSetPasswordError(
   error: unknown,
@@ -133,13 +134,14 @@ function mapSetPasswordError(
   const vendorCode = e?.body?.code ?? undefined;
   const rawStatus =
     typeof e?.statusCode === 'number' ? e.statusCode : typeof e?.status === 'number' ? e.status : 500;
-  if (vendorCode === undefined) {
+  if (vendorCode === undefined && !(rawStatus >= 400 && rawStatus <= 499)) {
     logger?.error('[AuthPlugin] set-initial-password failed', error instanceof Error ? error : new Error(String(error)));
     return { status: rawStatus, body: { success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } } };
   }
 
+  const code = vendorCode ?? 'INTERNAL_ERROR';
   const message = e?.body?.message ?? e?.message ?? 'set-initial-password failed';
-  const status = vendorCode === 'PASSWORD_ALREADY_SET' ? 409 : rawStatus;
+  const status = code === 'PASSWORD_ALREADY_SET' ? 409 : rawStatus;
 
-  return { status, body: { success: false, error: { code: vendorCode, message } } };
+  return { status, body: { success: false, error: { code, message } } };
 }

@@ -676,13 +676,14 @@ export async function writeAdminAudit(
 /**
  * Map what a vendor call threw onto the endpoint envelope.
  *
- * A refusal the vendor classifies (it carries a body code) keeps its own
- * message and status; `USER_ALREADY_EXISTS` is normalised to 409. A failure
- * that carries no vendor code is unclassified: it is answered `INTERNAL_ERROR`
- * in the generic words every route catch in `auth-plugin.ts` uses, and the
- * error is handed to `logger.error` once, as `[AuthPlugin] <fallback>` — the
- * thrown error's own text never reaches the caller. The status is read the
- * same way in both.
+ * A refusal keeps its own message and status: one the vendor classifies (it
+ * carries a body code; `USER_ALREADY_EXISTS` is normalised to 409), and one
+ * whose status says it is addressed to the caller (4xx). Anything else is an
+ * unclassified internal failure: it is answered `INTERNAL_ERROR` in the
+ * generic words every route catch in `auth-plugin.ts` uses, and the error is
+ * handed to `logger.error` once, as `[AuthPlugin] <fallback>` — the thrown
+ * error's own text never reaches the caller. The status is read the same way
+ * in every case.
  *
  * @param fallback  names the route's failure (`'create-user failed'`); it is
  *                  the log line, and a classified refusal's message when the
@@ -702,13 +703,14 @@ export function mapAuthApiError(
   const vendorCode = e?.body?.code ?? undefined;
   const rawStatus =
     typeof e?.statusCode === 'number' ? e.statusCode : typeof e?.status === 'number' ? e.status : 500;
-  if (vendorCode === undefined) {
+  if (vendorCode === undefined && !(rawStatus >= 400 && rawStatus <= 499)) {
     logger?.error?.(`[AuthPlugin] ${fallback}`, error instanceof Error ? error : new Error(String(error)));
     return { status: rawStatus, body: { success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } } };
   }
+  const code = vendorCode ?? 'INTERNAL_ERROR';
   const message = e?.body?.message ?? e?.message ?? fallback;
-  const status = vendorCode === 'USER_ALREADY_EXISTS' ? 409 : rawStatus;
-  return { status, body: { success: false, error: { code: vendorCode, message } } };
+  const status = code === 'USER_ALREADY_EXISTS' ? 409 : rawStatus;
+  return { status, body: { success: false, error: { code, message } } };
 }
 
 // ── POST /admin/create-user ──────────────────────────────────────────────

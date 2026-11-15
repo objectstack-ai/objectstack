@@ -1724,4 +1724,18 @@ describe('an unclassified internal failure is answered with the generic message 
     });
     expect(error).not.toHaveBeenCalled();
   });
+
+  it('CONTROL: a throw whose status addresses the caller (4xx) keeps its own answer, and is not logged', () => {
+    const error = vi.fn();
+    const result = mapAuthApiError(
+      Object.assign(new Error('The email domain is not accepted here.'), { statusCode: 400 }),
+      'create-user failed',
+      { error },
+    );
+    expect(result).toEqual({
+      status: 400,
+      body: { success: false, error: { code: 'INTERNAL_ERROR', message: 'The email domain is not accepted here.' } },
+    });
+    expect(error).not.toHaveBeenCalled();
+  });
 });

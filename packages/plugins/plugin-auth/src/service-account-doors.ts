@@ -280,15 +280,16 @@ function vendorRefusal(error: unknown, logger: ServiceAccountDoorDeps['logger'])
   }
   const status = typeof e?.statusCode === 'number' ? e.statusCode : typeof e?.status === 'number' ? e.status : 500;
   const vendorCode = e?.body?.code ?? undefined;
-  // Neither the vendor nor a declaration classified it: an internal failure,
-  // answered in the generic words the route's own catch uses and logged once.
-  // The thrown error's own text never reaches the caller.
-  if (vendorCode === undefined) {
+  // Neither the vendor, a declaration nor a 4xx status classified it: an
+  // internal failure, answered in the generic words the route's own catch
+  // uses and logged once. The thrown error's own text never reaches the caller.
+  if (vendorCode === undefined && !(status >= 400 && status <= 499)) {
     logger?.error('[AuthPlugin] service-account/register failed', error instanceof Error ? error : new Error(String(error)));
     return fail(status, 'INTERNAL_ERROR', WITHHELD_SERVER_MESSAGE);
   }
+  const code = vendorCode ?? 'INTERNAL_ERROR';
   const message = e?.body?.message ?? e?.message ?? 'organization/add-member failed';
-  return fail(status, vendorCode, `${MEMBERSHIP_REFUSAL_PREFIX}${message}`);
+  return fail(status, code, `${MEMBERSHIP_REFUSAL_PREFIX}${message}`);
 }
 
 // ── POST /service-account/register ─────────────────────────────────────────
