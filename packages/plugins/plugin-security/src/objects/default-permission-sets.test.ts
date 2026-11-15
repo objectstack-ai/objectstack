@@ -381,11 +381,16 @@ describe('sys_comment_reaction delete is ownership-shaped (#22566)', () => {
  */
 describe('member_default lets a member react to comments; external_default does not (#33584)', () => {
   it('member_default carries exactly read + create on sys_comment_reaction', () => {
+    // The parsed entry, so the schema's materialized `false`s are pinned too:
+    // no transfer and no view-all / modify-all bypass rides on the grant.
     expect(setByName('member_default').objects.sys_comment_reaction).toEqual({
       allowRead: true,
       allowCreate: true,
       allowEdit: false,
       allowDelete: false,
+      allowTransfer: false,
+      viewAllRecords: false,
+      modifyAllRecords: false,
     });
   });
 
