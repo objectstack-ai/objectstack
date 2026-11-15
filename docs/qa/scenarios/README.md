@@ -48,6 +48,20 @@ Chinese and an English title, and every reader picks one of the two explicitly. 
 unique across the library. The app lives in the namespace `demo` + code (`democrm`) wherever
 it is built, scored or exported, and every item it declares carries that prefix.
 
+**The run moves the card's dates.** `asOf` is the card's today as written, not the day it runs on.
+Before a card runs, the runner moves its dates onto the run date: `asOf` becomes the run date, and
+every ISO date under `run` and `iterate`, and every date an `ask` writes in its text, moves with it
+(one whole-day delta, so every interval between two dates is kept; truths over a calendar window
+are computed again over the moved seed). An author therefore must not rely on a fixed calendar
+date or on the day of the week: a date written as a Wednesday may run as a Sunday, an ask's weekday
+name is written again for the moved date, and a `this_month` window holds whatever the moved seed
+puts in it. A card whose dates keep to working days (leave taken Monday to Friday, a day count that
+skips weekends) declares `"workingDays": true`: `asOf` and every other date it holds must then fall
+on a Monday to Friday, or the card is refused, and the run moves those dates by whole working days
+instead, so a working day stays a working day on every run date and N working days between two
+dates stay N (a weekend run date moves them as for the Friday before it). Public holidays are out
+of scope either way.
+
 **Counts.** The default band is 8–10 questions and 4–6 operations. A card below 8 questions
 or 4 operations states why in `run.countsReason`, or it is refused; a `starter` or `delivery`
 card has no such excuse ([Tiers](#tiers)).
