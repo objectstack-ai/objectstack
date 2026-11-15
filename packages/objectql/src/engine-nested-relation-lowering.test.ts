@@ -175,7 +175,8 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
       // 3 hops, a sibling key beside the inner relation at the middle hop
       [
         { owner: { region: 'NA', account: { owner: { region: { $ne: 'EU' } } } } },
-        { owner: { $in: owner({ region: 'NA', account: { $in: ledger({ owner: { $in: owner({ region: { $ne: 'EU' } }) } }) } }) } },
+        // The innermost `$ne` is the shared lowering's NULL-inclusive form, as on a direct read of the owner.
+        { owner: { $in: owner({ region: 'NA', account: { $in: ledger({ owner: { $in: owner({ $and: [{ $or: [{ region: { $null: true } }, { region: { $ne: 'EU' } }] }] }) } }) } }) } },
       ],
       // 3 hops through a tree and a master_detail field
       [
@@ -358,7 +359,7 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
       [{ owner: { account: { owner: { account: { title: 'a' } } } } }, 'where.owner.account.owner', "'account' holds a condition of its own past the 3-relationship limit"],
       [{ parent: { parent: { owner: { account: { title: 'a' } } } } }, 'where.parent.parent.owner', "'account' is itself a lookup field of the related object 'nested_rel_owner'"],
       [{ owner: { account: { titel: 'a' } } }, 'where.owner.account', "'titel' is not a field of the related object 'nested_rel_ledger'"],
-      [{ owner: { 'account.title': 'a' } }, 'where.owner', "'account.title' is a dotted path, which a condition does not follow"],
+      [{ owner: { 'account.title': 'a' } }, 'where.owner', "'account.title' is a dotted path: nest each relation instead"],
       [{ owner: { regio: 'NA' } }, 'where.owner', "'regio' is not a field of the related object 'nested_rel_owner'"],
       [{ owner: {} }, 'where.owner', 'names no field of the related object'],
       [{ stray: { region: 'NA' } }, 'where.stray', "no object 'nested_rel_missing' is registered here"],

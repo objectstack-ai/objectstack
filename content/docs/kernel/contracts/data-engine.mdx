@@ -200,9 +200,11 @@ is read and none is capped); otherwise `$in` on the ids that read returns, any m
 multi-valued one (`multiple: true`). No related record matching selects no
 rows; under `$not`, a record whose relation is empty satisfies the negation.
 
-It reaches **one level**: every key must be a field the related object declares
-(`{ account: { owner: { region: 'NA' } } }` and the dotted `{ account: { 'owner.region': 'NA' } }`
-are refused), and where ids are read (a multi-valued relation, `update`, `delete`) a
+It reaches **up to three relationships** (ADR-0071's hop limit): every key must be a field
+the related object declares, and a relation key may carry a condition of its own
+(`{ account: { owner: { region: 'NA' } } }`), each hop read as the caller with its own read
+scope; a fourth relationship and the dotted `{ account: { 'owner.region': 'NA' } }` are
+refused. Where ids are read (a multi-valued relation, `update`, `delete`) a
 condition matching more than 1,000 related records is refused with `INVALID_FILTER` / 400
 rather than run over a cut-off list. The subquery needs the related object on the read's
 datasource and a driver that compiles it (the SQL drivers; the in-memory driver evaluates it

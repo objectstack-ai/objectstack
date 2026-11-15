@@ -697,8 +697,10 @@ Otherwise (a multi-valued relation, or `update` / `delete`) the field is
 matched against the ids the related read returns (`$in`; any member when
 `multiple: true`).
 
-Limits — one level: every key a field the related object declares, no relation
-or dotted key inside; forward only: never a parent by its children; `where`
+Limits — up to three relationships (ADR-0071's hop limit): every key a field the
+related object declares, and a relation key may hold a condition of its own on
+its related object (`{ account: { owner: { region: 'NA' } } }`), each hop read as
+the caller and nested as a subquery; no dotted key; forward only: never a parent by its children; `where`
 only: an aggregation's `filter` and `having` refuse it, `INVALID_FILTER` / 400;
 where ids are read, at most 1000 of them, refused past that,
 `INVALID_FILTER` / 400, never truncated; the subquery form needs the related
@@ -719,8 +721,11 @@ never an empty result.
 - **A related record the caller cannot read never matches**, whatever the operator:
   `{ account: { status: { $ne: 'cancelled' } } }` leaves out a row whose account is
   absent or hidden from the caller, as well as one whose account is cancelled.
-- **A second level is refused.** `{ account: { owner: { region: 'NA' } } }` and
-  `{ account: { 'owner.region': 'NA' } }` answer `INVALID_FILTER` / 400.
+- **Up to three relationships.** `{ account: { owner: { region: 'NA' } } }` reads
+  `user` as the caller, then `account` as the caller with the owner subquery inside,
+  and every hop carries its own object's row scope and field check; a related record
+  the caller cannot read at any hop excludes the row. A fourth relationship, and the
+  dotted `{ account: { 'owner.region': 'NA' } }`, answer `INVALID_FILTER` / 400.
 - **The reverse direction is not served.** A parent filtered by its children is not
   written as `{ opportunities: { stage: 'won' } }`: the parent has no such field, so the
   REST doors answer `INVALID_FIELD` / 400.

@@ -308,7 +308,7 @@ export function relationConditionRefusalMessage(refusal: RelationConditionRefusa
       );
     case 'dotted-key':
       return (
-        `${head}, and '${key}' is a dotted path, which a condition does not follow: nest each relation `
+        `${head}, and '${key}' is a dotted path: nest each relation `
         + `instead, or read ${named} with that condition, ${twoStep} ${verdict}`
       );
     case 'hop-limit':

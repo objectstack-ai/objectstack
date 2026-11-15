@@ -17,7 +17,7 @@
  * | `{ $or: [{ owner: { region: 'EU' } }, { title: 'a' }] }` | 400 | `d1`, `d2` |
  * | `{ owner: { region: 'APAC' } }` (no related record matches) | 400 | no rows |
  * | `{ meta: { a: 1 } }` (json; address alike), `{ id: { a: 1 } }` | 400 | 400, unchanged |
- * | a second level, an undeclared key, `{}`, an unregistered related object | 400 | 400, in words of their own |
+ * | a fourth relationship (ADR-0071's limit is 3), an undeclared key, `{}`, an unregistered related object | 400 | 400, in words of their own |
  * | `aggregations[1].filter` / `having` `{ owner: { region: 'NA' } }` | 400 | 400, the words say `where` serves it |
  *
  * The InMemoryDriver cells were measured on this branch and are not pinned
@@ -128,6 +128,10 @@ const SERVED: ReadonlyArray<readonly [string, FilterCondition, readonly string[]
   // subquery, so it never matches, whatever the operator.
   ['$ne in the condition — no owner never matches', { owner: { region: { $ne: 'NA' } } }, ['d2']],
   ['$null in the condition — no owner never matches', { owner: { region: { $null: true } } }, []],
+  // [#33626] Two relationships: the parent's owner. `d1` and `d4` have no parent.
+  ['two hops: the parent\'s owner', { parent: { owner: { region: 'NA' } } }, ['d2', 'd3']],
+  ['two hops, $ne at the second — no parent never matches', { parent: { owner: { region: { $ne: 'EU' } } } }, ['d2', 'd3']],
+  ['two hops, under $not', { $not: { parent: { owner: { region: 'NA' } } } }, ['d1', 'd4']],
 ];
 
 /**
@@ -139,7 +143,7 @@ const REFUSED: ReadonlyArray<readonly [string, FilterCondition, string, string, 
   ['a json field (the card)', { meta: { a: 1 } }, 'where.meta', 'whole-value match', '{ "meta": { "$null": false } }, or store the part you filter on in a field of its own'],
   ['an address field', { ship_to: { city: 'Paris' } }, 'where.ship_to', 'whole-value match', '{ "ship_to": { "$null": false } }'],
   ['the id column (the card)', { id: { a: 1 } }, 'where.id', "the platform-provisioned text column 'id'", `Compare 'id' with a value ({ "id": VALUE })`],
-  ['a second level', { parent: { owner: { region: 'NA' } } }, 'where.parent', `'owner' is itself a lookup field of the related object '${OBJECT}'`, '{ "parent": { "$in": [ID, …] } }'],
+  ['a fourth relationship', { parent: { parent: { parent: { owner: { region: 'NA' } } } } }, 'where.parent.parent.parent', `'owner' holds a condition of its own past the 3-relationship limit`, '{ "parent": { "$in": [ID, …] } }'],
   ['a key the related object does not declare', { owner: { regio: 'NA' } }, 'where.owner', `'regio' is not a field of the related object '${OWNER}'`, '{ "owner": { "FIELD": VALUE } }'],
   ['an empty condition', { owner: {} }, 'where.owner', 'names no field of the related object', '{ "owner": { "$null": false } }'],
   ['a related object not registered here', { assignee: { region: 'NA' } }, 'where.assignee', "no object 'sys_user' is registered here", '{ "assignee": { "$in": [ID, …] } }'],
@@ -334,6 +338,126 @@ for (const cell of CELLS) {
         const res = await query({ where: { photo: { url: 'x' } } });
         expect(reads.n - before, 'the driver was asked').toBe(1);
         expect(JSON.stringify(res.body)).not.toContain('is filter structure, not a value');
+      });
+    },
+  );
+}
+
+// ── [#33626] up to three relationships, each hop its related object's own read ──
+
+const HOP_CASE = 'rest_hop_case_33626';
+const HOP_CONTACT = 'rest_hop_contact_33626';
+const HOP_ACCOUNT = 'rest_hop_account_33626';
+const HOP_REGION = 'rest_hop_region_33626';
+
+const HOP_OBJECTS = [
+  { name: HOP_REGION, label: 'Region 33626', fields: { name: { name: 'name', type: 'text' as const } } },
+  {
+    name: HOP_ACCOUNT, label: 'Account 33626',
+    fields: { name: { name: 'name', type: 'text' as const }, region: { name: 'region', type: 'lookup' as const, reference: HOP_REGION } },
+  },
+  { name: HOP_CONTACT, label: 'Contact 33626', fields: { account: { name: 'account', type: 'lookup' as const, reference: HOP_ACCOUNT } } },
+  {
+    name: HOP_CASE, label: 'Case 33626',
+    fields: { subject: { name: 'subject', type: 'text' as const }, contact: { name: 'contact', type: 'lookup' as const, reference: HOP_CONTACT } },
+  },
+];
+
+/**
+ * k1 → c1 → a1 → r1 (NA) · k2 → c2 → a2 → r2 (EU) · k3 → c3 → a3 → (no region)
+ * · k4 → c4 → a4 → r_gone (a region that does not exist: a missing parent)
+ * · k5 → c5 → (no account) · k6 → (no contact).
+ */
+const HOP_SEED: ReadonlyArray<readonly [string, ReadonlyArray<Record<string, unknown>>]> = [
+  [HOP_REGION, [{ id: 'r1', name: 'NA' }, { id: 'r2', name: 'EU' }, { id: 'r_gone', name: 'GONE' }]],
+  [HOP_ACCOUNT, [
+    { id: 'a1', name: 'A1', region: 'r1' }, { id: 'a2', name: 'A2', region: 'r2' },
+    { id: 'a3', name: 'A3' }, { id: 'a4', name: 'A4', region: 'r_gone' },
+  ]],
+  [HOP_CONTACT, [{ id: 'c1', account: 'a1' }, { id: 'c2', account: 'a2' }, { id: 'c3', account: 'a3' }, { id: 'c4', account: 'a4' }, { id: 'c5' }]],
+  [HOP_CASE, [
+    { id: 'k1', subject: 's', contact: 'c1' }, { id: 'k2', subject: 's', contact: 'c2' }, { id: 'k3', subject: 's', contact: 'c3' },
+    { id: 'k4', subject: 's', contact: 'c4' }, { id: 'k5', subject: 's', contact: 'c5' }, { id: 'k6', subject: 't' },
+  ]],
+];
+
+/** name · the nested `where` on the case · the region condition · the rows it means. */
+const HOPS: ReadonlyArray<readonly [string, (region: FilterCondition) => FilterCondition, FilterCondition, readonly string[]]> = [
+  ['three hops', (r) => ({ contact: { account: { region: r } } }), { name: 'NA' }, ['k1']],
+  ['three hops, $ne — a missing or empty ancestor never matches', (r) => ({ contact: { account: { region: r } } }), { name: { $ne: 'NA' } }, ['k2']],
+  ['three hops, $null on the last field', (r) => ({ contact: { account: { region: r } } }), { name: { $null: true } }, []],
+  ['three hops, under $not — every row without a NA region', (r) => ({ $not: { contact: { account: { region: r } } } }), { name: 'NA' }, ['k2', 'k3', 'k4', 'k5', 'k6']],
+  ['three hops, inside $or beside a column', (r) => ({ $or: [{ subject: 't' }, { contact: { account: { region: r } } }] }), { name: 'EU' }, ['k2', 'k6']],
+];
+
+for (const cell of CELLS) {
+  const config = cell.config();
+  describe.skipIf(!config)(
+    `[#33626] a nested-relation condition through three relationships — ${cell.label}${config ? '' : ` (skipped: set ${cell.env} to run this cell)`}`,
+    () => {
+      let engine: ObjectQL;
+      let driver: any;
+
+      const dropTables = async () => {
+        if (cell.id === 'sqlite') return;
+        for (const o of HOP_OBJECTS.map((x) => x.name).reverse()) await driver?.execute(`drop table if exists ${o}`).catch(() => {});
+      };
+
+      beforeAll(async () => {
+        driver = new SqlDriver(config as any);
+        await dropTables();
+        engine = new ObjectQL();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        for (const o of HOP_OBJECTS) engine.registry.registerObject(o as any);
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine);
+        for (const [object, rows] of HOP_SEED) for (const row of rows) await engine.insert(object, { ...row } as any);
+        // The missing parent: `a4` keeps pointing at a region row removed behind the engine's back.
+        await driver.execute(`delete from ${HOP_REGION} where id = 'r_gone'`);
+      });
+
+      afterAll(async () => {
+        await dropTables();
+        try { await engine?.destroy(); } catch { /* noop */ }
+      });
+
+      /** The two-step route, hop by hop: read each related object's ids, then match the relation against them. */
+      const twoStep = async (region: FilterCondition): Promise<FilterCondition> => {
+        const ids = async (object: string, where: FilterCondition) =>
+          (await engine.find(object, { where, fields: ['id'] })).map((r: any) => r.id);
+        const regions = await ids(HOP_REGION, region);
+        const accounts = await ids(HOP_ACCOUNT, { region: { $in: regions } });
+        const contacts = await ids(HOP_CONTACT, { account: { $in: accounts } });
+        return { $in: contacts };
+      };
+
+      it('each case answers the rows it means, and exactly what the two-step route answers — on find and count', async () => {
+        for (const [name, nest, region, rows] of HOPS) {
+          const nested = nest(region);
+          const got = (await engine.find(HOP_CASE, { where: nested })).map((r: any) => r.id).sort();
+          expect(got, name).toEqual([...rows].sort());
+          expect(await engine.count(HOP_CASE, { where: nested }), `count, ${name}`).toBe(rows.length);
+          // Parity: the same shape with the innermost three hops replaced by the hand-read id list.
+          const contactIds = await twoStep(region);
+          const reference = JSON.parse(JSON.stringify(nested).replace(
+            JSON.stringify({ account: { region } }), JSON.stringify(contactIds),
+          ));
+          const ref = (await engine.find(HOP_CASE, { where: reference })).map((r: any) => r.id).sort();
+          expect(got, `two-step parity, ${name}: ${JSON.stringify(reference)}`).toEqual(ref);
+        }
+      });
+
+      it('one driver statement per read: no hop reads its ids first', async () => {
+        let calls = 0;
+        const real = driver.find.bind(driver);
+        driver.find = (...a: unknown[]) => { calls += 1; return real(...a); };
+        try {
+          await engine.find(HOP_CASE, { where: { contact: { account: { region: { name: 'NA' } } } } });
+        } finally {
+          driver.find = real;
+        }
+        expect(calls).toBe(1);
       });
     },
   );
