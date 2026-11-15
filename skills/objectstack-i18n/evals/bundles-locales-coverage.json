@@ -108,7 +108,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["sourceLocale", "defaultLocale: 'zh-CN'", "fallbackLocale: 'en'", "supportedLocales"],
-        "must_not_contain": ["defaultLocale: 'en'", "sourceLanguage"]
+        "must_not_contain": ["defaultLocale: 'en'", "sourceLocale: 'zh-CN'"]
       }
     }
   ]

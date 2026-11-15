@@ -48,7 +48,7 @@ export default defineStack({
 | `fallbackLocale` | `string` | optional | Fallback when translation missing |
 
 An app authored in English for Chinese users declares `defaultLocale: 'zh-CN', sourceLocale: 'en'`,
-never `defaultLocale: 'en'`. ⚠️ Label serving still reads inline text as `defaultLocale` text: with no
+not an English `defaultLocale`. ⚠️ Label serving still reads inline text as `defaultLocale` text: with no
 `fallbackLocale: 'en'`, an `en` request reaches the zh-CN bundle before the English inline label.
 `sourceLanguage`, `authoringLocale` and `authoringLanguage` are refused, each naming `sourceLocale`.
 
