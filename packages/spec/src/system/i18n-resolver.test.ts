@@ -4404,8 +4404,10 @@ describe('translateObject — a field\'s translated help is served on `descripti
   });
 
   it('a field the packaged base does not declare counts as diverged', () => {
-    // An `objectExtensions` field is folded on after the owner's declaration,
-    // which is all the base carries.
+    // A field authored after the fact — a tenant overlay's, or a stored
+    // extension's — is absent from the packaged base. (A field a CODE
+    // extender adds is not this case: the serving layer's base carries it,
+    // `getPackagedObjectBase` in `@objectstack/objectql`.)
     const served = clone(PACKAGED) as any;
     served.fields.extra = { name: 'extra', type: 'text', label: 'Extra', description: 'Added by an extension.' };
     const bundle = clone(BUNDLE) as any;

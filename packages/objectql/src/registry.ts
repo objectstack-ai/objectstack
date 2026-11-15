@@ -1021,6 +1021,39 @@ function withoutWithheldMembers(base: ServiceObject, withheld: WithheldExtension
  * over the base rather than re-derived from the running `merged`; `tenantRules`
  * ({@link SchemaRegistry.tenantRuleSettings}) is computed once for the same reason.
  */
+/**
+ * [ADR-0029 D9.2a, #27559's rule-name principle carried to field names] The
+ * fields the CODE `extend` contributors of an object add — every field name
+ * the owner does not declare — in fold order, so a later extender's
+ * declaration of one name replaces an earlier one's, as
+ * {@link mergeObjectDefinitions} does. The same filter as
+ * `SchemaRegistry.packagedRules`: `ownership === 'extend'` and a code artifact
+ * body, so a tenant overlay or a stored extension (`_provenance: 'org'`)
+ * contributes nothing. `fieldPatches` are not read. `undefined` when no code
+ * extender adds a field, or the owner's `fields` is not the canonical record.
+ */
+function packagedAddedFields(
+  owner: ServiceObject,
+  contributors: readonly ObjectContributor[],
+): Record<string, unknown> | undefined {
+  const ownFields = owner.fields as unknown;
+  if (ownFields !== undefined && (ownFields === null || typeof ownFields !== 'object' || Array.isArray(ownFields))) {
+    return undefined;
+  }
+  const declared = (ownFields ?? {}) as Record<string, unknown>;
+  let added: Record<string, unknown> | undefined;
+  for (const contrib of contributors) {
+    if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition)) continue;
+    const fields = contrib.definition.fields as unknown;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) continue;
+    for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
+      if (Object.prototype.hasOwnProperty.call(declared, name)) continue;
+      (added ??= {})[name] = def;
+    }
+  }
+  return added;
+}
+
 function mergeObjectDefinitions(
   base: ServiceObject,
   extension: ObjectExtensionBody,
@@ -8137,12 +8170,26 @@ export class SchemaRegistry {
    * `@objectstack/metadata-protocol`, `packagedRuleLookup` in this package),
    * so they cannot split again.
    *
-   * ⛔ ONLY `validations` widens. The scalars stay the owner's: an extension's
-   * `label` / `description` must keep reading as diverged from the packaged
-   * one, or the catalog takes back the case #8037 filed.
+   * The same sentence holds for a FIELD a code extender adds (a dependent
+   * package's `objectExtensions` field the owner does not declare): its
+   * packaged declaration is the extender's, because the catalog rows for it
+   * can only translate what that extender ships ({@link packagedAddedFields}).
+   * Read off the owner alone, such a field counted as authored after the fact,
+   * and `/meta` served its label and option labels untranslated in every
+   * locale while the extender's own pack carried them.
+   *
+   * ⛔ Exactly those two widen: rules by name, and field NAMES the owner does
+   * not declare. The scalars stay the owner's, and so does every field the
+   * owner declares, even one an extender redeclares; an extender's
+   * `fieldPatches` are never folded in. Each must keep reading as diverged from
+   * the packaged one, or the catalog — which translates the owner's text under
+   * the owner's keys — takes back the case #8037 filed. A tenant overlay and a
+   * stored (non-code) extension add nothing here: their fields stay authored
+   * after the fact.
    *
    * Returns the owner's definition BY REFERENCE when no code extender ships a
-   * rule, and `undefined` exactly where {@link getPackagedObjectOwner} does.
+   * rule or adds a field, and `undefined` exactly where
+   * {@link getPackagedObjectOwner} does.
    */
   getPackagedObjectBase(name: string): ServiceObject | undefined {
     const owner = this.getPackagedObjectOwner(name);
@@ -8154,9 +8201,13 @@ export class SchemaRegistry {
     const extended = contributors.some((c) =>
       c.ownership === 'extend' && isCodeArtifactBody(c.definition)
       && Array.isArray(c.definition.validations) && c.definition.validations.length > 0);
-    if (!extended) return owner.definition;
-    const rules = this.packagedRules(contributors) ?? [];
-    return { ...owner.definition, validations: rules as ServiceObject['validations'] };
+    const addedFields = packagedAddedFields(owner.definition, contributors);
+    if (!extended && addedFields === undefined) return owner.definition;
+    return {
+      ...owner.definition,
+      ...(extended ? { validations: (this.packagedRules(contributors) ?? []) as ServiceObject['validations'] } : {}),
+      ...(addedFields !== undefined ? { fields: { ...owner.definition.fields, ...addedFields } } : {}),
+    };
   }
 
   /**

@@ -381,6 +381,54 @@ describe('getPackagedObjectBase — a field a code extender ADDS is packaged, as
         expect(base.fields.cb_market.label).toBe('Market');
     });
 
+    it('is no longer the owner BY REFERENCE once a code extender adds a field: the shared fixture\'s `loyalty_tier` is carried', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        registerExtension(s.registry);
+        const base = baseOf(s.protocol);
+        expect(base).not.toBe(s.registry.getPackagedObjectOwner(OBJ)?.definition);
+        expect(base.fields.loyalty_tier.label).toBe('Loyalty Tier');
+        expect(base.label).toBe(PACKAGED_LABEL);
+    });
+
+    it('carries nothing from a stored (tenant-provenance) extension, a `.custom` pair\'s row included', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        s.registry.registerObject(
+            {
+                name: OBJ,
+                fields: { region__c: { name: 'region__c', type: 'text', label: 'Region' } },
+                _packageId: 'app.showcase.custom', _provenance: 'org',
+            } as any,
+            'app.showcase.custom',
+            undefined,
+            'extend',
+            200,
+        );
+        expect((s.registry.getObject(OBJ) as any).fields.region__c).toBeDefined();
+        const base = baseOf(s.protocol);
+        expect(base.fields.region__c).toBeUndefined();
+        expect(base).toBe(s.registry.getPackagedObjectOwner(OBJ)?.definition);
+    });
+
+    it('does not fold a code extender\'s fieldPatches into the base: the owner\'s field text stays the packaged one', () => {
+        const s = makeSession();
+        registerPackaged(s.registry);
+        s.registry.installPackage({ id: DEP_PKG, name: DEP_PKG, version: '1.0.0' } as any, 'code');
+        s.registry.registerObject(
+            { name: OBJ, fields: { cb_market: MARKET }, fieldPatches: { name: { label: 'Company Name', description: 'Patched.' } } } as any,
+            DEP_PKG,
+            undefined,
+            'extend',
+            200,
+        );
+        expect((s.registry.getObject(OBJ) as any).fields.name.label).toBe('Company Name');
+        const base = baseOf(s.protocol);
+        expect(base.fields.name.label).toBe('Name');
+        expect(base.fields.name.description).toBeUndefined();
+        expect(base.fields.cb_market.label).toBe('Market');
+    });
+
     it('lets a later code extender\'s declaration of an added field replace an earlier one, as the fold does', () => {
         const s = makeSession();
         registerPackaged(s.registry);
