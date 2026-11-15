@@ -154,11 +154,13 @@ function makeDoors(opts: Harness = {}) {
                 : n === 'automation' ? automation
                     : n === 'protocol' ? protocol
                         : null;
-    const resolveAsync = async (n: string) => {
+    // A wired slot that fails to resolve fails on every accessor the kernel has.
+    const resolveOrFail = (n: string) => {
         if (n === resolveFails) throw new Error(`service '${n}' factory failed`);
         return resolve(n);
     };
-    const kernel: any = { getService: resolve, getServiceAsync: resolveAsync, context: { getService: resolve } };
+    const resolveAsync = async (n: string) => resolveOrFail(n);
+    const kernel: any = { getService: resolveOrFail, getServiceAsync: resolveAsync, context: { getService: resolveOrFail } };
     const dispatcher = new HttpDispatcher(kernel);
 
     const trigger = async (route: Route, ec: unknown, body: unknown = {}): Promise<Answer> => {
