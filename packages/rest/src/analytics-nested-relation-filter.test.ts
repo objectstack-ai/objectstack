@@ -93,13 +93,14 @@ const SERVED: ReadonlyArray<readonly [string, FilterCondition]> = [
   ['under $not', { $not: { owner: { region: 'NA' } } }],
   ['multi-valued under $not', { $not: { owners: { region: 'NA' } } }],
   ['inside $or', { $or: [{ owner: { region: 'NA' } }, { title: 'b' }] }],
+  // A single-valued relation is one subquery on a SQL driver: no id list, no cap.
+  ['single-valued, more related matches than the id cap', { owner: { region: 'CAP' } }],
 ];
 
 /** Conditions the engine REFUSES: its envelope is the answer every face must give. */
 const REFUSED: ReadonlyArray<readonly [string, FilterCondition, { code: string; status: number }]> = [
   ['a related field the caller cannot read', { owner: { secret: 's1' } }, { code: 'PERMISSION_DENIED', status: 403 }],
   ['a related field the caller cannot read, multi-valued', { owners: { secret: 's1' } }, { code: 'PERMISSION_DENIED', status: 403 }],
-  ['past the cap', { owner: { region: 'CAP' } }, { code: 'INVALID_FILTER', status: 400 }],
   ['past the cap, multi-valued', { owners: { region: 'CAP' } }, { code: 'INVALID_FILTER', status: 400 }],
 ];
 
@@ -484,15 +485,18 @@ describe('[#33335] a dotted cross-object where on the engine-aggregate path answ
     }
   });
 
-  it('a related field the caller cannot read, and a match past the cap, are refused as the engine refuses them', async () => {
+  it('a related field the caller cannot read is refused as the engine refuses it; a single-valued match past the id cap is served', async () => {
     const cases: ReadonlyArray<readonly [FilterCondition, FilterCondition, { code: string; status: number }]> = [
       [{ 'owner.secret': 's1' }, { owner: { secret: 's1' } }, { code: 'PERMISSION_DENIED', status: 403 }],
-      [{ 'owner.region': 'CAP' }, { owner: { region: 'CAP' } }, { code: 'INVALID_FILTER', status: 400 }],
     ];
     for (const [dotted, nested, expected] of cases) {
       expect(await reference(nested), JSON.stringify(nested)).toEqual({ refused: expected });
       expect(await cubeRead(dotted), JSON.stringify(dotted)).toEqual({ refused: expected });
     }
+    // One subquery, no id list: the 1001 `CAP` owners select no ledger row, served.
+    const pastCap = await reference({ owner: { region: 'CAP' } });
+    expect(pastCap).not.toHaveProperty('refused');
+    expect(await cubeRead({ 'owner.region': 'CAP' })).toEqual(pastCap);
   });
 
   it('a leaf under $not stays refused, never answered from a negated match that admits the hidden owner\'s row', async () => {

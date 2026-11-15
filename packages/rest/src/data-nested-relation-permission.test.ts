@@ -205,4 +205,16 @@ describe('[#20802] the nested-relation form reads the related object as the call
     const system = await engine.find(OBJECT, { where: { owner: { region: 'HIDDEN' } }, context: SYS_CTX } as never);
     expect(idsOf(system)).toEqual(['d4']);
   });
+
+  it('an unreadable related record excludes its row under $ne too: the subquery carries the related object\'s row scope', async () => {
+    // u3 (HIDDEN) satisfies `region != 'NA'`, but the caller cannot read it,
+    // so d4 is not selected — only d2, whose owner the caller can read.
+    const res = await query({ owner: { region: { $ne: 'NA' } } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(idsOf(res.body)).toEqual(['d2']);
+    const system = await engine.find(OBJECT, { where: { owner: { region: { $ne: 'NA' } } }, context: SYS_CTX } as never);
+    expect(idsOf(system)).toEqual(['d2', 'd4']);
+    // The same holds through count and aggregate, the analytics verbs.
+    expect(await engine.count(OBJECT, { where: { owner: { region: { $ne: 'NA' } } }, context: MEMBER_CTX } as never)).toBe(1);
+  });
 });

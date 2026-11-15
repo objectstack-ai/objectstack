@@ -124,6 +124,10 @@ const SERVED: ReadonlyArray<readonly [string, FilterCondition, readonly string[]
   ['no related record matches, a multiple lookup', { owners: { region: 'APAC' } }, []],
   ['under $not, no related record matches', { $not: { owner: { region: 'APAC' } } }, ['d1', 'd2', 'd3', 'd4']],
   ['an operator in the condition', { owner: { region: { $in: ['EU'] } } }, ['d2']],
+  // `$ne` is evaluated on the related records: a row with no owner is in no
+  // subquery, so it never matches, whatever the operator.
+  ['$ne in the condition — no owner never matches', { owner: { region: { $ne: 'NA' } } }, ['d2']],
+  ['$null in the condition — no owner never matches', { owner: { region: { $null: true } } }, []],
 ];
 
 /**
@@ -285,7 +289,7 @@ for (const cell of CELLS) {
         expect(JSON.stringify(counted.body)).toContain('"n":2');
       });
 
-      it('the cap: a condition matching more related records than the cap is REFUSED, never truncated; at the cap it is served whole', async () => {
+      it('no cap on a single-valued relation (one subquery, no id list); a multi-valued one past the cap is REFUSED, never truncated', async () => {
         const many = Array.from({ length: RELATION_FILTER_ID_CAP }, (_, i) => ({ id: `cap_${i}`, region: 'CAP' }));
         // In batches: one multi-row INSERT of a thousand rows passes SQLite's
         // compound-SELECT limit.
@@ -294,11 +298,14 @@ for (const cell of CELLS) {
         await engine.insert(OBJECT, { id: 'd_cap', title: 'cap', owner: 'cap_extra' } as any);
         try {
           const over = await query({ where: { owner: { region: { $in: ['CAP', 'CAP_EXTRA'] } } } });
-          expect(over.status, JSON.stringify(over.body)).toBe(400);
-          expect(over.body.code).toBe('INVALID_FILTER');
-          expect(over.body.error).toContain(`matched more than ${RELATION_FILTER_ID_CAP} records of the related object '${OWNER}'`);
-          expect(over.body.error).toContain('the filter was NOT applied');
-          expect(over.body.error).toContain('{ "owner": { "$in": [ID, …] } }');
+          expect(over.status, JSON.stringify(over.body)).toBe(200);
+          expect(idsOf(over.body)).toEqual(['d_cap']);
+          const overMulti = await query({ where: { owners: { region: { $in: ['CAP', 'CAP_EXTRA'] } } } });
+          expect(overMulti.status, JSON.stringify(overMulti.body)).toBe(400);
+          expect(overMulti.body.code).toBe('INVALID_FILTER');
+          expect(overMulti.body.error).toContain(`matched more than ${RELATION_FILTER_ID_CAP} records of the related object '${OWNER}'`);
+          expect(overMulti.body.error).toContain('the filter was NOT applied');
+          expect(overMulti.body.error).toContain('{ "owners": { "$contains": ID } }');
           // Exactly the cap: served, every id in play (no ledger row points at one).
           const at = await query({ where: { owner: { region: 'CAP' } } });
           expect(at.status, JSON.stringify(at.body)).toBe(200);
