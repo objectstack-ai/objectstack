@@ -16,7 +16,7 @@
  * from here too.
  */
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import { ConsolePageHeader, useAdapter, useMetadata, FlowRunner, type ScreenFlowState, DeveloperNamespaceGate } from '@object-ui/app-shell';
 import { createAuthenticatedFetch } from '@object-ui/auth';
@@ -367,8 +367,12 @@ function FlowTestRunner({
   // The paused screen a test run stopped at — driven to completion by
   // <FlowRunner>, exactly as a `type: 'flow'` action would.
   const [screenFlow, setScreenFlow] = useState<ScreenFlowState | null>(null);
+  // Bumped by every new run and flow switch: a completed run's re-read that
+  // lands after either belongs to a panel the tester has already left.
+  const runGeneration = useRef(0);
 
   useEffect(() => {
+    runGeneration.current += 1;
     setValues({});
     setResult(null);
     setError(null);
@@ -382,6 +386,7 @@ function FlowTestRunner({
       setError({ unavailable: 'automation.execute' });
       return;
     }
+    runGeneration.current += 1;
     setRunning(true);
     setError(null);
     setResult(null);
@@ -407,6 +412,29 @@ function FlowTestRunner({
       setError({ message: e?.message ?? String(e) });
     } finally {
       setRunning(false);
+    }
+  };
+
+  // The runner drove the paused run to completion. The trigger answer in
+  // `result` still describes the pause, and its screen no longer exists on the
+  // server, so it is replaced by the run as the server now records it: the
+  // panel reads the run's final status and offers no "Continue run".
+  const handleComplete = async () => {
+    const runId = screenFlow?.runId ?? result?.runId;
+    const generation = runGeneration.current;
+    setScreenFlow(null);
+    setResult(null);
+    onExecuted?.();
+    if (!runId) return;
+    if (!client?.automation?.getRun) {
+      setError({ unavailable: 'automation.getRun' });
+      return;
+    }
+    try {
+      const res: any = await client.automation.getRun(flow.name, runId);
+      if (generation === runGeneration.current) setResult(res?.run ?? res);
+    } catch (e: any) {
+      if (generation === runGeneration.current) setError({ message: e?.message ?? String(e) });
     }
   };
 
@@ -527,7 +555,7 @@ function FlowTestRunner({
         dataSource={adapter}
         objects={objects}
         onClose={() => { setScreenFlow(null); onExecuted?.(); }}
-        onComplete={() => { setScreenFlow(null); onExecuted?.(); }}
+        onComplete={handleComplete}
       />
     </Card>
   );

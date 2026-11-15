@@ -125,6 +125,12 @@ export interface ServiceAccountDoorDeps {
   /** The API-key lifecycle policy (`AuthManager.resolveApiKeyLifecyclePolicy`); absent ⇒ none configured. */
   resolveApiKeyLifecyclePolicy?(): ApiKeyLifecyclePolicy | Promise<ApiKeyLifecyclePolicy>;
   now?(): number;
+  /**
+   * The mount's logger. A membership failure that carries no vendor code is
+   * answered with the generic message, and the error is handed here, once, at
+   * error level.
+   */
+  logger?: { error(message: string, error?: Error): void };
 }
 
 export const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined);
@@ -263,7 +269,7 @@ class MembershipRefused extends Error {
 
 const MEMBERSHIP_REFUSAL_PREFIX = 'The AI service account could not be added to the organization, so it was not registered: ';
 
-function vendorRefusal(error: unknown): EndpointResult {
+function vendorRefusal(error: unknown, logger: ServiceAccountDoorDeps['logger']): EndpointResult {
   const e = error as { statusCode?: number; status?: number | string; body?: { code?: string; message?: string }; message?: string } | null;
   // The vendor's own refusals carry `body.code` and keep the answer below.
   // A refusal a hook or middleware declared on the membership insert reaches
@@ -273,7 +279,15 @@ function vendorRefusal(error: unknown): EndpointResult {
     if (declared) return declared;
   }
   const status = typeof e?.statusCode === 'number' ? e.statusCode : typeof e?.status === 'number' ? e.status : 500;
-  const code = e?.body?.code ?? 'INTERNAL_ERROR';
+  const vendorCode = e?.body?.code ?? undefined;
+  // Neither the vendor, a declaration nor a 4xx status classified it: an
+  // internal failure, answered in the generic words the route's own catch
+  // uses and logged once. The thrown error's own text never reaches the caller.
+  if (vendorCode === undefined && !(status >= 400 && status <= 499)) {
+    logger?.error('[AuthPlugin] service-account/register failed', error instanceof Error ? error : new Error(String(error)));
+    return fail(status, 'INTERNAL_ERROR', WITHHELD_SERVER_MESSAGE);
+  }
+  const code = vendorCode ?? 'INTERNAL_ERROR';
   const message = e?.body?.message ?? e?.message ?? 'organization/add-member failed';
   return fail(status, code, `${MEMBERSHIP_REFUSAL_PREFIX}${message}`);
 }
@@ -368,7 +382,7 @@ export async function runRegisterServiceAccount(
       try {
         await deps.addMember({ userId: id, organizationId });
       } catch (error) {
-        throw new MembershipRefused(vendorRefusal(error));
+        throw new MembershipRefused(vendorRefusal(error, deps.logger));
       }
       return id;
     });

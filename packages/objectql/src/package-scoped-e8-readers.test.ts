@@ -639,3 +639,79 @@ describe('#32183 — a disabled package holds no name at the library readers', (
     expect((thrown as Error).message).not.toContain(B);
   });
 });
+
+describe('[ruling 6893582352] doc (ADR-0150 D1 bucket 1): a bare read of a name two enabled packages hold is refused', () => {
+  // Both registration orders of every two-holder pin: the answer it replaced
+  // was a registration-order pick (the registry's first composite here; the
+  // MetadataService's copy, the holder registered last, on a composed door).
+  const ORDERS = [['alpha first', [A, B]], ['beta first', [B, A]]] as const;
+  const shipDoc = (name: string, packageId: string) => registry.registerItem(
+    'doc', { name, label: `${packageId.split('.').pop()} doc`, content: `# ${packageId}` }, 'name' as never, packageId);
+  /** A MetadataService that keeps a doc by name alone: the holder registered last. */
+  const serviceKeepingLast = (order: readonly string[], name: string) => {
+    const last = order[order.length - 1]!;
+    const copy = { name, label: `${last.split('.').pop()} doc`, content: `# ${last}`, _packageId: last };
+    return new Map<string, any>([['metadata', { get: async (type: string, n: string) => (type === 'doc' && n === name ? copy : undefined) }]]);
+  };
+
+  it.each(ORDERS)('[FROM one holder\'s body TO 409] the protocol read (both faces), the facade and the registry refuse naming both (%s)', async (_order, order) => {
+    for (const id of order) shipDoc('shared_doc', id);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'doc', name: 'shared_doc' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => protocol.getMetaItemForExecution({ type: 'doc', name: 'shared_doc' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => facade.get('doc', 'shared_doc'), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => facade.getEntry('doc', 'shared_doc'), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => registry.resolveItem('doc', 'shared_doc'), 'ambiguous-in-environment', [A, B]);
+    expect(await facade.exists('doc', 'shared_doc')).toBe(true);
+  });
+
+  it.each(ORDERS)('[FROM the service\'s copy TO 409] refused before the MetadataService layer is read (%s)', async (_order, order) => {
+    for (const id of order) shipDoc('shared_doc', id);
+    const composed = new ObjectStackProtocolImplementation((protocol as unknown as { engine: never }).engine, () => serviceKeepingLast(order, 'shared_doc'));
+    await expectRefusal(() => composed.getMetaItem({ type: 'doc', name: 'shared_doc' }), 'ambiguous-in-environment', [A, B]);
+  });
+
+  it('CONTROL — one holder is served exactly as before, at every reader', async () => {
+    shipDoc('solo_doc', A);
+    expect(labelOf((await protocol.getMetaItem({ type: 'doc', name: 'solo_doc' }))?.item)).toBe('alpha doc');
+    expect(labelOf((await protocol.getMetaItemForExecution({ type: 'doc', name: 'solo_doc' }))?.item)).toBe('alpha doc');
+    expect(labelOf(await facade.get('doc', 'solo_doc'))).toBe('alpha doc');
+    expect(labelOf(registry.resolveItem('doc', 'solo_doc'))).toBe('alpha doc');
+  });
+
+  it.each(ORDERS)('CONTROL — the exact address and a package caller read their own holder\'s doc (%s)', async (_order, order) => {
+    for (const id of order) shipDoc('shared_doc', id);
+    for (const id of [A, B]) {
+      const tagOf = `${id.split('.').pop()} doc`;
+      expect(labelOf((await protocol.getMetaItem({ type: 'doc', name: 'shared_doc', packageId: id }))?.item)).toBe(tagOf);
+      expect(labelOf(await facade.get('doc', 'shared_doc', id))).toBe(tagOf);
+      expect(labelOf(registry.resolveItem('doc', 'shared_doc', id))).toBe(tagOf);
+    }
+  });
+
+  it.each(ORDERS)('CONTROL — a disabled package holds no name: the enabled holder is not refused, and the facade serves it (%s)', async (_order, order) => {
+    for (const id of order) shipDoc('shared_doc', id);
+    registry.disablePackage(B);
+    expect(labelOf(await facade.get('doc', 'shared_doc'))).toBe('alpha doc');
+    expect(labelOf(registry.resolveItem('doc', 'shared_doc'))).toBe('alpha doc');
+    const read = await protocol.getMetaItem({ type: 'doc', name: 'shared_doc' });
+    expect(JSON.stringify(read?.item ?? null)).not.toContain('beta doc');
+    registry.enablePackage(B);
+    await expectRefusal(() => facade.get('doc', 'shared_doc'), 'ambiguous-in-environment', [A, B]);
+  });
+
+  it.each(ORDERS)('CONTROL — the environment\'s own item answers first beside two holders (%s)', async (_order, order) => {
+    for (const id of order) shipDoc('shared_doc', id);
+    registry.registerItem('doc', { name: 'shared_doc', label: 'env doc', content: '# env', _provenance: 'org' }, 'name' as never);
+    expect(labelOf(await facade.get('doc', 'shared_doc'))).toBe('env doc');
+    expect(labelOf((await protocol.getMetaItem({ type: 'doc', name: 'shared_doc' }))?.item)).toBe('env doc');
+  });
+
+  it('a package-less row only the store holds is no exemption: its layers would not serve it, so the read is still refused', async () => {
+    for (const id of [A, B]) shipDoc('shared_doc', id);
+    const row = { type: 'doc', name: 'shared_doc', state: 'active', package_id: null, metadata: JSON.stringify({ name: 'shared_doc', label: 'saved doc', content: '# saved' }) };
+    const engine = (protocol as unknown as { engine: { find: ReturnType<typeof vi.fn> } }).engine;
+    engine.find.mockImplementation(async (object: string, query: { where?: Record<string, unknown> }) =>
+      (object === 'sys_metadata' && query?.where?.name === 'shared_doc' ? [row] : []));
+    await expectRefusal(() => protocol.getMetaItem({ type: 'doc', name: 'shared_doc' }), 'ambiguous-in-environment', [A, B]);
+  });
+});
