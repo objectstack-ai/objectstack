@@ -2001,7 +2001,7 @@ export async function resumeActionRun(
         });
         if (projected.kind === 'fault') throw actionRunFieldVisibilityRefusal(projected.object);
         if (projected.kind === 'withhold') continue;
-        const admission = resumeAdmission(deps, candidate, ec, activationEngine);
+        const admission = resumeAdmissionRefusal(deps, candidate, ec, activationEngine);
         if (!(admission instanceof Error)) {
             admitted = candidate;
             handOff = admission.handOff;
@@ -2152,7 +2152,7 @@ async function refuseUnresumableAdmittedRun(
  * the permission gate), because a refusal on a new door should be
  * machine-readable.
  */
-function resumeAdmission(
+function resumeAdmissionRefusal(
     deps: DomainHandlerDeps,
     candidate: { action: any; objectName: string },
     ec: any,

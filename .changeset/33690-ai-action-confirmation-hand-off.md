@@ -9,7 +9,7 @@ Clause-②: no (narrowing)
 Metadata-protocol: semantic
 Skills-docs: follow-up owed — skills/objectstack-ai/SKILL.md, skills/objectstack-platform/SKILL.md (the area files the card and rewrites it to #N)
 
-<!-- adr-0087: registered action-requires-confirmation-elicited -->
+<!-- adr-0087: not-required (already-registered action-requires-confirmation-elicited) The semantic entry registered with the contract already carries this move to the upgrade guide and os migrate meta: no key is added, removed or re-shaped, and nothing an author wrote is rewritten. -->
 
 **BREAKING** for an MCP client, an agent or a script that runs an action declaring `ai.requiresConfirmation: true` through the `run_action` or `resume_run` tool by sending `confirm: true` itself. Ruled by the account owner on the safety fix: the caller's own `confirm: true` never counts on such a call; the person it runs as confirms it in the app.
 
