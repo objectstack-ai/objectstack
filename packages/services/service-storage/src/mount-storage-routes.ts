@@ -58,8 +58,8 @@
 import type { IHttpServer, IDataEngine, IStorageService } from '@objectstack/spec/contracts';
 import {
   parseHostMaxUploadMb,
+  announceUploadBound,
   resolveStorageLimits,
-  uploadBoundBootLine,
   type HostMaxUploadMb,
   type StorageLimitsSnapshot,
 } from './storage-limits.js';
@@ -106,7 +106,11 @@ export interface MountStorageRoutesOptions {
   maxUploadMb?: HostMaxUploadMb;
   /** TTL of the signed URL minted on a GATED download. @default 300 */
   downloadTtl?: number;
-  /** Receives the door's one-time notices (the upload bound in force, open upload mode, unbound gates). */
+  /**
+   * Receives the door's one-time notices (the upload bound in force, open
+   * upload mode, unbound gates). Without one, an explicit `maxUploadMb:
+   * 'unlimited'` is still announced, on `console.warn`.
+   */
   logger?: { info(msg: string): void; warn(msg: string): void };
 }
 
@@ -169,15 +173,15 @@ export function mountStorageRoutes(
 
   // The upload bound this mount's doors meet now, and the layer it came from:
   // the kernel has bootstrapped, so a bound plugin's settings are read.
+  // No bound is said at `warn` whether or not the host passed a logger.
   const carrier = storage as { getLimitsSnapshot?: () => StorageLimitsSnapshot | undefined };
-  const bound = uploadBoundBootLine(
+  announceUploadBound(
     'mountStorageRoutes',
     resolveStorageLimits(typeof carrier.getLimitsSnapshot === 'function' ? carrier.getLimitsSnapshot() : undefined, {
       maxUploadMb,
     }),
+    opts.logger,
   );
-  if (bound.level === 'warn') opts.logger?.warn(bound.message);
-  else opts.logger?.info(bound.message);
 
   const unbound: string[] = [];
   if (!report.sessionResolver) {

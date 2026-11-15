@@ -1005,6 +1005,38 @@ describe('the upload bound resolves by one precedence — saved > host > manifes
   });
 
   describe('no limit is an explicit host choice, honoured and announced', () => {
+    it('mountStorageRoutes with no logger still announces \'unlimited\' at warn, on console', async () => {
+      const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as never);
+      kernel.registerService('storage', new LocalStorageAdapter({ rootDir: await tmpRoot(), signingSecret: 'test-secret-bound' }));
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mountStorageRoutes(routeCollector().http, kernel, { basePath: BASE, maxUploadMb: 'unlimited' });
+      expect(consoleWarn.mock.calls.filter(([m]) => String(m).includes('UNLIMITED'))).toHaveLength(1);
+      // CONTROL — a bounded mount with no logger says nothing on console.warn.
+      consoleWarn.mockClear();
+      mountStorageRoutes(routeCollector().http, kernel, { basePath: BASE });
+      expect(consoleWarn).not.toHaveBeenCalled();
+    });
+
+    it('registerStorageRoutes announces the bound in force: \'unlimited\' at warn, with a logger or, without one, on console', async () => {
+      const adapter = new LocalStorageAdapter({ rootDir: await tmpRoot(), signingSecret: 'test-secret-bound' });
+      const warns: string[] = [];
+      const infos: string[] = [];
+      const logger = { info: (m: string) => { infos.push(m); }, warn: (m: string) => { warns.push(m); } };
+      registerStorageRoutes(routeCollector().http, adapter, new StorageMetadataStore(null), { maxUploadMb: 'unlimited', logger });
+      expect(warns.filter((m) => m.includes('UNLIMITED'))).toHaveLength(1);
+
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      registerStorageRoutes(routeCollector().http, adapter, new StorageMetadataStore(null), { maxUploadMb: 'unlimited' });
+      expect(consoleWarn.mock.calls.filter(([m]) => String(m).includes('UNLIMITED'))).toHaveLength(1);
+
+      // CONTROL — a bounded registration names its bound and layer to the logger, and nothing goes to console.warn.
+      consoleWarn.mockClear();
+      registerStorageRoutes(routeCollector().http, adapter, new StorageMetadataStore(null), { logger });
+      registerStorageRoutes(routeCollector().http, adapter, new StorageMetadataStore(null));
+      expect(infos.find((m) => m.includes(`(${BUILT_IN} bytes)`))).toContain('built-in default');
+      expect(consoleWarn).not.toHaveBeenCalled();
+    });
+
     it('the plugin: maxUploadMb \'unlimited\' accepts any size, and boot says so at warn', async () => {
       const { routes, warns, infos } = await bootPlugin(null, { maxUploadMb: 'unlimited' });
       expect((await call(routes, 'POST', `${BASE}/upload/presigned`, {
@@ -1034,7 +1066,10 @@ describe('the upload bound resolves by one precedence — saved > host > manifes
   });
 
   it('a malformed host option refuses the boot — the plugin, the host mount and the route registrar alike', async () => {
-    const malformed: unknown[] = [0, -1, Number.NaN, Number.POSITIVE_INFINITY, '100', 'Unlimited', 'none', null, true, {}];
+    // The numeric arm's two edges: too small to bound one byte, and too large to be a finite byte bound.
+    const malformed: unknown[] = [
+      0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1e-9, Number.MAX_VALUE, '100', 'Unlimited', 'none', null, true, {},
+    ];
     const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as never);
     kernel.registerService('storage', new LocalStorageAdapter({ rootDir: await tmpRoot(), signingSecret: 'test-secret-bound' }));
     for (const bad of malformed) {
@@ -1051,8 +1086,22 @@ describe('the upload bound resolves by one precedence — saved > host > manifes
       ).toThrow(InvalidMaxUploadMbError);
       expect(direct.routes.size).toBe(0);
     }
-    // CONTROL — the two well-formed spellings construct.
+    // The file verbs judge a host bound handed to them directly, too.
+    for (const bad of [0, 1e-9, Number.MAX_VALUE, '100']) {
+      const deps = {
+        getEngine: () => null,
+        getStorage: () => null,
+        getLimitsSnapshot: () => undefined,
+        hostMaxUploadMb: bad as never,
+        logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as never,
+      };
+      expect(() => new FieldFileService(deps as never), String(bad)).toThrow(InvalidMaxUploadMbError);
+      expect(() => new FileAttachmentService(deps as never), String(bad)).toThrow(InvalidMaxUploadMbError);
+    }
+    // CONTROL — the well-formed spellings construct, down to a bound of exactly one byte.
     expect(() => new StorageServicePlugin({ maxUploadMb: 0.5 })).not.toThrow();
+    expect(() => new StorageServicePlugin({ maxUploadMb: 1 / MIB })).not.toThrow();
+    expect(resolveStorageLimits(undefined, { maxUploadMb: 1 / MIB }).maxUploadBytes).toBe(1);
     expect(() => new StorageServicePlugin({ maxUploadMb: 'unlimited' })).not.toThrow();
   });
 });

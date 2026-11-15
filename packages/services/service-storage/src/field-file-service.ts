@@ -24,6 +24,7 @@ import {
 // The upload doors' own size verdict and refusal, asked here rather than
 // restated.
 import {
+  parseHostMaxUploadMb,
   resolveStorageLimits,
   uploadSizeRefusal,
   UPLOAD_TOO_LARGE_CODE,
@@ -185,7 +186,10 @@ function isSlot(owner: FieldFileSlot | null, slot: FieldFileSlot): boolean {
 }
 
 export class FieldFileService implements IFieldFileService {
-  constructor(private readonly deps: FieldFileServiceDeps) {}
+  constructor(private readonly deps: FieldFileServiceDeps) {
+    // The host bound is judged where the verb is built, as at every host door.
+    parseHostMaxUploadMb(deps.hostMaxUploadMb, 'FieldFileService');
+  }
 
   async storeFile(input: StoreFieldFileInput): Promise<StoredFieldFile> {
     const request = validateStoreInput(input);

@@ -132,9 +132,20 @@ new StorageServicePlugin({ maxUploadMb: 500 });          // the host's bound, in
 new StorageServicePlugin({ maxUploadMb: 'unlimited' });  // no bound, announced at warn on boot
 ```
 
-Anything else (`0`, a negative or non-finite number, a numeric string, any
-other string) refuses construction. One line at boot names the bound in force
-and the layer it came from. On the S3 adapter a presigned upload is judged by
+Anything else (`0`, a negative or non-finite number, a number too small to
+bound one byte, a numeric string, any other string) refuses construction. Each
+host door — the plugin, `mountStorageRoutes`, `registerStorageRoutes` — says once
+the bound in force and the layer it came from; an explicit `'unlimited'` is said
+at `warn`, on `console.warn` when the door was given no logger.
+
+Who moved from no bound to 100 MB, and the remedy:
+
+| Host | Remedy |
+|:---|:---|
+| Constructs the plugin with no settings bound (`bindToSettings: false`, `--preset minimal`), or its settings read fails | `maxUploadMb: 500` or `'unlimited'` on the plugin |
+| `mountStorageRoutes` / `registerStorageRoutes` over a bare adapter or an unbound plugin | the same option on that call |
+| DevPlugin-composed server (DevPlugin builds the plugin with no options) | `new DevPlugin({ services: { storage: false }, extraPlugins: [new StorageServicePlugin({ maxUploadMb: 500 })] })`, or list the instance in the stack's `plugins` |
+| A saved or env-sourced `max_upload_mb` that is not a positive number | correct the saved value; the saved layer cannot spell "no bound", so to accept any size remove it and pass `maxUploadMb: 'unlimited'` | On the S3 adapter a presigned upload is judged by
 its declared size — the bytes go straight to the bucket.
 
 ## REST API Endpoints

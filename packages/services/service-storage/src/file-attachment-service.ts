@@ -35,6 +35,7 @@ import { createWallOrganizationResolver } from './backfill-sys-file-organization
 // The upload doors' own size verdict and refusal, asked here rather than
 // restated.
 import {
+  parseHostMaxUploadMb,
   resolveStorageLimits,
   uploadSizeRefusal,
   UPLOAD_TOO_LARGE_CODE,
@@ -322,6 +323,8 @@ export class FileAttachmentService
   private readonly recordFiles: RecordFileAccess | null;
 
   constructor(private readonly deps: FileAttachmentServiceDeps) {
+    // The host bound is judged where the verb is built, as at every host door.
+    parseHostMaxUploadMb(deps.hostMaxUploadMb, 'FileAttachmentService');
     const bound = deps.recordFiles;
     this.recordFiles = bound
       ? new RecordFileAccess({

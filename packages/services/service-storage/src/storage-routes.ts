@@ -86,6 +86,7 @@ import { uploadLinkCopy, uploadLinkRefusalText, type UploadLinkCopy } from './up
 // [#23306] The size refusal itself lives there too, beside the limit it
 // enforces, because a second door asks it: the server-side attach verb.
 import {
+  announceUploadBound,
   parseHostMaxUploadMb,
   resolveStorageLimits,
   uploadSizeRefusal,
@@ -531,7 +532,11 @@ export interface StorageRoutesOptions {
    * download keeps `presignedTtl`.
    */
   downloadTtl?: number;
-  /** Optional logger for the one-time open-mode notice. */
+  /**
+   * Optional logger for the one-time notices (open mode, and on
+   * `registerStorageRoutes` the upload bound in force). Without one, an
+   * explicit `maxUploadMb: 'unlimited'` is still announced, on `console.warn`.
+   */
   logger?: { info(msg: string): void; warn(msg: string): void };
 }
 
@@ -561,6 +566,15 @@ export function registerStorageRoutes(
   opts: StorageRoutesOptions = {},
 ): void {
   registerStorageFamily(httpServer, storage, store, opts, undefined);
+  // The direct registrar is a host door too: the upload bound in force is said
+  // once, and no bound (an explicit `'unlimited'`) at `warn` with or without a
+  // logger. The two composed mounts say it themselves (the plugin's boot hook,
+  // `mountStorageRoutes`), so it is said here and not in the family.
+  announceUploadBound(
+    'registerStorageRoutes',
+    resolveStorageLimits(opts.limitsSnapshot?.(), { maxUploadMb: opts.maxUploadMb as HostMaxUploadMb | undefined }),
+    opts.logger,
+  );
 }
 
 /**

@@ -147,17 +147,25 @@ function describeRaw(raw: unknown): string {
 }
 
 /**
- * A host's `maxUploadMb`, strictly: absent, a finite positive NUMBER, or
- * exactly {@link UNLIMITED_UPLOAD}. Anything else throws
- * {@link InvalidMaxUploadMbError} — the boot is refused rather than a bound
- * guessed. A numeric string is refused too: a host option is code, not a
- * form post.
+ * A host's `maxUploadMb`, strictly: absent, a positive NUMBER whose bound in
+ * bytes is finite and at least one byte, or exactly {@link UNLIMITED_UPLOAD}.
+ * Anything else throws {@link InvalidMaxUploadMbError} — the boot is refused
+ * rather than a bound guessed. A numeric string is refused too: a host option
+ * is code, not a form post. The byte edge is judged on the floored byte count
+ * the doors enforce, so a number too small to bound one byte, or too large to
+ * be a finite bound, is refused rather than read as "refuse everything" or as
+ * an unannounced "no bound".
  */
 export function parseHostMaxUploadMb(raw: unknown, where: string): HostMaxUploadMb | undefined {
   if (raw === undefined) return undefined;
   if (raw === UNLIMITED_UPLOAD) return UNLIMITED_UPLOAD;
-  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
+  if (typeof raw === 'number' && raw > 0 && isByteBound(Math.floor(raw * BYTES_PER_UPLOAD_MB))) return raw;
   throw new InvalidMaxUploadMbError(where, raw);
+}
+
+/** A bound the doors can enforce: a finite whole number of bytes, at least one. */
+function isByteBound(bytes: number): boolean {
+  return Number.isFinite(bytes) && bytes >= 1;
 }
 
 /** The three keys, their snapshot field, and the unit a warning names. */
@@ -230,7 +238,12 @@ function pickLayer<T>(
   return { value: builtIn, layer: 'built-in default' };
 }
 
-/** Resolve the limits a request is served under — see the module header for the precedence. */
+/**
+ * Resolve the limits a request is served under — see the module header for the
+ * precedence. `host.maxUploadMb` is taken as given: every door that accepts
+ * one from a host (the plugin, `mountStorageRoutes`, `registerStorageRoutes`,
+ * the file verbs) has passed it through {@link parseHostMaxUploadMb} first.
+ */
 export function resolveStorageLimits(
   snapshot: StorageLimitsSnapshot | undefined,
   host: StorageLimitHostOptions = {},
@@ -271,6 +284,28 @@ export function uploadBoundBootLine(
 }
 
 /**
+ * Say the boot line through a host door's logger. The `warn` for no bound
+ * never depends on that optional argument: with no logger it goes to
+ * `console`, the sink the platform's other boot notices fall back to, so an
+ * explicit `'unlimited'` is announced at every door that accepts it. The
+ * bounded `info` line goes to the logger when there is one. Called on the
+ * sink, never as a detached function, so a class-based logger keeps `this`.
+ */
+export function announceUploadBound(
+  who: string,
+  limits: ResolvedStorageLimits,
+  logger: { info(msg: string): void; warn(msg: string): void } | undefined,
+): void {
+  const line = uploadBoundBootLine(who, limits);
+  if (line.level === 'warn') {
+    const sink = logger ?? console;
+    sink.warn(line.message);
+  } else {
+    logger?.info(line.message);
+  }
+}
+
+/**
  * [#22283] The answer every door that accepts bytes gives a file over the
  * resolved `max_upload_mb` — before the backend stores a byte and before any
  * row is written. The REST upload doors (`storage-routes.ts`) send it as their
@@ -300,8 +335,8 @@ function uploadTooLargeMessage(measured: string, maxUploadBytes: number): string
   return (
     `${measured}, over the maximum upload size of ${mb} MB (${maxUploadBytes} bytes). ` +
     'The limit is the "Max upload size (MB)" storage setting (max_upload_mb in the storage settings), ' +
-    'which an administrator can change; where no storage settings are bound, the host sets it with the ' +
-    'storage plugin\'s maxUploadMb option.'
+    'which an administrator can change; with nothing saved, the host sets it with the storage plugin\'s ' +
+    'maxUploadMb option.'
   );
 }
 

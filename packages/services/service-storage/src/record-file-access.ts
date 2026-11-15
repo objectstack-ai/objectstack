@@ -36,6 +36,7 @@ import {
 // The upload doors' own size verdict and refusal, asked here rather than
 // restated.
 import {
+  parseHostMaxUploadMb,
   resolveStorageLimits,
   uploadSizeRefusal,
   UPLOAD_TOO_LARGE_CODE,
@@ -764,7 +765,10 @@ function describe(file: FileRecord): Pick<RecordFileEntry, 'fileId' | 'name' | '
 }
 
 export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoor {
-  constructor(private readonly deps: RecordFileAccessDeps) {}
+  constructor(private readonly deps: RecordFileAccessDeps) {
+    // The host bound is judged where the verb is built, as at every host door.
+    parseHostMaxUploadMb(deps.hostMaxUploadMb, 'RecordFileAccess');
+  }
 
   private now(): number {
     return this.deps.now ? this.deps.now() : Date.now();
