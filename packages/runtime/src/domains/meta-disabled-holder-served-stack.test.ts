@@ -20,6 +20,7 @@ import { MetadataPlugin } from '@objectstack/metadata';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
@@ -798,7 +799,7 @@ describe('[#32605] the bare save of a name an enabled and a disabled package hol
 
     /** Every stored row of the name, keyed by binding (`null`: package-unbound), with its stored bytes. */
     const storedRows = async (engine: ObjectQL, name: string): Promise<Record<string, { label: string; bytes: string }>> => {
-        const rows = (await engine.find('sys_metadata', { where: { type: 'dashboard', name, state: 'active' }, context: { isSystem: true } } as any)) as any[];
+        const rows = (await engine.find('sys_metadata', { where: { type: 'dashboard', name, state: 'active' }, context: { isSystem: true } } satisfies EngineQueryOptions)) as any[];
         return Object.fromEntries(rows.map((row) => [String(row.package_id ?? null), {
             label: JSON.parse(String(row.metadata)).label,
             bytes: JSON.stringify([row.metadata, row.version, row.checksum ?? null]),
