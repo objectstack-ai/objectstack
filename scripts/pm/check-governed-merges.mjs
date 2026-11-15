@@ -1170,7 +1170,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
   '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 74,
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 51,
-  '⭐ the weekly audit card: every reading the job files on, both ways (#33814)': 40,
+  '⭐ the weekly audit card: every reading the job files on, both ways (#33814)': 51,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -5090,7 +5090,8 @@ export function readAuditSweep({ exit = '', raw = '', stderr = '' } = {}) {
   const counts = readable
     ? `${sweep.entries.length} governed entr${sweep.entries.length === 1 ? 'y' : 'ies'} over ${sweep.scanned ?? '?'} mainline commit(s) since ${auditClean(sweep.since)}`
     : 'no sweep reading';
-  const stderrTail = !readable && err ? err.slice(-AUDIT_CARD.stderrChars).replace(/```/g, "'''") : '';
+  // Both fence markers are defused, so a stderr line can neither close the quote nor open a fence of its own.
+  const stderrTail = !readable && err ? err.slice(-AUDIT_CARD.stderrChars).replace(/```/g, "'''").replace(/~~~/g, "'''") : '';
   return { verdict, counts, breaches, unread, readings, stderrTail };
 }
 
@@ -5127,7 +5128,9 @@ export function renderAuditRunSummary(findings) {
  *   * #33814 N13: a keyed row outside every known section (under a reworded heading, or moved above the first
  *     one) is counted in `stray`, so a row the carry-forward cannot see is reported instead of vanishing with a
  *     zero `unkeyed` count.
- *   * N14: a fenced block is never read: the quoted stderr may hold a line that starts with a heading.
+ *   * N14: a fenced block is never read: the quoted stderr may hold a line that starts with a heading. A fence
+ *     closes only on its own marker, at least as long and with nothing after it, and one still open at the end
+ *     of the read is reported in `openFence` (review S2), since every line after its opener went unread.
  *   * N16: only the LAST footer ends the reading, so a maintainer's line that starts with the footer's words
  *     does not cut a section short.
  *   * N17: the footer's second line bounds the reading too, and `footer: false` says when neither was found
@@ -5150,10 +5153,14 @@ export function readAuditCardRows(text, headings) {
   const stray = [];
   let unkeyed = 0;
   let section = null;
-  let fenced = false;
+  let fence = null;
   for (const raw of lines.slice(0, end)) {
-    if (/^\s*(```|~~~)/.test(raw)) { fenced = !fenced; continue; }
-    if (fenced) continue;
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(raw);
+    if (fence === null && marker) { fence = marker[1]; continue; }
+    if (fence !== null) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      continue;
+    }
     if (raw.startsWith('## ')) { section = known.find((h) => raw.startsWith(h)) ?? 'other'; continue; }
     if (!raw.trim() || raw.startsWith('… and ')) continue;
     const m = AUDIT_ROW_KEY.exec(raw);
@@ -5165,7 +5172,7 @@ export function readAuditCardRows(text, headings) {
       stray.push(m[1]);
     }
   }
-  return { rows, unkeyed, stray, footer };
+  return { rows, unkeyed, stray, footer, openFence: fence !== null };
 }
 
 /**
@@ -5182,7 +5189,12 @@ export function auditRulingCandidates(closed, now) {
  * the card is the maintainer's "every BREACH row here is ruled" ONLY when an authorized approver closed it by
  * hand: a seat's close, a closing keyword in a merged pull request (the close event names a commit), the stale
  * bot, or a close whose event could not be read rules nothing, so the rows it held are announced again.
- * `card.close` is `{ actor, commitId }` from the card's last `closed` event, or null.
+ * `card.close` is `{ actor, commitId, app }` from the card's last `closed` event, or null.
+ *
+ * ⚠️ "By hand" is read off the event, not off the login alone (review S1 on #33814): an approver's login is also
+ * a seat account, and a seat session writes through a GitHub App (the `claude` app signs user-account writes,
+ * measured in `scripts/pm/check-half-states.mjs`). An event `performed_via_github_app` is an app's act, so it
+ * rules nothing whoever's login it carries.
  */
 export function auditCloseRuling(card, { now, approvers }) {
   if (card?.state_reason === 'duplicate') return 'closed as a duplicate';
@@ -5191,6 +5203,7 @@ export function auditCloseRuling(card, { now, approvers }) {
   if (!Array.isArray(approvers) || approvers.length === 0) return 'the authorized approver list could not be loaded';
   if (!card.close) return 'its close event could not be read';
   if (card.close.commitId) return `closed by commit \`${String(card.close.commitId).slice(0, 12)}\` (a closing keyword), not by hand`;
+  if (card.close.app) return `closed through the ${auditClean(card.close.app)} app on ${auditClean(card.close.actor ?? '(unknown)')}'s account (a seat session), not by hand`;
   if (!approvers.includes(card.close.actor)) return `closed by ${auditClean(card.close.actor ?? '(unknown)')}, not by an authorized approver`;
   return null;
 }
@@ -5274,8 +5287,8 @@ export function composeAuditCard({ findings, existing = null, ruling = { ruled: 
     ? `${AUDIT_CARD.carriedMark}on this card from an earlier run; this run read it as ${readings[key]}, not as a BREACH; it stays until this card is closed_`
     : `${AUDIT_CARD.carriedMark}on this card from an earlier run and not in this run's reading; it stays until this card is closed_`);
   const breachRows = [
-    ...live.map((b) => ({ md: `- ${auditCut(b.line)}`, live: true })),
-    ...carried.map((b) => ({ md: `- ${auditCut(b.line)}${mark(b.key)}`, live: false })),
+    ...live.map((b) => ({ key: b.key, md: `- ${auditCut(b.line)}`, live: true })),
+    ...carried.map((b) => ({ key: b.key, md: `- ${auditCut(b.line)}${mark(b.key)}`, live: false })),
   ];
   const ruledLines = alreadyRuled.length === 0 ? [] : [
     `${AUDIT_CARD.ruledHeading} — ${alreadyRuled.length} BREACH row(s) this run read again, ruled when an authorized approver closed the card named; not re-announced`,
@@ -5293,12 +5306,16 @@ export function composeAuditCard({ findings, existing = null, ruling = { ruled: 
   const render = (breachShown, unreadShown, withStderr) => {
     const shown = breachRows.slice(0, breachShown);
     const liveShown = shown.filter((r) => r.live).length;
-    const overflow = breachRows.length - shown.length;
+    const dropped = breachRows.slice(breachShown);
+    const overflow = dropped.length;
+    const droppedCarried = dropped.filter((r) => !r.live).length;
     const breachLines = breachRows.length === 0 ? [] : [
       `${AUDIT_CARD.breachHeading} — ${shown.length} low-risk skills arm landing(s) without a same-head at-tier PASS record on this card (${liveShown} read by this run, ${shown.length - liveShown} carried from earlier runs)${overflow > 0 ? `; ${overflow} more did not fit` : ''}`,
       '',
       ...shown.map((r) => r.md),
-      ...(overflow > 0 ? [`… and ${overflow} more, NOT on this card and so not carried — see the run log and the artifact`] : []),
+      // Review S3: a carried row that does not fit is in no run's reading any more, so only this run's are in the
+      // run log and the artifact; the refresh comment names every dropped key.
+      ...(overflow > 0 ? [`… and ${overflow} more did not fit, so they are NOT on this card and not carried: ${overflow - droppedCarried} read by this run (in its run log and artifact)${droppedCarried > 0 ? `, ${droppedCarried} carried from earlier runs and held by no run's reading` : ''}`] : []),
       '',
     ];
     const body = [
@@ -5330,7 +5347,7 @@ export function composeAuditCard({ findings, existing = null, ruling = { ruled: 
       `${AUDIT_CARD.footer} of the run above (kept 30 days). Re-read the week by`,
       `${AUDIT_CARD.footerTail} --since 7d --repos objectstack\` from a fresh \`origin/main\`.`,
     ].join('\n');
-    return { body, shown: shown.length, liveShown, overflow };
+    return { body, shown: shown.length, liveShown, overflow, dropped };
   };
   let breachShown = Math.min(AUDIT_CARD.breachCap, breachRows.length);
   let unreadShown = Math.min(AUDIT_CARD.unreadCap, unread.length);
@@ -5353,11 +5370,15 @@ export function composeAuditCard({ findings, existing = null, ruling = { ruled: 
     `Weekly governed-merges audit refreshed this card — [run log](${meta?.runUrl}) · trigger \`${meta?.event}\` · sweep exit ${meta?.exit || '(not recorded)'} · verdict \`${meta?.verdict}\`.`,
     '',
     `- ⛔ BREACH rows new to this card: ${fresh.length > 0 ? fresh.join(', ') : 'none'}.`,
-    `- BREACH rows read again by this run: ${again}; carried from earlier runs: ${out.shown - out.liveShown} on the card${out.overflow > 0 ? `; ${out.overflow} row(s) did not fit the card and are NOT carried (the run log and the artifact hold them)` : ''}. They stay until this card is closed.`,
+    `- BREACH rows read again by this run: ${again}; carried from earlier runs: ${out.shown - out.liveShown} on the card. They stay until this card is closed.`,
+    ...(out.overflow > 0 ? [
+      `- ⚠️ ${out.overflow} BREACH row(s) did not fit the card and are NOT carried${out.dropped.some((r) => r.live) ? `; read by this run (in its run log and artifact): ${out.dropped.filter((r) => r.live).map((r) => r.key).join(', ')}` : ''}${out.dropped.some((r) => !r.live) ? `; carried from earlier runs and held by no run's reading, so this comment is their last record: ${out.dropped.filter((r) => !r.live).map((r) => r.key).join(', ')}` : ''}.`,
+    ] : []),
     ...(alreadyRuled.length > 0 ? [`- Read again but already ruled, so not announced: ${alreadyRuled.map((b) => `${b.key} (card #${ruled.get(b.key)})`).join(', ')}.`] : []),
     `- Lines under the BREACH heading that carried no row key (hand-edited, so not carried): ${read.unkeyed}.`,
     `- Keyed rows outside every section this audit reads (a reworded heading, or a row moved out of its section), so not carried: ${read.stray.length}${read.stray.length > 0 ? ` (${read.stray.join(', ')})` : ''}.`,
     ...(read.footer ? [] : ['- ⚠️ This card\'s footer was not found, so its last section was read to the end of the body.']),
+    ...(read.openFence ? ['- ⚠️ A fenced block on this card is never closed, so every line after its opening marker went unread (rows there are not carried).'] : []),
     ...(unruled.length > 0 ? [`- Closed audit cards whose close rules nothing: ${unruled.map((u) => `#${u.number} (${u.why})`).join('; ')}.`] : []),
     `- NOT MEASURED readings in this run: ${unread.length}${unread.length > 0 ? ' (listed in the body; a clean manual re-run answers those it can read)' : ''}.`,
   ].join('\n');
@@ -9676,7 +9697,12 @@ async function selfTest() {
     const small = composeAuditCard({ findings: { breaches: many.slice(0, 3).map((b) => ({ ...b, line: `${b.key} — short` })), unread: [], readings: {} }, existing: null, meta });
     assert('N8-control-a-small-card-keeps-every-row-and-names-no-overflow', readAuditCardRows(small.body, [AUDIT_CARD.breachHeading]).rows.length === 3 && !small.body.includes('did not fit'), small.body);
     const capped = composeAuditCard({ findings: { breaches: many.map((b) => ({ ...b, line: `${b.key} — short` })), unread: [], readings: {} }, existing: { number: 901, body: card([]) }, meta });
-    assert('N8-past-the-row-cap-the-comment-counts-carried-rows-on-the-card-and-the-overflow-apart', capped.comment.includes('carried from earlier runs: 0 on the card; 20 row(s) did not fit the card and are NOT carried'), capped.comment);
+    assert('N8-past-the-row-cap-the-comment-counts-carried-rows-on-the-card-and-the-overflow-apart', capped.comment.includes('carried from earlier runs: 0 on the card.') && capped.comment.includes('20 BREACH row(s) did not fit the card and are NOT carried'), capped.comment);
+    // Review S3: the dropped rows are NAMED, and a dropped carried row is never said to be in the run log.
+    assert('⭐ S3-the-refresh-comment-names-every-dropped-key-read-by-this-run', capped.comment.includes(`read by this run (in its run log and artifact): ${many.slice(100).map((b) => b.key).join(', ')}.`) && !capped.comment.includes('held by no run'), capped.comment);
+    const carriedOver = composeAuditCard({ findings: { breaches: many.slice(0, 100).map((b) => ({ ...b, line: `${b.key} — short` })), unread: [], readings: {} }, existing: { number: 904, body: card(['- PR #7001 — carried a', '- PR #7002 — carried b']) }, meta });
+    assert('⭐ S3-a-dropped-carried-row-is-named-as-held-by-no-runs-reading', carriedOver.comment.includes("carried from earlier runs and held by no run's reading, so this comment is their last record: PR #7001, PR #7002.") && carriedOver.body.includes("2 carried from earlier runs and held by no run's reading") && !carriedOver.body.includes('see the run log and the artifact'), carriedOver.comment);
+    assert('S3-control-a-card-that-fits-names-no-dropped-row', !refreshed.comment.includes('did not fit') && !refreshed.body.includes('did not fit'), refreshed.comment);
 
     // N10: a close is a ruling only by an authorized approver's hand.
     const now = Date.parse('2026-11-15T23:40:00Z');
@@ -9694,6 +9720,10 @@ async function selfTest() {
       const r = ruledAuditRows([closedCard(911, c, more)], { now, approvers });
       assert(`⭐ N10-${name}-rules-nothing`, r.ruled.size === 0 && r.unruled[0]?.number === 911, JSON.stringify(r.unruled));
     }
+    const viaApp = ruledAuditRows([closedCard(913, { actor: 'hotlong', commitId: null, app: 'claude' })], { now, approvers });
+    assert('⭐ S1-an-approvers-account-closing-through-an-app-is-a-seat-session-and-rules-nothing', viaApp.ruled.size === 0 && /closed through the claude app on hotlong/.test(viaApp.unruled[0]?.why ?? ''), JSON.stringify(viaApp.unruled));
+    assert('S1-control-the-same-account-closing-with-no-app-rules', ruledAuditRows([closedCard(914, { actor: 'hotlong', commitId: null, app: null })], { now, approvers }).ruled.size === 1);
+    assert('S1-the-job-passes-the-events-app-through-to-the-close', /performed_via_github_app/.test(cardStep) && /app: last\.performed_via_github_app/.test(cardStep), cardStep.slice(0, 200));
     assert('N10-no-approver-list-rules-nothing', ruledAuditRows([closedCard(912, { actor: 'os-zhuang', commitId: null })], { now, approvers: [] }).ruled.size === 0);
 
     // N12: every ruled card counts, not only the newest.
@@ -9730,6 +9760,19 @@ async function selfTest() {
     const fenced = ['## NOT MEASURED — 1', '', '- the sweep left no readable JSON', '', '```', '## ⛔ BREACH from stderr', '- PR #80 — inside the fence', '```', '', `${AUDIT_CARD.footer} x`].join('\n');
     assert('⭐ N14-a-heading-inside-the-quoted-stderr-opens-no-section', readAuditCardRows(fenced, [AUDIT_CARD.breachHeading]).rows.length === 0, JSON.stringify(readAuditCardRows(fenced, [AUDIT_CARD.breachHeading])));
     assert('N14-control-the-same-lines-outside-a-fence-are-read', readAuditCardRows(fenced.replace(/```\n/g, ''), [AUDIT_CARD.breachHeading]).rows.map((r) => r.key).join() === 'PR #80');
+    // Review S2: a fence closes only on its own marker, and one left open is reported.
+    const mixed = card(['- PR #81 — before', '```', '~~~', '- PR #82 — still inside the backtick fence', '```', '- PR #83 — after']);
+    const mx = readAuditCardRows(mixed, [AUDIT_CARD.breachHeading]);
+    assert('⭐ S2-a-tilde-line-does-not-close-a-backtick-fence', mx.rows.map((r) => r.key).join() === 'PR #81,PR #83' && mx.openFence === false, JSON.stringify(mx));
+    const shortClose = readAuditCardRows(card(['````', '```', '- PR #84 — inside the four-tick fence', '````', '- PR #85 — after']), [AUDIT_CARD.breachHeading]);
+    assert('S2-a-shorter-marker-does-not-close-a-longer-fence', shortClose.rows.map((r) => r.key).join() === 'PR #85', JSON.stringify(shortClose));
+    const unclosed = card(['- PR #86 — before', '```', '- PR #87 — swallowed']);
+    const uc = readAuditCardRows(unclosed, [AUDIT_CARD.breachHeading]);
+    const ucComment = composeAuditCard({ findings: breachRun, existing: { number: 905, body: unclosed }, meta }).comment;
+    assert('⭐ S2-a-fence-left-open-is-reported-in-the-read-and-in-the-comment', uc.openFence === true && uc.rows.map((r) => r.key).join() === 'PR #86' && ucComment.includes('is never closed'), JSON.stringify(uc));
+    assert('S2-control-a-closed-fence-reports-nothing', readAuditCardRows(fenced, [AUDIT_CARD.breachHeading]).openFence === false && !refreshed.comment.includes('never closed'));
+    const tildeErr = readAuditSweep({ exit: '1', raw: '', stderr: 'x\n~~~\n## ⛔ BREACH injected' });
+    assert('⭐ S2-the-quoted-stderr-defuses-tilde-fences-too', !tildeErr.stderrTail.includes('~~~') && !tildeErr.stderrTail.includes('```'), tildeErr.stderrTail);
 
     // N16: only the LAST footer ends the reading.
     const footerWords = card(['- PR #90 — row', `${AUDIT_CARD.footer} was checked by me — maintainer note`, '- PR #91 — row after the note']);
@@ -9768,7 +9811,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled line, 3,000 since the maintainer's 2026-10-09 word, declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and the patrol's name does not silence this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET. — and the closed argv: each mode reads a closed flag set and refuses every other on exit 1 (an unknown flag, another mode's flag, an equals spelling, a --repo, which prescribes the qualified --pr spelling), a bare --pr beside a PM_SWEEP_REPO naming another repository is refused with both qualified spellings, and the card's own invocation table replayed against a recording fake API: every refusal READS NOTHING, the qualified spelling answers from the repository it names, byte-identical with PM_SWEEP_REPO set. — and the #30718 rename-aware size: --branch and the sweep count a moved file by its \`-M\` numstat, as GitHub does (a 400-line move with one edit reads +1 / -1 over one file, a \`diff.renames=false\` config notwithstanding), while both PATH lists keep \`--no-renames\` and so still carry both paths. — and the weekly audit card's readings (#33814), each pinned with its control: a PR-less governed landing reads NOT MEASURED, a carried row names the state this run read it in, the body is fitted under the issue-body limit with its counts taken on the card, a close rules only by an authorized approver's hand and every such card within the horizon counts, and the section reader ignores fences, counts stray rows and stops at the last footer.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled line, 3,000 since the maintainer's 2026-10-09 word, declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and the patrol's name does not silence this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET. — and the closed argv: each mode reads a closed flag set and refuses every other on exit 1 (an unknown flag, another mode's flag, an equals spelling, a --repo, which prescribes the qualified --pr spelling), a bare --pr beside a PM_SWEEP_REPO naming another repository is refused with both qualified spellings, and the card's own invocation table replayed against a recording fake API: every refusal READS NOTHING, the qualified spelling answers from the repository it names, byte-identical with PM_SWEEP_REPO set. — and the #30718 rename-aware size: --branch and the sweep count a moved file by its \`-M\` numstat, as GitHub does (a 400-line move with one edit reads +1 / -1 over one file, a \`diff.renames=false\` config notwithstanding), while both PATH lists keep \`--no-renames\` and so still carry both paths. — and the weekly audit card's readings (#33814), each pinned with its control: a PR-less governed landing reads NOT MEASURED, a carried row names the state this run read it in, the body is fitted under the issue-body limit with its counts taken on the card, a close rules only by an authorized approver's hand (an app-signed close is a seat's and rules nothing) and every such card within the horizon counts, the section reader ignores fences (closed only by their own marker, an unclosed one reported), counts stray rows and stops at the last footer, and every BREACH row that does not fit is named.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }
