@@ -1,0 +1,160 @@
+/**
+ * ObjectUI
+ * Copyright (c) 2024-present ObjectStack Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
+ * The composer's model picker shows what each model costs at the moment of
+ * choice (objectstack#33660).
+ *
+ * `ChatbotModelOption.costMultiplier` is the factor by which one message on a
+ * model draws on the AI allowance, against the environment's default model
+ * (`AiModelsResponseSchema`'s `costMultiplier`). `allowanceUsedFraction` is the
+ * used share of that allowance (`GET /ai/usage` `pool.fraction`).
+ *
+ * What is pinned, through the rendered picker (the Radix `Select`, opened from
+ * the keyboard, options clicked):
+ *   - each model with a multiplier draws `×N` beside its label; a model with
+ *     none draws none (never a guessed `×1`);
+ *   - a pick at ×20 or above asks once: Cancel keeps the model in force and
+ *     writes nothing, Confirm writes the pick;
+ *   - CONTROL: a ×1 or ×5 pick writes at once, with no dialog;
+ *   - the allowance note shows the share left when usage is served, and is
+ *     absent without it.
+ */
+
+import '@testing-library/jest-dom/vitest';
+import React from 'react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { ChatbotEnhanced, type ChatbotModelOption } from '../ChatbotEnhanced';
+
+afterEach(() => cleanup());
+
+const MODELS: ChatbotModelOption[] = [
+  { id: 'haiku', label: 'Fast', costMultiplier: 1 },
+  { id: 'sonnet', label: 'Advanced', costMultiplier: 5 },
+  { id: 'opus', label: 'Expert', costMultiplier: 20 },
+  { id: 'local', label: 'Local' },
+];
+
+function mount(extra: Record<string, unknown> = {}, models: ChatbotModelOption[] = MODELS) {
+  const onModelChange = vi.fn();
+  render(
+    <ChatbotEnhanced
+      models={models}
+      selectedModelId="haiku"
+      onModelChange={onModelChange}
+      onSendMessage={vi.fn()}
+      {...extra}
+    />,
+  );
+  return { onModelChange, trigger: () => screen.getByRole('combobox', { name: 'Model' }) };
+}
+
+async function openPicker(trigger: HTMLElement): Promise<HTMLElement> {
+  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  return screen.findByRole('listbox');
+}
+
+async function pick(trigger: HTMLElement, label: string): Promise<void> {
+  const listbox = await openPicker(trigger);
+  const option = within(listbox)
+    .getAllByRole('option')
+    .find((o) => o.textContent?.startsWith(label));
+  if (!option) throw new Error(`the picker lists no "${label}"`);
+  fireEvent.click(option);
+}
+
+function multiplierOf(option: HTMLElement): string | null {
+  return option.querySelector('[data-testid="model-cost-multiplier"]')?.textContent ?? null;
+}
+
+describe('ChatbotEnhanced — the model picker shows each model’s cost multiplier (objectstack#33660)', () => {
+  it('draws ×N beside each model that has one, and nothing beside a model that has none', async () => {
+    const { trigger } = mount();
+    const listbox = await openPicker(trigger());
+    const options = within(listbox).getAllByRole('option');
+    expect(options.map(multiplierOf)).toEqual(['×1', '×5', '×20', null]);
+  });
+
+  it('the trigger shows the multiplier of the model in force', () => {
+    const { trigger } = mount({ selectedModelId: 'sonnet' });
+    expect(multiplierOf(trigger())).toBe('×5');
+  });
+
+  it('a fractional multiplier is drawn as the number it is', async () => {
+    const { trigger } = mount({ selectedModelId: 'a' }, [
+      { id: 'a', label: 'A', costMultiplier: 1 },
+      { id: 'b', label: 'B', costMultiplier: 0.5 },
+    ]);
+    const options = within(await openPicker(trigger())).getAllByRole('option');
+    expect(options.map(multiplierOf)).toEqual(['×1', '×0.5']);
+  });
+
+  it('a ×20 pick asks first; Cancel keeps the model in force and writes nothing', async () => {
+    const { onModelChange, trigger } = mount();
+    await pick(trigger(), 'Expert');
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText(/Expert/)).toBeInTheDocument();
+    expect(onModelChange).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(onModelChange).not.toHaveBeenCalled();
+    expect(trigger().textContent).toContain('Fast');
+  });
+
+  it('a ×20 pick applies once confirmed', async () => {
+    const { onModelChange, trigger } = mount();
+    await pick(trigger(), 'Expert');
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Switch model' }));
+    expect(onModelChange.mock.calls).toEqual([['opus']]);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it.each([
+    ['Fast', 'haiku', 'sonnet'],
+    ['Advanced', 'sonnet', 'haiku'],
+    ['Local', 'local', 'haiku'],
+  ])('CONTROL: a pick of "%s" (below ×20 or none) applies at once, with no dialog', async (label, id, from) => {
+    const { onModelChange, trigger } = mount({ selectedModelId: from });
+    await pick(trigger(), label);
+    expect(onModelChange.mock.calls).toEqual([[id]]);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('with usage served the list notes the share of the allowance left, and the confirmation says it too', async () => {
+    const { trigger } = mount({ allowanceUsedFraction: 0.25 });
+    const listbox = await openPicker(trigger());
+    const note = screen.getByTestId('model-allowance-note');
+    expect(listbox.contains(note) || listbox.parentElement?.contains(note)).toBe(true);
+    expect(note.textContent).toContain('75%');
+    fireEvent.click(within(listbox).getAllByRole('option')[2]);
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog.textContent).toContain('75%');
+    expect(dialog.textContent).toContain('20');
+  });
+
+  it('without usage served the multipliers show alone: no allowance note, and the confirmation names only the multiplier', async () => {
+    const { trigger } = mount();
+    const listbox = await openPicker(trigger());
+    expect(screen.queryByTestId('model-allowance-note')).toBeNull();
+    fireEvent.click(within(listbox).getAllByRole('option')[2]);
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog.textContent).toContain('20');
+    expect(dialog.textContent).not.toContain('%');
+  });
+
+  it('CONTROL: with usage served but no model carrying a multiplier, there is no note', async () => {
+    const { trigger } = mount({ allowanceUsedFraction: 0.25, selectedModelId: 'a' }, [
+      { id: 'a', label: 'A' },
+      { id: 'b', label: 'B' },
+    ]);
+    await openPicker(trigger());
+    expect(screen.queryByTestId('model-allowance-note')).toBeNull();
+  });
+});

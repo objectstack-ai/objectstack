@@ -39,6 +39,7 @@ interface RawModel {
   id?: string;
   label?: string;
   default?: boolean;
+  costMultiplier?: unknown;
   [key: string]: unknown;
 }
 
@@ -57,10 +58,26 @@ export function resetAiModelsSession(): void {
   noAiServiceUrls.clear();
 }
 
+/**
+ * objectstack#33660 — `costMultiplier` is kept only as the spec declares it
+ * (`AiModelsResponseSchema`: a positive number). Anything else is not a
+ * multiplier, so the model shows none rather than a guessed one.
+ */
+function costMultiplierOf(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 function normalize(raw: RawModel[]): ChatbotModelOption[] {
   return raw
     .filter((m) => typeof m?.id === 'string' && (m.id as string).length > 0)
-    .map((m) => ({ id: m.id as string, label: m.label || (m.id as string) }));
+    .map((m) => {
+      const costMultiplier = costMultiplierOf(m.costMultiplier);
+      return {
+        id: m.id as string,
+        label: m.label || (m.id as string),
+        ...(costMultiplier !== undefined ? { costMultiplier } : {}),
+      };
+    });
 }
 
 /**

@@ -378,6 +378,18 @@ describe('ObjectStack Protocol', () => {
       models: [{ id: 'gpt-4o-mini', label: 'GPT-4o mini', default: true }], defaultModel: 'gpt-4o-mini',
     }).success).toBe(true);
     expect(AiModelsResponseSchema.safeParse({ models: ['gpt-4o-mini'] }).success).toBe(true);
+    // objectstack#33660 — the optional per-model cost multiplier (positive; the default model is 1)
+    const entry = { id: 'claude-opus', label: 'Expert', default: false };
+    const withMultiplier = AiModelsResponseSchema.safeParse({ models: [{ ...entry, costMultiplier: 20 }] });
+    expect(withMultiplier.success).toBe(true);
+    expect(withMultiplier.data?.models[0]).toEqual({ ...entry, costMultiplier: 20 });
+    expect(AiModelsResponseSchema.safeParse({ models: [{ ...entry, costMultiplier: 0.5 }] }).success).toBe(true);
+    for (const bad of [0, -1, '20', Number.NaN]) {
+      expect(
+        AiModelsResponseSchema.safeParse({ models: [{ ...entry, costMultiplier: bad }] }).success,
+        `costMultiplier ${String(bad)} is refused`,
+      ).toBe(false);
+    }
 
     // conversations
     expect(CreateAiConversationRequestSchema.safeParse({ title: 'Q3 pipeline', metadata: { source: 'sdk' } }).success).toBe(true);

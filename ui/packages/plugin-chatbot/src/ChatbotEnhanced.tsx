@@ -18,9 +18,24 @@
  *  - streaming markdown via streamdown (used by Message internals)
  */
 import * as React from 'react';
-import { cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
+import {
+  cn,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@object-ui/components';
 import { SchemaRenderer } from '@object-ui/react';
-import { useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
+import { formatNumber, useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
 import { AlertCircle, ArrowRight, Copy, Check, RefreshCw, CornerDownLeft, Bot, Eye, GitCompareArrows, Rocket, Clock3, CheckCircle2, ChevronDown, XCircle, Loader2, ShieldCheck, TriangleAlert, ClipboardList, HelpCircle, Info, Table2, WifiOff, Sparkles, Hourglass, Trash2 } from 'lucide-react';
 import type { ChatStatus } from 'ai';
 import {
@@ -630,6 +645,14 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   /** Fired when the user picks a different model. */
   onModelChange?: (modelId: string) => void;
   /**
+   * objectstack#33660 — the used share (0..1) of the environment's AI
+   * allowance, as `GET /api/v1/ai/usage` answers it (`pool.fraction`). With it,
+   * and a model that carries a `costMultiplier`, the model picker notes the
+   * share left and what a costlier model does to it. Absent (usage not served,
+   * unmetered, unknown) → the multipliers show alone.
+   */
+  allowanceUsedFraction?: number;
+  /**
    * Optional banner rendered between the message-count strip and the
    * conversation. Used by shell-level UIs (e.g. Studio's assistant status
    * row) without forcing them to fork the whole component.
@@ -1139,6 +1162,12 @@ export interface ChatbotModelOption {
   id: string;
   label?: string;
   provider?: string;
+  /**
+   * objectstack#33660 — how much one message on this model draws on the AI
+   * allowance, against one on the environment's default model (1). The picker
+   * draws it as `×N` beside the label; absent → nothing is drawn.
+   */
+  costMultiplier?: number;
 }
 
 /** A record-write card value as a person reads it: nothing, a list, or the value itself. */
@@ -1168,6 +1197,9 @@ function writtenRecordOf(
 /** The item a selected model none of the offered models carries is shown by. */
 const OUTSIDE_MODELS = 'outside';
 
+/** objectstack#33660 — a pick at this cost multiplier or above asks before it applies. */
+const EXPENSIVE_MODEL_MULTIPLIER = 20;
+
 /**
  * objectui#11865 — the composer's model picker, drawn with the shared `Select`,
  * the control the rest of the console picks with. It used to be a
@@ -1181,44 +1213,127 @@ const OUTSIDE_MODELS = 'outside';
  *   labelled with the id, so the trigger shows the model the host holds. The
  *   native control showed the first model there. Picking that item writes
  *   nothing.
+ * - objectstack#33660: a model's `costMultiplier` is drawn as `×N` beside its
+ *   label (none drawn when it has none). A pick at
+ *   {@link EXPENSIVE_MODEL_MULTIPLIER} or above asks once before it is written;
+ *   Cancel writes nothing. Every chat host renders this picker, so none can
+ *   skip the question.
  */
 function ModelPicker({
   label,
   models,
   value,
   onPick,
+  allowanceUsedFraction,
 }: {
   label: string;
   models: ReadonlyArray<ChatbotModelOption>;
   value: string;
   onPick: (modelId: string) => void;
+  allowanceUsedFraction?: number;
 }) {
+  const { t, language } = useObjectTranslation();
+  // The model a ×20-or-above pick is waiting to apply; `null` while nothing is asked.
+  const [confirming, setConfirming] = React.useState<ChatbotModelOption | null>(null);
   const at = models.findIndex((m) => m.id === value);
+  const multiplierText = (n: number) => formatNumber(n, { locale: language, maximumFractionDigits: 2 });
+  // The share of the allowance left, as the console's usage ring reads it; only
+  // with usage served and a multiplier to set it against (rule D5: a fraction, never a count).
+  const allowanceLeft =
+    typeof allowanceUsedFraction === 'number' &&
+    Number.isFinite(allowanceUsedFraction) &&
+    models.some((m) => m.costMultiplier !== undefined)
+      ? formatNumber(Math.min(1, Math.max(0, 1 - allowanceUsedFraction)), {
+          locale: language,
+          style: 'percent',
+          maximumFractionDigits: 0,
+        })
+      : undefined;
   return (
-    <Select
-      value={at !== -1 ? String(at) : OUTSIDE_MODELS}
-      onValueChange={(token) => {
-        // `undefined` for the outside item: it is the host's own model, so there is nothing to write.
-        const picked = models[Number(token)];
-        if (picked) onPick(picked.id);
-      }}
-    >
-      <SelectTrigger
-        aria-label={label}
-        className="h-7 w-auto gap-1 px-2 text-xs text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-offset-0"
+    <>
+      <Select
+        value={at !== -1 ? String(at) : OUTSIDE_MODELS}
+        onValueChange={(token) => {
+          // `undefined` for the outside item: it is the host's own model, so there is nothing to write.
+          const picked = models[Number(token)];
+          if (!picked) return;
+          if ((picked.costMultiplier ?? 0) >= EXPENSIVE_MODEL_MULTIPLIER) setConfirming(picked);
+          else onPick(picked.id);
+        }}
       >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {at === -1 && <SelectItem value={OUTSIDE_MODELS}>{value}</SelectItem>}
-        {models.map((m, i) => (
-          <SelectItem key={`${i}:${m.id}`} value={String(i)}>
-            {m.label ?? m.id}
-            {m.provider ? ` · ${m.provider}` : ''}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+        <SelectTrigger
+          aria-label={label}
+          className="h-7 w-auto gap-1 px-2 text-xs text-muted-foreground hover:text-foreground focus:ring-1 focus:ring-offset-0"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {at === -1 && <SelectItem value={OUTSIDE_MODELS}>{value}</SelectItem>}
+          {models.map((m, i) => (
+            <SelectItem key={`${i}:${m.id}`} value={String(i)}>
+              {m.label ?? m.id}
+              {m.provider ? ` · ${m.provider}` : ''}
+              {m.costMultiplier !== undefined ? (
+                <span className="ml-1.5 tabular-nums text-muted-foreground" data-testid="model-cost-multiplier">
+                  ×{multiplierText(m.costMultiplier)}
+                </span>
+              ) : null}
+            </SelectItem>
+          ))}
+          {allowanceLeft !== undefined ? (
+            <p
+              className="mt-1 max-w-64 border-t px-2 pb-1 pt-1.5 text-[11px] leading-snug text-muted-foreground"
+              data-testid="model-allowance-note"
+            >
+              {t('chatbot.modelPicker.allowanceNote', {
+                left: allowanceLeft,
+                defaultValue:
+                  '{{left}} of your AI allowance is left. A model marked ×N uses it N times as fast as the default model.',
+              })}
+            </p>
+          ) : null}
+        </SelectContent>
+      </Select>
+      <AlertDialog open={confirming !== null} onOpenChange={(open) => { if (!open) setConfirming(null); }}>
+        {confirming ? (
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t('chatbot.modelPicker.confirmTitle', {
+                  model: confirming.label ?? confirming.id,
+                  defaultValue: 'Switch to {{model}}?',
+                })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t('chatbot.modelPicker.confirmBody', {
+                  multiplier: multiplierText(confirming.costMultiplier ?? 0),
+                  defaultValue:
+                    'Each message on this model uses {{multiplier}} times as much of your AI allowance as one on the default model.',
+                })}
+                {allowanceLeft !== undefined
+                  ? ` ${t('chatbot.modelPicker.confirmAllowance', {
+                      left: allowanceLeft,
+                      multiplier: multiplierText(confirming.costMultiplier ?? 0),
+                      defaultValue: '{{left}} of it is left, and on this model it runs out {{multiplier}} times as fast.',
+                    })}`
+                  : null}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t('chatbot.modelPicker.confirmCancel', { defaultValue: 'Cancel' })}</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  onPick(confirming.id);
+                  setConfirming(null);
+                }}
+              >
+                {t('chatbot.modelPicker.confirmAction', { defaultValue: 'Switch model' })}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        ) : null}
+      </AlertDialog>
+    </>
   );
 }
 
@@ -2465,6 +2580,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       models,
       selectedModelId,
       onModelChange,
+      allowanceUsedFraction,
       headerSlot,
       promptOverlaySlot,
       promptHeaderSlot,
@@ -5520,6 +5636,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     models={models}
                     value={selectedModelId ?? models[0].id}
                     onPick={(modelId) => onModelChange?.(modelId)}
+                    allowanceUsedFraction={allowanceUsedFraction}
                   />
                 ) : null}
                 {/* #2458 UX#7 — the composer sends on PLAIN Enter (Shift+Enter =

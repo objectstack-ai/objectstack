@@ -207,7 +207,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **models** | `(string \| { id: string; label: string; default: boolean })[]` | ✅ | Models this system offers |
+| **models** | `(string \| { id: string; label: string; default: boolean; costMultiplier?: number })[]` | ✅ | Models this system offers |
 | **defaultModel** | `string` | optional | Default model id, when the service reports one |
 
 ### Nested Shape: `AiModelsResponse.models[number]`
@@ -217,6 +217,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **id** | `string` | ✅ | Model id |
 | **label** | `string` | ✅ | Display label for the picker |
 | **default** | `boolean` | ✅ | Whether this is the environment default |
+| **costMultiplier** | `number` | optional | Factor by which one message on this model draws on the AI allowance, compared with one message on the environment's default model (which is 1): 20 means one message here uses as much allowance as 20 on the default. Written by cloud service-ai's GET /api/v1/ai/models from the model's cost weight; absent when the service reports none, and then nothing is shown for it. |
 
 
 ---
