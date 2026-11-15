@@ -87,22 +87,25 @@ export const AuthPluginConfigSchema = lazySchema(() => z.object({
    *   - `POST /admin/impersonate-user` / `POST /admin/stop-impersonating`
    *   - `POST /admin/set-role`
    *   - `POST /admin/remove-user`
-   *   - `POST /admin/list-users` / `POST /admin/list-user-sessions`
+   *   - `GET /admin/list-users` / `POST /admin/list-user-sessions`
    *   - `POST /admin/revoke-user-session(s)`
    *
-   * Served with the plugin off as well as on, as ObjectStack mounts that write
-   * through the platform: `POST /admin/ban-user` / `POST /admin/unban-user`,
-   * `POST /admin/unlock-user` and `POST /admin/set-user-password`.
+   * Served with the plugin off as well as on, as ObjectStack mounts rather
+   * than the plugin's own routes: `POST /admin/ban-user` /
+   * `POST /admin/unban-user`, `POST /admin/unlock-user` and
+   * `POST /admin/set-user-password`.
    *
    * The plugin augments `sys_user` with `role`, `banned`, `ban_reason`,
    * `ban_expires` and `sys_session` with `impersonated_by`. These columns
    * are mapped to snake_case by `buildAdminPluginSchema()`.
    *
-   * Every one of these doors is platform-admin gated. The ObjectStack mounts,
-   * `create-user`, `remove-user` and the rebuilt `impersonate-user` run the
-   * ADR-0068 platform-admin gate; the vendor routes left as better-auth ships
-   * them (`set-role`, `list-users`, …) keep better-auth's own check of the
-   * legacy `user.role` scalar.
+   * The ObjectStack mounts, `create-user`, `remove-user` and the rebuilt
+   * `impersonate-user` run the ADR-0068 platform-admin gate; the vendor routes
+   * left as better-auth ships them (`set-role`, `list-users`, …) keep
+   * better-auth's own check of the legacy `user.role` scalar. The exception is
+   * `stop-impersonating`, which is neither: better-auth admits it on the
+   * impersonated session together with the signed `admin_session` cookie
+   * that `impersonate-user` set.
    *
    * Tri-state on purpose (#13816, maintainer ruling 2026-09-01): when left
    * UNSET, effective SCIM decides — SCIM provisioning forces the admin
