@@ -444,6 +444,7 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.currency.rateField': '汇率字段',
   'designer.field.currency.rateFieldNone': '— 选择数字字段 —',
   'designer.field.currency.homeAmountHint': '保存记录时，服务端按单据日期当日生效的汇率把该金额折算为组织本位币，并保存折算结果与所用汇率。这里只列出可存放它们的只读字段：金额用动态模式的币种字段，汇率用数字字段。',
+  'designer.field.currency.homeAmountHeld': '尚未保存：本位币金额的三个字段须全部选定或全部留空。还需选择：{missing}。',
   // Object basics (no-selection default inspector)
   'designer.object.kind': '对象',
   'designer.object.section.basic': '基础信息',

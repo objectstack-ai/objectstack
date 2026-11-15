@@ -75,6 +75,7 @@ import { isVisitorResendInEndpointContext } from './visitor-verification-resend.
 import { createBetterAuthLogSink } from './sso-oidc-refusal-cause.js';
 import { withSystemReadContext } from './objectql-adapter.js';
 import { refuseSsoAccountOutsideProvenDomain, refuseSsoAccountWithoutAddress } from './sso-account-at-proven-domain.js';
+import { refuseSamlAccountKeyContradiction } from './sso-saml-account-key.js';
 
 /** The path better-auth declares for the email sign-up endpoint. */
 const SIGN_UP_EMAIL_PATH = '/sign-up/email';
@@ -354,8 +355,15 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // posture, invitation or JIT toggle relaxes it, and the audience gate
       // must admit as well. Then, verification on or off, an SSO provider
       // creates an account only for a value that is an email address.
+      //
+      // Before all of them, on every action (create, link, sign-in): a SAML
+      // sign-in keyed on a stable attribute read from the posted assertion
+      // goes on only when the vendor's verified attributes carry that value
+      // (`sso-saml-account-key.ts`).
       validateUserInfo: async (data: any, ctx: any) => {
         this.idpLocale.stage(data, ctx);
+        const contradicted = refuseSamlAccountKeyContradiction(data, this.config.logger);
+        if (contradicted) return contradicted;
         const outsideProvenDomain = await refuseSsoAccountOutsideProvenDomain(data, {
           verificationEnabled: () => this.isSsoDomainVerificationEnabled(),
           reader: this.config.dataEngine ? (withSystemReadContext(this.config.dataEngine) as never) : undefined,
