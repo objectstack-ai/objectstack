@@ -396,9 +396,11 @@ produced; a client renders it as received.
   shorter at a time (`fr-FR` → `fr`, `zh-Hant-US` → `zh-Hant`), so a Traditional Chinese
   code is never handed Simplified text.
 - **App-authored** refusal text is not on this ladder: a hook's catalogued refusal is served
-  through `hooks.<hook>.refusals.<CODE>.message` in the caller's locale, negotiated over
+  through `hooks.<hook>.refusals.<CODE>.message` (a declared reason's through
+  `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`) in the caller's locale, negotiated over
   whatever locales the app's translations hold, and otherwise as declared, in the app's own
-  source language. No `en` floor is supplied for it.
+  source language. No `en` floor is supplied for it. Under an entry declaring `params`, a
+  translation keeps its `{{ name }}` holes; the runtime fills them after picking it.
 
 ---
 
