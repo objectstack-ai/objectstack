@@ -13,12 +13,19 @@
  *
  * ## Usage — from the repo root
  *
- *   node scripts/pm/verify-review-tier.mjs PATH      # the Agent tool's output file for the review sub-agent
+ *   node scripts/pm/verify-review-tier.mjs PATH      # the transcript of the run that reviewed
  *   node scripts/pm/verify-review-tier.mjs --self-test
  *
  * `post-stamped.mjs --tier-evidence=PATH` runs the same check before it writes a record that names the tier.
  *
- * ## The transcript it reads (measured on this harness's Agent tool output files)
+ * ## The transcript it reads (measured on this harness, both shapes)
+ *
+ * Two transcripts, one format: a review SUB-AGENT's output file (the Agent tool names it when the agent starts), and
+ * a SESSION's own transcript (`~/.claude/projects/SLUG/SESSION.jsonl`) for a review the session ran itself — a card
+ * thread, or a seat reviewing in-seat. The session form carries every turn of the session, so it passes only when
+ * the WHOLE session ran at the tier; a session that ran at another tier refuses, as it should. Measured: a session
+ * transcript adds `queue-operation`, `last-prompt`, `mode` and `system` (`stop_hook_summary`) entries beside the
+ * same `assistant` and `attachment` entries; none of the extra kinds carries a model, so they are not judged.
  *
  * JSON Lines, one entry per line. An entry with `type: 'assistant'` is one model turn: `message.model` is the
  * model that SERVED it and `requestedModel` the one the harness asked for. An entry with `type: 'attachment'`
@@ -139,8 +146,8 @@ export function verdictText(verdict) {
 let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'passes: every turn at the tier': 3,
-  'refuses: a turn, a request or an identity off the tier': 4,
+  'passes: every turn at the tier': 4,
+  'refuses: a turn, a request or an identity off the tier': 5,
   'refuses: the fallback notice in a harness entry, and only there': 3,
   'refuses: no model field, empty, unparseable or unreadable': 6,
   'output: no model identifier and no path in any verdict line': 2,
@@ -176,6 +183,8 @@ function selfTest() {
   t('all turns at the tier, with a matching identity attachment, pass and count the turns', pass.ok && pass.turns === 2);
   t('a turn with no requestedModel key still passes on its served model', judgeReviewTranscript(jl(user, { type: 'assistant', message: { model: TIER } })).ok);
   t('blank lines and a trailing newline are not entries', judgeReviewTranscript(`${jl(user, turn(TIER))}\n\n`).ok);
+  const session = (...turns) => jl({ type: 'queue-operation', operation: 'enqueue' }, user, { type: 'last-prompt' }, ident(TIER), ...turns, { type: 'system', subtype: 'stop_hook_summary', content: 'hooks ran' }, { type: 'mode', mode: 'auto' });
+  t('⭐ a SESSION transcript (a card thread or in-seat review) run wholly at the tier passes: its extra entry kinds carry no model', judgeReviewTranscript(session(turn(TIER), turn(TIER))).ok);
 
   battery('refuses: a turn, a request or an identity off the tier');
   t('one off-tier turn among at-tier turns refuses, naming its line', (() => {
@@ -185,6 +194,7 @@ function selfTest() {
   t('a run served entirely off the tier refuses', !judgeReviewTranscript(jl(user, turn(OTHER), turn(OTHER))).ok);
   t('a turn served at the tier but requested as another model refuses', !judgeReviewTranscript(jl(user, turn(TIER, OTHER))).ok);
   t('a model attachment naming another model refuses', !judgeReviewTranscript(jl(user, ident(OTHER), turn(TIER))).ok);
+  t('⛔ a SESSION transcript with one turn at another tier (a session that switched, or ran its own work elsewhere) refuses', !judgeReviewTranscript(session(turn(TIER), turn(OTHER), turn(TIER))).ok);
 
   battery('refuses: the fallback notice in a harness entry, and only there');
   t('a system entry carrying the fallback notice refuses', !judgeReviewTranscript(jl(user, turn(TIER), { type: 'system', content: NOTICE })).ok);
@@ -246,7 +256,7 @@ function selfTest() {
 function main(argv) {
   const args = argv.filter((a) => a !== '');
   if (args.length !== 1 || args[0].startsWith('-')) {
-    console.error('usage: node scripts/pm/verify-review-tier.mjs PATH   (the review sub-agent\'s output transcript) · --self-test');
+    console.error('usage: node scripts/pm/verify-review-tier.mjs PATH   (the reviewing run\'s transcript: a sub-agent output file, or a session\'s own .jsonl) · --self-test');
     return EXIT_USAGE;
   }
   const verdict = verifyReviewTranscriptFile(args[0]);

@@ -32,10 +32,10 @@
 - 逾 24 小时条件未满的 hold 列入分诊轮次记录(`check-owed-reviews.mjs` 标出)。
 - 复核记录 = 一条评论落 PR 或卡,席内与各子代理同形;散文、dev 自评、`os-dev-report` 不算。
 - 同形 = `## Contract review` 题头之下 `Head-sha:` 行独占码段、①②③逐项、独立性对、PASS/FAIL。
-- 同形含首行 `Served-tier:`:值写该面所定档的常量名 `CONTRACT_REVIEW_TIER` 或 `TIER_DEFAULT`;
-  无此行不成裁决;模板 `node scripts/pm/record-recognisers.mjs --template`,申报面加 `--face declaration`。
-- 达档复核的 Agent 调用显式传该档 model,简报自述不算;`Served-tier: CONTRACT_REVIEW_TIER` 的记录只
-  经 `post-stamped.mjs --tier-evidence=<子代理输出>` 贴,`verify-review-tier.mjs` 拒即重跑 ⛔ 不改档名。
+- 同形含首行 `Served-tier:`:值为该面所定档常量名 `CONTRACT_REVIEW_TIER` 或 `TIER_DEFAULT`;无此行不
+  成裁决;模板 `node scripts/pm/record-recognisers.mjs --template`;前者只经写工具带 `--tier-evidence=`
+  贴:子代理(调用显式传该档 model)给其输出文件,卡线程或席内复核给本会话
+  `~/.claude/projects/*/<id>.jsonl`;`verify-review-tier.mjs` 拒即重跑 ⛔ 不改档名。
 - ④ 设计判断欠 schema、governed 规则文本、收窄三面,spec、skills、ADR 皆已在内 ⛔ 不另立面:
   逐 `hits` 文件判改动对所引代码与验收场景是否成立,ADR 另判首个消费者与执行计划;
   实现文件审合契约、diff 外只读;①–④ 合称完整复核,余面同形无 ④,⛔ 无第二条记录。

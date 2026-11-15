@@ -2142,7 +2142,7 @@ export function recordLineRefusalText(rows) {
 /**
  * Why a `## Contract review` record that names `CONTRACT_REVIEW_TIER` on its `Served-tier:` line cannot be written,
  * or `null` when it can. The name is the seat's own declaration and AGENTS.md keeps the model identifier out of the
- * comment, so the evidence stays local: `--tier-evidence=PATH` names the review sub-agent's output transcript and
+ * comment, so the evidence stays local: `--tier-evidence=PATH` names the reviewing run's transcript (a sub-agent's output file, or a session's own) and
  * `verify-review-tier.mjs` must pass on it (every turn served at the tier, no fallback). ⛔ The path and every model
  * identifier stay out of the comment, and out of this refusal too. A record naming another tier and every comment
  * that is not a record are untouched. Reads the evidence file and nothing else.
@@ -2157,15 +2157,17 @@ export function recordTierEvidenceRefusal(body, tierEvidence) {
   return verdict.ok ? null : { why: tierVerdictText(verdict) };
 }
 
-/** The refusal a caller reads, from `recordTierEvidenceRefusal`. */
-export function recordTierEvidenceRefusalText(refusal) {
+/** The refusal a caller reads, from `recordTierEvidenceRefusal`; `tool` names the sender, as the signature refusal does. */
+export function recordTierEvidenceRefusalText(refusal, { tool = 'post-stamped' } = {}) {
   return (
-    `post-stamped: REFUSED — this \`## Contract review\` record declares \`Served-tier: ${CONTRACT_REVIEW_TIER_NAME}\` without evidence that passes. Nothing was written.\n` +
+    `${tool}: REFUSED — this \`## Contract review\` record declares \`Served-tier: ${CONTRACT_REVIEW_TIER_NAME}\` without evidence that passes. Nothing was written.\n` +
     `  ${refusal.why}\n\n` +
-    '  Pass the review sub-agent\'s output transcript: --tier-evidence=PATH (the file stays local; neither it nor any model\n' +
-    '  identifier enters the comment). `node scripts/pm/verify-review-tier.mjs PATH` reads the same verdict. A transcript\n' +
-    '  that refuses means the review did not run at the tier: rerun it with the tier\'s model passed explicitly, ⛔ never\n' +
-    '  post the record as at-tier and ⛔ never rename its tier to clear this.'
+    `  Pass the transcript of the run that REVIEWED, as --tier-evidence=PATH on this ${tool} call: a review sub-agent's\n` +
+    '  output file (the Agent tool names it when the agent starts), or, for a review this session ran itself (a card\n' +
+    '  thread, or in-seat), this session\'s own transcript under ~/.claude/projects/ (SESSION.jsonl, every turn of it).\n' +
+    '  The file stays local; neither it nor any model identifier enters the comment. `node scripts/pm/verify-review-tier.mjs\n' +
+    '  PATH` reads the same verdict. A transcript that refuses means the review did not run at the tier: rerun it with the\n' +
+    '  tier\'s model passed explicitly, ⛔ never post the record as at-tier and ⛔ never rename its tier to clear this.'
   );
 }
 
@@ -3550,7 +3552,7 @@ export function parseOptions(argv) {
     return { ok: false, error: '--tier-evidence belongs to a comment (--comment=N): it is the transcript behind a `## Contract review` record, and a record IS a comment.' };
   }
   if (tierEvidence === '') {
-    return { ok: false, error: '--tier-evidence= names no file. Pass the review sub-agent\'s output transcript: --tier-evidence=PATH.' };
+    return { ok: false, error: '--tier-evidence= names no file. Pass the reviewing run\'s transcript (a sub-agent\'s output file, or this session\'s own): --tier-evidence=PATH.' };
   }
   return {
     ok: true,
@@ -3920,7 +3922,7 @@ export function judgeBody(input, options = {}, nowMs = Date.now(), tool = 'post-
   if (record.length > 0) return { ok: false, rendered, text: recordLineRefusalText(record) };
   // The record's tier, on the same act: a record naming `CONTRACT_REVIEW_TIER` carries local evidence that passes.
   const tier = options.mode === 'comment' ? recordTierEvidenceRefusal(rendered.body, options.tierEvidence ?? null) : null;
-  if (tier !== null) return { ok: false, rendered, text: recordTierEvidenceRefusalText(tier) };
+  if (tier !== null) return { ok: false, rendered, text: recordTierEvidenceRefusalText(tier, { tool }) };
   // ⛔ Comments only: a decision analysis is anchored on its card AS A COMMENT, and the handover check reads comments.
   const facets = options.mode === 'comment' ? decisionFacetRefusals(rendered.body) : [];
   if (facets.length > 0) return { ok: false, rendered, text: decisionFacetRefusalText(facets) };
@@ -3966,7 +3968,7 @@ const USAGE = [
   '  MANDATORY hit `--tier` printed nor a `reason:` included — and the refusal prints the spelling that can.',
   '  A `## Contract review` comment\'s `Local-runs:` line is read the same way when it is present (`none`, or',
   '  `probe — REASON`); a record without the line is not re-judged. A record whose `Served-tier:` names',
-  '  `CONTRACT_REVIEW_TIER` is REFUSED unless --tier-evidence=PATH names the review sub-agent\'s transcript and',
+  '  `CONTRACT_REVIEW_TIER` is REFUSED unless --tier-evidence=PATH names the reviewing run\'s transcript and',
   '  `verify-review-tier.mjs` passes on it; the path and the model stay local, out of the comment.',
   '  A comment that is a decision analysis — a decision frame, an options table or lettered options, and a',
   `  recommendation naming one — is REFUSED when it carries no \`${DECISION_FACET_MARKER}\` marker outside code; the`,
@@ -4206,7 +4208,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the signature: every body opens with LANE#N · ACCOUNT · SESSION or is refused, beside the stamp contract; one leading signature changes no reading': 11,
   'the one judge: every body refusal on ONE path — `main` and `label-write.mjs --comment-file` call `judgeBody`, never a copy': 8,
   'the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes': 10,
-  'the record tier: a record naming `CONTRACT_REVIEW_TIER` is written only on a transcript `verify-review-tier.mjs` passes; another tier and a non-record comment are untouched': 12,
+  'the record tier: a record naming `CONTRACT_REVIEW_TIER` is written only on a transcript `verify-review-tier.mjs` passes; another tier and a non-record comment are untouched': 15,
 });
 const SELF_TEST_BATTERY_FLOOR = 29;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -5743,7 +5745,7 @@ export function selfTest() {
     t('structural: main reaches every body refusal through judgeBody alone, ⛔ no inline copy beside it', (mainOnly.match(/judgeBody\(/gu) ?? []).length === 1 && !/signatureRefusal\(|claimKeyedLineRefusals\(|decisionFacetRefusals\(|vacantLedgerRefusals\(/u.test(mainOnly));
     let lw = '';
     try { lw = readFileSync(new URL('./label-write.mjs', import.meta.url), 'utf8'); } catch { lw = ''; }
-    t('↔ structural: label-write imports judgeBody and judges its folded comment with it, ⛔ no reader of its own', /\bjudgeBody\b[^;]*from '\.\/post-stamped\.mjs'/u.test(lw) && /judgeBody\(text, \{ mode: 'comment' \}/u.test(lw) && !/function\s+(signatureRefusal|claimKeyedLineRefusals|decisionFacetRefusals)\b/u.test(lw));
+    t('↔ structural: label-write imports judgeBody and judges its folded comment with it, ⛔ no reader of its own', /\bjudgeBody\b[^;]*from '\.\/post-stamped\.mjs'/u.test(lw) && /judgeBody\(text, \{ mode: 'comment', tierEvidence: options\.tierEvidence \}/u.test(lw) && !/function\s+(signatureRefusal|claimKeyedLineRefusals|decisionFacetRefusals)\b/u.test(lw));
   }
 
   battery('the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes');
@@ -5784,6 +5786,13 @@ export function selfTest() {
       const none = judged(REC(CONTRACT_REVIEW_TIER_NAME), null);
       t('⛔ a record naming CONTRACT_REVIEW_TIER with no --tier-evidence is refused', !none.ok && none.text.includes('--tier-evidence'));
       t('⭐ …and the same record passes on a transcript served at the tier throughout', judged(REC(CONTRACT_REVIEW_TIER_NAME), atTier).ok);
+      const sessionAtTier = join(dir, 'session.jsonl');
+      writeFileSync(sessionAtTier, [JSON.stringify({ type: 'queue-operation' }), JSON.stringify({ type: 'attachment', attachment: { type: 'model', identity: { modelId: CONTRACT_REVIEW_TIER } } }), turn(CONTRACT_REVIEW_TIER), JSON.stringify({ type: 'system', subtype: 'stop_hook_summary' })].join('\n'));
+      t('⭐ …and on a SESSION transcript run wholly at the tier — the path a card-thread or in-seat reviewer passes', judged(REC(CONTRACT_REVIEW_TIER_NAME), sessionAtTier).ok);
+      t('the refusal names the sender it was handed, and both evidence paths a reviewer can follow', (() => {
+        const lw = judgeBody(REC(CONTRACT_REVIEW_TIER_NAME), { mode: 'comment' }, NOW_MS, 'label-write');
+        return !lw.ok && lw.text.startsWith('label-write: REFUSED') && lw.text.includes('output file') && lw.text.includes('~/.claude/projects/');
+      })());
       const off = judged(REC(CONTRACT_REVIEW_TIER_NAME), offTier);
       t('⛔ a transcript with one turn served off the tier is refused', !off.ok && off.text.includes('REFUSED'));
       t('⛔ an empty transcript is refused', !judged(REC(CONTRACT_REVIEW_TIER_NAME), empty).ok);
@@ -5794,6 +5803,8 @@ export function selfTest() {
       t('⭐ a card BODY is untouched — the check is a record\'s, and a record is a comment', judgeBody(REC(CONTRACT_REVIEW_TIER_NAME), { mode: 'body' }, NOW_MS).ok);
       t('the CLI carries --tier-evidence=PATH on a comment, and leaves it null when absent', parseOptions(['--comment=1', `--tier-evidence=${atTier}`]).options.tierEvidence === atTier && parseOptions(['--comment=1']).options.tierEvidence === null);
       t('⛔ --tier-evidence with --body, or with no path, is refused', parseOptions(['--body=1', '--tier-evidence=x']).ok === false && parseOptions(['--comment=1', '--tier-evidence=']).ok === false);
+      const verifier = spawnSync(process.execPath, [fileURLToPath(new URL('./verify-review-tier.mjs', import.meta.url)), '--self-test'], { encoding: 'utf8' });
+      t('the verifier\'s own --self-test runs HERE, so CI runs it inside check:pm-post-stamped: exit 0 and its success line', verifier.status === 0 && /✓ verify-review-tier self-test: \d+ cases pass/u.test(verifier.stdout));
       const own = readFileSync(SELF_PATH, 'utf8');
       t('structural: the transcript judge is imported from verify-review-tier.mjs, ⛔ never restated here', /import \{[^}]*\bverifyReviewTranscriptFile\b[^}]*\} from '\.\/verify-review-tier\.mjs';/u.test(own) && !/function\s+(judgeReviewTranscript|verifyReviewTranscriptFile)\b/u.test(own));
     } finally {
