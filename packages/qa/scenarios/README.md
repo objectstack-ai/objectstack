@@ -304,6 +304,12 @@ npx @objectstack/scenarios help                                      # the comma
   door's text). The runner also records the run dates (each clock instant's UTC and local date) and the fields
   the agent's own write calls set (`agentSetOf`: a create's or update's `data`, a `run_action`'s `params`); a
   declared `asOf` value is matched against a run date only in a field the agent did not set.
+- **Run date** (`run-date.ts`): before a card runs, its dates move onto the day it starts. One whole-day
+  delta, `run date − asOf`, moves `asOf`, every ISO date under `run` and `iterate`, and the dates an `ask` writes
+  in its text (ISO, English `[Weekday] D Month`, Chinese `M 月 D 日(周X)`, weekdays written again); the truths are
+  computed again over the moved seed. The prompt's "today", the seeded rows, the timestamps the app's real clock
+  stamps and the grader's expectations then agree, however long after `asOf` the run is. The card file is not
+  changed. A card on working days keeps to them only when the delta is whole weeks.
 - **Namespaces** (`namespace.ts`): every card's app is in the namespace `demo` + the card's `code` (`democrm`): scratch
   mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
   `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are
