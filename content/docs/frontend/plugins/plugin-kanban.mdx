@@ -159,9 +159,10 @@ export function useBoard(initialColumns: KanbanColumn[]) {
 
 A host that owns the card click (`onRowClick`) and knows it opens nothing for
 these cards passes the React prop `rowOpensRecord={false}` to `ObjectKanban`: a
-card that cannot be dragged then is no control at all (no `button` role, no tab
-stop, no Enter/Space activation, no pointer, hover lift or title hover), and a
-card that can keeps its grab cursor and its drag semantics. The click still reaches `onRowClick`. Absent
+card that cannot be dragged then is no control at all: it is not a button,
+takes no tab stop, ignores Enter and Space, and draws no pointer, hover lift or
+title hover. A card that can be dragged keeps its grab cursor and its drag
+semantics. The click still reaches `onRowClick`. Absent
 (or `true`), every card is drawn as before. It is a host prop, not a schema
 key: list metadata cannot set it. The console passes `false` for a view
 authored `navigation: { mode: 'none' }` and for an object whose data API serves
