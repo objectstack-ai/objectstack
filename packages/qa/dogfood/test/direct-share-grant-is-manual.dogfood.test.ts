@@ -122,14 +122,16 @@ describe('[ADR-0111 D7] a share granted directly by a non-system caller is alway
     expect(await sharesOn(recordId)).toHaveLength(1);
   });
 
-  it('the generic data door does not write a share row for the caller', async () => {
+  it('the generic data door on sys_record_share refuses the caller\'s create and writes no share row', async () => {
     const recordId = await newNote('dsm generic door');
     const res = await stack.apiAs(ownerToken, 'POST', '/data/sys_record_share', {
       object_name: OBJECT, record_id: recordId, recipient_type: 'user', recipient_id: recipientId,
       access_level: 'read', source: 'rule', source_id: 'srule_dsm',
     });
-    expect(res.status, await res.clone().text()).toBeGreaterThanOrEqual(400);
-    expect(res.status).toBeLessThan(500);
+    const text = await res.text();
+    // `enable.apiMethods` on `sys_record_share` grants no create (ADR-0103).
+    expect(res.status, text).toBe(405);
+    expect(text).toContain('OBJECT_API_METHOD_NOT_ALLOWED');
     expect(await sharesOn(recordId)).toHaveLength(0);
   });
 });
