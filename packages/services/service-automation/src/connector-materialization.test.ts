@@ -225,6 +225,8 @@ async function bootReloadable(
         residualOwners?: Record<string, 'code' | 'marketplace'>;
         /** The connectors a package registration filed, as `getArtifactItem` answers them (#28594). */
         registered?: unknown[];
+        /** A real `SchemaRegistry` served instead of the double over the mutable set (#31699: two holders). */
+        schemaRegistry?: SchemaRegistry;
     },
 ) {
     const state = { declared: initial };
@@ -239,7 +241,7 @@ async function bootReloadable(
         async init(ctx: any) {
             captured = ctx;
             ctx.registerService('objectql', {
-                registry: {
+                registry: opts.schemaRegistry ?? {
                     listItems: (type: string) => (type === 'connector' ? state.declared : []),
                     getPackage: (id: string) => opts.packages?.[id],
                     getArtifactItem: artifactReader(opts.registered),
@@ -445,16 +447,80 @@ describe('ADR-0150 D3 — a declared connector name resolves by (package, name) 
         expect(calls.map((c) => c.label)).toEqual([`billing from ${A}`]);
     });
 
-    it('two package holders: the boot refuses, naming both — no instance is picked by list order', async () => {
+    it('[ADR-0150 D9, the narrowing] two package holders of different namespaces: each instance materializes under its package (FROM: the boot refused, naming both)', async () => {
         const { factory, calls } = makeFakeProvider();
-        const err = await boot([], { providerFactory: factory, schemaRegistry: registryShipping(A, B) }).then(
-            () => undefined,
-            (e: Error) => e,
-        );
-        expect(err?.message).toContain(`connector instance 'billing' is not materialized`);
-        expect(err?.message).toContain(`"${A}"`);
-        expect(err?.message).toContain(`"${B}"`);
-        expect(calls).toEqual([]);
+        const kernel = await boot([], { providerFactory: factory, schemaRegistry: registryShipping(A, B) });
+        const engine = automationOf(kernel);
+        expect(calls.map((c) => c.label).sort()).toEqual([`billing from ${A}`, `billing from ${B}`]);
+        expect(engine.getConnectorDescriptors().filter((d) => d.name === 'billing').map((d) => d.packageId).sort()).toEqual([A, B]);
+        expect(engine.getConnectorOrigin('billing', A)).toBe('declarative');
+        expect(engine.getConnectorOrigin('billing', B)).toBe('declarative');
+        // The bare name reads no instance: two, never one of them.
+        expect(engine.getConnectorOrigin('billing')).toBeUndefined();
+        await kernel.shutdown();
+    });
+
+    describe('[#31699 review M1] the credential listing reads each declaring entry\'s own instance', () => {
+        const REF = 'OS_TEST_31699_LISTING_REF';
+        const auth = { type: 'bearer', credentialRef: REF } as ConnectorInstanceAuth;
+        afterEach(() => { delete process.env[REF]; });
+        /** A's instance reaches its upstream; B's cannot (degraded). */
+        const factory: ConnectorProviderFactory = (ctx) => {
+            if (ctx.label === `billing from ${B}`) throw new ConnectorUpstreamUnavailableError(`connector '${ctx.name}' could not reach its server: connect ECONNREFUSED`);
+            return {
+                def: { name: ctx.name, label: ctx.label, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] } as unknown as Connector,
+                handlers: { ping: async () => ({ ok: true }) },
+            };
+        };
+
+        it('two packages\' instances of one name, one ready and one degraded: each entry reports its own state', async () => {
+            process.env[REF] = 'dummy-31699';
+            const registry = new SchemaRegistry();
+            registry.logLevel = 'silent';
+            for (const id of [A, B]) {
+                registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() } as never, 'code');
+                registry.registerItem('connector', providerConnector('billing', { label: `billing from ${id}`, auth }), 'name' as never, id);
+            }
+            const kernel = await boot([], { providerFactory: factory, schemaRegistry: registry });
+            const [entry] = await automationOf(kernel).listConnectorCredentialRefs();
+            expect(entry?.connectors.map((c) => [c.packageId, c.state]).sort()).toEqual([[A, 'ready'], [B, 'degraded']]);
+            await kernel.shutdown();
+        });
+
+        it.each(['sys_metadata', '__runtime__'])('an entry stamped %s (no package of its own) over a one-holder name reports the holder\'s instance state', async (stamp) => {
+            process.env[REF] = 'dummy-31699';
+            const registry = new SchemaRegistry();
+            registry.logLevel = 'silent';
+            registry.installPackage({ id: A, name: A, version: '1.0.0', type: 'app', namespace: 'billing_a' } as never, 'code');
+            registry.registerItem('connector', providerConnector('billing', { label: `billing from ${A}` }), 'name' as never, A);
+            // The declaration the reconcile reads is the environment's stored row; the holder is A's.
+            const row = { ...providerConnector('billing', { label: `billing from ${A}`, auth }), _packageId: stamp };
+            const served = Object.assign(Object.create(registry) as SchemaRegistry, {
+                listItems: (type: string) => (type === 'connector' ? [row] : registry.listItems(type as never)),
+            });
+            const kernel = await boot([], { providerFactory: factory, schemaRegistry: served });
+            const engine = automationOf(kernel);
+            expect(engine.getConnectorDescriptors().find((d) => d.name === 'billing')?.packageId).toBe(A);
+            const [entry] = await engine.listConnectorCredentialRefs();
+            expect(entry?.connectors).toEqual([expect.objectContaining({ name: 'billing', state: 'ready' })]);
+            await kernel.shutdown();
+        });
+    });
+
+    it('[#31699 review M2] a reload of one holder\'s artifact re-materializes that holder\'s instance and leaves the other\'s live', async () => {
+        const { factory, calls, closed } = makeClosableProvider();
+        const { engine, reload, kernel } = await bootReloadable([], { providerFactory: factory, schemaRegistry: registryShipping(A, B) });
+        expect(calls.map((c) => c.label).sort()).toEqual([`billing from ${A}`, `billing from ${B}`]);
+        // A's artifact, its item unstamped as a compiled artifact carries it: it is A's, by the manifest.
+        await reload([], { metadata: { manifest: { id: A }, connectors: [providerConnector('billing', { label: 'billing from A, edited' })] } });
+        expect(calls.map((c) => c.label)).toContain('billing from A, edited');
+        // One teardown: A's superseded instance. B's was never touched.
+        expect(closed).toEqual(['billing']);
+        expect(calls.filter((c) => c.label === `billing from ${B}`)).toHaveLength(1);
+        expect(engine.getConnectorOrigin('billing', A)).toBe('declarative');
+        expect(engine.getConnectorOrigin('billing', B)).toBe('declarative');
+        expect(engine.getConnectorDescriptors().filter((d) => d.name === 'billing').map((d) => d.packageId).sort()).toEqual([A, B]);
+        await kernel.shutdown();
     });
 });
 

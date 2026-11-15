@@ -874,6 +874,139 @@ describe('#32501 — the dataset doors at an exact pair address read the package
     boot(order, true);
     await judgedOverAdmission({ callerPackage: `${P}.custom` }, '?callerPackage= the App pair, installed');
   });
+
+  // ── [#32948, ADR-0150 D4] a row no one module owns, beside the App's two modules ──
+  // A row of the name that either module could own is no one holder's
+  // customization, so each module's own exact read refuses it naming both
+  // (`ambiguous-in-closure`, read as that module). The admission arm read that
+  // refusal as "cannot be judged", so every refusal of the name answered 503
+  // for every caller. Now a module whose own address is contended is judged on
+  // its own item as the list scoped to it serves it: named in the 409 when the
+  // caller is admitted to it, never run, and not named otherwise.
+  //
+  // Staged with the registry's own `registerItem`: the App pair's row that no
+  // module's address declares, hydrated into the bare slot (the registry binds
+  // it to no package). A package-less row (`_provenance: 'org'`, or stamped
+  // `sys_metadata`) is declined at each module's address for a dataset (epic
+  // ruling 6817768147), so it contends nothing; the CONTROL below holds that.
+  //
+  // BASE (`main` ba35dfd78): 503 SERVICE_UNAVAILABLE for every caller, in both
+  // orders, on the bare read and at a module's own `?package=`, single door and
+  // batch alike; nothing named, nothing run.
+  const contendingRow = () => registry.registerItem('dataset', {
+    name: 'sales', label: 'pair sales', object: 'pair_item', _packageId: `${P}.custom`, _provenance: 'org',
+    dimensions: [{ name: 'region', field: 'region', type: 'string' }],
+    measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+  }, 'name' as never);
+  /**
+   * A 409 narrowed to the one module the caller may query neither names nor
+   * implies the hidden one: the refusal carries its code and its sentence and
+   * nothing else (no candidates, no reason, no details), and the sentence
+   * counts no holders and speaks of no other, both, each or "no one" package.
+   */
+  const hiddenHolderNotImplied = (answer: Awaited<ReturnType<typeof both>>, where: string) => {
+    const single = JSON.parse(answer.single.text);
+    const entry = JSON.parse(answer.batch.text);
+    expect(Object.keys(single).sort(), where).toEqual(['code', 'message']);
+    expect(Object.keys(entry).sort(), where).toEqual(['error', 'status']);
+    expect(Object.keys(entry.error).sort(), where).toEqual(['code', 'message']);
+    for (const message of [answer.single.message, answer.batch.message]) {
+      expect(message, where).not.toMatch(/\b\d+\s+(packages?|holders?)\b/i);
+      expect(message, where).not.toMatch(/\b(packages|holders|other|another|both|each|either|no one|ambiguous|picks?)\b/i);
+    }
+  };
+  const judgedOverContention = async (query: Record<string, unknown>, what: string) => {
+    refusedNamingModules(await both(query, admitting(['one_item', 'two_item'])), `${what}, admitted to both`);
+    for (const [admitted, shown, hidden] of [['one_item', M1, M2], ['two_item', M2, M1]] as const) {
+      const answer = await both(query, admitting([admitted]));
+      const where = `${what}, admitted to ${admitted} only`;
+      // Never run: the module's own address is contended, so nothing is picked.
+      expect([answer.single.status, answer.single.code, answer.single.ran], where).toEqual([409, 'RESOURCE_CONFLICT', []]);
+      expect([answer.batch.status, answer.batch.entry, answer.batch.code, answer.batch.ran], where).toEqual([200, 409, 'RESOURCE_CONFLICT', []]);
+      expect(answer.single.message, where).toContain(`package "${shown}"`);
+      expect(answer.batch.message, where).toContain(`package "${shown}"`);
+      expect(answer.single.text, where).not.toContain(hidden);
+      expect(answer.batch.text, where).not.toContain(hidden);
+      hiddenHolderNotImplied(answer, where);
+    }
+    const none = await both(query, admitting([]));
+    const missing = await both(query, admitting([]), 'nowhere');
+    expect([none.single.status, none.single.code, none.single.ran], `${what}, admitted to neither`).toEqual([404, 'NOT_FOUND', []]);
+    expect(none.single.text, `${what}, admitted to neither`).toBe(missing.single.text.replace(/nowhere/g, 'sales'));
+    expect([none.batch.status, none.batch.entry, none.batch.ran], `${what}, admitted to neither`).toEqual([200, 404, []]);
+    expect(none.batch.text, `${what}, admitted to neither`).toBe(missing.batch.text.replace(/nowhere/g, 'sales'));
+  };
+
+  it.each([['one first', [M1, M2]], ['two first', [M2, M1]]] as const)('[#32948] plugin-wired admission (%s): an App pair row no module owns contends both modules\' addresses, and the name refuses 409 naming the modules the caller is admitted to (BASE: 503 for every caller)', async (_order, order) => {
+    boot(order, true);
+    contendingRow();
+    await judgedOverContention({}, 'the bare read');
+    await judgedOverContention({ package: M1 }, '?package= a module');
+    await judgedOverContention({ callerPackage: M2 }, '?callerPackage= a module');
+  });
+
+  it.each([['alpha first', [A, M1, M2]], ['alpha last', [M2, M1, A]]] as const)('[#32948] plugin-wired admission (%s): beside the two contended modules, another package\'s holder the caller alone may query runs, and with a module admitted too the 409 names both (BASE: 503)', async (_order, order) => {
+    boot(order, true);
+    contendingRow();
+    ran(await both({}, admitting(['alpha_item'])), 'alpha sales', 'admitted to alpha only');
+    const two = await both({}, admitting(['alpha_item', 'one_item']));
+    expect([two.single.status, two.single.code, two.single.ran]).toEqual([409, 'RESOURCE_CONFLICT', []]);
+    expect([two.batch.status, two.batch.entry, two.batch.ran]).toEqual([200, 409, []]);
+    for (const text of [two.single.message, two.batch.message]) {
+      expect(text).toContain(`package "${A}"`);
+      expect(text).toContain(`package "${M1}"`);
+      expect(text).not.toContain(M2);
+    }
+  });
+
+  // At a module's own address the uncontended holder is not a candidate: the
+  // read refuses that module's name over the two modules only, so the widening
+  // never reaches across to it. Running alpha there would be a pick at a
+  // module's exact address; the caller admitted to alpha alone is answered what
+  // a missing name answers, and one admitted beside a module is refused naming
+  // that module alone. BASE (`main` ba35dfd78): 503 in every cell.
+  it.each([['alpha first', [A, M1, M2]], ['alpha last', [M2, M1, A]]] as const)('[#32948] plugin-wired admission (%s): at a module\'s address the uncontended holder is not reached across to — alpha alone answers the missing name, alpha with a module refuses naming that module alone (BASE: 503)', async (_order, order) => {
+    boot(order, true);
+    contendingRow();
+    for (const [query, what] of [[{ package: M1 }, '?package= a module'], [{ callerPackage: M2 }, '?callerPackage= a module']] as const) {
+      const alone = await both(query, admitting(['alpha_item']));
+      const missing = await both(query, admitting(['alpha_item']), 'nowhere');
+      expect([alone.single.status, alone.single.code, alone.single.ran], `${what}, alpha only`).toEqual([404, 'NOT_FOUND', []]);
+      expect(alone.single.text, `${what}, alpha only`).toBe(missing.single.text.replace(/nowhere/g, 'sales'));
+      expect([alone.batch.status, alone.batch.entry, alone.batch.ran], `${what}, alpha only`).toEqual([200, 404, []]);
+      expect(alone.batch.text, `${what}, alpha only`).toBe(missing.batch.text.replace(/nowhere/g, 'sales'));
+      const beside = await both(query, admitting(['alpha_item', 'one_item']));
+      const where = `${what}, alpha and one`;
+      expect([beside.single.status, beside.single.code, beside.single.ran], where).toEqual([409, 'RESOURCE_CONFLICT', []]);
+      expect([beside.batch.status, beside.batch.entry, beside.batch.code, beside.batch.ran], where).toEqual([200, 409, 'RESOURCE_CONFLICT', []]);
+      for (const answer of [beside.single, beside.batch]) {
+        expect(answer.message, where).toContain(`package "${M1}"`);
+        expect(answer.text, where).not.toContain(A);
+        expect(answer.text, where).not.toContain(M2);
+      }
+      hiddenHolderNotImplied(beside, where);
+    }
+  });
+
+  it.each([['one first', [M1, M2]], ['two first', [M2, M1]]] as const)('[#32948] CONTROL (%s): a package-less row beside the two modules is declined at each module\'s address, so the App pair is judged over the modules as with no row, before and after', async (_order, order) => {
+    boot(order);
+    registry.registerItem('dataset', {
+      name: 'sales', label: 'row sales', object: 'row_item', _provenance: 'org',
+      dimensions: [{ name: 'region', field: 'region', type: 'string' }],
+      measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+    }, 'name' as never);
+    await judgedOverAdmission({ package: `${P}.custom` }, '?package= the App pair, a package-less row beside');
+  });
+
+  it('[#32948] CONTROL — one module holds the name: the App pair row is that module\'s customization, served at its address and on the bare read; admission is not asked, before and after', async () => {
+    boot([M1], true);
+    contendingRow();
+    for (const query of [{}, { package: M1 }]) {
+      const svc = admitting(['one_item', 'pair_item']);
+      ran(await both(query, svc), 'pair sales', JSON.stringify(query));
+      expect(svc.admitDatasetCatalogEntry, JSON.stringify(query)).not.toHaveBeenCalled();
+    }
+  });
 });
 
 // ── [#32292, ADR-0150 D3 after ADR-0149 D2] the refusal arm judges admission first ──
@@ -938,7 +1071,11 @@ describe('[#32292] POST /analytics/dataset/query — a refused name is judged ov
    * package-less row of the name beside the holders no longer rigs this for a
    * dataset: a sealed type declines that row at every exact address (epic
    * ruling 6817768147), which serves the holder's own. So the refusal that row
-   * gave is thrown here, in the shape that read threw it.
+   * gave is thrown here, read as no address's own (`callerPackageId: null`).
+   * [#32948] The shape a real exact read throws over a row two holders could
+   * own (read AS the holder, naming it) is judged, not left undetermined: the
+   * `#32501` describe pins that over a real registry arrangement. This double
+   * pins every OTHER refusal of a holder's own read, which stays undetermined.
    */
   const exactReadsRefuse = (...holders: string[]) => {
     const target = protocol;
@@ -1079,6 +1216,35 @@ describe('[#32292] POST /analytics/dataset/query — a refused name is judged ov
       expect(answer.text).not.toContain(A);
       expect(answer.text).not.toContain(B);
       expect(svc.queryDataset).not.toHaveBeenCalled();
+    }
+  });
+
+  // [#32826] The operator reads why: the 503's cause, printed by the door's
+  // `logError`, names each holder that could not be judged and why; the body
+  // keeps its one sentence and names no holder. BASE (`main` ba35dfd78): the
+  // logged error carried no cause.
+  it('[#32826] the undetermined 503 logs which holders could not be judged and why, and its body names none', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    exactReadsRefuse(B);
+    vi.stubEnv('OS_REST_LOG', 'error');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const svc = service({ unresolved: ['alpha_item'] });
+      const answer = await send(svc);
+      expect([answer.status, answer.code], answer.text).toEqual([503, 'SERVICE_UNAVAILABLE']);
+      expect(answer.text).not.toContain(A);
+      expect(answer.text).not.toContain(B);
+      const error = logged.mock.calls.map((call) => call.find((arg) => arg instanceof Error)).find(Boolean) as Error | undefined;
+      expect((error as { code?: unknown } | undefined)?.code).toBe('SERVICE_UNAVAILABLE');
+      const cause = String((error?.cause as Error | undefined)?.message ?? '');
+      // Each unjudged holder by name, and the refusal's reason where a read refused.
+      expect(cause).toContain(`package "${A}"`);
+      expect(cause).toContain(`package "${B}"`);
+      expect(cause).toContain('ambiguous-in-closure');
+    } finally {
+      logged.mockRestore();
+      vi.unstubAllEnvs();
     }
   });
 
