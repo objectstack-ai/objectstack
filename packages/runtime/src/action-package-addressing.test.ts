@@ -31,7 +31,8 @@ import { PackageScopedNameRefusedError, resolvePackageScopedHolders } from '@obj
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import {
-    actionHandlerOwnerRefusal, executeRegisteredAction, resolveAddressedRouteActionDeclaration, resolveRouteActionDeclaration,
+    actionHandlerOwnerRefusal, actionPermissionRefusal, executeRegisteredAction, resolveActionHandlerKeys,
+    resolveAddressedRouteActionDeclaration, resolveRouteActionDeclaration,
     type ActionExecutionDeps,
 } from './action-execution.js';
 
@@ -1908,5 +1909,180 @@ describe('ADR-0150 D4 — the action route resolves the declaration its own pack
         storeEnvironmentRow('account');
         const declaration = await routeTo('account', A);
         expect([declaration.refusal, declaration.packageId]).toEqual([undefined, A]);
+    });
+});
+
+/**
+ * [ADR-0150 D4] An action is identified by `(owner, owning object, name)`, so
+ * the platform's package-less `approve` bound to `lead` and the environment's
+ * object-less `approve` are two items under two keys. Binding first, then
+ * owner: `/actions/lead/approve` serves the platform's `lead`-bound item, the
+ * environment's object-less item serves every other route, and the
+ * environment changes `lead` by authoring an item bound to `lead` (one key,
+ * the environment's item). On every route the declaration the gates judge and
+ * the handler the dispatch runs are one item's, in both registration orders,
+ * beside no package holder, one, or two elsewhere.
+ */
+describe('ADR-0150 D4 — a route serves the package-less action on its own key, and runs that item\'s handler', () => {
+    /** A fresh engine whose `find` reads the environment's store, as one kernel's engine does. */
+    const freshEngine = () => {
+        engine = new ObjectQL();
+        engine.registry.logLevel = 'silent';
+        (protocol as any).engine.registry = engine.registry;
+        storedRows = [];
+        (engine as any).find = async (object: string, query: any) => {
+            if (object !== 'sys_metadata') return [];
+            const where: Record<string, any> = query?.where ?? {};
+            return storedRows.filter((row) => Object.keys(where).every((field) => {
+                if (field.startsWith('$')) throw new Error(`engine store double: combinator ${field} is not implemented`);
+                return row[field] === where[field];
+            }));
+        };
+    };
+    const body = { language: 'js', source: 'return 1;', capabilities: [] };
+    /** The platform's `approve` bound to `lead` (code registering with no package), and its handler there. */
+    const platformOnLead = () => {
+        engine.registry.registerItem('action', {
+            name: 'approve', label: 'platform', type: 'script', objectName: 'lead', target: 'approve',
+            requiredPermissions: ['platform_gate'], body,
+        } as never, 'name' as never);
+        engine.registerAction('lead', 'approve', () => 'ran platform', 'plugin.platform');
+    };
+    /** The environment's own `approve` (object-less, or bound): registered, its row stored, its handler bound by the resync (the harness's row store answers no single row, so the item carries no stored-row stamp). */
+    const environmentItem = (objectName?: string) => {
+        const def = { name: 'approve', label: 'env', type: 'script', ...(objectName ? { objectName } : {}), requiredPermissions: ['env_gate'] };
+        engine.registry.registerItem('action', { ...def, body } as never, 'name' as never);
+        storedRows = [{ id: 'env-approve', type: 'action', name: 'approve', state: 'active', package_id: null, metadata: JSON.stringify(def) }];
+        engine.registerAction(objectName ?? 'global', 'approve', () => 'ran env', 'metadata-service');
+    };
+    /** `count` package holders elsewhere, each with its handler: A on `account`, B on `contact`. */
+    const holdersElsewhere = (count: number) => {
+        [A, B].forEach((id) => install(id));
+        for (const [id, objectName] of [[A, 'account'], [B, 'contact']].slice(0, count)) {
+            ship(id, objectName);
+            engine.registerAction(objectName, 'approve', () => `ran ${id}`, `app:${id}`);
+        }
+    };
+    const bothOrders = (steps: Array<() => unknown>): Array<[string, () => void]> => [
+        ['registered in order', () => steps.forEach((step) => step())],
+        ['registered in reverse', () => [...steps].reverse().forEach((step) => step())],
+    ];
+    const onlyEnvGate = { userId: 'u1', systemPermissions: ['env_gate'] };
+    const bothGates = { userId: 'u2', systemPermissions: ['env_gate', 'platform_gate'] };
+    /** The route's declaration, the D4 gate and the owner gate on it for `ec`, and the handler its dispatch runs. */
+    const call = async (objectName: string, ec: any) => {
+        const declaration = await resolveRouteActionDeclaration(deps, { request: {} } as any, { ql: engine, objectName, actionName: 'approve' });
+        const action = declaration.action;
+        const gate = action ? actionPermissionRefusal(deps, action, ec, objectName) : undefined;
+        const ownerGate = action ? await actionHandlerOwnerRefusal(deps, { request: {} } as any, {
+            ql: engine, action, objectName, candidates: resolveActionHandlerKeys(action, 'approve'), ec,
+        }) : undefined;
+        const run = await executeRegisteredAction(deps, engine, objectName, resolveActionHandlerKeys(action ?? {}, 'approve'), {}, declaration.packageId);
+        return { label: action?.label, requiredPermissions: action?.requiredPermissions, gate, ownerGate, result: run.result };
+    };
+
+    for (const elsewhere of [0, 1]) {
+        it(`${elsewhere} package holder(s) elsewhere: \`/actions/lead/approve\` serves the platform's \`lead\`-bound item and runs its handler, in both registration orders`, async () => {
+            for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
+                freshEngine();
+                holdersElsewhere(elsewhere);
+                register();
+                const admitted = await call('lead', bothGates);
+                expect([admitted.label, admitted.requiredPermissions, admitted.gate, admitted.ownerGate, admitted.result], order)
+                    .toEqual(['platform', ['platform_gate'], null, undefined, 'ran platform']);
+            }
+        });
+
+        it(`${elsewhere} package holder(s) elsewhere: the platform item's \`requiredPermissions\` gate \`/actions/lead/approve\` in both registration orders`, async () => {
+            for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
+                freshEngine();
+                holdersElsewhere(elsewhere);
+                register();
+                const refused = await call('lead', onlyEnvGate);
+                expect([refused.gate?.code, refused.gate?.status], order).toEqual(['PERMISSION_DENIED', 403]);
+                expect(refused.gate?.message, order).toContain('platform_gate');
+            }
+        });
+
+    }
+
+    for (const elsewhere of [0, 1, 2]) {
+        it(`${elsewhere === 0 ? 'CONTROL — ' : ''}${elsewhere} package holder(s) elsewhere: the environment's object-less item serves every other route and runs its own handler, in both registration orders`, async () => {
+            for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
+                freshEngine();
+                holdersElsewhere(elsewhere);
+                register();
+                for (const route of ['opportunity', 'global']) {
+                    const served = await call(route, onlyEnvGate);
+                    expect([served.label, served.requiredPermissions, served.gate, served.ownerGate, served.result], `${order}, ${route}`)
+                        .toEqual(['env', ['env_gate'], null, undefined, 'ran env']);
+                }
+            }
+        });
+    }
+
+    it('two package holders elsewhere: `/actions/lead/approve` answers what the platform\'s `lead`-bound item alone answers there (no declaration, the bare route\'s answer beside two holders), never the environment\'s object-less item, in both registration orders', async () => {
+        for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
+            freshEngine();
+            holdersElsewhere(2);
+            register();
+            const onLead = await resolveRouteActionDeclaration(deps, { request: {} } as any, { ql: engine, objectName: 'lead', actionName: 'approve' });
+            expect([onLead.action, onLead.refusal, onLead.degraded], order).toEqual([undefined, undefined, undefined]);
+        }
+    });
+
+    it('CONTROL — one key keeps one item: the environment\'s item bound to `lead`, registered after the platform\'s there, wins on `lead` and runs its own handler', async () => {
+        for (const elsewhere of [0, 1, 2]) {
+            freshEngine();
+            holdersElsewhere(elsewhere);
+            platformOnLead();
+            environmentItem('lead');
+            const served = await call('lead', onlyEnvGate);
+            expect([served.label, served.requiredPermissions, served.gate, served.result], `${elsewhere} elsewhere`)
+                .toEqual(['env', ['env_gate'], null, 'ran env']);
+        }
+    });
+
+    it('CONTROL — the platform\'s `lead`-bound item alone serves `lead` and no other route', async () => {
+        for (const elsewhere of [0, 1]) {
+            freshEngine();
+            holdersElsewhere(elsewhere);
+            platformOnLead();
+            const lead = await call('lead', bothGates);
+            expect([lead.label, lead.result], `${elsewhere} elsewhere`).toEqual(['platform', 'ran platform']);
+            expect((await call('opportunity', bothGates)).label, `${elsewhere} elsewhere`).toBeUndefined();
+        }
+    });
+
+    it('the environment\'s address: `/actions/_env/lead/approve` is the platform item\'s key, `404`, and every other route serves the environment\'s object-less item and runs its handler, in both registration orders', async () => {
+        const envAddress = (objectName: string) => resolveAddressedRouteActionDeclaration(deps, { request: {} } as any, {
+            ql: engine, objectName, actionName: 'approve', qualifier: { environment: true },
+        });
+        for (const elsewhere of [0, 1]) {
+            for (const [order, register] of bothOrders([platformOnLead, () => environmentItem()])) {
+                freshEngine();
+                holdersElsewhere(elsewhere);
+                register();
+                const at = `${elsewhere} elsewhere, ${order}`;
+                const err = await envAddress('lead').then(() => undefined, (e: any) => e);
+                expect([err?.code, err?.status], at).toEqual(['RESOURCE_NOT_FOUND', 404]);
+                const served = await envAddress('opportunity');
+                expect(served.action?.label, at).toBe('env');
+                expect(await executeRegisteredAction(deps, engine, 'opportunity', ['approve'], {}, served.packageId), at)
+                    .toEqual({ dispatched: true, result: 'ran env' });
+            }
+        }
+    });
+
+    it('CONTROL — the environment\'s object-less item alone serves `lead` and every other route', async () => {
+        for (const elsewhere of [0, 1]) {
+            freshEngine();
+            holdersElsewhere(elsewhere);
+            environmentItem();
+            for (const route of ['lead', 'opportunity']) {
+                const served = await call(route, onlyEnvGate);
+                expect([served.label, served.gate, served.result], `${elsewhere} elsewhere, ${route}`).toEqual(['env', null, 'ran env']);
+            }
+        }
     });
 });

@@ -77,10 +77,22 @@ function makeRes() {
 
 type Path = 'native' | 'rows';
 
+/** [#33698] SqlDriver with `aggregationFilter` reported off, so a filtered measure keeps the rows path. */
+class RowsPathSqlDriver extends SqlDriver {
+  override get supports() {
+    return { ...super.supports, aggregationFilter: false };
+  }
+}
+
 /**
  * `native`: SqlDriver aggregates and the engine applies `having` to its
  * answer. `rows`: a filtered aggregation sends the engine to the rows path,
  * where it aggregates `find()` rows itself and then applies `having`.
+ *
+ * [#33698] SqlDriver now compiles a filtered measure itself
+ * (`supports.aggregationFilter`), so this file's driver reports that bit off
+ * ({@link RowsPathSqlDriver}): a filtered aggregation still routes to the rows
+ * path here, and the two paths stay the ones their names say.
  */
 function grouped(path: Path, having?: Record<string, unknown>): EngineAggregateOptions {
   const aggregations: NonNullable<EngineAggregateOptions['aggregations']> = [
@@ -100,7 +112,7 @@ describe('[#20489] sum / avg — one double on both SQLite paths, engine and RES
   let post: (body: Record<string, unknown>) => Promise<any>;
 
   beforeAll(async () => {
-    driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
+    driver = new RowsPathSqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
     engine = new ObjectQL();
     engine.registerDriver(driver, true);
     await engine.init();
