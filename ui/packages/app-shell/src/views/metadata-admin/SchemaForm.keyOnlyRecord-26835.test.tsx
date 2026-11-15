@@ -29,6 +29,11 @@ import {
   HOOK_REFUSAL_REASON_PATTERN,
 } from '@objectstack/spec/data';
 import { SchemaForm, KEY_ONLY_RECORD_WIDGET } from './SchemaForm';
+// Module-scope loads of the engines the form reaches through dynamic `import()`
+// (the condition widget's CEL authoring), per AGENTS.md's flaky-test rule: the
+// first load is paid during collection, never inside a clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 afterEach(cleanup);
 
