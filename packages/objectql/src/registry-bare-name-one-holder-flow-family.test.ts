@@ -697,6 +697,11 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
       const err = await register(ofBeta({ emailTemplates: [member('beta', RESET, 'zh-CN')] }));
       expectRefusal(err, 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_${RESET}`);
       expect(err!.message).not.toContain(EMAIL_SERVICE_PKG);
+      // The reason states the exception that refused it: another namespace may NOT ship this name.
+      expect(err!.message).toContain('may ship the same name, save the exceptions below');
+      expect(err!.message).toMatch(
+        /For an email template, whatever the namespaces: a name the platform requests by its bare spelling \([^)]*"auth\.password_reset"[^)]*\) keeps one holder per deployment/,
+      );
       expect(await register(pkg('com.acme.beta'))).toBeUndefined();
       expectRefusal(
         await caught(() => registry.registerItem(type, member('beta', RESET, 'zh-CN'), 'name', 'com.acme.beta')),
@@ -725,7 +730,14 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
     it('at the package door, naming the base', async () => {
       const { register } = await boot();
       expect(await register(pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', name, 'en-US')] }))).toBeUndefined();
-      expectRefusal(await register(dependent()), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_${name}`);
+      const err = await register(dependent());
+      expectRefusal(err, 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_${name}`);
+      // The reason states the exception that refused it: another namespace may NOT ship this addition.
+      expect(err!.message).toContain('may ship the same name, save the exceptions below');
+      expect(err!.message).toContain(
+        "a package that depends on the name's holder (which does not depend on it back) and ships the name only in "
+        + "locales the holder does not ship is refused as an addition to the holder's email template",
+      );
     });
 
     it('at the item seam, naming the base', async () => {

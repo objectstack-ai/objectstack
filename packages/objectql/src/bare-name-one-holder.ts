@@ -270,6 +270,7 @@ import {
   BARE_NAME_ONE_HOLDER_TYPES,
   isPackageScopedType,
   isPlatformRequestedBareName,
+  PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE,
   OVERRIDABLE_BASELINE_PACKAGES,
   isBareNameOneHolderType,
   isOverridableBaseline,
@@ -645,6 +646,36 @@ const joinList = (parts: readonly string[]): string =>
   parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 
 /**
+ * The holdings of a narrowed type that still meet whatever their namespaces
+ * ("Two holdings still meet under a narrowed type", above), as the clauses a
+ * reason states them in — empty for a type with neither. Read from the same
+ * tables {@link bareNameHoldersMeet} and the registry's bundle-addition read
+ * ask: the names the platform requests by their bare spelling
+ * (`PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`), and a bundle's addition
+ * ({@link isBundleAdditionPair}), for a type whose items are keyed by a
+ * discriminator (`ITEM_KEY_DISCRIMINATORS`).
+ */
+function crossNamespaceExceptionClauses(type: BareNameOneHolderType): string[] {
+  const clauses: string[] = [];
+  const requested = isPackageScopedType(type) ? (PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE[type] ?? []) : [];
+  if (requested.length > 0) {
+    clauses.push(
+      `a name the platform requests by its bare spelling (${joinList(requested.map((n) => `"${n}"`))}) keeps one ` +
+      'holder per deployment',
+    );
+  }
+  const disc = ITEM_KEY_DISCRIMINATORS[type];
+  if (disc !== undefined && isBareNameRegistryType(type)) {
+    const noun = TYPE_NOUN[type].replace(/^an? /, '');
+    clauses.push(
+      `a package that depends on the name's holder (which does not depend on it back) and ships the name only in ` +
+      `${disc.field}s the holder does not ship is refused as an addition to the holder's ${noun}`,
+    );
+  }
+  return clauses;
+}
+
+/**
  * Why a second holder is refused, in one sentence a reader can act on per
  * rule — for the covered types `types` lists (every covered type when none),
  * in the order {@link BARE_NAME_ONE_HOLDER_TYPES} lists them. Shared by the
@@ -652,7 +683,9 @@ const joinList = (parts: readonly string[]): string =>
  *
  * A narrowed type ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES}, "The narrowing")
  * is told its own rule: one holder per namespace, another namespace may ship
- * the name, and a bare name two holders share is refused naming both. A type
+ * the name, and a bare name two holders share is refused naming both; a
+ * narrowed type whose holdings can still meet across namespaces is told
+ * those exceptions too ({@link crossNamespaceExceptionClauses}). A type
  * not yet narrowed keeps the one-name-per-deployment sentence and its
  * consumers' clause. A list carrying both gets one sentence per rule, the
  * narrowed one first.
@@ -668,11 +701,18 @@ export function bareNameReason(types: readonly BareNameOneHolderType[] = BARE_NA
   const perDeployment = listed.filter((t) => !isNamespaceScopedBareNameType(t));
   const sentences: string[] = [];
   if (narrowed.length > 0) {
+    const exceptions = narrowed
+      .map((t) => ({ t, clauses: crossNamespaceExceptionClauses(t) }))
+      .filter(({ clauses }) => clauses.length > 0);
     sentences.push(
-      `${subject(narrowed)} one name per namespace: a package of another namespace may ship the same name, ` +
-      'but within one namespace, or beside a package that declares no namespace, a name has one holder, and ' +
-      'a bare name two holders share is refused naming both.',
+      `${subject(narrowed)} one name per namespace: a package of another namespace may ship the same name` +
+      `${exceptions.length > 0 ? ', save the exceptions below' : ''}, but within one namespace, or beside a ` +
+      'package that declares no namespace, a name has one holder, and a bare name two holders share is refused ' +
+      'naming both.',
     );
+    for (const { t, clauses } of exceptions) {
+      sentences.push(`For ${TYPE_NOUN[t]}, whatever the namespaces: ${joinList(clauses)}.`);
+    }
   }
   if (perDeployment.length > 0) {
     sentences.push(
