@@ -73,7 +73,7 @@ const SERVICE_ACCOUNT_ADMIN_VISIBLE = [
 const MANAGED_ADD_PERSON_VISIBLE =
   'current_user.isPlatformAdmin == true && has(features.cloudManaged) && features.cloudManaged == true';
 
-const TEMPORARY_PASSWORD_LABEL ='Temporary password: copy it now, it is shown only once and never stored';
+const TEMPORARY_PASSWORD_LABEL = 'Temporary password: copy it now, it is shown only once and never stored';
 
 /**
  * sys_user — System User Object
