@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 321 |
-| Object name statically decidable | 226 |
+| Write call sites | 328 |
+| Object name statically decidable | 233 |
 | Object name chosen at run time | 95 |
-| Against a tenancy-enabled object | 219 |
+| Against a tenancy-enabled object | 226 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 250 |
+| Threading a tenant context | 257 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 59 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 181 |
+| Threading a decidably elevated context | 187 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 128 |
+| Threading a context of undecidable elevation | 129 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-15 at `2ab05f460`.
+Measured on 2026-11-15 at `f51a0c4fc`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1176 |
-| engine-shaped types recognised | 141 |
-| declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 311 |
+| tracked non-test sources scanned | 1177 |
+| engine-shaped types recognised | 143 |
+| declared objects in the registry | 138 |
+| same-named calls subtracted as non-engine | 313 |
 
 ## Every site
 
@@ -163,6 +163,8 @@ Measured on 2026-11-15 at `2ab05f460`.
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `update` | `sys_member` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/environment-user-outbox.ts` | `insert` | `sys_environment_user_outbox` | enabled | context, elevation undecidable | 1 |
+| `packages/plugins/plugin-auth/src/environment-user-outbox.ts` | `update` | `sys_environment_user_outbox` | enabled | elevated | 6 |
 | `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts` | `delete` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | PROVABLY NONE | 1 |

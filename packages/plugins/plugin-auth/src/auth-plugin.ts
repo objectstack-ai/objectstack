@@ -2301,7 +2301,7 @@ export class AuthPlugin implements Plugin {
             host: this.options.environmentUserHost,
             isCloudManaged,
             logger: ctx.logger,
-          });
+          }) ?? null;
         }
         try {
           await refreshAllMappingMatches(engine);
