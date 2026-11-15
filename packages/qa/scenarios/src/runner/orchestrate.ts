@@ -49,7 +49,7 @@ import {
   type ScenarioArtifactScore,
 } from '../score/index.js';
 import type { AppHarness, PersonaAccount } from './app.js';
-import { servedAsRequested, type AgentDriver, type StepRef } from './driver.js';
+import { ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
 import { agentSetOf, clockDates, observeOperation, observeProbe, probeCall, touchedRowId, writeCallsOn, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
@@ -151,7 +151,11 @@ export interface BuildHalf {
 export interface QuestionResult {
   question: string;
   persona: string | null;
-  /** Why this turn was not asked: its expected answer changes without the rows the seed could not load ({@link seedDependence}). Not measured, never a fail. */
+  /**
+   * Why this turn measures nothing: it was not asked, because its expected
+   * answer changes without the rows the seed could not load ({@link seedDependence});
+   * or it was replayed and the replay was not faithful (`ReplayNotFaithfulError`). Never a fail.
+   */
   notMeasured?: string;
   grade?: PersonaRunGrade;
   turn?: TurnSummary;
@@ -165,7 +169,9 @@ export interface OperationResult {
    * Why this operation is not measured: it was not run, because it acts on a
    * row the seed could not load ({@link seedDependence}); or it ran and its
    * grade measured nothing (`OperationGrade.notMeasured`: the build denies the
-   * persona the write the card gives it, `buildDeniesWrite`). Never a fail.
+   * persona the write the card gives it, `buildDeniesWrite`); or it was
+   * replayed and the app did not answer its re-sent writes as it answered the
+   * recorded run (`ReplayNotFaithfulError`). Never a fail.
    */
   notMeasured?: string;
   /**
@@ -268,6 +274,9 @@ const summarize = (t: ParsedTurn): TurnSummary => {
 };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 2000);
+
+/** Why a replayed turn measures nothing ({@link ReplayNotFaithfulError}): what its read-back would grade is the replay's, not the agent's. */
+const replayNotFaithful = (e: ReplayNotFaithfulError): string => `the replay is not faithful: ${e.reason}`.slice(0, 2000);
 
 /** `60 min`, `0.5 min`: a timeout as the not-measured reason states it. */
 export const minutesText = (ms: number): string => `${Number((ms / 60_000).toFixed(2))} min`;
@@ -736,6 +745,12 @@ export async function runHalf(
     await seedApp(scenario, app, accounts, half.seed, requiredLookups(built)); // tallied in place, so a throw keeps the partial seed
 
     const keyOf = (persona: string | null) => (persona === null ? adminKey : accounts.find((a) => a.persona === persona)!.apiKey);
+    // The door a turn is given: the app's MCP endpoint as the persona, and the
+    // runner's own call through it (a replay re-sends the recorded writes there).
+    const doorOf = (persona: string | null): Pick<AskTask, 'mcp' | 'callTool'> => {
+      const apiKey = keyOf(persona);
+      return { mcp: { url: app.mcpUrl, apiKey }, callTool: (tool, args) => app.callTool(apiKey, tool, args) };
+    };
     // A refused seed row makes what reads it not measured — never a fail of the app's answer.
     const dependence = seedDependence(scenario, half.seed.refused);
 
@@ -749,7 +764,7 @@ export async function runHalf(
           continue;
         }
         try {
-          const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), prompt: questionPrompt(scenario, q.id), mcp: { url: app.mcpUrl, apiKey: keyOf(persona) } });
+          const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), prompt: questionPrompt(scenario, q.id), ...doorOf(persona) });
           res.turn = summarize(turn);
           res.grade = gradeCardAnswer(scenario, {
             question: q.id,
@@ -758,7 +773,10 @@ export async function runHalf(
             turn,
           });
         } catch (e) {
-          res.error = errText(e);
+          if (e instanceof ReplayNotFaithfulError) {
+            res.turn = summarize(e.turn);
+            res.notMeasured = replayNotFaithful(e);
+          } else res.error = errText(e);
         }
         half.questions.push(res);
       }
@@ -774,7 +792,14 @@ export async function runHalf(
       try {
         const before = (await app.listRows(op.object)).rows as Row[];
         const started = new Date();
-        const turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), mcp: { url: app.mcpUrl, apiKey: keyOf(op.actingAs) } });
+        let turn: ParsedTurn;
+        try {
+          turn = await driver.ask({ ...ref, step: op.id, persona: op.actingAs, prompt: operationPrompt(card, op.id), ...doorOf(op.actingAs) });
+        } catch (e) {
+          if (!(e instanceof ReplayNotFaithfulError)) throw e;
+          half.operations.push({ ...res, turn: summarize(e.turn), notMeasured: replayNotFaithful(e) });
+          continue;
+        }
         res.turn = summarize(turn);
         const after = (await app.listRows(op.object)).rows as Row[];
         // The card's today, the dates the app's clock read during the turn, and
