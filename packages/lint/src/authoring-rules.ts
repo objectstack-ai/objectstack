@@ -157,6 +157,7 @@ import { lintConnectorCredentialLiterals } from './lint-connector-credential-lit
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
+import { lintDuplicateFieldLabels } from './lint-duplicate-field-labels.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
 import { validateEmailTemplateHoleGrammar } from './validate-email-template-hole-grammar.js';
@@ -2343,6 +2344,35 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         path: f.path,
         message: f.message,
         hint: f.fix ?? '',
+      })),
+  },
+  // Two visible fields of one object served under one label
+  // (`field-label-duplicate`): the platform's `owner_id` and an author's
+  // `assignee`, both read as "负责人" by a zh-CN reader, are two columns of one
+  // name in every grid, card and form, and editing one reads as editing the
+  // other. GATING on all three commands and on the runtime publish gate's
+  // `object` writes, the door an AI or Studio author has. The labels compared
+  // are the ones `translateObject` serves (see the rule's module note), and
+  // the gate's differential charges a stored object's clash only to the write
+  // that creates it, so an object already stored with one keeps saving
+  // unrelated edits. No boot or registration path runs this table, so an app
+  // already installed keeps loading.
+  {
+    name: 'lintDuplicateFieldLabels',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/lint-duplicate-field-labels.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack) =>
+      lintDuplicateFieldLabels(stack).map((f) => ({
+        severity: f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.hint,
       })),
   },
   // #3991 / ADR-0120 D5b — a column carrying BOTH a field-level `unique` and a
