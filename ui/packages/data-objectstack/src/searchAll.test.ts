@@ -7,7 +7,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from './index';
+import { ObjectStackAdapter } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 /** A fetch mock that answers discovery + records the global-search GET. */
 function makeFetch(searchResponse: { ok: boolean; status?: number; body: unknown }) {

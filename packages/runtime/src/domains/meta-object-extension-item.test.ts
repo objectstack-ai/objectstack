@@ -749,6 +749,68 @@ describe('[#33153] the publish door refuses a formula cycle the extension adds, 
     }, 60_000);
 });
 
+describe('[#33494] the publish door serves the winner `os build` serves when another package extends the same field', () => {
+    const formula = (expression: string) => ({ type: 'formula', label: 'F', expression, returnType: 'number' });
+    const number = { type: 'number', label: 'Sibling' };
+    /** A third package, registered as an extender of the account at the priority given. */
+    const SIBLING = 'com.acme.sibling';
+    const withSibling = async (fields: Record<string, unknown>, priority: number) => {
+        const rig = await boot();
+        rig.engine.registry.registerObjectExtension({ extend: TARGET, priority, fields }, SIBLING);
+        return rig;
+    };
+    /** `os build`'s cycle findings over the base and both packages' entries, sibling first. */
+    const atBuild = (sibling: Record<string, unknown>, siblingPriority: number, written: unknown) => {
+        const stack = {
+            objects: baseManifest().objects,
+            packages: [
+                { manifest: { objectExtensions: [{ extend: TARGET, priority: siblingPriority, fields: sibling }] } },
+                { manifest: { objectExtensions: [written] } },
+            ],
+        };
+        return runAuthoringRules('build', { normalized: stack, parsed: stack } as any)
+            .filter((f) => f.rule === 'expression-invalid' && f.message.includes('reads its own value'))
+            .map((f) => f.where);
+    };
+
+    for (const [label, siblingPriority] of [['a tie (200/200)', 200], ['an outranked entry (sibling 300, written 200)', 300]] as const) {
+        it(`⭐ LIT — ${label}: the written self-reading formula is not served, so it publishes, as \`os build\` accepts it`, async () => {
+            const item = { extend: TARGET, priority: 200, fields: { s__c: formula('record.s__c * 2') } };
+            expect(atBuild({ s__c: number }, siblingPriority, item)).toEqual([]);
+
+            const rig = await withSibling({ s__c: number }, siblingPriority);
+            await rig.saveAndPublish(PAIR, item);
+            expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'active' }]);
+        }, 60_000);
+    }
+
+    it('⭐ LIT — a higher sibling\'s formula closing a cycle through the entry\'s other field is refused on that field, as `os build` refuses it', async () => {
+        const sibling = { s__c: formula('record.a__c + 1') };
+        const item = { extend: TARGET, priority: 200, fields: { s__c: number, a__c: formula('record.s__c * 2') } };
+        const where = "object 'crm_account' · objectExtensions[0] · field 'a__c' expression";
+        expect(atBuild(sibling, 300, item)).toContain(where.replace('objectExtensions[0]', 'packages[1].manifest.objectExtensions[0]'));
+
+        const rig = await withSibling(sibling, 300);
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item, mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+        expect(err, 'the publish was admitted').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = (err.issues ?? []).filter((i: any) => i.rule === 'expression-invalid');
+        expect(issues.map((i: any) => i.where), JSON.stringify(err.issues)).toEqual([where]);
+        expect(await rig.rows()).toEqual([{ name: TARGET, package_id: PAIR, state: 'draft' }]);
+    }, 60_000);
+
+    it('⭐ CONTROL — an entry that outranks the sibling (written 300 over 200) with a self-reading formula is still refused', async () => {
+        const item = { extend: TARGET, priority: 300, fields: { s__c: formula('record.s__c * 2') } };
+        const rig = await withSibling({ s__c: number }, 200);
+        await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item, mode: 'draft', packageId: PAIR });
+        const err: any = await rig.protocol.publishMetaItem({ type: TYPE, name: TARGET, packageId: PAIR }).catch((e: any) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect((err.issues ?? []).filter((i: any) => i.rule === 'expression-invalid').map((i: any) => i.where))
+            .toEqual(["object 'crm_account' · objectExtensions[0] · field 's__c' expression"]);
+    }, 60_000);
+});
+
 describe('[#33217] the publish door judges an extension\'s `format` regex and `json_schema` schema as `os build` does', () => {
     const ruleBody = (rule: Record<string, unknown>) => ({
         extend: TARGET,

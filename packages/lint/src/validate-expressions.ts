@@ -167,6 +167,7 @@ import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } fr
 import type { NullGuardFinding, NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
 import { stripInjectedSystemColumns } from '@objectstack/metadata-core';
 import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
+import type { StoredObjectExtension } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
 import { extensionFormulaLoci, formulaCycleIssues } from './formula-cycle-issues.js';
 export interface ExprIssue {
@@ -2388,6 +2389,19 @@ export interface StackExpressionOptions {
    */
   runtimeWriteType?: string;
   /**
+   * [#33494] On an `object_extension` write only: the written entry's target's
+   * OTHER packages' published extensions, as the host's registry holds them
+   * (`AuthoringRuleContext.storedObjectExtensions`). The door's live target
+   * carries their fields as plain fields with no package and no priority, so
+   * without them the walk folded the written entry over all of them and served
+   * its definition of every name it adds. With them the fold
+   * (`objectsAsServed` and `objectExtensionsByTarget`, the build's own) places
+   * the written entry among them by priority: a sibling that outranks it is
+   * served, and a name they add at the priority that decides it is a tie, left
+   * out as the build leaves it out. Read on no other write.
+   */
+  storedObjectExtensions?: readonly StoredObjectExtension[];
+  /**
    * [#32872] Set only by `judgeAuthoredSiteExpression`
    * (`authored-site-expression.ts`), the entry the MCP `validate_expression`
    * tool asks for the gate's verdict on one validation rule or formula field.
@@ -2452,6 +2466,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // after that walk, so the claim holds by construction. See
   // {@link StackExpressionOptions.runtimeWriteType}.
   const extensionWrite = options.runtimeWriteType === 'object_extension';
+  // [#33494] The target's other packages' published extensions the door folds
+  // the written entry among, by priority. See
+  // {@link StackExpressionOptions.storedObjectExtensions}.
+  const storedExtensions = extensionWrite ? options.storedObjectExtensions ?? [] : [];
   // [#32872] See {@link StackExpressionOptions.sharedValidatorRunByCaller}.
   const validatorRunByCaller = options.sharedValidatorRunByCaller === true;
   // [#24798] On a `view` write exactly ONE pass judges — the bulk `confirmText`
@@ -2491,7 +2509,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // the registry serves is registration order, which the stack does not state,
   // so such a field is a known name with no type and no null-guard verdict.
   // The read-attachment index is object-level and an extension carries none.
-  const { objects: servedObjects, tied } = objectsAsServed(stack);
+  const { objects: servedObjects, tied } = objectsAsServed(stack, storedExtensions);
   const typedObjects = objectsWithoutTiedFields({ objects: servedObjects, tied });
   const fieldIndex = buildFieldIndex(servedObjects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
@@ -4218,8 +4236,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // `objectExtensions` and the door's live objects as `objects`, so the field
   // (and, #33154, the rule's field reads) is judged against its target as
   // served and located where the build locates it (`objectExtensions[0]` for
-  // a one-entry stack).
-  for (const [target, entries] of objectWrite ? [] : objectExtensionsByTarget(stack)) {
+  // a one-entry stack). [#33494] The target's other packages' published
+  // extensions join the fold there (`storedExtensions`), each at its priority,
+  // so the written entry is served where the build serves it; they are folded
+  // in, never judged or located (`stored`).
+  for (const [target, entries] of objectWrite ? [] : objectExtensionsByTarget(stack, storedExtensions)) {
     // The target's position in `objects`, which is its position in
     // `typedObjects` too (see `objectPosition` above); -1 when undeclared.
     let position = -1;
@@ -4236,8 +4257,16 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // Its fields by name as the registry serves them, built as the object
     // walk builds its own `fieldDefs`.
     const fieldDefs = new Map<string, AnyRec>(servedTarget ? fieldEntries(servedTarget) : []);
+    // [#33494] On the door's pass `base` already carries the stored entries'
+    // fields as plain fields, folded before the write; filled back from it, a
+    // name they tie on would be served again as one sibling's definition. Their
+    // names come from the fold above alone, as in the build.
+    const storedNames = new Set<string>();
+    for (const { fields: held, stored } of entries) {
+      if (stored) for (const [n] of fieldEntries({ fields: held })) storedNames.add(n);
+    }
     if (base) {
-      for (const [n, def] of fieldEntries(base)) if (!fieldDefs.has(n)) fieldDefs.set(n, def);
+      for (const [n, def] of fieldEntries(base)) if (!fieldDefs.has(n) && !storedNames.has(n)) fieldDefs.set(n, def);
       for (const [n, def] of injectedColumnDefsFor(base)) if (!fieldDefs.has(n)) fieldDefs.set(n, def as AnyRec);
     } else {
       for (const { fields: added } of entries) {
@@ -4247,7 +4276,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const extensionOptionFields = [...fieldDefs]
       .filter(([, def]) => declaresOptionsOnceServed(def))
       .map(([n]) => n);
-    for (const { path: entryPath, fields: added, validations: rules } of entries) {
+    for (const { path: entryPath, fields: added, validations: rules, stored } of entries) {
+      // [#33494] A stored entry is another package's, already published: folded
+      // in above, judged on its own write, never located here.
+      if (stored) continue;
       for (const f of added) {
         const fname = typeof f.name === 'string' ? f.name : '?';
         judgeFieldFormula(fname, f, {
@@ -4300,19 +4332,19 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // In the build `base` is the authored object, and a member it declares is
     // the object walk's, located at the object: a cycle closing through a
     // declared formula keeps that location and is named once. On the door's
-    // one pass `base` is the target as served BEFORE the write (other
-    // packages' published extension fields included, carried as plain fields
-    // with no priority) and the object walk does not run, while the written
-    // entry, its sole extension, is folded over it. So the door judges the
-    // written entry's own definition of every name it adds, a name the target
-    // already serves included, and none is left out there. Where a sibling
-    // package adds the same name at the same priority (a tie, which the build
-    // drops on a declared target) or at a higher one (the build serves the
-    // sibling's), the door can refuse a cycle the build lets through; making
-    // the door read the build's winner is #33494. A member the target or a
-    // sibling package stored is never a name the entry adds, so the target's
-    // own cycle, a sibling's, and a formula that only reads a cycle are not
-    // this write's to answer for.
+    // one pass `base` is the target as served BEFORE the write and the object
+    // walk does not run, so no name is left out there. [#33494] The other
+    // packages' published extensions of the target are folded in with the
+    // written entry by priority (`storedExtensions`, the build's fold), so the
+    // door serves the definition the build serves: the written entry's where
+    // it decides a name, a sibling's where the sibling outranks it, none where
+    // they add it at the priority that decides it (a tie, left out as the
+    // build leaves it out on a declared target). A stored entry locates
+    // nothing ({@link extensionFormulaLoci}), so a cycle a sibling's
+    // definition closes through another field of the written entry is named
+    // on that field, and a member the target or a sibling package stored is
+    // never this write's: the target's own cycle, a sibling's, and a formula
+    // that only reads a cycle are not charged to it.
     const ownNames = new Set(base && !extensionWrite ? fieldEntries(base).map(([n]) => n) : []);
     issues.push(...formulaCycleIssues(target, fieldDefs, extensionFormulaLoci(target, entries, ownNames)));
   }

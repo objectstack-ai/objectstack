@@ -1235,6 +1235,16 @@ export default defineConfig({
             // `en` is the namespace's resident fallback and gets its own chunk so
             // its bytes are named in `eager-closure.json` instead of hiding in
             // the runtime's.
+            //
+            // The loader module (`index.ts`, which imports `en` statically: the
+            // synchronous fallback, objectstack#25922) gets a group too, for the
+            // marketplace loader's reason below: without one it falls to the
+            // eager `i18n-runtime` group, and its static `en` edge put the 64 KB
+            // `en` catalogue on every console route, though only the Studio
+            // and Setup screens that import `metadata-admin/i18n.ts` read it
+            // (objectstack#33582). `includeDependenciesRecursively: false` for
+            // the same measured reason as the marketplace loader's.
+            { name: 'i18n-ns-studio', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]studio[\\/]index\.ts$/, priority: 84, includeDependenciesRecursively: false },
             { name: 'i18n-ns-studio-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]studio[\\/]en\.ts$/, priority: 84 },
             { name: 'i18n-ns-studio-zh', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]studio[\\/]zh\.ts$/, priority: 84 },
             //

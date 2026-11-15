@@ -3697,6 +3697,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry; } catch { /* no data engine — nothing registered */ }
         const declared = captureUninstallDeclared(registry, manifestId);
         const withdrawal = this.withdrawFromRunningKernel(ctx, manifestId);
+        // The registry verb reaches no executable handler: the package's
+        // script-action handlers, body hooks and functions this door's install
+        // bound on the engine ({@link bindArtifactHandlers}) go right after the
+        // registry half withdrew, through the binder's own inverse — never on
+        // a refused withdrawal, which leaves the package loaded and running.
+        if (!withdrawal) await this.unbindArtifactHandlers(ctx, manifestId);
         const copies = withdrawal ? undefined : await this.withdrawObjectCopies(ctx, manifestId);
         // [#24182] …and the copies of OTHER packages' objects that this one's
         // extensions rewrote: the bridge that wrote them restores the owner's
@@ -6644,6 +6650,44 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return;
         }
         await schedule(ctx, manifest, { appId: manifestId, ql, source: 'MarketplaceInstallLocal' });
+    };
+
+    /**
+     * Withdraw from the running engine the script-action handlers, body hooks
+     * and functions {@link bindArtifactHandlers} bound for `manifestId`,
+     * through `unbindAppArtifactHandlers` — the runtime binder's inverse, so
+     * the door unbinds exactly the owners the binder bound and nothing of
+     * another package, host code or the environment. The uninstall door runs
+     * it once the registry has withdrawn the package.
+     *
+     * Before this, a withdrawn package's handlers stayed under its owner
+     * `app:<manifestId>` until a restart: beside another package's action of
+     * the same object and name, a call that names no package
+     * (`POST /api/v1/actions/OBJECT/NAME/ID`) went on answering `409
+     * RESOURCE_CONFLICT`, naming the uninstalled package as one of two owners.
+     *
+     * Resolved lazily through `@objectstack/runtime`, like the binder. Never
+     * throws: a runtime with no inverse is warned with the remedy, the bind
+     * door's posture for a runtime with no binder.
+     */
+    private unbindArtifactHandlers = async (ctx: PluginContext, manifestId: string): Promise<void> => {
+        let ql: IObjectQLEngine | undefined;
+        try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine — nothing bound */ }
+        if (!ql) return;
+        let unbind: typeof import('@objectstack/runtime')['unbindAppArtifactHandlers'] | undefined;
+        try {
+            const mod: any = await import('@objectstack/runtime');
+            if (typeof mod?.unbindAppArtifactHandlers === 'function') unbind = mod.unbindAppArtifactHandlers;
+        } catch { /* reported below */ }
+        if (!unbind) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] uninstalled ${manifestId}, but this runtime has no unbindAppArtifactHandlers — `
+                + 'its script actions, body hooks and functions stay bound until the runtime restarts. '
+                + 'Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
+            );
+            return;
+        }
+        unbind(ql, manifestId, { logger: ctx.logger, source: 'MarketplaceInstallLocal' });
     };
 
     /**

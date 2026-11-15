@@ -30,7 +30,7 @@ import { notifyDataChanged } from '@object-ui/react';
 // Test-only and off the `@object-ui/types` barrel; the vitest alias makes this
 // the same module instance the provider's `sharedGetJson` uses.
 import { resetInflightGetsForTesting } from '../../../packages/types/src/http-inflight';
-import { clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../packages/data-objectstack/src/sharedDiscovery';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
 import { __resetAppDefaultLocaleForTests, loadAppDefaultLocale } from './languageSeed';
 // Not on the `@object-ui/auth` barrel; the vitest alias maps that barrel to

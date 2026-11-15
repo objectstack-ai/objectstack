@@ -358,6 +358,10 @@ export function useObjectViewRecordNavigation({
             const { navOverlay: overlay, searchParams: params, setSearchParams: setParams, recordOpenPreference: preference, handleNavOverlayNavigate: navigateTo, recordServed: served } = rowClickInputs.current;
             // No record surface: not even a modifier click opens one in a new tab.
             if (!served) return;
+            // An authored `none` is no navigation (the spec's "No navigation
+            // (read-only list)"): no click opens the record, a ⌘/Ctrl or
+            // middle click included (objectstack#33548).
+            if (overlay.mode === 'none') return;
             // Cmd/Ctrl/middle-click — let the hook open in a new tab (full page)
             // regardless of configured mode. Matches browser link convention.
             const isModifier = !!(

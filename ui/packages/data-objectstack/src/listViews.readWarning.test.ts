@@ -9,11 +9,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   ObjectStackAdapter,
-  clearSharedDiscoveryCache,
   classifyImportMappingsFailure,
   classifyViewsFailure,
   type MetadataReadWarningEvent,
 } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 /**
  * `listViews(object)` feeds the list-view switcher, and it degrades EVERY

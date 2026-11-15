@@ -41,7 +41,7 @@ export const ReassignLeadAction = defineAction({
   locations: ['record_header', 'list_item'],
   disabled: P`record.status == "converted"`,
   disabledReason: 'A converted lead is reassigned from its opportunity.',
-  params: [{ field: 'assigned_to', required: true }],
+  params: [{ field: 'owner_id', required: true }],
   submitText: 'Reassign',
   undoable: true,
   successMessage: 'Lead {{ record.name }} reassigned.',

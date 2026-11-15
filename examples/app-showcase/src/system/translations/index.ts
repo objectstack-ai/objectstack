@@ -467,7 +467,10 @@ export const ShowcaseTranslationBundle = {
           title: { label: '标题' },
           // The project page's Tasks list, titled by this master-detail.
           project: { label: '项目', relatedListTitle: '任务' },
-          assignee: { label: '负责人' },
+          // Not 负责人: that is what a zh-CN reader is served for the platform's
+          // `owner_id` on this object, and two columns of one label cannot be
+          // told apart (`field-label-duplicate`).
+          assignee: { label: '处理人' },
           status: {
             label: '状态',
             options: { backlog: '待规划', todo: '待办', in_progress: '进行中', in_review: '评审中', done: '已完成' },
@@ -859,7 +862,7 @@ export const ShowcaseTranslationBundle = {
       },
       showcase_team: {
         label: '团队', pluralLabel: '团队',
-        fields: { name: { label: '团队名称' }, lead: { label: '负责人' }, capacity_hours: { label: '产能(小时)' } },
+        fields: { name: { label: '团队名称' }, lead: { label: '组长' }, capacity_hours: { label: '产能(小时)' } },
         _sections: { team: { label: '团队' } },
       },
       showcase_project_membership: {
@@ -1002,7 +1005,7 @@ export const ShowcaseTranslationBundle = {
         // because `check-i18n-coverage` ratchets this example at its current
         // untranslated count: a newly declared label that skips zh-CN pushes the
         // count up and fails the gate. (The gallery's older params sit inside
-        // that baseline; this one is not allowed to widen it.) `负责人` matches
+        // that baseline; this one is not allowed to widen it.) `处理人` matches
         // what the bundle already renders for `showcase_task.assignee`, rather
         // than introducing a second word for the same idea.
         // 动作显隐矩阵（objectui#3492 / #3501）。同上：本示例被
@@ -1013,7 +1016,7 @@ export const ShowcaseTranslationBundle = {
           showcase_action_param_gallery: {
             params: {
               p_assignee: {
-                label: '负责人',
+                label: '处理人',
                 helpText: '指向系统对象的内联查找 —— 可按姓名或邮箱搜索,无需填写 UUID。',
               },
             },

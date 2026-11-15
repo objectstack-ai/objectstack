@@ -104,14 +104,14 @@ export default class I18nCheck extends Command {
     json: Flags.boolean({ description: 'Output as JSON' }),
     'default-locale': Flags.string({
       description:
-        "Locale that must be 100% translated (errors raised against it). Defaults to the config's i18n.defaultLocale, else 'en'.",
+        "Source locale: the language inline labels are written in, which they satisfy and errors are raised against. Overrides the config's i18n.sourceLocale, else its i18n.defaultLocale, else 'en'.",
     }),
     locales: Flags.string({
       description:
         'Comma-separated list of locales to check (default: the config\'s i18n.supportedLocales, else every locale found)',
     }),
     strict: Flags.boolean({
-      description: 'Treat missing keys in non-default locales as errors (CI parity gate)',
+      description: 'Treat missing keys in non-source locales as errors (CI parity gate)',
     }),
     threshold: Flags.integer({
       description: 'Fail when any locale falls below this coverage percent (0-100)',
@@ -258,7 +258,7 @@ export default class I18nCheck extends Command {
       } else {
         console.log(`  ${parts.join(', ')} across ${report.locales.length} locale(s) ${chalk.dim(`(${timer.display()})`)}`);
         if (report.totals.errors === 0 && thresholdViolations.length === 0) {
-          printWarning('Non-default locales have gaps but the default locale is fully covered.');
+          printWarning('Non-source locales have gaps but the source locale is fully covered.');
         }
       }
       console.log('');
