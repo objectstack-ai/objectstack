@@ -97,6 +97,12 @@ export function useObjectViewHeaderChrome({
     // it before the header can fold, so no action in the folded face carries
     // `autoTrigger`. Not offered on the environment list, whose toolbar is
     // `EnvironmentListToolbar`, not this bar.
+    //
+    // objectstack#33988 — not offered either when the list declares no
+    // primary (no New, no toolbar action authored `variant: 'primary'`): that
+    // face would keep no labelled action, so a long description alone would
+    // send the page's one action into the `⋯`. Without a folded face the
+    // header keeps `actions` at every width and the description truncates.
     const toolbarRowActions: UIActionSchema[] = listActions?.some((a: { locations?: readonly string[] }) => a.locations?.includes('list_toolbar'))
         ? toolbarActionsWithDeepLink
         : [];
@@ -133,7 +139,7 @@ export function useObjectViewHeaderChrome({
         maxVisible: 0,
         mobileMaxVisible: 0,
     };
-    const foldedHeaderActions = !isEnvironmentList ? (
+    const foldedHeaderActions = !isEnvironmentList && (showCreate || primaryToolbarAction) ? (
         <>
             {createButton}
             {/* One inline slot at every width: `toolbarBar` keeps none below
