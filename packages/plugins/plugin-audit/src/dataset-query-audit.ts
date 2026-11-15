@@ -85,8 +85,19 @@ export interface DatasetQueryAuditEvent {
   context:
     | Pick<ExecutionContext, 'userId' | 'actor' | 'tenantId' | 'performedBy' | 'impersonatedBy'>
     | undefined;
-  /** The saved dataset's name, as the door resolved it. The opt-in is keyed on it. */
+  /**
+   * The saved dataset's name, as the door resolved it. The opt-in is keyed on
+   * it, so a name covers every package that holds a dataset of that name.
+   */
   datasetName: string;
+  /**
+   * The package holding the dataset the door read (ADR-0150 D3: two packages
+   * can hold one name), or `null` for the environment's own definition. This
+   * is what tells two holders' rows apart.
+   */
+  datasetPackage?: string | null;
+  /** The door served a draft definition (a preview read), not the published one. */
+  preview?: boolean;
   /** The dataset's base object. */
   objectName?: string;
   /** The selection's dimension names. */
@@ -167,6 +178,13 @@ function selectionNames(v: unknown): string[] {
     .map(recordedField);
 }
 
+/** A package id the row records: the id when it has a package id's shape, else `?`; absent is `null`. */
+const PACKAGE_ID = /^[A-Za-z0-9@][A-Za-z0-9@._\/-]{0,127}$/;
+function recordedPackage(v: unknown): string | null {
+  if (typeof v !== 'string' || v === '') return null;
+  return PACKAGE_ID.test(v) ? v : '?';
+}
+
 /** JSON that cannot throw on a cyclic/odd value — same rule as the CRUD writer. */
 function safeStringify(v: unknown): string {
   try {
@@ -188,9 +206,11 @@ export function buildDatasetQueryAuditRow(event: DatasetQueryAuditEvent, queried
 
   const metadata: Record<string, unknown> = {
     dataset: recordedField(String(event.datasetName ?? '')),
+    dataset_package: recordedPackage(event.datasetPackage),
     dimensions: selectionNames(event.dimensions),
     measures: selectionNames(event.measures),
   };
+  if (event.preview === true) metadata.preview = true;
   const timeDimensions = selectionNames(event.timeDimensions);
   if (timeDimensions.length > 0) metadata.time_dimensions = timeDimensions;
   const filter = event.readQuery?.filter;

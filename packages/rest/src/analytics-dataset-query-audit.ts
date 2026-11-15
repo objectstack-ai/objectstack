@@ -38,6 +38,8 @@ import { resolveThrownHttpError } from '@objectstack/types';
 interface DatasetQueryAuditEvent {
     context: unknown;
     datasetName: string;
+    datasetPackage: string | null;
+    preview?: true;
     objectName?: string;
     dimensions?: unknown;
     measures?: unknown;
@@ -68,12 +70,27 @@ export interface AuditedDatasetQuery {
     readonly datasetName: string | undefined;
     /** The parsed dataset definition (read for its base object). */
     readonly dataset: unknown;
+    /**
+     * The item the by-name read served, before any strip: read for its package
+     * stamp (`_packageId`, the holder the door resolved; `sys_metadata` is the
+     * environment's own definition) and its draft badge (`_draft`).
+     */
+    readonly served?: unknown;
     /** The caller's selection (read for its names and its filter). */
     readonly selection: unknown;
 }
 
 const asRecord = (v: unknown): Record<string, unknown> =>
     v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+
+/** The environment's own definition's package stamp: it names no holder package. */
+const ENVIRONMENT_PACKAGE_STAMP = 'sys_metadata';
+
+/** The package holding the served dataset, or `null` for the environment's own definition. */
+function holderPackageOf(served: unknown): string | null {
+    const stamp = asRecord(served)._packageId;
+    return typeof stamp === 'string' && stamp !== '' && stamp !== ENVIRONMENT_PACKAGE_STAMP ? stamp : null;
+}
 
 /** The selection's time-dimension names, never their date ranges. */
 function timeDimensionNames(v: unknown): string[] | undefined {
@@ -127,6 +144,9 @@ export async function runAuditedDatasetQuery<T>(
     const base = {
         context: query.context,
         datasetName: query.datasetName,
+        // Two packages can hold one name (ADR-0150 D3): the row names the one read.
+        datasetPackage: holderPackageOf(query.served),
+        ...(asRecord(query.served)._draft === true ? { preview: true as const } : {}),
         ...(typeof asRecord(query.dataset).object === 'string' ? { objectName: asRecord(query.dataset).object as string } : {}),
         dimensions: selection.dimensions,
         measures: selection.measures,

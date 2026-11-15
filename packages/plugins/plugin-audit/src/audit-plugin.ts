@@ -111,7 +111,9 @@ export interface AuditPluginDatasetQueryAuditOptions {
    * recorded as `dataset_query` rows in `sys_audit_log`: who, which dataset,
    * the dimensions and measures selected, the filtered field names (never the
    * values), the row count and the outcome. Absent or empty records nothing
-   * and buffers nothing.
+   * and buffers nothing. A name covers every package that holds a dataset of
+   * that name (ADR-0150 D3); each row records the holder it read in
+   * `metadata.dataset_package`.
    */
   datasets?: readonly string[];
   /** Flush once this many rows are buffered. Default 50. */

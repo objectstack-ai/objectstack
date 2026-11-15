@@ -567,6 +567,8 @@ async function answerDatasetQuery(
         // Resolve the dataset definition: inline draft (Studio
         // preview) or a saved dataset by name.
         let dataset = body.dataset;
+        // The item the by-name read served, for the ledger row's holder package.
+        let served: unknown;
         if (!dataset && body.datasetName) {
             const p = await this.resolveProtocol(environmentId, req);
             // [#32072, ADR-0150 D3/D5] The saved dataset is read BY
@@ -708,6 +710,7 @@ async function answerDatasetQuery(
                 read = judged.read;
             }
             dataset = read?.item;
+            served = read?.item;
             if (!dataset) {
                 return datasetNotFoundAnswer(body.datasetName);
             }
@@ -775,7 +778,7 @@ async function answerDatasetQuery(
         // The read. A saved dataset's query hands the ledger one
         // `dataset_query` event here, answered or failed; every refusal above
         // returned before it and hands none ({@link runAuditedDatasetQuery}).
-        const queried = { req, environmentId, context, dataset, selection, datasetName: body.dataset ? undefined : body.datasetName };
+        const queried = { req, environmentId, context, dataset, served, selection, datasetName: body.dataset ? undefined : body.datasetName };
         const result = await runAuditedDatasetQuery(this, queried, () => svc.queryDataset(
             dataset,
             selection,
