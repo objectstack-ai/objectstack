@@ -78,7 +78,7 @@ async function waitFor(check: () => Promise<boolean>, ms = 3000): Promise<void> 
 }
 
 function makeFetch() {
-    const calls: Array<{ url: string; method: string; body: string }> = [];
+    const calls: Array<{ url: string; method: string; body: string | undefined }> = [];
     const impl: FetchImpl = async (url, init) => {
         calls.push({ url, method: init.method, body: init.body });
         return { ok: true, status: 200, async text() { return 'ok'; } };
@@ -259,7 +259,7 @@ describe('webhook method GET retired — a stored GET row is parked, never conve
             expect(calls).toHaveLength(1);
             expect(calls[0].method).toBe('POST');
             expect(calls[0].url).toBe('https://receiver.invalid/post_hook');
-            expect(JSON.parse(calls[0].body)).toMatchObject({ object: 'probe_task', action: 'created' });
+            expect(JSON.parse(calls[0].body ?? '')).toMatchObject({ object: 'probe_task', action: 'created' });
             expect(errors).toEqual([]);
         } finally {
             await enqueuer.stop();
