@@ -6,7 +6,7 @@
 
 fix(metadata-protocol,rest,runtime)!: a name only disabled packages hold answers 404 at `_env`, and an environment customization of such a name is hidden until a holder is enabled again (ADR-0150 D3, D4)
 
-Clause-②: yes (narrowing)
+Clause-②: no (narrowing)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are by-name reads under a reversible package state: no stored row is changed or deleted, so there is nothing for a migration to rewrite and no tombstone. -->
