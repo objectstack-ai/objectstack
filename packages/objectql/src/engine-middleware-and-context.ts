@@ -38,6 +38,7 @@ import type { IPubSub } from '@objectstack/spec/contracts';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isWriteEpochOperation } from './write-epoch.js';
+import { READABLE_IDS_WRITE_IN_FLIGHT } from './engine-readable-ids-permission-formula.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { ORGANIZATION_OBJECT, SystemWriteOrganizationRequiredError, carriesOrganization, resolveSystemWriteOrganization, resolveTenantFieldName, type SystemWriteOrganizationDecision } from './tenancy/system-write-organization.js';
@@ -160,7 +161,9 @@ export class MiddlewareAndContextFacet {
       }
     };
 
-    await next();
+    // [#33696] A write's chain runs inside the write scope: its reads keep the chain.
+    if (isWriteEpochOperation(ctx.operation)) await READABLE_IDS_WRITE_IN_FLIGHT.run(true, next);
+    else await next();
     return ctx.result;
   }
 

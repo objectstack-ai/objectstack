@@ -62,6 +62,13 @@ import {
     NOTIFICATION_PREFERENCE_IDENTITY_INDEX_NAME,
     NOTIFICATION_PREFERENCE_TABLE,
 } from './notification-preference-identity-index.js';
+import {
+    buildOverlayDuplicateProbeSql,
+    OVERLAY_INDEX_NAMES,
+    OVERLAY_PROBE_INDEX_NAMES,
+    OVERLAY_TABLE,
+} from './overlay-index.js';
+import { ensureOverlayIndex } from '../protocol-overlay-index.js';
 import { currentLiveMysqlDatabase } from './live-mysql-database.testkit.js';
 import type { IndexExec } from './partial-index-probe.js';
 
@@ -291,5 +298,148 @@ describe.skipIf(!PG_URL)('#26630 identity indexes on a LIVE PostgreSQL', () => {
             const [message] = logger.error.mock.calls[0]!;
             expect(message).toContain('(1 duplicated key, held by 3 rows)');
         });
+    });
+});
+
+/**
+ * The overlay ACTIVE key, landed on a live PostgreSQL by the boot call site.
+ *
+ * `sys-metadata.object.ts` declares `idx_sys_metadata_overlay_active` as a plain
+ * unique over `(type, name, package_id, bundle_member)`, which the driver
+ * materializes on PostgreSQL as a NULL-distinct UNIQUE CONSTRAINT — and with
+ * `bundle_member` NULL on nearly every row it enforces nothing. The runtime
+ * migration replaces it with the partial NULL-safe index SQLite carries, but on
+ * PostgreSQL only when the call site hands the migration the dialect and a seam
+ * that returns the read-back's rows. Before that it printed one raw 2BP01 per
+ * process, kept the constraint, and reported nothing.
+ *
+ * Driven through `ensureOverlayIndex` (`protocol-overlay-index.ts`), the body
+ * the protocol runs at its first `sys_metadata` read or write, with a driver
+ * shaped like `SqlDriver` (`execute` plus `config.client`) over this file's
+ * live connection. The fixture is the statement knex 3's PostgreSQL client
+ * compiles `table.unique(['type','name','package_id','bundle_member'], {
+ * indexName })` to, read off knex for this table.
+ */
+describe.skipIf(!PG_URL)('sys_metadata overlay ACTIVE key on a LIVE PostgreSQL', () => {
+    let client: pg.Client;
+    const ACTIVE = OVERLAY_INDEX_NAMES.active;
+    const DRAFT = OVERLAY_INDEX_NAMES.draft;
+
+    const indexDef = async (name: string): Promise<string | undefined> => {
+        const { rows } = await client.query<{ indexdef: string | null }>(
+            `SELECT pg_get_indexdef(to_regclass('"${name}"')) AS indexdef`,
+        );
+        return rows[0]?.indexdef ?? undefined;
+    };
+
+    const constraintHolds = async (): Promise<boolean> => {
+        const { rows } = await client.query(
+            'SELECT 1 FROM pg_constraint WHERE conname = $1 AND conrelid = to_regclass($2)',
+            [ACTIVE, `"${OVERLAY_TABLE}"`],
+        );
+        return rows.length > 0;
+    };
+
+    const insertOverlay = (id: string, state: string, packageId: string | null = null) =>
+        client.query(
+            'INSERT INTO sys_metadata (id, type, name, package_id, bundle_member, state) ' +
+                "VALUES ($1, 'object', 'probe_dup', $2, NULL, $3)",
+            [id, packageId, state],
+        );
+
+    /** One protocol boot: a fresh host, so the run-once flag is unset. */
+    const boot = async (): Promise<{ error: ReturnType<typeof vi.spyOn>; warn: ReturnType<typeof vi.spyOn> }> => {
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const driver = { execute: (sql: string) => client.query(sql), config: { client: 'pg' } };
+        const host = {
+            engine: { driver },
+            ensureOverlayMembersBackfilled: async () => undefined,
+            overlayIndexEnsured: false,
+        };
+        await ensureOverlayIndex.call(host as any);
+        return { error, warn };
+    };
+
+    beforeAll(async () => {
+        client = new pg.Client({ connectionString: PG_URL });
+        await client.connect();
+        await client.query(`CREATE SCHEMA IF NOT EXISTS "${SCHEMA}"`);
+        await client.query(`SET search_path TO "${SCHEMA}"`);
+    });
+
+    afterAll(async () => {
+        if (!client) return;
+        await client.query('SET search_path TO "$user", public');
+        await client.query(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
+        await client.end();
+    });
+
+    beforeEach(async () => {
+        vi.restoreAllMocks();
+        await client.query('DROP TABLE IF EXISTS sys_metadata');
+        await client.query(
+            'CREATE TABLE sys_metadata (id VARCHAR(255) PRIMARY KEY, type VARCHAR(255), name VARCHAR(255), ' +
+                'package_id VARCHAR(255), bundle_member VARCHAR(255), state VARCHAR(255))',
+        );
+        // The driver's statement, as knex compiles it (block header).
+        await client.query(
+            `alter table "sys_metadata" add constraint "${ACTIVE}" ` +
+                'unique ("type", "name", "package_id", "bundle_member")',
+        );
+        expect(await constraintHolds()).toBe(true);
+    });
+
+    it('a fresh database ends with the partial NULL-safe ACTIVE index, and no line is printed', async () => {
+        const { error, warn } = await boot();
+
+        expect(error).not.toHaveBeenCalled();
+        expect(warn).not.toHaveBeenCalled();
+        expect(await constraintHolds()).toBe(false);
+        expect(await indexDef(ACTIVE)).toMatch(
+            /^CREATE UNIQUE INDEX idx_sys_metadata_overlay_active ON \S+ USING btree \(type, name, COALESCE\(package_id, ''::character varying\), COALESCE\(bundle_member, ''::character varying\)\) WHERE \(\(state\)::text = 'active'::text\)$/,
+        );
+        expect(await indexDef(DRAFT)).toContain("WHERE ((state)::text = 'draft'::text)");
+        expect(await indexDef(OVERLAY_PROBE_INDEX_NAMES.active)).toBeUndefined();
+
+        // What the key is for: a second ACTIVE row of one (type, name, package)
+        // is refused with SQLSTATE 23505, and the ACTIVE+DRAFT pair is legal.
+        await insertOverlay('a1', 'active');
+        await expect(insertOverlay('a2', 'active')).rejects.toMatchObject({ code: '23505' });
+        await insertOverlay('d1', 'draft');
+
+        // A second boot over the same database is quiet and leaves it as it is.
+        const first = await indexDef(ACTIVE);
+        const again = await boot();
+        expect(again.error).not.toHaveBeenCalled();
+        expect(again.warn).not.toHaveBeenCalled();
+        expect(await indexDef(ACTIVE)).toBe(first);
+    });
+
+    it('duplicate ACTIVE rows: the constraint stays, no row is deleted, and the D4 line names the key and the rows', async () => {
+        // Admitted by the NULL-distinct constraint — the population a boot meets.
+        await insertOverlay('dup1', 'active');
+        await insertOverlay('dup2', 'active');
+
+        const { error } = await boot();
+
+        expect(await constraintHolds()).toBe(true);
+        expect(await indexDef(OVERLAY_PROBE_INDEX_NAMES.active)).toBeUndefined();
+        const { rows } = await client.query('SELECT id FROM sys_metadata ORDER BY id');
+        expect(rows.map((r) => r.id)).toEqual(['dup1', 'dup2']);
+        // The draft index is independent and still lands.
+        expect(await indexDef(DRAFT)).toContain("WHERE ((state)::text = 'draft'::text)");
+
+        expect(error).toHaveBeenCalledTimes(1);
+        const message = String(error.mock.calls[0]![0]);
+        expect(message).toContain(`[metadata-protocol] cannot rebuild '${ACTIVE}'`);
+        expect(message).toContain("COALESCE(package_id, ''), COALESCE(bundle_member, '')");
+        expect(message).toContain('os migrate duplicates');
+        expect(message).toContain(buildOverlayDuplicateProbeSql('active'));
+        // …and the shipped listing names the blocking rows on this database.
+        const listed = await client.query(buildOverlayDuplicateProbeSql('active'));
+        expect(listed.rows).toEqual([
+            expect.objectContaining({ type: 'object', name: 'probe_dup', duplicate_rows: '2' }),
+        ]);
     });
 });
