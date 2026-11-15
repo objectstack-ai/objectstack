@@ -1185,6 +1185,9 @@ export {
   AUTONUMBER_LITERAL_TOKEN,
 } from './lint-autonumber-formats.js';
 
+export { lintDuplicateFieldLabels, FIELD_LABEL_DUPLICATE } from './lint-duplicate-field-labels.js';
+export type { DuplicateFieldLabelFinding } from './lint-duplicate-field-labels.js';
+
 export { lintViewRefs } from './lint-view-refs.js';
 export type { ViewRefFinding } from './lint-view-refs.js';
 export {
