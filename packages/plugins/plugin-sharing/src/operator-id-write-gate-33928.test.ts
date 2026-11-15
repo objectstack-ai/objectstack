@@ -42,6 +42,8 @@ const OTHER = 'usr_opid_other';
 const ORDER = 'qa_opid_order';
 /** Owner-scoped (`private` OWD with an `owner_id`): record sharing enforces on it. */
 const LINE = 'qa_opid_line';
+/** Owner-scoped like LINE, holding only the rows of the `$nin` pin, whose predicate names no other key. */
+const TAG = 'qa_opid_tag';
 
 const SYSTEM = { isSystem: true, tenantId: ORG } as const;
 const SYS = { context: SYSTEM } as never;
@@ -90,6 +92,12 @@ function objectsPlugin(): Plugin {
         name: 'Operator id write gate',
         objects: [
           { name: ORDER, label: 'Order', sharingModel: 'public_read_write', fields: { name: { type: 'text', label: 'Name' } } },
+          {
+            name: TAG,
+            label: 'Tag',
+            sharingModel: 'private',
+            fields: { name: { type: 'text', label: 'Name' }, owner_id: { type: 'text', label: 'Owner' } },
+          },
           {
             name: LINE,
             label: 'Line',
@@ -199,15 +207,19 @@ describe('sharing write gate: an operator-valued id is a predicate write, never 
 
   describe('another operator shape is scoped per matched row, never judged as a by-id string', () => {
     it('a `$nin` delete deletes only the matched rows the caller owns, and answers no error', async () => {
-      const { theirs } = await seedLines('n1');
-      await ql.insert(LINE, { id: 'n1_kept', owner_id: ME, stage: 'n1' }, SYS);
+      // The whole predicate is `where.id`, as in the `$in` pins: the shape the gate used to judge by id.
+      await ql.insert(TAG, [
+        { id: 'n1_mine1', owner_id: ME },
+        { id: 'n1_mine2', owner_id: ME },
+        { id: 'n1_theirs', owner_id: OTHER },
+        { id: 'n1_kept', owner_id: ME },
+      ], SYS);
 
-      const got = await outcomeOf(ql.delete(
-        LINE, { where: { id: { $nin: ['n1_kept'] }, stage: 'n1' }, multi: true, context: asCaller() } as never,
-      ));
+      const got = await outcomeOf(ql.delete(TAG, { where: { id: { $nin: ['n1_kept'] } }, multi: true, context: asCaller() } as never));
 
       expect(got).toMatchObject({ kind: 'landed' });
-      expect(await storedLines('n1')).toEqual(['n1_kept', theirs].sort());
+      const rows = (await ql.find(TAG, { context: SYSTEM } as never)) as Array<{ id: string }>;
+      expect(rows.map((r) => String(r.id)).sort()).toEqual(['n1_kept', 'n1_theirs']);
     });
   });
 
