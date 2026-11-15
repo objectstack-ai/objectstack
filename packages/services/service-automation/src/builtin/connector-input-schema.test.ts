@@ -24,12 +24,19 @@
  *     value is computed by an envelope.
  *  4. **Only the judged subset refuses.** `required`, `type` (with OpenAPI 3.0
  *     `nullable`), `properties` and `items` are judged; keywords outside that
- *     subset (`$ref`, `oneOf`, `enum`, `format`, `additionalProperties`, …)
- *     never refuse a call, and an action with no `inputSchema` dispatches
- *     whatever it is given.
+ *     subset (`$ref`, `oneOf`, `enum`, `format`, …) never refuse a call, and an
+ *     action with no `inputSchema` dispatches whatever it is given.
  *  5. **The refusal is routable.** The input can come from run data, so the
  *     failure is a `runtime` one: a `fault` edge receives it, with
  *     `$error.code === 'VALIDATION_ERROR'`.
+ *  6. **A key the action does not declare is refused, nothing sent** (#33553).
+ *     A key outside an object schema's `properties` / `required` — at the top
+ *     of `connectorConfig.input` or inside a section — fails the step naming
+ *     the node, the key and the keys declared there, the EVALUATED input
+ *     included. A schema that admits more keys (`additionalProperties` true
+ *     or a schema, `patternProperties`, a composition keyword) or lists no
+ *     `properties` declares open input, and still dispatches. The connector
+ *     pull door, which does not ask for this judgment, is unchanged.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -37,6 +44,7 @@ import { AutomationEngine } from '../engine.js';
 import type { NodeExecutor } from '../engine.js';
 import { installBuiltinNodes } from './index.js';
 import type { Connector } from '@objectstack/spec/integration';
+import { judgeConnectorInput } from '../connector-input-schema.js';
 
 function silentLogger(): any {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } };
@@ -93,6 +101,11 @@ const CONNECTOR = {
     { key: 'post', label: 'Post', inputSchema: SLACK_POST },
     { key: 'update', label: 'Update', inputSchema: { ...SLACK_POST, required: ['channel', 'ts'] } },
     { key: 'free', label: 'Free-form' },
+    { key: 'openTrue', label: 'Open (true)', inputSchema: { ...SLACK_POST, additionalProperties: true } },
+    { key: 'openSchema', label: 'Open (schema)', inputSchema: { ...SLACK_POST, additionalProperties: { type: 'string' } } },
+    { key: 'openPattern', label: 'Open (pattern)', inputSchema: { ...SLACK_POST, patternProperties: { '^x_': {} } } },
+    { key: 'openComposed', label: 'Open (composed)', inputSchema: { ...SLACK_POST, allOf: [{ properties: { thread_ts: { type: 'string' } } }] } },
+    { key: 'unlisted', label: 'No properties', inputSchema: { type: 'object' } },
   ],
 } as Connector;
 
@@ -113,6 +126,11 @@ function makeEngine(): { engine: AutomationEngine; sent: Array<{ action: string;
     post: handler('post'),
     update: handler('update'),
     free: handler('free'),
+    openTrue: handler('openTrue'),
+    openSchema: handler('openSchema'),
+    openPattern: handler('openPattern'),
+    openComposed: handler('openComposed'),
+    unlisted: handler('unlisted'),
   });
   const faults: Seen[] = [];
   engine.registerNodeExecutor({
@@ -261,9 +279,9 @@ describe('3. a valid call dispatches as before', () => {
 });
 
 describe('4. only the judged subset refuses', () => {
-  it('values outside `enum`/`format`/`$ref`/`oneOf`, and keys outside `properties`, still dispatch', async () => {
+  it('values outside `enum`/`format`/`$ref`/`oneOf` still dispatch', async () => {
     const { engine, sent } = makeEngine();
-    const input = { text: 'x', mode: 'sideways', meta: 42, when: 'not a date', either: true, extra: 'kept' };
+    const input = { text: 'x', mode: 'sideways', meta: 42, when: 'not a date', either: true };
     const result = await run(engine, 'ok_unjudged', 'echo', input);
     expect(result.success, result.error).toBe(true);
     expect(sent).toEqual([{ action: 'echo', input }]);
@@ -274,5 +292,85 @@ describe('4. only the judged subset refuses', () => {
     const result = await run(engine, 'ok_free', 'free', undefined);
     expect(result.success, result.error).toBe(true);
     expect(sent).toEqual([{ action: 'free', input: {} }]);
+  });
+});
+
+describe('6. a key the action does not declare is refused before dispatch (#33553)', () => {
+  it('a top-level key outside `properties` fails naming the node, the key and the declared keys; nothing is sent', async () => {
+    const { engine, sent, faults } = makeEngine();
+    const result = await run(engine, 'stale_top', 'post', { channel: 'c1', text: 'hi', stale_key: 'from the old action' }, { fault: true });
+    expect(sent).toEqual([]);
+    expect(faults).toHaveLength(1);
+    expect(faults[0]?.code).toBe('VALIDATION_ERROR');
+    expect(faults[0]?.message).toContain("connector_action 'call'");
+    expect(faults[0]?.message).toContain("'stale_key'");
+    expect(faults[0]?.message).toContain("'channel', 'text', 'blocks'");
+    expect(result.success).toBe(true);
+  });
+
+  it('without a fault edge the step fails, and a `null` undeclared value is refused too', async () => {
+    const { engine, sent } = makeEngine();
+    const result = await run(engine, 'stale_null', 'post', { channel: 'c1', stale_key: null });
+    expect(result.success).toBe(false);
+    expect(sent).toEqual([]);
+    expect(result.error).toContain("'stale_key'");
+  });
+
+  it('a key a closed schema (`additionalProperties: false`) does not declare is refused', async () => {
+    const { engine, sent } = makeEngine();
+    const result = await run(engine, 'stale_closed', 'echo', { text: 'x', extra: 'dropped?' });
+    expect(result.success).toBe(false);
+    expect(sent).toEqual([]);
+    expect(result.error).toContain("'extra'");
+  });
+
+  it('a key inside a section is judged against the section, named by its path', async () => {
+    const { engine, sent } = makeEngine();
+    const result = await run(engine, 'stale_nested', 'getPet', { path: { petId: 1 }, query: { verbose: true, stale: 1 } });
+    expect(result.success).toBe(false);
+    expect(sent).toEqual([]);
+    expect(result.error).toContain("'query.stale'");
+    expect(result.error).toContain("'verbose', 'tag'");
+  });
+
+  it('the EVALUATED input is judged: an envelope computing an undeclared key is refused', async () => {
+    const { engine, sent } = makeEngine();
+    const result = await run(engine, 'stale_envelope', 'getPet', { path: { dialect: 'cel', source: '{"petId": rec.petId, "owner": rec.name}' } });
+    expect(result.success).toBe(false);
+    expect(sent).toEqual([]);
+    expect(result.error).toContain("'path.owner'");
+  });
+
+  it('a schema that admits more keys, or lists no `properties`, declares open input and dispatches every key', async () => {
+    const { engine, sent } = makeEngine();
+    for (const [action, input] of [
+      ['openTrue', { channel: 'c1', extra: 'kept' }],
+      ['openSchema', { channel: 'c1', extra: 'kept' }],
+      ['openPattern', { channel: 'c1', x_extra: 'kept' }],
+      ['openComposed', { channel: 'c1', thread_ts: '1.2' }],
+      ['unlisted', { anything: 'kept' }],
+    ] as const) {
+      const result = await run(engine, `open_${action}`, action, input);
+      expect(result.success, `${action}: ${result.error}`).toBe(true);
+    }
+    expect(sent.map((s) => s.input)).toEqual([
+      { channel: 'c1', extra: 'kept' },
+      { channel: 'c1', extra: 'kept' },
+      { channel: 'c1', x_extra: 'kept' },
+      { channel: 'c1', thread_ts: '1.2' },
+      { anything: 'kept' },
+    ]);
+  });
+
+  it('a call holding only declared keys dispatches as before', async () => {
+    const { engine, sent } = makeEngine();
+    const result = await run(engine, 'declared_only', 'post', { channel: 'c1', text: 'hi' });
+    expect(result.success, result.error).toBe(true);
+    expect(sent).toEqual([{ action: 'post', input: { channel: 'c1', text: 'hi' } }]);
+  });
+
+  it('the judgment is opt-in: a door that does not ask for it (the connector pull door) is unchanged', () => {
+    expect(judgeConnectorInput(SLACK_POST, { channel: 'c1', extra: 'kept' })).toBeUndefined();
+    expect(judgeConnectorInput(SLACK_POST, { channel: 'c1', extra: 'kept' }, { refuseUndeclaredKeys: true })?.undeclaredKey).toBe(true);
   });
 });
