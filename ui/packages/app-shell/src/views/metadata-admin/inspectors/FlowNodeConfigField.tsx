@@ -634,6 +634,25 @@ export interface FlowNodeConfigFieldProps {
   requiredColumns?: ReadonlySet<string>;
 }
 
+/**
+ * objectstack#33838 — the key-cell props of a `keyValue` map judged against a
+ * closed key set ({@link FlowConfigField.acceptedKeys}): a key outside it is
+ * marked as refused, and the accepted keys no sibling field owns (`omitKeys`)
+ * are suggested. The key stays free text, so a marked key is still editable.
+ */
+function acceptedKeyProps(
+  acceptedKeys: readonly string[],
+  omitKeys: readonly string[] | undefined,
+  locale: string | undefined,
+): Pick<FlowKeyValueFieldProps, 'keyRefusal' | 'keyOptions'> {
+  const accepted = new Set(acceptedKeys);
+  const offered = acceptedKeys.filter((k) => !omitKeys?.includes(k));
+  return {
+    keyRefusal: (key) => (accepted.has(key) ? null : t('engine.inspector.flowNode.kv.undeclaredKey', locale)),
+    ...(offered.length > 0 ? { keyOptions: offered.map((k) => ({ value: k, label: k })) } : {}),
+  };
+}
+
 export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, context, scopeGroups, approvalScopeGroups, triggerScope, inactiveRetained, onClearInactive, required, requiredColumns }: FlowNodeConfigFieldProps) {
   // A text / textarea field with no override is a literal (no picker spelling).
   const refMode: 'expression' | 'hole' | undefined =
@@ -777,6 +796,11 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
           // `headers`) renders `{{ }}` holes in each value cell.
           valueMode: field.refMode === 'hole' ? 'hole' : undefined,
           valueRefusal: isFilterOperandSlot(context?.node?.type, field.path) ? filterOperandRefusal : undefined,
+          // objectstack#33838 — a map the run judges against a closed key set
+          // (a connector action's declared inputs): each other key is marked
+          // as refused, and the declared keys no sibling field types are
+          // suggested in the key cell.
+          ...(field.acceptedKeys ? acceptedKeyProps(field.acceptedKeys, field.omitKeys, locale) : {}),
         };
         // objectui#11788 — a record node's field-value map: its keys are fields
         // of the node's own target object, so the key cell lists them. The
