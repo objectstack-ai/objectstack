@@ -1,0 +1,32 @@
+{
+  "number": 33918,
+  "kind": "issue",
+  "title": "SCIM: project the enterprise `manager` attribute into sys_user.manager_id, so SCIM-held users' managers can change at all",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "lease:A1",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:08:46Z",
+  "updated_at": "2026-11-15T14:08:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33918",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nFollow-up named by the #33200 ruling (comment 6895645364, maintainer option A).\n\n## Gap\n\nAfter #33200, `admin-set-user-manager` refuses only users a SCIM directory holds (a `sys_scim_subject` row), telling the admin to change the manager in the directory. But no code projects the SCIM enterprise `manager` attribute into `sys_user.manager_id`: `packages/lint/src/validate-approval-approvers.ts:155-159` records the attribute as declared with zero non-test projection sites, and `packages/plugins/plugin-auth/src/scim*` has none either. So for a SCIM-held user, the directory cannot set the manager and the admin is refused: no path changes it.\n\n## Done when\n\n1. A SCIM create/replace/patch carrying `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager.value` sets `manager_id` to the matching user in the same org, subject to the same four refusals as the admin endpoint (self, cycle, depth, cross-org), answered as SCIM errors.\n2. A manager value naming no known user is refused loudly, not dropped.\n3. Clearing the attribute clears `manager_id`.\n4. The lint note at `validate-approval-approvers.ts:155-159` and its rule explanation are updated to match.\n\n## Notes\n\n- Clause-②: yes (widening): a SCIM request that today ignores `manager` will start writing it.\n- Order: after the #33200 build (same refusal helpers; reuse them, do not copy).\n- Does not touch ADR-0135 D4 stamping.\n\nPre-claim lane: domain:server, auth area (plugin-auth SCIM)."
+}

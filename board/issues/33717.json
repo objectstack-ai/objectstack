@@ -2,8 +2,8 @@
   "number": 33717,
   "kind": "issue",
   "title": "pm: give the post-merge governed audit an owner — a weekly scheduled workflow (maintainer)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,25 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T07:16:52Z",
-  "updated_at": "2026-11-15T07:48:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T12:54:21Z",
+  "closed_at": "2026-11-15T12:54:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33717",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (card #33603 part 2, owner of the post-merge governed audit, proposed by PR #33711 and judged sound by at-tier record 6890932729).\n\n## 维护者速读\n\nAGENTS.md 第 14 条把「合并后的受管面审计」定为座位落地的补偿控制。#33603 让审计能分开「低风险技能臂落地」和「Tier H 违规」,但还没人定期跑它。席位巡查规则文件 `lanes/skills.md` 已满(35/35),写不进去;更稳的是一个每周的定时工作流。工作流在 `.github/workflows/**`,由你决定。\n\n## What lands (maintainer's call)\n\n- A scheduled workflow (weekly) runs `node scripts/pm/check-governed-merges.mjs` in its audit mode over the past week's `main` and opens or updates one issue when it reports a BREACH or NOT MEASURED.\n- Until then the skills seat runs it on its patrol once a week (no rule carrier binds it; recorded on seat post #7623).\n\n⛔ Not a claim. Grading is triage's.\n"

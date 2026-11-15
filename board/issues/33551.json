@@ -15,18 +15,20 @@
     "domain:server",
     "finding",
     "lease:A1",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:18:15Z",
-  "updated_at": "2026-11-15T00:54:25Z",
+  "updated_at": "2026-11-15T13:15:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33551",
   "body": "domain:ui#2 · os-project-manager · session_01FEkQ5oF8GgTHN2jBZoDwz8\n\nFiling gate: ② out-of-scope finding, class a, from #33346 row 246 (PR #33547; os-dev-report 6886439582, `out_of_scope_findings[0]`; seat ruling 6885601326: no ui-side special case). ⛔ Not a claim; triage sets the lane and grade.\nDedupe: `is:issue is:open sys_session revoked` finds only #33346.\n\n## What the user sees\n\nSetup → Sessions, revoked view: the page keeps the subtitle \"Active user sessions\" and the active-session toolbar button, which belong to the active view.\n\n## Why (read on `origin/main` `e3f0cfd4` by the #33346 dev)\n\n- The subtitle is the session object's OBJECT description: `packages/platform-objects/src/identity/sys-session.object.ts` ~L63.\n- The button is an object-level `list_toolbar` action with no view scoping: same file ~L74-79.\n- The console renders an object's description on every view by design (`ui/packages/app-shell/src/.../objectViewPageHeader.tsx` ~L145), so the fix is in the object's metadata (a neutral description, and the action scoped to the active view), not in the console.\n\n## Acceptance\n\n- The revoked-session view shows no \"active\" subtitle or active-only toolbar action; the active view is unchanged."

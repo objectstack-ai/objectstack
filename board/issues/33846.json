@@ -1,0 +1,32 @@
+{
+  "number": 33846,
+  "kind": "issue",
+  "title": "review follow-ups of PR #33804",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T12:08:36Z",
+  "updated_at": "2026-11-15T13:05:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33846",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (review follow-ups of a PR in flight). Shape per ruling B on #33718 (record 6891082225). Dedupe: no open issue names PR #33804 apart from its card #33620.\n\n## review follow-ups of PR #33804 (card #33620, NUL-separated path reads)\n\nRecords: 6893545108, 6893808803 (review#1, PASS on head `f1a04f78`, nits only).\n\n- [ ] N2 the CONTROL rows rely on git's default `core.quotePath`; `gitFreeEnv()` does not strip a user or system gitconfig, so a machine with `core.quotePath=false` reddens them (fails red, never falsely green). Pin `-c core.quotePath=true` in the fixture, or strip the global config.\n\nThe two real defects the records named outside this PR are carded on their own (filing gate per-defect rule): `dispatch-gates.mjs` `changedPathsFromGit` reads without `-z`; `dispatch-gates --commands` did not derive `check:pm-fleet-write-execute` for a diff changing a function the executor self-test fakes.\n\n`scripts/pm/**`; `skip-changeset`; `Clause-②: no`. Waits for PR #33804.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 33798,
+  "kind": "issue",
+  "title": "docs(releases): write content/docs/releases/v18/18-5.mdx for the 18.5.0 cut, its v18 index entry and the upgrading table row, with a 需手动处理 section for the breaking changes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T10:57:54Z",
+  "updated_at": "2026-11-15T12:41:49Z",
+  "closed_at": "2026-11-15T12:40:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33798",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. In the triage seat session on 2026-11-15, verbatim: 「18.5的版本发布说明可以开始安排写了」. It follows #33106 (the 18.4.0 notes, PR #33137) and `docs/releases-maintenance.md` §3 (the curated platform layer). ⛔ Not a claim.\n\n## 维护者速读\n\n为 18.5.0 写发布说明页，赶在发版前写好，不要像 18.4.0 那样发版后才补（#33106 是第三次同类缺口：#26631、#29933）。自 `@objectstack/cli@18.4.0` 以来有 283 个新增 changeset，约 60 个提交标了 BREAKING（`!`）。说明页要把「用户升级时必须手动做什么」写清楚。这是公开的发布说明，⛔ 不写任何客户、下游项目或「谁在等」的内容。\n\n## Measured (2026-11-15 ~11:00Z)\n\n- Commits `@objectstack/cli@18.4.0..origin/main`: about 330. Added changesets: 283. Commits marked breaking (`type(scope)!:`): 60.\n- Version Packages PR #33097 was refreshed at 10:41Z (head `25559f43`, `@objectstack/cli@18.5.0`). Its generated CHANGELOGs are the source of numbers. It will be refreshed again right before the merge, so re-read its diff then.\n\n## What lands (shape of PR #33137)\n\n1. `content/docs/releases/v18/18-5.mdx`, on the 18-4 skeleton, with sections grouped by what the reader must do (`releases-maintenance.md` \"Release notes are grouped by what the reader must do\"):\n   - **需手动处理 (action required):** every breaking change a user must act on, each with the refusal or behaviour change it serves and the remedy. Candidates from `main` (verify each against its changeset):\n     - walled-mode seed hooks and reads see only the row's organization (#33206/#33207, PR #33222);\n     - cloud-managed environments keep no local password (ADR-0135 D5.2, #33268/#33248) and add pending SSO-only people (#33181);\n     - `connector_action` refuses undeclared input keys (#33553);\n     - object_extension publish door judgements (`ee627c67`), and the action route answering by the holder on the route;\n     - `admin_full_access` switch-off refused with no platform admin left (#33082);\n     - the hook refusal catalogue reshaped (#33214);\n     - the history and rollback doors refusing a bare two-holder name; plural action reads counted per (object, name);\n     - and the rest of the `!` list.\n   - **New capabilities:** controlled_by_parent `writeRequiresMasterRead` (#33250), one-hop cross-object analytics `where` with its 1000-parent cap (#33512 / #33619), dataset metrics for the ask agent, model-picker multipliers if landed, localized refusals and advisories, SQL-first rule.\n   - **Notable fixes:** grouped by capability, in the platform's own terms, never by who reported or waited for them.\n   - **Console section** per `releases-maintenance.md` \"Sourcing the Console section\".\n2. `meta.json` places 18-5 before 18-4. Add the v18 index entry and the upgrading page's \"Per-release specifics\" row for v18.5.0, then regenerate `handwritten-docs.json`.\n3. Every number on the page is read from the Version PR's CHANGELOGs or `npm view`, not from memory.\n\n4. **Fix the v18 index page** (`content/docs/releases/v18/index.mdx`; the maintainer: 「我记得v18总的版本说明写的也不对」). Read on `main` (last edited by PR #33137), it still reads as the 18.0.0 page:\n   - The frontmatter `description` and the banner say \"Release status: 18.0.0 is GA — the release this page documents\", and describe closing the `18.0.0-next.N` train. The page is the **v18 line overview**, and the line is at 18.4.0 on `latest` (18.5.0 next). Say what the line is and which release is current; the 18.0.0 GA details belong on `18-0.mdx`.\n   - \"Upgrading a database to 18.0.0\" (the ADR-0131 ceremony) is the 18.0.0 checklist and already lives on `18-0.mdx`. On the index, keep one short paragraph (\"coming from 17.x? run the ceremony\") with the link.\n   - \"How a breaking stage lands\" still describes pre mode and `18.0.0-next.N` in the present tense (\"Through `next` before `latest`… every release cut from `main` was the next `18.0.0-next.N`\", \"a v18 prerelease's handshake\"). Since the ADR-0125 amendments of 2026-11-05/06, `next` carries a snapshot of `main` (`0.0.0-next-<timestamp>`, `docs/releases-maintenance.md` \"Release channels\"). Rewrite it to how releases land now: GA minors through the Version Packages PR, `next` as a daily snapshot, and the #25105 level rule (a breaking change can ship in a minor or a patch, so pin exact versions). Keep the skills step if it is still true.\n   - \"Per-release notes\" gets the 18.5.0 entry (item 2), in the same shape as the others, with counts from the CHANGELOGs.\n   - The page is public, so the rule above applies.\n\n## Public page rule\n\nThis page is public. ⛔ It names no customer, downstream project, demo or internal seat, and no \"waiting on\" or \"requested by\". Each item is described by what changed for any user, and linked to its changeset or PR only.\n\n## Timing\n\nDraft now against `25559f43`. Before the Version PR merges, re-read the refreshed diff and add any changeset that landed since. Coordinate with the 18.5.0 sweep #33761 (qa#3): a breaking change the sweep finds undocumented belongs here.\n\n## Grade\n\np1, on the maintainer's word, and it gates the cut.\n\nReader: `domain:devx` (the docs lane that wrote #33106).\n"
+}

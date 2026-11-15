@@ -2,8 +2,8 @@
   "number": 33523,
   "kind": "issue",
   "title": "import: a lookup cell resolves a name across the whole target object, not within the row's own master reference, so a repeated detail name (\"Advance 30%\" on two contracts) fails the row with reference_ambiguous",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T23:27:28Z",
-  "updated_at": "2026-11-15T05:36:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T09:52:19Z",
+  "closed_at": "2026-11-15T09:52:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

@@ -1,0 +1,34 @@
+{
+  "number": 33791,
+  "kind": "issue",
+  "title": "seed: `owner_id: 'PERSON NAME'` is written as literal text on an app object that relies on the injected owner_id — the seed loader builds its reference graph from the authored definition, which has no owner_id",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:A4",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T10:49:52Z",
+  "updated_at": "2026-11-15T13:54:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33791",
+  "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\n**What happens.** #33207 (PR #33222) promises that on an organization-scoped load a seed value naming a person in `owner_id` resolves through the organization's membership. The changeset says so, and so does `content/docs/data-modeling/seed-data.mdx` (the target table row \"`sys_user` (people: `owner_id`, people lookups)\", about :473). It only holds when the object declares `owner_id` itself.\n\nAn app's own object that relies on the platform-injected `owner_id`, which is the default case, gets the literal name stored. This happens on every posture: single, walled `isolated`, the boot replay and the organization-create replay. Nothing is logged, and nothing is reported. On the same row, a declared `Field.user()` or `Field.lookup('sys_user')` resolves the same name to the user's id. A text `owner_id` is non-NULL, so the first-admin handoff never claims it, and the row stays owned by a user id that does not exist.\n\nDownstream: HotCRM's o2c `invoice`, `payment` and `billing_milestone` objects (and others) do not declare `owner_id`.\n\n**Reproduction** (QA run at main `a557fa38`. Reproduced by two independent runners on 4 fresh single-posture DBs and 4 fresh walled DBs.)\n1. In an app (a scratch copy of `examples/app-showcase`), add an object `showcase_vfy_widget` with no `owner_id` field, plus `rep: Field.user()` and `rep_lk: Field.lookup('sys_user')`. Add a control object `showcase_vfy_owned` that declares `owner_id: Field.lookup('sys_user')`.\n2. Seed both with rows `{name:'Y', owner_id:'Vera Verify', rep:'Vera Verify'}`, where Vera Verify is a `sys_user` row in the same seed set. After the dev admin exists (second boot on the same DB), also seed `{name:'Z', owner_id:'Dev Admin', rep:'Dev Admin'}`.\n3. Boot `objectstack dev --seed-admin --no-compile` on a fresh file DB, then reboot it once. Read `GET /api/v1/data/showcase_vfy_widget` and `GET /api/v1/data/showcase_vfy_owned` as admin.\n\n- **Expected:** `owner_id` is handled like `rep`. It holds the user's id, or it is NULL with an error when the person is not a member.\n- **Actual:**\n\n  | object | `owner_id` | `rep` / `rep_lk` |\n  |---|---|---|\n  | `showcase_vfy_widget`, row Y | `\"Vera Verify\"` | `\"JfVslg3dvTAEWWyp\"` (Vera's id) |\n  | `showcase_vfy_widget`, row Z | `\"Dev Admin\"` | the admin's id |\n  | `showcase_vfy_owned` (control) | the user's id | — |\n\n  The boot log has no line about `showcase_vfy_widget.owner_id`. On a walled `isolated` boot (posture env vars, `POST /api/v1/auth/organization/create` replay), the widget's `owner_id` is likewise stored as text.\n- **Control:** the same value on an install-local package object that also does not declare `owner_id` IS resolved, per organization.\n\n**Mechanism** (read in `packages/metadata-protocol/src/seed-loader.ts` @ a557fa38, and confirmed at the engine layer by swapping only what `metadata.getObject` returns):\n- `resolveObjectDefinition` (about :1370) returns the metadata service's definition whenever it has `fields`, so the engine schema is only a fallback.\n- `buildDependencyGraph` (about :1283) builds its references from that definition's fields only.\n- A config-app object's authored definition has no `owner_id`, because objectql's `applySystemFields` adds it only at registration.\n- The loader already reads injected columns elsewhere, through `resolveInjectedSystemColumns(def).tenant` and `.names`, but the reference graph ignores `.owner`.\n- The PR's pin `packages/runtime/src/seed-org-scoped-references.integration.test.ts` stubs the metadata service with `engine.registry.getObject(...)` (the enriched definition), so it cannot see this.\n\n**TO:** the reference graph treats the injected owner column like a declared `sys_user` lookup. The pin serves the as-authored definition from its metadata stub. A seed `owner_id` that names no member resolves to NULL with the \"not a member\" error, as `rep` does.\n\n**Not a regression:** `buildDependencyGraph` and `resolveObjectDefinition` are identical at 18.4.0 (`181ad7d4`). It does contradict the 18.5.0 changeset and docs promise for #33207. Not a security finding.\n\n**Related observation, not this card:** on a walled boot the organization-create replay runs before the founder's `sys_member` row is written (log 10:36:52.150Z vs 10:36:52.175Z). So the new organization's own replay can never resolve any person, the founder included. Only a later install into the organization, or a reseed, reaches existing members.\n\nDedupe: searched open issues for \"seed owner_id literal\", \"seed owner_id resolve\" and \"seed loader injected owner_id\". No match.\n\nQA-source: #33785 · R-CUST card #33207 · platform-core.seed-mode-matrix · card acceptance (owner_id: NAME resolves)"
+}

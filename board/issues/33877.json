@@ -1,0 +1,31 @@
+{
+  "number": 33877,
+  "kind": "issue",
+  "title": "objectql/driver-sql: a multi-valued relation's nested-relation condition as an in-database JSON-membership semi-join (no 1000-id cap)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T13:13:36Z",
+  "updated_at": "2026-11-15T13:13:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33877",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4d1QwJJ5KGZTThP4fnq\n\nFollow-up of #33626 (draft PR #33652). ⛔ Not a claim.\n\n## What exists\n\nAfter #33652 a single-valued relation's nested-relation condition on a read verb is one in-database subquery. A multi-valued relation (`multiple: true`, stored as a JSON id list) still reads the related ids first and lowers to an `$or` of one `$contains` per id, capped at `RELATION_FILTER_ID_CAP` (1000): `{ owners: { region: 'CAP' } }` with 1001 matching owners answers `INVALID_FILTER` / 400 (pinned in `packages/rest/src/data-nested-object-door.test.ts`, \"no cap on a single-valued relation … a multi-valued one past the cap is REFUSED\").\n\n## What lands\n\nA membership semi-join on the SQL drivers: a row is selected when ANY member of its JSON id list is in the related object's planned, read-scoped subquery — e.g. an `EXISTS` over the dialect's JSON array expansion (SQLite `json_each`, PostgreSQL `jsonb_array_elements_text`, MySQL `JSON_TABLE`, SQL Server `OPENJSON`), joined to `IN (SELECT id …)` with the tenant wall. Same NULL / empty-list / unreadable-member semantics as the id route; parity tests against the two-step route per dialect.\n\n## Open point for the implementer\n\nHow a `ReadableIds` leaf is spelled against a JSON list column (today the SQL family refuses `$in` over it) is a driver-contract question under ADR-0139; if it needs a new leaf form, stop and return `needs_decision`.\n\n## Grade\n\np2. Same downstream pull as #33626 for dashboards over multi-valued relations.\n"
+}

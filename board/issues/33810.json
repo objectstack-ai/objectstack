@@ -1,0 +1,35 @@
+{
+  "number": 33810,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0011 and ADR-0151 record who confirms a declared-gated action on an AI door",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T11:14:18Z",
+  "updated_at": "2026-11-15T12:54:21Z",
+  "closed_at": "2026-11-15T12:54:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-15T12:54:19Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33810",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X3KyFEoEw9hQnSWC2gDfEpS)_\n\ndomain:spec#1 · os-project-manager · session_01FEkQ5kZuoX9F5S7p84Dwue\n\nFixes #33689 (PR 2 of 2: the ADR-0011 and ADR-0151 amendment notes. PR 1, the contract, merged as #33725, `1e65a389`.)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:只加两段 ADR 修订说明,不改任何代码、接口或决定。ADR-0011 记录:声明了 `ai.requiresConfirmation: true` 的动作,经 MCP `run_action` / `resume_run` 调用时,由人来确认(客户端支持征询就在客户端问;不支持就交给宿主的待确认服务,由调用所代表的那个人登录应用后同意或拒绝;宿主没有该服务才拒绝),调用方自己传的 `confirm: true` 不再算数。ADR-0151 记录:AI 服务账号的规则 3 不变,照旧拒绝,不征询也不交出;待确认服务不是规则 3 等待的那扇「转交给人」的门(那仍是 O6)。\n- 为什么改:#33725 已把这条契约合进 `@objectstack/spec`,卡片要求同步修订这两份 ADR。\n- 风险与回滚:纯文档。两段说明都写明「实现变更发布前,门禁仍读 `confirm: true`」。回滚即还原本 PR。\n- 先看:`docs/adr/0011-actions-as-ai-tools.md` 的 Confirmation 表格下方的修订说明;`docs/adr/0151-…md` D3 末尾的修订说明;两份文件头部各加一行 Amended。\n- 需要你做的:这是 Tier H(`docs/adr/**`),需要你审批合并。应用内助手这扇门按你的裁定「B 同一规则，两套流程暂留」写入 ADR-0011 说明:同一规则适用于所有 AI 入口,应用内确认卡和 `IAIService` 待批成员保留;契约改动走 #33808,cloud 路由对齐走 #33809,两套接缝合并是 #33806。\n\n## What changes\n\nDocs only: two dated amendment notes and one header line in each ADR. No decision of either ADR is reversed, and no status line changes.\n\n- **`docs/adr/0011-actions-as-ai-tools.md`**: a header `**Amended**` line, and an amendment note under the \"Confirmation (HITL approval queue)\" heading. It cites the merged contract by symbol (`packages/spec/src/contracts/ai-service.ts#AI_ACTION_CONFIRMATION_CAPABILITY`, `#IActionConfirmationService`, `#ACTION_CONFIRMATION_SERVICE`). The note covers:\n  - **Why:** measured 2 of 6 self-confirmed runs on 18.4.0.\n  - **Which calls:** the declared flag, through MCP `run_action`, or `resume_run` for its candidate action, by any caller acting for a person.\n  - **The three steps:** elicit; otherwise hand off, where only the person the call ran as decides, an approval runs as them with every gate re-checked, a `resume_run` resumes its parked run, and the approve and reject doors take a signed-in session only; refuse with `no_confirmation_service` only when no service is registered.\n  - **`confirm`:** the caller's `confirm` never counts.\n  - **What an answer proves:** neither answer proves a human.\n  - **Bounds:** the MCP delete tools keep the member, and REST `/actions` stays outside the gate for a person.\n  - **The in-app assistant door, as ruled (Ruling-ref: Leehom 2026-11-15T11:10:57Z, 「B 同一规则，两套流程暂留」, record 6893484458):** the core rules bind every AI door, the in-app assistant included. Neither the caller's nor the model's own confirmation counts, only the person the call ran as decides, the deciding doors take a signed-in session only, and the approved action runs as that person, re-checked. The in-app door keeps its own channel (the pending-approval card and inbox), and `IAIService`'s pending members stay. The note points to the follow-ups: the in-app door's three changes (who decides, which credential, as whom it runs) land through #33808, the cloud route alignment is #33809, and the seam merge is #33806.\n  - **When it binds:** until the implementing change ships, `#actionConfirmationRefusal` gates on `confirm: true`, and the addendum's sentence stays the description of running code.\n  - **What stays unchanged:** the opt-in, the H/C/E buckets with \"never relaxed\" (what changes is who confirms), and ADR-0151 D3 rule 3.\n- **`docs/adr/0151-…-of-its-own.md`**: a header `**Amended**` line, and an amendment note after D3. It covers:\n  - **Rule 3 is unchanged:** an account is refused whatever it sends, neither elicited nor handed off.\n  - **The new reason:** from the implementing change the refusal carries `details.reason: 'service_account'` on every door that runs an action.\n  - **Not the hold door:** the pending-confirmation service is not the hold door rule 3 waits on. It hands a person's call back to that person, and its doors refuse an agent principal. O6 stays a separate decision.\n  - **OAuth agents:** an OAuth agent acting for a person is not an account.\n  - **Until the switch:** the gate is `#actionConfirmationRefusal` / `#isAiServiceAccountCaller` as before.\n\n## Why\n\nCard #33689's \"Change\" amends ADR-0011 and ADR-0151 alongside the contract. Under its order the notes ship as their own Tier H PR after the contract (PR 1) merged.\n\n## Verification\n\nHead `ab50848a`, from `origin/main` at `1e65a389`.\n\n<details><summary>Derived gates: 21 derived, 21 exit 0, 0 NOT-MEASURED</summary>\n\n```text\nnode scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack   (21 commands; each run with timeout 900, exit captured before any pipe)\n21 of 21 :: exit 0   (check:adr-symbol-anchors: 3621 anchors across 156 records resolve; check-adr-links: 1131 destinations resolve; check:adr-anchors, check:adr-index, check:doc-authoring, check:pm-governed-merges included)\ndispatch-gates --ran :: exit 0 — 21 derived, 21 run, 0 NOT-MEASURED\nChanged lines: 70 (+70 / -0), under the human-merge threshold\n```\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (docs only; the derived lint-family gates ran green)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing; no changeset)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (the maintainer quick-read section is in Chinese by the project's convention)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5kZuoX9F5S7p84Dwue)_\n\n<!-- signed: domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag -->\n"
+}

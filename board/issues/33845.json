@@ -1,0 +1,32 @@
+{
+  "number": 33845,
+  "kind": "issue",
+  "title": "review follow-ups of PR #33777",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T12:08:33Z",
+  "updated_at": "2026-11-15T13:04:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33845",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (review follow-ups of a PR in flight). Shape per ruling B on #33718 (record 6891082225): one checklist card per reviewed PR. Dedupe: no open issue names PR #33777 apart from its card #33751.\n\n## review follow-ups of PR #33777 (card #33751, area-lease mode)\n\nRecords: 6893242470, 6893494266, 6893759817 (review#1, PASS on head `0d547f0d`, nits only). Every item is wording or a missing pin; none changes what a seat does today.\n\n- [ ] N3 the `lease:` label family has no row in `ensure-pm-labels.sh` (the eight pilot labels exist and label-write accepts them).\n- [ ] N6 the same-account review-seat exception is written only in `area-lease.md`; `lanes/review.md` still carries the unconditional line, and \"本线程\" does not say which thread.\n- [ ] N7 the lease table's 复核席 column has no reader now that routing follows `contract-review.md` alone.\n- [ ] N8 the seat-thread no-log line by its letter catches the red-check log read on PRs the seat lands (`platform-readings.md`, `landing-operations.md`); say a sub-agent read satisfies both.\n- [ ] N11 \"署本席签名\" does not say which session fills the signature's third slot.\n- [ ] N12 the `seat-lifecycle.md` L11 owner line says incumbent PM where \"current PM session\" is meant; say session at the next touch.\n- [ ] N13 the mutual exemption between two table sessions holds only by reading the mutual word over the whole group.\n- [ ] N14 reading four samples the newest closed card only; with that card's claim exempt, say whether the reader passes to the next closed card or reads four as empty.\n\n`.claude/skills/pm-dispatch/**` (Tier S); `skip-changeset`; `Clause-②: no`. Waits for PR #33777.\n"
+}

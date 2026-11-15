@@ -1,0 +1,30 @@
+{
+  "number": 33858,
+  "kind": "issue",
+  "title": "Console: a server-ended session is re-checked twice — the 401 burst of one navigation is not collapsed to one get-session read",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T12:26:00Z",
+  "updated_at": "2026-11-15T12:56:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33858",
+  "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nKind: product defect (low severity)\n\nSubject: objectstack main a557fa386bc3, console built from this tree (`pnpm console:build`), stock showcase `os dev --ui --seed-admin --no-compile --no-watch` on its own port + file DB.\n\nRepro (reproduced 3 times, fresh browser context each, Playwright, role/label-targeted clicks):\n1. Sign in through the console form as admin@objectos.ai / admin123; open `/_console/apps/com.example.showcase/showcase_task/record/‹id›`.\n2. From a second client signed in as the same admin: `POST /api/v1/auth/revoke-other-sessions` → 200 `{\"status\":true}`.\n3. In the tab, click the sidebar entry \"Projects\" (no reload).\nExpected (AuthProvider.tsx's own comment, and identity-auth.console-sign-out-and-ended-session acceptance[2]): \"A burst of `401`s from one navigation collapses to one read\" — the console sends ONE `GET /api/v1/auth/get-session`, then goes to `/login?redirect=…`.\nActual: two get-session reads, both 401, ~10 ms apart, before the tab moves to `/_console/login?redirect=%2Fapps%2Fcom.example.showcase%2Fshowcase_project` (the end state is correct). Trace (run 1): +333ms 401 GET sys_personal_view → +334 REQ get-session → +335 401 showcase_project?top=0 → +366 401 get-session → +366 REQ get-session → +371 401 showcase_project?populate=… → +375 401 get-session → +393 NAV /login?redirect=…\n\nMechanism: `ui/packages/auth/src/AuthProvider.tsx:308-322` — the sessionEndEvents subscriber sets `sessionEndCheckInFlight.current = true`, awaits `client.getSession()`, schedules `setUser(null)`/`setSession(null)` on a \"no session\" answer, then clears the flag in `finally`. The subscription is only torn down when the effect re-runs on `holdsSession` turning false, i.e. after React commits. A 401 from the same navigation that lands between the flag clear and that commit passes the guard (`if (sessionEndCheckInFlight.current || sessionLoadInFlight.current) return;`, line 309) and fires a second read. Fix shape: leave the flag set (or mark the subscription cancelled) once a read has ended the session, so later 401s of the same burst are dropped.\n\nImpact: one redundant request per server-ended session; no wrong state reached. Not a regression (the session-end code path did not change after 181ad7d4; the one commit touching AuthProvider.tsx since, 4dbcbddd8, edits the direct-sign-in part). The unit pins (ui/packages/auth/src/__tests__/AuthProvider.test.tsx 20/20, createAuthenticatedFetch.test.tsx 19/19) do not assert a get-session call count across a multi-401 burst.\n\nDuplicates searched (gh api search/issues, repo:objectstack-ai/objectstack is:issue is:open): \"sessionEndCheckInFlight\" → 0; \"get-session burst 401\" → 4, all [PM seat] cards, none related; \"session ended re-check get-session\" → 11, all [PM seat] cards, none related.\n\nQA-source: #33853 · identity-auth.console-sign-out-and-ended-session · acceptance[2]"
+}

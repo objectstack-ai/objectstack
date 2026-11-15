@@ -1,0 +1,30 @@
+{
+  "number": 33864,
+  "kind": "issue",
+  "title": "Console shows machine names or raw record ids where a label exists: Access binding-suggestion banner and toasts, OWD \"By parent →\", Audit Log Record column, Setup palette record hits, flow entry-condition field picker",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T12:33:10Z",
+  "updated_at": "2026-11-15T12:55:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33864",
+  "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\n**Convention.** The `ux-conventions.labels-over-machine-names` rule: anything shown to a person uses the label, and the machine name appears at most as secondary text.\n\n**Where** (main `a557fa38`, stock showcase, seeded admin; met by a QA run beside that item's clauses, which all passed on the surfaces they list):\n\n1. **Studio → Access pillar of a writable package:**\n   - **Binding-suggestion banner.** Publish a permission set with `isDefault: true` and a label, e.g. name `qa_note_readers`, label \"QA Note Readers\". The banner reads `This package suggests granting \"qa_note_readers\" to all signed-in users (Everyone).`\n   - **Grant / Dismiss / Revoke results.** The toasts (`\"qa_note_readers\" is now granted to everyone.`, `Suggestion for \"…\" dismissed.`) and the dismissed banner (`\"qa_note_readers\" is not granted: …`) also name the set by machine name.\n2. **Studio → Access → Record sharing (OWD).** Choose \"Controlled by parent\" on a detail object whose master is labelled \"QA Project\". The line reads `By parent → qa_access_project`.\n3. **Setup → Audit Log list.** The Record column shows the record id, not the record's display name.\n4. **Setup ⌘K palette record hits.** Record Share and Notification Event hits show the record id as their title.\n5. **Studio flow editor → entry-condition builder.** The field list offers paths (`status`, `previous.status`) rather than field labels.\n\n**Expected:** the label (set label, object label, record display name, field label). The name can follow as secondary text where it is useful.\n\n**Regression vs 18.4.0:** not measured. These surfaces are not in the item's variant list, which is why its clauses passed.\n\nQA-source: #33861 · ux-conventions.labels-over-machine-names · observed beside the clauses"
+}

@@ -2,9 +2,9 @@
   "number": 33407,
   "kind": "pull_request",
   "title": "docs(adr-0090): D5 — removing a row one owns is not a delete bit (#33010 ruling)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -13,6 +13,7 @@
   "labels": [
     "documentation",
     "domain:server",
+    "pm:awaiting-merge",
     "size/xs",
     "skip-changeset"
   ],
@@ -22,12 +23,16 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T19:01:34Z",
-  "updated_at": "2026-11-14T19:02:40Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-11-15T09:52:18Z",
+  "closed_at": "2026-11-15T09:52:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-15T09:52:16Z",
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/33407",
-  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU5CHkeh2msc49m4dh6kwEt)_\n\n## Summary\n\nDocs-only companion to #33322 (Fixes #33010). The maintainer's ruling on #33010 (comment 6879388034) says a member may delete an attachment they uploaded themselves, own uploads only, and that the ADR-0090 D5 text saying the member grant has no delete bit gets a matching sentence. This adds that sentence as a D5 bullet: removing a row one owns is served by an own-row delete door, not by `allowDelete` on a set bound to `everyone`; the attachment member grant stays read and create only.\n\n## What changes\n\n- `docs/adr/0090-permission-model-v2-concept-convergence.md`: one new bullet in D5, after the D7 lint bullet.\n\n## Landing\n\nGoverned surface (`docs/adr/**`): lands through the seat after #33322 merges, so the ADR never names a door main does not have.\n\nNo code, no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi\n"
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU5CHkeh2msc49m4dh6kwEt)_\n\n## Summary\n\nDocs-only companion to #33322 (merged). The maintainer's ruling on #33010 (comment 6879388034) says a member may delete an attachment they uploaded themselves, own uploads only, and that the ADR-0090 D5 text saying the member grant has no delete bit gets a matching sentence. This records that sentence as a dated note in D5, after the `Note (2026-10-14)` blockquote, citing the ruling by its record id: removing a row one owns is served by an own-row delete door, not by `allowDelete` on a set bound to `everyone`; the attachment member grant stays read and create only.\n\n## What changes\n\n- `docs/adr/0090-permission-model-v2-concept-convergence.md`: one new dated note blockquote in D5, `Note (2026-11-14, ruling of record 6879388034 on #33010)`, after the `Note (2026-10-14)` blockquote. No ruled text is edited.\n- Review 2, item 1, option (a): the first head placed the sentence as a D5 bullet directly above the `Revision (2026-09-12, #17189)` blockquote, whose ruled text opens with \"the bullet above\" and means the D7 lint bullet. As a dated note after the last D5 blockquote it no longer sits between that revision and its antecedent.\n\n## Landing\n\nGoverned surface (`docs/adr/**`, Tier H): lands only on its tier's record. #33322 merged 2026-11-14T21:19Z, so the door the note names is on `main`.\n\nNo code, no changeset.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1D3AzXvEhBbz79Pmi\n\n<!-- signed: domain:server#5 · os-elon-musk · session_016WV4d1QwJJ5KGZTThP4fnq -->\n"
 }

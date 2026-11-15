@@ -1,0 +1,34 @@
+{
+  "number": 33839,
+  "kind": "issue",
+  "title": "service-automation: a catalog descriptor saved active through PUT /api/v1/meta/connector/:name never gets the inert-connector audit warning until a later publish or restart",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:A5",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T11:53:00Z",
+  "updated_at": "2026-11-15T13:55:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33839",
+  "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nObserved at objectstack main @ a557fa38 (examples/app-showcase scratch copy, `os dev`, sqlite file DB, admin session), beside integration-system.connector-descriptor-audit.\n\nReproduction (reproduced twice, qa_erp_rt and qa_erp_rt3):\n1. Boot the stock showcase; confirm the boot log has no \"declare actions but are not registered\" line.\n2. PUT /api/v1/meta/connector/qa_erp_rt  body {\"name\":\"qa_erp_rt\",\"label\":\"QA ERP runtime\",\"type\":\"saas\",\"enabled\":true,\"actions\":[{\"key\":\"get_y\",\"label\":\"Get Y\"}]}  → 200 \"Saved connector 'qa_erp_rt' (env-wide, state=active)\".\n3. Wait (8 s). Expected: the `[Automation] N declarative connector(s) declare actions but are not registered … : qa_erp_rt …` warning, as a boot or a publish raises it. Actual: no warning line at all; the log shows only `[Registry] Registered connector: qa_erp_rt`.\n4. Control: PUT /api/v1/meta/connector/qa_erp_rt2?mode=draft (same shape) then POST /api/v1/meta/connector/qa_erp_rt2/publish → the warning appears within seconds and names BOTH qa_erp_rt and qa_erp_rt2 — so the first descriptor was inert and unreported the whole time.\n5. Corroboration that the save path does reconcile: PUT /api/v1/meta/connector/qa_inst_rt with provider 'rest' (active, no draft) materializes the instance (it appears `ready` on GET /api/v1/automation/connectors) — only the audit is skipped.\n\nMechanism: packages/services/service-automation/src/plugin.ts — `queueConnectorMutationReconcile` (the #28002 `onMetadataMutation` path that \"also covers a direct active save, which raises no reload anywhere\") runs `reconcileDeclaredConnectors` only; `auditDeclaredConnectors` is wired on `kernel:ready` and `metadata:reloaded` alone (plugin.ts ~2830 and ~2865), so the direct-save door skips it.\n\nExpected: the inert-descriptor audit runs wherever the connector reconcile runs (PD#10: declared ≠ delivered surfaces loudly), or the item/ADR states that only a publish re-audits.\nNot a regression since 18.4.0: the save-path reconcile predates tag 181ad7d4 (git merge-base check).\n\nQA-source: #33829 · integration-system.connector-descriptor-audit · observed beside the clauses"
+}

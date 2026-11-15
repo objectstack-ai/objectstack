@@ -2,8 +2,8 @@
   "number": 33301,
   "kind": "issue",
   "title": "docs + spec: ADR-0150 D7 addendum, PositionSchema.renamedFrom describe and the position liveness line still say the renamedFrom holder carry runs at boot only (after PR #33245)",
-  "state": "open",
-  "state_reason": "reopened",
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T16:15:46Z",
-  "updated_at": "2026-11-15T06:06:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T09:08:17Z",
+  "closed_at": "2026-11-15T09:08:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 14,
   "locked": false,

@@ -1,0 +1,30 @@
+{
+  "number": 33860,
+  "kind": "issue",
+  "title": "checklist: platform-core.bare-name-one-holder-refusal acceptance[0] and [3] still drive connector as the one-holder-per-deployment type, but #33431 narrowed connector per namespace and no covered type is left",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T12:26:59Z",
+  "updated_at": "2026-11-15T12:51:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33860",
+  "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nKind: stale spec → re-point card (checklist item revision; the product is right)\n\n## What the run saw (objectstack main a557fa386bc3)\n\n`platform-core.bare-name-one-holder-refusal` rev 5 drives the connector `qa_conn` as \"the one covered type `NAMESPACE_SCOPED_BARE_NAME_TYPES` does not list at this revision\", and asks the runner to re-read that complement before the run. At a557fa38 the list ends with `'connector'` under `// #31699 PR 3 (the narrowing PR)` (`packages/core/src/package-scoped-resolution.ts`, lines 160-178), landed by #33431 (322ded7da, 2026-11-14, after the 18.4.0 tag 181ad7d4). Every member of `BARE_NAME_ONE_HOLDER_TYPES` (lines 103-122) is now in the namespace list, so the complement is empty.\n\nLive, on a showcase scratch copy with its own OS_HOME:\n\n1. `os package install` com.qa.addr-a (ns qa_a) then com.qa.addr-b (ns qa_b), each declaring `connectors: [{ name: 'qa_conn', type: 'api', enabled: false }]`: both install. `GET /api/v1/meta/connector` lists `qa_conn` under each package; bare `GET /api/v1/meta/connector/qa_conn` answers 409 `RESOURCE_CONFLICT` naming both. acceptance[0] expects 422 `PLUGIN_REGISTER_FAILED` for the second.\n2. A cold boot of one `composeStacks([d, c], { manifest: 'preserve' })` artifact whose two namespaced packages both declare connector `qa_conn` boots and logs no \"Bare-name conflict at boot\" warning. acceptance[3] expects one.\n\nacceptance[1], [2] and every negative passed. The item's own text foresaw this (\"a type the list has gained is now acceptance[1]'s\"), but with nothing left outside the list, acceptance[0] and [3] have no type to drive.\n\n## Re-point proposal\n\n- acceptance[1]: add connector to the per-namespace set (connector #33431) and drop \"connector alone at this revision\".\n- acceptance[0]: the 422 still occurs when the second holder has no namespace. In this run's probe, a namespace-less package com.qa.addr-e declaring connector `qa_conn` after qa_a got 422 `PLUGIN_REGISTER_FAILED`, \"Bare-name conflict: package \\\"com.qa.addr-e\\\" cannot register a name another holder already holds — … connector \\\"qa_conn\\\", already held by package \\\"com.qa.addr-a\\\" …\". Re-point the clause to that co-owner (namespace-less, or same-namespace) shape, or retire it. Its message carries the stale reason sentence tracked in #33507.\n- acceptance[3]: decide whether a cold-boot warning still exists for any pair, for example two namespace-less code packages. If one does, re-point the fixture to it. If not, retire the clause and keep negative[1] (the boot is not refused).\n- fixtures.requires[1]: keep the composeStacks preserve fixture, which builds and boots as written.\n\n## Duplicates searched\n\n- `gh api -X GET search/issues -f q='repo:objectstack-ai/objectstack is:issue is:open \"platform-core.bare-name-one-holder-refusal\"'` returned 1: #33353 (next-sweep hand-overs, row 114, about acceptance[2]'s email-service resolution, not this).\n- `… is:open bare-name connector narrowed checklist` returned 6, none about this item.\n- `… is:open checklist connector namespace 33431` returned 1, a PM seat card.\n- `… is:open bareNameReason one name per deployment` returned #33507 (the refusal's reason sentence). That card is related but covers product copy, not the checklist clause.\n\nSeverity guess: p2 (checklist accuracy; two clauses cannot be scored).\n\nQA-source: #33853 · platform-core.bare-name-one-holder-refusal · acceptance[0]"
+}

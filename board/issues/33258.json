@@ -1,7 +1,7 @@
 {
   "number": 33258,
   "kind": "issue",
-  "title": "[PM seat] review · seat 2 — 🟢 os-project-manager",
+  "title": "[PM seat] review · seat 2 — 🟢 os-tesla",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-project-manager"
+    "os-tesla"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T15:05:03Z",
-  "updated_at": "2026-11-14T15:07:19Z",
+  "updated_at": "2026-11-15T13:00:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33258",
-  "body": "review#2 · os-project-manager · session_01FEkQ5nhu4dRbKVQKDB4CDB\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 2**. Posture and round ledger live in the project.\n\n## Current PM — 🟢 seated\n\n- **Holder:** `os-project-manager` · `session_01FEkQ5nhu4dRbKVQKDB4CDB` · seated on the maintainer's summons in the project thread (2026-11-14, 14:47Z).\n- **Scope:** contract reviews owed on open PRs per `check-owed-reviews.mjs`, first the heads `review#1` is barred from by independence (same account as the dispatching seat), then any head waiting for a review seat. It writes review records, claim lines and doorbells only; it does not land, ready, dispatch or grade.\n- **Mailbox:** PR #33260. **Patrol:** `trig_01R6nz15UUuYGxLXNhmRjMbV · 6 * * * *` (hourly, self-bound to this session; rule (b) waits one round of ~60 min).\n- **Effort:** session launched at the project default, below the charter's `high`; recorded here per seat-lifecycle.\n- **Independence:** this account dispatches no PR now (its lane seats are off duty); ⛔ it never reviews a PR this account dispatched or implemented.\n\n## Hand-over ledger\n\n- New seat; nothing inherited. ⛔ Never the Version Packages PR.\n\n## Hot-file serial queue\n\n- None: this seat writes no code.\n\n## Notes\n\n- Write path: the relay. ⛔ No GitHub MCP writes.\n"
+  "body": "review#2 · os-tesla · session_01L9qibxTeW8xHnxoHxWNHWW\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 2**. Posture and round ledger live in the project.\n\n## Current PM — 🟢 seated\n\n- **Holder:** `os-tesla` · `session_01L9qibxTeW8xHnxoHxWNHWW` · seated 2026-11-15T12:58Z on the maintainer's summons in the project thread (「开一个 review 车道」).\n- **Successor-of:** `os-project-manager` · `session_01FEkQ5nhu4dRbKVQKDB4CDB` (signed off 2026-11-15 12:50Z; hand-over 6894511621 read).\n- **Scope:** contract reviews owed on open PRs per `check-owed-reviews.mjs`, first the heads `review#1` (os-elon-musk) is barred from by independence, then any head waiting for a review seat. It writes review records, claim lines and doorbells only; it does not land, ready, dispatch or grade.\n- **Independence:** ⛔ never reviews a PR this account (`os-tesla`) dispatched or implemented — every `os-tesla` lane seat (server#7, spec#2, skills#2, ui#4, devx#3, eval#1, qa#3, epic:#33595#1 …) reviews its own PRs or knocks review#1.\n- **Mailbox:** PR #33873. **Patrol:** `trig_01EigusG5L17dhSRmAWjS3W4` · `58 * * * *` (hourly), plus wakes from the mailbox and subscribed PRs.\n\n## Hand-over ledger\n\n- Inherited from the previous holder: none open on this seat. PR #33721 and PR #33821 were redirected to review#1 by the previous holder and stay there unless review#1 hands them back.\n- ⛔ Never the Version Packages PR #33097 or any release PR.\n\n## Hot-file serial queue\n\n- None: this seat writes no code.\n\n## Notes\n\n- Write path: the relay. ⛔ No GitHub MCP writes.\n- Tier H PRs still need the maintainer's own approval via os-zhuang; this seat only records.\n"
 }

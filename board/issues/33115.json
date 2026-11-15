@@ -1,7 +1,7 @@
 {
   "number": 33115,
   "kind": "issue",
-  "title": "[PM seat] review — 🟢 os-elon-musk (area-lease pilot)",
+  "title": "[PM seat] review — 🔴 vacant · last shift os-elon-musk 2026-11-15",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -17,12 +17,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T14:23:05Z",
-  "updated_at": "2026-11-14T14:30:55Z",
+  "updated_at": "2026-11-15T13:25:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33115",
-  "body": "review#1 · os-elon-musk · session_016WV4cwxS1ZpSu2hAMRcqbt\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 1**. Posture and round ledger live in the project.\n\n## Current PM — 🟢 seated (area-lease pilot, #33059)\n\n- **Holder:** `os-elon-musk` · `session_016WV4cwxS1ZpSu2hAMRcqbt` · seated 2026-11-14T14:35Z on the maintainer's summons.\n- **Scope:** pilot of the area-lease scheme (#33059) on `domain:server`. This seat gives an independent acceptance review of each PR the server seat 5 (#28677) area threads hand it, at the PR's current head: PASS, or changes needed with concrete items, plus whether the PR changes a contract. It does not land, ready, dispatch or grade.\n- **Ceremony:** the maintainer suspended fleet ceremony that slows the pilot (2026-11-14T14:26Z). Requests reach this seat through the project, not a mailbox. **Mailbox:** none. **Patrol:** none (event-woken).\n- **Independence:** same account as the dispatching seat; the reviewing session is separate from the dispatching and implementing sessions, as the maintainer asked.\n- **Previous holder:** `os-tesla` · `session_01L9qibzosF5fZk98UHos9cv`, signed off 2026-11-14T04:41Z.\n\n## Hand-over ledger\n\n- Inherited owed item PR #33182 (card #32607) merged after the previous sign-off; nothing owed.\n- ⛔ Never the Version Packages PR #33097.\n\n## Hot-file serial queue\n\n- None: this seat writes no code.\n\n## Notes\n\n- Write path: the relay. ⛔ No GitHub MCP writes.\n"
+  "body": "review#1 · os-elon-musk · session_016WV4cy7hQ5MvQ83ByNZ8ZH\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 1**. Posture and round ledger live in the project.\n\n## Current PM — 🔴 vacant\n\n- **Last holder:** `os-elon-musk` · `session_016WV4cy7hQ5MvQ83ByNZ8ZH`, seated 2026-11-15T11:20Z, signed off 2026-11-15T13:30Z on the maintainer's word. Hand-over: the latest HANDOVER comment on this post.\n- **Mailbox:** none (#33813 closed). **Patrol:** none.\n- New contract-review requests go to `review#2` (#33258).\n\n## Hand-over ledger\n\n- Inherited: none (all pilot E1 PRs merged).\n- ⛔ Never the Version Packages PR #33097.\n\n## Hot-file serial queue\n\n- None: this seat writes no code.\n\n## Notes\n\n- Write path: the relay. ⛔ No GitHub MCP writes.\n"
 }

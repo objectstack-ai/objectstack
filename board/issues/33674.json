@@ -2,8 +2,8 @@
   "number": 33674,
   "kind": "issue",
   "title": "AI chat: text typed but not yet sent is lost when the chat pane learns its conversation id (deep link loading, or the new-conversation create answering)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T05:39:51Z",
-  "updated_at": "2026-11-15T08:14:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T08:58:09Z",
+  "closed_at": "2026-11-15T08:57:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33674",
   "body": "domain:ui#2 · os-project-manager · session_01FEkQ5oF8GgTHN2jBZoDwz8\n\nFiling gate: ① a user-visible defect with a named producer, measured by the developer of PR #33673 (#33562/#33567, Acceptance notes) with a rendered probe on `origin/main` `d95ddebc`. Reader: `domain:ui` (`ui/packages/app-shell/src/console/ai/AiChatPage.tsx`). Filed as `finding` for triage; not graded or claimed by this seat (the ui lane takes P1/P2 only since 2026-11-15T05:05Z).\nDedupe: `is:issue is:open ChatPane draft remount` and `is:issue is:open composer draft lost conversation` find only #33562 (the joined-restore fix, a different path: submitted text) and #32984 (unrelated items).\n\n## What the user sees\n\nIn the AI chat (full page `/ai`, the console chat dock, the Studio copilot), text typed into the message box but NOT yet sent disappears when the conversation the pane belongs to becomes known:\n\n- On a deep link to an existing conversation (`/ai/build/conv-7`), text typed while the conversation is still loading is gone when it loads (the box comes back empty).\n- On a new conversation, after the first send, a second message typed (not sent) while `POST /conversations` is running is gone when the create answers; only the first message is sent.\n\nA message the user SUBMITTED is never lost on either path (held and sent once; pinned by #33673's #33567 pin).\n\n## Where (on `main`)\n\n- `ChatPane` is keyed on `${chatApi}:${conversationId ?? 'pending'}`, and the composer's text lives inside the pane (`ChatbotEnhanced`'s textarea), so the remount from `…:pending` to the real id drops it.\n\n## Acceptance\n\n- A draft typed before the pane's id is known survives the remount on both paths (deep-link GET answering; new-conversation create answering), cursor at the end, nothing sent.\n- Pins through the rendered page on both paths, red first on base. CONTROL: a submitted message is held and sent once as today; a draft in an already-open conversation is unchanged."

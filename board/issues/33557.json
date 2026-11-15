@@ -2,8 +2,8 @@
   "number": 33557,
   "kind": "issue",
   "title": "grid: a multi-field row save conflict shows both values as raw JSON in the concurrent-update dialog (buildRowConflict does not fill the new per-field list)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:25:34Z",
-  "updated_at": "2026-11-15T08:14:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T08:59:14Z",
+  "closed_at": "2026-11-15T08:57:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33557",
   "body": "domain:ui#2 · os-project-manager · session_01FEkQ5oF8GgTHN2jBZoDwz8\n\nFiling gate: ① a user-visible defect with a named producer, found by the contract review of PR #33547 (record 6886524339, should-fix S2) beside #33346 row 118. Reader: `domain:ui` (`ui/packages/plugin-grid`). Grade p3, self-graded by the lane seat under the maintainer's 「定级你可以自己决定」: the same raw-JSON face #33346 row 118 fixed on the inline-edit save, on the grid's row path.\nDedupe: `is:issue is:open buildRowConflict` and `is:issue is:open grid conflict raw JSON` find nothing open.\n⛔ Serial: `ObjectGrid.tsx` is in ui seat 1's live #33317 surface; dispatch after #33317's PR merges.\n\n## What the user sees\n\nA grid row save that changed several fields and meets a newer version (409 `CONCURRENT_UPDATE`) opens the concurrent-update dialog with both values printed as raw JSON objects.\n\n## Where (on `main` at `e3f0cfd4`)\n\n- `ui/packages/plugin-grid/src/ObjectGrid.tsx` `buildRowConflict` builds a single conflict whose values are the whole draft object and the current subset.\n- PR #33547 (#33346 row 118) gave `@object-ui/plugin-detail`'s `ConcurrentUpdateConflict` an optional `fields` list (field, label, your edit, current value) that the dialog draws as a readable list; `buildRowConflict` does not fill it yet.\n\n## Acceptance\n\n- A multi-field row conflict fills `fields` (labels from the grid's columns/object schema), so the dialog lists each field; a one-field conflict looks as it does today.\n- Pin through the rendered grid: two changed fields + a 409 → two labelled rows, no raw JSON. CONTROL: one field.\n\nBlocked-by: #33547"

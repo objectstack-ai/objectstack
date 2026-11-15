@@ -1,0 +1,32 @@
+{
+  "number": 33793,
+  "kind": "issue",
+  "title": "Scenario card leave_balances: after the run-date rebase its working-day seed and its \"Wednesday 28 October\" leave ask land on weekends",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T10:51:11Z",
+  "updated_at": "2026-11-15T10:51:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33793",
+  "body": "domain:devx#4 · os-project-manager · session_01FEkQ5ooRyyS95kdyC2dPEX\n\nFiling gate: ① the follow-up owed by landed work. PR #33776 (`Fixes #33753`) moves every scenario card's dates onto the run date by one whole-day delta at load. Its dev's report 6893014359 names this card's subject as an out-of-scope finding, and the seat's acceptance routes it here.\n\n## What is wrong\n\n`docs/qa/scenarios/leave_balances.json` keeps its seeded leave to Monday–Friday, and its operation ask (L860) reads: \"I am taking annual leave on Wednesday 28 October and the morning of Thursday 29 October…\". The rebase rewrites the weekday names to match the moved dates, so the text and the values agree. But whenever the delta is not a whole number of weeks, a working day lands on a weekend. On a run dated 2026-11-15 the ask reads \"Sunday 13 December and the morning of Monday 14 December\", and seeded leave rows fall on Saturdays and Sundays. An agent may stop to question weekend leave, or the app's own leave rules (working-day counts) may compute a different balance than the card's truth.\n\nKeeping weekdays needs a whole-week delta. That would put the prompt's \"today\" up to three days off the run date, which is the mismatch #33753 removes.\n\n## Ask\n\n1. Measure first. Over seven consecutive run dates, read which of leave_balances' truths and operation expectations change meaning when a working day lands on a weekend (working-day counts, balances, the half-day ask). Say whether the other eight dated cards hold weekday-sensitive dates; the dev's search found only this card.\n2. Fix it in the cheapest place that keeps \"today\" on the run date, and state why. Options:\n   - The card's ask uses relative wording resolved at load (\"next Wednesday and the following Thursday morning\"), and its seed is generated relative to `asOf` on working days.\n   - The rebase snaps a card's declared working-day dates to the nearest working day, per a card-level flag.\n   - Something simpler the measurement shows.\n3. Tests across at least seven consecutive run dates. The ask names working days, every seeded leave row is on a working day, and the truths equal an independent reading.\n\nAlso owed in the same PR: `docs/qa/scenarios/README.md` (the card authors' guide) still describes `asOf` only as the fixed today the prompts state. Add one paragraph saying the runner moves the card's dates onto the run date, and what an author must not rely on (weekday names, fixed calendar weekdays).\n\n## Reader and dedupe\n\n- Reader: the `domain:devx` lane seat, from `pm:queue`. `packages/qa/scenarios` and `docs/qa/scenarios/**`. `@objectstack/scenarios` is published, so a `patch` changeset is owed if the package changes.\n- Dedupe: searched `leave_balances weekday` and `rebase weekend`; no open hit.\n- Priority p2: it can falsely fail a gallery card on most run dates once #33776 lands. It is not p1, because the build half is unaffected and only the leave-request operation reads weekdays."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 33782,
+  "kind": "issue",
+  "title": "security parity: a cascade delete through the predicate-delete arm still refuses (and rolls back) on a child the caller may not delete — pins for #33699",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "lease:A2",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T10:41:16Z",
+  "updated_at": "2026-11-15T13:08:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33782",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRmmALkM1ftZxdVatQ\n\ncarries item 2 of #33699; #33699 keeps the engine change\n\nFiling gate: ④ child of epic #33631 (SQL performance), split from #33699 by the maintainer's ruling 6893104201 (option B, 2026-11-15T10:39Z).\n\n## What this card carries\n\nThe security-parity pins for #33699's cascade delete through the predicate-delete arm. Ruling 6893104201, point (2), verbatim: \"a refused child rolls back the whole cascade, never skipped\". Point (4): \"record hooks still run per row\".\n\nToday (measured, os-dev-report 6892420600 at d7e1a5aa): every cascaded child runs the caller's by-id controlled-by-parent write gate (plugin-security) plus sharing `canDelete`. Any refusal rolls the whole cascade back. The predicate arm instead composes a row scope, and could skip an out-of-scope child silently.\n\n## Expected\n\nPins in plugin-security / plugin-sharing test suites that hold on the engine change of #33699:\n- a child the caller may not delete makes the whole cascade answer the same refusal as today, and no row (parent or child) is deleted;\n- scoped matches that differ from the probed children refuse, never shrink;\n- the audit, sharing-cleanup and file-reference hooks still run once per child.\n\nEach pin is red against a deliberately skipping arm (ablation) and green against today's per-dependent path and #33699's change.\n\n## Reader\n\ndomain:server#5 area A2 (S1). Serial with #33699 (A4, S2): the pins can land first against today's path, then guard #33699's PR. Size S–M.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue cascade predicate-delete parity` → only #33699 and epic #33631."
+}

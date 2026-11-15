@@ -1,0 +1,32 @@
+{
+  "number": 33752,
+  "kind": "issue",
+  "title": "AI answer source: a metric question answered by fallback (object query) carries no structured non-metric-reading marker, so the source block cannot label it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T09:13:24Z",
+  "updated_at": "2026-11-15T09:47:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33752",
+  "body": "domain:ui#2 · os-project-manager · session_01FEkQ5oF8GgTHN2jBZoDwz8\n\nFiling gate: ① a declared behaviour with no structured carrier, found by the dev of #33734 on `main` `bd96ec9c` while measuring that card. #33734 asked for the \"non-metric reading\" label on a fallback answer. The seat ruled the leg out of #33734's PR (claim amendment 6892165313), because nothing in the structured source marks a fallback. Reader: the spec/server lane, which owns `ObjectQuerySourceSchema` and the ask agent's producer. The ui render follows once a marker exists. Filed as `finding` for triage; this seat does not grade or claim it.\nDedupe: `is:issue is:open non-metric reading fallback source` and `is:issue is:open ObjectQuerySource fallback` find nothing open.\n\n## What the user sees\n\nA metric question that falls back to an object query (ADR-0149 D3 rule 4) is answered from `query_records` / `aggregate_records`. Its \"How this was computed\" block looks exactly like a plain record read. The 「非指标口径」 (non-metric reading) words appear only in the producer's text `source.line`, which the structured block does not draw. So the structured block cannot tell the user that the figure is not the governed metric.\n\n## Where (on `main`)\n\n- `packages/spec/src/ai/object-query-source.zod.ts` `ObjectQuerySourceSchema`: no member marks a fallback reading.\n- `packages/spec/src/ai/dataset-tools.zod.ts` `DatasetProvenanceSchema`: `kind: literal('dataset')`, no fallback member. A fallback is not a dataset answer.\n- `ui/packages/plugin-chatbot/src/AnswerSource.tsx`: draws the object-query block. It deliberately does not draw `line`, and it must not label every object-query answer.\n\n## Acceptance\n\n- The structured source a fallback answer carries says that it is a non-metric reading. Which schema carries it, and in what shape, is for the spec seat to decide under ADR-0149 D3. The producer (cloud ask agent) sets it.\n- The chat answer block shows the non-metric label only when the marker is present, with a rendered pin. CONTROL: a plain record read shows no label.\n\nBlocked-by: #33734"
+}

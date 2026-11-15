@@ -1,0 +1,36 @@
+{
+  "number": 33754,
+  "kind": "issue",
+  "title": "Scenario grader: an unanswerable reply that cites a carried figure or a date (\"36-month\", \"31 Dec\") is failed as \"stated a figure the data cannot support\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T09:21:41Z",
+  "updated_at": "2026-11-15T11:51:58Z",
+  "closed_at": "2026-11-15T11:50:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33754",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① grader defect, measured. `reach:` the fourth gallery debut refresh, 2026-11-15T08:3xZ (card `asset_lifecycle`, scratch, published 18.4.0, runner at objectstack main `412fbf76`, which carries #33414, #33415 and #33676; model claude-opus-5-5). Build 153/153, Seed 559/559, Iterate Build 168/168; under #33676 the build-half disposal passed as `confirmed by the agent`. Epic objectstack-ai/cloud#3600; gallery #30349.\n\n## What happened\n\nQuestion `laptop_warranty_expiring` (truth `unanswerable`: no seeded object records a warranty) failed in both halves with `problems: ['stated a figure the data cannot support']`.\n- The reply declined correctly: \"I can't answer this from the app, because it doesn't store warranty dates…\".\n- It mentioned \"The Laptop category gives a 36-month *useful life*\", and offered to list laptops \"whose 36-month depreciation life ends by 31 Dec\".\n- `36` **was** carried: the turn's `query_records {objectName: demoasset_asset_category}` output holds `\"useful_life_months\": 36`.\n- So the unsupported number is either the date fragment (`31` of \"31 Dec\") or a year, or `carriedNumbers` misses the 36.\n\n## Carrier\n\n`packages/qa/scenarios/src/score/scenario-run-grade.ts` ≈687–696: `supported = writtenNumbers(reply).every(values => values.some(n => carried.has(n)))`.\n\n## Ask\n\n1. Find which number failed, and fix the reading:\n   - a calendar date or a year the reply writes is not a figure;\n   - and/or a number carried in a JSON tool output counts as carried.\n2. Tests:\n   - this reply passes;\n   - an unanswerable reply that invents a count (\"about 12 laptops\") still fails.\n3. Re-grade the recording.\n\nReader: `domain:devx` lane seat, from `pm:queue`. Dedupe: `\"stated a figure the data cannot support\"`, no open hit. Priority p2: it falsely blocks a gallery export."
+}

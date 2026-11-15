@@ -2,8 +2,8 @@
   "number": 33542,
   "kind": "issue",
   "title": "console list footer: the total of a summary field (Field.summary, scale 2) renders without decimals (\"Paid 230,000\" next to a currency \"Open 215,000.00\")",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:06:00Z",
-  "updated_at": "2026-11-15T07:11:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T09:51:37Z",
+  "closed_at": "2026-11-15T08:57:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33542",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n## What happens (@objectstack 18.4.0, HotCRM Order to Cash browser pass, 2026-11-15)\n\nOn HotCRM's All Invoices grid, the list footer sums two columns:\n- `paid_amount` is a `Field.summary` with `scale: 2`, summing payment `amount`, which is currency.\n- `open_amount` is a currency field with scale 2.\n\nThe footer reads \"Paid 230,000 · Open 215,000.00\". The summary field's total drops its decimals, although its declared scale is 2 and its source is currency. The record page and the column cells may differ; this card is about the footer total.\n\n## Ask\n\nThe footer total of a summary field renders with the field's declared `scale` (and the currency format, when its source field is currency), as it does for a plain currency field. Related: #20029 (currency summary footer) and #19629 (scale on currency).\n\n## Acceptance\n\n1. A summary field with `scale: 2` over a currency source shows two decimals in the list footer, in en and zh-CN.\n2. A summary field with no scale keeps today's rendering."

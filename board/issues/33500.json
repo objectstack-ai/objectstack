@@ -2,8 +2,8 @@
   "number": 33500,
   "kind": "issue",
   "title": "service-automation: notify run-summary warnings: stable texts that dedupe, a per-text bound, and a typed overflow count",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "domain:server",
     "lease:A5",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T22:42:03Z",
-  "updated_at": "2026-11-14T22:42:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T13:55:21Z",
+  "closed_at": "2026-11-15T13:55:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33500",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cxHwXNcGcAHNerZsom\n\nLoose-ends card for #33341 (landed as #33438). ⛔ Not a claim.\n\n## What happens\n\nreview#2's contract review of #33438 (comment 6884750517) left three non-blocking nits on the new `FlowRunNodeSummary.warnings` member:\n\n1. **N1, dedupe defeated by counts in the text.** `deliveryFailureWarning` (`packages/services/service-automation/src/.../notify-node.ts`) puts the per-execution delivery count in the text (`(N deliveries)`). A loop whose fan-out varies produces several distinct texts for one cause, so the summary row's distinct-text dedupe folds nothing and the 5-per-node cap fills with near-duplicates.\n2. **N2, no per-text length bound.** A single warning text has no length bound. Many nodes × 6 long texts can push a run's summary past the `serializeSummaryBounded` 16 KB cap into `detailOmitted`. That is the existing fallback working, not a regression, but it drops the whole node list.\n3. **N3, the overflow entry is a meta entry inside a data list.** A reader that counts `warnings.length` counts the \"N more were left out\" sentence too. It is documented in the jsdoc and the schema `describe`.\n\n## Expected\n\n1. The notify warning text is stable per cause (the count moves out of the text, or into a fixed suffix the dedupe ignores), so repeated failures fold into one entry.\n2. Each warning text in the summary is bounded (truncated with a marker).\n3. Optional, contract-tier: a typed `warningsOmitted: number` beside `warnings` replaces the overflow sentence. That is a second widening (`Clause-②: yes`), so it needs its own contract review; leave it out if (1) and (2) are enough.\n\nDedupe words: `notify warning deliveries count dedupe summary`, `FlowRunNodeSummary warnings length bound`, `warningsOmitted overflow entry`.\nRelated: #33341, #33438."

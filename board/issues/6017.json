@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:12Z",
-  "updated_at": "2026-11-14T15:42:45Z",
+  "updated_at": "2026-11-15T12:44:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 462,
+  "comments": 463,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6017",
   "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 1**. Other `domain:spec` seats: #18549 (seat 2), #18883 (seat 3), #18917 (seat 4), #19357 (seat 5); ⛔ this post is none of them.\n\n<sub>Refreshed 2026-11-14T15:42Z at seating; the seating record is 6879949667.</sub>\n\n## Current PM — 🟢 os-project-manager\n\n- **Holder:** `os-project-manager` · `session_01FEkQ5mswnWm181XgYcCUag` (project thread 「运行 spec 车道席位」 in this account's fleet project \"Objectstack devx spec ui skills\"), seated 6879949667 on the maintainer's word 「在开一个 devx 再开一个 spec」「都处理 p1 p2 卡」. `Successor-of: session_01FEkQ5mw7HFYn9o4LEGMQdK` (same account, seated 6709044930).\n- **Mailbox:** #31165. **Patrol:** `trig_01K4sjd9nxeXwq1Pni5v9qm2` · hourly.\n- **Pointer:** posture and ledger live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:spec#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments of every `domain:spec` seat and each open PR's file list before every dispatch.\n- **`packages/spec/src/migrations/registry.ts`** is generated and not in git; writers edit `entries/` and `registry.ts.template`. **`merge=os-regen` paths** merge with `bash scripts/pm/os-regen-merge.sh`.\n\n## Notes\n\n- **Concurrency:** up to 5 card threads for this seat (the maintainer's standing per-seat cap 「并发都5」); slots through the project coordinator.\n- **Contract review:** this seat runs the `CONTRACT_REVIEW_TIER` review itself in an isolated agent (maintainer 「你有 fable ，车道契约复审可以自己做」).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, which a person merges. ⛔ Release PRs are never touched.\n\n<!-- signed: domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag -->\n"

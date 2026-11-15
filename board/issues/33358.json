@@ -2,8 +2,8 @@
   "number": 33358,
   "kind": "issue",
   "title": "plugin-auth: with local sign-in off the sign-in floor still counts email and password, and the direct sign-in door's landings lose ?redirect= and the IP allow-list page",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "bug",
     "domain:server",
     "lease:A1",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T17:26:30Z",
-  "updated_at": "2026-11-15T05:09:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T13:55:21Z",
+  "closed_at": "2026-11-15T13:55:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33358",
   "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\nFiling gate: follow-up of #33183 / PR #33221, from contract review records 6879172654 (N7, N8), 6880597586 (the rate-limited landing) and 6881390951 (N13) on that PR. Each is a reproducible defect next to direct sign-in that the seat kept out of that PR's scope. An administrator can lock everyone out of a self-hosted system, and people who follow a deep link land on the home page instead of where they were going. ⛔ Not a claim; triage sets the lane and grade.\n\n## What happens today\n\n1. **N7 · the sign-in floor counts a way in the page no longer offers.** `sign-in-method-floor.ts` and the boot report count \"email and password on\" as a way in, mirroring what the sign-in page offers. With `localSignIn: 'off'` (from #33221) the page no longer offers it, so deleting the last identity provider passes the floor and leaves the page with \"No sign-in method is available\". On hosted the platform provider cannot be deleted; a self-hosted system with `OS_AUTH_LOCAL_SIGN_IN=off` can reach it.\n2. **N8 · a client the IP allow-list blocks gets a raw body.** The allow-list exempts `/config` so a blocked client still gets a clean page, but `GET /api/v1/auth/sign-in/direct` is a top-level navigation and is not exempt, so with direct sign-in on a blocked client lands on the raw `403 IP_NOT_ALLOWED` JSON instead of the sign-in page.\n3. **N8 · an identity-provider error loses `?redirect=`.** The error return address the door hands the vendor is the bare `/login`, so after a provider error the retry starts from `/login` without the deep link.\n4. **The rate-limited landing loses `?redirect=`** the same way: `?error=direct_sign_in_rate_limited` lands on `/login` without the original `?redirect=`.\n5. **N13 · the sign-out note can outlive a provider that does not send the browser back.** `createAuthClient.signOut` writes a note in the tab's `sessionStorage` before the provider-logout navigation; the first `AuthProvider` mount reads and drops it within ten minutes. If the provider never returns the browser, the next load of the app in that tab within the window reads `sessionEndedBySignOut: true`, so `LoginRedirect` drops the deep link's `?redirect=` and, with direct sign-in on, the page holds for one click. True with direct sign-in off as well.\n\n## What this card would build\n\n- Make the floor and the boot report count email and password only when the page offers it (`localSignIn` not `off`), and pin deleting the last provider under `off` as refused.\n- Give the direct sign-in door a clean blocked-client landing (exempt it like `/config`, or answer a redirect to the sign-in page with an error the page explains), pinned with the allow-list on.\n- Carry `?redirect=` through the door's provider-error return address and its rate-limited landing, with a pin for each.\n- Bound N13: scope the note to the provider-logout round trip (for example, clear it on any load that is not the return), or keep `?redirect=` when the flag is raised, and pin the deep-link case.\n\n## Seam\n\n`Seam: plugin-auth:sign-in-method-floor.ts + direct-sign-in.ts (error / rate-limited return addresses) + IP allow-list exemptions → ui/packages/auth signOutRoundTrip.ts / console ProtectedRoute.tsx (LoginRedirect)`.\n\nDedupe words: `sign-in method floor localSignIn`, `direct sign-in IP_NOT_ALLOWED`, `direct_sign_in_rate_limited redirect`, `sessionEndedBySignOut deep link`, `signOutRoundTrip`."

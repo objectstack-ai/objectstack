@@ -1,7 +1,7 @@
 {
   "number": 31433,
   "kind": "issue",
-  "title": "[PM seat] qa — 🟢 zhuangjianguo",
+  "title": "[PM seat] qa — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-08T07:51:42Z",
-  "updated_at": "2026-11-10T00:45:01Z",
+  "updated_at": "2026-11-15T08:55:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31433",
-  "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/qa.md` and the `checklist-test` skill §4–§6 (⛔ not copied here). This is **`qa` seat 1**, the first holder; there was no previous post, so there is no predecessor brief and no inherited ledger.\n\n## Current PM — 🟢 zhuangjianguo\n\n- **Holder:** `zhuangjianguo` (`GET /user`) · `session_01QsR2jUARzLeR7GhKms8a5s` · seated 2026-11-08 (the post's creation time) on the maintainer's summons (`/pm-dispatch qa`).\n- **Patrol:** none. The maintainer ruled that the seat runs on their word, not on a schedule (see Standing orders), so no routine is created.\n- **Mailbox:** none opened (no sibling seat sends this seat work; the runners report back through their own session transcripts).\n- **Takeover:** `/pm-dispatch qa`, then read this post first.\n\n## Standing orders (maintainer, this seat's session, verbatim)\n\n- 「也不需要每周跑，一波开发完了，我会和你说」: the seat does NOT run the weekly cadence that `lanes/qa.md` and checklist-test §6 describe. A round starts when the maintainer says a development wave is done. The record selector stays `owed:weekly`, the title grammar's spelling.\n- 「首轮只跑 owed:weekly，按你推荐的来」: the first round runs the owed list only (73 items on 2026-11-08), not the other three routines.\n- 「可以开云卡」: runners may be dispatched as cloud sessions.\n- 「纳入，本轮一起跑，立卡交 skills 车道」: each round also runs the scenario library (`docs/qa/scenarios`, the `starter` cards, `--modes scratch --packages workspace`) beside the checklist owed list. The charter text change is the skills-lane card #31434.\n\n## Hot-file serial queue\n\n- None: this seat writes no code and opens no PR.\n\n## Notes\n\n- Write path: the relay (`issue-create.mjs`, `post-stamped.mjs`, `close-cards.mjs`). ⛔ No GitHub MCP writes.\n- Round 1 (refreshed 2026-11-08T11:07Z): checklist half closed, record #31486 (73/73 · 61 PASS / 7 PARTIAL / 4 FAIL / 1 BLOCKED), extracted #31488 #31490–#31498, gaps on #31499; open `qa-run` records 0. Scenario half: runner `session_01QsR2jT2gdWkjebLaZAv7qz` in flight.\n- Runner sizing that worked: one cloud session per slice of 16–23 items, about 40–90 min each, environment about a fifth of the wall clock.\n"
+  "body": "qa#1 · zhuangjianguo · session_01QsR2jUARzLeR7GhKms8a5s\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/qa.md` and the `checklist-test` skill §4–§6 (⛔ not copied here). This is **`qa` seat 1**.\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `zhuangjianguo` · `session_01QsR2jUARzLeR7GhKms8a5s` · seated 2026-11-08, clocked out 2026-11-15T08:53Z on the maintainer's word (「你可以下班了。」). `check-handover.mjs` exited 0 (no unreleased claim, no decision outside the inbox). The seated-time body is the revision of 2026-11-09.\n- **Patrol:** none (the seat runs on the maintainer's word, no routine). **Mailbox:** none was opened.\n- **Takeover:** `/pm-dispatch qa`, then read this post and the comments under it.\n\n## Standing orders (maintainer, verbatim; the comments below quote each in place)\n\n- 「也不需要每周跑，一波开发完了，我会和你说」 and 「维持\"每波开发完你通知\"」: no schedule; a round starts on the maintainer's word after a development wave. Charter: #31434 (merged).\n- 「纳入，本轮一起跑，立卡交 skills 车道」: each round has a scenario half (the `starter` cards, `--modes scratch --packages workspace`).\n- 「qa#1 继续按口令跑例行轮，qa#2 执行发版波次」: this seat runs the routine rounds only; release waves are `qa#2`'s.\n- 「可以开云卡」: runners may run as cloud sessions.\n\n## Ledger at clock-out\n\n- Round 1 checklist half: record #31486 (closed; 73/73 · 61 PASS / 7 PARTIAL / 4 FAIL / 1 BLOCKED). Extracted #31488, #31490–#31498, collection card #31499: all closed, fixed by merged PRs. Round 1 scenario half: round record comment 6754602020 below; extracted #31998 and #31999, both closed, fixed.\n- Owed now (`retest-owed.mjs` on 2026-11-09): 11 rows, the 10 round-1 fix cards plus `studio-authoring.expression-editors` (#27482) and the blocked `access-security.no-active-org-session-semantics`. The next routine round re-judges them; open `qa-run` records: 0.\n- Not carded, offered to the maintainer and unanswered (runner observations, judgment calls): a data-door PATCH of a readonly `sys_file` column answers 200 and drops the change silently; the permission matrix's field bulk \"Write all\" on a filter matching system columns grants them editable; the Setup audit log's Record column shows truncated raw ids for user rows.\n- Security: one finding went to the owner seat as advisory id GHSA-r3cw-542r-c6c3 (doorbell on #31360). Adding the owner seat's account as a collaborator was stopped by this session's permission check and waits on the maintainer.\n- Half-states seen on other lanes' cards, reported, not touched: #31488, #31490 and #31496 are closed but still carry `pm:dispatched`.\n\n## Hot-file serial queue\n\n- None: this seat writes no code and opens no PR.\n\n## Notes\n\n- Write path: the relay (`issue-create.mjs`, `post-stamped.mjs`, `close-cards.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Runner lessons: one cloud session per 16–23 checklist items, about 40–90 min each; `source_revision` refuses a short sha (start on the default branch and check out the sha first); a scenario runner in Accept-edits mode waits on a permission prompt for every `send_message`, so the maintainer approves it when it reports; a `qa-run` record must list every item on its own line, id first and verdict on the same line, or `retest-owed.mjs` keeps it owed. Runner spend round 1: four checklist sessions about $26 each, the scenario session about $3 plus about $114 API-equivalent on the subscription.\n"
 }

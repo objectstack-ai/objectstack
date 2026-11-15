@@ -1,0 +1,31 @@
+{
+  "number": 33794,
+  "kind": "issue",
+  "title": "docs (seed-data): the org-scoped reference table still says a tenantField-walled target is \"refused and reported\" — since the 33393 fix it resolves to the load organization's row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T10:51:11Z",
+  "updated_at": "2026-11-15T11:50:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33794",
+  "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\n**What happens.** `content/docs/data-modeling/seed-data.mdx` :476 is the row of the \"what an organization-scoped load resolves a reference to\" table that #33207 / PR #33222 added. It reads:\n\n> An object walled by another tenant column (`tenancy.tenantField`) with no `organization_id` column | nothing on such a load: the lookup is refused and reported, never answered from another organization\n\nThe 18.5.0 changeset `.changeset/33393-seed-probe-tenant-column.md` (PRs #33409 and #33550) changed this behaviour. The probe now filters on the target's resolved tenant column, so the reference resolves to the load organization's own row and the tenant column is stamped. The doc row was not updated, and the 33207 changeset sentence on the same case is superseded by the 33393 one. Both changesets ship in 18.5.0, so the release notes contradict each other.\n\n**Live evidence** (QA run at main `a557fa38`, walled `isolated`, scratch showcase copy). Setup:\n- A target `showcase_qa_seed_ws_tag` declaring `tenancy: { enabled: true, tenantField: 'workspace_id' }`, with `organization_id` switched off.\n- A per-organization `Gold` row.\n- A seed reference `tag: 'Gold'`, replayed on `POST /api/v1/auth/organization/create` for QA North and QA South.\n\nResult: each organization's row resolved to its own `Gold` (North and South got different ids), `workspace_id` was stamped per organization, and no refusal was logged.\n\n**TO:** rewrite row :476 to say that the reference resolves on the declared tenant column, to the load organization's own row, and is never answered from another organization. Check the 33207 changeset bullet for the same case against the 33393 changeset before 18.5.0's notes are curated.\n\nDocs only. Not a security finding.\n\nDedupe: searched open issues for \"seed-data tenantField\" and \"seed org-scoped reference table\". No match.\n\nQA-source: #33785 · R-CUST card #33206/#33207 · card acceptance 5 (docs vs walled behaviour)"
+}

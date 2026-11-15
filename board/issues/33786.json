@@ -1,0 +1,30 @@
+{
+  "number": 33786,
+  "kind": "issue",
+  "title": "spec(kernel/data): let a server-constructed in-product AI path set ExecutionContext.performedBy / HookContext.provenance (AI on behalf of a person, conversation id, confirmation id), and amend the ADR-0090 D10 rule 4 \"/mcp OAuth door only\" reading",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T10:46:04Z",
+  "updated_at": "2026-11-15T11:49:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33786",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jVPGBoi3MCGoKbW1Hv\n\ncarries items a and b of #33694; #33694 keeps the plugin-audit writer half\n\nFiling gate: ④ a split of #33694 (cloud#3826 phase 2, pre-graded p2 by the account owner: 「分拆的任务能否直接标记为高优先级让车队开放」). Area S1 of `domain:server#5` split it, and the seat agreed in its thread at 10:44Z. Grading and lane are triage's.\n\n## 维护者速读\n\n- 产品内 AI 替某人改数据时,要在写入上下文里标明「AI 替谁做的、哪次对话、哪次确认」,审计日志才能记下来。\n- 现在规范只允许 /mcp OAuth 入口设置这个标记(ADR-0090 D10 第 4 条),产品内 AI 走的是 cloud 的路径,不在其中。\n- 本卡只改规范和裁决;审计日志写入那一半留在 #33694,本卡落地后再做。\n\n## Items\n\na. **Schema.** `packages/spec/src/kernel/execution-context.zod.ts` `ExecutionContext.performedBy` and `packages/spec/src/data/hook.zod.ts` `HookContext.provenance` (`performedByClientId`) carry only the OAuth client today. Add the in-product AI attribution: AI on behalf of a person, a conversation id and a confirmation id. Use the existing `performed_by` / `on_behalf_of` pair. #33694 says: \"Do not add a new actor vocabulary.\"\n   - This widens a published schema, so it is `Clause-②: yes`, with a contract review at tier.\nb. **Ruling.** Both jsdocs say the attribution is \"Set only at the /mcp OAuth door ... Server-constructed only\" (ADR-0090 D10 rule 4).\n   - The producer here is cloud's in-product AI path, not the /mcp door. So (b) is a reading of ADR-0090 D10 and needs a ruling, and possibly an ADR addendum.\n   - Two things stay as they are: the attribution stays server-constructed and is never client-supplied, and it never becomes the authorization subject.\n\n## Not here\n\n- The plugin-audit writer half (`packages/plugins/plugin-audit/src/audit-writers.ts`, which today writes `performed_by` / `on_behalf_of` only for OAuth-client calls) stays on #33694. #33694 is `pm:blocked` with `Blocked-by:` this card.\n- The cloud producer that fills the fields belongs to cloud#3826.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue performedBy in-product AI` gives #33694 only.\n\n⛔ Not a claim."
+}

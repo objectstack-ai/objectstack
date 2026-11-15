@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "lease:A5",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T05:10:52Z",
-  "updated_at": "2026-11-15T05:10:52Z",
+  "updated_at": "2026-11-15T14:06:42Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33663",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cwhJBt274G7zk78A5a\n\nLoose ends of #33553, left after PR #33614 merged (review#2 PASS record 6889245825). p3, one card.\n\n- **N5.** `packages/connectors/connector-openapi/src/openapi-connector.ts` `buildInputSchema` still carries a \"Path params are always required\" comment; since #33614 the `path` section is required only when it declares a parameter.\n- **N6.** The #33553 changeset could tell OpenAPI connector users how to fix a newly refused key: declare the parameter in the packaged OpenAPI document. The shipped Stripe and DocuSign documents declare 0 header parameters, so a per-call header is now refused for them.\n- **Connector pull door.** `connectorSource.input` (`packages/services/service-automation/src/connector-pull.ts`) does not opt into the undeclared-key judge, so undeclared top-level and query keys are still sent there (pinned as current behaviour by #33614's door-level test). Decide whether the pull door should judge the same way as `connector_action`; if yes it is a narrowing with its own Clause-②/Metadata-protocol answer.\n\nArea: A5. Resume-from: main after #33614."

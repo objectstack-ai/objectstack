@@ -1,0 +1,30 @@
+{
+  "number": 33806,
+  "kind": "issue",
+  "title": "Contract: merge the in-app pending-action queue into the AI-door confirmation seam (#33689 Q1, option C deferred)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T11:13:10Z",
+  "updated_at": "2026-11-15T11:13:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33806",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nDeferred step of #33689 Q1. Leehom ruled B on 2026-11-15T11:10:57Z: one rule, and the two flows stay for now. Option C, merging the seams now, was not taken. This card holds the later merge, to be timed by need.\n\nToday there are two seams. The in-app queue is `IAIService.proposePendingAction` and its siblings, answering `pending_approval`. The MCP hand-off is `ACTION_CONFIRMATION_SERVICE` / `IActionConfirmationService`, answering `pending_confirmation`.\n\nDoing it means one seam and one literal, and retiring `IAIService`'s pending members. That is breaking: spec, ui inbox (21 files), the client SDK and the cloud service-ai store, at least 4 PRs across 3 lanes.\n\nGrade: p3 (nobody is blocked today). Dispatch only on a maintainer's word. Analysis: `/mnt/project-files/pm-orders/spec/33689-q1-decision-analysis.md` (project share)."
+}

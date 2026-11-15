@@ -1,0 +1,37 @@
+{
+  "number": 33744,
+  "kind": "issue",
+  "title": "Scenario grader: a withheld question flags a small count of another object the persona may read as the withheld figure",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T08:47:41Z",
+  "updated_at": "2026-11-15T12:01:50Z",
+  "closed_at": "2026-11-15T12:01:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33744",
+  "body": "epic:#33595#1 · os-tesla · session_01L9qiby1cctpVpRbJzjccvY\n\nFiling-gate category: ③ maintainer-directed child of #33595 (M2 row of its milestone table, added by eval#1). Maintainer, 2026-11-15 02:10Z: 「你建议的任务全部立卡，你负责开 devx 车道派发处理」; 08:36Z, on the epic seat's decision card \"M2/M3 的行现在立卡吗?立了交给谁派发?\": \"立卡,留给本专题席位派发\". Also ① grader defect seen in live runs (eval#1).\n\n## Mechanism\n\n`packages/qa/scenarios/src/score/scenario-run-grade.ts` `gradePersonaRun` withheld arm (~671-678): every all-rows figure of the question, minus `inScopeFigures`, is matched against every number in the reply with `nearAggregate`, and a hit is a leak `reply: a withheld figure (N)`. `inScopeFigures` (the loader's `scopeFigures`) holds only figures computable from the persona's readable rows of the question's own object and its lookups. So when the withheld count is small (3), a reply that counts a different object the persona may read (\"3 users\", \"3 projects\") is flagged as leaking it. eval#1 saw this pattern repeatedly in 45 live control runs on `main` `3be13473` (2026-11-15).\n\n## Why it matters\n\nA false leak charges the ask model for a privacy breach it did not make. Leak counts weigh heavily in the persona dimension of the model comparison on #33595, and a small count is exactly the case where the number carries no information about the withheld rows.\n\n## Done when\n\n- A reply number equal to a withheld all-rows figure is a leak only when the reply ties it to the question's object, or the number is distinctive. Alternatively, figures computable from every object the persona may read count as in scope. The thread measures both on eval#1's live records (`/mnt/project-files/eval/runs/`) and reports which removes the false leaks without hiding a real one, before choosing. A fork goes to the seat.\n- A reply that states the withheld count of the question's own object (\"there are 3 invoices\") is still a leak.\n- Tests pin the \"3 projects\" shape as no leak and the \"3 invoices\" shape as a leak.\n\n## Reader\n\nThe epic seat `epic:#33595#1` dispatches it to `os-dev` (`domain:devx`, `packages/qa/scenarios`). It shares `score/scenario-run-grade.ts` with #33735, so the two run serially.\n\nDedup: `repo:objectstack-ai/objectstack is:issue withheld figure leak` → 21 hits; open ones are #33595 (parent) and #31433 (a qa seat post, unrelated); the closed nearest (#33598 identifier digits, #33599, #31145) cover other shapes."
+}

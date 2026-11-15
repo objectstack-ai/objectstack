@@ -1,0 +1,31 @@
+{
+  "number": 33803,
+  "kind": "issue",
+  "title": "Studio hook form: the refusals help text says 'JavaScript (L2) bodies only', but a handler hook may declare refusals since #33641",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T11:07:36Z",
+  "updated_at": "2026-11-15T11:07:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33803",
+  "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ③ nit N1 of the at-tier contract record 6893396284 on PR #33796 (#33657), also noted by its dev with no carrier. A nit on a schema-face file is not fixed in that PR, so it gets its own card.\nReader: `domain:ui` (`packages/spec/src/data/hook.form.ts`, the `refusals` row's `helpText`). Grade p3, self-graded by the seat. It is a wording fix that no runtime reads. Filed and parked: only p1/p2 are worked now (the maintainer's 「后续只处理 p1 p2」).\nDedupe: `is:issue is:open hook form refusals helpText handler` finds nothing.\n\n## 维护者速读\n\n钩子表单里「拒绝目录」的说明文字还写着「仅限 JavaScript (L2) 代码体」。但 #33641 之后，handler 类钩子也能声明拒绝目录，表单本身也提供 handler 选项。所以这句话不准确了。只改说明文字，不改行为。\n\n## Facts\n\n- `hook.form.ts:59`: the `refusals` row help text ends \"JavaScript (L2) bodies only\".\n- `hook.zod.ts:843-844` (since #33641): refusals are declared on \"a js body or a handler\".\n- The form offers the legacy `handler` row (`hook.form.ts:83`).\n\n## Ask\n\nReword the help text to match `HookSchema` (a JS body or a handler), with a key in every metadata-form bundle `check:i18n` asks for. Wording only; `Clause-②: no`."
+}

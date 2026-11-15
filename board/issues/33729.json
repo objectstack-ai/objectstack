@@ -2,8 +2,8 @@
   "number": 33729,
   "kind": "issue",
   "title": "review follow-ups of PR #33711",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,26 @@
   "labels": [
     "domain:skills",
     "finding",
+    "pm:dispatched",
+    "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T08:14:00Z",
-  "updated_at": "2026-11-15T08:14:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T10:15:33Z",
+  "closed_at": "2026-11-15T10:15:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33729",
-  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (review follow-ups of a PR in flight). Shape per ruling B on #33718 (record 6891082225): one checklist card per reviewed PR; later reviews of PR #33711 append here.\n\n## review follow-ups of PR #33711 (card #33603)\n\nRecords: 6890932729 (first), 6891274033 (delta), the final delta on head `c48e9f19`. All items are nits, accepted for the landing; none changes a verdict the audit gives today.\n\n- [ ] N3 `SUB_AGENT_TOOLS` in `verify-review-tier.mjs` is an exact-name deny list: a skill that forks a sub-agent, or a connector tool that messages another thread, is not on it.\n- [ ] N5 a git-side read failing inside the arm (diff-tree status, changeset text, fork predicate) folds into `tier-h`, not `not-measured`; `armCell` prints only two reasons and can hide it.\n- [ ] N6 the audit's `baseRef` is the landed commit's first parent, where the queue used the merge group's base (fails toward BREACH).\n- [ ] N8 the approval leg reads review state as of now: an authorised approval dismissed after landing no longer clears (fails toward BREACH).\n- [ ] N9 the edited-after clause is appended only on the `absent` state; a dropped edited PASS beside an older FAIL or off-tier record is not named.\n- [ ] N10 `editedAfter` names any trusted comment edited after landing (claims, reports), not only records; \"A, B was edited\" wording.\n- [ ] N11 no audit battery row for `recognisers.available !== true` or a set without `trustedAuthors`; an untrusted PASS reads the same words as no record (the guard prints an ignored-authors line).\n\nCarried elsewhere (not here): raw relay comment tier #33715; contract-review.md session evidence #33716; weekly audit owner #33717.\n\n`scripts/pm/check-governed-merges.mjs`, `scripts/pm/verify-review-tier.mjs`; `skip-changeset`; `Clause-②: no`. Waits for PR #33711.\n"
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (review follow-ups of a PR in flight). Shape per ruling B on #33718 (record 6891082225): one checklist card per reviewed PR; later reviews of PR #33711 append here.\n\n## review follow-ups of PR #33711 (card #33603)\n\nRecords: 6890932729 (first), 6891274033 (delta), the final delta on head `c48e9f19`. All items are nits, accepted for the landing; none changes a verdict the audit gives today.\n\n- [x] N3 `SUB_AGENT_TOOLS` in `verify-review-tier.mjs` is an exact-name deny list: a skill that forks a sub-agent, or a connector tool that messages another thread, is not on it.\n- [x] N5 a git-side read failing inside the arm (diff-tree status, changeset text, fork predicate) folds into `tier-h`, not `not-measured`; `armCell` prints only two reasons and can hide it.\n- [x] N6 the audit's `baseRef` is the landed commit's first parent, where the queue used the merge group's base (fails toward BREACH).\n- [x] N8 the approval leg reads review state as of now: an authorised approval dismissed after landing no longer clears (fails toward BREACH).\n- [x] N9 the edited-after clause is appended only on the `absent` state; a dropped edited PASS beside an older FAIL or off-tier record is not named.\n- [x] N10 `editedAfter` names any trusted comment edited after landing (claims, reports), not only records; \"A, B was edited\" wording.\n- [x] N11 no audit battery row for `recognisers.available !== true` or a set without `trustedAuthors`; an untrusted PASS reads the same words as no record (the guard prints an ignored-authors line).\n\nResolved by PR #33762 (report 6892426950, at-tier PASS 6892490875): N3 N5 N8 N9 N10 N11 fixed with pin rows; N6 closed with its reason in readArmLanding's jsdoc (baseRef is read only through git merge-base by regenCarry). The review's own nits go to the card review follow-ups of PR #33762.\n\nCarried elsewhere (not here): raw relay comment tier #33715; contract-review.md session evidence #33716; weekly audit owner #33717.\n\n`scripts/pm/check-governed-merges.mjs`, `scripts/pm/verify-review-tier.mjs`; `skip-changeset`; `Clause-②: no`. Waits for PR #33711.\n\n"
 }

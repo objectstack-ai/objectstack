@@ -1,0 +1,30 @@
+{
+  "number": 33842,
+  "kind": "issue",
+  "title": "checklist cli.validate-v18-authoring-verdicts acceptance[3]: `os lint` never reports an omitted `required` on a defineStack app's sole cbp master_detail: the strict parse already defaulted it to false; the clause needs a non-strict fixture",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T11:54:44Z",
+  "updated_at": "2026-11-15T12:52:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33842",
+  "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nObserved at objectstack main @ a557fa38 (scratch copy of examples/app-todo; os CLI from the tree), while running cli.validate-v18-authoring-verdicts rev 3.\n\nReproduction (reproduced twice):\n1. In the scratch app's `objectstack.config.ts`, inside `defineStack({...})` (strict default), add two objects. The first is a plain header `todo_qa_hdr` (sharingModel private). The second is `todo_qa_line` with sharingModel 'controlled_by_parent' and one field `hdr: { type: 'master_detail', label: 'Hdr', reference: 'todo_qa_hdr' }`. Both are written as plain object literals, and `required` is omitted.\n2. Run `os lint --json`. Expected (acceptance[3]): exit ≠ 0 with relationship/master-detail-required at error on the master_detail's path. Actual: exit 0, `passed: true`, `errors: 0`, and no relationship/master-detail-required issue.\n3. Run `os validate --json` and `os build`. Both exit 0, as the clause expects.\n4. Self-check: import the config with tsx and print the field. It reads `{\"type\":\"master_detail\",\"required\":false,…}`, so the stack that any CLI verb receives already holds the optional master (ruling A of #30905). This is not the omission.\n5. Control: change only the call to `defineStack({...}, { strict: false })`.\n   - `os lint` exits 1 with `error relationship/master-detail-required at objects[2].fields.hdr.required`: \"master_detail \\\"todo_qa_line.hdr\\\" → todo_qa_hdr declares no required: write true (every detail names its master) or false (an optional master)\". It also reports security-controlled-by-parent-no-relation.\n   - `os validate --json` and `os build` still exit 0.\n   - So every half of the clause holds on this door.\n\nDisposition: assertion defect (stale clause). The rev-3 history says the os lint exits \"are read from the rule's reach note and its unit pin, not driven live by this edit\". packages/lint/src/data-model-rules.ts (R2 docblock) itself says \"the parse cannot see the omission (it reads the parsed `false`)\". `os lint` loads the same parsed stack, so on the default authoring door no verb can see it.\n\nAsk, pick one:\n- **A (checklist only):** steps[2] names the door where the rule is reachable, `defineStack(…, { strict: false })` or a raw object config, and acceptance[3] says so.\n- **B (product):** if #31470's reach line (\"Only `os lint` … reports it\") is meant to hold for ordinary defineStack apps, then `os lint` would need the pre-parse config. Today an omitted `required` on such an app is reported by nothing, and it is silently admitted as the optional master.\n\nRe-observation: QA record r2026-11-13 L4 met the same thing in a probe on cli.validate-v18-authoring-verdicts rev 2. It parked it without filing (\"the rule's own 'declares no required: write true or false' branch is not reachable through `os lint`\"). Rev 3 then turned it into a scored clause.\n\nNot a regression since 18.4.0:\n- #31523 (merge 47bc6211, which wrote ruling A's three-door prose) is an ancestor of 181ad7d4.\n- `git log 181ad7d4..HEAD` shows nothing on data-model-rules.ts, controlled-by-parent-master.ts or utils/config.ts.\n- On commands/lint.ts it shows only 0be91f0e7 (i18n.sourceLocale, unrelated).\n\nDuplicate search (read-only `gh api search/issues`, open and closed):\n- \"master-detail-required lint defineStack\"\n- \"master-detail-required omitted required\"\n- \"optional master lint parsed required false\"\n\nThe closest is #31470 (closed, ruling B: prose only, behaviour unchanged). It covers the parse's reading, not os lint's reach on a defineStack config. No open duplicate.\n\nQA-source: #33829 · cli.validate-v18-authoring-verdicts · acc[3]"
+}

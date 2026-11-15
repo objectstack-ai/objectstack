@@ -1,0 +1,35 @@
+{
+  "number": 33779,
+  "kind": "pull_request",
+  "title": "fix(service-messaging): read recipient preferences in the emitting organization",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T10:38:10Z",
+  "updated_at": "2026-11-15T11:50:12Z",
+  "closed_at": "2026-11-15T11:50:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T11:50:09Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33779",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbSUQWB2j9eHYsRcrCiq1X1C)_\n\n## 维护者速读\n\n- 改了什么:通知发送时读取收件人\"通知偏好\"(静音/退订)所用的组织,改为与 `role:` 收件人解析同一个组织(发送方给的组织,否则事件行上引擎派生的组织)。\n- 为什么改:原先发送方没给组织时,偏好查询不带组织条件、在系统上下文下跨全部组织读取,别的组织里的偏好行可能把本组织收件人静音,或覆盖他的退订。\n- 风险与回滚:只影响\"发送方未给组织、且引擎为事件行派生了组织\"的这一种发送;回滚即还原 `messaging-service.ts` 的一行。\n- 先看:`packages/services/service-messaging/src/messaging-service.ts` 的 emit 3b 步那一行,其次 `resolveAudience` 的 `[spec]`,再看集成测试新增的 describe。\n- 两分钟验证:`pnpm --filter @objectstack/service-messaging exec vitest run --maxWorkers=2 src/notification-organization-follows-event.integration.test.ts`,预期 14 个用例全绿。\n- 需要你做的:无,席位落地。\n\nFixes #33649\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nThree follow-ups from the contract review of PR #33320 (review#2 records 6881335909 and 6882029716), all in `@objectstack/service-messaging`.\n\n1. **`MessagingService.emit` step 3b reads preferences in the emitting organization.** The preference filter now gets `owned.organizationId`, the same value `role:` resolves with at step 3 (the producer's organization, else the one stored on the event row). Measured on the real engine before the change: when the producer names no organization, the two preference reads run with `where` `{\"topic\":\"t\"}` and `{\"topic\":\"*\"}`, with no organization term, under the system opt-in. So a preference row stored under another organization is read too, and in the in-memory index the last row read for a key wins. With a stray `enabled: true` row under `org_old`, a recipient who opted out in the event row's organization `org_sole` was still delivered to (`delivered 1`). The same emit naming `org_sole` was muted (`delivered 0`). When neither the producer nor the event row has an organization, the read is unscoped, as before.\n2. **Real-engine pins of the event-row fallback**, as a new top-level `describe` in `notification-organization-follows-event.integration.test.ts`. They run on `single` with one organization, which the engine derives onto the event row: `role:admin` reaches the admins of that organization and not an admin stored under another one; the preference read is pinned both ways; and a CONTROL checks that a producer-named organization's preferences decide.\n3. **`resolveAudience`'s per-spec branch hands the resolver `[spec]`.** Measured: this changes behaviour only for an entry that is itself a list. That is outside `AudienceSpec`, so no typed audience is affected. The single-call branch skips such an entry with a warning. The per-spec branch expanded it, because `resolve` takes a bare array as the whole audience. Both branches now skip it.\n\n## Tests\n\n- New, real engine (`ObjectQL` over `SqlDriver`, better-sqlite3), in `notification-organization-follows-event.integration.test.ts`:\n  - `role:` reaches the role's holders in the derived organization, and no holder stored under another;\n  - a recipient's opt-out in the derived organization holds over an opt-in stored under another;\n  - another organization's opt-out does not mute a recipient who opted out nowhere in the derived one;\n  - CONTROL: a producer-named organization is the one whose preferences decide.\n- New, unit (`messaging-service.test.ts`, the `role:` describe): in the per-spec branch, a nested list entry is skipped; CONTROL: the single-call branch skips the same entry.\n- Ablations (each through `scripts/ablation-replace.mjs`, committed fix first, and each restore read back as blob == HEAD with `git diff HEAD` empty). The tests import `./messaging-service.js` from `src`, so no rebuild is involved.\n  - Step 3b put back to `input.organizationId`: both preference pins go red (`- [] + [\"user_1\"]`; `- [\"user_1\"] + []`), 2 failed, 12 passed.\n  - Step 3 `role:` organization put back to the producer's: the real-engine `role:` pin goes red, 1 failed, 13 passed.\n  - `[spec]` put back to `spec`: the per-spec nested-entry pin goes red, 1 failed, 91 passed.\n\n## Acceptance notes\n\n- Step 1b (channel availability) still asks with the producer-named organization. It runs before the event write, so the derived organization does not exist yet at that point. Noted, not changed.\n- Where stray rows come from: the engine refuses an organization delete while `sys_notification_preference` rows still name that organization (`DELETE_RESTRICTED`, measured). A preference row under an organization other than the sole one is therefore data at rest written below the engine. The pins seed such rows through the driver.\n\n## Verification\n\nAll runs below are local readings at head `42a16409` (the fix commit `b7493b14` merged with `origin/main` `a557fa38`). The merge brought in no package source.\n\n- `pnpm --filter @objectstack/service-messaging test`: Test Files 71 passed (71), Tests 972 passed (972). `typecheck` exit 0. Under the verify lock, `VERDICT command-exit 0`.\n- Direct dependents, run at `b7493b14` after a build of their closure:\n  - `@objectstack/service-automation`: 282 files, 3976 tests passed.\n  - `@objectstack/plugin-approvals`: 120 files, 1652 tests passed.\n  - `@objectstack/plugin-webhooks`: 25 files, 307 tests passed.\n  - `@objectstack/plugin-auth`: 277 files, 5465 passed and 10 skipped.\n  - The other dependents (`runtime`, `cli`, `dogfood`, `http-conformance`, `verify`, `app-showcase`) are declared to CI. The package's exported surface is byte-unchanged.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 67 families derived at `42a16409`, all 67 run.\n  - 64 exited 0.\n  - `check-plugin-teardown-shape --self-test` first exited 3 on the shallow clone. After a fetch of its pinned fixture it exited 0, with 48 cases passing.\n  - NOT MEASURED: `check:dual-build-cjs-loads` and `check:i18n`. Both exited 3 because they need the whole workspace built (`Run pnpm build first. This is NOT a pass`). They are left to CI.\n  - `--ran` reconciliation: 67 derived, 67 run, 0 unrun.\n- `pnpm lint` exit 0.\n\nSession: https://claude.ai/code/session_01QsR2jVPGBoi3MCGoKbW1Hv\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

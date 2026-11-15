@@ -1,0 +1,34 @@
+{
+  "number": 33772,
+  "kind": "pull_request",
+  "title": "test(dogfood): time the package-less tool row pin's reads, not its three installs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T10:04:44Z",
+  "updated_at": "2026-11-15T11:50:12Z",
+  "closed_at": "2026-11-15T11:50:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T11:50:09Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33772",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb5soSS5cRV6WrfiW2kCmgEp)_\n\nFixes #33680\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：AI 家族 bare-name 测试里三条在 `it` 里装包的用例（无包工具行、CONTROL、第三命名空间），把行保存和 install-local 挪进嵌套 describe 的 beforeAll，读断言留在 it 里，断言逐字未改。\n- 为什么改：每次 install-local 都会重同步整个 showcase（123 个对象 schema、33 条流程），装包占了用例的大部分耗时；在 merge queue 的分片负载下整条用例越过 vitest 默认 5 秒，两次把 PR 踢出队列（#33451、#33653）。\n- 风险与回滚：只改测试文件，不改产品代码，不发布；回滚即 revert 本 PR。\n- 先看：`packages/qa/dogfood/test/bare-name-one-holder-ai-family.dogfood.test.ts` 新的三个嵌套 describe（beforeAll 的 60 秒装包预算与其后的 it）。\n- 两分钟验证：`cd packages/qa/dogfood && pnpm exec vitest run --reporter=verbose test/bare-name-one-holder-ai-family.dogfood.test.ts`，预期 28 个全绿，三条用例的 it 各在 0.5 秒内。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nThree pins in `packages/qa/dogfood/test/bare-name-one-holder-ai-family.dogfood.test.ts` move their setup out of the test clock:\n\n- The `[#31985]` package-less tool row case becomes a nested `describe`. Its setup (two `PUT /meta/tool/NAME` saves, three `POST /marketplace/install-local` calls in the same two install orders) runs in that describe's `beforeAll` with a declared 60 s loading budget, like the file's own boot hook. Its reads become `it.each(['before the hydrator', 'after the hydrator'])`, run in declaration order; the assertions are byte-identical to the old loop body.\n- Folded in 9ebd6e38 (loose end R5): the `CONTROL — install-local ... fresh ... names` (epsilon) and `[#31701, #31985] ... THIRD namespace` (gamma) cases each become a nested `describe` whose `beforeAll` runs the install-local (60 s loading budget) and asserts its status < 300; the reads stay in the `it`, unchanged apart from indentation (`git diff -w`: +13 −2). Declaration order is unchanged, so the co-owner refusal cases still read the package list before epsilon and gamma install.\n\nNo assertion, test clock of a behaviour read, or product file changes.\n\n## Why\n\nDiagnosis (card #33680, triage 6890622593):\n\n- Both victims fail the same test at line 381 with REASON `Error: Test timed out in 5000ms.`: 5139 ms in job 132667862849 (PR #33451) and 5046 ms in job 132715484165 (PR #33653). The dogfood config sets no `testTimeout`, so this is vitest's default 5 s.\n- The same test in 14 green merge_group runs of 2026-11-15 (43688903702 to 43695401645): 2220 to 4447 ms, median about 3.2 s. It sits at 45 to 90 % of its clock.\n- Measured locally on an idle box (instrumented copy, not committed): setup 2840 ms of the test, each install-local 828 to 1033 ms, the reads 164 ms and 147 ms. Each install logs `syncSchemas() ran`, `Schema sync complete {\"synced\":123}` and `Re-synced 33 flow(s) after metadata reload`.\n- The triage's `No driver available for object 'sys_session'` lead does not hold: 0 hits in victim 1, 1 hit in victim 2, and that line sits inside another worker's boot log while this file's stack was still up.\n- Sibling anchor #33479 (flow family) has a different root: its root PR #33431 fails four assertions, a semantic conflict, not a clock.\n\nSo this is a load/timing cliff in the test's structure: a behaviour clock timing loading. Not a flake in the product, not a race, not a conflict between queued PRs.\n\n## Tests\n\n- Red before the fix, reproduced: the file under 6 CPU-bound node loops on a 4-core box failed exactly like CI (`Test timed out in 5000ms`, 5630 ms).\n- Green after, same load, twice on 24c4208b and once on the merged head fad7b8d7: 28/28; the two hydrator reads took 220 to 381 ms.\n- On 9ebd6e38: the file 28/28 idle and twice under 6 CPU hogs on 4 cores; the epsilon and gamma `it`s now take 131 to 320 ms (1030 and 1159 ms idle as single `it`s before).\n- `pnpm --filter @objectstack/dogfood typecheck`: exit 0 (`--listFiles` includes the file).\n- `pnpm lint`: exit 0.\n\n## Acceptance notes\n\n- No ablation: the diff changes no tested behaviour, only where the setup's time is clocked.\n- The two sibling cases are folded in 9ebd6e38 (see What changes).\n- Not done here (one loose-ends card after landing): each install-local re-syncing the whole deployment (123 schemas, 33 flows) is a product cost worth its own measurement if the queue keeps hitting install-heavy files.\n- Full dogfood battery not run locally (no `!` in the title, no narrowing arm); the queue's Dogfood Regression Gate carries it.\n\n## Verification\n\n<details><summary>Derived gates (dispatch-gates --commands)</summary>\n\nAt 24c4208b: 52 derived, 52 run, every one exit 0; `dispatch-gates --ran` reconciles 52/52 with 0 NOT-MEASURED. `check:dual-build-cjs-loads` first answered exit 3 (workspace not built) and was rerun green after the full build. At 9ebd6e38: the same 52 families re-derived and rerun, all exit 0, 52/52, 0 NOT-MEASURED.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jRabTH2KkTRU4d62Uq\n\n<!-- signed: domain:server#5 · zhuangjianguo · session_01QsR2jTEivi2wogPpeo3xd5 -->\n"
+}

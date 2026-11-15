@@ -1,0 +1,31 @@
+{
+  "number": 33837,
+  "kind": "issue",
+  "title": "ADR-0113 D5: name the managed package install as the deliberate relax for a sealed package object",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T11:51:53Z",
+  "updated_at": "2026-11-15T13:03:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33837",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRmmALkM1ftZxdVatQ\n\nFiling gate: ④ follow-up owed by PR #33769 (Part of #33724). Named in review-b PASS 6892884183 (\"a governed card for the one-line ADR-0113 D5 amendment\") and in contract review 6892876561 (\"The D5 sentence naming the install is governed text, so it is owed to the seat as a follow-up card and is not edited here\"). It waited on #33382, which edited the same passage and is merged.\n\n## What the ADR says today\n\n`docs/adr/0113-required-write-contract-vs-column-constraint.md`, D5, lines 195–199 on origin/main: a `required: true` field that writes `storage: { notNull: false }` has its stricter column reported (`relax_not_null`, `needs_confirm`, never auto-applied), \"and the publish of that declaration applies the relax, being the deliberate relax named above.\"\n\n## What the code does since #33769\n\nA sealed package object cannot be published by the author. The managed install or upgrade of its package through the install-local door now applies that same relax, for the columns the installing package's own body declares `notNull: false`, through `SqlDriver.relaxDeclaredNotNull`. A boot or rehydrate never applies it. So D5 names one deliberate act, and the code honours two.\n\n## Expected\n\nOne sentence in D5 naming the managed install or upgrade of the package as the same deliberate relax for a package object. Tier H: governed text under docs/adr, so the maintainer's record is required. No code change."
+}

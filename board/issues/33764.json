@@ -1,0 +1,37 @@
+{
+  "number": 33764,
+  "kind": "pull_request",
+  "title": "fix(scenarios): a recorded replay re-sends each turn's recorded writes before the read-back",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T09:43:01Z",
+  "updated_at": "2026-11-15T10:29:51Z",
+  "closed_at": "2026-11-15T10:29:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T10:29:49Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33764",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoEDtPjXPciS3z2UwV39x6wK)_\n\nClause-②: yes (widening) — new export `ReplayNotFaithfulError` and new optional field `AskTask.callTool`, both reached through `./runner` (`src/runner/index.ts` re-exports `driver.ts`)\nMetadata-protocol: none\n\nFixes #33737\n\n## 维护者速读\n\n- 改了什么:录制重放(`--driver recorded:`)现在会把录制里每个回合的写入(新建/修改/删除/调用动作)按原顺序、以同一角色重新发给新启动的应用,再读回结果;读操作不重发。\n- 为什么改:以前重放只回放模型的回答、不发写入,所以「应当成功」的操作在重放里一律读不到数据、判失败(haiku crm 实跑 3/5,重放 1/4),操作分无法重评。\n- 风险与回滚:只影响重放驱动,实跑驱动不变;重放时若应用的回答与录制不同(被拒的码不同、成功变失败等),该题/操作记为「未测量」并写明是哪个调用,绝不判失败。回滚即还原本 PR。\n- 先看:`packages/qa/scenarios/src/runner/driver.ts` 的 `RecordedDriver.ask`(重发与比对),`src/runner/orchestrate.ts` 的 `runHalf`(把应用的 MCP 门交给驱动、接住不一致)。\n- 两分钟验证:`pnpm --filter @objectstack/scenarios exec vitest run test/runner/orchestrate.test.ts`,应见 55 项全过,其中新的 eval#1 重放组 8 项。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `RecordedDriver.ask` re-sends the recorded turn's write calls (`create_record`, `update_record`, `delete_record`, `run_action`) to the booted app, in recorded order, through the new optional `AskTask.callTool` (the runner's own MCP door as the turn's persona), before it hands the turn back, so the runner's read-back finds what the recorded run wrote. Reads are never re-sent.\n- A recorded refused write is re-sent too and must meet the same refusal (same code; a flow refusal stays a flow refusal; an uncoded error stays uncoded).\n- A row the recorded run created gets a new id in the replayed app; a later recorded write naming the recorded id, in the same turn or a later one, is sent with the new id.\n- The replay is not faithful, and the turn measures nothing (`ReplayNotFaithfulError`), when the app answers a re-sent write otherwise than the recorded run did, or when a recorded write has no recorded answer (the turn was cut short; nothing of that turn is re-sent). `runHalf` records the question or operation NOT MEASURED with the reason naming each call, keeps the recorded turn summary, and never grades it a fail.\n- `runHalf` gives every question and operation turn the door (`callTool` bound to the persona's key through `AppHarness.callTool`). Live drivers ignore it; a caller that only re-reads a recording (no door) gets the turn back and nothing is sent.\n- README: one sentence on the replay in the runner's Driver paragraph. Changeset `33737-replay-resends-recorded-writes.md` (patch).\n\n## Measurement (read-only, before the change)\n\n- Recordings: all 79 `*.rec.json` under the eval seat's runs (`/mnt/project-files/eval/runs/`, 2026-11-14/15): 533 recorded write calls, every one in an operation turn, every one with its recorded answer (0 without), 0 turns mixing answered and unanswered writes. Each call carries the tool name and its input, and the step key names the persona, so a faithful re-send is possible for every call. 2 writes name a row created earlier in the same turn (create then update), which the id remap covers.\n- eval#1's reading reproduced on `main` `53f5a4c9`: haiku `crm_account_with_contacts` replay, Run-operations `1/4 · 1 not measured`; `add_contact` \"0 row(s) read back\", `move_eli` read \"ac3\", declared \"ac1\", audit actor \"admin\".\n- Same recording on this branch (`5bdadc88`): Run-operations `3/4 · 1 not measured`, Iterate the same; `add_contact` and `move_eli` pass, as in the live run. `contact_bad_email` stays the existing build-denial NOT MEASURED, as on `main`. Build 27/27, 问数 8/9 unchanged.\n\n## Tests\n\n- New top-level describe in `test/runner/orchestrate.test.ts` replaying the verbatim eval#1 turns (fixture `test/runner/fixtures/eval-haiku-crm-replay.recording.json`, four operation turns of the haiku crm recording, reads included) through `runHalf` against a fake MCP door that behaves as that build: `add_contact` reads its row back and passes, `move_eli` passes with its audit actor; the app receives exactly the recorded writes in order, each as its persona, and no read; a recorded refused delete and create are re-sent and refused again; an app that answers otherwise makes the operation NOT MEASURED naming the call, with no grade and no error. Driver-level: the created-id remap (same turn and later turn), the unanswered-write turn (nothing sent, not faithful), a door that throws, and a turn read without a door.\n- The four eval-r1 build-denial replay tests now see the replay's re-sent writes beside the runner's probes; their fake app answers the re-sends as that build did, and their grades are unchanged.\n\n## Acceptance notes\n\n- `move_eli` on `main` read the audit actor as \"admin\": the replay's app had only the seed's writes. With the re-send the audit actor is the persona again.\n- A question turn's recorded writes are re-sent as well (the driver cannot tell a question from an operation, and re-sending keeps the app state later turns read the same as the live run's); the 79 recordings hold none.\n- Two local replays of the branch scaffolded a project whose install did not complete (`npx objectstack` 404, \"no project was installed\"); the scaffold precedes every driver call, and the third run with `--work` on a fixed directory completed. Not investigated further; noted in case it recurs.\n\n## Verification\n\n<details><summary>Package and gates on 58da7e9c (re-run after the main merge on 20d149c6)</summary>\n\n- `pnpm --filter @objectstack/scenarios build`, `typecheck`, `test`: exit 0, Test Files 32 passed, Tests 790 passed (after the merge: typecheck + test exit 0, 790/790).\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 62 derived families, all run, each exit 0 (`check-plugin-teardown-shape --self-test` after fetching its fixture commit; `check:dual-build-cjs-loads` after `turbo run build --filter=./packages/**`); `--ran` reconciliation: 62 derived, 62 run, 0 NOT-MEASURED, 0 UNRUN.\n- eslint on the three changed sources: exit 0.\n\n</details>\n\n<details><summary>Ablation (one, on the re-send)</summary>\n\n`node scripts/ablation-replace.mjs` replaced the re-send guard in `RecordedDriver.ask` with an unconditional `return turn` (anchor 1 → 0, blob e66c5893 → 32a70041): `orchestrate.test.ts` went red, 10 failed (the 7 new replay tests that send, and 3 of the 4 build-denial tests). Restored by the tool; `git diff HEAD` empty afterwards.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qiby9eoofRB23PSVqcuM)_\n\n<!-- signed: epic:#33595#1 · os-tesla · session_01L9qiby9eoofRB23PSVqcuM -->\n"
+}

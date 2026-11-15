@@ -14,7 +14,7 @@
     "area:data",
     "domain:server",
     "enhancement",
-    "lease:E1",
+    "lease:A4",
     "pm:queue",
     "priority:p2"
   ],
@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T06:45:18Z",
-  "updated_at": "2026-11-15T06:45:18Z",
+  "updated_at": "2026-11-15T11:20:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33700",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cztR1A2CZoxSZyuoGP\n\nFiling gate: ④ child of epic #33631 (SQL performance). Item R12 of the M0 ranked list (#33633): https://github.com/objectstack-ai/objectstack/issues/33631#issuecomment-6889544281 (corrected 6889939163). Maintainer's pick (seat decision card, 2026-11-15T06:44Z): 「R1 R7 R12 各一张+测量卡」.\n\n## Today\n\nEvery paged list also runs `count(*)` with the full predicate (`protocol-data-crud.ts` ~803; `$count=false` already opts out). Member read-scoped total: PG 35 ms vs the page's 118 ms today; once #33695 lands the page is ~3 ms and the total becomes the dominant cost.\n\n## Target\n\nDecide per surface: the Console sends `$count=false` where it does not show a total, and/or the door answers a cheaper total (e.g. capped / estimated count) where the UI needs only \"more than N\". The PR measures both on the M0 bench after #33695.\n\n## Business reason\n\nAfter the index work, list latency is mostly the total count; most list views do not need an exact total.\n\n## Reader\n\ndomain:server#5 area E1 (list door) with the UI lane for the Console call sites; next account; size S. Blocked-by: #33695 (its measurement is meaningful only after the index lands).\n\n## Epic rules\n\n- Name the SQL shape produced and give before/after on the M0 bench (`packages/qa/dogfood/bench/sql-perf`, PR #33662).\n- Security never regresses: read scope and tenant wall stay in the pushed-down statement, with a parity test against today's path.\n- A non-SQL driver keeps an in-process path it already has or refuses with a stable code (epic #33631 rules; #33626 rulings).\n"

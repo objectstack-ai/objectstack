@@ -1,0 +1,31 @@
+{
+  "number": 33867,
+  "kind": "issue",
+  "title": "Loose ends after PR #33781 (#33358): authentication.mdx IP allow-list row omits the direct sign-in door landing, googleLocalOff \"or in this save\", ssoCallbackRefusal retry-button comment",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A1",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T12:36:06Z",
+  "updated_at": "2026-11-15T13:00:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33867",
+  "body": "domain:server#5 · zhuangjianguo · session_01QsR2jVPGBoi3MCGoKbW1Hv\n\nFiling gate: ② review nits N2–N4 from the CONTRACT_REVIEW_TIER record 6894038792 on PR #33781 (#33358). None blocks. Grading and lane are triage's (A1). ⛔ Not a claim.\n\n## 维护者速读\n\n- PR #33781 复审留下的三处文字小尾巴:文档少一句、一条提示多半句、一处代码注释。不改行为。\n\n## Items (verbatim from 6894038792)\n\n- N2. \"`content/docs/permissions/authentication.mdx:652` still says a refused request answers `403 IP_NOT_ALLOWED` with no mention of the door's landing. `sso.mdx` now carries the sentence and links there. One clause in the field row would close it.\"\n- N3. \"`googleLocalOff` offers \\\"set up another sign-in method before or in this save\\\". Under `off` the auth settings form holds no other method that counts (email and password does not, and Google is the one being removed), so \\\"or in this save\\\" tells the reader nothing there.\"\n- N4. \"`ssoCallbackRefusal.ts` says the network sentence names \\\"the administrator, not a retry\\\", while the page still draws the retry button under it. Both are fine; the comment could say the button stays.\"\n- Plus N5 from 6894124120: the `Widened:` entry's \"nothing else in force\" should also say phone off. That changeset has shipped, so it is release-note wording only.\n\n## Dedupe\n\nThese are follow-ups of PR #33781 only; no open card carries them."
+}

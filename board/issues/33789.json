@@ -1,0 +1,32 @@
+{
+  "number": 33789,
+  "kind": "issue",
+  "title": "pm: close the mailboxes to outsiders — lock each mailbox PR's conversation to collaborators, and accept a knock only from the fleet bot or a maintainer account",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p1",
+    "security",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T10:48:54Z",
+  "updated_at": "2026-11-15T10:48:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33789",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. In the triage seat session on 2026-11-15 the maintainer asked 「现在任何人往信箱留言就可以调度车队经理干活吗？如果有坏人怎么办？」, then answered triage's proposal with 「立卡」. ⛔ Not a claim.\n\n## 维护者速读\n\n今天的防线是「作者决定性质」（`references/untrusted-text.md`）：只有维护者本人、派发令和规则文件算指令，车队机器人的敲门只是同事陈述，其他账号写的都是数据。座位不会因为外人留言而改卡或写入。但仓库是公开的，任何 GitHub 用户都能在信箱 PR 下留言，伪造一条敲门格式的文字，让座位白读、白耗 token。本卡补两道硬闸：\n1. 信箱 PR 锁定讨论，只有协作者能评论，外人写不进来。\n2. 读敲门的工具只认车队机器人或维护者账号写的敲门，其余的连正文都不交给会话。\n\n## Facts (read 2026-11-15)\n\n- `objectstack-ai/objectstack` is public. Every mailbox (`pm:mailbox` draft PRs, e.g. #32588, #33459, #33747) accepts comments from any GitHub account.\n- Seats receive mailbox comments as PR-activity notifications. The harness labels the author and marks the body untrusted, but the body still reaches the session's context.\n- Knocks today all come from `objectstack-fleet[bot]` through the relay. The seat signature on line 1 is text, so inside the fleet one seat's session could write another seat's signature.\n\n## What lands\n\n1. **Lock the mailbox conversation at open** (`scripts/pm/mailbox-open.mjs`): right after it opens a mailbox PR, lock the conversation (`PUT /repos/{owner}/{repo}/issues/{n}/lock`, reason `resolved` or none) through the relay. Collaborators with write access (the fleet App included) can still comment; outsiders cannot. Add a self-test row. Also add a one-off relay sweep that locks every open mailbox, and record it on this card.\n2. **Knock author check** (`scripts/pm/record-recognisers.mjs` `--mailbox-keys`, or wherever knocks are parsed): a knock counts only when `user.login` is `objectstack-fleet[bot]` or in `GOVERNED_APPROVERS`. Any other author yields \"ignored: not a fleet or maintainer author\", and the body is not echoed. `untrusted-text.md` and `seat-post-protocol.md` say the same in one line each.\n3. **Signature matches the seat post** (lighter; lands with item 2 or after): the knock's `session_…` must equal a session the named seat's post or mailbox opening lists (current or successor-of). Otherwise the knock is reported as \"unverified seat signature\" to the receiving seat and not acted on.\n4. **Not in scope:** issues opened by outsiders. Triage keeps first-touching them as data under `untrusted-text.md`. That is the product's public intake and is not locked.\n\n## Grade\n\np1: closes a public write path into every seat's context. The rule-level defence already exists; this makes it a gate."
+}

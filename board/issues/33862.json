@@ -1,0 +1,31 @@
+{
+  "number": 33862,
+  "kind": "issue",
+  "title": "Import wizard: when no column is mapped, Tab cannot leave the \"Save current\" reason span — the mapping selects, Next, Cancel, Back and Close are unreachable by keyboard",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T12:32:09Z",
+  "updated_at": "2026-11-15T12:49:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33862",
+  "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\n**Where.** Console → any object list → Import → mapping step, `ui/packages/plugin-grid/src/ImportWizard.tsx` (the template bar's `nothingMapped` branch: a `TooltipTrigger asChild` span with `tabIndex={0}` wrapping the disabled `import-template-save-btn`, added by #31557).\n\n**Reproduction** (main `a557fa38`, stock showcase, seeded admin, headless Chromium with real keyboard events; reproduced on 4 fresh loads, with and without a prior hover):\n\n1. Open `/_console/apps/com.example.showcase/showcase_task` → Import.\n2. Upload a CSV whose headers match no field, e.g. `foo,bar` with one row. The wizard opens the mapping step with nothing mapped.\n3. Press Tab repeatedly from the dialog.\n\n- **Expected:** Tab visits every tabbable in the dialog: the template select, the Save-current reason span, both column-mapping selects, the Next reason span, Cancel, Back and Close (8 stops by DOM).\n- **Actual:** focus cycles template select → Save-current reason span → the dialog container → back to the template select. The two `— Skip —` mapping selects, the `import-next-btn` wrapper, Cancel, Back and Close are never reached. Shift+Tab stays on the dialog container.\n\n**Controls.**\n- CSV `title,project` (Save current enabled, no wrapper span): Tab reaches all 8 stops.\n- CSV `title,foo` (Save current enabled, Next disabled behind its own reason span): Tab reaches the Next span.\n\nSo the cycle appears only when the Save-current reason span is drawn.\n\n**Impact.** A keyboard-only user whose file maps nothing cannot map a column, go Back or leave the dialog except with Escape. This breaks the reach-by-keyboard half of the disabled-control-reason convention for this one control. Every other disabled-with-reason control the item covers is reachable: Archive, Publish, field inspector rail, validation body, Properties group, Reassign…, and Next.\n\n**Regression vs 18.4.0:** likely not. #31557 (2c6b93644) is an ancestor of 18.4.0's tag `181ad7d4`. It was not re-measured on an 18.4.0 build.\n\nQA-source: #33861 · ux-conventions.disabled-control-reason · acceptance[1]"
+}

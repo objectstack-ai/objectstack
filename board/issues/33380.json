@@ -2,8 +2,8 @@
   "number": 33380,
   "kind": "issue",
   "title": "service-automation: extend the StepLogEntry ↔ ExecutionStepLog type pin to warnings / droppedFields and fix its stale comment",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,25 @@
   "labels": [
     "domain:server",
     "lease:A5",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T18:08:40Z",
-  "updated_at": "2026-11-14T18:53:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T13:55:23Z",
+  "closed_at": "2026-11-15T13:55:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33380",
   "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nFollow-up of #33020 (PR #33368, `Clause-②: yes (widening)`: `ExecutionStepLogSchema` gains `warnings` and `droppedFields`). Contract review 6881957920, finding N3 (and N2, folded here).\n\n**Stale once #33368 merges:** `packages/services/service-automation/src/builtin/region-index-keys.test.ts:56-60`, the comment \"The engine's interface legitimately carries engine-local fields the contract does not (`nodeLabel`, `warnings`)\": `warnings` is a contract member after #33368. The type-level pin covers only the region keys (`parentNodeId | iteration | branch | regionKind | retryAttempt`), so drift between the engine's `StepLogEntry` and the spec's `ExecutionStepLog` on `warnings` / `droppedFields` is caught only by #33368's runtime parse pin, not at compile time.\n\n**TO:**\n- add `warnings` and `droppedFields` to the pinned keys (invariant `Eq`, same as the region keys) and correct the comment (`nodeLabel` stays engine-local);\n- N2: the `stepAdvisoriesOf` docblock in `packages/services/service-automation/src/dag-traversal.ts` says step and run answer \"can never disagree\", but a host event with `fields: []` parses under `DroppedFieldsEventSchema` and stays on the step while `foldDropEvents` drops it (`run-dropped-fields.ts:68`). Either drop empty events in `stepAdvisoriesOf` too, or narrow the sentence. No in-tree producer emits one.\n\nTest and comment only (plus one docblock or one filter line): no published surface moves. Waits for #33368 to merge.\n\nclass: b · type: Test · Grade: p3 (no runtime effect; a type pin and two sentences) · domain: server"

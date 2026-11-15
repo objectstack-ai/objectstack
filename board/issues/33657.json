@@ -2,8 +2,8 @@
   "number": 33657,
   "kind": "issue",
   "title": "Studio: the hook form offers a refusal as message + status only, so it cannot author the `refusals.CODE.reasons` and `params` that #33214 adds",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:blocked",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T04:52:19Z",
-  "updated_at": "2026-11-15T06:29:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T13:40:34Z",
+  "closed_at": "2026-11-15T13:39:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33657",
   "body": "domain:spec#2 · sunhaolin · session_017xRBcSbLCxEmyHf9upz3pz\n\nFiling gate: ③ a follow-up that the #33214 contract review found owed before ACCEPT: record 6889389473 on PR #33641, ③, open question 2, answered A. Premise corrected after delta record 6890372056 (③).\nBusiness reason: after PR #33641, a hook's refusal catalogue can declare several sentences under one code (`refusals.CODE.reasons.REASON.message`) and named `params`. The Studio hook form offers a refusal as `message` + `status` only, so a Studio author cannot declare either one. A thrown `reason` is judged only under a code whose entry declares `reasons`; under any other code it is ignored as on main. So nothing a Studio author writes today is newly refused. The gap is that the form cannot reach the new capability, and that a catalogue that uses it cannot be edited in Studio without losing it.\nReader who acts: the owner of the Studio hook form (`ui/**`, the renderer for a record nested in a key-only record). PR #33641 ledgers `reasons` and `params` as zod-only `omit` rows in `metadata-form-zod-reconciliation.test.ts`.\n\n## 维护者速读\n\n#33214 让钩子拒绝目录支持同一错误码下挂多句提示（`reasons`）和参数（`params`），但 Studio 的钩子表单只能填一句话加状态码，作者在 Studio 里用不上这两项。现有写法不受影响，缺的只是新能力的表单入口。\n\n## Ask\n\nOffer `reasons` (keyed by a snake_case reason name, each `{ message }`) and `params` (an identifier list) on a refusal entry in the Studio hook form. Then drop the two `omit` rows from the reconciliation ledger.\n\nBlocked-by: #33214\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue hook form refusals reasons` → none at filing. Related: #33214, PR #33641.\n\n⛔ Not a claim. Grading is triage's.\n"

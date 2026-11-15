@@ -2,8 +2,8 @@
   "number": 33692,
   "kind": "issue",
   "title": "MCP delete_record / delete_records: measure whether a delete goes to the recycle bin, and make the tool text say so",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "bug",
     "domain:server",
     "lease:A5",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T06:38:18Z",
-  "updated_at": "2026-11-15T06:47:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T13:55:21Z",
+  "closed_at": "2026-11-15T13:55:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33692",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nPart of objectstack-ai/cloud#3826, phase 1. Ruled on objectstack-ai/cloud#3826 by the account owner in seat session `session_01Q4EjjPP1zuWBNq3nBXVei9`: 「3826 照建议（征询版）」 (decision request 6890278459 and the revised D1 that follows it). Priority per the owner: 「分拆的任务能否直接标记为高优先级让车队开放」. It is the evidence for D3: whether MCP deletes also need human confirmation.\n\n## 维护者速读\n\n1. **要做的**：实测外部 AI 通过 MCP 删除记录时，记录是否进回收站、保留多久、能否恢复，并把工具说明改成如实描述（现在写的是「永久删除」）。\n2. **为什么**：如果删除可以恢复，MCP 删除就暂时不需要真人确认；如果不能恢复，再议。\n3. **需要你做的**：无。\n\n## Facts\n\n`packages/mcp/src/mcp-http-tools.ts:3091` still describes delete as permanent. The recycle bin is live (#30237, #30239; `packages/objectql/src/recycle-bin/`). Whether MCP deletes enter it is unmeasured.\n\n## Change\n\nMeasure on a real kernel: record the reading on this card, correct the tool text and return value, and add a test.\n\n<!-- signed: repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9 -->"

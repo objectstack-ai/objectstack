@@ -12,6 +12,7 @@
   },
   "labels": [
     "domain:server",
+    "lease:E1",
     "pm:queue",
     "priority:p3"
   ],
@@ -19,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T16:23:30Z",
-  "updated_at": "2026-11-14T16:51:47Z",
+  "updated_at": "2026-11-15T09:33:13Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33311",
   "body": "epic:#31527#3 · os-tesla · session_01L9qibvyhxPWfA8DsbmVYJ5\n\nFiling gate ①: a product defect with a named landing point and a measured wrong answer over HTTP, owed by PR #33193 (#32905), which reported it and scoped it out (its changeset says so).\n\nParent: #32905 (source card). Found by: PR #33193's measurement (PR body, \"Gap reported, not fixed here\") and contract review 6880527562 (\"Follow-ups without a card … need a card before merge\").\n\n- **Why:** an admin opening the history of an action two packages ship gets an empty timeline, and a rollback answers \"version not found\", where the plain read of the same name tells them two packages hold it and how to name one. The empty answer reads as \"this action has never changed\" and hides the ambiguity; an agent following it concludes there is nothing to restore.\n- **Reader:** the server lane's next seat on the epic #31527 line, after PR #33193 lands.\n- **Duplicate search** (issues, open and closed, 2026-11-14): `is:issue diff history package holders` 139 hits, `is:issue getHistory package` 18, `is:issue history rollback action two shippers` 2. The only open hits on this surface are #32905 (the source card), #31699 and #31527 (the epic); #32351 (closed) made the manager path package-aware and #23658 (closed) is the publish twin of item B. None covers this item.\n\n## Measured (reach: HTTP)\n\nArtifact boot of the #31697 fixture: two packages shipping `qa_shared_digest` object-less and `qa_shared_bound` each on its own object, no stored row.\n\n| Request | Status | Answer |\n|:--|:--|:--|\n| `GET /meta/action/qa_shared_digest` | 409 | refused, both packages named |\n| `GET /meta/action/qa_shared_digest/history` | 200 | `{\"events\":[]}` |\n| `POST /meta/action/qa_shared_digest/rollback` | 404 | `VERSION_NOT_FOUND`, nothing restored |\n\n## Landing point\n\n`historySlotOf` (`packages/metadata-protocol/src/protocol-history-slots.ts`, added by PR #33193) judges a bare name by its row slots and the registry's `resolveItem` only. The bare plain read of an action also runs `refuseAmbiguousObjectLessAction` and `judgeBareActionRead`, which the history doors do not ask.\n\n## Expected\n\nThe bare history and rollback doors refuse where the bare plain read refuses: 409 naming both shippers for an action name two packages ship, with or without a stored row. A one-shipper action keeps working bare (CONTROL). The pin belongs beside PR #33193's `SHIPPED_NONE` dogfood case (`packages/qa/dogfood/test/history-rollback-two-holders.dogfood.test.ts`)."

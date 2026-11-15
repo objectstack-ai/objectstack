@@ -2,8 +2,8 @@
   "number": 33486,
   "kind": "issue",
   "title": "docs(metadata-protocol): rollbackToPackageCommit docblock says each step records its revert commit; the record is best effort",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,24 @@
     "domain:server",
     "finding",
     "lease:E1",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T22:26:57Z",
-  "updated_at": "2026-11-14T22:47:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T12:09:17Z",
+  "closed_at": "2026-11-15T12:09:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33486",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a follow-up owed by work in flight). Contract review 6884842817 on PR #33465 (card #32504) found that the \"revert commit is recorded\" claim overstates what the code does, and sent the copy outside that diff to a follow-up.\n\n## What is wrong\n\nThe `rollbackToPackageCommit` docblock in `packages/metadata-protocol/src/protocol.ts` (on main, just above `async rollbackToPackageCommit(request`) says each step \"reverts the item's neighbours and records its revert commit\". The record write is best effort. `recordPackageCommit` (`protocol-package-commit-record.ts`) catches every error, including an unprovisioned `sys_metadata_commit`, logs once at info (unprovisioned) or at error, and returns `null`. `revertCommit` then leaves `revertCommitId` out of its answer and returns normally. So a step that returns may have recorded nothing, and that revert is then on no package-commit timeline and cannot itself be reverted as a commit.\n\n## Fix\n\nProse only, in that docblock: \"attempts its own revert commit (best effort: when the commit store is unprovisioned or the write fails, nothing is recorded and the answer omits `revertCommitId`)\". This matches the ADR-0067 amendment that PR #33465 adds. A `patch` changeset for `@objectstack/metadata-protocol` is owed, because TSDoc ships in the `.d.ts`.\n\n## Out of scope\n\nWhether `revertCommit` or `rollbackToPackageCommit` should become atomic is a maintainer decision. The ADR-0067 amendment's \"What this amendment does not decide\" section names it.\n\nBlocked-by: #33465 (same ADR wording; land after it)\n"

@@ -1,0 +1,32 @@
+{
+  "number": 33788,
+  "kind": "issue",
+  "title": "positions: a renamedFrom position saved through the metadata save door's active mode does not carry its holders until restart (only draft + publish announces)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:A3",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T10:48:49Z",
+  "updated_at": "2026-11-15T11:47:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33788",
+  "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\n**What happens.** #33238 (PR #33245, completed by #33448, #33473, #33304) made a declared position rename carry its holders (`sys_user_position.position`) on `metadata:reloaded`, not only at boot. The changeset lists what is carried at once: a hot install or upgrade through `/marketplace/install-local`, a per-item publish of a position or a package publish of drafts (`position/NAME`), `POST /packages`, and a package enable. Saving a position straight to active through the metadata save door (`PUT /api/v1/meta/position/:name?package=…`, the default mode, no draft) is in neither the \"carried at once\" list nor the \"carried at the next restart\" list. Live, it is not carried until a restart. In the meantime the holders keep the old name, which no longer exists, and lose that position's access.\n\n**Reproduction** (QA run at main `a557fa38`, scratch showcase copy, admin session; reproduced twice):\n1. `POST /api/v1/packages` `{\"manifest\":{\"id\":\"com.qa.authpos\",\"version\":\"0.1.0\",\"namespace\":\"qaauth\",…}}` → 201.\n2. `PUT /api/v1/meta/position/qaauth_a?package=com.qa.authpos` `{\"name\":\"qaauth_a\",\"label\":\"A\",\"permissionSets\":[\"qaposren_reader\"]}` → 200, state active. (`qaposren_reader` grants read + create on a test object `qaposren_doc`.)\n3. `POST /api/v1/data/sys_user_position` `{\"user_id\":\"<pu4>\",\"position\":\"qaauth_a\"}` → 201. As pu4, `POST /api/v1/data/qaposren_doc` → 201.\n4. `DELETE /api/v1/meta/position/qaauth_a?package=com.qa.authpos` → 200.\n5. `PUT /api/v1/meta/position/qaauth_b?package=com.qa.authpos` `{\"name\":\"qaauth_b\",\"label\":\"B\",\"renamedFrom\":[\"qaauth_a\"],\"permissionSets\":[\"qaposren_reader\"]}` → 200, state active.\n6. Read `sys_user_position` for pu4; as pu4, `POST /api/v1/data/qaposren_doc`.\n\n- **Expected:** pu4's row moves to `qaauth_b` at once, as it does after a draft save followed by `POST /api/v1/meta/position/qaauth_b/publish`, and the POST answers 201.\n- **Actual:** the row stays on `qaauth_a`, and pu4's POST answers 403 PERMISSION_DENIED (the server log shows positions `[org_member, qaauth_a, everyone]`). After a restart on the same database, the boot run carries it: pu4 moves to `qaauth_b` and the POST answers 201.\n\n**Likely mechanism (not proven).** `ObjectQLPlugin` announces `metadata:reloaded` from `onMetaItemPublished` (the draft publish door) only. The active save fires `onMetadataMutation`, which re-syncs hooks and actions but announces nothing, so the carry (`positionRenameReloadScope` in `plugin-security` `position-renamed-holder-carry.ts`) never hears it.\n\n**TO (either one):** the active save of a position announces `position/NAME` the way the publish door does. Or the changeset, the `PositionSchema.renamedFrom` describe and ADR-0150 D7 name the active save door under \"carried at the next restart\". In both cases, add a pin with a holder of a renamed position saved active.\n\n**Not a security finding.** It is a fail-closed loss of access until a restart. It is related to #33656 (the install-local multi-package announcement), but that card is a different door and not this one.\n\nDedupe: searched open issues for \"renamedFrom position\", \"renamedFrom holders\", \"position renamed restart\" and \"metadata:reloaded position\". The only overlap is #33656, a different door.\n\nQA-source: #33785 · R-CUST card #33238 (no checklist item covers it) · observed beside the clauses"
+}

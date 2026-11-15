@@ -1,0 +1,32 @@
+{
+  "number": 33920,
+  "kind": "issue",
+  "title": "Eval run · control cards × 3 model configs × 5 reps · 3be13473 · 2026-11-15",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "eval-run"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T14:09:31Z",
+  "updated_at": "2026-11-15T14:12:37Z",
+  "closed_at": "2026-11-15T14:12:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33920",
+  "body": "eval#1 · os-tesla · session_01L9qibzr7AespGQoymAnLtn\n\nFiled by eval#1 (#33468). Run record of the 2026-11-15 confirmation runs; the cloud model recommendation that rests on it is filed separately and links here.\n\nFiling-gate category: ③ maintainer-directed, verbatim (eval seat thread, 2026-11-15): 「你的测试结论会写成卡片吗」 · 「云端的模型建议也立上一张卡，带上你的测试卡」.\n\n## Environment\n\n- Runner: `@objectstack/scenarios` (objectstack `packages/qa/scenarios`) at objectstack main `3be13473`, which carries every Eval scoring v2 M1 fix (objectstack#33595: #33596 #33597 #33598 #33599, card-role prompts #33707).\n- Package under test: published `18.4.0` (`--create-version 18.4.0`), mode `scratch`.\n- Driver: headless Claude Code on the subscription (`claude auth status` = oauth_token, no API key); every model builds the app and answers its own questions (`--model`).\n- Served models: `claude-haiku-5-5`, `claude-opus-5-5`. Effort set with `CLAUDE_CODE_EFFORT_LEVEL` (the runner has no flag yet: objectstack#33739).\n- Cost is the CLI's reported nominal figure; nothing was billed to the API.\n\n## Scope\n\n- Cards: the 3 control cards `crm_account_with_contacts`, `invoice_with_line_items`, `project_with_tasks` (objectstack `docs/qa/scenarios/*.json`), first run + iterate run each.\n- Configs: haiku at the CLI default effort, haiku at effort medium, opus at effort low.\n- 5 repetitions per config: 45 card runs, all exit 0, all recorded (`--record`).\n- Per repetition: 58 questions (29 first + 29 iterate), about 30 operations, about 218 Build checks.\n\n## Results (mean of 5; min–max in brackets)\n\n| Config | Build | Ask (问数) | Operations (writes through chat) | Leak flags per rep | Build min | Ask min | Nominal cost per rep |\n|:--|:--|:--|:--|:--|:--|:--|:--|\n| haiku default | 98.1% | 84.8% (81–88%) | 65.5% (61–72%) | 3 / 4 / 3 / 1 / 3 | 17 | 27 | $1.23 |\n| haiku medium | 98.2% | 85.9% (81–90%) | 71.4% (62–76%) | 2 / 0 / 3 / 1 / 1 | 19 | 27 | $1.44 |\n| opus low | 98.2% | 86.2% (81–90%) | 80.7% (80–83%) | 4 / 4 / 1 / 2 / 3 | 7 | 18 | $17.97 |\n\nPer card, 5 reps pooled (Build · Ask · Operations):\n\n| Card | haiku default | haiku medium | opus low |\n|:--|:--|:--|:--|\n| crm_account_with_contacts | 100% · 87% · 80% | 100% · 90% · 81% | 100% · 90% · 80% |\n| invoice_with_line_items | 100% · 95% · 60% | 100% · 95% · 60% | 100% · 93% · 80% |\n| project_with_tasks | 94% · 71% · 58% | 94% · 71% · 74% | 94% · 74% · 82% |\n\n## Reading\n\n1. Ask and Build are a tie across the three configs. An earlier single run (2026-11-15, before the M1 fixes) showed haiku medium 6 questions ahead of haiku default on Ask; across 5 reps the gap is under one question, so that was noise.\n2. The configs differ on operations, the writes a persona asks for in chat: haiku default 65.5% → haiku medium 71.4% → opus low 80.7%, opus steady across all 5 reps. The gap sits on `invoice_with_line_items` (add / remove a line) and `project_with_tasks` (add a task).\n3. opus low builds in about 7 minutes against 17–19 for haiku, at 13–15× the nominal cost.\n4. Every config loses Build points on `project_with_tasks`: the persona-grant checks (#33597) find permission-set gaps in all three.\n\n## Findings filed from this run\n\n- Leak flags: triaged. Most are the grader reading a small count of another readable object as a withheld figure → objectstack#33744 (in flight). The rest come from a build that leaves the `security-rollup-source-unreadable` lint warning standing → objectstack#33818 (Build charges it) and objectstack#33819 (authoring skill).\n- Replay does not re-send recorded writes, so operations can only be scored live → objectstack#33737 (merged).\n\n## Records\n\nThis issue is the report. Run records (`2026-11-15-scenario-*.json`), recordings (`*.rec.json`) and run logs stay outside the repository tree, as qa's `qa-run` records do; the eval seat keeps them in its project files (`eval/runs/2026-11-15-confirm/<config>/rep<N>/`) for replay."
+}

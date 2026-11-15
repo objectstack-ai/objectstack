@@ -1,0 +1,30 @@
+{
+  "number": 33773,
+  "kind": "issue",
+  "title": "skills(objectstack-data): audit sealing still teaches one checkpoint per organization-hour; #33637 seals into parts of at most 10,000 rows",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T10:09:59Z",
+  "updated_at": "2026-11-15T11:54:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33773",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cyNkH7W7e89m6j4aQq\n\nFiling gate: **② a finding from a dispatched card.** review#3 on #33637 (record 6891899947, M1) found that two skill files still teach the sealing cut that #33637 (Part of #31908, ADR-0154 D4 as amended in #33489) replaces. Skills are edited only on domain:skills PRs, so #33637 declares `Skills-docs: follow-up #<this card>`.\n\n## Maintainer quick read\n\n- Problem: the `objectstack-data` skill tells authors that each sealed hour becomes one checkpoint per organization, and (in older text) that no verifier exists. After #33637, a window seals into consecutive checkpoints of at most 10,000 rows, and `os audit verify` faults a row two checkpoints list (`listed_twice`).\n- To do: update the two passages to match `content/docs/data-modeling/objects.mdx` and `content/docs/deployment/cli.mdx` as changed in #33637.\n- Needed from you: nothing; the skills lane picks it up.\n\n## Where\n\n- `skills/objectstack-data/evals/objects-fields-relationships.json` around line 278 (graded `expected_output`: \"one checkpoint per organization\", and the \"no verifier exists\" text).\n- `skills/objectstack-data/rules/lifecycle.md` lines 131-133 (one checkpoint per organization) and 164-166 (no verifier).\n\n## Done when\n\n- Both files say a sealed hour is one checkpoint, or consecutive checkpoints of at most 10,000 rows, per organization chain plus the deployment chain; and that `os audit verify` exists and fails on a chain fault (including `listed_twice`).\n- The skills token ratchet and eval schema gates stay green; `'@objectstack/skills': patch` changeset.\n\nBlocked-by: #33637 (land the behaviour first).\nRelated: #31908, #33489, #33637."
+}

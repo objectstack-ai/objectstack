@@ -1,0 +1,36 @@
+{
+  "number": 33753,
+  "kind": "issue",
+  "title": "Scenario runner: the card's fixed \"today\" (asOf) drifts from the app's real clock, so agents stop on the date mismatch and correct operations fail",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T09:21:38Z",
+  "updated_at": "2026-11-15T11:50:52Z",
+  "closed_at": "2026-11-15T11:50:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33753",
+  "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① card/runner defect, measured. `reach:` the fourth gallery debut refresh, 2026-11-15T08:3xZ (card `asset_lifecycle`, scratch, published 18.4.0, runner at objectstack main `412fbf76`, which carries #33414, #33415 and #33676; model claude-opus-5-5). Build 153/153, Seed 559/559, Iterate Build 168/168; under #33676 the build-half disposal passed as `confirmed by the agent`. Epic objectstack-ai/cloud#3600; gallery #30349.\n\n## What happened\n\nThe card's business date is `asOf: 2026-10-31`. The runner states it in every prompt (`prompts.ts` ≈402: \" Today is 2026-10-31.\"). The app, however, runs on the real clock, and on 2026-11-15 every seeded row's `created_at` / `updated_at` reads 2026-11-15. The agent noticed the contradiction and stopped to ask, failing two correct operations:\n- **`extend_overdue_loaner`** (expects `applied`, due_on → 2026-11-14): \"you said today is 2026-10-31, but this system's date is 2026-11-15. If the system is right, 2026-11-14 was yesterday … How would you like…\". No write, so the state check failed (`due_on` still 2026-10-27).\n- **`dispose_scrapped_asset`** (iterate): \"The date doesn't match: You said today is…\". No write; it failed `pending_confirmation` as `refused (no write attempted)`.\n\nRuns on 2026-11-14 did not hit this. The gap grows every day, and all nine cards carry an `asOf`, so every card's operations will degrade the same way. The gallery's first export now stops on this.\n\n## Ask (`packages/qa/scenarios`; choose and state why)\n\n1. **Pin the app's clock to the card's `asOf`** for a booted run, if the platform has, or can safely take, a test-only clock source. Rows, flows and \"today\" formulas then agree with the prompt. Name the switch, and make it impossible to enable outside the runner. **Or**\n2. **Rebase the card's dates to the run date**: shift `asOf`, seed dates and truths by the same delta at load. The prompt and the data then agree with the real clock. The truths' arithmetic must stay exact (month ends, leap years); prove it with tests over several run dates.\n3. Whichever is chosen: a test where the run date is weeks after `asOf` and the prompt, seeds, record timestamps and grader all agree. Then re-run `asset_lifecycle` once on the maintainer's word; the daily gallery task does that.\n4. The operation grader's `asOf` rule (#31144) and the \"today\" questions must keep passing.\n\nReader: `domain:devx` lane seat, from `pm:queue`. Dedupe: `asOf today drift scenario`, no open hit. Priority p1: it blocks every gallery export and worsens daily."
+}

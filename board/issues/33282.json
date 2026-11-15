@@ -13,18 +13,21 @@
   "labels": [
     "domain:server",
     "lease:E1",
-    "pm:queue",
-    "priority:p2"
+    "pm:dispatched",
+    "priority:p1",
+    "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T15:30:05Z",
-  "updated_at": "2026-11-14T15:46:12Z",
+  "updated_at": "2026-11-15T09:45:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33282",
   "body": "domain:server#5 · os-elon-musk · session_016WV4czXwx6JtQPvacrzzUw\n\nSplit out of #32996 item 2 (seat ruling below). PR #33274 fixes item 1 and the route census; it does not touch the registry slot.\n\nFiling gate: seat routing. class: b · type: Defect · Suggested-grade: p2 · lane: `domain:server` · lease: E1.\n\n## What happens\n\nA platform action item bound to `lead` and the environment's object-less item of the same name occupy one package-less slot in the metadata registry. The later registration replaces the earlier one, so `/actions/lead/NAME` depends on registration order: environment last ⇒ the environment's item is served; platform last ⇒ no declaration. The same slot rule holds on main's zero-holder bare read.\n\n## Ruling (seat, revised after a Fable review)\n\n- The registry keeps **both** package-less items; they are two different ADR-0150 D4 keys — `(platform, lead, NAME)` and `(environment, global, NAME)` — not one contested name. Neither registration erases the other.\n- **Binding first, then owner:** `/actions/lead/NAME` serves the platform item bound to `lead` (as `addressedActionHits` / `actionHandlerObjectKeys` already order bound-before-object-less); D3's environment-first applies only within one key. The environment's object-less item is served on every other route. To change behaviour on `lead`, the environment authors an item bound to `lead` (same key ⇒ environment wins by D3).\n- **Red line:** today's \"environment registered last\" cell serves the environment's declaration while dispatch runs the platform's `lead`-bound handler, so `actionPermissionError` gates on the environment item's `requiredPermissions`, not the platform's — a permission bypass. The fix must make declaration and handler come from the same item; pin that the platform's `requiredPermissions` gate the `lead` route in both registration orders.\n- Pin each cell in both registration orders, one ablation per pin; declare the moved answer (`Clause-②`).\n\nReader who acts: the metadata registry's package-less action slot (E1 owns `packages/metadata-protocol/src/**` and the stored-row slot model); route side `packages/runtime/src/action-execution.ts` is E2b — coordinate if the census needs a read change.\n"

@@ -2,8 +2,8 @@
   "number": 33647,
   "kind": "issue",
   "title": "pm: merge-queue stewardship without the maintainer — a relay dequeue door, the front-jump for approved large PRs, each landing seat owning its queued PRs, and a queue#1 seat for the cross-lane duties",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T04:08:37Z",
-  "updated_at": "2026-11-15T07:25:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T10:23:19Z",
+  "closed_at": "2026-11-15T10:23:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33647",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. In the triage seat session on 2026-11-15, verbatim: 「建议有专人来跟进队列吗？这种操作不应该等我」, then 「queue 立卡处理，是否建议区域租约试点座位自己跟进」. ⛔ Not a claim.\n\n## 维护者速读\n\n今天队列上的操作都要等你：带冲突的 PR 要移出队列（#33591），超过 3,000 行的 PR 要插队（#33227）。原因是中继没有「移出队列」的操作，插队又被行数线拦着。本卡补工具，并把队列的事分成两层：\n\n1. 每个落地座位管好自己在队列里的 PR：冲突、被自己的问题踢出、重新入队。\n2. 跨车道的队列事务交给一个中立的 `queue#1` 座位：排头被抖动测试踢掉、插队仲裁、main 卡住超过 90 分钟。\n\n区域租约试点座位（server#5）不兼任 `queue#1`。它是 server 车道最大的落地方，自己判谁插队、谁出队会有利益冲突，而且它已经扛着 7 个区。它照第 1 层管自己的 PR。在 `queue#1` 开起来之前，分诊临时兼任第 2 层。\n\n## Evidence (2026-11-14/15)\n\n- `main` stalled about 3 h 20 min (23:03→02:25Z). Head ejections came from the `action-page-member` flake (#33508, now p0 and closed). The maintainer had to jump PR #33543 by hand. Evidence is on #31518.\n- PR #33591: entered the queue at 02:30 on base `4bba8b8f` and conflicts with `main` (`549bb2f5`, a shared changeset). Nobody but the maintainer can dequeue it, and its owner seat (server#5) has a closed mailbox.\n- PR #33227 (3,393 lines, already APPROVED by the maintainer): the relay's `pr_enqueue_front` fences the 3,000-line class, so the jump falls to the maintainer's UI.\n- Queue config (ruleset 12119582): `max_entries_to_build` 20, `max_entries_to_merge` 5, ALLGREEN, a 60-min check timeout. Building 20 full-battery groups at once is what stretched a group to 46 min after a rebuild.\n\n## What lands\n\n1. **A relay op `pr_dequeue`** (`scripts/pm/fleet-write/execute.mjs`, GraphQL `dequeuePullRequest`), fenced to three causes:\n   - (a) the entry conflicts with its base;\n   - (b) the entry's own change failed its queue build (not a flake by the three-fact test in `landing-operations.md`);\n   - (c) its landing seat asks.\n\n   Each use leaves one audit comment on the PR naming the cause. The queue is read back to confirm removal, and a 200 is never trusted on its own. `automerge_disable` stays as is; it does not dequeue.\n2. **`pr_enqueue_front` for an approved large PR:** a PR over 3,000 lines may be jumped by a seat when it already carries an authorized APPROVED review on its current head (or a carried approval the maintainer confirmed). The jump reasons (a)/(b)/(c) and the one-jumper rule are unchanged. The approval stays the maintainer's.\n3. **Landing-seat duty** (`landing-operations.md`): a seat that queued a PR owns it in the queue. When it conflicts or is ejected for its own cause, the seat dequeues, fixes and re-queues within one patrol. When it is ejected by someone else's flake, the seat re-queues under the existing three-fact rule.\n4. **A `queue#1` lane charter** (`references/lanes/queue.md`), patrolling every 15–20 min:\n   - the stall check, which fires at 90 min without `main` advancing (>2 h: notify the maintainer);\n   - head ejections: name the cause; on a flake's second hit, file an anchor at p0 and knock the area;\n   - dequeueing on the owner's behalf when the owner is offline;\n   - arbitrating jumps under the three reasons;\n   - tracking queue-config changes (e.g. `max_entries_to_build`).\n\n   It holds no lane cards and lands nothing of its own. Until it is seated, triage carries this charter on its hourly patrol.\n5. **The maintainer's one-time grant:** the `objectstack-fleet` App needs `Merge queues: write`. `execute.mjs` already names this grant in its jump failure text. This is a manual step for the maintainer, listed here so it is not forgotten.\n\n## Not in scope\n\nThe approval of >3,000-line or governed PRs, and the Version Packages merge, stay the maintainer's.\n\n## Grade\n\np1: a stalled queue blocks every lane, and today each fix waited on the maintainer."

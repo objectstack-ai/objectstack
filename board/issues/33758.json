@@ -1,0 +1,31 @@
+{
+  "number": 33758,
+  "kind": "issue",
+  "title": "Setup: Resend Invitation is offered on a cloud-managed environment, where its door refuses with 409",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T09:29:12Z",
+  "updated_at": "2026-11-15T09:29:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33758",
+  "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ③ an out-of-scope finding of the #33186 dev (os-dev report 6892329704 on PR #33755, measurement table in the PR body), class a.\nReader: `domain:ui` (`packages/platform-objects/src/identity/sys-invitation.object.ts`, `resend_invitation`). Grade p2, self-graded by the seat: it sits on the managed onboarding path (cloud#4465, whose children #33186 / #33187 are p1). Under the maintainer's 「后续只处理 p1 p2」 it is dispatchable.\nDedupe: `is:issue is:open resend_invitation cloudManaged` finds nothing.\n\n## 维护者速读\n\n托管环境里「邀请」都改走云端，邀请接口在托管环境一律返回 409。但「重新发送邀请」按钮没有跟着隐藏，管理员点了只会看到冲突错误。应当和其他邀请按钮一样，在托管环境隐藏。\n\n## Facts\n\n- `resend_invitation` targets `POST /api/v1/auth/organization/invite-member` with `bodyExtra: { resend: true }`. On a cloud-managed environment that door answers `409 RESOURCE_CONFLICT`, resends included (`auth-manager-before-hook.ts` cloud-managed branch).\n- Its offer has no `features.cloudManaged` term, so it is offered on a pending invitation row to owners, admins and delegated admins there. Its siblings (`copy_invitation_link`, the four `invite_user` mirrors) are hidden on managed since #25309.\n\n## Ask\n\nHide `resend_invitation` on a cloud-managed environment with the same gate its siblings carry, booked in `PUBLIC_AUTH_FEATURES.cloudManaged.gatedInputs` as the feature-gate guard requires. Pin it in `identity/cloud-managed-visibility.test.ts` (managed hidden, unmanaged offered as today) and ablate the term red."
+}

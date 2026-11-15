@@ -2,7 +2,7 @@
   "number": 33613,
   "kind": "pull_request",
   "title": "fix(core): an import lookup naming a detail resolves within the row's own master",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,6 +12,7 @@
   },
   "labels": [
     "documentation",
+    "pm:awaiting-merge",
     "size/l",
     "tests",
     "tooling"
@@ -22,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T02:42:51Z",
-  "updated_at": "2026-11-15T05:41:58Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-15T09:52:19Z",
+  "closed_at": "2026-11-15T09:52:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-15T09:52:16Z",
   "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/33613",
