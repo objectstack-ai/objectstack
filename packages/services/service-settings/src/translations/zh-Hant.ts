@@ -387,14 +387,17 @@ export const zhHant: PlatformTranslationData = {
         deepseek_api_key: { label: 'DeepSeek API 金鑰', help: 'sk-...——由 platform.deepseek.com 核發。' },
         deepseek_model: { label: '模型', help: '範例：deepseek-chat（V3）、deepseek-reasoner（R1 推理）。' },
         dashscope_api_key: { label: 'DashScope API 金鑰', help: 'sk-...——由 dashscope.console.aliyun.com 核發。' },
-        dashscope_model: { label: '模型' },
+        dashscope_model: { label: '模型', help: '範例：qwen-plus、qwen-max、qwen3-max、qwen-turbo。' },
         cloudflare_account_id: { label: 'Cloudflare 帳戶 ID', help: 'Cloudflare 主控台網址中 32 個字元的十六進位 ID。' },
         cloudflare_gateway_id: { label: 'Gateway ID', help: '在 Cloudflare → AI Gateway 中設定的閘道名稱。預設為 "default"。' },
         cloudflare_api_key: {
           label: 'Cloudflare AI Gateway 權杖',
           help: '在 AI Gateway →「API tokens」分頁核發（cfut_… 或 sk_…）。',
         },
-        cloudflare_model: { label: '模型' },
+        cloudflare_model: {
+          label: '模型',
+          help: '格式：provider/model。允許的提供者（依 Cloudflare /compat）：anthropic、openai、groq、mistral、cohere、perplexity、workers-ai、google-ai-studio、vertex、grok、deepseek、cerebras、baseten、parallel。',
+        },
         siliconflow_api_key: { label: 'SiliconFlow API 金鑰' },
         siliconflow_model: {
           label: '模型',

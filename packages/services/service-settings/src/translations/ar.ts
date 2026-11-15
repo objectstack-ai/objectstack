@@ -536,7 +536,7 @@ export const ar: PlatformTranslationData = {
         deepseek_api_key: { label: 'مفتاح API لـ DeepSeek', help: 'sk-... — يصدر من platform.deepseek.com.' },
         deepseek_model: { label: 'النموذج', help: 'أمثلة: deepseek-chat (V3)، وdeepseek-reasoner (التفكير R1).' },
         dashscope_api_key: { label: 'مفتاح API لـ DashScope', help: 'sk-... — يصدر من dashscope.console.aliyun.com.' },
-        dashscope_model: { label: 'النموذج' },
+        dashscope_model: { label: 'النموذج', help: 'أمثلة: qwen-plus، qwen-max، qwen3-max، qwen-turbo.' },
         cloudflare_account_id: {
           label: 'معرّف حساب Cloudflare',
           help: 'المعرّف السداسي العشري المكوَّن من 32 حرفًا في عنوان URL للوحة تحكم Cloudflare.',
@@ -549,7 +549,10 @@ export const ar: PlatformTranslationData = {
           label: 'رمز Cloudflare AI Gateway',
           help: 'يصدر في AI Gateway ← تبويب "API tokens" (cfut_… أو sk_…).',
         },
-        cloudflare_model: { label: 'النموذج' },
+        cloudflare_model: {
+          label: 'النموذج',
+          help: 'الصيغة: provider/model. المزوّدون المسموح بهم (وفق Cloudflare /compat): anthropic، openai، groq، mistral، cohere، perplexity، workers-ai، google-ai-studio، vertex، grok، deepseek، cerebras، baseten، parallel.',
+        },
         siliconflow_api_key: { label: 'مفتاح API لـ SiliconFlow' },
         siliconflow_model: {
           label: 'النموذج',

@@ -581,7 +581,7 @@ export const ru: PlatformTranslationData = {
         deepseek_api_key: { label: 'Ключ API DeepSeek', help: 'sk-... — выдаётся на platform.deepseek.com.' },
         deepseek_model: { label: 'Модель', help: 'Примеры: deepseek-chat (V3), deepseek-reasoner (рассуждения R1).' },
         dashscope_api_key: { label: 'Ключ API DashScope', help: 'sk-... — выдаётся на dashscope.console.aliyun.com.' },
-        dashscope_model: { label: 'Модель' },
+        dashscope_model: { label: 'Модель', help: 'Примеры: qwen-plus, qwen-max, qwen3-max, qwen-turbo.' },
         cloudflare_account_id: {
           label: 'Идентификатор аккаунта Cloudflare',
           help: '32-символьный шестнадцатеричный идентификатор из URL панели Cloudflare.',
@@ -594,7 +594,10 @@ export const ru: PlatformTranslationData = {
           label: 'Токен Cloudflare AI Gateway',
           help: 'Выдаётся в AI Gateway → вкладка «API tokens» (cfut_… или sk_…).',
         },
-        cloudflare_model: { label: 'Модель' },
+        cloudflare_model: {
+          label: 'Модель',
+          help: 'Формат: provider/model. Допустимые провайдеры (по Cloudflare /compat): anthropic, openai, groq, mistral, cohere, perplexity, workers-ai, google-ai-studio, vertex, grok, deepseek, cerebras, baseten, parallel.',
+        },
         siliconflow_api_key: { label: 'Ключ API SiliconFlow' },
         siliconflow_model: {
           label: 'Модель',

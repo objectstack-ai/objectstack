@@ -572,7 +572,7 @@ export const de: PlatformTranslationData = {
           label: 'DashScope-API-Schlüssel',
           help: 'sk-... — ausgestellt auf dashscope.console.aliyun.com.',
         },
-        dashscope_model: { label: 'Modell' },
+        dashscope_model: { label: 'Modell', help: 'Beispiele: qwen-plus, qwen-max, qwen3-max, qwen-turbo.' },
         cloudflare_account_id: {
           label: 'Cloudflare-Konto-ID',
           help: 'Die 32-stellige Hex-ID aus der URL Ihres Cloudflare-Dashboards.',
@@ -585,7 +585,10 @@ export const de: PlatformTranslationData = {
           label: 'Cloudflare-AI-Gateway-Token',
           help: 'Ausgestellt in AI Gateway → Registerkarte „API tokens“ (cfut_… oder sk_…).',
         },
-        cloudflare_model: { label: 'Modell' },
+        cloudflare_model: {
+          label: 'Modell',
+          help: 'Format: provider/model. Zulässige Anbieter (laut Cloudflare /compat): anthropic, openai, groq, mistral, cohere, perplexity, workers-ai, google-ai-studio, vertex, grok, deepseek, cerebras, baseten, parallel.',
+        },
         siliconflow_api_key: { label: 'SiliconFlow-API-Schlüssel' },
         siliconflow_model: {
           label: 'Modell',
