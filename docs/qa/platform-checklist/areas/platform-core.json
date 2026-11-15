@@ -257,7 +257,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "steps[1]'s baseline re-counted and steps[4]'s banner example follows (rows 1 and 183 of ledger 6896511848 on #33761; QA runs #33784 at a557fa38 and #33909 at b914e724 derived 10 invoice lines and 141 rows, as the step tells a run to). ShowcaseSeedData still carries 20 datasets; showcase_invoice_line now authors 10 lines, not 7, so the total is 141, not 138. Counted at base 0ac112fc by importing examples/app-showcase/src/data/seed/index.ts and summing each records array. No clause changed",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -809,7 +809,7 @@
           "revision": 15,
           "date": "2026-11-15",
           "change": "steps[3] names the user record URL (row 8 of ledger 6896511848 on #33761; QA run #33784 at a557fa38): a row click on the Setup Users list opens a side panel (?recordId=), and the Preferences and Linked Accounts tabs live on the record page (/apps/setup/sys_user/record/ID, the sys_user_detail page). No clause changed. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -1224,7 +1224,7 @@
           "revision": 7,
           "date": "2026-11-15",
           "change": "source[4] and fixtures.requires[0] re-pointed (rows 124 and 125 of ledger 6896511848 on #33761; QA run #33853 at a557fa38). source[4] said empty ids answer 400: POST /notifications/read {\"ids\":[]} answers 200 readCount 0, since MarkNotificationsReadRequestSchema takes any string array; a body without ids is the 400. requires[0] offered the stock seed alone as a coalescing fixture, but with one topic nothing is left for mark-all-read after the per-group mark, so acceptance[4] needs the digest flood. No clause changed. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -2460,7 +2460,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "fixtures.requires[2] re-pointed (row 110 of ledger 6896511848 on #33761; QA run #33853 at a557fa38): install-local's ledger follows OS_HOME (OS_HOME/installed-packages) and falls back to the working directory's .objectstack/installed-packages only without it, adopting a working-directory ledger once (local-manifest-source.ts resolveInstalledPackagesDir); the text said OS_HOME does not redirect it. The scratch-copy rule stands. No clause changed. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -2666,7 +2666,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "steps[3] names the one-book redirect (row 108 of ledger 6896511848 on #33761; QA run #33853 at a557fa38): AppDocsIndex renders a card per book and, with one book, navigates straight into that book's reader, so the listing a run diffs is the reader's book sidebar. No clause changed. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -2909,7 +2909,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "steps[2] warns that the search term persists (row 214 of ledger 6896511848 on #33761; QA run #33914 at b914e724): the `?` typed into the list search box stays as uf__search across reloads in the same browser context, and later probes there ran on a filtered empty list. No clause changed. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -3726,7 +3726,7 @@
           "revision": 10,
           "date": "2026-11-15",
           "change": "acceptance[1] names `os serve --dev` alone as the development boot that prints the `--dev` spelling (rows 4 and 185 of ledger 6896511848 on #33761; QA runs #33784 at a557fa38 and #33909 at b914e724). Under `os dev` the refused `serve --dev` child announces the refusal to its parent and exits without printing it, and `os dev` runs the ceremony on a copy itself (serve.ts announceOrganizationOwnershipRequired, dev.ts upgradeRefusedDevelopmentDatabase, ADR-0131 D10), so the clause listed a boot that never shows the text. The spelling the clause pins is unchanged. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -3817,7 +3817,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "steps[2] and acceptance[3].verify re-pointed (row 122 of ledger 6896511848 on #33761; QA run #33853 at a557fa38): a named, non-conventional artifact boots alone, without the cwd config (artifact-precedence.ts cwdConfigJoinsBoot), so the showcase copy's code plugins drop out and its boot aborts on the 'showcase_status_api' rest provider after the conversion warns. The clause is read from the warns that precede the abort; a serving boot needs an app with no code-plugin connector. No clause changed. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -4622,7 +4622,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "fixtures.requires[0] route (b) and requires[1] re-pointed (rows 106 and 218 of ledger 6896511848 on #33761; QA runs #33853 at a557fa38 and #33914 at b914e724). Dropping uniq_sys_metadata_activation_packageless alone left this release's three-column key (metadata_type, package_id, name) standing, so plan 1 and plan 2 never showed acceptance[3]'s create_index then replace_unique_index; both runs had to drop that key and recreate 18.3.0's UNIQUE (metadata_type, name) as uniq_sys_metadata_activation_metadata_type_name. Route (b) now says so, requires[1]'s pair needs that recreated index dropped too, and the two-holder name names the composeStacks scratch app both runs used. No clause changed. Index names read at base 0ac112fc (sys-metadata-activation.object.ts, schema-drift.ts buildIndexName)",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -4825,7 +4825,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "fixtures.requires[0] drops the activation-ledger index plant (row 123 of ledger 6896511848 on #33761; QA run #33853 at a557fa38): route (b) said to drop uniq_sys_metadata_activation_packageless, but this item plants no ledger row and no clause reads that table, so the run did not plant it. The plant lives on platform-core.activation-ledger-package-key-upgrade. Route (a) not driven is the run's scope, not item text. No clause changed",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },

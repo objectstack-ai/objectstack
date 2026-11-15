@@ -431,7 +431,7 @@
           "revision": 10,
           "date": "2026-11-15",
           "change": "steps[8] passes --from to meta's dry run (row 37 of ledger 6896511848 on #33761; QA run #33829 at a557fa38): `os migrate meta --json` with no --from exits 1 missing_from_major, since the authored-source chain requires the major the metadata was written against (packages/cli/src/commands/migrate/meta.ts). No clause changed. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -1104,7 +1104,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "acceptance[3].verify re-pointed (rows 90 and 216 of ledger 6896511848 on #33761; QA runs #33853 at a557fa38 and #33914 at b914e724): 'a blank scaffold ships no app' is stale, since the blank template ships src/apps/main.app.ts (app Main, a Notes nav entry), so the nav half is drivable; the action half stays a stated limit, as the template ships no action. No clause weakened. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -1301,7 +1301,7 @@
         { "revision": 2, "date": "2026-08-21", "change": "corrected the two descriptors that called `os migrate meta` a codemod — the expected-fail clause's 'The real metadata codemod is os migrate meta' and the source list's 'cli.migrate-meta-codemod (the codemod that actually exists)'. It is not one. Re-derived at this base: the command declares exactly from/to/step/out/stored/database-url/apply/yes/force/type/json (commands/migrate/meta.ts) with no --write/--fix/in-place; its only file writes are the two `if (flags.out)`-guarded writeFileSync calls, which emit a JSON snapshot; and its header states the command does not silently rewrite TS config source because that AST rewrite is 'unsafe and lossy'. Both descriptors now say what it is — a chain replayer that PRINTS the mechanical edits for hand application — and name #9591 (v18, pm:on-hold) as the commissioned-but-unbuilt in-place codemod, which was added to `source` so the reference resolves. The clause the item turns on is UNCHANGED and still an expected-fail: the hint at doctor.ts prescribes `objectstack codemod v2-to-v3`, registered nowhere. The clause also now warns that a FIX which merely repoints the hint at `os migrate meta` must describe it as a list, not an auto-fix — otherwise the dead prescription is replaced by a false one. Sibling cli.migrate-meta-codemod was read and deliberately left alone: its revision-3 text (#9733 via PR #10412) already states the print-only contract correctly, and its `-codemod` id is immutable by README lifecycle", "ref": "#10418" },
         { "revision": 3, "date": "2026-08-24", "change": "text refresh only, no capability change: #10680 landed the fix revision 2's expected-fail described, so acceptance[5] inverts — but NOT into 'the hint now names a registered command'. The route taken was prescribe-nothing: at this base the hint is a two-branch printInfo (doctor.ts) reading 'Found <N> deprecated pattern(s). No automated codemod ships with the CLI — apply each finding’s replacement by hand (re-run with --verbose to print them).' bare and '… — apply the → replacement shown under each finding above.' under --verbose, so revision 2's assertion 'the hint must name a command os actually registers' was the wrong SHAPE for head, not a fail that merely flipped. The print site's comment records why a repoint at `os migrate meta` was refused, and the clause now cites that comment instead of re-deriving the migrate/meta.ts anchors. Six texts changed beyond the named clause, all re-derived at this base: (a) the title's trailing expected-fail phrase inverted; (b) fixtures.knownGaps — revision 2's 'no test anywhere in the repo references --scan-deprecations' is FALSE at head, #10680 added packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts, and the gap text now states what that pin does and does NOT reach (no decoys, no absent-src probe, two seeded lines rather than eight patterns, in-process Doctor.run rather than the shipped binary — so stale-dist stays this item's to catch), with the test added to source; (c) step 6 repurposed from 'record the command the hint prescribes' into a corroboration probe — `os codemod --help` must STILL be not-found, which is what makes 'No automated codemod ships' true rather than the next false statement; (d) step 3 now demands the closing hint from BOTH runs, since it is not the same sentence; (e) three negatives added for the inverted clause's wrong shapes — an unregistered name returning, a repoint at the registered-but-incapable `os migrate meta`, and the count line vanishing with the prescription; (f) every doctor.ts anchor re-derived by content: #10679 moved the scanner block +76 and #10680's comment pushed the print site to +109, so of the eleven numbers revision 2 quoted only walkDir's node_modules prune still held. Verified accurate at head and deliberately LEFT ALONE: content/docs/protocol/backward-compatibility.mdx (the 'not yet available' admission still reads as quoted — and at head the tool is consistent WITH it), packages/cli/README.md §os doctor, the blank template's src/objects/note.object.ts, #9591 (still open, target:v18, pm:on-hold), sibling cli.migrate-meta-codemod (still revision 3), the DEPRECATED_PATTERNS count of 8, the four original negatives, both personas and both traps. Out of scope and filed instead: FOLLOW-UPS.md §7b still lists this prescription as unfixed and names `os migrate meta` as 'the real path', the repoint #10680 refused (#11628)", "ref": "#11420" },
         { "revision": 4, "date": "2026-11-14", "change": "fixtures.requires[0] and steps[0] re-pointed (stale count and an under-specified fixture, card #33330, row 165 of the #32908 close-out ledger; QA run #33058 comment 6846283471 on #32908). doctor.ts's scan loop pushes one result per line per DEPRECATED_PATTERNS entry, so the retired-lookup entry's two seeded spellings are two hits and the count line reads 9 over 8 entries. The scaffold keeps its dependencies: doctor's Dependencies row is an error when node_modules is absent, and an error row exits 1, which a reader could take for the advisory scan gating. No clause changed. Read from source at base 87330e89, not driven live", "ref": "#33330" },
-        { "revision": 5, "date": "2026-11-15", "change": "steps[5]'s quote and acceptance[3]'s boundary corrected (rows 48 and 199 of ledger 6896511848 on #33761; QA runs #33829 at a557fa38 and #33910 at b914e724). `os codemod --help` prints 'Command codemod not found.' (capital C, the help path), not the quoted lowercase text. The .ts-only walk also skips .tsx and still reads .spec.ts and .d.ts, comments included (doctor.ts scanDeprecatedPatterns, walkDir); the clause now names that boundary. No clause weakened. Read from source at base 0ac112fc", "ref": "#PENDING-33965" }
+        { "revision": 5, "date": "2026-11-15", "change": "steps[5]'s quote and acceptance[3]'s boundary corrected (rows 48 and 199 of ledger 6896511848 on #33761; QA runs #33829 at a557fa38 and #33910 at b914e724). `os codemod --help` prints 'Command codemod not found.' (capital C, the help path), not the quoted lowercase text. The .ts-only walk also skips .tsx and still reads .spec.ts and .d.ts, comments included (doctor.ts scanDeprecatedPatterns, walkDir); the clause now names that boundary. No clause weakened. Read from source at base 0ac112fc", "ref": "#34004" }
       ]
     },
     {
@@ -1443,7 +1443,7 @@
           "revision": 11,
           "date": "2026-11-15",
           "change": "fixtures.requires[1], steps[1] and acceptance[3].clause re-pointed (row 36 of ledger 6896511848 on #33761; QA run #33829 at a557fa38). (1) The cross-partition duplicate asked for an organization_id NULL row, which a table this release creates cannot hold (the tenant column is NOT NULL, ADR-0131 D1); the run used a second organization, which is the report's own question (one identifier across more than one organization partition). (2) acceptance[3] counted three pre-flight entries; runtimeIndexProbes lists seven from six migrations at base 0ac112fc, and the clause now names them and says to read the count off the list. The duplicates.ts docblock that still says four is code, outside this file. No clause weakened",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -1779,7 +1779,7 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能), authored VERIFY-FIRST as the brief required since the hunter had lower confidence here. Source confirmed the three-severity split and errors-only gating; two sketch claims were corrected against lint.ts before authoring: (1) the --json shape is lint's own {passed,total,errors,warnings,suggestions,issues,duration}, not the os validate #3782 parity shape — the parity lint actually owes is the #4409 shared-registry agreement with os build, encoded as its own clause; (2) the exit contract is 0/1 on both paths (process.exit(1), CliExitCode slot), not build's human-path oclif-2 split. The i18n platform fold with its hiddenPlatform disclosure is covered as the third load-bearing surface", "ref": "claude/new-session-0pv25p" },
-        { "revision": 2, "date": "2026-11-15", "change": "fixtures.requires[0] re-pointed (row 47 of ledger 6896511848 on #33761; QA run #33829 at a557fa38). A camelCase object or field name is refused by ObjectSchema at load, so it never reaches lint's naming/snake-case rule; the error finding is now the missing label. The i18n fold needs a second declared locale: with the default locale alone the coverage step has nothing to judge and step 5's fold never prints. No clause changed. Read from source at base 0ac112fc", "ref": "#PENDING-33965" }
+        { "revision": 2, "date": "2026-11-15", "change": "fixtures.requires[0] re-pointed (row 47 of ledger 6896511848 on #33761; QA run #33829 at a557fa38). A camelCase object or field name is refused by ObjectSchema at load, so it never reaches lint's naming/snake-case rule; the error finding is now the missing label. The i18n fold needs a second declared locale: with the default locale alone the coverage step has nothing to judge and step 5's fold never prints. No clause changed. Read from source at base 0ac112fc", "ref": "#34004" }
       ]
     },
     {
@@ -2042,7 +2042,7 @@
           "revision": 10,
           "date": "2026-11-15",
           "change": "fixtures.knownGaps gains acceptance[3]'s schemaMode limit (rows 44 and 194 of ledger 6896511848 on #33761; QA runs #33829 at a557fa38 and #33910 at b914e724, both scoring that half from source): a non-managed datasource is refused DDL at assertSchemaMutable before reconcileAndWarnDrift runs, so the autoOn conjunction is unreachable with another schemaMode on any boot. No clause changed. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -2303,7 +2303,7 @@
           "revision": 12,
           "date": "2026-11-15",
           "change": "acceptance[5].verify re-pointed twice, with the cli-18-prerelease-db recipe it scores on (rows 5, 6 and 186 of ledger 6896511848 on #33761; QA runs #33784 at a557fa38 and #33909 at b914e724). (1) 'Each table's count after equals its count before, less what moved' had no room for the rows this release's own second boot adds (showcase_invoice_line 5 → 10, sys_seed_landed_key 0 → 141 and others, none a duplicate or a loss): the oracle is now that every pre-existing id survives unless the report moved or deleted it, and a count may grow. (2) The carve-out for a sys_activity shard dropped at the first boot is retired: cli-prerelease-fixture.ts restore now re-dates rotation shards to the day before the run (dumpAsOf over fixture-as-of.ts), and QA run #33784 read sys_activity__r20261114, 66 rows, after the refused boot. The recipe's knownGaps[4] and sequence[0].expect say the same. No clause weakened: every pre-existing row is still accounted for. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -2397,7 +2397,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "steps[0] gives the ViewItem body its viewKind (row 42 of ledger 6896511848 on #33761; QA run #33829 at a557fa38): a body with no viewKind answers 422 INVALID_METADATA, because ViewItemSchema is a union discriminated on viewKind ('list' | 'form'). The example body parses against the built schema at base 0ac112fc. No clause changed",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
@@ -2828,7 +2828,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "fixtures.requires[0] names the sharingModel every scratch app needs (row 89 of ledger 6896511848 on #33761; QA run #33853 at a557fa38): a hand-written object without it is refused by the error-severity security-owd-unset rule, which hid the namespace verdict on the triggers copy. No clause changed. Read from source at base 0ac112fc",
-          "ref": "#PENDING-33965"
+          "ref": "#34004"
         }
       ]
     },
