@@ -84,6 +84,27 @@ export interface SignInAttempt {
 
 const signInAttemptState = defineRequestState<SignInAttempt | undefined>(() => undefined);
 
+/** The sentence the explicit `403 ACCOUNT_LOCKED` carries. */
+export const ACCOUNT_LOCKED_MESSAGE =
+  'This account is temporarily locked after too many failed sign-in ' +
+  'attempts. Try again later or ask an administrator to unlock it.';
+
+/**
+ * The answer password sign-in gives a locked account under the deployment's
+ * `lockoutRefusal`, as an error to throw: `'explicit'` is `403
+ * ACCOUNT_LOCKED`; anything else is the answer a wrong password gets at
+ * `/sign-in/email`, better-auth's own `401 INVALID_EMAIL_OR_PASSWORD`, built
+ * from the vendor's constant so the two never part.
+ */
+export async function lockedAccountRefusal(lockoutRefusal: unknown): Promise<Error> {
+  if (lockoutRefusal === 'explicit') {
+    const { APIError } = await import('better-auth/api');
+    return new APIError('FORBIDDEN', { message: ACCOUNT_LOCKED_MESSAGE, code: 'ACCOUNT_LOCKED' });
+  }
+  const { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');
+  return APIError.from('UNAUTHORIZED', BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD);
+}
+
 /**
  * Record the gate's verdict for the request that is running (`undefined`: this
  * attempt has none, whatever an earlier call recorded). `false` when no request

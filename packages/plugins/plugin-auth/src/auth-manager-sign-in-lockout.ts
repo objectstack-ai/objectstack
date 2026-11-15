@@ -62,6 +62,7 @@ import {
 import { canonicalClientAddress } from './client-address-canonical.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import {
+  lockedAccountRefusal,
   readSignInAttempt,
   recordSignInAttempt,
   type SignInAttempt,
@@ -289,13 +290,7 @@ export async function admitSignInAttempt(
       { object: 'sys_user', threshold },
     );
   }
-  const { APIError } = await import('better-auth/api');
-  throw new APIError('FORBIDDEN', {
-    message:
-      'This account is temporarily locked after too many failed sign-in ' +
-      'attempts. Try again later or ask an administrator to unlock it.',
-    code: 'ACCOUNT_LOCKED',
-  });
+  throw await lockedAccountRefusal('explicit');
 }
 
 /** How a `/sign-in/email` ended, as the after-hook judged it. */
@@ -501,6 +496,72 @@ export async function findSignInAccount(
   return row && typeof row.id === 'string' && row.id
     ? (row as { id: string } & Record<string, unknown>)
     : undefined;
+}
+
+/** The `sys_user` column {@link refuseLockedAccountSession} reads, beside the other session refusals' columns. */
+export const LOCKED_ACCOUNT_ROW_FIELDS = ['locked_until'] as const;
+
+/**
+ * Whether a new session for `session.userId` is a sign-in: a session the
+ * caller is given for an account it is not already signed in as.
+ *
+ * Not a sign-in, and so never refused by the lock:
+ *
+ *  - a session made outside any endpoint call (no `path`): the server's own
+ *    in-process work, never a caller signing in;
+ *  - an administrator's impersonation session (`impersonatedBy`);
+ *  - a new session for the account the caller already holds a live session
+ *    for (enrolling a second factor, a password change that ends the other
+ *    sessions, a signed-in verification): that caller is signed in already.
+ */
+function isSignInSession(session: any, ctx: any): boolean {
+  if (typeof ctx?.path !== 'string' || ctx.path === '') return false;
+  if (typeof session?.impersonatedBy === 'string' && session.impersonatedBy !== '') return false;
+  const held = ctx?.context?.session;
+  const heldUserId = held?.user?.id ?? held?.session?.userId;
+  return !(typeof heldUserId === 'string' && heldUserId === session?.userId);
+}
+
+/**
+ * ADR-0069 D2 — a locked account is refused on every door that ends in a
+ * session for that account, with the answer password sign-in gives under the
+ * deployment's `lockoutRefusal` ({@link lockedAccountRefusal}). Composed into
+ * `session.create.before`, the one write every sign-in door ends in, so a door
+ * is held by the lock whichever credential it checks.
+ *
+ * The lock is the one password sign-in reads: `locked_until` still in the
+ * future while `lockoutThreshold` is on. An expired lock admits, and with the
+ * threshold off no lock is read, as at `/sign-in/email`. Only a sign-in is
+ * refused ({@link isSignInSession}). `/sign-in/email` is refused by its own
+ * gate before its credential is checked ({@link admitSignInAttempt}), which
+ * also settles its counter and writes its row, so it is left to that gate.
+ *
+ * A refused sign-in writes the account's `login_failed` row with the lock as
+ * its reason, as password sign-in's does. The counter is not moved.
+ *
+ * @param row the `sys_user` row the session refusals composed before this one
+ *   read, with {@link LOCKED_ACCOUNT_ROW_FIELDS} among its columns.
+ */
+export async function refuseLockedAccountSession(
+  this: Pick<SignInLockoutHost, 'config'>,
+  session: any,
+  ctx: any,
+  row: Record<string, unknown> | undefined,
+): Promise<void> {
+  const threshold = Number(this.config.lockoutThreshold) || 0;
+  if (threshold <= 0 || !row || !lockHolds(row.locked_until, Date.now())) return;
+  const userId = session?.userId;
+  if (typeof userId !== 'string' || userId === '') return;
+  if (ctx?.path === SIGN_IN_EMAIL_PATH || !isSignInSession(session, ctx)) return;
+  await emitAuthSessionAuditEvent(
+    this.config.getAuditSink?.(),
+    signInFailureEventFor(userId, {
+      path: ctx.path,
+      reason: 'ACCOUNT_LOCKED',
+      fingerprint: signInClientFingerprint(ctx, await readRequestClientAddress()),
+    }),
+  );
+  throw await lockedAccountRefusal(this.config.lockoutRefusal);
 }
 
 /** The body of `AuthManager#resolveTwoFactorAccountLockout`; the method's docblock there is its contract. */
