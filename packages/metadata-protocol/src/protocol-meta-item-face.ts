@@ -119,6 +119,37 @@ function isHoldersPairRow(engine: unknown, type: string, name: string, item: unk
 }
 
 /**
+ * [#33401, ADR-0150 D4] The package a package-less row (stamped with no
+ * package, `''` or the `sys_metadata` sentinel) that the read naming no
+ * package reached is withheld with: the holder whose key the row customizes,
+ * when every holder of that key is disabled. Seat ruling 6882483833 on
+ * #32814: a package-less row whose key (`(type, name)`; `(object, name)` for
+ * an `action`) an installed package holds is that holder's overlay, owned
+ * over every holder, disabled included (epic ruling 6816940784 on #31699), so
+ * with every holder disabled the read answers as if no row were stored. The
+ * member is not part of the key: a locale the holder never shipped is still
+ * its customization.
+ *
+ * The key's holders are the registry's one owner rule
+ * (`overlayRowBinding`, every holder counted): `null` is the environment's
+ * own item (D3 (a), no holder at its key, a same-name action on another
+ * object included), served; one holder is withheld when it is disabled; two
+ * or more are judged as the name's holders are ({@link disabledOnlyHolderOf}).
+ * The row itself is untouched, so it is served again on re-enable.
+ * `undefined` when the item is not such a row, or the registry cannot bind
+ * one (optional-called: such a registry hides nothing more).
+ */
+function packagelessRowWithheldHolder(registry: any, type: string, name: string, item: unknown): string | undefined {
+    const stamp = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (stamp !== undefined && stamp !== null && stamp !== '' && stamp !== 'sys_metadata') return undefined;
+    if (typeof registry?.overlayRowBinding !== 'function' || typeof registry?.isPackageDisabled !== 'function') return undefined;
+    const holder: unknown = registry.overlayRowBinding(type, name, item, { includeDisabledPackages: true });
+    if (holder === null) return undefined;
+    if (typeof holder === 'string') return registry.isPackageDisabled(holder) === true ? holder : undefined;
+    return disabledOnlyHolderOf(registry, type, name);
+}
+
+/**
  * [#32183] The package whose stack a read naming no package takes, for a
  * name a disabled package also holds: the one holder ADR-0150 D3 resolves
  * over the served set. `undefined` leaves the read as it was: a type the
@@ -459,6 +490,9 @@ export async function readMetaItemFace(
     // name's holders too, as it does when it reached nothing: a pair row of a
     // name only disabled packages hold is their withheld item, the answer the
     // same read gives with no row stored.
+    // [#33401] …and so does a package-less row of a key whose every holder is
+    // disabled ({@link packagelessRowWithheldHolder}): that holder's
+    // customization, withheld with it; the environment's own item is served.
     const withheldHolder = request.type === 'object' || request.type === 'package'
         ? undefined
         : (request.packageId ? disabledExactAddressHolder(this, { type: request.type, name: request.name, packageId: request.packageId }) : undefined)
@@ -467,7 +501,10 @@ export async function readMetaItemFace(
                     ? !isStoredUnder(answer.item, request.packageId)
                     : isHoldersPairRow(this.engine, request.type, request.name, answer.item))
                 ? disabledOnlyHolderOf(this.engine?.registry, request.type, request.name)
-                : undefined);
+                : undefined)
+            ?? (request.packageId || answer?.item == null
+                ? undefined
+                : packagelessRowWithheldHolder(this.engine?.registry, request.type, request.name, answer.item));
     if (withheldHolder === undefined && (request.type === 'object' || request.type === 'package'
         || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item)))) {
         return answer;

@@ -2716,3 +2716,119 @@ describe('[#32814] the read naming no package withholds a pair row of a name onl
     },
   );
 });
+
+/**
+ * [#33401, ADR-0150 D4] The read naming no package, at a member only a
+ * PACKAGE-LESS stored row carries, of a key whose every holder is disabled.
+ * Seat ruling 6882483833 on #32814: a package-less row whose key an installed
+ * package holds is that holder's overlay, owned over every holder, disabled
+ * included; the member is not part of the key, so a locale the holder never
+ * shipped is still its customization. With every holder disabled the read
+ * answers as if no row were stored; the row is kept and served on re-enable.
+ *
+ * FROM (`main` 1e65a389, measured on this fixture and on the REST door): the
+ * row (200), on the served and the execution face, in every order below. A
+ * row the holder's own member overlays, and the same row once hydrated into
+ * the registry, were already withheld (CONTROLs below). TO: the holder's
+ * withheld item, the answer with no row stored.
+ */
+describe('[#33401] the read naming no package withholds a package-less row of a key only disabled packages hold', () => {
+  const custom = (name: string, locale: string) => rows.push({
+    id: `row_${name}_${locale}`, type: 'email_template', name, state: 'active', package_id: null, bundle_member: locale,
+    metadata: JSON.stringify({ name, label: `custom ${locale}`, locale, subject: `custom ${locale}`, bodyHtml: '<p>c</p>' }),
+  });
+  const tpl = (packageId: string, name = 'welcome') => registry.registerItem('email_template', {
+    name, label: `${packageId.split('.').pop()} en-US`, locale: 'en-US', subject: 'en', bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const bare = (member = 'fr-FR', name = 'welcome') => protocol.getMetaItem({ type: 'email_template', name, member } as never);
+  const bareForExecution = (member = 'fr-FR', name = 'welcome') =>
+    protocol.getMetaItemForExecution({ type: 'email_template', name, member } as never);
+  /** The boot's hydration: the list read lays the stored row into the registry's slot. */
+  const hydrate = () => protocol.getMetaItems({ type: 'email_template' } as never);
+
+  const ORDERS = [
+    ['the holder registered, then the row saved', false],
+    ['the row saved, then the holder registered', true],
+  ] as const;
+  const DISABLE = [['the holder disabled last', false], ['the holder disabled first', true]] as const;
+  const CASES = ORDERS.flatMap(([order, rowFirst]) => DISABLE.map(([when, disableFirst]) => [order, when, rowFirst, disableFirst] as const));
+
+  it.each(CASES)('%s, %s: the bare read at a locale the holder never shipped answers its withheld item (BASE: the row), on both faces; re-enabled, the row', async (_order, _when, rowFirst, disableFirst) => {
+    if (rowFirst) custom('welcome', 'fr-FR');
+    tpl(A);
+    if (disableFirst) registry.disablePackage(A);
+    if (!rowFirst) custom('welcome', 'fr-FR');
+    if (!disableFirst) registry.disablePackage(A);
+    const answer = await bare();
+    expect(answer?.item).toBeUndefined();
+    expect((answer as { packageId?: string } | undefined)?.packageId).toBe(A);
+    expect(JSON.stringify(answer ?? null)).not.toContain('custom fr-FR');
+    const executed = await bareForExecution();
+    expect(executed?.item).toBeUndefined();
+    expect(JSON.stringify(executed ?? null)).not.toContain('custom fr-FR');
+    // CONTROL — re-enabled: the row is served again, untouched.
+    registry.enablePackage(A);
+    expect(labelOf(await bare())).toBe('custom fr-FR');
+    expect(labelOf(await bareForExecution())).toBe('custom fr-FR');
+  });
+
+  // `version` is left out of the comparison, as in the #32814 pin above.
+  it('the holder disabled: the answer with the package-less row stored is the answer with none', async () => {
+    tpl(A);
+    registry.disablePackage(A);
+    const { version: _noRowVersion, ...withoutRow } = (await bare()) as Record<string, unknown>;
+    custom('welcome', 'fr-FR');
+    const { version: _rowVersion, ...withRow } = (await bare()) as Record<string, unknown>;
+    expect(withRow).toEqual(withoutRow);
+  });
+
+  it('two holders, both disabled: withheld too; both re-enabled: the read\'s own refusal naming both, as before the disable', async () => {
+    tpl(A);
+    tpl(B);
+    custom('welcome', 'fr-FR');
+    registry.disablePackage(A);
+    registry.disablePackage(B);
+    const answer = await bare();
+    expect(answer?.item).toBeUndefined();
+    expect(JSON.stringify(answer ?? null)).not.toContain('custom fr-FR');
+    registry.enablePackage(A);
+    registry.enablePackage(B);
+    const err = await refusalOf(bare);
+    expect([err.status, err.refusal.candidates]).toEqual([409, [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]]);
+  });
+
+  it('CONTROL — the holder enabled: the row is served, on both faces', async () => {
+    tpl(A);
+    custom('welcome', 'fr-FR');
+    expect(labelOf(await bare())).toBe('custom fr-FR');
+    expect(labelOf(await bareForExecution())).toBe('custom fr-FR');
+  });
+
+  it('CONTROL — the environment\'s own item (no package holds its key) is served while another package\'s same-type item is disabled', async () => {
+    tpl(A);
+    custom('farewell', 'fr-FR');
+    registry.disablePackage(A);
+    expect(labelOf(await bare('fr-FR', 'farewell'))).toBe('custom fr-FR');
+    expect(labelOf(await bareForExecution('fr-FR', 'farewell'))).toBe('custom fr-FR');
+  });
+
+  it.each([['stored', false], ['stored and hydrated', true]] as const)('CONTROL — a package-less row at the member the holder ships (%s): withheld, as on BASE', async (_state, hydrated) => {
+    tpl(A);
+    custom('welcome', 'en-US');
+    if (hydrated) await hydrate();
+    registry.disablePackage(A);
+    const answer = await bare('en-US');
+    expect(answer?.item).toBeUndefined();
+    expect(JSON.stringify(answer ?? null)).not.toContain('custom en-US');
+  });
+
+  it('CONTROL — the fr-FR row hydrated into the registry: withheld, as on BASE', async () => {
+    tpl(A);
+    custom('welcome', 'fr-FR');
+    await hydrate();
+    registry.disablePackage(A);
+    const answer = await bare();
+    expect(answer?.item).toBeUndefined();
+    expect(JSON.stringify(answer ?? null)).not.toContain('custom fr-FR');
+  });
+});
