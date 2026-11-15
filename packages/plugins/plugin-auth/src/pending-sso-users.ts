@@ -158,7 +158,8 @@ export interface PendingSsoUserDeps
   host?: EnvironmentUserHostAccessor;
   /** Wakes the outbox worker for a call that is due again at `atMs` (`environment-user-outbox.ts`). */
   wakeOutbox?(atMs: number): void;
-  logger?: { warn(msg: string): void };
+  /** `error` receives, once, a membership failure answered with the generic message (`mapAuthApiError`). */
+  logger?: { warn(msg: string): void; error?(message: string, error?: Error): void };
 }
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
@@ -898,7 +899,7 @@ export async function runRemoveSsoUser(
       stillPending,
     );
   } catch (error) {
-    return removalNotDone(deps, engine, error, { host, recorded, deliveryId });
+    return removalNotDone(deps, engine, error, { userId, host, recorded, deliveryId });
   }
   if (recorded && birth.status === 'pending') deps.wakeOutbox?.(outboxNextAttemptAt(1, Date.now()));
 
@@ -934,9 +935,9 @@ async function removalNotDone(
   deps: PendingSsoUserDeps,
   engine: PendingSsoUserEngine,
   error: unknown,
-  call: { host: EnvironmentUserHostOutcome; recorded: EnvironmentUserEvent | undefined; deliveryId: string },
+  call: { userId: string; host: EnvironmentUserHostOutcome; recorded: EnvironmentUserEvent | undefined; deliveryId: string },
 ): Promise<EndpointResult> {
-  const { host, recorded, deliveryId } = call;
+  const { userId, host, recorded, deliveryId } = call;
   const told = recorded !== undefined && host.notified;
   // The cancellation the host took is recorded, so the person's status says so.
   const recordCancellation = async (): Promise<void> => {
@@ -967,6 +968,11 @@ async function removalNotDone(
 
   const thrown = resolveThrownHttpError(error, 500);
   const cause = thrown.status >= 500 ? INTERNAL_ERROR_MESSAGE : thrown.message;
+  if (thrown.status >= 500) {
+    const line = `[AuthPlugin] removing pending user ${userId} failed, so no one was removed`;
+    if (deps.logger?.error) deps.logger.error(line, error instanceof Error ? error : undefined);
+    else deps.logger?.warn(`${line}. Cause: ${error instanceof Error ? error.message : String(error)}`);
+  }
   let after = hostSentence;
   if (told) {
     const person = await readPersonState(engine, recorded!.userId);
