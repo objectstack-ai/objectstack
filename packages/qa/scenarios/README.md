@@ -344,7 +344,9 @@ npx @objectstack/scenarios help                                      # the comma
   in its text (ISO, English `[Weekday] D Month`, Chinese `M 月 D 日(周X)`, weekdays written again); the truths are
   computed again over the moved seed. The prompt's "today", the seeded rows, the timestamps the app's real clock
   stamps and the grader's expectations then agree, however long after `asOf` the run is. The card file is not
-  changed. A card on working days keeps to them only when the delta is whole weeks.
+  changed. A card that declares `workingDays: true` (the loader refuses one whose `asOf` or any other date falls on a
+  weekend) moves by whole working days instead: `asOf` onto the run date, every other date by the working days
+  from `asOf` to the run date (a weekend run date read as the Friday before it), so its weekdays stay weekdays.
 - **Namespaces** (`namespace.ts`): every card's app is in the namespace `demo` + the card's `code` (`democrm`): scratch
   mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
   `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are
