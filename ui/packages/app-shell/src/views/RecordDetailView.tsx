@@ -1505,7 +1505,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     return dataSource.onMutation((e: { type?: string; resource?: string; id?: string | number; record?: unknown }) => {
       if (e?.type !== 'update' || e.id == null || String(e.id) !== pureRecordId) return;
       if (String(e.resource ?? '').toLowerCase() !== object) return;
-      setPageRecord((held: any) => applySavedRecordEcho(held, e.record, pureRecordId));
+      setPageRecord((held: unknown) => applySavedRecordEcho(held, e.record, pureRecordId));
     });
   }, [hasPage, dataSource, objectName, pureRecordId]);
 
