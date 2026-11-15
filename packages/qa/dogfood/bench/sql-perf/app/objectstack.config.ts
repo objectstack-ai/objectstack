@@ -15,6 +15,17 @@
  * non-admin member's read of a line item composes the nested master chain
  * (line item -> opportunity -> account owner). That is the read-scoped scenario.
  *
+ * Beside the chain, three roll-up pairs for the summary-recompute leg (R10), the
+ * same parent/child shape with 0, 1 and 2 `summary` fields on the parent:
+ *
+ *   bench_roll0 <- bench_roll0_item   no summary field (the control)
+ *   bench_roll1 <- bench_roll1_item   total_quantity = sum(quantity)
+ *   bench_roll2 <- bench_roll2_item   total_quantity = sum(quantity), item_count = count
+ *
+ * All six are public, so a write there pays no read-scope cost; the only
+ * difference between the pairs is the number of roll-ups a child write
+ * recomputes. They are a fixed size (not `--scale`): see `../README.md`.
+ *
  * Rows are NOT seeded here: `../bench.mjs` bulk-loads them straight into the
  * tables after schema sync, because a million rows through the API would take
  * hours. See `../README.md`.
@@ -22,6 +33,49 @@
 import { defineStack } from '@objectstack/spec';
 
 const readWrite = { allowRead: true, allowCreate: true, allowEdit: true };
+
+/** One roll-up pair: a parent with `summaries` summary fields over a master-detail child. */
+function rollupPair(n: 0 | 1 | 2) {
+  const parent = `bench_roll${n}`;
+  const child = `${parent}_item`;
+  const summaries: Record<string, unknown> = {};
+  if (n >= 1) {
+    summaries.total_quantity = {
+      type: 'summary',
+      label: 'Total quantity',
+      summaryOperations: { object: child, field: 'quantity', function: 'sum' },
+    };
+  }
+  if (n >= 2) {
+    summaries.item_count = {
+      type: 'summary',
+      label: 'Item count',
+      summaryOperations: { object: child, function: 'count' },
+    };
+  }
+  return [
+    {
+      name: parent,
+      label: `Roll-up parent (${n})`,
+      sharingModel: 'public_read_write',
+      fields: {
+        name: { type: 'text', label: 'Name', required: true },
+        ...summaries,
+      },
+    },
+    {
+      name: child,
+      label: `Roll-up item (${n})`,
+      sharingModel: 'public_read_write',
+      fields: {
+        name: { type: 'text', label: 'Name', required: true },
+        parent: { type: 'master_detail', label: 'Parent', reference: parent, required: true, deleteBehavior: 'cascade' },
+        quantity: { type: 'number', label: 'Quantity' },
+        amount: { type: 'number', label: 'Amount' },
+      },
+    },
+  ];
+}
 
 export default defineStack({
   manifest: {
@@ -139,6 +193,9 @@ export default defineStack({
         },
       },
     },
+    ...rollupPair(0),
+    ...rollupPair(1),
+    ...rollupPair(2),
   ],
 
   permissions: [
@@ -154,6 +211,12 @@ export default defineStack({
         bench_account: { ...readWrite, readScope: 'own' },
         bench_opportunity: readWrite,
         bench_line_item: readWrite,
+        bench_roll0: readWrite,
+        bench_roll0_item: readWrite,
+        bench_roll1: readWrite,
+        bench_roll1_item: readWrite,
+        bench_roll2: readWrite,
+        bench_roll2_item: readWrite,
       },
     },
   ],

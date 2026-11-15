@@ -27,7 +27,7 @@ import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createServer } from 'node:net';
+import { connect, createServer } from 'node:net';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP_DIR = resolve(HERE, 'app');
@@ -53,6 +53,10 @@ function parseArgs(argv) {
     seedTimeoutMs: 1_800_000,
     cascadeDeletes: 5,
     only: undefined,
+    shares: 0,
+    dbLatencyMs: 0,
+    grantsCacheTtlMs: undefined,
+    sqlLog: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const [flag, inline] = argv[i].split('=');
@@ -70,8 +74,12 @@ function parseArgs(argv) {
       case '--seed-timeout-ms': out.seedTimeoutMs = Number(val()); break;
       case '--cascade-deletes': out.cascadeDeletes = Number(val()); break;
       case '--only': out.only = val().split(','); break;
+      case '--shares': out.shares = Number(val()); break;
+      case '--db-latency-ms': out.dbLatencyMs = Number(val()); break;
+      case '--grants-cache-ttl-ms': out.grantsCacheTtlMs = Number(val()); break;
+      case '--sql-log': out.sqlLog = true; break;
       case '--help': case '-h':
-        console.log('usage: bench.mjs --dialect sqlite|pg --scale N [--iterations 20] [--warmup 3] [--pg-url URL] [--work-dir DIR] [--out DIR] [--only scenario,...]');
+        console.log('usage: bench.mjs --dialect sqlite|pg --scale N [--iterations 20] [--warmup 3] [--pg-url URL] [--work-dir DIR] [--out DIR] [--only scenario,...] [--shares N] [--db-latency-ms N] [--grants-cache-ttl-ms N] [--sql-log]');
         process.exit(0);
         break;
       default: throw new Error(`unknown argument: ${argv[i]}`);
@@ -79,6 +87,17 @@ function parseArgs(argv) {
   }
   if (!['sqlite', 'pg'].includes(out.dialect)) throw new Error(`--dialect must be sqlite or pg, got ${out.dialect}`);
   if (!Number.isInteger(out.scale) || out.scale < 1000) throw new Error('--scale must be an integer >= 1000');
+  if (!Number.isInteger(out.shares) || out.shares < 0) throw new Error('--shares must be an integer >= 0');
+  if (!Number.isFinite(out.dbLatencyMs) || out.dbLatencyMs < 0) throw new Error('--db-latency-ms must be >= 0');
+  if (out.dbLatencyMs > 0 && out.dialect !== 'pg') throw new Error('--db-latency-ms needs --dialect pg (SQLite is in-process: there is no connection to delay)');
+  if (out.grantsCacheTtlMs !== undefined && (!Number.isInteger(out.grantsCacheTtlMs) || out.grantsCacheTtlMs < 0)) throw new Error('--grants-cache-ttl-ms must be an integer >= 0');
+  // A run with a non-default leg writes its own result files, never over the baseline's.
+  out.suffix = [
+    out.shares ? `shares${out.shares}` : '',
+    out.dbLatencyMs ? `rtt${out.dbLatencyMs}` : '',
+    out.grantsCacheTtlMs !== undefined ? `gc${out.grantsCacheTtlMs}` : '',
+    out.sqlLog ? 'sqllog' : '',
+  ].filter(Boolean).map((p) => `-${p}`).join('');
   out.out ??= join(out.workDir, 'results');
   return out;
 }
@@ -102,13 +121,22 @@ const SHAPE = {
   opportunities: Math.max(100, Math.round(args.scale / 10)),
   lineItems: args.scale,
   memberEvery: 10, // every 10th account is owned by the member
+  // The roll-up pairs (R10) are a fixed size, not scaled: what a child write
+  // costs depends on the summaries and the distinct parents it touches, and on
+  // the children per parent the aggregate reads, not on the table size.
+  rollupParents: 200,
+  rollupItemsPerParent: 50,
 };
 const STATUSES = ['open', 'shipped', 'invoiced', 'cancelled'];
 const STAGES = ['prospecting', 'proposal', 'negotiation', 'won', 'lost'];
 const INDUSTRIES = ['tech', 'finance', 'retail', 'health', 'energy'];
 const FAMILIES = ['hardware', 'software', 'services', 'training'];
 const pad = (n) => String(n).padStart(8, '0');
-const id = { region: (i) => `rg${pad(i)}`, product: (i) => `pr${pad(i)}`, account: (i) => `ac${pad(i)}`, opportunity: (i) => `op${pad(i)}`, line: (i) => `li${pad(i)}` };
+const id = {
+  region: (i) => `rg${pad(i)}`, product: (i) => `pr${pad(i)}`, account: (i) => `ac${pad(i)}`, opportunity: (i) => `op${pad(i)}`, line: (i) => `li${pad(i)}`,
+  share: (i) => `sh${pad(i)}`, rollup: (n, i) => `r${n}p${pad(i)}`, rollupItem: (n, i) => `r${n}i${pad(i)}`,
+};
+const ROLLUPS = [0, 1, 2]; // summary fields on bench_roll<n>: 0 (control), 1, 2
 // Deterministic PRNG (mulberry32) so every run seeds the same rows.
 function rng(seed) {
   let a = seed >>> 0;
@@ -137,7 +165,7 @@ function freePort() {
   });
 }
 
-async function bootServer(databaseUrl, label) {
+async function bootServer(databaseUrl, label, extraEnv = {}) {
   const port = await freePort();
   const logFile = join(args.workDir, `server-${label}.log`);
   const { openSync } = await import('node:fs');
@@ -152,6 +180,7 @@ async function bootServer(databaseUrl, label) {
       OS_SERVER_TIMING: 'true', // the Server-Timing header on every response, member included
       OS_LOG_LEVEL: process.env.OS_LOG_LEVEL ?? 'warn',
       NODE_OPTIONS: process.env.NODE_OPTIONS ?? '--max-old-space-size=4096',
+      ...extraEnv,
     },
   });
   const server = { child, port, base: `http://127.0.0.1:${port}/api/v1`, origin: `http://localhost:${port}`, logFile, exited: false };
@@ -172,6 +201,55 @@ async function bootServer(databaseUrl, label) {
 }
 
 const liveServers = new Set();
+
+// ── network leg (R8): a TCP proxy that adds a fixed round trip ───────────
+/**
+ * Stands between the server and PostgreSQL and holds every chunk for half the
+ * requested round trip in each direction, so each statement the server waits
+ * on pays `rttMs` more than on the local socket. It runs inside this process
+ * (it dies with the bench; there is no PID to clean up) and counts the chunks
+ * it forwards, so a run can show its traffic really went through it. Same-delay
+ * timers fire in creation order in Node, so the byte stream keeps its order.
+ */
+async function startLatencyProxy(targetUrl, rttMs) {
+  const target = new URL(targetUrl);
+  const half = rttMs / 2;
+  const stats = { connections: 0, chunksToDb: 0, chunksFromDb: 0 };
+  const sockets = new Set();
+  const server = createServer((client) => {
+    stats.connections++;
+    const upstream = connect(Number(target.port || 5432), target.hostname);
+    for (const s of [client, upstream]) { s.setNoDelay(true); sockets.add(s); s.on('close', () => sockets.delete(s)); }
+    const forward = (src, dst, key) => src.on('data', (buf) => { stats[key]++; setTimeout(() => { if (!dst.destroyed) dst.write(buf); }, half); });
+    forward(client, upstream, 'chunksToDb');
+    forward(upstream, client, 'chunksFromDb');
+    const close = () => setTimeout(() => { client.destroy(); upstream.destroy(); }, half);
+    client.on('end', close); upstream.on('end', close);
+    client.on('error', close); upstream.on('error', close);
+  });
+  await new Promise((res, rej) => { server.once('error', rej); server.listen(0, '127.0.0.1', res); });
+  const url = new URL(targetUrl);
+  url.hostname = '127.0.0.1';
+  url.port = String(server.address().port);
+  return {
+    url: url.toString(),
+    stats,
+    close: () => new Promise((res) => { for (const s of sockets) s.destroy(); server.close(() => res()); }),
+  };
+}
+
+/** Median `select 1` round trip on one connection: the injected latency, measured rather than assumed. */
+async function measureRoundTrip(databaseUrl, n = 21) {
+  const { Client } = driverRequire('pg');
+  const c = new Client({ connectionString: databaseUrl });
+  await c.connect();
+  const ms = [];
+  try {
+    await c.query('select 1');
+    for (let i = 0; i < n; i++) { const t0 = performance.now(); await c.query('select 1'); ms.push(performance.now() - t0); }
+  } finally { await c.end(); }
+  return round(median(ms));
+}
 async function stopServer(server) {
   if (!server || server.exited) { liveServers.delete(server); return; }
   try { process.kill(-server.child.pid, 'SIGTERM'); } catch { /* already gone */ }
@@ -292,8 +370,12 @@ async function bulkLoad(databaseUrl, t) {
     const who = ownerIsMember ? memberId : adminId;
     return { created_at: created, updated_at: created, organization_id: orgId, created_by: who, updated_by: who, owner_id: who };
   };
-  const tables = ['bench_line_item', 'bench_opportunity', 'bench_account', 'bench_product', 'bench_region'];
+  const tables = [
+    'bench_line_item', 'bench_opportunity', 'bench_account', 'bench_product', 'bench_region',
+    ...ROLLUPS.flatMap((n) => [`bench_roll${n}_item`, `bench_roll${n}`]),
+  ];
   for (const table of tables) await db(table).del();
+  await db('sys_record_share').where({ object_name: 'bench_account' }).del();
 
   // SQLite: one prepared statement per table inside a transaction (knex's
   // multi-row insert compiles to a compound SELECT, which SQLite caps at 500
@@ -341,12 +423,59 @@ async function bulkLoad(databaseUrl, t) {
       status: STATUSES[Math.floor(r() * STATUSES.length)],
     };
   });
+  // R10: the roll-up pairs, parents seeded with the values their summaries
+  // would hold, so a recompute writes a real change and never a backfill.
+  const per = SHAPE.rollupItemsPerParent;
+  for (const n of ROLLUPS) {
+    const qty = (i) => 1 + (i % 7);
+    const totals = new Array(SHAPE.rollupParents).fill(0);
+    for (let i = 0; i < SHAPE.rollupParents * per; i++) totals[Math.floor(i / per)] += qty(i);
+    await load(`bench_roll${n}`, SHAPE.rollupParents, (i) => ({
+      id: id.rollup(n, i), ...sys(i, false), name: `Roll-up ${n}/${i}`,
+      ...(n >= 1 ? { total_quantity: totals[i] } : {}), ...(n >= 2 ? { item_count: per } : {}),
+    }));
+    await load(`bench_roll${n}_item`, SHAPE.rollupParents * per, (i) => ({
+      id: id.rollupItem(n, i), ...sys(i, false), name: `Item ${n}/${i}`, parent: id.rollup(n, Math.floor(i / per)), quantity: qty(i), amount: 10,
+    }));
+  }
+
+  // R9: `--shares N` user grants on accounts the member does NOT own, written
+  // as the sharing service stores a manual grant (`sys_record_share`), so the
+  // member's read scope is "owned OR shared". Its columns are read from the
+  // table schema sync created; a NOT NULL column this row does not fill fails
+  // the run here instead of being guessed.
+  let shared = [];
+  if (args.shares > 0) {
+    const notOwned = [];
+    for (let i = 0; i < SHAPE.accounts; i++) if (!memberOwnsAccount(i)) notOwned.push(i);
+    if (args.shares > notOwned.length) throw new Error(`--shares ${args.shares} exceeds the ${notOwned.length} accounts the member does not own at --scale ${args.scale}`);
+    // Spread over the whole table (every k-th non-owned account), not its head.
+    const step = notOwned.length / args.shares;
+    shared = Array.from({ length: args.shares }, (_, k) => notOwned[Math.floor(k * step)]);
+    const columns = await db('sys_record_share').columnInfo();
+    const now = iso(Date.UTC(2026, 0, 1));
+    const shareRow = (k) => {
+      const row = {
+        id: id.share(k), object_name: 'bench_account', record_id: id.account(shared[k]),
+        recipient_type: 'user', recipient_id: memberId, access_level: 'read', source: 'manual',
+        granted_by: adminId, created_at: now, updated_at: now,
+        organization_id: orgId, created_by: adminId, updated_by: adminId, owner_id: adminId,
+      };
+      return Object.fromEntries(Object.entries(row).filter(([c]) => c in columns));
+    };
+    const filled = new Set(Object.keys(shareRow(0)));
+    const unfilled = Object.entries(columns).filter(([c, info]) => !filled.has(c) && info.nullable === false && info.defaultValue == null).map(([c]) => c);
+    if (unfilled.length) throw new Error(`sys_record_share has NOT NULL columns the share seed does not fill: ${unfilled.join(', ')}`);
+    await load('sys_record_share', args.shares, shareRow);
+  }
+
   if (sqlite) { sqlite.exec('ANALYZE'); sqlite.close(); } else await db.raw('ANALYZE');
   const indexes = args.dialect === 'sqlite'
-    ? await db.raw("select tbl_name as table_name, name as index_name, sql as definition from sqlite_master where type = 'index' and tbl_name like 'bench_%' order by tbl_name, name")
-    : (await db.raw("select tablename as table_name, indexname as index_name, indexdef as definition from pg_indexes where tablename like 'bench_%' order by tablename, indexname")).rows;
+    ? await db.raw("select tbl_name as table_name, name as index_name, sql as definition from sqlite_master where type = 'index' and (tbl_name like 'bench_%' or tbl_name = 'sys_record_share') order by tbl_name, name")
+    : (await db.raw("select tablename as table_name, indexname as index_name, indexdef as definition from pg_indexes where (tablename like 'bench_%' or tablename = 'sys_record_share') order by tablename, indexname")).rows;
   await db.destroy();
-  return { orgId, adminId, memberId, indexes };
+  const memberOwned = Array.from({ length: SHAPE.accounts }, (_, i) => i).filter(memberOwnsAccount).length;
+  return { orgId, adminId, memberId, indexes, shares: { seeded: args.shares, memberOwnedAccounts: memberOwned, expectedVisibleAccounts: memberOwned + shared.length } };
 }
 
 async function preparePgDatabase() {
@@ -395,30 +524,118 @@ function scenarios(ctx) {
     { name: 'scoped_list_unfiltered', who: 'admin', method: 'GET', path: '/data/bench_line_item?sort=-created_at&top=50' },
     { name: 'scoped_list_unfiltered', who: 'member', method: 'GET', path: '/data/bench_line_item?sort=-created_at&top=50' },
     { name: 'scoped_account_list', who: 'member', method: 'GET', path: '/data/bench_account?sort=-created_at&top=50' },
+    // 6. per-request fixed cost (R8): a public object, one page and its count,
+    // so everything past those two statements is identity and permission work.
+    { name: 'public_list_tiny', who: 'admin', method: 'GET', path: '/data/bench_region?top=1' },
+    { name: 'public_list_tiny', who: 'member', method: 'GET', path: '/data/bench_region?top=1' },
+    // 7. child writes under roll-up summaries (R10), as the admin.
+    ...rollupScenarios(),
   ].filter((s) => !args.only || args.only.includes(s.name));
+}
+
+/**
+ * R10: the same batch child write on the three roll-up pairs (0, 1, 2 summary
+ * fields), spread over 1 and over 10 distinct parents. A body is a function of
+ * the call number, so no two calls write the same values (an update that
+ * changes nothing proves nothing about the recompute).
+ */
+function rollupScenarios() {
+  const batch = 50;
+  const per = SHAPE.rollupItemsPerParent;
+  const out = [];
+  for (const parents of [1, 10]) {
+    for (const n of ROLLUPS) {
+      // Inserts land on parents 100.. so they never grow the update leg's parents.
+      out.push({
+        name: `rollup${n}_insert_p${parents}`, who: 'admin', method: 'POST', path: `/data/bench_roll${n}_item/createMany`,
+        note: `createMany of ${batch} children over ${parents} parent(s); ${n} summary field(s) on the parent`,
+        body: (call) => Array.from({ length: batch }, (_, k) => ({ name: `new ${call}/${k}`, parent: id.rollup(n, 100 + (k % parents)), quantity: 1 + ((call + k) % 5), amount: 10 })),
+      });
+      // Updates touch `batch / parents` seeded children of each of parents 0..parents-1.
+      const each = batch / parents;
+      out.push({
+        name: `rollup${n}_update_p${parents}`, who: 'admin', method: 'POST', path: `/data/bench_roll${n}_item/updateMany`,
+        note: `updateMany of ${batch} children (quantity) over ${parents} parent(s); ${n} summary field(s) on the parent`,
+        body: (call) => ({ records: Array.from({ length: batch }, (_, k) => ({ id: id.rollupItem(n, Math.floor(k / each) * per + (k % each)), data: { quantity: 1 + ((call + k) % 9) } })) }),
+      });
+    }
+  }
+  for (const n of ROLLUPS) {
+    out.push({
+      name: `rollup${n}_insert_one`, who: 'admin', method: 'POST', path: `/data/bench_roll${n}_item`,
+      note: `one child insert; ${n} summary field(s) on the parent`,
+      body: (call) => ({ name: `one ${call}`, parent: id.rollup(n, 150), quantity: 1 + (call % 5), amount: 10 }),
+    });
+  }
+  return out;
+}
+
+/** The table each captured statement reads or writes first, counted: where a request's statements go. */
+function statementsByTable(queries) {
+  const out = {};
+  for (const q of queries ?? []) {
+    const text = String(q.label ?? q.sql ?? q ?? '');
+    const m = /\b(?:from|into|update)\s+["`]?([A-Za-z0-9_]+)["`]?/i.exec(text);
+    const key = `${/^\s*(\w+)/.exec(text)?.[1]?.toLowerCase() ?? '?'} ${m?.[1] ?? '?'}`;
+    out[key] = (out[key] ?? 0) + 1;
+  }
+  return out;
 }
 
 const pct = (sorted, p) => (sorted.length === 0 ? undefined : sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]);
 const round = (n) => (n === undefined ? undefined : Math.round(n * 10) / 10);
 const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return pct(s, 50); };
 
+/**
+ * `--sql-log`: every statement of ONE request, for the member too. The server
+ * runs with knex's `DEBUG=knex:query`, which writes each statement (bindings
+ * stripped) to the server log; requests run one at a time, so the lines the log
+ * gained during this call are this call's. The detail header lists only the 20
+ * slowest statements, and only to an admin. The run's timings carry the log's
+ * own cost, so a `--sql-log` run is for shapes and counts, not milliseconds.
+ */
+async function captureStatements(server, token, sc, payload) {
+  const { readFileSync, statSync } = await import('node:fs');
+  const before = statSync(server.logFile).size;
+  const r = await call(server, token, sc.method, sc.path, payload);
+  await new Promise((res) => setTimeout(res, 100)); // let the child's stderr reach the file
+  const text = readFileSync(server.logFile).subarray(before).toString('utf8');
+  const statements = [];
+  for (const line of text.split('\n')) {
+    const m = /knex:query (.*?)(?: undefined)?(?: \+\d+m?s)?$/.exec(line);
+    if (m) statements.push(m[1].trim());
+  }
+  return { status: r.status, serverCount: dbQueries(r.timing), statements };
+}
+
 async function runScenario(server, tokens, sc) {
   const token = tokens[sc.who];
+  let calls = 0;
+  const body = () => (typeof sc.body === 'function' ? sc.body(calls++) : sc.body);
+
   // The SQL shapes, once, admin only (the detail header is never disclosed to a member).
   let shapes;
   if (sc.who === 'admin') {
-    const probe = await call(server, token, sc.method, sc.path, sc.body, { detail: true });
+    const probe = await call(server, token, sc.method, sc.path, body(), { detail: true });
     shapes = probe.sql;
+    if (probe.status >= 400) log(`  ${sc.name} [${sc.who}] probe answered ${probe.status}: ${probe.text.slice(0, 300)}`);
   }
-  for (let i = 0; i < args.warmup; i++) await call(server, token, sc.method, sc.path, sc.body);
+  for (let i = 0; i < args.warmup; i++) await call(server, token, sc.method, sc.path, body());
+  // Captured warm, after the warmup, so it is the shape the timed calls run.
+  let captured;
+  if (args.sqlLog) {
+    const c = await captureStatements(server, token, sc, body());
+    captured = { status: c.status, serverCount: c.serverCount, logged: c.statements.length, byTable: statementsByTable(c.statements), statements: c.statements };
+    if (c.serverCount !== c.statements.length) log(`  ${sc.name} [${sc.who}] the log holds ${c.statements.length} statements, Server-Timing counted ${c.serverCount} (the difference is background work that ran during the call)`);
+  }
   const samples = [];
   for (let i = 0; i < args.iterations; i++) {
-    const r = await call(server, token, sc.method, sc.path, sc.body);
+    const r = await call(server, token, sc.method, sc.path, body());
     samples.push({ status: r.status, ms: r.ms, serverMs: Number(r.timing.total?.dur ?? NaN), dbMs: Number(r.timing.db?.dur ?? NaN), queries: dbQueries(r.timing), rows: Array.isArray(r.json?.records) ? r.json.records.length : Array.isArray(r.json?.data?.rows) ? r.json.data.rows.length : undefined, total: r.json?.total, error: r.status >= 400 ? (r.json?.code ?? r.json?.error?.code ?? r.text.slice(0, 160)) : undefined });
   }
   const ms = samples.map((s) => s.ms).sort((a, b) => a - b);
   const result = {
-    name: sc.name, who: sc.who, method: sc.method, path: sc.path, body: sc.body, note: sc.note,
+    name: sc.name, who: sc.who, method: sc.method, path: sc.path, body: typeof sc.body === 'function' ? sc.body(0) : sc.body, note: sc.note,
     status: [...new Set(samples.map((s) => s.status))].join('/'),
     error: samples.find((s) => s.error)?.error,
     p50: round(pct(ms, 50)), p95: round(pct(ms, 95)),
@@ -426,7 +643,8 @@ async function runScenario(server, tokens, sc) {
     dbMsP50: round(median(samples.map((s) => s.dbMs).filter(Number.isFinite))),
     queries: median(samples.map((s) => s.queries).filter((q) => q !== undefined)),
     rows: samples[0]?.rows, total: samples[0]?.total,
-    shapes: shapes ? { count: shapes.count, totalMs: shapes.totalMs, queries: shapes.queries } : undefined,
+    shapes: shapes ? { count: shapes.count, totalMs: shapes.totalMs, slowest20ByTable: statementsByTable(shapes.queries), queries: shapes.queries } : undefined,
+    captured,
     samples,
   };
   log(`  ${sc.name} [${sc.who}] ${result.status} p50=${result.p50}ms p95=${result.p95}ms queries=${result.queries}${result.error ? ` error=${result.error}` : ''}`);
@@ -460,11 +678,24 @@ function markdown(report) {
   lines.push('');
   lines.push(`commit \`${report.commit}\` · ${report.startedAt} · iterations ${report.iterations} (warmup ${report.warmup}) · seed ${report.seedMs} ms`);
   lines.push(`shape: ${report.shape.regions} regions · ${report.shape.products} products · ${report.shape.accounts} accounts · ${report.shape.opportunities} opportunities · ${report.shape.lineItems} line items · member owns every ${report.shape.memberEvery}th account`);
+  const { shares, network, grantsCache } = report.legs;
+  lines.push(`legs: shares ${shares.seeded} (member owns ${shares.memberOwnedAccounts} accounts, expected visible ${shares.expectedVisibleAccounts}, reads ${shares.memberVisibleAccounts ?? 'n/a'}) · grants cache ${grantsCache.ttlMs}${grantsCache.bootLine ? ` (\`${grantsCache.bootLine.replace(/`/g, '')}\`)` : ''} · network ${network ? `+${network.injectedRttMs} ms RTT: select 1 direct ${network.directSelect1Ms} ms, proxied ${network.proxiedSelect1Ms} ms, ${network.proxyStats?.chunksToDb} chunks to the database` : 'none (local socket)'}`);
   lines.push('');
   lines.push('| scenario | who | status | p50 ms | p95 ms | server p50 ms | db ms p50 | SQL statements | rows/total |');
   lines.push('|:--|:--|:--|--:|--:|--:|--:|--:|:--|');
   for (const r of report.results) {
     lines.push(`| ${r.name} | ${r.who} | ${r.status}${r.error ? ` ${r.error}` : ''} | ${r.p50 ?? ''} | ${r.p95 ?? ''} | ${r.serverP50 ?? ''} | ${r.dbMsP50 ?? ''} | ${r.queries ?? ''} | ${r.rows ?? ''}${r.total !== undefined ? `/${r.total}` : ''} |`);
+  }
+  lines.push('');
+  if (report.results.some((r) => r.captured)) {
+    lines.push('## Where the statements go (`--sql-log`: every statement of one request, by verb and first table)');
+    lines.push('');
+    for (const r of report.results) {
+      if (!r.captured) continue;
+      const parts = Object.entries(r.captured.byTable).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ×${v}`);
+      lines.push(`- ${r.name} [${r.who}]: ${r.captured.logged} logged (Server-Timing ${r.captured.serverCount}) — ${parts.join(', ')}`);
+    }
+    lines.push('');
   }
   lines.push('');
   lines.push('## Indexes on the fixture tables after schema sync');
@@ -511,8 +742,30 @@ async function main() {
   const loaded = await withDeadline(bulkLoad(databaseUrl, template), args.seedTimeoutMs, 'the bulk load');
   const seedMs = Date.now() - seedStarted;
 
-  // Boot 2: measure.
-  server = await bootServer(databaseUrl, `${args.dialect}-${args.scale}-measure`);
+  // Boot 2: measure — through the latency proxy (R8) and with the grants
+  // cache TTL (R8) when the run asks for them.
+  const measureEnv = {};
+  if (args.grantsCacheTtlMs !== undefined) measureEnv.OS_AUTHZ_GRANTS_CACHE_TTL_MS = String(args.grantsCacheTtlMs);
+  if (args.sqlLog) { measureEnv.DEBUG = 'knex:query'; measureEnv.DEBUG_COLORS = 'no'; }
+  let proxy;
+  let network;
+  if (args.dbLatencyMs > 0) {
+    proxy = await startLatencyProxy(databaseUrl, args.dbLatencyMs);
+    network = {
+      injectedRttMs: args.dbLatencyMs,
+      method: 'in-process TCP proxy between the server and PostgreSQL, holding each chunk rttMs/2 in each direction',
+      directSelect1Ms: await measureRoundTrip(databaseUrl),
+      proxiedSelect1Ms: await measureRoundTrip(proxy.url),
+    };
+    log(`latency proxy: select 1 direct ${network.directSelect1Ms} ms, through the proxy ${network.proxiedSelect1Ms} ms (injected ${args.dbLatencyMs} ms)`);
+  }
+  const label = `${args.dialect}-${args.scale}${args.suffix}-measure`;
+  server = await bootServer(proxy ? proxy.url : databaseUrl, label, measureEnv);
+  // Prove the cache posture from the server's own boot line, not from the flag.
+  const { readFileSync } = await import('node:fs');
+  const cacheLine = readFileSync(server.logFile, 'utf8').split('\n').find((l) => l.includes('[authz-cache]'));
+  const grantsCache = { ttlMs: args.grantsCacheTtlMs ?? 'unset (server default)', bootLine: cacheLine?.trim().slice(0, 240) ?? null };
+  if (args.grantsCacheTtlMs > 0 && !cacheLine?.includes('ENABLED')) log(`WARNING: --grants-cache-ttl-ms ${args.grantsCacheTtlMs} but the server printed no "grants cache ENABLED" line; see ${server.logFile}`);
   const results = [];
   try {
     const tokens = {
@@ -534,10 +787,18 @@ async function main() {
     }
   } finally {
     await stopServer(server);
+    if (proxy) { network.proxyStats = { ...proxy.stats }; await proxy.close(); }
   }
 
-  const report = { dialect: args.dialect, scale: args.scale, commit, startedAt, iterations: args.iterations, warmup: args.warmup, seedMs, shape: SHAPE, indexes: loaded.indexes, results };
-  const base = join(args.out, `${args.dialect}-${args.scale}`);
+  // R9: did the member see what the seeded shares grant? Owned + shared accounts.
+  const accountList = results.find((r) => r.name === 'scoped_account_list' && r.who === 'member');
+  const shares = { ...loaded.shares, memberVisibleAccounts: accountList?.total };
+  if (accountList && accountList.total !== shares.expectedVisibleAccounts) {
+    log(`VISIBLE ROWS MISMATCH: the member reads ${accountList.total} accounts; it owns ${shares.memberOwnedAccounts} and holds ${shares.seeded} read shares (expected ${shares.expectedVisibleAccounts})`);
+  }
+
+  const report = { dialect: args.dialect, scale: args.scale, commit, startedAt, iterations: args.iterations, warmup: args.warmup, seedMs, shape: SHAPE, legs: { shares, network: network ?? null, grantsCache }, indexes: loaded.indexes, results };
+  const base = join(args.out, `${args.dialect}-${args.scale}${args.suffix}`);
   writeFileSync(`${base}.json`, JSON.stringify(report, null, 2));
   writeFileSync(`${base}.md`, markdown(report));
   log(`wrote ${base}.json and ${base}.md`);
