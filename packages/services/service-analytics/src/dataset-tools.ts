@@ -55,8 +55,9 @@ import { matchDatasetTerms } from './dataset-term-matcher.js';
  *
  * `provenance` is composed here, after the query ran, from the dataset the
  * tool resolved and the selection the service answered. Nothing in it is read
- * from the model's input except the selection's own member names (which the
- * service just judged) and its `runtimeFilter`, echoed as sent. The input is a
+ * from the model's input except the selection's own member names (each one a
+ * member the dataset declares, {@link assertDeclaredMembers}, which the service
+ * then judged) and its `runtimeFilter`, echoed as sent. The input is a
  * strict object, so a `provenance` (or any other key) the model puts beside
  * `datasetName` / `selection` is refused, never merged.
  */
@@ -90,7 +91,9 @@ const LIST_DATASETS_DESCRIPTION =
 
 const QUERY_DATASET_DESCRIPTION =
   'Run a selection (measures, optional dimensions, filter, time window, order, limit) against one saved business '
-  + 'dataset, by the name `list_datasets` lists, under the caller\'s permissions. Answers the rows plus '
+  + 'dataset, by the name `list_datasets` lists, under the caller\'s permissions. Measures and dimensions are the '
+  + 'member names `list_datasets` lists for that dataset; any other name (a raw field, `count`) is refused '
+  + 'INVALID_FIELD, naming the members you may use. Answers the rows plus '
   + '`provenance` naming the dataset and the measures used — render the answer\'s source from `provenance` '
   + '(e.g. 「指标：营收（数据集：销售分析）」), and explain a number with its measure\'s description. A dataset that '
   + 'does not exist and one this caller may not query both answer NOT_FOUND. Rows are capped; `truncated` says '
