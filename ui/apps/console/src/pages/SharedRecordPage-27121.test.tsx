@@ -234,14 +234,14 @@ describe('SharedRecordPage — rows read the resolve answer’s fields projectio
     expect(requested).toEqual([RESOLVE_PATH]);
   });
 
-  it('a key with no fields entry keeps the humanized label and the JSON-shape value (control)', async () => {
+  it('a key with no fields entry is not listed: the record page lists declared fields only (objectstack#33346)', async () => {
     shareServer(ACCOUNT, FIELDS);
     renderLink();
 
     await screen.findByText('Shared account');
-    const founded = cellOf('Founded On');
-    expect(founded.textContent).not.toBe('2026-03-15');
-    expect(founded.textContent).not.toBe('');
+    expect(screen.getByText('Account Name', { selector: 'dt' })).toBeTruthy();
+    expect(screen.queryByText('Founded On', { selector: 'dt' })).toBeNull();
+    expect(document.body.textContent).not.toContain('2026-03-15');
   });
 
   it('an answer without fields (an older server) renders exactly as before the projection', async () => {
@@ -274,7 +274,7 @@ describe('SharedRecordPage — a lookup shows a neutral placeholder, never its s
     partner_id: null,
     plan_id: 'plan_mdx_42',
     contact_ids: ['con_a11', 'con_b22'],
-    created_by: 'usr_creator_5',
+    sponsor_id: 'usr_creator_5',
   };
   const OPPORTUNITY_FIELDS = {
     id: { label: 'Record ID', type: 'text' },
@@ -283,7 +283,7 @@ describe('SharedRecordPage — a lookup shows a neutral placeholder, never its s
     partner_id: { label: 'Partner', type: 'lookup', reference: 'account', displayField: 'name' },
     plan_id: { label: 'Plan', type: 'master_detail', reference: 'plan', displayField: 'title' },
     contact_ids: { label: 'Contacts', type: 'lookup', reference: 'contact', multiple: true },
-    created_by: { label: 'Created By', type: 'lookup', reference: 'sys_user' },
+    sponsor_id: { label: 'Sponsor', type: 'lookup', reference: 'sys_user' },
   };
   const STORED_IDS = ['acc_9f3e1c', 'plan_mdx_42', 'con_a11', 'con_b22', 'usr_creator_5'];
 
@@ -293,7 +293,7 @@ describe('SharedRecordPage — a lookup shows a neutral placeholder, never its s
 
     await screen.findByText('Shared opportunity');
     expect(cellOf('Account').textContent).toBe('Linked record');
-    expect(cellOf('Created By').textContent).toBe('Linked record');
+    expect(cellOf('Sponsor').textContent).toBe('Linked record');
     expect(document.body.innerHTML).not.toContain('acc_9f3e1c');
     expect(document.body.innerHTML).not.toContain('usr_creator_5');
     expect(requested).toEqual([RESOLVE_PATH]);

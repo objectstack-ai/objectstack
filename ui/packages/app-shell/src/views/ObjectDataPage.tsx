@@ -713,6 +713,9 @@ export function ObjectDataPage({ dataSource, objects }: any) {
             userFilterSelections={initialUfSelections}
             onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
             onRowClick={handleRecordClick}
+            // objectstack#33317 — a list-only object's rows open nothing, so
+            // the grid draws them no record link and no Open.
+            rowOpensRecord={recordServed}
           />
         )}
       </div>

@@ -837,6 +837,14 @@ export interface MetadataValidationIssue {
   path: string;
   message: string;
   code?: string;
+  /**
+   * The producer's sentence for the person who saved, in the request's
+   * language — `RuntimeAuthoringIssueSchema.userMessage`, which the runtime
+   * authoring gate's 422 `issues[]` carry. Typed from the spec row, so a
+   * rename there stops this compiling. Absent on spec-validation issues and on
+   * any finding the producer wrote no sentence for.
+   */
+  userMessage?: RuntimeAuthoringIssue['userMessage'];
 }
 
 export interface MetadataError extends Error {

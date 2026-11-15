@@ -690,6 +690,9 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
           onSortChange={onConfigChange ? (sort: any) => onConfigChange({ sort }) : undefined}
           onColumnStateChange={onConfigChange ? (st: { order?: string[] }) => { if (st?.order?.length) onConfigChange({ columns: st.order }); } : undefined}
           onRowClick={recordAction === 'none' ? undefined : handleRecordClick}
+          // objectstack#33317 — `none` (authored, or a list-only source)
+          // opens nothing, so the grid draws no record link and no Open.
+          rowOpensRecord={recordAction !== 'none'}
         />
       </div>
       {navOverlay.isOverlay && (

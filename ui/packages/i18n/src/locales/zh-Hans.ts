@@ -2808,6 +2808,8 @@ const zh = {
         ssoBackToConsole: "返回控制台",
         ssoSwitchAccountHint: "“切换账号”会在新标签页中打开你的登录服务并在那里退出登录。之后请在此处使用有权访问的账号重新登录。",
         linkEmailMismatch: "该账号未关联：它的邮箱地址与你当前登录账号的邮箱地址不一致。请关联使用相同邮箱地址的账号。",
+        linkAlreadyLinkedToOtherUser: "该账号未关联：它已关联到本系统中的另一个用户。请关联其他账号，或先以它所关联的用户登录，在那里解除关联。",
+        linkUnableToLink: "无法关联该账号。请确认它的邮箱地址已在该登录服务中完成验证，然后重试。如果仍然失败，请联系管理员。",
         twoFactorInvalidCode: '验证码无效，请检查身份验证器应用后重试。',
         twoFactorInvalidBackupCode: '该备用码无效或已被使用。',
         twoFactorTooManyAttempts: '错误次数过多，请重新使用密码登录。',
@@ -4334,6 +4336,7 @@ const zh = {
       objectsAndFields: '对象与字段',
       views: '视图',
       suggestedField: '补充',
+      suggestedFieldLegend: '标「{{mark}}」的字段是 AI 自行补充的，你没有要求。',
       nameField: '名称：{{field}}',
     },
     build: {

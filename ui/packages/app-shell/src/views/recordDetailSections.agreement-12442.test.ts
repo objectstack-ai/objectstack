@@ -26,8 +26,9 @@
  *   no `record:details` of its own to drift from the runtime's;
  * - an explicit `full`, on an object with no `fieldGroups`: the seed's
  *   `record:details` carries the runtime's sections, written in the persisted
- *   shape (field names), and that shape parses under the spec's
- *   `RecordDetailsProps`;
+ *   shape (field names) and headed by the persisted headings (the "More
+ *   details" locale map, objectstack#33471), and that shape parses under the
+ *   spec's `RecordDetailsProps`;
  * - CONTROL: an explicit `full` on an object with `fieldGroups` seeds the
  *   synthesizer's own `{ group }` references (objectui#11630), its ungrouped
  *   bucket headed (objectstack#33377, pinned in
@@ -52,6 +53,7 @@ import {
   deriveRecordDetailSections,
   deriveStudioDetailSections,
   toAuthoredDetailSections,
+  loadPersistedSectionLabels,
   MORE_DETAILS_DEFAULT_LABEL,
   UNGROUPED_SECTION_DEFAULT_LABEL,
 } from './recordDetailSections';
@@ -152,14 +154,18 @@ describe('objectui#12442 — an explicit full page-create seed carries the runti
 
     const seeded = theDetailsNode(await fullSeedFor(flatDef));
     expect(seeded.properties?.sections, 'the seed wrote a bare record:details').toBeDefined();
-    expect(seeded.properties.sections).toEqual(toAuthoredDetailSections(runtimeSections));
+    const persisted = await loadPersistedSectionLabels(flatDef);
+    expect(seeded.properties.sections).toEqual(
+      toAuthoredDetailSections(deriveRecordDetailSections(flatDef, persisted)),
+    );
 
     // The same members, in the same sections, in the same order as the runtime.
     expect(seeded.properties.sections.map((s: any) => s.fields)).toEqual([
       ['name', 'subject', 'priority', 'account'],
       ['notes'],
     ]);
-    expect(seeded.properties.sections[1]).toMatchObject({ name: 'details', label: 'More details' });
+    // The heading is the runtime's, in every shipped language (objectstack#33471).
+    expect(seeded.properties.sections[1]).toMatchObject({ name: 'details', label: { en: 'More details' } });
   });
 
   it('the seeded sections are spec-legal: they parse under RecordDetailsProps', async () => {
@@ -172,7 +178,7 @@ describe('objectui#12442 — an explicit full page-create seed carries the runti
 
   it('the seed and the runtime build the same record:details node from those sections', async () => {
     const runtimePage = buildDefaultPageSchema(flatDef as any, {
-      sections: toAuthoredDetailSections(deriveRecordDetailSections(flatDef, LABELS)) as any,
+      sections: toAuthoredDetailSections(deriveRecordDetailSections(flatDef, await loadPersistedSectionLabels(flatDef))) as any,
     });
     expect(theDetailsNode(await fullSeedFor(flatDef))).toEqual(theDetailsNode(runtimePage));
   });
