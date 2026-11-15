@@ -94,6 +94,7 @@ import type { RollbackMetaItemRequest } from './protocol-door-requests.js';
 import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { ProtocolHost } from './protocol-host.js';
+import type { RegistryWriteThroughRequest } from './protocol-registry-hydration.js';
 import type { ImportUnmanagedPackageAnswer, InstallPackageStoredRowHook, StoredPackageRow } from './protocol-package-install.js';
 
 /**
@@ -1744,7 +1745,13 @@ export class ProtocolPackageCommitsFacet {
                     // [#33563] The registry's refusal of the restored object is
                     // this item's outcome, not a line on stderr: the row holds
                     // the pre-commit body and the registry does not serve it.
-                    const registryRefusal = await host.applyRegistryWriteThrough({
+                    // [#33851] …and so is a fault of any other type's branch
+                    // (the overlay hydration, the `object_extension`
+                    // registration), which the write-through answers only to a
+                    // caller that asks (`answerFaults`). The request is handed
+                    // whole through the class's forwarder, so it is built as the
+                    // write-through's own request type.
+                    const writeThrough: RegistryWriteThroughRequest = {
                         type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                         name: it.name,
                         item: restored.item.body,
@@ -1757,7 +1764,9 @@ export class ProtocolPackageCommitsFacet {
                         // said "the row's OWN scope" while passing the REQUEST's
                         // org; the resolution above is what makes the comment true.
                         organizationId: null,
-                    });
+                        answerFaults: true,
+                    };
+                    const registryRefusal = await host.applyRegistryWriteThrough(writeThrough);
                     if (registryRefusal) {
                         notApplied.push(
                             'the runtime registry refused to serve the restored body ('

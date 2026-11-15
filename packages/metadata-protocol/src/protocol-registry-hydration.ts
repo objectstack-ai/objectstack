@@ -1458,21 +1458,14 @@ export class ProtocolRegistryHydrationFacet {
      * The orphan adoption ({@link reassignOrphanedMetadata}) calls it for each
      * view row it rebinds, with `reboundFrom`, and [#23646] for each object
      * row, once {@link releaseAdoptedObjectOwner} has handed it the name.
+     *
+     * [#33851] What it answers: the registry's refusal of an object (the
+     * object branch, #33005), and nothing else unless the caller asks
+     * ({@link RegistryWriteThroughRequest.answerFaults}). A non-object branch
+     * that throws logs the fault at `warn` and, for a caller that asked,
+     * answers it in the same shape.
      */
-    static async applyRegistryWriteThrough(host: Pick<ProtocolHost, 'applyObjectRegistryMutation' | 'hydrateOverlayIntoRegistry' | 'registerStoredObjectExtension' | 'registryTakesStoredRows'>, request: {
-            type: string;
-            name: string;
-            item?: any;
-            packageId?: string | null;
-            /** The row's org scope — `null` for an env-wide row. [#6602] */
-            organizationId: string | null;
-            /**
-             * [#23198] The binding the write moved the row from, when it moved it
-             * (an orphan adoption): `null` for the package-less row. See
-             * {@link HydrationOptions}.
-             */
-            reboundFrom?: { readonly packageId: string | null };
-        }): Promise<ObjectRegistryRefusal | undefined> {
+    static async applyRegistryWriteThrough(host: Pick<ProtocolHost, 'applyObjectRegistryMutation' | 'hydrateOverlayIntoRegistry' | 'registerStoredObjectExtension' | 'registryTakesStoredRows'>, request: RegistryWriteThroughRequest): Promise<ObjectRegistryRefusal | undefined> {
         // [#8862] The `|| request.type === 'objects'` limb is GONE — this
         // branch admitted the plural that {@link applyObjectRegistryMutation}
         // then consumed. All four call sites of this method fold at their
@@ -1527,6 +1520,8 @@ export class ProtocolRegistryHydrationFacet {
                 console.warn(
                     `[Protocol] registry write-through failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
                 );
+                // [#33851] …and answered, to a caller that asked.
+                if (request.answerFaults === true) return { error: err };
             }
             return undefined;
         }
@@ -1546,6 +1541,10 @@ export class ProtocolRegistryHydrationFacet {
             console.warn(
                 `[Protocol] registry write-through failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
             );
+            // [#33851] …and answered, to a caller that asked: the write is
+            // still not failed here, the caller decides what the fault means
+            // for its own answer.
+            if (request.answerFaults === true) return { error: err };
         }
         return undefined;
     }
@@ -2473,9 +2472,46 @@ export function objectStorageSyncRefusedNotice(name: string, err: unknown): Runt
  * answers when the registry refused the object it was asked to register: the
  * thrown value, whole. The row is already persisted; this is the one fact the
  * write-through used to keep to a `warn` line.
+ *
+ * [#33851] The write-through answers a non-object branch's fault in this
+ * shape too, to a caller that asked ({@link RegistryWriteThroughRequest.answerFaults}).
  */
 export interface ObjectRegistryRefusal {
     readonly error: unknown;
+}
+
+/**
+ * What {@link ProtocolRegistryHydrationFacet.applyRegistryWriteThrough} is
+ * asked to make live: the row's type, name and body, its binding and scope.
+ */
+export interface RegistryWriteThroughRequest {
+    type: string;
+    name: string;
+    item?: any;
+    packageId?: string | null;
+    /** The row's org scope — `null` for an env-wide row. [#6602] */
+    organizationId: string | null;
+    /**
+     * [#23198] The binding the write moved the row from, when it moved it
+     * (an orphan adoption): `null` for the package-less row. See
+     * {@link HydrationOptions}.
+     */
+    reboundFrom?: { readonly packageId: string | null };
+    /**
+     * [#33851] `true`: a non-object branch whose registration throws (the
+     * `object_extension` registration, the overlay hydration) answers the
+     * fault as the object branch answers the registry's refusal, beside the
+     * `warn` line it logs. `revertCommit` asks, so a revert whose restored
+     * body the registry does not serve answers the item in `failed[]`
+     * (ADR-0067 D3, the method's docblock: a revert that answers success is
+     * one the running process has acted on).
+     *
+     * Left unset, the fault is only logged and the answer is `undefined`, as
+     * before. The save and publish doors leave it unset: they report a
+     * returned refusal as an object's (`object-registry-refused`), and their
+     * answers for every other type do not change.
+     */
+    answerFaults?: boolean;
 }
 
 /**
