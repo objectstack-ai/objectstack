@@ -1,5 +1,110 @@
 # @object-ui/plugin-list
 
+## 18.5.0
+
+### Patch Changes
+
+- beff1fb: fix(plugin-grid, plugin-list, app-shell): a list row whose click opens nothing no longer looks clickable
+  
+  Clause-②: yes (widening) — `ObjectGridComponentProps` (published by `@object-ui/plugin-grid`) and `ListViewProps` (published by `@object-ui/plugin-list`) each gain one optional prop, `rowOpensRecord?: boolean`. Absent, every row renders as before. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  **Rows that open nothing.** A list row opens nothing when its view is authored `navigation: { mode: 'none' }`, or when its object's data API serves no single-record read (a list-only object, such as the SCIM connection credentials in Setup). The grid still drew such a row's first column as a link, and its right-click menu still offered Open and Open in new tab, so a click that did nothing looked like a broken page. The Console's object list, object data page and interface list pages now tell the grid that these rows open nothing (`rowOpensRecord={false}`, handed through `ListView`): the first column, and any column authored `link: true`, show the value as plain text, and the right-click menu offers no Open items. The row's actions (`list_item`) stay in the row menu and the right-click menu. The row click itself still reaches the host, so a Cmd/Ctrl-click on a row of a view authored `none` still opens the record in a new tab, as before. Rows that open a drawer or a page are unchanged.
+- bea3328: fix(plugin-grid, plugin-list, plugin-kanban, app-shell): cards whose click opens nothing no longer look clickable, and a view authored `navigation: { mode: 'none' }` opens no record on a Cmd/Ctrl or middle click
+  
+  Clause-②: yes (widening) — `ObjectGalleryProps` (published by `@object-ui/plugin-list`) and `ObjectKanbanComponentProps` (published by `@object-ui/plugin-kanban`) each gain one optional prop, `rowOpensRecord?: boolean`, the name `ObjectGridComponentProps` and `ListViewProps` already carry. Absent, every card renders as before. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  **Cards that open nothing.** A list's rows open nothing when its view is authored `navigation: { mode: 'none' }`, or when its object's data API serves no single-record read (a list-only object). The grid already drew such rows plain on a desktop; its phone cards, the gallery's cards and the board's cards still drew a pointer and a hover lift, so a tap that did nothing looked like a broken page. `ListView` now hands its `rowOpensRecord` to the gallery and the board as well as the grid, and none of these faces draws a pointer or a hover lift for a card that opens nothing. A board card the reader may not drag is no control at all: no `button` role, no tab stop, no Enter/Space activation and no title hover. A board card the reader may drag keeps its grab cursor and its drag semantics. Card actions (the phone card's "⋮") stay, and the click still reaches the host.
+  
+  **No new tab on an authored `none`.** On the Console's object list a Cmd/Ctrl-click or a middle click on a row of a view authored `navigation: { mode: 'none' }` opened the record in a new tab, though the view declares no navigation. It now opens nothing, like a plain click. This supersedes the sentence in the `33317-row-opens-nothing-plain` note that says such a click "still opens the record in a new tab, as before". Rows that open a drawer or a page still open a new tab on a Cmd/Ctrl or middle click.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [f530d25]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [f5121e8]
+- Updated dependencies [b462444]
+- Updated dependencies [82838e8]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [ba32e79]
+- Updated dependencies [9317833]
+- Updated dependencies [8ed2b89]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [a9da547]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [4c32b96]
+- Updated dependencies [12d090d]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [d574341]
+- Updated dependencies [bc50d11]
+- Updated dependencies [de476f1]
+- Updated dependencies [f068cde]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [beff1fb]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [159dbe3]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [020ce3d]
+- Updated dependencies [ee627c6]
+- Updated dependencies [6446935]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [bea3328]
+- Updated dependencies [89defde]
+- Updated dependencies [f06f064]
+- Updated dependencies [06e53a7]
+- Updated dependencies [5604aeb]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @object-ui/i18n@18.5.0
+  - @object-ui/fields@18.5.0
+  - @object-ui/plugin-grid@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/plugin-detail@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/mobile@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

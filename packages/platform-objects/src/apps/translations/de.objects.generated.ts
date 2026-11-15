@@ -218,6 +218,54 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      add_sso_user: {
+        label: "Benutzer hinzufügen",
+        description: "Fügen Sie eine Person vor ihrer ersten Anmeldung per E-Mail-Adresse hinzu. Sie meldet sich über den Identitätsanbieter Ihrer Organisation an; hier wird kein Passwort gesetzt.",
+        params: {
+          positions: {
+            label: "Position",
+            helpText: "Optional. Die Position, die diese Person ab dem Hinzufügen innehat."
+          },
+          permissionSets: {
+            label: "Berechtigungssatz",
+            helpText: "Optional. Weist der Person diesen Berechtigungssatz zu, damit sie ihre Apps bei der ersten Anmeldung öffnen kann."
+          },
+          manager: {
+            label: "E-Mail der Führungskraft",
+            helpText: "Optional. Die E-Mail-Adresse der Führungskraft dieser Person, ein Benutzer dieser Umgebung."
+          }
+        },
+        resultDialog: {
+          title: "Benutzer hinzugefügt",
+          acknowledge: "Fertig",
+          fields: {
+            email: "E-Mail",
+            notApplied: "Bereits ausstehend, daher nicht übernommen (am Datensatz festlegen)",
+            managerError: "Führungskraft",
+            "host.reason": "Einladung nicht gesendet"
+          }
+        }
+      },
+      import_sso_users: {
+        label: "Benutzer importieren",
+        description: "Fügen Sie viele Personen auf einmal aus CSV-Text hinzu. Jede Zeile wird einzeln hinzugefügt, eine fehlerhafte Zeile schlägt also allein fehl. Sie melden sich über den Identitätsanbieter Ihrer Organisation an; hier wird kein Passwort gesetzt.",
+        params: {
+          csv: {
+            label: "CSV",
+            helpText: "Eine Kopfzeile, dann eine Person pro Zeile, höchstens 500. Spalten: email, name, positions und permission_sets (Maschinennamen, durch ; getrennt) sowie manager_id (die E-Mail-Adresse der Führungskraft)."
+          }
+        },
+        resultDialog: {
+          title: "Import abgeschlossen",
+          acknowledge: "Fertig",
+          fields: {
+            "summary.added": "Hinzugefügt",
+            "summary.alreadyPending": "Bereits ausstehend, erneut benachrichtigt",
+            "summary.failed": "Nicht hinzugefügt",
+            rows: "Ergebnis pro Zeile"
+          }
+        }
+      },
       set_user_password: {
         label: "Passwort festlegen",
         successMessage: "Passwort aktualisiert",

@@ -34,6 +34,7 @@ import {
   chainKeyOf,
   checkpointBodyFromRow,
   checkpointDigest,
+  checkpointPartOf,
   checkpointRow,
   signedBodyBytes,
   SignedBodyError,
@@ -44,8 +45,10 @@ import { dropAuditSealSecret, writeAuditSealSecret, type SealStorageDriver, type
 
 /**
  * ADR-0154 D3 — the sealer: after a settle lag, one window at a time, under
- * the cluster lock `audit.sealer`, it seals each sealed object's rows into one
- * signed checkpoint per chain (organization, or the deployment) per window.
+ * the cluster lock `audit.sealer`, it seals each sealed object's rows into
+ * signed checkpoints per chain (organization, or the deployment) per window:
+ * consecutive parts of at most {@link AUDIT_SEAL_MAX_LEAVES} leaves each
+ * (S7, D4 as amended 2026-11-14), cut in D1 order, the last one final.
  *
  * A pass, per sealed object:
  *
@@ -62,6 +65,13 @@ import { dropAuditSealSecret, writeAuditSealSecret, type SealStorageDriver, type
  *
  * Each checkpoint carries the sealed-through watermark: the end of the last
  * window the sealer had completed for every chain when it wrote it.
+ *
+ * S7: a pass that stops mid-window leaves the chain's last `window` part
+ * non-final; the next pass resumes that window as further `window` parts,
+ * counting on from that part's index, so the rest is never sealed as `late`.
+ * A window is read twice: once for the ids and instants of its rows, then
+ * each part's rows by id, hashed under that part's own seed (D2) — so one
+ * checkpoint's work is bounded by N, whatever its window holds.
  *
  * S4 (seat ruling 6884540128 item 2): a fault is isolated to the smallest
  * thing it belongs to. A chain-local fault — a row a canonical rule refuses,
@@ -91,6 +101,24 @@ const REPORT_REPEAT_MS = 60 * 60 * 1000;
 const PAGE_SIZE = 500;
 /** Windows sealed per object per pass; a backlog continues on the next pass, which follows at once. */
 const MAX_WINDOWS_PER_PASS = 24;
+/**
+ * S7 (ADR-0154 D4 amended): the most leaves one checkpoint holds. A window
+ * holding more seals into consecutive parts. A fixed constant, not a knob.
+ */
+export const AUDIT_SEAL_MAX_LEAVES = 10_000;
+/**
+ * review#3 S1: windows a pass may walk that seal nothing — every row of them
+ * belongs to a chain sealed past them, or to a chain skipped in this pass —
+ * while a chain is skipped, before it stops walking. Only a skipped chain
+ * holds the floor back so that such windows recur; this bounds what each pass
+ * re-reads while it stays skipped. One late horizon's worth of windows.
+ *
+ * With no chain skipped the walk is not cut: such windows are then only what
+ * a chain skipped before (fixed since, or with nothing left to seal) left
+ * behind, and walking on to the next window that seals something is what
+ * moves the floor past them. Cut there, the floor would never move again.
+ */
+export const AUDIT_SEAL_MAX_IDLE_WINDOWS_PER_PASS = AUDIT_SEAL_LATE_HORIZON_MS / AUDIT_SEAL_WINDOW_MS;
 /** Sign attempts of one checkpoint before the pass gives up (the S1 loop). */
 const MAX_SIGN_ATTEMPTS = 3;
 /** The key id a body is built with before the signer has named one. */
@@ -121,6 +149,12 @@ export interface AuditSealerOptions {
   cluster?: () => IClusterService | undefined;
   logger: AuditSealerLogger;
   now?: () => number;
+  /**
+   * Test seam, like `now`: a smaller {@link AUDIT_SEAL_MAX_LEAVES}, so a test
+   * can cut a window into parts with a handful of rows. `AuditPlugin` never
+   * passes it, and nothing an operator or a tenant sets reaches it.
+   */
+  maxLeaves?: number;
 }
 
 /** A sealed object, as a pass reads it. */
@@ -136,12 +170,22 @@ interface ChainHead {
   readonly digest: string;
 }
 
-/** One chain's rows of one window, as leaves. */
-interface ChainLeaves {
+/** One chain's rows of one window, as read: each row's id and canonical `created_at`, not yet hashed. */
+interface ChainRows {
   readonly tenantId: string | null;
-  readonly seed: Buffer;
-  readonly leaves: Array<{ id: string; at: string; hash: Buffer }>;
+  readonly rows: Array<{ id: string; at: string }>;
 }
+
+/** A row as a leaf of one checkpoint, under that checkpoint's seed. */
+interface Leaf {
+  readonly id: string;
+  readonly at: string;
+  readonly hash: Buffer;
+}
+
+/** D1 leaf order: `(created_at, id)`. */
+const leafOrder = (a: { id: string; at: string }, b: { id: string; at: string }): number =>
+  a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 
 const iso = (ms: number): string => new Date(ms).toISOString();
 
@@ -257,6 +301,19 @@ export class AuditSealer {
     }
   }
 
+  /**
+   * review#3 S1: the walk stopped on its bound of windows that seal nothing.
+   * While a skipped chain holds the floor back, windows past that bound wait
+   * for it; this says so at `error`, once per {@link REPORT_REPEAT_MS}.
+   */
+  private reportIdleStop(object: string, stop: { at: number; windows: number }, skipped: ReadonlyMap<string, unknown>): void {
+    const chains = [...skipped.keys()].map((key) => `'${key}'`).join(', '); // never empty: the bound counts only while one is skipped
+    this.report(`idle:${object}`, () =>
+      `AuditSealer: '${object}' walked ${stop.windows} windows that seal nothing in one pass and stopped there — ` +
+      `its rows from the window of ${iso(stop.at)} on are NOT being sealed while the skipped chain(s) ${chains} ` +
+      'hold its sealed-through watermark back. Fix the chain fault reported for it; sealing then catches up.');
+  }
+
   /** The sealed objects the registry holds that can be sealed; each that cannot is reported. */
   private plans(): SealPlan[] {
     const plans: SealPlan[] = [];
@@ -343,6 +400,7 @@ export class AuditSealer {
         } finally {
           written += pass?.written ?? 0;
           if (pass) this.reportSkipped(plan.name, pass.skipped);
+          if (pass?.idleStop) this.reportIdleStop(plan.name, pass.idleStop, pass.skipped);
         }
       }
       return written;
@@ -365,6 +423,10 @@ class ObjectPass {
   private readonly cursors = new Map<string, number>();
   /** S4: the chains a chain-local fault put out for the rest of this pass, and the window each stays unsealed from. */
   readonly skipped = new Map<string, { fault: string; from: number }>();
+  /** S7: the chains whose newest `window` part is not final — the window they resume, and its next part. */
+  private readonly resume = new Map<string, { window: number; next: number }>();
+  /** review#3 S1: where the walk stopped on its bound of windows that seal nothing, if it did. */
+  idleStop: { at: number; windows: number } | null = null;
   /** Checkpoints this pass wrote, counted as each lands. */
   written = 0;
   /** The key id the last checkpoint of this pass was signed under: the next body's expectation. */
@@ -407,17 +469,30 @@ class ObjectPass {
       const recent = await this.checkpoints.find(AUDIT_CHECKPOINT_OBJECT, {
         where: { sealed_object: this.plan.name, kind: 'window', window_start: { $gte: iso(this.floor) } },
       });
+      // S7: a chain whose newest `window` part is not final resumes that window, from the next part.
+      const newest = new Map<string, { start: number; part: number; final: boolean }>();
       for (const row of recent) {
         const key = String(row.chain_key);
         let start: number;
+        let part: { part_index: number; final_part: boolean };
         try {
           start = Date.parse(canonicalDatetime(row.window_start, 'window_start'));
+          // A checkpoint written before the amendment is one part, final.
+          part = checkpointPartOf(row) ?? { part_index: 0, final_part: true };
         } catch (err) {
           this.skip(key, err, this.floor);
           continue;
         }
-        this.cursors.set(key, Math.max(this.cursors.get(key) ?? start + AUDIT_SEAL_WINDOW_MS, start + AUDIT_SEAL_WINDOW_MS));
+        const seen = newest.get(key);
+        if (!seen || start > seen.start || (start === seen.start && part.part_index > seen.part)) {
+          newest.set(key, { start, part: part.part_index, final: part.final_part });
+        }
         lastWindow = Math.max(lastWindow ?? start, start);
+      }
+      for (const [key, { start, part, final }] of newest) {
+        if (this.skipped.has(key)) continue;
+        this.cursors.set(key, final ? start + AUDIT_SEAL_WINDOW_MS : start);
+        if (!final) this.resume.set(key, { window: start, next: part + 1 });
       }
     }
     const due = windowOf(this.now - AUDIT_SEAL_SETTLE_MS);
@@ -431,13 +506,21 @@ class ObjectPass {
       cursor = windowOf(oldest);
     }
     // Windows oldest first from the floor; each chain is sealed from its own cursor. A window that only re-reads
-    // chains already sealed (or skipped) past it does not count toward the pass's windows.
-    for (let n = 0; n < MAX_WINDOWS_PER_PASS;) {
+    // chains already sealed (or skipped) past it does not count toward the pass's windows; while a chain is
+    // skipped it counts toward its own bound (review#3 S1): a chain that stays skipped holds the floor, and every
+    // pass walks on from there. With none skipped it counts toward nothing, so the walk reaches the next window
+    // that seals something and the floor moves on.
+    for (let n = 0, idle = 0; n < MAX_WINDOWS_PER_PASS;) {
       const next = await this.firstRowAt(cursor, due);
       if (next === null) break;
+      if (idle >= AUDIT_SEAL_MAX_IDLE_WINDOWS_PER_PASS) {
+        this.idleStop = { at: windowOf(next), windows: idle };
+        break;
+      }
       const start = windowOf(next);
       const chains = await this.readWindow(start, (row) => start >= this.cursorOf(chainKeyOf(tenantOf(row))));
       if (chains.size > 0) n += 1;
+      else if (this.skipped.size > 0) idle += 1;
       await this.writeChains(chains, start, 'window', Math.max(this.watermark ?? Number.NEGATIVE_INFINITY, Math.min(start, this.stuckFrom())));
       cursor = start + AUDIT_SEAL_WINDOW_MS;
     }
@@ -564,8 +647,8 @@ class ObjectPass {
    * is read once though both stores hold it (between the archive's copy and
    * its hot delete), and only in the window its canonical `created_at` names.
    */
-  private async readWindow(start: number, accept: (row: Row) => boolean): Promise<Map<string, ChainLeaves>> {
-    const chains = new Map<string, ChainLeaves>();
+  private async readWindow(start: number, accept: (row: Row) => boolean): Promise<Map<string, ChainRows>> {
+    const chains = new Map<string, ChainRows>();
     const seen = new Set<string>();
     const range = { created_at: { $gte: iso(start), $lt: iso(start + AUDIT_SEAL_WINDOW_MS) } };
     for (const store of this.stores()) {
@@ -592,11 +675,11 @@ class ObjectPass {
             seen.add(id);
             let chain = chains.get(key);
             if (!chain) {
-              chain = { tenantId, seed: generateCheckpointSeed(), leaves: [] };
+              chain = { tenantId, rows: [] };
               chains.set(key, chain);
             }
-            const leaf = leafInput(row, this.plan.columns, this.plan.fields, columnSaltsOf(chain.seed, this.plan.name));
-            chain.leaves.push({ id, at, hash: leafHash(leaf) });
+            // S7: ids and instants only; each part's rows are read again by id and hashed under its own seed.
+            chain.rows.push({ id, at });
           } catch (err) {
             // S4: a row a canonical rule refuses skips its chain, and only its chain.
             if (!(err instanceof CanonicalFormError)) throw err;
@@ -633,21 +716,91 @@ class ObjectPass {
     return head;
   }
 
-  private async writeChains(chains: Map<string, ChainLeaves>, start: number, kind: AuditCheckpointKind, watermark: number): Promise<void> {
-    // `readWindow` makes a chain only with its first leaf, so no checkpoint is empty (D3).
+  private async writeChains(chains: Map<string, ChainRows>, start: number, kind: AuditCheckpointKind, watermark: number): Promise<void> {
+    // `readWindow` makes a chain only with its first row, so no checkpoint is empty (D3).
     for (const key of [...chains.keys()].sort()) {
       if (this.skipped.has(key)) continue;
       try {
-        await this.writeCheckpoint(key, chains.get(key)!, start, kind, watermark);
+        await this.writeChain(key, chains.get(key)!, start, kind, watermark);
       } catch (err) {
-        // S4: only a chain-local fault of this chain skips it; every other fault stops the object's pass.
-        if (!(err instanceof ChainFault) || err.chainKey !== key) throw err;
+        // S4: only a chain-local fault of this chain skips it — a malformed checkpoint of it, or a row of it a
+        // canonical rule refuses as its part is hashed; every other fault stops the object's pass.
+        if (!(err instanceof CanonicalFormError) && !(err instanceof ChainFault && err.chainKey === key)) throw err;
         this.skip(key, err, start);
         continue;
       }
-      if (kind === 'window') this.cursors.set(key, start + AUDIT_SEAL_WINDOW_MS);
+      if (kind === 'window') {
+        this.cursors.set(key, start + AUDIT_SEAL_WINDOW_MS);
+        this.resume.delete(key);
+      }
     }
     if (kind === 'window') this.watermark = Math.max(this.watermark ?? watermark, watermark);
+  }
+
+  /**
+   * S7: one chain's rows of window `start` as consecutive checkpoints of at
+   * most N leaves, cut in D1 order, the last one final. A `window` sealing
+   * that resumes a window a stopped pass left continues its part count and
+   * seals only the rows no checkpoint lists yet.
+   */
+  private async writeChain(key: string, chain: ChainRows, start: number, kind: AuditCheckpointKind, watermark: number): Promise<void> {
+    await this.headOf(key);
+    const resumed = kind === 'window' ? this.resume.get(key) : undefined;
+    let rows = chain.rows;
+    if (kind === 'late' || resumed?.window === start) {
+      // N1: the window's checkpoints, re-read once this chain's head is known: a row another sealer listed
+      // since this pass read the window's lists is not sealed twice. One stored after the head was known
+      // takes a sequence at or past this one, so the unique index refuses whichever insert comes second.
+      // A resumed window drops the rows its earlier parts list the same way.
+      const listed = await this.listedIn(start, key);
+      rows = rows.filter((r) => !listed.has(r.id));
+    }
+    const ordered = [...rows].sort(leafOrder);
+    const size = Math.max(1, Math.floor(this.options.maxLeaves ?? AUDIT_SEAL_MAX_LEAVES));
+    const first = resumed?.window === start ? resumed.next : 0;
+    for (let at = 0; at < ordered.length; at += size) {
+      const seed = generateCheckpointSeed();
+      const leaves = await this.leavesOf(key, seed, ordered.slice(at, at + size), start);
+      // Every row of the part went since the window was read: nothing is written, and its index is not reused, so
+      // part_index may skip one, and a window whose last part emptied has no final part. Nothing reads either.
+      if (leaves.length === 0) continue;
+      await this.writeCheckpoint(key, chain.tenantId, seed, leaves, start, kind, watermark, {
+        part_index: first + at / size,
+        final_part: at + size >= ordered.length,
+      });
+    }
+  }
+
+  /**
+   * The leaves of one part: its rows read again by id, from the hot store and
+   * then the archive, hashed under the part's seed, in D1 order. A row gone
+   * since the window was read, or whose `created_at` or chain moved since, is
+   * left out: it is no longer a row of this chain's window.
+   */
+  private async leavesOf(key: string, seed: Buffer, part: ReadonlyArray<{ id: string }>, start: number): Promise<Leaf[]> {
+    const ids = part.map((r) => r.id);
+    const byId = new Map<string, Row>();
+    for (const store of this.stores()) {
+      for (let i = 0; i < ids.length; i += PAGE_SIZE) {
+        const batch = ids.slice(i, i + PAGE_SIZE).filter((id) => !byId.has(id));
+        if (batch.length === 0) continue;
+        await this.lock.renew(LOCK_TTL_MS);
+        for (const row of await this.find(store, { where: { id: { $in: batch } } })) {
+          const id = rowIdOf(row);
+          if (!byId.has(id)) byId.set(id, row);
+        }
+      }
+    }
+    const saltOf = columnSaltsOf(seed, this.plan.name);
+    const leaves: Leaf[] = [];
+    for (const id of ids) {
+      const row = byId.get(id);
+      if (!row) continue;
+      const at = canonicalDatetime(row.created_at, `${id}.created_at`);
+      if (windowOf(Date.parse(at)) !== start || chainKeyOf(tenantOf(row)) !== key) continue;
+      leaves.push({ id, at, hash: leafHash(leafInput(row, this.plan.columns, this.plan.fields, saltOf)) });
+    }
+    return leaves.sort(leafOrder);
   }
 
   /**
@@ -670,33 +823,34 @@ class ObjectPass {
     throw new Error(`the checkpoint signer answered a different key id on each of ${MAX_SIGN_ATTEMPTS} attempts`);
   }
 
-  private async writeCheckpoint(chainKey: string, chain: ChainLeaves, start: number, kind: AuditCheckpointKind, watermark: number): Promise<void> {
+  private async writeCheckpoint(
+    chainKey: string,
+    tenantId: string | null,
+    seed: Buffer,
+    ordered: readonly Leaf[],
+    start: number,
+    kind: AuditCheckpointKind,
+    watermark: number,
+    part: { readonly part_index: number; readonly final_part: boolean },
+  ): Promise<void> {
     const { engine, crypto } = this.options;
     const head = await this.headOf(chainKey);
-    let leaves = chain.leaves;
-    if (kind === 'late') {
-      // N1: the window's checkpoints, re-read once this chain's head is known: a row another sealer listed
-      // since this pass read the window's lists is not sealed twice. One stored after the head was known
-      // takes a sequence at or past this one, so the unique index refuses whichever insert comes second.
-      const listed = await this.listedIn(start, chainKey);
-      leaves = leaves.filter((leaf) => !listed.has(leaf.id));
-      if (leaves.length === 0) return;
-    }
-    const ordered = [...leaves].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const sequence = head ? head.sequence + 1 : 0;
     // Q6: an over-long coordinate is refused here, before anything is encrypted or written.
-    const context = checkpointSeedContext(this.plan.name, chain.tenantId, sequence);
+    const context = checkpointSeedContext(this.plan.name, tenantId, sequence);
     await this.lock.renew(LOCK_TTL_MS);
-    const handle = await crypto!.encrypt(encodeCheckpointSeed(chain.seed), context);
+    const handle = await crypto!.encrypt(encodeCheckpointSeed(seed), context);
     await writeAuditSealSecret(engine, handle, context);
     let signed: { body: CheckpointSignedBody; keyId: string; signature: string };
     try {
       const sealedAt = iso((this.options.now ?? Date.now)());
       signed = await this.signBody((signingKeyId) => ({
         sealed_object: this.plan.name,
-        tenant_id: chain.tenantId,
+        tenant_id: tenantId,
         sequence,
         kind,
+        part_index: part.part_index,
+        final_part: part.final_part,
         window_start: iso(start),
         window_end: iso(start + AUDIT_SEAL_WINDOW_MS),
         sealed_through: iso(watermark),
@@ -713,9 +867,17 @@ class ObjectPass {
       }));
       if (!this.lock.isHeld()) throw new Error('the audit.sealer lock lapsed before the checkpoint was written');
       // S1: the chain's window head, re-read under the lease: a window another sealer sealed (or passed)
-      // since this pass began is not sealed again. Windows of a chain are sealed oldest first.
-      if (kind === 'window' && (await this.storedCheckpoint(chainKey, { kind: 'window', window_start: { $gte: iso(start) } }))) {
-        throw new Error(`chain '${chainKey}' already holds a window checkpoint at or after ${iso(start)}; it is not sealed twice`);
+      // since this pass began is not sealed again. Windows of a chain are sealed oldest first, and the parts of
+      // one window in order (S7), so only a later window or a part of this one at this index or past it refuses.
+      // A checkpoint of this window written before the amendment is the whole window; its part index is NULL,
+      // which no comparison matches on SQL (`NULL >= 0` is not true), so it is matched as NULL.
+      const thisWindow = { $gte: iso(start), $lt: iso(start + AUDIT_SEAL_WINDOW_MS) };
+      if (kind === 'window' && (await this.storedCheckpoint(chainKey, { kind: 'window', $or: [
+        { window_start: { $gte: iso(start + AUDIT_SEAL_WINDOW_MS) } },
+        { window_start: thisWindow, part_index: { $gte: part.part_index } },
+        { window_start: thisWindow, part_index: { $null: true } },
+      ] }))) {
+        throw new Error(`chain '${chainKey}' already holds a window checkpoint at or after part ${part.part_index} of ${iso(start)}; it is not sealed twice`);
       }
     } catch (err) {
       // No insert was attempted, so nothing names the seed.

@@ -169,13 +169,21 @@ async function loadActions(): Promise<{ files: number; actions: FirstPartyAction
 }
 
 /** Every capability flag on, so no feature term hides the standing's verdict. */
-const FEATURES = {
+const CAPABILITIES = {
   organization: true, multiOrgEnabled: true, twoFactor: true,
   oidcProvider: true, admin: true, phoneNumber: true, apiKey: true, sso: true,
-  // The managed mode off. It is hide-when-on, so ON would hide `create_user`
-  // and `set_user_password` from the platform admin too, by design.
-  cloudManaged: false,
 };
+
+/**
+ * Both managed modes. `cloudManaged` hides `create_user` and
+ * `set_user_password` when on and offers `add_sso_user` / `import_sso_users`
+ * only when on, by design, so a member counts as offered when ONE mode offers
+ * it, and no refused principal may be offered a member in EITHER mode.
+ */
+const MODES: ReadonlyArray<Record<string, boolean>> = [
+  { ...CAPABILITIES, cloudManaged: false },
+  { ...CAPABILITIES, cloudManaged: true },
+];
 
 type Subject = { id: string; email: string; isPlatformAdmin: boolean; positions: string[] };
 
@@ -194,16 +202,18 @@ const REFUSED: ReadonlyArray<[string, Subject]> = [
   ],
 ];
 
-/** The console's binding: the whole scope as `extra`, one subject under every alias. */
+/** The console's binding: the whole scope as `extra`, one subject under every alias; offered in either managed mode. */
 function offered(source: string, subject: Subject, record: Record<string, unknown>): boolean {
-  const r = celEngine.evaluate(
-    { dialect: 'cel', source },
-    {
-      record,
-      extra: { current_user: subject, user: subject, ctx: { user: subject }, os: { user: subject }, features: FEATURES },
-    },
-  );
-  return r.ok && r.value === true;
+  return MODES.some((features) => {
+    const r = celEngine.evaluate(
+      { dialect: 'cel', source },
+      {
+        record,
+        extra: { current_user: subject, user: subject, ctx: { user: subject }, os: { user: subject }, features },
+      },
+    );
+    return r.ok && r.value === true;
+  });
 }
 
 /**
@@ -246,6 +256,8 @@ describe('platform-admin-gated doors: every first-party action offers itself to 
         'sys_user.unban_user',
         'sys_user.unlock_user',
         'sys_user.create_user',
+        'sys_user.add_sso_user',
+        'sys_user.import_sso_users',
         'sys_user.set_user_password',
         'sys_user.impersonate_user',
         'sys_user.set_user_manager',

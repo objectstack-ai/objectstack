@@ -36,6 +36,9 @@ function makeFakeEngine(seedCommits: any[] = []) {
       (r as any).logLevel = 'silent';
       return r;
     })(),
+    // [#33563] The restore limb syncs a restored object's storage; a double
+    // without the door reads as a refused sync, which now fails the item.
+    syncObjectSchema: vi.fn(async () => true),
     insert: vi.fn(async (table: string, data: any) => {
       if (table === 'sys_metadata_commit') commits.push(data);
     }),
