@@ -137,13 +137,15 @@ const propsOf = (node: Record<string, any>): Record<string, any> =>
  *
  * ⛔ Not a second copy of the rule: it is the count prefetch's
  * (`relatedCountTargetOf`, plugin-detail), reached through the walker the
- * package exports, handed this one node with its gate and child slots left
- * out, so the walk answers for this node alone (`[target]` or `[]`). A list
- * the rule leaves out reads for itself through its block, as it did before
- * the payload.
+ * package exports, handed this one node as a bare `{ type, properties }`
+ * with its child slots left out, so the walk answers for this node alone
+ * (`[target]` or `[]`) and the walker's `visibleWhen` skip, which reads the
+ * outer node only, keeps a gated list in the request as before. A list the
+ * rule leaves out reads for itself through its block, as it did before the
+ * payload.
  */
 function pageAnswersRelatedList(p: Record<string, any>): boolean {
-  const { visibleWhen: _gate, children: _children, items: _items, regions: _regions, components: _components, ...own } = p;
+  const { children: _children, items: _items, ...own } = p;
   return relatedCountTargetsIn({ type: 'record:related_list', properties: own }).length === 1;
 }
 

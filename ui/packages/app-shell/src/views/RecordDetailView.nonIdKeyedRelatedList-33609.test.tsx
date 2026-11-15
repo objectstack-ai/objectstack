@@ -301,6 +301,15 @@ describe('objectstack#33609 — a related list keyed by a parent lookup does not
     // The id-keyed list draws its rows (its total is the payload's; a full
     // list past the payload's three rows reads its own window, as before).
     expect(await screen.findByText('Order task one', undefined, { timeout: 5000 })).toBeInTheDocument();
+
+    // The plan's lines read for themselves, filtered by the order's STORED
+    // plan id although the page record carries `selected_plan` expanded, and
+    // draw their rows.
+    const lineReads = held.filter((h) => h.method === 'GET' && objectOf(h) === PLAN_LINE);
+    expect(lineReads.map((h) => h.path).filter((path) => path.includes(`"allocation_plan","=","${PLAN_ID}"`))).not.toEqual([]);
+    expect(lineReads.filter((h) => h.path.includes('[object Object]'))).toEqual([]);
+    expect(await screen.findByText('Plan line alpha', undefined, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByText('Plan line beta')).toBeInTheDocument();
   });
 });
 
