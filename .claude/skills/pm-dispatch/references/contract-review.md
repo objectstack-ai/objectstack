@@ -33,9 +33,9 @@
 - L2 记录 = 一条评论落 PR 或卡,席内与各子代理同形;散文、dev 自评、`os-dev-report` 不算。
 - 同形 = `## Contract review` 题头之下 `Head-sha:` 行独占码段、①②③逐项、独立性对、PASS/FAIL。
 - 同形含首行 `Served-tier:`:值为该面所定档常量名 `CONTRACT_REVIEW_TIER` 或 `TIER_DEFAULT`;无此行不
-  成裁决;模板 `node scripts/pm/record-recognisers.mjs --template`;前者只经写工具带 `--tier-evidence=`
-  贴:子代理(调用显式传该档 model)给其输出文件,卡线程或席内 L2 审核给本会话
-  `~/.claude/projects/*/<id>.jsonl`;`verify-review-tier.mjs` 拒即重跑 ⛔ 不改档名。
+  成裁决;模板 `node scripts/pm/record-recognisers.mjs --template`;前者只经写工具带 `--tier-evidence=`贴:
+  子代理(显式传该档 model)给输出文件;卡线程或席内 L2 未起他 agent、未发消息、未调 Skill
+  才给本会话 `~/.claude/projects/*/<id>.jsonl`;`verify-review-tier.mjs` 拒即子代理重跑 ⛔ 不改档名。
 - ④ 设计判断欠 schema、governed 规则文本、收窄三面:逐 `hits` 文件判改动对所引代码与
   验收场景是否成立,ADR 另判首个消费者与执行计划;①–④ 合称完整 L2,余面同形无 ④。
 - 实质 head 各欠一轮完整 L2,发现逐条定 must-fix/should-fix/nit(无碍正确与契约);有前两级才由
