@@ -48,15 +48,28 @@ export const hookForm = defineForm({
         },
         // The catalogue is a record keyed by the code, and an entry has no
         // member that echoes its key — so the row takes the key-only record
-        // control, which never writes the key into the entry (#26835).
+        // control, which never writes the key into the entry (#26835). An
+        // entry's `reasons` is the same shape one level down (keyed by the
+        // reason, each `{ message }`), so it takes the same control; the key
+        // rule each level checks is the one its served schema declares.
         {
           field: 'refusals',
           type: 'record',
           widget: 'key-only-record',
           helpText: 'Refusal catalogue, keyed by the SCREAMING_SNAKE code the body throws (e.g. CLEAN_VERSION_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. JavaScript (L2) bodies only',
           fields: [
-            { field: 'message', type: 'textarea', required: true, helpText: 'The sentence the user reads when the body throws this code — plain text, with no placeholders' },
+            { field: 'message', type: 'textarea', required: true, helpText: 'The sentence the user reads when the body throws this code. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param' },
             { field: 'status', type: 'number', helpText: 'HTTP status of the refusal (400–499). Absent: 400' },
+            {
+              field: 'reasons',
+              type: 'record',
+              widget: 'key-only-record',
+              helpText: 'Further sentences under this same code, keyed by the snake_case reason the body throws beside the code ({ code, reason }). The wire code and status stay this entry\'s; a reason not declared here is refused. Absent: a thrown reason is not read',
+              fields: [
+                { field: 'message', type: 'textarea', required: true, helpText: 'The sentence the user reads when the body throws this reason under the code. Its {{ }} holes follow the entry\'s params' },
+              ],
+            },
+            { field: 'params', type: 'tags', helpText: 'Names the sentences may fill (e.g. state): the body throws { code, params: { state } }, and a {{ state }} hole renders it. Absent: the sentences are plain text' },
           ],
         },
       ],

@@ -81,7 +81,12 @@
  */
 
 import { StandardErrorCode } from '@objectstack/spec/api';
-import { recordCurrencyFollowedCodeError, recordCurrencyUnfollowedRollupError } from '@objectstack/spec/data';
+import {
+  recordCurrencyDynamicRollupNotHomeError,
+  recordCurrencyFollowedCodeError,
+  recordCurrencyUnfollowedRollupError,
+  storedHomeAmountSourceOf,
+} from '@objectstack/spec/data';
 import { recordCurrencyFieldOf, recordCurrencyPathOf, type RecordCurrencyPath } from './validation/record-currency-code.js';
 
 /**
@@ -400,9 +405,9 @@ export function recordCurrencySummaryRefusal(
 }
 
 /**
- * [ADR-0144 D2 and D6, amended] A declaration that claims a currency it does
- * not follow, refused at registration: the two cross-object halves
- * `defineStack` judges where a stack holds both objects
+ * [ADR-0144 D2, D6 and D8 rule 5, amended] A declaration that claims a
+ * currency it does not follow, refused at registration: the cross-object
+ * halves `defineStack` judges where a stack holds both objects
  * (`collectRecordCurrencyPathErrors`), for the single-object save that holds
  * one, in the same words (`@objectstack/spec/data`'s
  * `record-currency-path.ts`). See {@link recordCurrencyFollowRefusal}.
@@ -415,7 +420,7 @@ export class RecordCurrencyFollowRefusedError extends Error {
   readonly httpStatus = 422;
   /** The object declaring the refused field (the child, for an amount; the parent, for a roll-up). */
   readonly objectName: string;
-  /** The refused field: a record-mode amount following its parent, or a `record` roll-up. */
+  /** The refused field: a record-mode amount following its parent, or a `record` or `dynamic` roll-up. */
   readonly fieldName: string;
 
   constructor(objectName: string, fieldName: string, message: string) {
@@ -456,6 +461,16 @@ function declaresRecordCurrency(def: unknown): boolean {
   return config !== null && typeof config === 'object' && (config as { currencyMode?: unknown }).currencyMode === 'record';
 }
 
+/**
+ * A `summary` field declaring `currencyConfig.currencyMode: 'dynamic'`, or a
+ * `currencyConfig` naming no mode, which the spec parses as `dynamic`.
+ */
+function declaresDynamicCurrency(def: unknown): boolean {
+  const config = (def as { currencyConfig?: unknown } | null)?.currencyConfig;
+  return config !== null && typeof config === 'object'
+    && ((config as { currencyMode?: unknown }).currencyMode ?? 'dynamic') === 'dynamic';
+}
+
 /** How {@link recordCurrencyFollowRefusal} reads the registry. */
 export interface RecordCurrencyFollowRegistryView {
   /** A REGISTERED object by name, as served. */
@@ -490,7 +505,17 @@ export interface RecordCurrencyFollowRegistryView {
  *   registration with the child registered, and at the child's with the
  *   parent registered. A child amount in its own record currency, or
  *   following another record, is D6's ({@link recordCurrencySummaryRefusal}),
- *   which refuses any such roll-up whatever it declares.
+ *   which refuses any such roll-up whatever it declares;
+ * - (d) a `summary` declaring `currencyMode: 'dynamic'` (or a `currencyConfig`
+ *   naming no mode) that rolls up `sum` / `avg` / `min` / `max` of a child
+ *   field that is not a stored home amount: no valid `homeAmount` on the child
+ *   as served names it (`storedHomeAmountSourceOf`, which reads a
+ *   `homeAmount` only where it is valid as declared, so an extension cannot
+ *   make a plain number a home amount by naming it). The faces draw such a
+ *   total in the organization's home currency, which its rows are not known
+ *   to be in (ADR-0144 D8 rule 5). Judged at both ends, as (c) is; a child
+ *   field the child does not hold is no verdict. A child amount in its own
+ *   record currency is D6's first, as for (c).
  *
  * `served` is the layer's object AS SERVED with the layer in place: its base
  * (`overlay ?? own`), every enabled extension, and the incoming layer filling
@@ -555,7 +580,7 @@ export function recordCurrencyFollowRefusal(
  * well as the pointer: a run that re-points the pair's master_detail onto
  * another parent makes a new pair, so it is that run's to answer for.
  */
-function followPairKey(kind: 'follow' | 'rollup', object: string, field: string, target: string): string {
+function followPairKey(kind: 'follow' | 'rollup' | 'dynamic', object: string, field: string, target: string): string {
   return `${kind}\u0000${object}\u0000${field}\u0000${target}`;
 }
 
@@ -583,6 +608,20 @@ function* followRefusalsOf(
     ))];
   }
 
+  // (d) at the parent: the object's `dynamic` roll-ups, over a child already registered (or itself).
+  for (const [summaryField, def] of Object.entries(own)) {
+    const rollup = rawRollupOf(def);
+    if (!rollup || !declaresDynamicCurrency(def)) continue;
+    const childFields = rollup.child === name ? own : fieldsOf(view.lookup(rollup.child));
+    if (!childFields || !Object.prototype.hasOwnProperty.call(childFields, rollup.childField)) continue;
+    if (storedHomeAmountSourceOf(childFields, rollup.childField) !== undefined) continue;
+    yield [followPairKey('dynamic', name, summaryField, `${rollup.child}.${rollup.childField}`), new RecordCurrencyFollowRefusedError(name, summaryField, recordCurrencyDynamicRollupNotHomeError(
+      { object: name, field: summaryField, fn: rollup.fn, childObject: rollup.child, childField: rollup.childField },
+      childFields,
+      childFields[rollup.childField],
+    ))];
+  }
+
   // (a) at the child: the object's following amounts, under a parent already registered (or itself).
   for (const [field, def] of Object.entries(own)) {
     const pointer = recordCurrencyFieldOf(def);
@@ -596,7 +635,7 @@ function* followRefusalsOf(
     if (message !== undefined) yield [followPairKey('follow', name, field, `${path.master}.${String(pointer)}`), new RecordCurrencyFollowRefusedError(name, field, message)];
   }
 
-  // The other ends, already registered: (a) at the parent, (c) at the child.
+  // The other ends, already registered: (a) at the parent, (c) and (d) at the child.
   for (const other of view.all()) {
     const otherName = typeof other.name === 'string' ? other.name : undefined;
     const otherFields = fieldsOf(other);
@@ -623,9 +662,19 @@ function* followRefusalsOf(
         continue;
       }
       const rollup = rawRollupOf(def);
-      if (!rollup || rollup.child !== name || !declaresRecordCurrency(def)) continue;
+      if (!rollup || rollup.child !== name) continue;
       const childDef = Object.prototype.hasOwnProperty.call(own, rollup.childField) ? own[rollup.childField] : undefined;
-      if (childDef === undefined || recordCurrencyAggregandOf(childDef) !== undefined) continue;
+      if (childDef === undefined) continue;
+      if (declaresDynamicCurrency(def)) {
+        if (storedHomeAmountSourceOf(own, rollup.childField) !== undefined) continue;
+        yield [followPairKey('dynamic', otherName, field, `${name}.${rollup.childField}`), new RecordCurrencyFollowRefusedError(otherName, field, recordCurrencyDynamicRollupNotHomeError(
+          { object: otherName, field, fn: rollup.fn, childObject: name, childField: rollup.childField },
+          own,
+          childDef,
+        ))];
+        continue;
+      }
+      if (!declaresRecordCurrency(def) || recordCurrencyAggregandOf(childDef) !== undefined) continue;
       yield [followPairKey('rollup', otherName, field, `${name}.${rollup.childField}`), new RecordCurrencyFollowRefusedError(otherName, field, recordCurrencyUnfollowedRollupError(
         { object: otherName, field, fn: rollup.fn, childObject: name, childField: rollup.childField },
         childDef,

@@ -128,7 +128,11 @@ import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import { reportSsoProvidersWithNonBareDomainEntries } from './sso-stored-domain-entries.js';
-import type { DirectSignInOptions } from './direct-sign-in.js';
+import {
+  directSignInNetworkRefusal,
+  isDirectSignInDoorNavigation,
+  type DirectSignInOptions,
+} from './direct-sign-in.js';
 import {
   devSeedAdminEmail,
   devSeedAdminPassword,
@@ -3880,6 +3884,9 @@ export class AuthPlugin implements Plugin {
     // of the routes below. The public render helpers (/config,
     // /bootstrap-status) are exempt so a blocked client still gets a clean
     // login page + error. Nothing is judged when no ranges are configured.
+    // Direct sign-in's start door is NOT exempt: a blocked browser that
+    // navigated to it is refused with a landing on the sign-in page that names
+    // the refusal (`directSignInNetworkRefusal`), never by reaching the door.
     //
     // The address judged is the one the server ESTABLISHED, by the platform's
     // client-address trust rule (`AuthManager.resolveClientAddress`, shared
@@ -3905,6 +3912,13 @@ export class AuthPlugin implements Plugin {
       if (!mgr.isClientIpAllowed(ip)) {
         this.explainAllowListRefusal(ctx, mgr, ip, headers);
         this.auditAllowListRefusal(ctx, mgr, c, path.startsWith(basePath) ? path.slice(basePath.length) : path, ip);
+        if (
+          this.directSignInDoorMounted &&
+          typeof mgr.getConsoleUrl === 'function' &&
+          isDirectSignInDoorNavigation(c.req.method, path, basePath)
+        ) {
+          return directSignInNetworkRefusal(c.req.url, (page) => mgr.getConsoleUrl(page));
+        }
         return c.json(
           { success: false, error: { code: 'IP_NOT_ALLOWED', message: 'Sign-in is not allowed from your network.' } },
           403,
