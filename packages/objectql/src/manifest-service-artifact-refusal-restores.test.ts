@@ -726,3 +726,215 @@ describe('a reload is one registration run, asked the follow door once at its en
     expect(warn.mock.calls.filter((c) => c[0] === RELOAD_REFUSED)).toHaveLength(1);
   });
 });
+
+// ── [#33593 ruling A, amended] An `extend` layer's following amount, judged as the object is served ──
+//
+// Every object layer is judged as the served fold of its object — the base,
+// every enabled extension and the incoming body — never as the bare body
+// (R1). So an amount an extension-only package adds is refused at the run
+// that adds it, as the same amount in an own body is; the owner registering
+// under an extension that arrived first judges the extension's amounts with
+// its own (R3); a parent upgrade that breaks an extension's amount is refused
+// naming the extension's package (R6); and a run that leaves a pair as it
+// found it is never refused over it (R7).
+
+const EXTENDER = 'com.probe.extender';
+const SUPPLIER = 'com.probe.supplier';
+/** A record-mode amount following `pointer`. */
+const follows = (pointer: string) => ({ type: 'currency', label: 'Extra', currencyConfig: { currencyMode: 'record', currencyField: pointer } });
+/** A package that only extends `suite_line` with `fields`. */
+const extender = (fields: Record<string, unknown>, version = '1.0.0') => ({
+  id: EXTENDER, name: 'extender', namespace: 'extender', version, type: 'module',
+  objectExtensions: [{ extend: 'suite_line', fields }],
+});
+/** A package that only extends `suite_invoice` with an ISO 4217 code field. */
+const supplier = (version = '1.0.0') => ({
+  id: SUPPLIER, name: 'supplier', namespace: 'supplier', version, type: 'module',
+  objectExtensions: [{ extend: 'suite_invoice', fields: { currency_code: CODE } }],
+});
+const extraOf = (ql: ObjectQL) => fieldOf(ql, 'suite_line', 'ext_amount');
+
+describe('[#33593] an extension\'s record-mode amount is judged against its object as served, at the end of the run', () => {
+  const BAD_EXTENSIONS: Array<{ label: string; fields: Record<string, unknown>; says: string }> = [
+    { label: 'a parent field holding no ISO 4217 code (R1)', fields: { ext_amount: follows('invoice.title') }, says: "'suite_invoice.title'" },
+    { label: 'a parent field that does not exist (R1, R4)', fields: { ext_amount: follows('invoice.no_such_field') }, says: "declares no field 'no_such_field'" },
+    {
+      label: 'a field reached through the extension\'s own new master_detail (R1)',
+      fields: {
+        inv2: { type: 'master_detail', label: 'Invoice 2', reference: 'suite_invoice' },
+        ext_amount: follows('inv2.title'),
+      },
+      says: "'suite_invoice.title'",
+    },
+  ];
+  for (const c of BAD_EXTENSIONS) {
+    it(`an extension-only install following ${c.label} is refused 422, and leaves nothing`, async () => {
+      const { ql, manifest } = await boot();
+      await manifest.register(ledger('currency_code'));
+      await manifest.register(billing([line('invoice.currency_code')]));
+
+      const err = await refusal(() => manifest.register(extender(c.fields), { source: 'marketplace' }));
+
+      expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+      expect(String(err?.message)).toContain(c.says);
+      expect(extraOf(ql)).toBeUndefined();
+      expect(ql.registry.getPackage(EXTENDER)).toBeUndefined();
+    });
+  }
+
+  it('CONTROL: the extension following the parent\'s code installs, and the served child carries it', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger('currency_code'));
+    await manifest.register(billing([line('invoice.currency_code')]));
+
+    await manifest.register(extender({ ext_amount: follows('invoice.currency_code') }), { source: 'marketplace' });
+
+    expect(extraOf(ql)?.currencyConfig?.currencyField).toBe('invoice.currency_code');
+  });
+
+  it('CONTROL: the same amount in an own body is refused the same way', async () => {
+    const { manifest } = await boot();
+    await manifest.register(ledger('currency_code'));
+
+    const err = await refusal(() => manifest.register(billing([
+      object('suite_line', { fields: {
+        invoice: { type: 'master_detail', label: 'Invoice', reference: 'suite_invoice' },
+        ext_amount: follows('invoice.title'),
+      } }),
+    ])));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+  });
+
+  it('CONTROL: a package that owns the parent and extends the child in one install is refused the same way', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(billing([line()]));
+
+    const err = await refusal(() => manifest.register({
+      ...ledger('currency_code'),
+      objectExtensions: [{ extend: 'suite_line', fields: { ext_amount: follows('invoice.title') } }],
+    }));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+    expect(ql.registry.getPackage(LEDGER)).toBeUndefined();
+  });
+
+  it('R3: an extension that arrives before its object\'s owner is no verdict (R2), and the owner\'s install that completes the bad pair is refused', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger('currency_code'));
+    // `suite_line` is not registered yet: nothing serves it, so nothing is judged.
+    await manifest.register(extender({ ext_amount: follows('invoice.title') }), { source: 'marketplace' });
+    expect(ql.registry.getPackage(EXTENDER)).toBeDefined();
+
+    const err = await refusal(() => manifest.register(billing([line('invoice.currency_code')])));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+    expect(ql.registry.getPackage(BILLING)).toBeUndefined();
+    expect(ql.registry.getObject('suite_line')).toBeUndefined();
+  });
+
+  it('R3 CONTROL: …and the owner installs over an extension arrived first that follows the code', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger('currency_code'));
+    await manifest.register(extender({ ext_amount: follows('invoice.currency_code') }), { source: 'marketplace' });
+
+    await manifest.register(billing([line('invoice.currency_code')]));
+
+    expect(extraOf(ql)?.currencyConfig?.currencyField).toBe('invoice.currency_code');
+  });
+
+  it('R4: an extension that arrives before the parent\'s code field exists is refused; once the parent holds it, the same extension installs', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger());
+    await manifest.register(billing([line()]));
+
+    const err = await refusal(() => manifest.register(extender({ ext_amount: follows('invoice.currency_code') })));
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+    expect(String(err?.message)).toContain("declares no field 'currency_code'");
+
+    await manifest.register({ ...ledger('currency_code'), version: '1.1.0' });
+    await manifest.register(extender({ ext_amount: follows('invoice.currency_code') }));
+    expect(extraOf(ql)?.currencyConfig?.currencyField).toBe('invoice.currency_code');
+  });
+
+  it('R5: a code field another extension supplies is read from the served parent: missing, the amount is refused; installed, it installs', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger());
+    await manifest.register(billing([line()]));
+
+    const err = await refusal(() => manifest.register(extender({ ext_amount: follows('invoice.currency_code') })));
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+
+    await manifest.register(supplier());
+    await manifest.register(extender({ ext_amount: follows('invoice.currency_code') }));
+    expect(extraOf(ql)?.currencyConfig?.currencyField).toBe('invoice.currency_code');
+  });
+
+  it('R5: …a disabled supplier is no supplier: the amount is refused', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger());
+    await manifest.register(billing([line()]));
+    await manifest.register(supplier());
+    ql.registry.disablePackage(SUPPLIER);
+    expect(fieldOf(ql, 'suite_invoice', 'currency_code')).toBeUndefined();
+
+    const err = await refusal(() => manifest.register(extender({ ext_amount: follows('invoice.currency_code') })));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+  });
+
+  it('R5: …and the supplier and the amount in ONE artifact pass at the run end', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger());
+    await manifest.register(billing([line()]));
+
+    await manifest.register(artifact([
+      core('1.0.0', { objectExtensions: [{ extend: 'suite_line', fields: { ext_amount: follows('invoice.currency_code') } }] }),
+      addon('1.0.0', { objectExtensions: [{ extend: 'suite_invoice', fields: { currency_code: CODE } }] }),
+    ]));
+
+    expect(extraOf(ql)?.currencyConfig?.currencyField).toBe('invoice.currency_code');
+    expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('R6: a parent upgrade that removes the code field an extension\'s amount follows is refused, naming the extension\'s package and field', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger('currency_code'));
+    await manifest.register(billing([line()]));
+    await manifest.register(extender({ ext_amount: follows('invoice.currency_code') }));
+
+    const err = await refusal(() => manifest.register({ ...ledger(), version: '2.0.0' }));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+    expect(String(err?.message)).toContain(`'suite_line.ext_amount', which package '${EXTENDER}' adds to 'suite_line'`);
+    expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.0');
+    expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('R6: …and so is one that de-codes it (the field stays, holding no ISO 4217 code)', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger('currency_code'));
+    await manifest.register(billing([line()]));
+    await manifest.register(extender({ ext_amount: follows('invoice.currency_code') }));
+
+    const err = await refusal(() => manifest.register({
+      ...ledger(), version: '2.0.0', objects: [invoice(undefined, { currency_code: { type: 'text', label: 'Currency' } })],
+    }));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+    expect(String(err?.message)).toContain(`'${EXTENDER}'`);
+    expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.0');
+  });
+
+  it('R7: a no-change upgrade of either owner is never refused over an extension\'s amount a cold boot admitted', async () => {
+    // The cold boot is not asked, so the bad extension is served.
+    const { ql, manifest } = await bootWith([ledger('currency_code'), billing([line()]), extender({ ext_amount: follows('invoice.title') })]);
+    expect(extraOf(ql)?.currencyConfig?.currencyField).toBe('invoice.title');
+
+    await manifest.register({ ...ledger('currency_code'), version: '1.0.1' });
+    await manifest.register(billing([line()], '1.0.1'));
+
+    expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.1');
+    expect(ql.registry.getPackage(BILLING)?.manifest?.version).toBe('1.0.1');
+  });
+});
