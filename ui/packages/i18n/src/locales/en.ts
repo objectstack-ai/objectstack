@@ -3399,6 +3399,9 @@ const en = {
         ssoSwitchAccountHint: "Switch account opens your sign-in service in a new tab and signs you out there. Then sign in here again with an account that has access.",
         // A signed-in person's link refused by the callback (`email_does_not_match`), shown where they land.
         linkEmailMismatch: "The account was not linked: its email address doesn't match the one on the account you're signed in with. Link an account that uses the same email address.",
+        // objectstack#33498 — the vendor's other two link refusals, shown the same way.
+        linkAlreadyLinkedToOtherUser: "The account was not linked: it is already linked to a different user of this system. Link a different account, or sign in as the user it is linked to and unlink it there first.",
+        linkUnableToLink: "The account could not be linked. Check that its email address is verified with that sign-in service, then try again. If it still fails, ask your administrator.",
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
         // server's code (`signInRefusalMessages`).
         twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',
@@ -5010,6 +5013,7 @@ const en = {
       objectsAndFields: 'Objects and fields',
       views: 'Views',
       suggestedField: 'suggested',
+      suggestedFieldLegend: 'Fields marked “{{mark}}” were added by the AI; you didn’t ask for them.',
       nameField: 'Name: {{field}}',
     },
     build: {

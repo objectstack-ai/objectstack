@@ -4676,9 +4676,12 @@ export class MetadataManager implements IMetadataService {
    *
    * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
    * `options.packageId` reads that package's versions only (`null`: the
-   * environment's, recorded under no package); naming none, a
-   * name more than one row slot holds is refused 409 naming every holder
-   * (`PackageScopedNameRefusedError`), and one holder answers as before.
+   * environment's, recorded under no package) — [#32717] with, when that
+   * address's slot is the name's one row slot, the versions attributed to no
+   * package and the environment's own, which a rollback addressing it
+   * restores; naming none, a name more than one row slot holds is refused 409
+   * naming every holder (`PackageScopedNameRefusedError`), and one holder
+   * answers as before.
    */
   async getHistory(
     type: string,
@@ -4707,10 +4710,18 @@ export class MetadataManager implements IMetadataService {
    *
    * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
    * `options.packageId` names whose row is restored, and the version must be
-   * that package's ("not found" otherwise). Naming none, the name's one row is
-   * restored; several are refused 409 naming every holder, and so is a version
-   * of a package that holds no row of the name (`not-held-by-qualifier`) —
-   * ⛔ never written into another package's row.
+   * one its addressed history lists ("not found" otherwise): that package's,
+   * and — [#32717, seat ruling 6885958183] when its slot is the name's one row
+   * slot — one attributed to no package or the environment's own, which land
+   * in that row as they do naming no package (ADR-0150 D4: a package-less row
+   * at a held name is its one holder's customization). Naming none, the
+   * name's one row is restored; several are refused 409 naming every holder,
+   * and so is a version attributed to none while several hold the name,
+   * addressed or not, and a version of a package that holds no row of the
+   * name (`not-held-by-qualifier`) — ⛔ never written into another package's
+   * row. The body stored, filed and returned is stamped for the row slot it
+   * is written into (`DatabaseLoader.registerRollback`), never for another
+   * package its snapshot names.
    */
   async rollback(
     type: string,
@@ -4744,22 +4755,27 @@ export class MetadataManager implements IMetadataService {
 
     // Restore the metadata using the dedicated rollback path so that a single
     // 'revert' history entry is written (instead of a conflicting 'update' entry)
-    const restoredMetadata = targetVersion.metadata;
+    let restoredMetadata = targetVersion.metadata;
     // [#33003] A version restored over an environment row the boot pass
     // stamped is that row (a version a rewrite stored before #33003 carries the
     // host stamp): stored without the stamp, as {@link register} stores it.
     const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
     if (!slotted) this.carryEnvironmentRowMark(this.registry.get(type)?.get(name), restoredMetadata);
     const stamp = this.environmentRowStamp(restoredMetadata);
-    await dbLoader.registerRollback(
+    const handed = stamp === undefined ? restoredMetadata : withoutEnvironmentRowStamp(restoredMetadata as Record<string, unknown>, stamp);
+    const written = await dbLoader.registerRollback(
       type,
       name,
-      stamp === undefined ? restoredMetadata : withoutEnvironmentRowStamp(restoredMetadata as Record<string, unknown>, stamp),
+      handed,
       version,
       options?.changeNote,
       options?.recordedBy,
       address,
     );
+    // [#32717] A by-package snapshot stamped for another package than the
+    // slot it lands in is written re-stamped for that slot: the registry files
+    // the body the row stores, ⛔ never the snapshot's stamp.
+    if (slotted && written !== handed) restoredMetadata = written as typeof restoredMetadata;
 
     // Update in-memory registry with the restored metadata. [#32351] A
     // package's restored version that names no package itself (a package-less

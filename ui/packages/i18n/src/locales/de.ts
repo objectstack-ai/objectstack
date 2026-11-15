@@ -2736,6 +2736,8 @@ const de = {
         ssoBackToConsole: "Zurück zur Konsole",
         ssoSwitchAccountHint: "Konto wechseln öffnet Ihren Anmeldedienst in einem neuen Tab und meldet Sie dort ab. Melden Sie sich anschließend hier erneut mit einem Konto an, das Zugriff hat.",
         linkEmailMismatch: "Das Konto wurde nicht verknüpft: Seine E-Mail-Adresse stimmt nicht mit der des Kontos überein, mit dem Sie angemeldet sind. Verknüpfen Sie ein Konto mit derselben E-Mail-Adresse.",
+        linkAlreadyLinkedToOtherUser: "Das Konto wurde nicht verknüpft: Es ist bereits mit einem anderen Benutzer dieses Systems verknüpft. Verknüpfen Sie ein anderes Konto, oder melden Sie sich als der Benutzer an, mit dem es verknüpft ist, und heben Sie die Verknüpfung dort zuerst auf.",
+        linkUnableToLink: "Das Konto konnte nicht verknüpft werden. Prüfen Sie, ob seine E-Mail-Adresse bei diesem Anmeldedienst bestätigt ist, und versuchen Sie es erneut. Wenn es weiterhin fehlschlägt, wenden Sie sich an Ihren Administrator.",
         twoFactorInvalidCode: "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
         twoFactorInvalidBackupCode: "Dieser Backup-Code ist ungültig oder wurde bereits verwendet.",
         twoFactorTooManyAttempts: "Zu viele falsche Codes. Melden Sie sich erneut mit Ihrem Passwort an.",
@@ -4086,6 +4088,7 @@ const de = {
       objectsAndFields: "Objekte und Felder",
       views: "Ansichten",
       suggestedField: "ergänzt",
+      suggestedFieldLegend: "Mit „{{mark}}“ markierte Felder hat die KI hinzugefügt; Sie haben sie nicht angefordert.",
       nameField: "Bezeichnung: {{field}}",
     },
     build: {
