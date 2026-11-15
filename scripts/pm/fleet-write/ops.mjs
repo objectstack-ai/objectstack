@@ -38,6 +38,9 @@
  * table's one `PUT` (`pr_update_branch`, below) reaches no whole-set replace
  * of labels or assignees. The one re-run the table has re-runs a run's FAILED
  * jobs alone, once, on a closed list of workflows (`run_rerun_failed`, below).
+ * Nor is there a row that locks or unlocks a conversation: a locked mailbox
+ * refuses the relay's own comment, so it would hear no knock (measured;
+ * `mailbox-open.mjs` 〈Never locked — measured〉).
  *
  * ## The one row that moves a branch — `pr_update_branch`
  *

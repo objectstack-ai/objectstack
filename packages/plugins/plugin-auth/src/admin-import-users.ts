@@ -88,9 +88,11 @@
  *    returned, when every row in the batch exists.
  *  - **Where the refusals come from.** `applyUserManagerLink` — the same
  *    derivation `POST /admin/set-user-manager` runs, imported, ⛔ never copied.
- *    Self-assignment, cycle, depth cap, cross-organization and directory-owned
- *    identity are that function's to answer, and the refusal it returns is
- *    reported on the row rather than re-worded here.
+ *    Self-assignment, cycle, depth cap, cross-organization and an identity a
+ *    SCIM directory holds are that function's to answer, and the refusal it
+ *    returns is reported on the row rather than re-worded here. An identity
+ *    that only signs in through SSO (`idp_provisioned` with no directory
+ *    behind it) is linked like any other row.
  *  - **A manager problem never costs the row its identity.** The user is
  *    created either way; `rows[].manager` carries the machine-readable outcome
  *    in `rows[].delivery`'s shape and `rows[].error` carries the sentence.
