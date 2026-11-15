@@ -849,7 +849,7 @@ export async function fetchConversation(apiBase: string, id: string): Promise<Se
     credentials: 'include',
   });
   if (res.status === 404 || res.status === 403) return null;
-  if (!res.ok) throw new Error(`GET conversation failed: ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(`GET conversation failed: ${res.status}`), { status: res.status });
   return (await res.json()) as ServerConversation;
 }
 
@@ -932,6 +932,11 @@ export function useChatConversation(
   const requestedKeyRef = useRef<string | undefined>(undefined);
   // The one create in flight, shared by every caller for the same key.
   const inflightRef = useRef<{ key: string; promise: Promise<string | undefined> } | null>(null);
+  // objectstack#33685 — the key whose resolve FAILED (a 5xx or network error
+  // reading the conversation to resume), so it settled on nothing: a send
+  // there runs the resolve again instead of waiting on one that never comes.
+  const failedKeyRef = useRef<string | undefined>(undefined);
+  const [resolveAttempt, setResolveAttempt] = useState(0);
 
   const createFor = useCallback(
     (key: string, forUser: string, forScope: string | undefined, base: string) => {
@@ -1055,6 +1060,7 @@ export function useChatConversation(
     }
     // Resolving: no longer settled on "nothing to resume" until this run says so.
     pendingKeyRef.current = undefined;
+    failedKeyRef.current = undefined;
     setIsLoading(true);
 
     (async () => {
@@ -1195,7 +1201,7 @@ export function useChatConversation(
         // later plain visit opens a clean chat, as it did when New minted one.
         if (!activeId && forceNew) writeCache(key, undefined);
         settlePending(key, userId, scope, apiBase);
-      } catch {
+      } catch (err) {
         if (cancelled) return;
         // objectui#2627 — the OTHER half of the same-conversation guard above.
         // That one stops an EMPTY re-read from wiping hydrated messages; this
@@ -1221,6 +1227,19 @@ export function useChatConversation(
         if (targetId && targetId === conversationId) return;
         setConversationId(undefined);
         setInitialMessages([]);
+        // objectstack#33685 — nothing to resume could be READ, so nothing is
+        // settled and no create may run. A send recorded during this run is
+        // told it was not sent (the host gives its text back with the notice,
+        // as for a failed create); the next send reads the conversation again.
+        failedKeyRef.current = key;
+        if (requestedKeyRef.current === key) {
+          setCreateError(
+            notSentCreateError(
+              err instanceof Error ? err.message : 'GET conversation failed',
+              (err as { status?: number } | undefined)?.status,
+            ),
+          );
+        }
       } finally {
         if (!cancelled) {
           setIsLoading(false);
@@ -1244,7 +1263,7 @@ export function useChatConversation(
     // read through a ref for the same reason (inline closures would re-resolve
     // every host render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, scope, apiBase, activeId, forceNew, resumeMode, legacyScope]);
+  }, [userId, scope, apiBase, activeId, forceNew, resumeMode, legacyScope, resolveAttempt]);
 
   const ensureConversation = useCallback(async (): Promise<string | undefined> => {
     const { userId: forUser, scope: forScope, apiBase: base } = latestRef.current;
@@ -1265,6 +1284,16 @@ export function useChatConversation(
     // the resolve fulfils it if it settles with nothing to resume.
     if (pendingKeyRef.current !== key) {
       requestedKeyRef.current = key;
+      // objectstack#33685 — the last resolve for this key failed and nothing
+      // is resolving: run it again, with this request recorded, and drop the
+      // failure the previous send was given back with.
+      if (failedKeyRef.current === key) {
+        failedKeyRef.current = undefined;
+        if (mountedRef.current) {
+          setCreateError(undefined);
+          setResolveAttempt((n) => n + 1);
+        }
+      }
       return undefined;
     }
     return createFor(key, forUser, forScope, base);

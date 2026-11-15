@@ -4696,6 +4696,60 @@ function recordCurrencyPathOf(field: unknown): { via: string; code: string } | u
 }
 
 /**
+ * The amount field of `childFields` whose `currencyConfig.homeAmount.field`
+ * names `field`, or `undefined` when no amount stores its home-currency value
+ * there: the test (d) of {@link collectRecordCurrencyPathErrors} reads for "a
+ * stored home amount" (ADR-0144 D5, the `homeAmount` declaration).
+ */
+function homeAmountSourceOf(childFields: Record<string, unknown>, field: string): string | undefined {
+  return Object.keys(childFields).find((name) => {
+    const def = childFields[name];
+    const config = isRecord(def) && isRecord(def.currencyConfig) ? def.currencyConfig : undefined;
+    return isRecord(config?.homeAmount) && config.homeAmount.field === field;
+  });
+}
+
+/**
+ * [#33659] (d)'s refusal: a `dynamic` roll-up over a child field that is not
+ * a stored home amount, with the declaration the child field does support.
+ */
+function dynamicRollupNotHomeError(
+  rollup: { object: string; field: string; fn: string; childObject: string; childField: string },
+  childFields: Record<string, unknown>,
+  childDef: unknown,
+): string {
+  const named = `'${rollup.childObject}.${rollup.childField}'`;
+  const config = isRecord(childDef) && isRecord(childDef.currencyConfig) ? childDef.currencyConfig : undefined;
+  const home = isRecord(config?.homeAmount) && typeof config.homeAmount.field === 'string' ? config.homeAmount.field : undefined;
+  const homes = Object.keys(childFields).flatMap((name) => {
+    const def = childFields[name];
+    const c = isRecord(def) && isRecord(def.currencyConfig) ? def.currencyConfig : undefined;
+    return isRecord(c?.homeAmount) && typeof c.homeAmount.field === 'string' ? [c.homeAmount.field] : [];
+  });
+  const why = config?.currencyMode === 'record'
+    ? `${named} is an amount in ${typeof config.currencyField === 'string' && config.currencyField.includes('.') ? 'its parent\'s' : 'each record\'s own'} `
+      + `currency (\`currencyMode: 'record'\`), not the home currency. `
+      + (home !== undefined
+        ? `Roll up its stored home amount '${rollup.childObject}.${home}' instead, `
+        : 'Roll up a stored home amount of the child instead (declare `homeAmount` on the amount), ')
+      + 'or, when the amounts follow this record through the master_detail the roll-up runs through, declare '
+      + '`currencyMode: \'record\'` naming this object\'s own code field.'
+    : config?.currencyMode === 'fixed' && typeof config.defaultCurrency === 'string'
+      ? `${named} is fixed to ${config.defaultCurrency}. Declare \`currencyConfig: { currencyMode: 'fixed', defaultCurrency: `
+        + `'${config.defaultCurrency}' }\` on the summary instead.`
+      : `${named} is not a stored home amount, so its rows are not known to be in the home currency. `
+        + (homes.length > 0
+          ? `The home amounts of '${rollup.childObject}' are ${homes.map((h) => `'${h}'`).join(', ')}; roll up one of them, `
+          : `'${rollup.childObject}' stores no home amount; `)
+        + 'or delete `currencyConfig` on the summary, or declare `currencyMode: \'fixed\'` if every amount it reads is in '
+        + 'one currency.';
+  return `Object '${rollup.object}' field '${rollup.field}' currencyConfig: \`currencyMode: 'dynamic'\` on a summary is `
+    + 'admitted only for a roll-up of a stored home amount (a child field that a `homeAmount.field` on the child object '
+    + 'names), whose every row is in the organization\'s home currency. This summary rolls up '
+    + `${rollup.fn}(${rollup.childObject}.${rollup.childField}), and ${why}`;
+}
+
+/**
  * [ADR-0144 D2 and D6, amended 2026-11-09 by #31743, ruling A recorded in
  * 6739066323] The two halves of a child that follows its parent's currency
  * that need both objects, judged where the stack holds both — the
@@ -4738,11 +4792,26 @@ function recordCurrencyPathOf(field: unknown): { via: string; code: string } | u
  * code field is not judged here: D6's first bullet refuses it at runtime
  * registration, and this pass does not repeat it.
  *
+ * (d) A `summary` (`sum`, `min`, `max`, `avg`) declaring
+ * `currencyMode: 'dynamic'` (or a `currencyConfig` with no `currencyMode`,
+ * which is `dynamic`) is admitted only when the child field it rolls up is a
+ * stored home amount: a field that some `currencyConfig.homeAmount.field` on
+ * the child object names (#33659). ADR-0144 D6 has consolidated totals read
+ * that home field, and D8 rule 5 makes it "a `dynamic`-mode currency field",
+ * displayed in the organization's home currency (`localization.currency`);
+ * every row of it is in that one currency, so its total is too, and declaring
+ * `dynamic` on the roll-up says so without naming the code (D8 rule 5:
+ * "Metadata never names the home currency"). Any other `dynamic` roll-up is
+ * refused: the faces would draw it in the home currency, which the amounts it
+ * reads are not known to be in. The object door has already refused a
+ * `dynamic` summary that names no child field or carries a `defaultCurrency`,
+ * and a `count` (`refuseUnadmittedSummaryCurrency`).
+ *
  * Resolution is against the stack's own `objects`, merged with its
  * `objectExtensions` by name; an object this stack does not declare is not
  * judged, nor is a parent it knows only through an extension (whose owner's
  * fields live elsewhere), nor, for (c), a child it knows only through an
- * extension or a child field it does not hold; and neither is a roll-up whose
+ * extension or a child field it does not hold (for (c) and (d) alike); and neither is a roll-up whose
  * relationship field is neither written nor the child's one relation back to
  * the parent.
  *
@@ -4787,6 +4856,17 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
       const childField = hasOwnKey(child, ops.field) ? child[ops.field] : undefined;
       const judgeRecord = summaryCurrency?.currencyMode === 'record' && declared.has(ops.object) && childField !== undefined;
       const rollup = { object: objectName, field: fieldName, fn: String(ops.function), childObject: ops.object, childField: ops.field };
+      // (d) A `dynamic` roll-up is admitted over a stored home amount only
+      // (#33659), judged against a child this stack declares and a child field
+      // it holds, as (c) is; a home field is admitted whatever else it is, so
+      // nothing below judges it again.
+      if (
+        summaryCurrency !== undefined && (summaryCurrency.currencyMode ?? 'dynamic') === 'dynamic'
+        && declared.has(ops.object) && childField !== undefined
+      ) {
+        if (homeAmountSourceOf(child, ops.field) === undefined) errors.push(dynamicRollupNotHomeError(rollup, child, childField));
+        continue;
+      }
       const refuseRecord = (why: string): void => {
         errors.push(recordCurrencyRecordRollupError(rollup, why));
       };
