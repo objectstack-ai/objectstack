@@ -61,7 +61,8 @@
  * token that request spends `actions: write` on reaches that path and the
  * failed-jobs re-run below, and no other (`ops.mjs`, `REFUSED_PATH_FAMILIES`).
  * A `run_rerun_failed` is fenced on the run and read back HERE (the section
- * of that name below), and a `pr_enqueue_front` on the pull and its queue.
+ * of that name below), a `pr_enqueue_front` on the pull and its queue, and a
+ * `pr_dequeue` on the pull, its queue and its cause.
  * The FIRST failure stops the run — later actions are NOT attempted, and the
  * summary says which — because a seat that dispatched five related writes
  * must be able to read exactly where the board was left. A 404 on a directed
@@ -183,6 +184,31 @@
  * up to `ENQUEUE_FRONT_WINDOW_MS` and lands only on `enqueueFrontReadBack`
  * (the entry jumped, nothing ahead). Queued without the jump, or behind
  * another, is FAILED at once and says the pull IS queued — ⛔ never re-sent.
+ *
+ * Over the human-merge line the `size` fence asks for the SIZE lift
+ * (`ops.mjs`, "The SIZE lift"): only then are the pull's reviews read, after
+ * the queue (`GET …/pulls/{n}/reviews`, one page at the endpoint's maximum, a
+ * full page read as unreadable) and reduced by the queue guard's
+ * `authorizedApprovalVerdict`; an approval that is not on the head reads the
+ * action's `approval_comment` by its own GET. Unread, unauthorised, elsewhere
+ * or carried by nobody, the line holds and the mutation is NOT SENT.
+ *
+ * ## The dequeue — `pr_dequeue`, fenced on the PULL, its QUEUE and its CAUSE, audited, and read back
+ *
+ * One action, one function (`dequeueAction`): the fences (`DEQUEUE_FENCES` in
+ * `ops.mjs`) are AUTHORITATIVE here (`dequeuePreflight`), judged on the
+ * pull's own GET, its base's queue read with each entry's merge-group rollup
+ * (`DEQUEUE_QUEUE_READ_QUERY`, unpaced) and — for `seat-asks` alone — its
+ * comments, every page to a cap, a comment counting only when the relay wrote
+ * it and its first line is a signature naming the dispatching session. A read
+ * or fence that fails writes NOTHING, exit 5. Then the ONE audit comment, a
+ * paced POST, whose 201 with an id is required before anything else is sent;
+ * then the node id and the mutation; then the queue re-read every
+ * `DEQUEUE_POLL_MS` for up to `DEQUEUE_WINDOW_MS` until it no longer lists the
+ * pull. GraphQL errors are FAILED naming the grant when the platform says "not
+ * accessible by integration"; a read-back that still lists the pull after the
+ * window is FAILED, UNCONFIRMED. Every failure after the comment names the
+ * comment, which stands: the run's row is the outcome it points to.
  *
  * ## The hierarchy link — `sub_issue_add` / `sub_issue_remove`, fenced on the CARDS and read back
  *
@@ -540,6 +566,7 @@ import {
   GOVERNED_TIER_H,
   GOVERNED_TIER_S,
   governedPathsIn,
+  HUMAN_MERGE_LINE_THRESHOLD,
   landingTierOf,
   LOW_RISK_ARM_RULING,
   pullCatalogReading,
@@ -551,7 +578,8 @@ import {
   repoIdForSlug,
   slugFromRemote,
 } from '../check-governed-merges.mjs';
-import { GOVERNED_APPROVERS } from '../check-governed-queue-guard.mjs';
+import { authorizedApprovalVerdict, GOVERNED_APPROVERS, unreadableApproval } from '../check-governed-queue-guard.mjs';
+import { readSignatureLine } from '../check-half-states.mjs';
 import { scrub } from '../fleet-token.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { announceBatch, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceFilePath, paceWrite, releaseWriteLease, unrecordableText } from '../write-pace.mjs';
@@ -673,6 +701,16 @@ import {
   enqueueFrontFenceText,
   enqueueFrontLandedText,
   enqueueFrontReadBack,
+  enqueueFrontSizeLift,
+  ENQUEUE_FRONT_REVIEWS_PAGE_SIZE,
+  DEQUEUE_QUEUE_READ_QUERY,
+  RELAY_COMMENT_AUTHOR,
+  dequeueAuditBody,
+  dequeueCauseReading,
+  dequeueFenceFailures,
+  dequeueFenceText,
+  dequeueLandedText,
+  dequeueReadBack,
   mergeQueueOf,
   failedJobNames,
   governedReviewRequests,
@@ -1226,9 +1264,9 @@ export const ENQUEUE_FRONT_WINDOW_MS = 30_000;
 export const ENQUEUE_FRONT_POLL_MS = 3_000;
 
 /** The base's merge queue, read by GraphQL query — unpaced (`read`). `{ queue }`, or `{ fail }` — the sentence. Never throws. */
-async function readMergeQueue(repo, branch, api, t) {
+async function readMergeQueue(repo, branch, api, t, query = MERGE_QUEUE_READ_QUERY) {
   const [owner, name] = repo.split('/');
-  const r = await rest(api, '/graphql', { method: 'POST', body: { query: MERGE_QUEUE_READ_QUERY, variables: { owner, name, branch } }, read: true }, t);
+  const r = await rest(api, '/graphql', { method: 'POST', body: { query, variables: { owner, name, branch } }, read: true }, t);
   const errors = Array.isArray(r.json?.errors) && r.json.errors.length ? `: GraphQL ${r.json.errors.map((e) => e?.message ?? 'error').join('; ')}` : '';
   const queue = r.status === 200 && !errors ? mergeQueueOf(r.json) : null;
   if (!queue) return { fail: `POST /graphql mergeQueue(branch: ${branch}) -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}${errors}: the merge queue could not be read` };
@@ -1253,9 +1291,34 @@ export async function enqueueFrontPreflight(req, payload, api, t) {
   if (base === null) return { fail: `pull #${number}'s base ref could not be read, so its queue was not judged — nothing sent` };
   const q = await readMergeQueue(payload.repo, base, api, t);
   if (q.fail) return { fail: `${q.fail}, so its fences were not judged — nothing sent` };
-  const failures = enqueueFrontFenceFailures({ pull: p.json, expectedHeadSha, governed, queue: q.queue });
+  // The SIZE lift (header): read only for a pull over the line — its reviews, and the carrying comment when named.
+  const lines = (p.json.additions ?? 0) + (p.json.deletions ?? 0);
+  const approval = Number.isInteger(p.json.additions) && Number.isInteger(p.json.deletions) && lines > HUMAN_MERGE_LINE_THRESHOLD ? await readSizeLift(req, payload, p.json, api, t) : null;
+  const failures = enqueueFrontFenceFailures({ pull: p.json, expectedHeadSha, governed, queue: q.queue, approval });
   if (failures.length) return { fail: `REFUSED at the relay's fence on pull #${number}, nothing sent — ${enqueueFrontFenceText(failures)}` };
   return { pull: p.json, base, queue: q.queue };
+}
+
+/**
+ * The jump's SIZE lift, read (header: "The front-of-queue enqueue"): the pull's reviews, one page at the endpoint's
+ * maximum — a full page is a truncated SUBSET, read as unreadable — reduced by the queue guard's
+ * `authorizedApprovalVerdict`, then the `approval_comment`'s own GET when the action names one and the approval is
+ * not on the head. Returns `enqueueFrontSizeLift`'s `{ lifts, way, reading }`. Never throws on a status.
+ */
+async function readSizeLift(req, payload, pull, api, t) {
+  const number = req.enqueueFront.pull;
+  const r = await rest(api, `/repos/${payload.repo}/pulls/${number}/reviews?per_page=${ENQUEUE_FRONT_REVIEWS_PAGE_SIZE}`, {}, t);
+  const verdict =
+    r.status !== 200 || !Array.isArray(r.json)
+      ? unreadableApproval(`GET …/pulls/${number}/reviews answered HTTP ${r.status}`)
+      : r.json.length >= ENQUEUE_FRONT_REVIEWS_PAGE_SIZE
+        ? unreadableApproval(`a full page of ${r.json.length} reviews is a truncated list`)
+        : authorizedApprovalVerdict(r.json, pull.head?.sha);
+  const headSha = pull.head?.sha ?? null;
+  const onHead = Array.isArray(verdict.approvals) && verdict.approvals.some((a) => typeof headSha === 'string' && a.commitId === headSha.toLowerCase());
+  const id = req.enqueueFront.approvalComment;
+  const comment = !onHead && Number.isInteger(id) ? await rest(api, `/repos/${payload.repo}/issues/comments/${id}`, {}, t) : null;
+  return enqueueFrontSizeLift({ verdict, headSha, comment, pull: number, approvers: GOVERNED_APPROVERS });
 }
 
 /**
@@ -1286,6 +1349,97 @@ export async function confirmEnqueueFront(req, answer, pre, payload, api, t, { s
     await sleep(pollMs);
   }
   return { ok: false, why: `HTTP 200 accepted, but ${last} ${windowMs} ms later — UNCONFIRMED: read the queue before anything else, ⛔ do not re-send` };
+}
+
+/** The dequeue's read-back window and poll interval (header): the queue is re-read until the entry is gone. */
+export const DEQUEUE_WINDOW_MS = 30_000;
+export const DEQUEUE_POLL_MS = 3_000;
+/** The pull's comments the `seat-asks` cause walks, at the endpoint's page maximum, to a cap — past it is a SUBSET. */
+export const DEQUEUE_COMMENTS_PAGE_SIZE = 100;
+export const DEQUEUE_COMMENTS_PAGE_CAP = 5;
+
+/**
+ * Did the dispatching session sign a fleet comment on the pull? `true`, `false`, or `{ fail }` — the sentence —
+ * for a page that did not answer 200 with an array or a walk past the cap: an unread list is never `false`.
+ * A comment counts only when its author is the relay itself (`RELAY_COMMENT_AUTHOR`) and its first non-empty
+ * line is a seat signature naming `session` (`readSignatureLine`). Never throws.
+ */
+async function sessionSignedOn(repo, pull, session, api, t) {
+  for (let page = 1; page <= DEQUEUE_COMMENTS_PAGE_CAP; page++) {
+    const r = await rest(api, `/repos/${repo}/issues/${pull}/comments?per_page=${DEQUEUE_COMMENTS_PAGE_SIZE}&page=${page}`, {}, t);
+    if (r.status !== 200 || !Array.isArray(r.json)) return { fail: `GET /repos/${repo}/issues/${pull}/comments -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}: #${pull}'s comments could not be read` };
+    if (r.json.some((c) => c?.user?.login === RELAY_COMMENT_AUTHOR && readSignatureLine(c?.body)?.session === session)) return true;
+    if (r.json.length < DEQUEUE_COMMENTS_PAGE_SIZE) return false;
+  }
+  return { fail: `#${pull}'s comments ran past the ${DEQUEUE_COMMENTS_PAGE_CAP}-page cap without a comment signed by ${session} — a truncated list is a SUBSET, never read as unsigned` };
+}
+
+/**
+ * The dequeue's fences, AUTHORITATIVE (header: "The dequeue"): the pull's own GET, its base's queue with each
+ * entry's merge-group rollup and — for `seat-asks` alone — its comments, the last reads before anything is written,
+ * judged against `DEQUEUE_FENCES`. Returns `{ pull, base, ctx }` to proceed, or `{ fail }` — nothing written.
+ * Never throws on a status.
+ */
+export async function dequeuePreflight(req, payload, api, t) {
+  const { pull: number, expectedHeadSha, cause } = req.dequeue;
+  const p = await rest(api, `/repos/${payload.repo}/pulls/${number}`, {}, t);
+  if (p.status !== 200 || !p.json || typeof p.json !== 'object') return { fail: `${p.call} -> HTTP ${p.status}${p.detail ? ` (${p.detail})` : ''}: pull #${number} could not be read, so its fences were not judged — nothing written` };
+  const base = typeof p.json.base?.ref === 'string' ? p.json.base.ref : null;
+  if (base === null) return { fail: `pull #${number}'s base ref could not be read, so its queue was not judged — nothing written` };
+  const q = await readMergeQueue(payload.repo, base, api, t, DEQUEUE_QUEUE_READ_QUERY);
+  if (q.fail) return { fail: `${q.fail}, so its fences were not judged — nothing written` };
+  let signed = null;
+  if (cause === 'seat-asks') {
+    const s = await sessionSignedOn(payload.repo, number, payload.session, api, t);
+    if (s?.fail) return { fail: `${s.fail}, so the seat-asks cause was not judged — nothing written` };
+    signed = s;
+  }
+  const ctx = { number, pull: p.json, expectedHeadSha, queue: q.queue, cause, session: payload.session, signed };
+  const failures = dequeueFenceFailures(ctx);
+  if (failures.length) return { fail: `REFUSED at the relay's fence on pull #${number}, nothing written — ${dequeueFenceText(failures)}` };
+  return { pull: p.json, base, ctx };
+}
+
+/**
+ * ONE dequeue (header: "The dequeue"): the fences, then the ONE audit comment (paced; a comment that does not answer
+ * 201 with an id stops the action, the mutation NOT SENT), then the mutation behind the pull's node id, then the queue
+ * read back until the entry is gone. Returns `{ ok, call, status, result | why }` for the row. Never throws on a status.
+ */
+export async function dequeueAction(req, { payload, api, t, sleep, now, windowMs = DEQUEUE_WINDOW_MS, pollMs = DEQUEUE_POLL_MS }) {
+  const { pull, reason, cause } = req.dequeue;
+  const mutation = 'POST /graphql dequeuePullRequest';
+  const pre = await dequeuePreflight(req, payload, api, t);
+  if (pre.fail) return { ok: false, call: mutation, status: 'not sent', why: pre.fail };
+  const reading = dequeueCauseReading(pre.ctx);
+  const body = dequeueAuditBody({ session: payload.session, requestId: payload.request_id, number: pull, cause, reading, reason });
+  const audit = await rest(api, `/repos/${payload.repo}/issues/${pull}/comments`, { method: 'POST', body: { body } }, t);
+  if (audit.status !== 201 || !Number.isInteger(audit.json?.id)) {
+    return { ok: false, call: audit.call, status: audit.status, why: `the audit comment did not land (HTTP ${audit.status}${audit.detail ? ` — ${audit.detail}` : ''}), so the dequeue was NOT SENT — a use with no audit comment never leaves` };
+  }
+  const auditId = audit.json.id;
+  const resolved = await graphqlVariables(req, payload, api, t);
+  if (resolved.fail) return { ok: false, call: resolved.fail.call, status: resolved.fail.status, why: `${resolved.fail.why}; audit comment ${auditId} stands, the dequeue was NOT SENT` };
+  const r = await rest(api, '/graphql', { method: 'POST', body: { query: req.graphql.query, variables: resolved.variables } }, t);
+  if (r.status !== 200 || !r.json || typeof r.json !== 'object') return { ok: false, call: mutation, status: r.status, why: `HTTP ${r.status}${r.detail ? ` — ${r.detail}` : ''}; audit comment ${auditId} stands — read the queue before anything else` };
+  if (Array.isArray(r.json.errors) && r.json.errors.length) {
+    const said = r.json.errors.map((e) => e?.message ?? 'error').join('; ');
+    const grant = /not accessible by integration/i.test(said) ? ' — the App token lacks the dequeue: the maintainer grants the objectstack-fleet App `Merge queues: write` (and accepts it on the installation)' : '';
+    return { ok: false, call: mutation, status: r.status, why: `GraphQL: ${said}${grant}; nothing was dequeued by this answer, audit comment ${auditId} stands — read the queue before anything else` };
+  }
+  const started = now();
+  let last = 'nothing was read back';
+  for (;;) {
+    const q = await readMergeQueue(payload.repo, pre.base, api, t, DEQUEUE_QUEUE_READ_QUERY);
+    if (q.fail) last = q.fail;
+    else {
+      const v = dequeueReadBack({ pull, queue: q.queue });
+      if (v.ok) return { ok: true, call: mutation, status: r.status, result: dequeueLandedText({ pull, total: q.queue.entries.length, auditId }) };
+      last = v.why;
+    }
+    if (now() - started >= windowMs) break;
+    await sleep(pollMs);
+  }
+  return { ok: false, call: mutation, status: r.status, why: `HTTP 200 accepted, but ${last} ${windowMs} ms later — UNCONFIRMED: a 200 is never trusted alone; read the queue before anything else, audit comment ${auditId} stands` };
 }
 
 /** The hierarchy link's read-back window and poll interval (header): the parent's list is re-read until it settles. */
@@ -2068,6 +2222,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
   const rr = { sleep: ub.sleep, now: ub.now, ...(deps.rerunFailed ?? {}) };
   const si = { sleep: ub.sleep, now: ub.now, ...(deps.subIssue ?? {}) };
   const ef = { sleep: ub.sleep, now: ub.now, ...(deps.enqueueFront ?? {}) };
+  const dq = { sleep: ub.sleep, now: ub.now, ...(deps.dequeue ?? {}) };
 
   const judged = validatePayload(raw);
   if (!judged.ok) {
@@ -2142,6 +2297,18 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         break;
       }
       const req = filled.req;
+      // The dequeue (header): its fences, its ONE audit comment, the mutation and the queue read back — one action.
+      if (req.dequeue) {
+        const out = await dequeueAction(req, { payload, api, t, ...dq });
+        rows.push({ action: i + 1, op: action.op, call: out.call, status: out.status, result: out.ok ? scrub(out.result, [token]) : `FAILED: ${scrub(out.why, [token])}` });
+        if (!out.ok) {
+          stoppedAt = { action: i + 1, op: action.op, why: scrub(out.why, [token]) };
+          log(`  ✗ action ${i + 1} ${action.op}: ${out.call} -> ${stoppedAt.why}`);
+          break;
+        }
+        log(`  ✓ action ${i + 1} ${action.op}: ${out.call} -> HTTP ${out.status} · ${rows[rows.length - 1].result}`);
+        continue;
+      }
       // The failed-jobs re-run and the mailbox branch delete (header): their fences, judged HERE on the reads before the write — refused, NOT SENT.
       const pre = req.rerunFailed
         ? await rerunFailedPreflight(req, payload, api, t)
@@ -2358,6 +2525,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the pr_enqueue_front: the pull's own GET, its whole file list and its base's queue read immediately before ONE enqueuePullRequest mutation with jump true and the expected head — open, ready, its head, not Version Packages, no governed path, at most the human-merge line count, a queue read whole with no jumped entry; each fence refused with the mutation not sent; GraphQL errors FAILED naming the missing grant; the 200 confirmed only by reading the queue back with the pull jumped and nothing ahead; queued without the jump or behind another is FAILED, never re-sent; the queue read unpaced; no annotation": 20,
+  "the pr_enqueue_front SIZE lift: a pull over the human-merge line is jumped only on an authorised APPROVED review on its current head, or an earlier one carried to the head by an authorised comment on the pull naming it — the reviews read only over the line, a full page or an unread list lifting nothing, a non-approver, an approval elsewhere or a comment naming another head or pull refused with the mutation not sent": 9,
+  "the pr_dequeue: the pull's own GET, its base's queue with each entry's merge-group rollup and, for seat-asks alone, its comments read before ONE audit comment and ONE dequeuePullRequest mutation — open, its head, not Version Packages, a queue read whole that lists it, and the cause holding on those reads (conflict: dirty; own-failure: UNMERGEABLE or a failing rollup, never an unread one; seat-asks: a relay comment signed by the dispatching session); each fence refused with nothing written; no audit comment, no mutation; GraphQL errors FAILED naming the grant; the 200 confirmed only by reading the queue back without the pull, UNCONFIRMED after the window": 16,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
   "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add, advisory_versions and advisory_state read the advisory first and send ONE PATCH — every existing login kept with the missing ones added, an all-present list a no-op, the versions entries alone, or the one state a legal transition reaches, the reopen and the publish among them — or nothing at all on a fence: an unread, other or wrong-state advisory, an illegal move, a list the versions may not replace or a publish whose versions are not set; each lands only when its answer shows the result, a publish only read back as published with the versions it was sent, and a landed publish alone is annotated with its id; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 41,
   "the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE": 7,
@@ -2369,8 +2538,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
 // branch delete's, 23 → 24 with the private-repository issue body's, 24 → 25 with advisory_list's, 25 → 26 with
-// pr_enqueue_front's, 26 → 27 with the cloud staging deploy's, 27 → 28 with advisory_note's: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 28;
+// pr_enqueue_front's, 26 → 27 with the cloud staging deploy's, 27 → 28 with advisory_note's: one battery, one row;
+// 28 → 30 with the jump's SIZE lift and pr_dequeue's.
+const SELF_TEST_BATTERY_FLOOR = 30;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2581,10 +2751,10 @@ export async function selfTest() {
       const bare = { verb: 'POST', path: '/graphql', graphql: { mutation: 'enablePullRequestAutoMerge', query: 'q', pull: 21 } };
       t('⛔ a pull mutation whose descriptor declares no landed state is never judged landed', requestLanded(bare, { status: 200, json: { data: { enablePullRequestAutoMerge: { pullRequest: { number: 21, autoMergeRequest: { mergeMethod: 'SQUASH' } } } } } }).ok, false);
       // The table half: every pull mutation the op table can issue carries its entry, and selects every field that entry reads.
-      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft', packages: ['p'], versions: [{ package: 'p', vulnerable_version_range: '< 1.0.0', patched_versions: '1.0.0' }] }, REPO).filter((r) => r.graphql?.pull !== undefined && !r.enqueueFront).map((r) => [op, r.graphql]));
+      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft', packages: ['p'], versions: [{ package: 'p', vulnerable_version_range: '< 1.0.0', patched_versions: '1.0.0' }] }, REPO).filter((r) => r.graphql?.pull !== undefined && !r.enqueueFront && !r.dequeue).map((r) => [op, r.graphql]));
       // The one pull mutation judged by reading its QUEUE back (header: "The front-of-queue enqueue"): no landed entry.
-      const queueRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft', packages: ['p'], versions: [{ package: 'p', vulnerable_version_range: '< 1.0.0', patched_versions: '1.0.0' }], expected_head_sha: 'a'.repeat(40) }, REPO).filter((r) => r.enqueueFront).map((r) => [op, r.graphql.landed ?? null]));
-      t('…and the one pull mutation judged by its queue read back instead, pr_enqueue_front, carries no PR_LANDED_STATE entry', queueRows, [['pr_enqueue_front', null]]);
+      const queueRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft', packages: ['p'], versions: [{ package: 'p', vulnerable_version_range: '< 1.0.0', patched_versions: '1.0.0' }], expected_head_sha: 'a'.repeat(40), cause: 'conflict', reason: 'r' }, REPO).filter((r) => r.enqueueFront || r.dequeue).map((r) => [op, r.graphql.landed ?? null]));
+      t('…and the two pull mutations judged by their queue read back instead, pr_enqueue_front and pr_dequeue, carry no PR_LANDED_STATE entry', queueRows, [['pr_enqueue_front', null], ['pr_dequeue', null]]);
       const selects = (query, field) => new RegExp(`\\b${field}\\b`).test(query.slice(query.indexOf('pullRequest {')));
       t('every pull mutation in the op table carries its PR_LANDED_STATE entry, and its query selects every field that entry reads', [pullRows.map(([op]) => op).sort(), pullRows.every(([op, g]) => g.landed === PR_LANDED_STATE[op] && g.landed.fields.every((f) => selects(g.query, f)))], [Object.keys(PR_LANDED_STATE).sort(), true]);
     }
@@ -3173,6 +3343,121 @@ export async function selfTest() {
       const beside = await run(base([{ op: 'pr_enqueue_front', pull: PULL, expected_head_sha: HEAD }, { op: 'comment', issue: 1, body: 'x' }]), happy);
       const short = await run(base([{ op: 'pr_enqueue_front', pull: PULL, expected_head_sha: HEAD.slice(0, 7) }]), happy);
       t('⛔ the validator is the executor\'s gate too: beside another action, or with a short head, refused with ZERO requests, exit 2', [[beside.exit, beside.seen.length], [short.exit, short.seen.length]], [[EXIT_REFUSED, 0], [EXIT_REFUSED, 0]]);
+    }
+
+    // ── the jump's SIZE lift ────────────────────────────────────────────────
+    battery("the pr_enqueue_front SIZE lift: a pull over the human-merge line is jumped only on an authorised APPROVED review on its current head, or an earlier one carried to the head by an authorised comment on the pull naming it — the reviews read only over the line, a full page or an unread list lifting nothing, a non-approver, an approval elsewhere or a comment naming another head or pull refused with the mutation not sent");
+    {
+      const PULL = 3227;
+      const HEAD = '7a1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c';
+      const EARLIER = '1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4';
+      const APPROVER = GOVERNED_APPROVERS[0];
+      const PULL_GET = `GET /repos/${REPO}/pulls/${PULL}`;
+      const FILES = `GET /repos/${REPO}/pulls/${PULL}/files`;
+      const REVIEWS = `GET /repos/${REPO}/pulls/${PULL}/reviews`;
+      const COMMENT = `GET /repos/${REPO}/issues/comments/71`;
+      const GQL = 'POST /graphql';
+      const big = { status: 200, json: { number: PULL, node_id: 'PR_kwDObig', state: 'open', draft: false, title: 'feat(ui): large', additions: 3300, deletions: 93, head: { sha: HEAD, ref: 'claude/issue-33181-x' }, base: { ref: 'main' } } };
+      const entry = (number, position, jump = false) => ({ position, jump, state: 'AWAITING_CHECKS', pullRequest: { number } });
+      const queueOf = (nodes) => ({ status: 200, json: { data: { repository: { mergeQueue: { entries: { totalCount: nodes.length, pageInfo: { hasNextPage: false }, nodes } } } } } });
+      const enqueued = { status: 200, json: { data: { enqueuePullRequest: { mergeQueueEntry: entry(PULL, 1, true) } } } };
+      const review = (login, commit, state = 'APPROVED') => ({ id: 1, state, commit_id: commit, user: { login } });
+      const reviewsOf = (...list) => ({ status: 200, json: list });
+      const commentOf = (patch = {}) => ({ status: 200, json: { id: 71, user: { login: APPROVER }, issue_url: `https://api.github.com/repos/${REPO}/issues/${PULL}`, body: `The approval carries to ${HEAD.slice(0, 9)}.`, ...patch } });
+      const happy = { ...allowed, [PULL_GET]: big, [FILES]: { status: 200, json: [{ filename: 'ui/src/a.ts' }] }, [REVIEWS]: reviewsOf(review(APPROVER, HEAD)), [GQL]: [queueOf([entry(3730, 1)]), enqueued, queueOf([entry(PULL, 1, true), entry(3730, 2)])] };
+      const stroke = (extra = {}) => base([{ op: 'pr_enqueue_front', pull: PULL, expected_head_sha: HEAD, ...extra }]);
+      let clock = 0;
+      const timing = { sleep: async (ms) => { clock += ms; }, now: () => clock };
+      const sent = (seen) => seen.filter((x) => x.call === GQL && x.body?.query?.startsWith('mutation')).length;
+      const verdict = async (answers, extra) => {
+        const r = await run(stroke(extra), { ...happy, ...answers }, timing);
+        return [r.exit, sent(r.seen), r.rows[0]?.status];
+      };
+      const landed = [EXIT_OK, 1, 200];
+      const refused = [EXIT_ACTION_FAILED, 0, 'not sent'];
+      const ok = await run(stroke(), happy, timing);
+      t('⭐ ON THE HEAD: an authorised APPROVED review whose commit is the current head lifts the line — the reviews read after the queue, the jump sent and read back', [ok.exit, ok.seen.map((x) => x.call)], [EXIT_OK, [PERM, PULL_GET, FILES, GQL, REVIEWS, PULL_GET, GQL, GQL]], ok.logs.join(' | '));
+      t('⛔ an authorised approval on an EARLIER commit with no approval_comment lifts nothing — refused naming the missing carry', [await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)) }), (await run(stroke(), { ...happy, [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)) })).rows[0]?.result.includes('no `approval_comment` carries it')], [refused, true]);
+      t('⭐ CARRIED: an earlier authorised approval plus the approver\'s comment on this pull naming the head\'s prefix lifts it; the comment read by its own GET', [await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: commentOf() }, { approval_comment: 71 }), (await run(stroke({ approval_comment: 71 }), { ...happy, [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: commentOf() }, timing)).seen.some((x) => x.call === COMMENT)], [landed, true]);
+      t('⛔ CARRIED, refused: a comment by a non-approver, on another pull, naming another head or too short a prefix, or unreadable', [
+        await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: commentOf({ user: { login: 'os-support-ai' } }) }, { approval_comment: 71 }),
+        await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: commentOf({ issue_url: `https://api.github.com/repos/${REPO}/issues/3228` }) }, { approval_comment: 71 }),
+        await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: commentOf({ body: `carries to ${EARLIER.slice(0, 9)}` }) }, { approval_comment: 71 }),
+        await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: commentOf({ body: `carries to ${HEAD.slice(0, 6)}` }) }, { approval_comment: 71 }),
+        await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: { status: 404, json: { message: 'Not Found' } } }, { approval_comment: 71 }),
+      ], [refused, refused, refused, refused, refused]);
+      t('⛔ an approval by an account outside GOVERNED_APPROVERS, or one the approver later dismissed, lifts nothing even on the head', [await verdict({ [REVIEWS]: reviewsOf(review('os-support-ai', HEAD)) }), await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, HEAD), review(APPROVER, HEAD, 'DISMISSED')) })], [refused, refused]);
+      t('⛔ reviews unread, or a full page of them (a truncated list), lift nothing — never a pass', [await verdict({ [REVIEWS]: { status: 502, json: { message: 'Bad Gateway' } } }), await verdict({ [REVIEWS]: { status: 200, json: Array.from({ length: ENQUEUE_FRONT_REVIEWS_PAGE_SIZE }, () => review(APPROVER, HEAD)) } })], [refused, refused]);
+      const under = await run(stroke(), { ...happy, [PULL_GET]: { ...big, json: { ...big.json, additions: 2000, deletions: 0 } } }, timing);
+      t('a pull at or under the line reads no reviews at all — the lift is asked only over it', [under.exit, under.seen.some((x) => x.call === REVIEWS)], [EXIT_OK, false]);
+      t('the governed and one-jump fences are untouched by the lift: an approved large pull touching a governed path, or behind a jumped entry, is still refused', [await verdict({ [FILES]: { status: 200, json: [{ filename: 'AGENTS.md' }] } }), await verdict({ [GQL]: queueOf([entry(3730, 1, true)]) })], [refused, refused]);
+      t('enqueueFrontSizeLift is pure: no verdict reads unread, an empty approval list lifts nothing', [enqueueFrontSizeLift({}).lifts, enqueueFrontSizeLift({ verdict: { state: 'unapproved', approvals: [] }, headSha: HEAD }).reading], [false, 'no authorised APPROVED review']);
+    }
+
+    // ── the dequeue ─────────────────────────────────────────────────────────
+    battery("the pr_dequeue: the pull's own GET, its base's queue with each entry's merge-group rollup and, for seat-asks alone, its comments read before ONE audit comment and ONE dequeuePullRequest mutation — open, its head, not Version Packages, a queue read whole that lists it, and the cause holding on those reads (conflict: dirty; own-failure: UNMERGEABLE or a failing rollup, never an unread one; seat-asks: a relay comment signed by the dispatching session); each fence refused with nothing written; no audit comment, no mutation; GraphQL errors FAILED naming the grant; the 200 confirmed only by reading the queue back without the pull, UNCONFIRMED after the window");
+    {
+      const PULL = 3591;
+      const HEAD = '5c1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c';
+      const MOVED = '0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3';
+      const SESSION = base([]).session;
+      const PULL_GET = `GET /repos/${REPO}/pulls/${PULL}`;
+      const COMMENTS = `GET /repos/${REPO}/issues/${PULL}/comments`;
+      const AUDIT = `POST /repos/${REPO}/issues/${PULL}/comments`;
+      const GQL = 'POST /graphql';
+      const pullAt = (patch = {}) => ({ status: 200, json: { number: PULL, node_id: 'PR_kwDOout', state: 'open', draft: false, title: 'fix(server): x', mergeable: false, mergeable_state: 'dirty', additions: 40, deletions: 6, head: { sha: HEAD, ref: 'claude/issue-33591-x' }, base: { ref: 'main' }, ...patch } });
+      const entry = (number, position, state = 'AWAITING_CHECKS', rollup = 'PENDING') => ({ position, jump: false, state, pullRequest: { number }, headCommit: rollup === undefined ? null : { statusCheckRollup: rollup === null ? null : { state: rollup } } });
+      const queueOf = (nodes, hasNextPage = false) => ({ status: 200, json: { data: { repository: { mergeQueue: { entries: { totalCount: nodes.length, pageInfo: { hasNextPage }, nodes } } } } } });
+      const before = queueOf([entry(3730, 1), entry(PULL, 2), entry(3732, 3)]);
+      const after = queueOf([entry(3730, 1), entry(3732, 2)]);
+      const dequeued = { status: 200, json: { data: { dequeuePullRequest: { mergeQueueEntry: entry(PULL, 2) } } } };
+      const audited = { status: 201, json: { id: 6899 } };
+      const stroke = (extra = {}) => base([{ op: 'pr_dequeue', pull: PULL, expected_head_sha: HEAD, cause: 'conflict', reason: 'conflicts with main at the shared changeset', ...extra }]);
+      const happy = { ...allowed, [PULL_GET]: pullAt(), [AUDIT]: audited, [GQL]: [before, dequeued, after] };
+      let clock = 0;
+      const timing = { sleep: async (ms) => { clock += ms; }, now: () => clock };
+      const mutations = (seen) => seen.filter((x) => x.call === GQL && x.body?.query?.startsWith('mutation'));
+      const audits = (seen) => seen.filter((x) => x.call === AUDIT);
+      const ok = await run(stroke(), happy, timing);
+      t('⭐ conflict: the sender gate, the pull, its queue — then ONE audit comment, the node id, ONE mutation, the queue read back; exit 0', [ok.exit, ok.seen.map((x) => x.call)], [EXIT_OK, [PERM, PULL_GET, GQL, AUDIT, PULL_GET, GQL, GQL]], ok.logs.join(' | '));
+      t('…the queue read selects each entry\'s merge-group rollup, the mutation sends the pull\'s node id to dequeuePullRequest', [ok.seen[2].body.query.includes('statusCheckRollup { state }'), mutations(ok.seen).map((m) => [m.body.query.includes('dequeuePullRequest(input: { id: $id })'), m.body.variables])], [true, [[true, { id: 'PR_kwDOout' }]]]);
+      const body = audits(ok.seen)[0]?.body?.body ?? '';
+      t('…the ONE audit comment names the session, the request, the cause, what the relay read and the seat\'s reason', [SESSION, 'fw-test-1', 'cause `conflict`', 'mergeable_state dirty', 'conflicts with main at the shared changeset'].map((w) => body.includes(w)), [true, true, true, true, true]);
+      t('…the row lands on the read-back, naming the audit comment; the comment and the mutation were paced as writes, the reads were not', [ok.rows[0]?.call, ok.rows[0]?.result, ok.pace ? readReal(ok.pace.file, 'utf8').trim().split('\n').filter(Boolean).length : null], [`${GQL} dequeuePullRequest`, `#${PULL} out of the merge queue · read back 2 entr(ies), none is #${PULL} · audit comment 6899`, 2]);
+      const fenced = async (answers, extra) => {
+        const r = await run(stroke(extra), { ...happy, ...answers });
+        return [r.exit, mutations(r.seen).length, audits(r.seen).length, r.rows[0]?.status, /REFUSED at the relay's fence/.test(r.rows[0]?.result ?? '')];
+      };
+      const refused = [EXIT_ACTION_FAILED, 0, 0, 'not sent', true];
+      t('⛔ conflict, refused: a pull that is clean, or whose mergeability is not computed yet — nothing written', [await fenced({ [PULL_GET]: pullAt({ mergeable: true, mergeable_state: 'clean' }) }), await fenced({ [PULL_GET]: pullAt({ mergeable: null, mergeable_state: 'unknown' }) })], [refused, refused]);
+      t('⛔ open, head and release, refused: a closed pull, a head pushed since the seat read the cause, the Version Packages pull', [await fenced({ [PULL_GET]: pullAt({ state: 'closed' }) }), await fenced({ [PULL_GET]: pullAt({ head: { sha: MOVED, ref: 'x' } }) }), await fenced({ [PULL_GET]: pullAt({ head: { sha: HEAD, ref: 'changeset-release/main' } }) })], [refused, refused, refused]);
+      t('⛔ queue and queued, refused: no queue on the base, a truncated list, a pull the queue does not list', [await fenced({ [GQL]: { status: 200, json: { data: { repository: { mergeQueue: null } } } } }), await fenced({ [GQL]: queueOf([entry(PULL, 1)], true) }), await fenced({ [GQL]: after })], [refused, refused, refused]);
+      const own = (node) => ({ [PULL_GET]: pullAt({ mergeable: true, mergeable_state: 'blocked' }), [GQL]: [queueOf([entry(3730, 1), node]), dequeued, after] });
+      t('own-failure: an entry reading UNMERGEABLE, or a merge-group rollup reading FAILURE or ERROR, holds', [(await run(stroke({ cause: 'own-failure' }), { ...happy, ...own(entry(PULL, 2, 'UNMERGEABLE')) }, timing)).exit, (await run(stroke({ cause: 'own-failure' }), { ...happy, ...own(entry(PULL, 2, 'AWAITING_CHECKS', 'FAILURE')) }, timing)).exit, (await run(stroke({ cause: 'own-failure' }), { ...happy, ...own(entry(PULL, 2, 'AWAITING_CHECKS', 'ERROR')) }, timing)).exit], [EXIT_OK, EXIT_OK, EXIT_OK]);
+      t('⛔ own-failure, refused: a build still pending, a green one, and a rollup the token could not read — null is never a pass', [await fenced(own(entry(PULL, 2, 'AWAITING_CHECKS', 'PENDING')), { cause: 'own-failure' }), await fenced(own(entry(PULL, 2, 'MERGEABLE', 'SUCCESS')), { cause: 'own-failure' }), await fenced(own(entry(PULL, 2, 'AWAITING_CHECKS', null)), { cause: 'own-failure' })], [refused, refused, refused]);
+      const signed = (login, session) => ({ status: 200, json: [{ id: 1, user: { login }, body: `domain:server#5 · os-project-manager · ${session}\n\nLanded.` }] });
+      const asks = (comments) => ({ [PULL_GET]: pullAt({ mergeable: true, mergeable_state: 'blocked' }), [COMMENTS]: comments });
+      const seat = await run(stroke({ cause: 'seat-asks' }), { ...happy, ...asks(signed(RELAY_COMMENT_AUTHOR, SESSION)) }, timing);
+      t('seat-asks: a relay comment on the pull signed by the dispatching session holds — the comments read only for this cause', [seat.exit, seat.seen.filter((x) => x.call === COMMENTS).length, ok.seen.filter((x) => x.call === COMMENTS).length], [EXIT_OK, 1, 0]);
+      t('⛔ seat-asks, refused: a signature naming another session, the same signature typed by a non-relay account, no comment at all', [await fenced(asks(signed(RELAY_COMMENT_AUTHOR, 'session_01ZZZZZZZZZZZZZZZZZZZZZZZZ')), { cause: 'seat-asks' }), await fenced(asks(signed('a-stranger', SESSION)), { cause: 'seat-asks' }), await fenced(asks({ status: 200, json: [] }), { cause: 'seat-asks' })], [refused, refused, refused]);
+      const unreadComments = await run(stroke({ cause: 'seat-asks' }), { ...happy, ...asks({ status: 502, json: { message: 'Bad Gateway' } }) });
+      t('⛔ seat-asks with the comments unread: nothing written, the read named — an unread list is never unsigned', [unreadComments.exit, writes(unreadComments.seen).filter((x) => x.call !== GQL).length, mutations(unreadComments.seen).length, unreadComments.rows[0]?.result.includes('comments could not be read')], [EXIT_ACTION_FAILED, 0, 0, true]);
+      const noAudit = await run(stroke(), { ...happy, [AUDIT]: { status: 403, json: { message: 'Resource not accessible by integration' } } });
+      t('⛔ an audit comment that does not land stops the action: the mutation NOT SENT, the row says so', [noAudit.exit, mutations(noAudit.seen).length, noAudit.rows[0]?.result.includes('NOT SENT')], [EXIT_ACTION_FAILED, 0, true]);
+      const denied = await run(stroke(), { ...happy, [GQL]: [before, { status: 200, json: { data: { dequeuePullRequest: null }, errors: [{ message: 'Resource not accessible by integration' }] } }] });
+      t('⛔ GraphQL errors on the mutation (the grant missing) are FAILED naming `Merge queues: write`; the audit comment stands and nothing is read back', [denied.exit, denied.rows[0]?.result.includes('Merge queues: write'), denied.rows[0]?.result.includes('audit comment 6899 stands'), denied.seen.filter((x) => x.call === GQL).length], [EXIT_ACTION_FAILED, true, true, 2]);
+      clock = 0;
+      const still = await run(stroke(), { ...happy, [GQL]: [before, dequeued, before] }, timing);
+      t('⛔ a read-back that still lists the pull is FAILED, UNCONFIRMED, after the window — a 200 is never trusted alone', [still.exit, still.rows[0]?.result.includes('UNCONFIRMED'), still.rows[0]?.result.includes('still lists'), clock], [EXIT_ACTION_FAILED, true, true, DEQUEUE_WINDOW_MS]);
+      clock = 0;
+      const late = await run(stroke(), { ...happy, [GQL]: [before, dequeued, before, after] }, timing);
+      t('an entry gone on a later read lands, read again at the interval', [late.exit, clock], [EXIT_OK, DEQUEUE_POLL_MS]);
+      t('dequeueReadBack: a truncated list is pending, a base with no queue lists nothing', [dequeueReadBack({ pull: 1, queue: { present: true, complete: false, entries: [] } }).pending, dequeueReadBack({ pull: 1, queue: { present: false, complete: true, entries: [] } }).ok], [true, true]);
+      const beside = await run(base([stroke().actions[0], { op: 'comment', issue: 1, body: 'x' }]), happy);
+      const flake = await run(stroke({ cause: 'flake' }), happy);
+      t('⛔ the validator is the executor\'s gate too: beside another action, or a cause outside the three, refused with ZERO requests, exit 2', [[beside.exit, beside.seen.length], [flake.exit, flake.seen.length]], [[EXIT_REFUSED, 0], [EXIT_REFUSED, 0]]);
+      const handover = readReal(fileURLToPath(new URL('../check-handover.mjs', import.meta.url)), 'utf8');
+      t('RELAY_COMMENT_AUTHOR is check-handover.mjs\'s FLEET_BOT_LOGIN, spelled once each and held equal here', /export const FLEET_BOT_LOGIN = '([^']+)'/.exec(handover)?.[1], RELAY_COMMENT_AUTHOR);
     }
 
     // ── the hierarchy link ──────────────────────────────────────────────────
