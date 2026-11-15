@@ -4,7 +4,6 @@
  */
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import {
   cn, Button, Badge, Progress, Input, Checkbox, Label, EmptyValue,
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription, DIALOG_VIEWPORT_GUTTER,
@@ -1543,12 +1542,6 @@ const TemplateBar: React.FC<{
           // takes no pointer or focus events, so the wrapping span is the tab
           // stop and the tooltip trigger, and the reason is also a persistent
           // description of both, read with the tooltip closed.
-          //
-          // The tooltip content is portalled out of the dialog: it unmounts
-          // when Tab blurs the span, and a node removed under the dialog's
-          // focus trap while focus is between two elements reads to the trap
-          // as the focused element removed, so it would pull focus to the
-          // dialog and Tab could never leave this span (objectstack#33862).
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1562,10 +1555,7 @@ const TemplateBar: React.FC<{
                   <span id={saveReasonId} className="sr-only">{t('grid.import.saveCurrentNeedsMapping')}</span>
                 </span>
               </TooltipTrigger>
-              {createPortal(
-                <TooltipContent className="max-w-xs">{t('grid.import.saveCurrentNeedsMapping')}</TooltipContent>,
-                document.body,
-              )}
+              <TooltipContent className="max-w-xs">{t('grid.import.saveCurrentNeedsMapping')}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         ) : saveCurrent

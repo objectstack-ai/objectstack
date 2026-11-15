@@ -188,3 +188,30 @@ describe('#26608 — label() reads the option label in the reader\'s locale', ()
     expect(b.display_name).toBe('v2 · Clean');
   });
 });
+
+describe('#33634 — the declared sourceLocale, not defaultLocale, is the authored option label\'s language', () => {
+  // An app authored in English that defaults its users to zh-CN: `defaultLocale:
+  // 'zh-CN'`, `sourceLocale: 'en'`, no `fallbackLocale` (collapsed to zh-CN by
+  // both boot paths), English inline option labels, a zh-CN pack.
+  const enSource = (overrides: Record<string, unknown> = {}) => makeI18n({
+    getDefaultLocale: () => 'zh-CN',
+    getFallbackLocale: () => 'zh-CN',
+    getSourceLocale: () => 'en',
+    ...overrides,
+  });
+  const en = { locale: 'en' } as never;
+
+  it('an en reader gets the inline English label; a zh-CN reader gets the pack', async () => {
+    const { engine } = await makeEngine(enSource());
+    const a = await engine.insert('ol_version', { version_no: 2, kind: 'clean' }, { context: en }) as Rec;
+    expect(a.display_name).toBe('v2 · Clean');
+    const b = await engine.insert('ol_version', { version_no: 3, kind: 'redline' }, { context: zhCN }) as Rec;
+    expect(b.display_name).toBe('v3 · 修订稿');
+  });
+
+  it('CONTROL — no sourceLocale declared: an en reader walks the chain to zh-CN, as before', async () => {
+    const { engine } = await makeEngine(enSource({ getSourceLocale: () => undefined }));
+    const a = await engine.insert('ol_version', { version_no: 2, kind: 'clean' }, { context: en }) as Rec;
+    expect(a.display_name).toBe('v2 · 清稿');
+  });
+});
