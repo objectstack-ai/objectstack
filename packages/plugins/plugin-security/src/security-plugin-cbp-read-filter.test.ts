@@ -384,3 +384,80 @@ describe('[#33696 ruling 6893666857] the tenant wall still bounds the detail row
     expect(b.ids).toEqual(expect.arrayContaining(['line_b1']));
   });
 });
+
+/** A write's answer: landed, or the refusal's code and status (the ADR-0112 envelope). */
+const outcomeOf = (p: Promise<unknown>) =>
+  p.then(
+    () => ({ kind: 'landed' as const }),
+    (e: { code?: unknown; status?: unknown; statusCode?: unknown } | null) => ({
+      kind: 'refused' as const,
+      code: e?.code == null ? undefined : String(e.code),
+      status: Number(e?.statusCode ?? e?.status),
+    }),
+  );
+
+describe('[#33696 · review 6895328067 route (a)] the write doors keep the chain: a View All reader over unrestricted hops writes as before', () => {
+  // Ruling 6893666857 is a READ ruling. The reads the security plugin asks on a
+  // write's behalf under the caller's context — the predicate-write narrowing,
+  // the 2.8 gate's predicate leg and the step-2.7 by-id read — keep the chain,
+  // so an orphan stays outside every write exactly as before the ruling.
+  let rig: Awaited<ReturnType<typeof boot>>;
+  // Two rows the admin created: a predicate write here composes the
+  // own-records write predicate (`created_by` = the caller), so these are the
+  // rows the admin's predicate writes land on. The rig stamps no `created_by`,
+  // so the driver stores it.
+  const MINE = ['line_mine_1', 'line_mine_2'];
+  beforeAll(async () => {
+    rig = await boot('single');
+    const driver = (rig.engine as any).getDriver(LINE);
+    await driver.create(LINE, { id: 'line_mine_1', name: 'mine1', opp: 'opp_a1', organization_id: ORG_A, created_by: ADMIN_USER });
+    await driver.create(LINE, { id: 'line_mine_2', name: 'mine2', opp: 'opp_a2', organization_id: ORG_A, created_by: ADMIN_USER });
+  });
+  afterAll(async () => { try { await rig?.engine.destroy(); } catch { /* noop */ } });
+
+  it('a hook\'s read inside a write, under the caller\'s context, keeps the chain and sees no orphan', async () => {
+    let seen: string[] | undefined;
+    rig.engine.registerHook(
+      'afterUpdate',
+      async (hookCtx: any) => {
+        seen ??= ids(await hookCtx.api.object(LINE).find({}));
+      },
+      { object: PUB_LINE, packageId: 'com.objectstack.qa.cbp-unrestricted-chain-write' },
+    );
+    const outcome = await outcomeOf(rig.engine.update(PUB_LINE, { name: 'edited' }, { where: { id: 'pub_line_1' }, context: { ...ADMIN } } as never));
+    expect(outcome).toEqual({ kind: 'landed' });
+    expect(seen).toEqual([...CHAINED_LINES, ...MINE].sort());
+    // The control: the same reader's plain read, outside any write, drops the chain.
+    expect((await rig.read(LINE, ADMIN)).ids).toEqual([...CHAINED_LINES, ...MINE, ...ORPHAN_LINES].sort());
+  });
+
+  it('a predicate delete over a set holding an empty-required-master orphan deletes the other rows and leaves the orphan', async () => {
+    const outcome = await outcomeOf(rig.engine.delete(LINE, {
+      where: { name: { $in: ['mine1', 'null'] } }, multi: true, context: { ...ADMIN },
+    } as never));
+    expect(outcome).toEqual({ kind: 'landed' });
+    const left = await rig.stored(LINE);
+    expect(left).not.toContain('line_mine_1');
+    expect(left).toContain('line_a_null');
+  });
+
+  it('a predicate update over a set holding an empty-master and a dangling-master orphan edits the other rows and leaves both orphans', async () => {
+    const outcome = await outcomeOf(rig.engine.update(LINE, { name: 'edited' }, {
+      where: { name: { $in: ['mine2', 'null', 'ghost'] } }, multi: true, context: { ...ADMIN },
+    } as never));
+    expect(outcome).toEqual({ kind: 'landed' });
+    const rows = (await rig.engine.find(LINE, { context: { isSystem: true } } as never)) as Array<{ id: string; name: string }>;
+    const nameOf = (id: string) => rows.find((r) => r.id === id)?.name;
+    expect(nameOf('line_mine_2')).toBe('edited');
+    expect(nameOf('line_a_null')).toBe('null');
+    expect(nameOf('line_a_ghost')).toBe('ghost');
+  });
+
+  it('a by-id update or delete of an orphan is still not found', async () => {
+    expect(await outcomeOf(rig.engine.update(LINE, { name: 'edited' }, { where: { id: 'line_a_ghost' }, context: { ...ADMIN } } as never)))
+      .toMatchObject({ kind: 'refused', code: 'RECORD_NOT_FOUND', status: 404 });
+    expect(await outcomeOf(rig.engine.delete(LINE, { where: { id: 'line_a_null' }, context: { ...ADMIN } } as never)))
+      .toMatchObject({ kind: 'refused', code: 'RECORD_NOT_FOUND', status: 404 });
+    expect(await rig.stored(LINE)).toEqual(expect.arrayContaining(['line_a_ghost', 'line_a_null']));
+  });
+});
