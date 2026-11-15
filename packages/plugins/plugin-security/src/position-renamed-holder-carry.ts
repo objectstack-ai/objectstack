@@ -47,8 +47,8 @@
  *    are is not decidable, so neither carries (condition 3);
  *  - `claimant-disabled` — the one position claiming the old name belongs to a
  *    disabled package: nothing is carried onto a position that is switched
- *    off with its package; the next boot after the package is enabled
- *    carries;
+ *    off with its package; enabling it through `PATCH /packages/:id/enable`
+ *    carries, and so does the next boot after it is enabled;
  *  - `still-declared` — the old name is still a position of the same holder:
  *    the name is in use, so nothing was renamed away from it (condition 3;
  *    a cycle is this case, since every name in a cycle is a current one);
@@ -132,13 +132,18 @@
  * A reload heard before the boot run is ignored: during the boot the catalog
  * is still being filled, and an old name whose holding package has not
  * registered yet would read as no position at all (condition 2). The boot run
- * judges it once the catalog is complete. A hot upgrade over a version the
+ * judges it once the catalog is complete. A hot install-local install or
+ * upgrade is carried at once for the package the door announces; the other
+ * packages of a multi-package artifact are carried at the next restart (the
+ * door names only the artifact's own id). A hot upgrade over a version the
  * running kernel still serves is carried at once: the re-register withdraws
  * the position the new version no longer ships (#33050), so the old name is
- * no current position when the announcement is heard. A door that registers
- * positions without announcing `metadata:reloaded` (the runtime's package
- * install and enable routes), and a package the announcement does not name,
- * are carried at the next boot.
+ * no current position when the announcement is heard. The runtime's package
+ * install (`POST /packages`) and the enable of a disabled package
+ * (`PATCH /packages/:id/enable`) announce `app/ID` too, so they are carried
+ * at once; an install that leaves the package disabled is refused
+ * `claimant-disabled` until that enable announces it. A package the
+ * announcement does not name is carried at the next boot.
  *
  * ## Its one limit
  *
@@ -685,7 +690,7 @@ const listIds = (ids: readonly string[]): string =>
 
 const REFUSAL_SENTENCE: Record<PositionRenameRefusal, string> = {
   'claimed-twice': 'two positions claim it, so whose holders they are is not decidable',
-  'claimant-disabled': 'the renamed position\'s package is disabled; the first boot after it is enabled carries them',
+  'claimant-disabled': 'the renamed position\'s package is disabled; enabling it through `PATCH /packages/:id/enable` carries them, and so does the first boot after it is enabled',
   'still-declared': 'it is still a position of the same holder, so nothing was renamed away from it',
   'held-by-other': 'it is a position another holder declares, and a package never claims another holder\'s people',
   'owned-by-other': 'it was another package\'s position, and a package never claims another holder\'s people',

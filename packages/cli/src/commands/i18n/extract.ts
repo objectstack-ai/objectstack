@@ -31,6 +31,7 @@ import {
   type FillStrategy,
   type TranslationModuleKind,
 } from '../../utils/i18n-bundle-extract.js';
+import { resolveSourceLocale, withGatedDefaultLocale } from '../../utils/i18n-coverage.js';
 import { authoringRuleUnionStack } from '../../utils/stack-collections.js';
 
 const FILL_STRATEGIES: FillStrategy[] = ['empty', 'default', 'todo'];
@@ -191,11 +192,11 @@ export default class I18nExtract extends Command {
   static override flags = {
     json: Flags.boolean({ description: 'Output JSON instead of writing files' }),
     'default-locale': Flags.string({
-      description: "Locale filled from schema labels. Defaults to the config's i18n.defaultLocale, else 'en'.",
+      description: "Source locale, filled from schema labels (the language they are written in). Overrides the config's i18n.sourceLocale, else its i18n.defaultLocale, else 'en'.",
     }),
     locales: Flags.string({
       description:
-        "Comma-separated list of locales to emit (always includes default-locale). Defaults to the config's i18n.supportedLocales.",
+        "Comma-separated list of locales to emit (always includes default-locale). Defaults to the config's i18n.supportedLocales, plus its i18n.defaultLocale when i18n.sourceLocale is declared.",
     }),
     fill: Flags.string({
       description: 'How non-default locales are filled: empty | default | todo',
@@ -257,20 +258,21 @@ export default class I18nExtract extends Command {
       const filter = flags.filter ? new RegExp(flags.filter) : undefined;
       // The stack's own `i18n` block already names the languages it ships, so
       // scaffolding those by default saves repeating them on every invocation.
-      const declared = (normalized as { i18n?: { defaultLocale?: unknown; supportedLocales?: unknown } }).i18n;
+      const declared = (normalized as { i18n?: { sourceLocale?: unknown; defaultLocale?: unknown; supportedLocales?: unknown } }).i18n;
       const declaredLocales = Array.isArray(declared?.supportedLocales)
         ? declared.supportedLocales.filter((l): l is string => typeof l === 'string' && l.length > 0)
         : [];
+      // On a stack declaring `sourceLocale`, the users' `defaultLocale` is
+      // scaffolded too, as `os i18n check` gates it: it is what every user
+      // without a preference is served, declared or not in `supportedLocales`.
+      // An explicit `--locales` list is the caller's whole answer.
       const locales = flags.locales
         ? flags.locales.split(',').map((s) => s.trim()).filter(Boolean)
-        : declaredLocales.length > 0
-          ? declaredLocales
-          : undefined;
-      const defaultLocale =
-        flags['default-locale'] ??
-        (typeof declared?.defaultLocale === 'string' && declared.defaultLocale.length > 0
-          ? declared.defaultLocale
-          : 'en');
+        : withGatedDefaultLocale(declaredLocales.length > 0 ? declaredLocales : undefined, declared);
+      // The locale the inline text IS — filled from it, and rewritten from it on
+      // every merge. `i18n.sourceLocale` outranks the users' `defaultLocale`,
+      // through the one reading `os lint` and `os i18n check` share.
+      const defaultLocale = flags['default-locale'] ?? resolveSourceLocale(declared);
 
       // Resolved before the extract because the previously committed provenance
       // records are an INPUT to it: they are the mechanism's only memory, and a

@@ -120,7 +120,8 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         help: "طريقة إنشاء هذه الهوية — idp_provisioned (توفير فوري عبر SSO الموحَّد) أو env_native (تسجيل محلي / مستخدم نهائي للتطبيق). يديره النظام؛ لا تعدّله.",
         options: {
           idp_provisioned: "مُوفَّر من مزوّد الهوية",
-          env_native: "حساب محلي"
+          env_native: "حساب محلي",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
@@ -1941,7 +1942,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "المعرّف"
       },
       identifier: {
-        label: "المعرّف",
+        label: "معرّف URI للمورد",
         help: "معرّف URI لمؤشر المورد المقدَّم في معامل resource وفق RFC 8707"
       },
       name: {

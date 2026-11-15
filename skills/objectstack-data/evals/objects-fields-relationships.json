@@ -327,6 +327,22 @@
           "Field.lookup('invoice')"
         ]
       }
+    },
+    {
+      "id": 19,
+      "prompt": "帮我搭一个工单管理应用：`ticket` 对象有标题、状态（新建 / 处理中 / 已解决）、优先级，以及负责人，负责人可以改派给别的同事。",
+      "expected_output": "The 负责人 is the platform's injected `owner_id` (`ownership: 'user'`, the default; label Owner / 负责人): reassigning the ticket writes `owner_id`, which also drives owner-scoped visibility and \"My records\" views. The `ticket` object declares no `assignee` / `assigned_to` / owner field of its own and no second visible field labelled 负责人; only a handler the request names apart from the owner would be a `user` field, with a label no other visible field carries (system fields `created_by` 创建人 and `updated_by` 更新人 included), granting no access.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "owner_id"
+        ],
+        "must_not_contain": [
+          "assignee:",
+          "assigned_to:",
+          "label: '负责人'"
+        ]
+      }
     }
   ]
 }

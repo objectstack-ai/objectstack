@@ -57,6 +57,20 @@ drawn for a viewer who may not create, or under a host that serves no create.
 `sharing` is not a published input of a page node yet: the Share button has no
 action the spec declares.
 
+## Rows and cards that open nothing
+
+A React host whose row click (`onRowClick`) opens nothing for these rows passes
+`rowOpensRecord={false}` to `ListView`, which hands it to the grid, the gallery
+and the board. None of them then draws a row or card as something to open: the
+grid's record-link cells are plain text and its right-click menu has no Open,
+and the grid's phone cards, the gallery's cards and a board card that cannot be
+dragged draw no pointer and no hover lift. The click still reaches
+`onRowClick`, and row and card actions stay. Absent (or `true`), nothing
+changes. It is a host prop, not a schema key: list metadata cannot set it. The
+console passes `false` for a view authored `navigation: { mode: 'none' }` and
+for an object whose data API serves no single-record read (objectstack#33317,
+objectstack#33548).
+
 ## Status
 
 This plugin is part of the v3.3.0 release. For full API reference and usage

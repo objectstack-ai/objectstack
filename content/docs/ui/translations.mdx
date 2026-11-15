@@ -90,7 +90,7 @@ export default defineStack({
 | Page tab labels (`page:tabs` items) | `pages.<name>.components.<tabsId>.items.<value>.label` — keyed by the tabs component's `id` and the item's `value`; an item without a `value` has no key (localize it with an inline locale map), and `page:accordion` panels have none |
 | A page `object-form`'s thank-you panel | `pages.<name>.components.<formId>.submitBehavior.title` / `.message` — keyed by the `object-form` component's `id` (a form without an `id` has no key), by the same rules as a form view's panel |
 | Screen-flow wizards (flow label, screen headings and body text, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.description` / `.fields.<field>.label` / `.placeholder` / `.inlineHelpText` — a screen field's help text is `inlineHelpText`, the key the field itself declares, not `help`; see the boundary note below |
-| Hook refusal messages | `hooks.<hook>.refusals.<CODE>.message` — one per entry of the hook's `refusals` catalogue. A sandboxed hook body refuses by code, and the server answers the refusal with this message in the caller's locale, else the declared `message` |
+| Hook refusal messages | `hooks.<hook>.refusals.<CODE>.message` — one per entry of the hook's `refusals` catalogue — and `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`, one per reason an entry declares. A hook (a `js` body or a TypeScript `handler`) refuses by code, optionally with a declared reason, and the server answers the refusal with this sentence in the caller's locale, else the declared one. A translation of an entry that declares `params` keeps its `{{ name }}` holes; the server fills them after picking the translation |
 | Position label / description | `positions.<name>.label` / `description` — keyed by the position's `name`; overlaid on every served position, which is the list the console's position picker draws |
 | Permission-set label / description | `permissions.<name>.label` / `description` — the group is spelled as the stack spells the collection (`permissions[]`), keyed by the set's `name` |
 | Doc book title, description and section titles | `books.<name>.label` / `description` / `groups.<key>.label` — keyed by the book's `name` and each group's `key`; overlaid on every served book and on the book tree, which is what the docs sidebar draws. A doc's own title and body localize through `doc.translations` instead |
@@ -360,9 +360,11 @@ same two numbers as `platformMetadataForms`.
 
 Your project decides, and the tooling never assumes. `os lint`, `os i18n check`
 and `os i18n extract` read the `i18n` block above — `supportedLocales` is the
-set they gate, `defaultLocale` the one that must be complete. Without that
-block they fall back to whatever locales your bundles already cover, and
-finally to `en`.
+set they gate, the **source locale** the one that must be complete. The source
+locale is the language your inline labels are written in: `sourceLocale` when
+you declare it, else `defaultLocale`. Without that block they fall back to
+whatever locales your bundles already cover, and finally to `en`. Each
+command's `--default-locale` flag overrides the source locale for one run.
 
 The consequence worth stating plainly: **a project that does not do i18n
 reports nothing.** No `i18n` block and no bundles means one active locale, the
@@ -373,6 +375,37 @@ tooling stops asking for English you never promised. The runtime reads the
 declaration the same way (#15711): a request for the default locale answers
 with the authored label, so what the gate counts as covered is what gets
 served.
+
+#### When users default to a language you did not author in
+
+`defaultLocale` is the language a user who has not picked one gets.
+`sourceLocale` is the language your inline text is written in. Most projects
+author in the language their users get and declare only `defaultLocale`. An
+app written in English and sold into the Chinese market declares both:
+
+```ts
+i18n: {
+  defaultLocale: 'zh-CN',          // users without a personal locale get Chinese
+  sourceLocale: 'en',              // the inline labels are English
+  supportedLocales: ['en', 'zh-CN', 'es-ES'],
+},
+```
+
+The tooling then counts the inline text as the `en` translation, asks for no
+`en` bundle, and reports every missing `zh-CN` and `es-ES` row; `os i18n
+extract` fills the `en` bundle from the inline text and leaves `zh-CN` rows to
+translators. With `sourceLocale` declared, `defaultLocale` is gated and
+scaffolded even when `supportedLocales` leaves it out, because it is the
+language every user without a preference is served. Declare `defaultLocale: 'zh-CN'` alone instead and the tooling
+reads your English labels as Chinese: it reports every key missing in `en` and
+never reports a `zh-CN` gap.
+
+`sourceLocale` is read by the authoring tools only. The runtime's
+authored-label rule above still keys on `defaultLocale`, so in this setup it is
+the `zh-CN` request that skips the fallback chain, and an `en` request walks
+the declared fallback (`fallbackLocale`, else `defaultLocale`) before it
+reaches the English inline label. Declare `fallbackLocale: 'en'` to keep an
+`en` request on the authored text.
 
 Translating is therefore opt-in, but once you opt in it covers the **whole**
 declared surface — every row of the table above, including action labels

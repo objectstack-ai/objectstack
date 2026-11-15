@@ -38,6 +38,7 @@
 
 import { describe, it, expect, afterAll, afterEach, beforeEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { PENDING_SSO_MESSAGES, PENDING_SSO_SOURCE } from './pending-sso-marker';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { runAdminSetUserPassword, type AdminUserEndpointDeps } from './admin-user-endpoints.js';
@@ -966,4 +967,88 @@ describe('SSO-only mode keeps IdP-provisioned users off local passwords at the r
       expect(await credentialOf(a.engine)).toBeDefined();
     }, 60_000);
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#33181] A pending person gets no password at the reset doors
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('a pending, SSO-only person is refused at the reset doors', () => {
+  const PHONE = '+15550181';
+
+  async function userIdOf(engine: ObjectQL): Promise<string> {
+    const [user] = (await engine.find('sys_user', { where: { email: EMAIL }, limit: 1 }, SYS)) as Array<{ id: string }>;
+    return user.id;
+  }
+
+  async function credentialOf(engine: ObjectQL): Promise<{ id: string } | undefined> {
+    const rows = (await engine.find(
+      'sys_account',
+      { where: { user_id: await userIdOf(engine), provider_id: 'credential' } },
+      SYS,
+    )) as Array<{ id: string }>;
+    return rows[0];
+  }
+
+  /** The staged account as `admin/add-sso-user` leaves one: `idp_pending`, no local credential. */
+  async function markedPending(a: Account): Promise<void> {
+    const id = await userIdOf(a.engine);
+    await a.engine.update('sys_user', { id, source: PENDING_SSO_SOURCE }, SYS);
+    const credential = await credentialOf(a.engine);
+    await a.engine.delete('sys_account', { where: { id: credential!.id }, context: { isSystem: true } } as never);
+    expect(await credentialOf(a.engine), 'fixture invariant: the pending person holds no credential').toBeUndefined();
+  }
+
+  async function expectPendingRefusal(res: Response): Promise<void> {
+    const text = await res.clone().text();
+    const body = JSON.parse(text) as { code?: unknown; message?: unknown };
+    expect({ status: res.status, code: body.code, message: body.message }, text).toEqual({
+      status: 409,
+      code: 'RESOURCE_CONFLICT',
+      message: PENDING_SSO_MESSAGES.resetPassword,
+    });
+  }
+
+  it('the emailed reset link refuses a pending person with 409 and writes no credential', async () => {
+    const a = await signedInAccount();
+    const token = await requestResetToken(a);
+    await markedPending(a);
+
+    await expectPendingRefusal(await post(a.manager, '/reset-password', { token, newPassword: SECOND }));
+    expect(await credentialOf(a.engine)).toBeUndefined();
+  }, 60_000);
+
+  it('the texted reset code refuses a pending person with 409 and writes no credential', async () => {
+    const a = await signedInAccount({ plugins: { phoneNumber: true } });
+    const texts: Array<{ templateParams?: { code?: string } }> = [];
+    a.manager.setSmsService({
+      async send(input: { templateParams?: { code?: string } }) {
+        texts.push(input);
+        return { id: `sms${texts.length}`, status: 'sent' };
+      },
+      isConfigured: () => true,
+    } as never);
+    await a.engine.update('sys_user', { id: await userIdOf(a.engine), phone_number: PHONE, phone_number_verified: true }, SYS);
+    const requested = await post(a.manager, '/phone-number/request-password-reset', { phoneNumber: PHONE });
+    expect(requested.status, await requested.clone().text()).toBe(200);
+    await vi.waitFor(() => expect(texts.length).toBe(1));
+    const otp = String(texts[0].templateParams?.code ?? '');
+    await markedPending(a);
+
+    await expectPendingRefusal(
+      await post(a.manager, '/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND }),
+    );
+    expect(await credentialOf(a.engine)).toBeUndefined();
+  }, 60_000);
+
+  it('CONTROL: the same reset for an env_native person who holds no password writes one, as before', async () => {
+    const a = await signedInAccount();
+    const token = await requestResetToken(a);
+    const id = await userIdOf(a.engine);
+    await a.engine.update('sys_user', { id, source: 'env_native' }, SYS);
+
+    const reset = await post(a.manager, '/reset-password', { token, newPassword: SECOND });
+    expect(reset.status, await reset.clone().text()).toBe(200);
+    expect(await credentialOf(a.engine)).toBeDefined();
+  }, 60_000);
 });

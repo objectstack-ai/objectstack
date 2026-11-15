@@ -816,7 +816,7 @@
     "personas": [
       {
         "id": "employee",
-        "role": "Employee, Engineering, two years of service — e07",
+        "role": "Employee, Engineering, two years of service — e07, who may not change their own leave balance",
         "record": {"object": "employee", "id": "e07"},
         "hidden": {"fields": [{"object": "employee", "field": "personal_phone"}]},
         "scope": [
@@ -846,7 +846,7 @@
       },
       {
         "id": "hr_officer",
-        "role": "HR officer, organization-wide — e13",
+        "role": "HR officer, organization-wide — e13, who deletes withdrawn leave requests",
         "hidden": {"fields": [{"object": "leave_request", "field": "medical_note"}]}
       }
     ],

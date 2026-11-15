@@ -21,7 +21,7 @@
 ## 常设承诺
 
 - 四维分析先于派发与复核。
-- Tier H 受管 PR 恒 draft 等维护者的字;flip 或 arm 前跑 `check-governed-merges --test` 带路径。
+- Tier H 受管 PR 恒 draft 等维护者的字;flip 或 arm 前跑 `check-governed-merges --pr N` 定档。
 - 档位从 `--tier` 推导引用;pm-dispatch 根恒契约复审档;条款②闸门照现行。
 - 棘轮逐行付账,⛔ re-wrap 筹行;砍点逐条核幸存,被砍内容若在别处无家,砍掉就是丢规则。
 - 「Instruments serve the fleet」答不出的 finding ⇒ 建议 p3 或不做,⛔ 不自入队;定级归分诊。

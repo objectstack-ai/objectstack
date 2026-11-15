@@ -56,7 +56,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ValueDataSource } from '@object-ui/core';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from './index';
+import { ObjectStackAdapter } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 /**
  * Four rows that tell the two candidate answers apart: `2` is the only row with

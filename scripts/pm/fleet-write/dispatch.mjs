@@ -532,7 +532,8 @@
  * the third legal exit), `readStateGuard` READS it once — the same `GET`, place and route as the kind rule, sharing its
  * answer when both read one card — and `judgeStateGuard` applies the stroke's steps in order and asks the predicate. A
  * refusal is usage (2) and an unread card PREREQUISITE NOT MET (3), nothing sent for the whole file, a dry run
- * included. A stroke that touches no card state and assigns no one reads nothing.
+ * included. A stroke that touches no card state and assigns no one reads nothing. Its last `issue_patch` with a
+ * `state` decides the card's end: `closed` is the legal exit, `open` makes the card judged OPEN whatever its read says.
  *
  * ## Exit codes — capture them BEFORE any pipe
  *
@@ -1094,7 +1095,11 @@ export const STATE_GUARD_OPS = Object.freeze(['labels_add', 'labels_remove', 'as
  * it closes, read nothing. The judgement is label-write's `refuseStatelessWrite`,
  * ⛔ never restated here. Pure.
  *
- * @returns {{ action: number, issue: unknown, steps: { op: string, names: string[] }[], closes: boolean }[]}
+ * The stroke's LAST `issue_patch` with a `state` decides the card's end state: `closed` closes it (`closes`), `open`
+ * reopens it (`reopens`), and a reopened card is judged OPEN whatever its read says — a stroke that reopens a closed
+ * card and strips its last state leaves an open card with none.
+ *
+ * @returns {{ action: number, issue: unknown, steps: { op: string, names: string[] }[], closes: boolean, reopens: boolean }[]}
  */
 export function stateGuardRows(actions) {
   if (!Array.isArray(actions)) return [];
@@ -1104,10 +1109,13 @@ export function stateGuardRows(actions) {
   const byIssue = new Map();
   actions.forEach((a, i) => {
     if (!a || typeof a !== 'object' || !STATE_GUARD_OPS.includes(a.op)) return;
-    if (!byIssue.has(a.issue)) byIssue.set(a.issue, { action: i + 1, issue: a.issue, steps: [], closes: false, judged: false });
+    if (!byIssue.has(a.issue)) byIssue.set(a.issue, { action: i + 1, issue: a.issue, steps: [], closes: false, reopens: false, judged: false });
     const row = byIssue.get(a.issue);
     if (a.op === 'issue_patch') {
-      if ('state' in a) row.closes = a.state === 'closed';
+      if ('state' in a) {
+        row.closes = a.state === 'closed';
+        row.reopens = a.state === 'open';
+      }
       return;
     }
     const names = Array.isArray(a.labels) ? a.labels : Array.isArray(a.assignees) ? a.assignees : [];
@@ -1137,7 +1145,9 @@ export function judgeStateGuard(row, card) {
     if (op === 'unassign') assigneeTarget = assigneeTarget.filter((u) => !ns.includes(u));
   }
   const { kind } = readTargetKind(card);
-  return refuseStatelessWrite({ state: card?.state ?? 'open', closes: row.closes, kind, current, target, currentAssignees, assigneeTarget });
+  // A stroke that reopens the card is judged on the card it leaves: OPEN, whatever the read said.
+  const state = row.reopens ? 'open' : (card?.state ?? 'open');
+  return refuseStatelessWrite({ state, closes: row.closes, kind, current, target, currentAssignees, assigneeTarget });
 }
 
 /**
@@ -2480,7 +2490,7 @@ export async function resolveRoute(env = process.env, deps = {}) {
 
 const STATELESS_DOOR_BATTERY = "the stateless write at the relay's door: an actions file that takes a card's last pm state off, or parks it with a holder (an assign onto a parked card included), is refused before the dry-run exit with label-write's own sentence; the card read ONCE, shared with the kind rule; an unread card never a pass; a stroke closing its card reads nothing";
 const SELF_TEST_BATTERIES = Object.freeze({
-  [STATELESS_DOOR_BATTERY]: 8,
+  [STATELESS_DOOR_BATTERY]: 10,
   'the selector: OS_FLEET_TRANSPORT wins; auto is dispatch only under all three conditions and direct otherwise': 8,
   'the session: OS_FLEET_SESSION first, else derived from the container (cse_<id> → session_<id>), the reason naming the source; refused in dispatch mode when absent, never invented': 14,
   'the three conditions of auto: cloud, session and a live relay — each alone failing is direct with its line, all three is dispatch, explicit dispatch stays strict': 16,
@@ -4320,6 +4330,13 @@ export async function selfTest() {
       t('⭐ CLI: an assign-ONLY stroke onto a card sitting in pm:queue is usage (2), refused on ONE read, ZERO requests sent', [cliAssignParked.code, cliAssignParked.seen, cliAssignParked.sent, cliAssignParked.err.includes('REFUSED') && cliAssignParked.err.includes(PARKED_RULE)], [EXIT_USAGE, [`GET ${at(10)}`], [], true], cliAssignParked.err.slice(-300));
       const cliAssignFlight = await cli([{ op: 'assign', issue: 11, assignees: ['os-x'] }], { [at(11)]: CARD(11, ['pm:dispatched', 'domain:skills']) });
       t('…the same assign onto a pm:dispatched card packs: exit 0 on ONE GET', [cliAssignFlight.code, cliAssignFlight.seen], [EXIT_OK, [`GET ${at(11)}`]], cliAssignFlight.err.slice(-300));
+      // A stroke that REOPENS a closed card is judged on the open card it leaves, never on the read's `closed`.
+      const CLOSED = (n, labels) => ({ status: 200, json: { ...CARD(n, labels).json, state: 'closed' } });
+      const REOPEN = (n) => ({ op: 'issue_patch', issue: n, state: 'open' });
+      const cliReopenStrip = await cli([REOPEN(12), { op: 'labels_remove', issue: 12, labels: ['pm:dispatched'] }], { [at(12)]: CLOSED(12, ['pm:dispatched', 'domain:skills']) }, { dryRun: false });
+      t('⭐ CLI: reopen + taking the last pm state off a CLOSED card is usage (2): the card it leaves is open with no state, ZERO sent', [cliReopenStrip.code, cliReopenStrip.sent, cliReopenStrip.err.includes(STATELESS_RULE)], [EXIT_USAGE, [], true], cliReopenStrip.err.slice(-300));
+      const cliReopenState = await cli([REOPEN(13), { op: 'labels_add', issue: 13, labels: ['pm:queue'] }, { op: 'labels_remove', issue: 13, labels: ['pm:dispatched'] }], { [at(13)]: CLOSED(13, ['pm:dispatched', 'domain:skills']) });
+      t('…reopen + a new state in the same stroke packs: exit 0 on ONE GET', [cliReopenState.code, cliReopenState.seen], [EXIT_OK, [`GET ${at(13)}`]], cliReopenState.err.slice(-300));
     }
 
     // ── the no-run conformance ──────────────────────────────────────────────
