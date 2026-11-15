@@ -238,6 +238,16 @@ export interface AIToolDefinition {
  *   — there is no header there for it to ride on. A free-form header would
  *   also be an OPEN channel, which is the one thing a safety member must not
  *   be.
+ *
+ * ## Amended: on a declared-gated action the member stops confirming
+ *
+ * The amended contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY}) has a
+ * person confirm an action declaring `ai.requiresConfirmation: true`, through
+ * an elicitation or a hand-off to the app, and the member never counts on such
+ * a call. That is what the doors enforce from the change that implements the
+ * amendment; until it ships they still gate on the member as described above
+ * and in {@link AIActionConfirmation}. The MCP `delete_record` and
+ * `delete_records` gates are outside the amendment and keep reading it.
  */
 export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
 
@@ -245,6 +255,19 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  * The confirmation half of an AI-facing action request — a CLOSED boolean
  * member, declared once here and mixed into each door's own request shape
  * rather than restated by it.
+ *
+ * ## Amended: the member contract is the FROM half
+ *
+ * For an action declaring `ai.requiresConfirmation: true`, the contract is
+ * now a person's confirmation ({@link AI_ACTION_CONFIRMATION_CAPABILITY}):
+ * the server elicits it through the client, or hands the call to the host's
+ * pending-confirmation service for the person to decide in the app, and the
+ * caller's own `confirm` never counts. What follows describes the member contract the
+ * doors enforce until the change that implements the amendment; the
+ * predicate section (the DECLARED flag, never the listing heuristic) and the
+ * AI service account rule carry over unchanged. The MCP `delete_record` and
+ * `delete_records` gates are outside the amendment and keep reading the
+ * member as described below.
  *
  * ## What the member means
  *
@@ -374,8 +397,306 @@ export interface ActionConfirmationRequiredDetails {
      * the refusal instead of restating it. An AI service account's refusal
      * carries it too, but no retry of that account's succeeds: a person runs
      * the action (ADR-0151 D3 rule 3).
+     *
+     * Under the amended contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY}),
+     * once the doors implement it, no retry with the member runs a
+     * declared-gated action: the member confers nothing there, and `reason`
+     * says what the caller can do.
      */
     confirmationMember: typeof AI_ACTION_CONFIRMATION_MEMBER;
+    /**
+     * Which case of the amended contract refused the call; see
+     * {@link ActionConfirmationRefusalReason}. Every door implementing that
+     * contract sets it on a declared-gated refusal, the AI service account's
+     * included on every door. A refusal without it comes from a member gate:
+     * a door before the implementing change, or the MCP `delete_record` /
+     * `delete_records` gate.
+     */
+    reason?: ActionConfirmationRefusalReason;
+}
+
+// ---------------------------------------------------------------------------
+// Action Confirmation by Elicitation or Hand-off — the amended contract
+// ---------------------------------------------------------------------------
+
+/**
+ * The MCP client capability a person's in-client confirmation travels
+ * through: `elicitation`, which an MCP client advertises in the
+ * `capabilities` of its `initialize` request.
+ *
+ * ONE exported constant for the same reason {@link AI_ACTION_CONFIRMATION_MEMBER}
+ * is one: the door that reads the capability and the client that advertises
+ * it have to agree on its spelling.
+ *
+ * ## Why the contract was amended
+ *
+ * Under the member contract ({@link AIActionConfirmation}) the confirmation of
+ * a declared-gated action is the caller's own `confirm: true`, an
+ * unverifiable claim: the gate made FORGETTING loud and did not prove a
+ * person. Measured on published 18.4.0, an agent sent `confirm: true` itself
+ * on an irreversible action in 2 of 6 runs, reading the person's instruction
+ * as consent. The account owner ruled the fix on objectstack-ai/cloud#3826
+ * (「3826 照建议（征询版）」, phase 1, card 1 of its item-6 chain) and amended
+ * it on the card that carries this contract (「我开始重新接受你说的主流方案，就是推送到客户的手机端」,
+ * 「比如最简单的我可以先推送到邮件」): the server asks the person, in the
+ * client when the client can be asked and in the app otherwise, and the
+ * caller's own answer never counts.
+ *
+ * ## The contract
+ *
+ * 1. **Which calls.** A call on an action whose author declared
+ *    `ai.requiresConfirmation: true` (the DECLARED flag, never the listing
+ *    heuristic; {@link AIActionConfirmation} keeps that predicate), through an
+ *    AI door: the MCP `run_action` tool, and the MCP `resume_run` tool for the
+ *    candidate action it would run. Every caller acting for a person is
+ *    covered, OAuth token or API key, a person or an agent acting for one
+ *    (`onBehalfOf`).
+ * 2. **When the person is asked.** After EVERY admission gate has passed,
+ *    the subject load and the caller-scope subject verdict included, so
+ *    nobody is asked to confirm a call that is refused anyway, and before
+ *    anything dispatches. A call refused at confirmation, or never confirmed,
+ *    may therefore have READ its subject under the caller's permissions; it
+ *    writes nothing.
+ * 3. **How the person is asked — three steps, in order.**
+ *    1. **Elicit**, when the client advertised `elicitation` at `initialize`
+ *       for the session the call rides on and the door can carry a request to
+ *       it while the call is open. The server sends ONE MCP
+ *       `elicitation/create` request in form mode, naming the action, the
+ *       object and the record it runs on (its id, and its title when the
+ *       subject load read one). An empty `elicitation: {}` reads as form mode
+ *       (MCP 2025-11-25). The answer is the result's `action` alone; any
+ *       `content` is not read.
+ *    2. **Hand off**, otherwise: the door hands the call to the host's
+ *       pending-confirmation service ({@link IActionConfirmationService}, the
+ *       service registered under {@link ACTION_CONFIRMATION_SERVICE}) and
+ *       answers the caller with {@link ActionConfirmationPending}: a pending
+ *       id and a plain message that a confirmation was sent to the person.
+ *       Nothing runs then. The host shows the pending item to the person in
+ *       the app and notifies them (an emailed link, for example); the person
+ *       signs in and approves or rejects it there. The person who approves or
+ *       rejects is the person the call ran as (its `userId`, the person an
+ *       agent acts for), and nobody else: another user who can see the item
+ *       cannot decide it. When a pending item lapses,
+ *       and how the caller learns its outcome, are the host's to define and
+ *       outside this contract.
+ *    3. **Refuse**, only when the host registers no service under
+ *       {@link ACTION_CONFIRMATION_SERVICE}: reason
+ *       `no_confirmation_service`. The message tells the person to use a
+ *       client that supports confirmation, or to perform the action in the
+ *       app.
+ *    A door or a client that cannot elicit is never refused for that alone:
+ *    it takes step 2, or step 3 when the host has no service. No step ever
+ *    falls back to the member.
+ * 4. **What each answer does.**
+ *    - Elicited `accept`: the call dispatches as any admitted call does,
+ *      exactly once, under the caller's permissions. The confirmation covers
+ *      that one call: nothing is stored, and the next call is asked again.
+ *    - Elicited `decline`: the person said no. Refused, reason `declined`;
+ *      nothing runs. The caller does not retry unless the person asks again.
+ *    - Elicited `cancel`: the person dismissed the question without choosing.
+ *      Refused, reason `cancelled`; nothing runs. An error answer to the
+ *      elicitation request, or a connection that drops before an answer, is
+ *      read the same way.
+ *    - Elicitation timed out: no answer within the door's bound, which the
+ *      implementing door names. Refused, reason `timed_out`; nothing runs,
+ *      and an answer that arrives later runs nothing.
+ *    - Handed off, then approved in the app: the action runs as the person
+ *      who approved it, through the same admitted sequence, every gate and
+ *      permission re-checked at that moment; a refusal there runs nothing and
+ *      is recorded on the pending item. A handed-off `resume_run` call
+ *      carries its run ({@link ActionConfirmationHandOff.run}): approving it
+ *      resumes THAT parked run with the values the call carried, as the
+ *      approver, who must be the run's owner as today; it never starts a new
+ *      run of the flow.
+ *    - Handed off, then rejected in the app: nothing runs.
+ *    The approve and reject doors of the pending-confirmation service take a
+ *    person's signed-in session to the app and nothing else. They refuse an
+ *    AI identity: an agent principal (`principalKind: 'agent'`, with or
+ *    without `onBehalfOf`), and any call that arrives through an AI door. They
+ *    also refuse an API key, a delegated or OAuth token and any other service
+ *    credential, whoever it resolves to: a person's own API key resolves as
+ *    that person, and is refused there all the same. A person decides; an
+ *    agent, a script or a credential never decides for one.
+ * 5. **The caller's `confirm` never counts.** On a declared-gated call the
+ *    member ({@link AI_ACTION_CONFIRMATION_MEMBER}) confers nothing: not with
+ *    an elicitation, not in place of one, not in place of a hand-off, and not
+ *    when the host has no service.
+ * 6. **An AI service account: unchanged** (ADR-0151 D3 rule 3). An agent
+ *    principal acting for itself, with no `onBehalfOf`, is refused whatever it
+ *    sends, reason `service_account`. It is neither elicited (no person stands
+ *    behind the account, and its own client could answer) nor handed off. The
+ *    one admitted sequence asks this rule at every door that runs an action,
+ *    so REST `/actions` and a host door carry the same `reason` on that
+ *    refusal.
+ *
+ * Every refusal keeps the registered envelope: `428`,
+ * `ACTION_CONFIRMATION_REQUIRED`, and `error.details` shaped as
+ * {@link ActionConfirmationRequiredDetails}, whose `reason` says which case
+ * above it is. A hand-off is not a refusal: it is the successful answer
+ * {@link ActionConfirmationPending}.
+ *
+ * ## What an answer proves
+ *
+ * An elicited `accept` proves that the CLIENT answered, not that a person
+ * did. The amendment closes the measured hole, an agent model answering for
+ * the person inside a client that would have asked its user; a caller that
+ * writes its own client can advertise `elicitation` and answer `accept`
+ * itself, bounded by its credentials as before.
+ *
+ * An approval of a hand-off proves that a signed-in session to the app
+ * answered, not that a person did: the approve and reject doors refuse every
+ * credential but a person's session, so a caller holding only the person's
+ * API key or token cannot approve its own hand-off, and one that holds the
+ * person's session (their password, or a browser they are signed in to) can,
+ * bounded by that session as any action in the app is. Each answer is as
+ * strong as what it takes to give it; neither proves a human.
+ *
+ * ## Its bounds
+ *
+ * - The MCP `delete_record` and `delete_records` gates are not declared-gated
+ *   actions: they read the member, as {@link AIActionConfirmation} describes,
+ *   until a decision moves them.
+ * - REST `/actions` stays outside the gate for a person, as before.
+ *
+ * ## When it binds
+ *
+ * This text is the contract from the release that carries it. The doors
+ * implement it in the change that enforces it, which also moves the shipped
+ * prescriptions that describe the member. Until that change ships, every door
+ * still gates on the member as {@link AIActionConfirmation} describes: the
+ * MCP `run_action` and `resume_run` tools run a declared-gated action on
+ * `confirm: true`, over stdio and over Streamable HTTP alike, and that reading
+ * is the FROM half of the breaking note.
+ *
+ * Measured at the amendment: the long-lived stdio server keeps the client's
+ * `initialize` capabilities and can send a request to the client while a call
+ * is open. The Streamable HTTP door (`handleHttpRequest` in
+ * `packages/mcp/src/mcp-server-runtime.ts`) builds a fresh server per request,
+ * issues no session id and answers in JSON, so as built it can do neither:
+ * under step 2 its callers are handed off. Whether, and how, that door comes
+ * to elicit is the implementing change's decision.
+ */
+export const AI_ACTION_CONFIRMATION_CAPABILITY = 'elicitation';
+
+/**
+ * Why a declared-gated call was refused under the amended contract
+ * ({@link AI_ACTION_CONFIRMATION_CAPABILITY}), carried as
+ * {@link ActionConfirmationRequiredDetails.reason}. A CLOSED set; a hand-off is
+ * not among them, because it is not a refusal:
+ *
+ * - `declined`: the person answered an elicitation with no.
+ * - `cancelled`: the person dismissed the elicitation, the client answered it
+ *   with an error, or the connection dropped first.
+ * - `timed_out`: no answer to the elicitation within the door's bound.
+ * - `no_confirmation_service`: the client could not be elicited and the host
+ *   registers no pending-confirmation service ({@link IActionConfirmationService})
+ *   under {@link ACTION_CONFIRMATION_SERVICE}.
+ *   The person uses a client that supports confirmation, or performs the
+ *   action in the app.
+ * - `service_account`: an AI service account, which never confirms an action
+ *   for itself (ADR-0151 D3 rule 3). A person runs the action.
+ */
+export const ACTION_CONFIRMATION_REFUSAL_REASONS = [
+    'declined',
+    'cancelled',
+    'timed_out',
+    'no_confirmation_service',
+    'service_account',
+] as const;
+
+/** One member of {@link ACTION_CONFIRMATION_REFUSAL_REASONS}. */
+export type ActionConfirmationRefusalReason = (typeof ACTION_CONFIRMATION_REFUSAL_REASONS)[number];
+
+/**
+ * The call an AI door hands to the host's pending-confirmation service (step 2
+ * of {@link AI_ACTION_CONFIRMATION_CAPABILITY}): enough to show the person what
+ * they are asked to approve, and to run it again, as them, once they do.
+ */
+export interface ActionConfirmationHandOff {
+    /** The declarative action name the call addressed. */
+    actionName: string;
+    /** The object the action operates on; omitted for object-less actions. */
+    objectName?: string;
+    /** The package namespace the call qualified the action with, if any. */
+    namespace?: string;
+    /** The record the action runs on, when it takes one. */
+    recordId?: string;
+    /** The action params the call carried, after the door's own checks. */
+    params: Record<string, unknown>;
+    /** The AI door the call arrived through, e.g. `mcp`. */
+    door: string;
+    /**
+     * The parked run a `resume_run` call continues: present exactly when the
+     * call is a `resume_run`, absent for `run_action`. Approval resumes this
+     * run with `values`, as the approver, who must be the run's owner; it
+     * never starts a new run, and `params` is then empty.
+     */
+    run?: {
+        /** The paused run the call resumes. */
+        runId: string;
+        /** The screen's field values the call carried. */
+        values: Record<string, unknown>;
+    };
+}
+
+/**
+ * The answer an AI door gives the caller when it hands a declared-gated call
+ * off (step 2 of {@link AI_ACTION_CONFIRMATION_CAPABILITY}). A success, not a
+ * refusal: the call was accepted for a person's decision, and nothing has run.
+ */
+export interface ActionConfirmationPending {
+    /** The discriminant: the call waits on a person's confirmation in the app. */
+    status: 'pending_confirmation';
+    /** The pending item's id in the host's pending-confirmation service. */
+    pendingId: string;
+    /** A plain message for the person: a confirmation was sent to them, and where to answer it. */
+    message: string;
+    /** The declarative action name the call addressed. */
+    actionName: string;
+    /** The object the action operates on; omitted for object-less actions. */
+    objectName?: string;
+}
+
+/**
+ * The service slot a {@link IActionConfirmationService} is registered under
+ * (step 2 of {@link AI_ACTION_CONFIRMATION_CAPABILITY}). The open build ships
+ * none; with none registered, a door that cannot elicit refuses, reason
+ * `no_confirmation_service` (step 3).
+ */
+export const ACTION_CONFIRMATION_SERVICE = 'ai.actionConfirmation';
+
+/**
+ * The host's pending-confirmation service: the hand-off seam of the amended
+ * contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY}, step 2), registered
+ * under {@link ACTION_CONFIRMATION_SERVICE}. OPTIONAL — a host without one
+ * refuses, reason `no_confirmation_service` (step 3), which is the case of a
+ * bare open-source deployment.
+ *
+ * The service owns what happens after the hand-off: it stores the pending
+ * item, shows it to the person the call ran as in the app and notifies them,
+ * and serves the approve and reject doors. Only that person decides the item.
+ * Those doors take a person's signed-in session and nothing else: they refuse
+ * an AI identity (an agent principal, with or without `onBehalfOf`, and any
+ * call through an AI door) and an API key, token or other service credential,
+ * whoever it resolves to. On approval the action runs as the approving person
+ * through the same admitted sequence, every gate and permission re-checked; a
+ * hand-off that carries a run ({@link ActionConfirmationHandOff.run}) resumes
+ * that run instead of starting one. On rejection nothing runs. When an item
+ * lapses, and how the caller learns its outcome, are the host's to define. A
+ * host may build it over its own pending-action store; the
+ * `held` outcome of {@link IAIService.approvePendingAction} is the existing
+ * precedent for a write that waits on a person outside the conversation.
+ */
+export interface IActionConfirmationService {
+    /**
+     * Record `handOff` for the person the caller acts for, notify them, and
+     * return the pending item's id. Runs nothing.
+     *
+     * @param handOff - The call to confirm
+     * @param context - The caller's execution context: who is asked, and as
+     *                whose call the item is recorded
+     */
+    submit(handOff: ActionConfirmationHandOff, context: ExecutionContext): Promise<{ pendingId: string }>;
 }
 
 // ---------------------------------------------------------------------------
