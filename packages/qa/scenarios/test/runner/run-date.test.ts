@@ -354,21 +354,23 @@ describe('leave_balances on seven consecutive run dates: its working days stay w
 
       // The asks name working days, and each named weekday is the date's own and the date the operation expects.
       const file = r.card.run.operations.find((o) => o.id === 'file_and_submit_from_text')!;
-      const named = [...file.ask.en.matchAll(EN_DAY)].map(([, w, d, m]) => ({ w, date: `${runDate.slice(0, 4)}-${String(MONTHS.indexOf(m) + 1).padStart(2, '0')}-${d.padStart(2, '0')}` }));
+      const [en, zh] = [file.ask.en ?? '', file.ask.zh ?? ''];
+      expect([en, zh].every((t) => t.length > 0)).toBe(true);
+      const named = [...en.matchAll(EN_DAY)].map(([, w, d, m]) => ({ w, date: `${runDate.slice(0, 4)}-${String(MONTHS.indexOf(m) + 1).padStart(2, '0')}-${d.padStart(2, '0')}` }));
       expect(named.map((n) => n.date)).toEqual([file.values!.start_date, file.values!.end_date]);
       for (const n of named) {
         expect(NAMES[weekday(n.date)], n.date).toBe(n.w);
         expect(['Saturday', 'Sunday']).not.toContain(n.w);
       }
-      expect(file.ask.zh).not.toMatch(/周[六日]/);
-      const zhDays = [...file.ask.zh.matchAll(/周([一二三四五六日])/g)].map(([, w]) => '日一二三四五六'.indexOf(w));
+      expect(zh).not.toMatch(/周[六日]/);
+      const zhDays = [...zh.matchAll(/周([一二三四五六日])/g)].map(([, w]) => '日一二三四五六'.indexOf(w));
       expect(zhDays).toEqual([weekday(file.values!.start_date as string), weekday(file.values!.end_date as string)]);
       const outcome = file.outcome.kind === 'applied' ? file.outcome.state : [];
       expect(outcome.filter((st) => st.object === 'leave_day').map((st) => st.where?.leave_date)).toEqual([file.values!.start_date, file.values!.end_date]);
       // The half day the draft's ask names is the date of the line it targets.
       const half = r.card.run.operations.find((o) => o.id === 'half_day_on_draft')!;
       const line = seed.leave_day.find((d) => d.id === half.target)!;
-      const [, hd, hm] = /\((\d{1,2}) (\w+)\)/.exec(half.ask.en)!;
+      const [, hd, hm] = /\((\d{1,2}) (\w+)\)/.exec(half.ask.en ?? '')!;
       expect(`${String(MONTHS.indexOf(hm) + 1).padStart(2, '0')}-${hd.padStart(2, '0')}`).toBe((line.leave_date as string).slice(5));
       expect(isWorking(line.leave_date as string)).toBe(true);
     });
