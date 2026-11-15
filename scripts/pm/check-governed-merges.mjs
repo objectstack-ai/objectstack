@@ -1180,7 +1180,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
   '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 74,
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 51,
-  '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 47,
+  '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 50,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2322,6 +2322,12 @@ export const LOW_RISK_ADD_ONLY_CONTEXT = 1000000;
 export const LOW_RISK_ADD_ONLY_RULED_HEADING = /decision|\bstatus\b|\bdecided\b|\bruling\b|\bresolution\b|决策|决定|裁决|状态/i;
 
 /**
+ * The same words read with spaces, punctuation and symbols squeezed out (case folded): a letter-spaced
+ * `D e c i s i o n` or `S.t.a.t.u.s` names the ruling too. Wider than the word test on purpose — it fails closed.
+ */
+export const LOW_RISK_ADD_ONLY_RULED_SQUEEZED = /decision|status|decided|ruling|resolution|决策|决定|裁决|状态/i;
+
+/**
  * A status line: after its quote markers, list bullet, table bar, emphasis, HTML tags, link brackets and
  * zero-width characters are stripped (NFKC-normalised), a line that STARTS with a status word, in any tail:
  * `Status:`, `| Status |`, `Status (2026-11-15): …`, `Superseded by …`, `Deprecated:`, `**状态**:…`.
@@ -2331,8 +2337,9 @@ export const LOW_RISK_ADD_ONLY_STATUS_LINE = /^(?:(?:status|superseded|deprecate
 /**
  * The ALLOWLIST an added non-blank line must match (contract review round 4: a denylist over Markdown fails open,
  * the same stance `LOW_RISK_RIDER_PATTERNS` takes). Exactly one of:
- *   - a plain ATX heading at column 0: one to six `#`, ONE space, and text of letters, digits, spaces and plain
- *     punctuation only — no emphasis, code, link, HTML, `#` or `\` (`LOW_RISK_ADD_ONLY_PLAIN_HEADING`);
+ *   - a plain ATX heading at column 0: one to six `#`, ONE space, and text of ASCII letters and digits, Han
+ *     characters, spaces and plain punctuation only — no other script (a look-alike letter), emphasis, code, link,
+ *     HTML, `#` or `\` (`LOW_RISK_ADD_ONLY_PLAIN_HEADING`);
  *   - plain prose at column 0, optionally behind `>` quote markers and then ONE list marker with ONE space, whose
  *     text starts with a letter, a digit, an opening quote or bracket, or emphasis or code opening onto one —
  *     never `#`, `>`, `[`, `|`, `<`, `-`, `+`, `=`, a second list marker or whitespace
@@ -2340,7 +2347,7 @@ export const LOW_RISK_ADD_ONLY_STATUS_LINE = /^(?:(?:status|superseded|deprecate
  * Every added line also carries no `<` (raw HTML, an autolink), no fence marker (three backticks or tildes), no
  * tab, and no character reference. Anything else is refused: ⛔ fail closed.
  */
-export const LOW_RISK_ADD_ONLY_PLAIN_HEADING = /^#{1,6} [\p{L}\p{N}](?:[\p{L}\p{N} .,:;!?'"()\/·、，。：；（）—–-]*[\p{L}\p{N}.!?)）])?$/u;
+export const LOW_RISK_ADD_ONLY_PLAIN_HEADING = /^#{1,6} [A-Za-z0-9\p{Script=Han}](?:[A-Za-z0-9\p{Script=Han} .,:;!?'"()\/·、，。：；（）—–-]*[A-Za-z0-9\p{Script=Han}.!?)）])?$/u;
 export const LOW_RISK_ADD_ONLY_PLAIN_PROSE = /^(?:> ?)*(?:(?:[-*+]|\d{1,9}[.)]) )?(?!\d{1,9}[.)](?:[ ]|$))(?:\*\*|__|\*|_|`)?[\p{L}\p{N}(“"'‘（]/u;
 
 /** Characters a hunk line may not carry: a bare CR, VT, FF and the Unicode line and paragraph separators end a line to a renderer. */
@@ -2430,7 +2437,7 @@ export function addOnlyHeadingReading(lines) {
     const prev = i - 1 >= start ? unquote(list[i - 1]) : '';
     const paragraph = i - 1 >= start && depth(list[i - 1]) === depth(list[i]) && !/^ {0,3}(?:[-*+]|\d+[.)])(?:[ \t]|$)/.test(prev);
     if (underline && paragraph && kinds[i - 1] === null && prev.trim() !== '') {
-      kinds[i - 1] = { level: underline[1][0] === '=' ? 1 : 2, text: prev.trim() };
+      kinds[i - 1] = { level: underline[1][0] === '=' ? 1 : 2, text: prev.trim(), setext: true };
       kinds[i] = { underline: true };
     }
   }
@@ -2522,7 +2529,7 @@ export function addOnlyNoteReasons(file) {
   // or a raw HTML block outside a fence — could hide or invent a heading: where a note sits is then unknown.
   const unmodelled = oldLines.map((l, i) => [l, i]).filter(([l, i]) => !before[i].code && (/^[ \t]*(?:>[ \t]?)*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)+(?:>[ \t]?)*[ \t]*(?:`{3,}|~{3,})/.test(l) || /^(?: {4,}|\t)[ \t]*(?:`{3,}|~{3,})/.test(l) || /^ {0,3}(?:>[ ]?)*[ \t]*<[A-Za-z!?/]/.test(l))).map(([, i]) => i);
   if (unmodelled.length > 0) return [`\`${path}\` carries a list-borne or indented fence, or a raw HTML block, at line ${unmodelled.slice(0, 3).map((n) => n + 1).join(', ')}, which the heading reader does not model`];
-  const ruled = (h) => Boolean(h) && LOW_RISK_ADD_ONLY_RULED_HEADING.test(addOnlyHeadingText(h.text));
+  const ruled = (h) => Boolean(h) && (LOW_RISK_ADD_ONLY_RULED_HEADING.test(addOnlyHeadingText(h.text)) || LOW_RISK_ADD_ONLY_RULED_SQUEEZED.test(addOnlyHeadingText(h.text).replace(/[\s\p{P}\p{S}]/gu, '')));
   const at1 = (list) => list.slice(0, 3).map((n) => `${n + 1}`).join(', ') + (list.length > 3 ? ` (+${list.length - 3} more)` : '');
   const sig = (r) => JSON.stringify([r.heading ? [r.heading.level, r.heading.text] : null, r.under.map((h) => [h.level, h.text])]);
   // Existing lines read as they read before: the added lines changed no heading and re-scoped nothing.
@@ -2540,7 +2547,11 @@ export function addOnlyNoteReasons(file) {
   }
   const inHeader = [];
   const inside = [];
+  const joins = [];
   for (const run of runs) {
+    // A non-blank added line directly above an existing setext heading joins that heading's text.
+    const next = run.end + 1;
+    if (newLines[run.end].trim() !== '' && next < newLines.length && (after[next].heading?.setext || (next + 1 < newLines.length && after[next + 1].heading?.setext && after[next + 1].heading === after[next].heading))) joins.push(run.end);
     if (firstSection < 0 || run.after < firstSection) { inHeader.push(run.lines[0]); continue; }
     const r = before[run.after];
     const scope = r.heading && !r.title ? [...r.under, r.heading] : r.under;
@@ -2552,10 +2563,13 @@ export function addOnlyNoteReasons(file) {
     const opens = lead !== undefined && (lead === 0 || newLines[lead - 1].trim() === '') && /^ {0,3}#{1,6}(?:[ \t]|$)/.test(newLines[lead]) && after[lead].heading && !after[lead].title && after[lead].heading.level <= Math.min(...ruledLevels);
     if (!opens) inside.push(run.lines[0]);
   }
+  if (joins.length > 0) reasons.push(`\`${path}\` adds line ${at1(joins)} directly above an existing setext heading, which it joins`);
   if (inHeader.length > 0) reasons.push(`\`${path}\` adds line ${at1(inHeader)} in the record's header block, above its first section heading`);
   if (inside.length > 0) reasons.push(`\`${path}\` adds line ${at1(inside)} inside a section that names the decision or the status, without opening a heading of that section's level first`);
   const words = added.filter((op) => op.text.trim() !== '');
-  const statusLines = words.filter((op) => LOW_RISK_ADD_ONLY_STATUS_LINE.test(addOnlyBareLine(op.text).normalize('NFKC'))).map((op) => op.new);
+  // A status word at the start (behind any opening punctuation), or `… status:` anywhere on the line.
+  const statusText = (t) => addOnlyBareLine(t).normalize('NFKC').replace(/^[^\p{L}\p{N}]+/u, '');
+  const statusLines = words.filter((op) => LOW_RISK_ADD_ONLY_STATUS_LINE.test(statusText(op.text)) || /(?:\bstatus\b|状态|狀態)[^\p{L}\p{N}]*[:：]/iu.test(statusText(op.text))).map((op) => op.new);
   // The allowlist: a plain heading or plain prose, and no `<`, fence marker, tab or character reference anywhere.
   const plain = (t) => (LOW_RISK_ADD_ONLY_PLAIN_HEADING.test(t) || (!t.startsWith('#') && LOW_RISK_ADD_ONLY_PLAIN_PROSE.test(t))) && !/[<\t]|`{3}|~{3}|&#?[A-Za-z0-9]+;/.test(t);
   const unplain = words.filter((op) => !plain(op.text)).map((op) => op.new);
@@ -9491,6 +9505,17 @@ async function selfTest() {
     assert('⭐ R4-the-allowlist-still-passes-plain-notes-quoted-listed-emphasised-linked-and-Chinese', !append('## Amendment notes', '', '> **Note (2026-11-15, #1).** The refusal now names its code.') &&
       !append('## Notes', '', '- One point, see [PR 1](https://example.invalid/1).', '- *Another* point with `code`.', '1. A numbered point.') && !append('## 修订注记', '', '注记：D1 现在也记日志。') &&
       !inContext('A plain sentence in Context, (with brackets) and “quotes”.') && !append('### Note 2026-11-15: D1, logged', '', 'x'));
+
+    // ⛔ Contract review round 5 (comment 6897145164): S3 a line joined onto a setext heading; S4 look-alike and
+    // letter-spaced ruled headings; N3 a status word behind punctuation or after a word.
+    const SETEXT = [...RECORD.slice(0, 8), 'Decision', '--------', ...RECORD.slice(9)];
+    assert('⛔ R5-S3-a-line-added-directly-above-a-setext-Decision-heading-joins-it-and-stays-H', H_([...keep(SETEXT.slice(0, 8)), ['+', 'No longer the'], ...keep(SETEXT.slice(8))]) &&
+      /joins/.test(why([ADR], read([ADR], [adrRow(patchOf([...keep(SETEXT.slice(0, 8)), ['+', 'No longer the'], ...keep(SETEXT.slice(8))]))]))) &&
+      !H_([...keep(SETEXT.slice(0, 7)), ['+', ''], ['+', 'A note in Context.'], ...keep(SETEXT.slice(7))]));
+    assert('⛔ R5-S4-a-look-alike-or-letter-spaced-ruled-heading-stays-H', append('## \u0501\u0435\u0441\u0456\u0455\u0456\u043e\u0578', 'We now allow X.') && append('## D e c i s i o n', 'We now allow X.') &&
+      append('## S.t.a.t.u.s', 'x') && append('## 决 策', 'x') && append('## 状-态', 'x') && append('## Ünïcode notes', 'x') && !append('## 修订注记', '', '注记。') && !append('## Notes 2', 'x'));
+    assert('⛔ R5-N3-a-status-word-behind-punctuation-or-after-a-word-stays-H', append('## Notes', '(Status): Superseded by ADR-0154') && append('## Notes', '"Status": superseded') && append('## Notes', 'Current status: superseded') &&
+      append('## Notes', '当前状态：已取代') && !append('## Notes', 'The status page now links here.'));
 
     // The heading reader: the title scopes nothing; fences and frontmatter hide headings; setext and quoted headings count.
     const h = addOnlyHeadingReading(['---', 'title: x', '---', '# ADR: a decision record', 'top', '```', '## Decision', '```', 'after fence', 'Decision', '========', 'under setext', '> ## Status', 'under quoted']);
