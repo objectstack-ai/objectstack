@@ -16,6 +16,7 @@ import {
   PLATFORM_TOOL_FAMILY_PREFIXES,
   isPlatformProvidedToolName,
 } from './platform-tool-names';
+import { LIST_DATASETS_TOOL_NAME, QUERY_DATASET_TOOL_NAME } from '../../ai/dataset-tools.zod';
 
 describe('PLATFORM_PROVIDED_TOOL_NAMES — internal invariants', () => {
   it('every name is snake_case (ToolSchema name grammar)', () => {
@@ -47,6 +48,20 @@ describe('PLATFORM_PROVIDED_TOOL_NAMES — internal invariants', () => {
     // to catch.
     expect(isPlatformProvidedToolName('forecast_revenue')).toBe(false);
     expect(isPlatformProvidedToolName('action_create_case')).toBe(false);
+  });
+
+  it('lists the service-ai dataset pair the ask agent registers (cloud#4551)', () => {
+    // Cloud `service-ai` registers both for the ask agent. While the registry
+    // lacked them, a skill naming either read as a fictional tool and the chat
+    // showed the raw tool id as the step name.
+    // The spelling is the one ADR-0149 D2 declares for both registrations.
+    expect(PLATFORM_TOOLS_BY_PACKAGE['service-ai']).toEqual(
+      expect.arrayContaining([LIST_DATASETS_TOOL_NAME, QUERY_DATASET_TOOL_NAME]),
+    );
+    expect(isPlatformProvidedToolName(LIST_DATASETS_TOOL_NAME)).toBe(true);
+    expect(isPlatformProvidedToolName(QUERY_DATASET_TOOL_NAME)).toBe(true);
+    // The control: a neighbour spelling nobody registers still misses.
+    expect(isPlatformProvidedToolName('query_datasets')).toBe(false);
   });
 
   it('each group is sorted, so diffs stay reviewable', () => {

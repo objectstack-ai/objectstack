@@ -111,6 +111,10 @@ import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shar
 // rejects outright.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// The object plane reaches `@objectstack/lint` only through a dynamic import; paid
+// here at module scope so the first load lands during collection, not inside a
+// clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/lint';
 
 interface Row {
     id: string;
@@ -589,8 +593,10 @@ describe('[#9174] a refused item touches no ledger key and stops no neighbour', 
         expect(res.success).toBe(false);
         expect(storedBody(rows, 'view', 'grid')?.label).toBe('V1');
         expect(storedBody(rows, 'fields', 'a.b')?.label).toBe('V2');
+        // [#33564] The revert's own plan records the version the restore
+        // replaced (V2, version 2), so reverting the revert brings it back.
         expect(JSON.parse(String(commitLedger[0].items))).toEqual([
-            { type: 'view', name: 'grid', existedBefore: true, prevVersion: null },
+            { type: 'view', name: 'grid', existedBefore: true, prevVersion: 2 },
         ]);
     });
 });

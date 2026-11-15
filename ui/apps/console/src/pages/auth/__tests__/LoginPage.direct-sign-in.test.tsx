@@ -196,6 +196,14 @@ describe('LoginPage — direct sign-in', () => {
     expect(screen.getByTestId('direct-sign-in-retry-button')).toBeTruthy();
     expect(window.location.replace).not.toHaveBeenCalled();
   });
+
+  it('names a start the IP allow-list refused (the door\'s IP_NOT_ALLOWED landing) as the network, without starting again', async () => {
+    renderLogin('?error=IP_NOT_ALLOWED&redirect=%2Fapps%2Fcrm', ON);
+    const alert = await screen.findByTestId('sso-callback-refusal');
+    expect(alert.textContent).toContain('This system does not allow sign-in from your network.');
+    expect(alert.textContent).not.toContain('expired or was already used');
+    expect(window.location.replace).not.toHaveBeenCalled();
+  });
 });
 
 /**

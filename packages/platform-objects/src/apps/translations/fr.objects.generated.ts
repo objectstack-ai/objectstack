@@ -218,6 +218,54 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      add_sso_user: {
+        label: "Ajouter un utilisateur",
+        description: "Ajoutez une personne par son adresse e-mail avant sa première connexion. Elle se connecte via le fournisseur d'identité de votre organisation ; aucun mot de passe n'est défini ici.",
+        params: {
+          positions: {
+            label: "Poste",
+            helpText: "Facultatif. Le poste que cette personne occupe dès son ajout."
+          },
+          permissionSets: {
+            label: "Ensemble d'autorisations",
+            helpText: "Facultatif. Accorde cet ensemble d'autorisations à la personne, pour qu'elle puisse ouvrir ses applications dès sa première connexion."
+          },
+          manager: {
+            label: "E-mail du responsable",
+            helpText: "Facultatif. L'adresse e-mail du responsable de cette personne, un utilisateur de cet environnement."
+          }
+        },
+        resultDialog: {
+          title: "Utilisateur ajouté",
+          acknowledge: "Terminé",
+          fields: {
+            email: "E-mail",
+            notApplied: "Déjà en attente, donc non appliqué (à définir sur l'enregistrement)",
+            managerError: "Responsable",
+            "host.reason": "Invitation non envoyée"
+          }
+        }
+      },
+      import_sso_users: {
+        label: "Importer des utilisateurs",
+        description: "Ajoutez plusieurs personnes à la fois à partir d'un texte CSV. Chaque ligne est ajoutée séparément : une ligne erronée échoue seule. Elles se connectent via le fournisseur d'identité de votre organisation ; aucun mot de passe n'est défini ici.",
+        params: {
+          csv: {
+            label: "CSV",
+            helpText: "Une ligne d'en-tête, puis une personne par ligne, 500 au maximum. Colonnes : email, name, positions et permission_sets (noms machine séparés par ;) et manager_id (l'adresse e-mail du responsable)."
+          }
+        },
+        resultDialog: {
+          title: "Importation terminée",
+          acknowledge: "Terminé",
+          fields: {
+            "summary.added": "Ajoutés",
+            "summary.alreadyPending": "Déjà en attente, prévenus à nouveau",
+            "summary.failed": "Non ajoutés",
+            rows: "Résultat par ligne"
+          }
+        }
+      },
       set_user_password: {
         label: "Définir le mot de passe",
         successMessage: "Mot de passe mis à jour",
@@ -401,7 +449,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
   sys_session: {
     label: "Session",
     pluralLabel: "Sessions",
-    description: "Sessions utilisateur actives",
+    description: "Sessions utilisateur",
     fields: {
       user_id: {
         label: "Utilisateur"

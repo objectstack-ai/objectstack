@@ -1139,6 +1139,11 @@ export const REMOTE_FACE_ANSWERS = {
   // with this face's reason, which the publish reports. `deferredDdl` reads
   // `false` here (arming is refused), so nothing short-circuits it.
   applyPublishedColumnChanges: 'inherited',
+  // [#33724] The install's NOT NULL relax: the same inherited reading of this
+  // face's own `detectManagedDrift` and `applyMigrationEntries`. A relax needs
+  // the SQLite table rebuild, which this transport does not run, so it comes
+  // back `skipped` with this face's reason, which the install logs.
+  relaxDeclaredNotNull: 'inherited',
   planMediaColumnMove: 'refused',
   // [cloud#3652 D3] Declared renames: this face renames no column (the
   // transport has no `RENAME COLUMN` door). The limit names that; the plan
@@ -1938,6 +1943,15 @@ export class TursoDriver extends SqlDriver {
       // Local and embedded-replica modes inherit `false` from SqlDriver: they
       // run knex against a real connection and honour `options.transaction`.
       transactionsUnsupported: this.transportMode === 'remote',
+
+      // [#33698] The remote transport compiles no measure filter: remote mode
+      // delegates `aggregate()` to `RemoteTransport.aggregate`, which refuses a
+      // per-aggregation `filter` (NOT_IMPLEMENTED / 501,
+      // `refusePerAggregationFilter`). Inheriting SqlDriver's `true` here would
+      // send every filtered measure to that refusal. `false` keeps remote mode
+      // on the engine's `find()` + in-memory path, which answers it; local and
+      // embedded-replica modes run SqlDriver's own compile and inherit `true`.
+      ...(this.transportMode === 'remote' ? { aggregationFilter: false } : {}),
     };
   }
 

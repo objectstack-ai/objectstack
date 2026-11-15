@@ -3005,6 +3005,7 @@ const ar = {
         directSignInIncomplete: "لم يكتمل تسجيل الدخول: عدت من تسجيل الدخول الموحّد دون أن يتم تسجيل دخولك. تحقّق من أن هذا المتصفح يسمح بملفات تعريف الارتباط لهذا الموقع، ثم حاول مرة أخرى.",
         directSignInUnavailable: "تعذّر بدء تسجيل الدخول الموحّد لهذا النظام. اطلب من المسؤول التحقق من خدمة تسجيل الدخول التي يستخدمها.",
         directSignInRateLimited: "بدأ عدد كبير جدًا من عمليات تسجيل الدخول من هذه الشبكة للتو. انتظر بضع ثوانٍ ثم حاول مرة أخرى.",
+        networkNotAllowed: "لا يسمح هذا النظام بتسجيل الدخول من شبكتك. اتصل من شبكة مسموح بها (مثل شبكة مكتب مؤسستك أو شبكة VPN الخاصة بها)، أو تواصل مع المسؤول.",
         ssoAccessDenied: "الحساب الذي سجّلت الدخول به ليس لديه صلاحية الوصول إلى هذه البيئة. سجّل الدخول بحساب لديه صلاحية الوصول، أو اطلب من مسؤول مؤسسة هذه البيئة إضافتك عضوًا.",
         ssoSwitchAccount: "تبديل الحساب",
         ssoBackToConsole: "العودة إلى وحدة التحكم",
@@ -4312,6 +4313,14 @@ const ar = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'تبقّى {{left}} من حصتك في الذكاء الاصطناعي. النموذج الموسوم بـ ×N يستهلكها أسرع بـ N مرة من النموذج الافتراضي.',
+      confirmTitle: 'هل تريد التبديل إلى {{model}}؟',
+      confirmBody: 'كل رسالة على هذا النموذج تستهلك من حصتك في الذكاء الاصطناعي {{multiplier}} أضعاف ما تستهلكه رسالة على النموذج الافتراضي.',
+      confirmAllowance: 'تبقّى منها {{left}}، وعلى هذا النموذج تنفد أسرع بـ {{multiplier}} مرة.',
+      confirmCancel: 'إلغاء',
+      confirmAction: 'تبديل النموذج',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'إرسال الرسالة',
     scrollToBottom: 'الانتقال إلى أحدث رسالة',
@@ -4335,11 +4344,16 @@ const ar = {
       aggregations: 'التجميعات',
       records: 'السجلات',
       visibleToYou: 'فقط السجلات التي يمكنك رؤيتها',
+      dataset: 'مجموعة البيانات',
+      metrics: 'المقاييس',
+      noAddedFilter: 'لا يوجد عامل تصفية مضاف إلى تعريف مجموعة البيانات',
     },
     tool: {
       aggregate_data: "تجميع البيانات ذات الصلة",
       get_record: "قراءة هذا السجل",
+      list_datasets: "عرض المؤشرات المتاحة",
       query_data: "الاستعلام عن البيانات المطلوبة",
+      query_dataset: "الاستعلام حسب المؤشر",
       query_records: "البحث عن السجلات المطابقة",
       read_package_doc: "قراءة دليل التطبيق",
       search_knowledge: "البحث في قاعدة المعرفة عن معلومات",

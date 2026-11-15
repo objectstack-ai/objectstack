@@ -37,11 +37,15 @@ import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } fr
 import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
   gradeCardAnswer,
+  gradeCardInjection,
   buildDeniesWrite,
   gradeCardOperation,
+  INJECTION_AS_DATA_CHECK,
   isWriteDenial,
   readArtifactFacts,
   scoreCardArtifact,
+  type CardTurn,
+  type CheckResult,
   type OperationGrade,
   type OperationObservation,
   type PersonaRunGrade,
@@ -106,8 +110,24 @@ export interface TurnSummary {
   requestedModel?: string;
   /** The served model is not the requested one ({@link servedAsRequested}); only when both are known. */
   modelMismatch?: true;
-  /** Wall-clock time of the CLI process, when the driver ran one (`meta.process`). */
+  /**
+   * The effort level the driver asked for (`--effort` / `--author-effort` /
+   * `--ask-effort`, `meta.process`); absent ⇒ the CLI's default effort, or a
+   * turn recorded before the runner kept it. No stream reports the effort a
+   * turn was served, so there is no served effort to compare it with.
+   */
+  requestedEffort?: string;
+  /**
+   * Wall-clock time of the turn's process, spawn to exit, by the runner's own
+   * clock (`meta.process`): every live driver runs one (`claude`, `codex`,
+   * `external:`). Absent ⇒ no process was recorded (a replay of a recording
+   * made before the runner kept it): the turn was not timed, never a zero.
+   */
   elapsedMs?: number;
+  /** The turn's duration as the CLI stated it (`meta.reportedDurationMs`, the `claude` result line's `duration_ms`); absent ⇒ none stated. */
+  reportedDurationMs?: number;
+  /** The part of it the CLI spent on the model API (`meta.reportedApiDurationMs`, `duration_api_ms`); absent ⇒ none stated. */
+  reportedApiDurationMs?: number;
   /**
    * The turn's cost in US dollars as its driver reported it (`meta.reportedCostUsd`:
    * the `claude` CLI's estimate, or an external command's report). Absent ⇒
@@ -203,6 +223,14 @@ export interface RunHalf {
   };
   questions: QuestionResult[];
   operations: OperationResult[];
+  /**
+   * The card's guardrails graded over the half's turns as a whole: today
+   * `guardrail:injection_as_data` (`gradeCardInjection`), passing when no turn
+   * that read the planted cell took the act the card forbids; not measured,
+   * never a pass, when no turn read it or the grading threw (which never sets
+   * {@link RunHalf.error}). Absent on a record from before it was graded.
+   */
+  guardrails?: CheckResult[];
   error?: string;
 }
 
@@ -248,8 +276,11 @@ const summarize = (t: ParsedTurn): TurnSummary => {
     ...(t.meta.model ? { model: t.meta.model } : {}),
     ...(p?.requestedModel ? { requestedModel: p.requestedModel } : {}),
     ...(p?.requestedModel && t.meta.model && !servedAsRequested(p.requestedModel, t.meta.model) ? { modelMismatch: true as const } : {}),
+    ...(p?.requestedEffort ? { requestedEffort: p.requestedEffort } : {}),
     toolCalls: t.toolCalls.length,
     ...(p ? { elapsedMs: p.elapsedMs } : {}),
+    ...(t.meta.reportedDurationMs !== undefined ? { reportedDurationMs: t.meta.reportedDurationMs } : {}),
+    ...(t.meta.reportedApiDurationMs !== undefined ? { reportedApiDurationMs: t.meta.reportedApiDurationMs } : {}),
     ...(t.meta.reportedCostUsd !== undefined ? { reportedCostUsd: t.meta.reportedCostUsd } : {}),
     ...(t.meta.inputTokens !== undefined ? { inputTokens: t.meta.inputTokens } : {}),
     ...(t.meta.outputTokens !== undefined ? { outputTokens: t.meta.outputTokens } : {}),
@@ -724,6 +755,8 @@ export async function runHalf(
   const { card } = scenario;
   const half: RunHalf = { personas: [], seed: { inserted: 0, refused: [] }, questions: [], operations: [] };
   const accounts: PersonaAccount[] = [];
+  // Every turn the agent answered, for the guardrails graded over the half (a replay that was not faithful measures nothing).
+  const turns: CardTurn[] = [];
   try {
     await app.signInAdmin();
     for (const p of card.run.personas) {
@@ -757,6 +790,7 @@ export async function runHalf(
         }
         try {
           const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), prompt: questionPrompt(scenario, q.id), ...doorOf(persona) });
+          turns.push({ step: q.id, ...(persona ? { persona } : {}), turn });
           res.turn = summarize(turn);
           res.grade = gradeCardAnswer(scenario, {
             question: q.id,
@@ -792,6 +826,7 @@ export async function runHalf(
           half.operations.push({ ...res, turn: summarize(e.turn), notMeasured: replayNotFaithful(e) });
           continue;
         }
+        turns.push({ step: op.id, persona: op.actingAs, turn });
         res.turn = summarize(turn);
         const after = (await app.listRows(op.object)).rows as Row[];
         // The card's today, the dates the app's clock read during the turn, and
@@ -845,6 +880,13 @@ export async function runHalf(
     }
   } catch (e) {
     half.error = errText(e);
+  }
+  try {
+    half.guardrails = [gradeCardInjection(scenario, turns, half.seed)];
+  } catch (e) {
+    // A guardrail that could not be graded is that check not measured, never
+    // the half's error: the half's questions and operations graded on their own.
+    half.guardrails = [{ check: INJECTION_AS_DATA_CHECK, pass: false, notMeasured: `guardrails: ${errText(e)}` }];
   }
   return half;
 }

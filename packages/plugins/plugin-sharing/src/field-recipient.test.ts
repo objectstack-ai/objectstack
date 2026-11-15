@@ -946,3 +946,149 @@ describe('#15072 × #14754 — the per-grant catch and the per-record kind compo
     spy.mockRestore();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+describe('two rules reaching one user on one record keep one grant each — the widest level wins, and revoking one rule leaves the other', () => {
+  // The shape a real app declares: a read rule for every team member, an edit
+  // rule for the manager, who is always on the team — so both rules name the
+  // same user on the same record. And an edit rule for a position, whose holder
+  // may be on the team too.
+  const TEAM = { id: 'srule_team_read', recipient_type: 'field', recipient_id: 'team_members', access_level: 'read' };
+  const MANAGER = { id: 'srule_manager_edit', recipient_type: 'field', recipient_id: 'project_manager', access_level: 'edit' };
+  const FINANCE = { id: 'srule_finance_edit', recipient_type: 'position', recipient_id: 'finance', access_level: 'edit' };
+  const P = { isSystem: false, userId: 'u_p', positions: [], permissions: [] } as any;
+
+  let h: ReturnType<typeof harness>;
+
+  /**
+   * Seed the rules so the per-record pass applies them in `order`: the pass
+   * walks `listRules`, which answers in name order, so the names carry the
+   * order and the ids stay fixed.
+   */
+  const seedRules = (order: Row[]) =>
+    h.engine.seed('sys_sharing_rule', order.map((r, i) => fieldRule({ ...r, name: `r${i}_${String(r.id).slice(6)}` })));
+
+  /** P's grants on `recordId`, one `source_id:level` entry per row. */
+  const grantsOfP = (recordId = 'prj_1') =>
+    (h.engine._tables.sys_record_share ?? [])
+      .filter((r) => r.record_id === recordId && r.recipient_id === 'u_p')
+      .map((r) => `${r.source_id}:${r.access_level}`)
+      .sort();
+  /** Does P's read scope reach `recordId`? Through the same filter every `find` is AND-ed with. */
+  const readsRecord = async (recordId = 'prj_1') => {
+    const filter: any = await h.sharing.buildReadFilter(OBJECT, P);
+    return JSON.stringify(filter).includes(`"${recordId}"`);
+  };
+
+  beforeEach(() => {
+    h = harness();
+    h.engine._schemas[OBJECT] = {
+      name: OBJECT,
+      sharingModel: 'private',
+      fields: {
+        id: { type: 'text' },
+        status: { type: 'select', options: ['draft', 'approved'] },
+        owner_id: { type: 'lookup', reference: 'sys_user' },
+        team_members: { type: 'user', multiple: true },
+        project_manager: { type: 'lookup', reference: 'sys_user' },
+      },
+    };
+    h.engine.seed(OBJECT, [
+      { id: 'prj_1', status: 'approved', owner_id: 'boss', team_members: ['u_p', 'u_q'], project_manager: 'u_p' },
+    ]);
+    h.engine.seed('sys_user_position', [{ id: 'up_fin', position: 'finance', user_id: 'u_p' }]);
+  });
+
+  it.each([
+    ['read rule first, then edit', [TEAM, MANAGER]],
+    ['edit rule first, then read', [MANAGER, TEAM]],
+  ])('per-record pass, %s: one row per rule, and P may edit', async (_label, order) => {
+    seedRules(order);
+    await h.rules.evaluateAllForRecord(OBJECT, 'prj_1', SYS);
+
+    expect(grantsOfP()).toEqual(['srule_manager_edit:edit', 'srule_team_read:read']);
+    expect(await h.sharing.checkEdit(OBJECT, 'prj_1', P)).toBe('allow');
+    expect(await readsRecord()).toBe(true);
+    // The team member who is not the manager reads and does not edit.
+    const Q = { ...P, userId: 'u_q' };
+    expect(await h.sharing.checkEdit(OBJECT, 'prj_1', Q)).toBe('deny');
+  });
+
+  it.each([
+    ['read rule first, then edit', [TEAM, MANAGER]],
+    ['edit rule first, then read', [MANAGER, TEAM]],
+  ])('whole-rule pass, %s: re-running the read rule never lowers the edit rule\'s grant', async (_label, order) => {
+    seedRules(order);
+    for (const rule of order) await h.rules.evaluateRule(String(rule.id), SYS);
+    await h.rules.evaluateRule(TEAM.id, SYS);
+
+    expect(grantsOfP()).toEqual(['srule_manager_edit:edit', 'srule_team_read:read']);
+    expect(await h.sharing.checkEdit(OBJECT, 'prj_1', P)).toBe('allow');
+  });
+
+  it.each([
+    ['read rule first, then edit', [TEAM, MANAGER]],
+    ['edit rule first, then read', [MANAGER, TEAM]],
+  ])('%s: revoking the edit rule leaves P the read the team rule still grants', async (_label, order) => {
+    seedRules(order);
+    await h.rules.evaluateAllForRecord(OBJECT, 'prj_1', SYS);
+
+    expect(await h.rules.revokeRuleGrants(MANAGER.id)).toBe(1);
+
+    expect(grantsOfP()).toEqual(['srule_team_read:read']);
+    expect(await readsRecord()).toBe(true);
+    expect(await h.sharing.checkEdit(OBJECT, 'prj_1', P)).toBe('deny');
+  });
+
+  it.each([
+    ['read rule first, then edit', [TEAM, MANAGER]],
+    ['edit rule first, then read', [MANAGER, TEAM]],
+  ])('%s: revoking the read rule leaves P the edit the manager rule still grants', async (_label, order) => {
+    seedRules(order);
+    await h.rules.evaluateAllForRecord(OBJECT, 'prj_1', SYS);
+
+    // Two rows for the team rule: P's and Q's.
+    expect(await h.rules.revokeRuleGrants(TEAM.id)).toBe(2);
+
+    expect(grantsOfP()).toEqual(['srule_manager_edit:edit']);
+    expect(await h.sharing.checkEdit(OBJECT, 'prj_1', P)).toBe('allow');
+  });
+
+  it.each([
+    ['field read rule first, then position edit', [TEAM, FINANCE]],
+    ['position edit rule first, then field read', [FINANCE, TEAM]],
+  ])('a position rule and a field rule, %s: P edits while holding the position, and reads once it is gone', async (_label, order) => {
+    seedRules(order);
+    await h.rules.evaluateAllForRecord(OBJECT, 'prj_1', SYS);
+
+    expect(grantsOfP()).toEqual(['srule_finance_edit:edit', 'srule_team_read:read']);
+    expect(await h.sharing.checkEdit(OBJECT, 'prj_1', P)).toBe('allow');
+
+    // P leaves the finance position: the membership recompute's user-scoped
+    // pass withdraws that rule's grants for P, and only those.
+    h.engine._tables.sys_user_position = [];
+    const financeRule = (await h.rules.getRule(FINANCE.id, SYS))!;
+    const pass = await h.rules.reconcileRuleForUser(financeRule, 'u_p');
+
+    expect(pass).toMatchObject({ grantsRevoked: 1 });
+    expect(grantsOfP()).toEqual(['srule_team_read:read']);
+    expect(await readsRecord()).toBe(true);
+    expect(await h.sharing.checkEdit(OBJECT, 'prj_1', P)).toBe('deny');
+  });
+
+  it('a row two rules once shared is split by the next pass, not kept merged', async () => {
+    // What a release keyed without `source_id` left behind: one row for P, the
+    // read rule's id on it, the edit rule's grant overwritten.
+    seedRules([TEAM, MANAGER]);
+    h.engine.seed('sys_record_share', [{
+      id: 'shr_merged', object_name: OBJECT, record_id: 'prj_1', recipient_type: 'user', recipient_id: 'u_p',
+      access_level: 'read', source: 'rule', source_id: TEAM.id,
+    }]);
+    expect(await h.sharing.checkEdit(OBJECT, 'prj_1', P)).toBe('deny');
+
+    await h.rules.evaluateAllForRecord(OBJECT, 'prj_1', SYS);
+
+    expect(grantsOfP()).toEqual(['srule_manager_edit:edit', 'srule_team_read:read']);
+    expect(await h.sharing.checkEdit(OBJECT, 'prj_1', P)).toBe('allow');
+  });
+});

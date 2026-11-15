@@ -2801,6 +2801,7 @@ const es = {
         directSignInIncomplete: "No se completó el inicio de sesión: volviste del inicio de sesión único sin haber iniciado sesión. Comprueba que este navegador permite cookies para este sitio y vuelve a intentarlo.",
         directSignInUnavailable: "No se pudo iniciar el inicio de sesión único para este sistema. Pide a tu administrador que revise qué servicio de inicio de sesión usa.",
         directSignInRateLimited: "Se iniciaron demasiados inicios de sesión desde esta red hace un momento. Espera unos segundos y vuelve a intentarlo.",
+        networkNotAllowed: "Este sistema no permite iniciar sesión desde tu red. Conéctate desde una red permitida (por ejemplo, la red de la oficina o la VPN de tu organización) o pide ayuda a tu administrador.",
         ssoAccessDenied: "La cuenta con la que iniciaste sesión no tiene acceso a este entorno. Inicia sesión con una cuenta que tenga acceso o pide a un administrador de la organización de este entorno que te añada como miembro.",
         ssoSwitchAccount: "Cambiar de cuenta",
         ssoBackToConsole: "Volver a la consola",
@@ -4060,6 +4061,14 @@ const es = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'Te queda un {{left}} de tu cuota de IA. Un modelo marcado con ×N la consume N veces más rápido que el modelo predeterminado.',
+      confirmTitle: '¿Cambiar a {{model}}?',
+      confirmBody: 'Cada mensaje con este modelo consume {{multiplier}} veces más cuota de IA que uno con el modelo predeterminado.',
+      confirmAllowance: 'Te queda un {{left}}, y con este modelo se agota {{multiplier}} veces más rápido.',
+      confirmCancel: 'Cancelar',
+      confirmAction: 'Cambiar de modelo',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Enviar mensaje',
     scrollToBottom: 'Ir al último mensaje',
@@ -4083,11 +4092,16 @@ const es = {
       aggregations: 'Agregaciones',
       records: 'Registros',
       visibleToYou: 'Solo los registros que puede ver',
+      dataset: 'Conjunto de datos',
+      metrics: 'Métricas',
+      noAddedFilter: 'Sin filtro añadido a la definición del conjunto de datos',
     },
     tool: {
       aggregate_data: "Resumir los datos",
       get_record: "Leer el registro",
+      list_datasets: "Ver las métricas disponibles",
       query_data: "Consultar los datos necesarios",
+      query_dataset: "Consultar por métrica",
       query_records: "Buscar los registros",
       read_package_doc: "Leer la guía de la aplicación",
       search_knowledge: "Consultar la base de conocimiento",

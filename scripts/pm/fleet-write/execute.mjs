@@ -2991,10 +2991,11 @@ export async function selfTest() {
             return '';
           }
           if (argv[0] === 'ls-tree') {
-            const tree = held.has(argv[3]) ? wfTrees.get(argv[3]) : null;
-            if (!tree) throw new Error(`fatal: not a tree object: ${argv[3]}`);
-            const dirs = argv.slice(5).map((d) => (d.endsWith('/') ? d : `${d}/`));
-            return Object.keys(tree).filter((p) => dirs.some((d) => p.startsWith(d))).join('\n');
+            // `ls-tree -r -z --name-only REV -- DIRS`: names NUL-separated, as readWorkflowDiff asks for them.
+            const tree = held.has(argv[4]) ? wfTrees.get(argv[4]) : null;
+            if (!tree) throw new Error(`fatal: not a tree object: ${argv[4]}`);
+            const dirs = argv.slice(6).map((d) => (d.endsWith('/') ? d : `${d}/`));
+            return Object.keys(tree).filter((p) => dirs.some((d) => p.startsWith(d))).join('\0');
           }
           if (argv[0] === 'show') {
             const at = argv[1].indexOf(':');

@@ -33,6 +33,7 @@ import { runAddSsoUser } from './pending-sso-users';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
+import { SysUser } from '@objectstack/platform-objects/identity';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-33181';
@@ -524,16 +525,20 @@ describe('[#33181] a pending person gets no password and no session', () => {
     }
   });
 
-  it('set-initial-password refuses a pending caller who holds platform-admin standing, whom the managed arm admits', async () => {
-    const s = await stage();
-    setManaged(true);
-    process.env[OWNER_ENV] = EMAILS.idp;
-    s.users().find((r) => String(r.id) === s.ids.idp)!.email_verified = true;
-    s.users().find((r) => String(r.id) === s.ids.idp)!.source = PENDING_SSO_SOURCE;
-    const v = await verdict(await s.fire('/set-initial-password', { newPassword: NEW_PASSWORD }, s.bearers.idp));
-    expect(v.status, v.text).toBe(409);
-    expect(v.message).toBe(PENDING_SSO_MESSAGES.setInitialPassword);
-    expect(s.credentialOf(s.ids.idp)).toBeUndefined();
+  it('set-initial-password refuses a pending caller who holds platform-admin standing, managed or not', async () => {
+    for (const managed of [true, false]) {
+      const s = await stage();
+      setManaged(managed);
+      process.env[OWNER_ENV] = EMAILS.idp;
+      s.users().find((r) => String(r.id) === s.ids.idp)!.email_verified = true;
+      s.users().find((r) => String(r.id) === s.ids.idp)!.source = PENDING_SSO_SOURCE;
+      const v = await verdict(await s.fire('/set-initial-password', { newPassword: NEW_PASSWORD }, s.bearers.idp));
+      expect(v.status, `managed=${managed}: ${v.text}`).toBe(409);
+      // Managed, the cloud-managed arm refuses every signed-in caller first, a
+      // platform administrator included (#33203).
+      expect(v.message).toBe(managed ? CLOUD_MANAGED_REFUSAL_MESSAGES.setInitialPassword : PENDING_SSO_MESSAGES.setInitialPassword);
+      expect(s.credentialOf(s.ids.idp)).toBeUndefined();
+    }
   });
 
   it('CONTROL: off a managed environment an idp_provisioned caller sets their initial password as before', async () => {
@@ -543,8 +548,9 @@ describe('[#33181] a pending person gets no password and no session', () => {
     expect(s.credentialOf(s.ids.idp)).toBeDefined();
   });
 
-  it('CONTROL: set-user-password still answers 200 on an env_native target', async () => {
-    const s = await managedStage();
+  it('CONTROL: off a managed environment set-user-password still answers 200 on an env_native target', async () => {
+    // Managed, the door refuses every target (#33203, `cloud-managed.test.ts`).
+    const s = await stage();
     const v = await verdict(await s.fire('/admin/set-user-password', { userId: s.ids.member, newPassword: NEW_PASSWORD }, s.bearers.admin));
     expect(v.status, v.text).toBe(200);
   });
@@ -981,5 +987,93 @@ describe('[#33181] the host event names the administrator\'s cloud id from their
     s.engine.tables.set('sys_account', accounts);
     expect((await s.fire('/admin/add-sso-user', { email: 'okta.actor@example.com', name: 'Okta Actor' }, s.bearers.admin)).status).toBe(201);
     expect(s.told[0]!.event).not.toHaveProperty('actorCloudUserId');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: the managed add actions reach these doors (cloud#4465 child 1b)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `sys_user.add_sso_user` and `sys_user.import_sso_users` are these doors'
+// first-party callers. Each pin reads the DECLARED action and posts what its
+// dialog submits, the way the console composes a `type: 'api'` body: the
+// values collected for the params it declares, then `bodyExtra` merged last.
+// The door's body is a closed key set, so a param it does not take would be
+// answered 400 here rather than dropped.
+
+describe('[#33186] the Setup → Users add actions reach the pending-person doors', () => {
+  function declaredAction(name: string) {
+    const action = (SysUser.actions ?? []).find((a) => a.name === name);
+    if (!action) throw new Error(`sys_user declares no action named "${name}"`);
+    return action;
+  }
+
+  /** The action's `target` under this mount, and the body its dialog submits. */
+  function dialogCall(name: string, collected: Record<string, unknown>) {
+    const action = declaredAction(name);
+    const target = String(action.target);
+    expect(target.startsWith(BASE), `${name} targets the auth mount`).toBe(true);
+    const declaredNames = (action.params ?? []).map((p) => p.name ?? p.field);
+    for (const key of Object.keys(collected)) expect(declaredNames, `${name} declares the ${key} param`).toContain(key);
+    return { path: target.slice(BASE.length), body: { ...collected, ...(action.bodyExtra ?? {}) } };
+  }
+
+  const ADD_DIALOG = {
+    email: 'dialog.person@example.com',
+    name: 'Dialog Person',
+    // The pickers submit one name each; the door reads it as a list of one.
+    positions: 'sales_rep',
+    permissionSets: 'crm_user',
+    manager: EMAILS.member,
+  };
+
+  it('add_sso_user on a managed boot: the dialog adds a pending person with the picked grants and manager', async () => {
+    const s = await managedStage();
+    const { path, body } = dialogCall('add_sso_user', ADD_DIALOG);
+
+    const res = await s.fire(path, body, s.bearers.admin);
+    const answer: any = await res.json();
+
+    expect(res.status, JSON.stringify(answer)).toBe(201);
+    const row = s.row(ADD_DIALOG.email)!;
+    expect(row.source).toBe(PENDING_SSO_SOURCE);
+    expect(s.rowsOf('sys_account', String(row.id))).toHaveLength(0);
+    expect(s.rowsOf('sys_user_position', String(row.id)).map((r) => r.position)).toEqual(['sales_rep']);
+    expect(s.rowsOf('sys_user_permission_set', String(row.id)).map((r) => r.permission_set)).toEqual(['crm_user']);
+    expect(String(row.manager_id)).toBe(s.ids.member);
+    expect(answer.data).toMatchObject({ email: ADD_DIALOG.email, source: PENDING_SSO_SOURCE, alreadyPending: false, host: { notified: true } });
+  });
+
+  it('import_sso_users on a managed boot: the dialog\'s CSV adds each row as a pending person', async () => {
+    const s = await managedStage();
+    const csv = 'email,name,positions\ncsv.one@example.com,CSV One,sales_rep\ncsv.two@example.com,CSV Two,\n';
+    const { path, body } = dialogCall('import_sso_users', { csv });
+
+    const res = await s.fire(path, body, s.bearers.admin);
+    const answer: any = await res.json();
+
+    expect(res.status, JSON.stringify(answer)).toBe(200);
+    expect(answer.data.summary).toEqual({ total: 2, added: 2, alreadyPending: 0, failed: 0 });
+    expect(answer.data.rows.map((r: any) => [r.row, r.email, r.ok])).toEqual([
+      [1, 'csv.one@example.com', true],
+      [2, 'csv.two@example.com', true],
+    ]);
+    for (const email of ['csv.one@example.com', 'csv.two@example.com']) expect(s.row(email)?.source).toBe(PENDING_SSO_SOURCE);
+  });
+
+  it('CONTROL: off a managed environment the same targets answer 409 and add no one', async () => {
+    const s = await stage();
+    const before = s.users().length;
+    for (const [name, collected] of [
+      ['add_sso_user', ADD_DIALOG],
+      ['import_sso_users', { csv: 'email,name\ncontrol.person@example.com,Control\n' }],
+    ] as const) {
+      const { path, body } = dialogCall(name, collected);
+      const v = await verdict(await s.fire(path, body, s.bearers.admin));
+      expect(v.status, `${name}: ${v.text}`).toBe(409);
+      expect(v.code).toBe('RESOURCE_CONFLICT');
+    }
+    expect(s.users()).toHaveLength(before);
+    expect(s.row(ADD_DIALOG.email)).toBeUndefined();
   });
 });

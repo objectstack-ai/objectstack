@@ -2797,6 +2797,7 @@ const fr = {
         directSignInIncomplete: "La connexion n'a pas abouti : vous êtes revenu de l'authentification unique sans être connecté. Vérifiez que ce navigateur autorise les cookies pour ce site, puis réessayez.",
         directSignInUnavailable: "L'authentification unique n'a pas pu être lancée pour ce système. Demandez à votre administrateur de vérifier le service de connexion utilisé.",
         directSignInRateLimited: "Trop de connexions ont été lancées depuis ce réseau à l'instant. Patientez quelques secondes, puis réessayez.",
+        networkNotAllowed: "Ce système n'autorise pas la connexion depuis votre réseau. Connectez-vous depuis un réseau autorisé (par exemple le réseau du bureau ou le VPN de votre organisation), ou contactez votre administrateur.",
         ssoAccessDenied: "Le compte avec lequel vous vous êtes connecté n'a pas accès à cet environnement. Connectez-vous avec un compte qui y a accès, ou demandez à un administrateur de l'organisation de cet environnement de vous ajouter comme membre.",
         ssoSwitchAccount: "Changer de compte",
         ssoBackToConsole: "Retour à la console",
@@ -4056,6 +4057,14 @@ const fr = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    modelPicker: {
+      allowanceNote: 'Il vous reste {{left}} de votre quota d’IA. Un modèle marqué ×N le consomme N fois plus vite que le modèle par défaut.',
+      confirmTitle: 'Passer à {{model}} ?',
+      confirmBody: 'Chaque message avec ce modèle consomme {{multiplier}} fois plus de quota d’IA qu’un message avec le modèle par défaut.',
+      confirmAllowance: 'Il en reste {{left}}, et avec ce modèle il s’épuise {{multiplier}} fois plus vite.',
+      confirmCancel: 'Annuler',
+      confirmAction: 'Changer de modèle',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Envoyer le message',
     scrollToBottom: 'Aller au dernier message',
@@ -4079,11 +4088,16 @@ const fr = {
       aggregations: 'Agrégations',
       records: 'Enregistrements',
       visibleToYou: 'Uniquement les enregistrements que vous pouvez voir',
+      dataset: 'Jeu de données',
+      metrics: 'Indicateurs',
+      noAddedFilter: 'Aucun filtre ajouté à la définition du jeu de données',
     },
     tool: {
       aggregate_data: "Synthétiser les données",
       get_record: "Lire l’enregistrement",
+      list_datasets: "Consulter les indicateurs disponibles",
       query_data: "Interroger les données nécessaires",
+      query_dataset: "Interroger un indicateur",
       query_records: "Rechercher les enregistrements",
       read_package_doc: "Lire le guide de l’application",
       search_knowledge: "Consulter la base de connaissances",

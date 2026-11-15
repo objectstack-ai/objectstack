@@ -3391,6 +3391,7 @@ const en = {
         directSignInIncomplete: "Sign-in did not complete: you came back from single sign-on without being signed in. Check that this browser allows cookies for this site, then try again.",
         directSignInUnavailable: "Single sign-on could not be started for this system. Ask your administrator to check which sign-in service it uses.",
         directSignInRateLimited: "Too many sign-ins were started from this network just now. Wait a few seconds, then try again.",
+        networkNotAllowed: "This system does not allow sign-in from your network. Connect from an allowed network (for example your organization's office network or VPN), or ask your administrator.",
         // objectstack#32992 — `access_denied`: the identity provider refused the
         // signed-in account for this environment, with its two ways on.
         ssoAccessDenied: "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
@@ -4900,6 +4901,15 @@ const en = {
   // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
   // against the registry instead of against its own hand-held list.
   chatbot: {
+    // objectstack#33660 — the composer's model picker: the allowance note and the ×20 confirmation.
+    modelPicker: {
+      allowanceNote: '{{left}} of your AI allowance is left. A model marked ×N uses it N times as fast as the default model.',
+      confirmTitle: 'Switch to {{model}}?',
+      confirmBody: 'Each message on this model uses {{multiplier}} times as much of your AI allowance as one on the default model.',
+      confirmAllowance: '{{left}} of it is left, and on this model it runs out {{multiplier}} times as fast.',
+      confirmCancel: 'Cancel',
+      confirmAction: 'Switch model',
+    },
     // objectui#13461 — the composer's send button and the scroll-to-latest button.
     sendMessage: 'Send message',
     scrollToBottom: 'Scroll to the latest message',
@@ -4923,11 +4933,16 @@ const en = {
       aggregations: 'Aggregations',
       records: 'Records',
       visibleToYou: 'Only records visible to you',
+      dataset: 'Dataset',
+      metrics: 'Metrics',
+      noAddedFilter: 'No filter added to the dataset definition',
     },
     tool: {
       aggregate_data: 'Aggregate the data',
       get_record: 'Read the record',
+      list_datasets: 'Check the available metrics',
       query_data: 'Query the data',
+      query_dataset: 'Query by a metric',
       query_records: 'Look up the records',
       read_package_doc: 'Read the app guide',
       search_knowledge: 'Search the knowledge base',
