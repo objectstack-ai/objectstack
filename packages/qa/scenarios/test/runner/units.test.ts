@@ -312,8 +312,17 @@ describe('the validation operation (#30883 item 2, ruled B): the agent half and 
       answer: { kind: 'refused', code: uncodedToolError, note: 'the door answered "MCP error -32602"' },
       writes: 0,
     });
+    // A denial with no status is no 403: still the platform's measured fail.
+    const statusless = observeProbe(call, { output: '{"error":{"code":"PERMISSION_DENIED"}}', isError: true }, contacts, contacts);
+    expect(failing(observe(turnOf(PRE_VALIDATED), statusless))).toEqual(['platform:refused:VALIDATION_FAILED']);
+    // A 403 denial of the write the card gives the persona is the build's (#33596): the platform half is not measured.
     const denied = observeProbe(call, { output: '{"error":{"code":"PERMISSION_DENIED","status":403}}', isError: true }, contacts, contacts);
-    expect(failing(observe(turnOf(PRE_VALIDATED), denied))).toEqual(['platform:refused:VALIDATION_FAILED']);
+    const g = grade(observe(turnOf(PRE_VALIDATED), denied));
+    expect(g.pass).toBe(true);
+    expect(g.checks.slice(2).map((c) => c.notMeasured)).toEqual([
+      "the build denies the persona this write: the runner's probe of the declared write was refused PERMISSION_DENIED (403), and nothing was written",
+      "the build denies the persona this write: the runner's probe of the declared write was refused PERMISSION_DENIED (403), and nothing was written",
+    ]);
   });
 
   it('③ the agent caught the bad value first — no write, nothing written, a reply asking for a correction: passes', () => {

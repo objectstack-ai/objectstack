@@ -508,6 +508,18 @@ const IGNORED_HEADER_PARAMETERS = new Set(['accept', 'content-type', 'authorizat
  * flow's `connectorConfig.input`), are left out of it — and so, for a
  * connector with a credential handle, is every parameter an `apiKey` security
  * scheme the operation requires places the token in (`schemeFilled`).
+ *
+ * #33553 — that executor also refuses a key an object schema does not
+ * declare, reading `properties` as the action's contract. So what this
+ * generator SKIPS must read as open, never as absent: the handler still
+ * sends it, and on a document nobody de-referenced it is the only way the
+ * input can carry it. An unresolved `$ref` parameter has no `in` to read
+ * without de-referencing, so it opens every location the handler sends
+ * (`path`, `query`, `header`): each is emitted with
+ * `additionalProperties: true`, even when it declares no parameter of its
+ * own. An unresolved `$ref` request body, or one whose content carries no
+ * `schema`, is declared as `body: {}` — any value. The declared parameters
+ * beside them are still judged as before.
  */
 function buildInputSchema(op: OpenApiOperation, auth: RestAuth, schemeFilled: ReadonlySet<string>): JsonSchema | undefined {
     const sections: Record<'path' | 'query' | 'header', { props: Record<string, JsonSchema>; required: string[] }> = {
@@ -518,8 +530,13 @@ function buildInputSchema(op: OpenApiOperation, auth: RestAuth, schemeFilled: Re
     const authHeader = auth.type === 'api-key' && !auth.paramName ? (auth.headerName ?? 'X-API-Key').toLowerCase() : undefined;
     const authQuery = auth.type === 'api-key' ? auth.paramName : undefined;
 
+    let unresolvedParameter = false;
     for (const p of op.parameters ?? []) {
-        if (!p || typeof p !== 'object' || '$ref' in p) continue;
+        if (!p || typeof p !== 'object') continue;
+        if ('$ref' in p) {
+            unresolvedParameter = true;
+            continue;
+        }
         if (p.in !== 'path' && p.in !== 'query' && p.in !== 'header') continue;
         if (p.in === 'header' && (IGNORED_HEADER_PARAMETERS.has(p.name.toLowerCase()) || p.name.toLowerCase() === authHeader)) continue;
         if (p.in === 'query' && authQuery !== undefined && p.name === authQuery) continue;
@@ -533,18 +550,22 @@ function buildInputSchema(op: OpenApiOperation, auth: RestAuth, schemeFilled: Re
     const required: string[] = [];
     for (const where of ['path', 'query', 'header'] as const) {
         const sec = sections[where];
-        if (Object.keys(sec.props).length === 0) continue;
-        const schema: JsonSchema = { type: 'object', properties: sec.props };
+        const declared = Object.keys(sec.props).length > 0;
+        if (!declared && !unresolvedParameter) continue;
+        const schema: JsonSchema = { type: 'object' };
+        if (declared) schema.properties = sec.props;
         if (sec.required.length) schema.required = sec.required;
+        if (unresolvedParameter) schema.additionalProperties = true;
         properties[where] = schema;
         // Path params are always required when present; others only if any are.
-        if (where === 'path' || sec.required.length) required.push(where);
+        if ((where === 'path' && declared) || sec.required.length) required.push(where);
     }
 
-    const bodySchema = extractRequestBodySchema(op.requestBody);
-    if (bodySchema) {
-        properties.body = bodySchema;
-        if (op.requestBody && !('$ref' in op.requestBody) && op.requestBody.required) required.push('body');
+    if (op.requestBody && typeof op.requestBody === 'object') {
+        // An unresolved `$ref` body, or content with no `schema`, is still a
+        // body the handler sends: declared as `{}`, any value.
+        properties.body = extractRequestBodySchema(op.requestBody) ?? {};
+        if (!('$ref' in op.requestBody) && op.requestBody.required) required.push('body');
     }
 
     if (Object.keys(properties).length === 0) return undefined;

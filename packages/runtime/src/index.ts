@@ -164,7 +164,8 @@ export type { DefaultDatasourceDefinition, DefaultDatasourcePluginOptions } from
 export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFunctionEntries, collectBundleActions } from './app-plugin.js';
 // [#21321] The ONE binder of an app artifact's script-action bodies and body
 // hooks, under the owner `app:<appId>` — called by `AppPlugin.start` and by the
-// install-local plugin (`@objectstack/cloud-connection`) on install and rehydrate.
+// install-local plugin (`@objectstack/cloud-connection`) on install and rehydrate;
+// `unbindAppArtifactHandlers` is its inverse, called by install-local's uninstall.
 // [#21489] …and its job half: `scheduleAppArtifactJobs` schedules a package's
 // jobs (a `body` runs sandboxed on every door), and `collectJobsWithoutBody`
 // names the enabled jobs no JSON door can run (no `body`, or a `body` or `pull`
@@ -176,6 +177,7 @@ export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFun
 // with the refusal the binder refuses each by at bind: install-local refuses them.
 export {
     bindAppArtifactHandlers,
+    unbindAppArtifactHandlers,
     appArtifactHandlerOwner,
     scheduleAppArtifactJobs,
     collectJobsWithoutBody,
@@ -185,6 +187,7 @@ export {
 export type {
     AppArtifactHandlerBinding,
     AppArtifactHandlerBindingOptions,
+    AppArtifactHandlerUnbinding,
     AppArtifactJobScheduling,
     AppArtifactJobSchedulingOptions,
     JobWithoutBody,

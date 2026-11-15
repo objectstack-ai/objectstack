@@ -226,11 +226,18 @@ describe('ObjectQL.registerAction on a key another owner holds', () => {
         for (const subject of ["'bc_org:rename'", "'app:com.test.owner'", "'app:com.test.twin'"]) expect(message).toContain(subject);
     });
 
-    it('withdrawing the replacing owner leaves the key with no handler — the consequence the warning names', async () => {
+    it('withdrawing the replacing owner hands the key back to the owner it replaced — what the engine answers without it', async () => {
+        // Each owner keeps its handler in its own package slot (#31673), so the
+        // replaced owner's handler is still held when the replacing one leaves:
+        // a call that names no package runs it, as an engine the replacing
+        // owner never registered on does — never "not found".
         const { engine } = await engineSpied();
         engine.registerAction('bc_org', 'rename', () => 'owner', 'app:com.test.owner');
         engine.registerAction('bc_org', 'rename', () => 'twin', 'app:com.test.twin');
         engine.removeActionsByPackage('app:com.test.twin');
+        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('owner');
+        // CONTROL: with no other owner left, the key has no handler.
+        engine.removeActionsByPackage('app:com.test.owner');
         await expect(engine.executeAction('bc_org', 'rename', {})).rejects.toThrow(/not found/);
     });
 

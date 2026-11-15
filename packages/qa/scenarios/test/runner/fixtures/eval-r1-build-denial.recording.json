@@ -1,0 +1,117 @@
+{
+  "driver": {
+    "driver": "claude-code-cli",
+    "authMethod": "oauth_token",
+    "apiBilled": false
+  },
+  "turns": {
+    "project_with_tasks/scratch/run/add_task/contractor": {
+      "replyText": "I'll find the Website relaunch project in the app and add the task to it.\n\nThe Website relaunch project has id `p1`. Creating the task there with status To Do.\n\nThe app refused the write. The External contractor credential does not have permission to create tasks, so the task was not added.\n\nWhat I found:\n\n- **Project located**: Website relaunch exists in the app with three tasks already on it, and the contractor can read it.\n- **Create refused**: creating a task titled \"Launch checklist\" on that project with status To Do returned a 403 permission denied. Nothing was created.\n- **Likely cause**: in this app, the contractor permission set on the Task object is read only. Tasks are details of Project, and the contractor grant does not include write access to them.\n\nTo get this done, an administrator needs to either grant the External contractor create rights on Task, or add the task under a credential that has them. Once that is in place, the same request can be rerun as is.",
+      "toolCalls": [
+        {
+          "name": "create_record",
+          "rawName": "mcp__app__create_record",
+          "input": {
+            "objectName": "demoproject_task",
+            "data": {
+              "title": "Launch checklist",
+              "project": "p1",
+              "status": "todo"
+            }
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"PERMISSION_DENIED\",\n    \"message\": \"You do not have permission to perform this action. Contact your administrator if you need access.\",\n    \"status\": 403\n  }\n}",
+          "isError": true
+        }
+      ],
+      "meta": {
+        "resultSubtype": "success",
+        "isError": false,
+        "numTurns": 6
+      }
+    },
+    "project_with_tasks/scratch/run/task_without_title/contractor": {
+      "replyText": "I'll load the app tools and look up the task object's schema first.\n\nThe task was not created. The platform refused the write with a permission error before it ever reached field validation.\n\nWhat happened:\n\n- **Permission denied.** Creating a task as External contractor returned a 403 \"You do not have permission to perform this action.\" The contractor role does not have create access on the Task object.\n- **Read access is also narrow.** Querying tasks on the Mobile app project returned nothing, even though the project lists one task. The contractor cannot see that project's tasks either.\n- **Title would have been the next blocker.** The Task schema marks title as required, alongside project and status. Even with create permission, a task with no title would be refused by the platform.\n\nNothing was changed. To proceed, an administrator needs to grant the External contractor role create access on tasks, and the task will still need a title.",
+      "toolCalls": [
+        {
+          "name": "create_record",
+          "rawName": "mcp__app__create_record",
+          "input": {
+            "objectName": "demoproject_task",
+            "data": {
+              "project": "p2",
+              "status": "todo"
+            }
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"PERMISSION_DENIED\",\n    \"message\": \"You do not have permission to perform this action. Contact your administrator if you need access.\",\n    \"status\": 403\n  }\n}",
+          "isError": true
+        }
+      ],
+      "meta": {
+        "resultSubtype": "success",
+        "isError": false,
+        "numTurns": 7
+      }
+    },
+    "project_with_tasks/scratch/run/drop_packing/contractor": {
+      "replyText": "I'll find the 'Pack boxes' task record through the app tools and delete it.\n\nFound exactly one match: task t5 \"Pack boxes\" (project p3, status done). Deleting it now, as you asked.\n\nThe deletion was refused. The 'Pack boxes' task still exists.\n\n**What happened:** I found the task as record t5 in the Task object, with project p3 and status done. The delete call came back with a 403 permission error. The External contractor credential can read tasks but is not allowed to delete them.\n\n**What this means:** Nothing was changed. The task is unchanged and still visible.\n\n**Next step:** An administrator needs to either grant the External contractor role delete permission on the Task object, or delete the record themselves. If a softer action is acceptable, I can check whether the contractor role is allowed to update the task instead, for example changing its status.",
+      "toolCalls": [
+        {
+          "name": "delete_record",
+          "rawName": "mcp__app__delete_record",
+          "input": {
+            "objectName": "demoproject_task",
+            "recordId": "t5",
+            "confirm": true
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"PERMISSION_DENIED\",\n    \"message\": \"You do not have permission to perform this action. Contact your administrator if you need access.\",\n    \"status\": 403\n  }\n}",
+          "isError": true
+        }
+      ],
+      "meta": {
+        "resultSubtype": "success",
+        "isError": false,
+        "numTurns": 6
+      }
+    },
+    "invoice_with_line_items/scratch/run/add_line/sales_rep": {
+      "replyText": "I'll find invoice INV-003 and update its Widgets line to 10.\n\nThe schema I can read hides the unit price, but the write requires it. Widget's price derives from INV-001's line as 5 each, so I'll pass that.\n\nI could not add the Widget line to INV-003. The Sales representative role is blocked by a field permission, so nothing was changed.\n\nWhat I found on INV-003:\n\n- It is a draft invoice with one line, Gadget × 3 for 75. There is no existing Widget line, so \"10 in total\" cannot be a running quantity.\n- The only Widget line in the system is on INV-001, priced at 5 each. Two Widgets at 5 each come to 10, so I read your request as a new line of quantity 2 with a line amount of 10.\n\nWhy the write failed:\n\n- Creating the line without a unit price was refused: the app says Unit Price is required.\n- Supplying a unit price of 5 was refused with a permission error: the Sales representative role is not allowed to write the unit price field on invoice lines. The field is also hidden from the schema this role can read.\n\nThe line cannot be created by this role as the app is configured. An administrator either needs to grant Sales representatives write access to Unit Price on invoice lines, or give the field a default so the line can be created without it. Once that is done, the line to add is Widget, quantity 2, unit price 5, on INV-003.",
+      "toolCalls": [
+        {
+          "name": "create_record",
+          "rawName": "mcp__app__create_record",
+          "input": {
+            "objectName": "demoinvoice_invoice_line",
+            "data": {
+              "invoice": "i3",
+              "product": "Widget",
+              "quantity": 2
+            }
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"VALIDATION_FAILED\",\n    \"message\": \"Unit Price is required\"\n  }\n}",
+          "isError": true
+        },
+        {
+          "name": "create_record",
+          "rawName": "mcp__app__create_record",
+          "input": {
+            "objectName": "demoinvoice_invoice_line",
+            "data": {
+              "invoice": "i3",
+              "product": "Widget",
+              "quantity": 2,
+              "unit_price": 5
+            }
+          },
+          "output": "{\n  \"error\": {\n    \"code\": \"PERMISSION_DENIED\",\n    \"message\": \"[Security] Field write denied: not permitted to edit [unit_price] on 'demoinvoice_invoice_line'\",\n    \"status\": 403,\n    \"userMessage\": \"You do not have permission to edit one or more of the fields you changed. Undo those changes and try again, or contact your administrator if you need access.\"\n  }\n}",
+          "isError": true
+        }
+      ],
+      "meta": {
+        "resultSubtype": "success",
+        "isError": false,
+        "numTurns": 15
+      }
+    }
+  },
+  "files": {}
+}

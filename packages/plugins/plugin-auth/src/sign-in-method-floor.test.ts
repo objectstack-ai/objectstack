@@ -470,6 +470,9 @@ const PASSWORD = 'S3cure!Passw0rd-30300';
 const SYS = { isSystem: true } as const;
 
 const ENV_KEYS_30300 = [
+  'OS_AUTH_DIRECT_SIGN_IN_ENABLED',
+  'OS_AUTH_DIRECT_SIGN_IN_PROVIDER',
+  'OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH',
   'OS_AUTH_EMAIL_PASSWORD_ENABLED',
   'OS_AUTH_GOOGLE_ENABLED',
   'GOOGLE_CLIENT_ID',
@@ -550,8 +553,8 @@ describe('the last way to sign in is kept, and a boot without one is said (#3030
   // ── Door 1 ─────────────────────────────────────────────────────────────────
 
   /** A signed-in administrator who owns `providers`, on a deployment with enterprise SSO switched on. */
-  async function adminWithProviders(providers: string[]) {
-    const env = await boot({ plugins: { sso: true } });
+  async function adminWithProviders(providers: string[], authOptions: Record<string, unknown> = {}) {
+    const env = await boot({ plugins: { sso: true }, ...authOptions });
     const { ql, manager } = env;
     const signedUp = await manager.handleRequest(
       new Request(`${AUTH}/sign-up/email`, {
@@ -651,7 +654,54 @@ describe('the last way to sign in is kept, and a boot without one is said (#3030
     expect(await providerIds()).toEqual(['okta']);
   }, 30_000);
 
+  // The local sign-in path behind direct sign-in: under `off` the sign-in page
+  // draws no email and password, so it is no way in there, on or not.
+
+  it('under the local sign-in path off, deleting the last provider is refused with email and password on: 409, nothing deleted', async () => {
+    const { manager, remove, providerIds } = await adminWithProviders(['okta'], { directSignIn: { localSignIn: 'off' } });
+    expect(manager.getPublicConfig().emailPassword.enabled).toBe(true);
+    expect(manager.getPublicConfig().features.localSignIn).toBe('off');
+
+    const res = await remove('okta');
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(409);
+    expect(body).toMatchObject({
+      code: 'DELETE_RESTRICTED',
+      message: SIGN_IN_FLOOR_COPY.en.enterpriseSsoLocalOff,
+      lastSignInMethod: 'enterprise_sso',
+    });
+    expect(await providerIds()).toEqual(['okta']);
+  }, 30_000);
+
+  it('CONTROL: with the local sign-in path hidden (the page offers email and password), deleting the last provider goes through as before', async () => {
+    const { manager, remove, providerIds } = await adminWithProviders(['okta'], { directSignIn: { localSignIn: 'hidden' } });
+    expect(manager.getPublicConfig().features.localSignIn).toBe('hidden');
+
+    const res = await remove('okta');
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await providerIds()).toEqual([]);
+  }, 30_000);
+
   // ── Door 2 ─────────────────────────────────────────────────────────────────
+
+  it('a boot under the local sign-in path off with no provider is said at error, email and password on or not', async () => {
+    const { manager, reports } = await boot({ directSignIn: { localSignIn: 'off' } });
+    expect(manager.getPublicConfig().emailPassword.enabled).toBe(true);
+    expect(reports()).toHaveLength(1);
+    expect(reports()[0]).toContain('OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden');
+  }, 30_000);
+
+  it('a boot under the local sign-in path off with email and password off too names both settings to recover', async () => {
+    const { manager, reports } = await boot({ emailAndPassword: { enabled: false }, directSignIn: { localSignIn: 'off' } });
+    expect(manager.getPublicConfig().emailPassword.enabled).toBe(false);
+    expect(reports()).toHaveLength(1);
+    expect(reports()[0]).toContain('OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden and OS_AUTH_EMAIL_PASSWORD_ENABLED=true');
+  }, 30_000);
+
+  it('CONTROL: the same boot with the local sign-in path hidden says nothing', async () => {
+    const { reports } = await boot({ directSignIn: { localSignIn: 'hidden' } });
+    expect(reports()).toEqual([]);
+  }, 30_000);
 
   it('a redeploy that drops the last provider while email and password is off is said at error, and still boots', async () => {
     const { manager, reports } = await boot({ emailAndPassword: { enabled: false } });
@@ -744,6 +794,43 @@ describe('the floor judges a provider delete and a boot by what it can read (#30
       NO_SIGN_IN_METHOD_AT_BOOT,
     );
     expect(await resolveNoSignInMethodReport(deps({ hostSignInHandoff: true }))).toBeNull();
+  });
+
+  it('counts the local ways in only as the sign-in page offers them: under localSignIn off, neither email and password nor phone sign-in', async () => {
+    const LOCAL_OFF: SignInMethodConfigView = {
+      emailPassword: { enabled: true },
+      socialProviders: [],
+      features: { sso: true, phoneNumber: true, localSignIn: 'off' },
+    };
+    await expect(ssoProviderDeleteRefusal(deps({ config: LOCAL_OFF, rows: [{ provider_id: 'okta' }] }), 'okta')).resolves.toEqual({
+      status: 'CONFLICT',
+      code: 'DELETE_RESTRICTED',
+      message: SIGN_IN_FLOOR_COPY.en.enterpriseSsoLocalOff,
+      lastSignInMethod: 'enterprise_sso',
+    });
+    expect(await resolveNoSignInMethodReport(deps({ config: LOCAL_OFF, rows: [] }))).toContain('OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden');
+    // CONTROL: the same deployment with the path hidden counts both as before.
+    const HIDDEN: SignInMethodConfigView = { ...LOCAL_OFF, features: { ...LOCAL_OFF.features, localSignIn: 'hidden' } };
+    await expect(ssoProviderDeleteRefusal(deps({ config: HIDDEN, rows: [{ provider_id: 'okta' }] }), 'okta')).resolves.toBeUndefined();
+    expect(await resolveNoSignInMethodReport(deps({ config: HIDDEN, rows: [] }))).toBeNull();
+    const PHONE_ONLY: SignInMethodConfigView = { ...HIDDEN, emailPassword: { enabled: false } };
+    await expect(ssoProviderDeleteRefusal(deps({ config: PHONE_ONLY, rows: [{ provider_id: 'okta' }] }), 'okta')).resolves.toBeUndefined();
+    // Phone sign-in alone under off, email and password off too: the page draws neither, so the delete is refused,
+    // and the remedy is the local-path one (turning email and password back on alone draws nothing under off).
+    const PHONE_ONLY_OFF: SignInMethodConfigView = { ...PHONE_ONLY, features: { ...PHONE_ONLY.features, localSignIn: 'off' } };
+    await expect(ssoProviderDeleteRefusal(deps({ config: PHONE_ONLY_OFF, rows: [{ provider_id: 'okta' }] }), 'okta')).resolves.toMatchObject({
+      code: 'DELETE_RESTRICTED',
+      message: SIGN_IN_FLOOR_COPY.en.enterpriseSsoLocalOff,
+    });
+    const report = await resolveNoSignInMethodReport(deps({ config: PHONE_ONLY_OFF, rows: [] }));
+    expect(report).toContain('OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden and OS_AUTH_EMAIL_PASSWORD_ENABLED=true');
+    expect(report).not.toContain('no phone-number sign-in');
+    // CONTROL: email and password off with the page drawing local sign-in keeps the email-off copy and report.
+    const EMAIL_OFF_HIDDEN: SignInMethodConfigView = { ...OFF, features: { sso: true, localSignIn: 'hidden' } };
+    await expect(ssoProviderDeleteRefusal(deps({ config: EMAIL_OFF_HIDDEN, rows: [{ provider_id: 'okta' }] }), 'okta')).resolves.toMatchObject({
+      message: SIGN_IN_FLOOR_COPY.en.enterpriseSso,
+    });
+    expect(await resolveNoSignInMethodReport(deps({ config: EMAIL_OFF_HIDDEN, rows: [] }))).toContain('OS_AUTH_EMAIL_PASSWORD_ENABLED=true and restart');
   });
 
   it('says it once at error (warn on a sink without error), and never throws', async () => {
