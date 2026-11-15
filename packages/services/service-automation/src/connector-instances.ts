@@ -10,10 +10,12 @@
  * one name are two instances. A caller that knows only the name is answered
  * by the one instance of that name, never by one of two (ADR-0150 red line 2).
  *
- * Today the declared-connector reconcile still keeps one instance per name
- * (the one-holder backstop and its duplicate-name refusal), and registers a
- * declarative instance with `soleOfName`, which drops any other declarative
- * instance of the name. The PR that narrows the backstop lifts that.
+ * The declared-connector reconcile registers each package's instance under
+ * its package (ADR-0150 D9: two packages of different namespaces may each
+ * declare one name), so two instances of a name can be live at once.
+ * `soleOfName` (drop any other declarative instance of the name) is kept on
+ * the engine's registration for a caller that wants one instance per name;
+ * the reconcile no longer asks for it.
  */
 
 import type { RegisteredConnector } from './engine.js';

@@ -236,3 +236,54 @@ describe('[#32451] two replicas converge to the same per-package answer for a sl
         });
     });
 });
+
+/**
+ * [#32663] The writer's own registry face, beside the peer's. Before this
+ * change a stored row of a slotted type took the name's ONE bare slot, so
+ * after alpha and beta each saved a row, both replicas answered the last
+ * write at both packages' exact addresses in the registry (measured on main:
+ * `[null, 'row-beta', 'row-beta']` after alpha then beta), while the protocol's
+ * exact reads, row-served, answered each package's own row. Each row now lives
+ * in its own package's overlay slot: the registry face matches the exact
+ * reads on the writer and on the peer, in both save orders.
+ */
+describe('[#32663] each package\'s stored row is its own registry slot, on the writer and on the peer, in both save orders', () => {
+    const read = async (protocol: any, type: string, packageId?: string) => {
+        try {
+            return (await protocol.getMetaItem({ type, name: NAME, ...(packageId ? { packageId } : {}) }))?.item?.label;
+        } catch (e) {
+            const err = e as { code?: string; status?: number };
+            return `${err.status} ${err.code}`;
+        }
+    };
+    for (const type of ['action', 'tool', 'email_template']) {
+        for (const saved of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+            it(`${type} (${saved[0] === ALPHA ? 'alpha' : 'beta'} saved first): alpha's and beta's slots are their own rows on both replicas, and the exact reads agree`, async () => {
+                vi.spyOn(console, 'warn').mockImplementation(() => {});
+                const c = makeCluster(type);
+                const body = (label: string) => (type === 'tool' ? { name: NAME, label, description: label, parameters: { type: 'object', properties: {} } } : bodyOf(type, label));
+                for (const id of saved) {
+                    const res = await c.a.protocol.saveMetaItem({ type, name: NAME, packageId: id, item: body(`row-${id.split('.').pop()}`) });
+                    expect(res.success).toBe(true);
+                    await settle();
+                }
+                // FROM (main): both replicas `[null, last, last]` at the two slots.
+                expect(c.a.serves().slice(0, 2), 'the writer').toEqual(['row-alpha', 'row-beta']);
+                expect(c.b.serves(), 'the peer').toEqual(c.a.serves());
+                expect([await read(c.a.protocol, type, ALPHA), await read(c.a.protocol, type, BETA)]).toEqual(['row-alpha', 'row-beta']);
+                // The read naming no package refuses (#32607). For `action`
+                // this is a move: on main the last-hydrated row answered it 200.
+                expect(await read(c.a.protocol, type)).toBe('409 RESOURCE_CONFLICT');
+            });
+        }
+    }
+    it('CONTROL — one package\'s row of a name: its slot, its exact read and the read naming no package, on both replicas, as before', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const c = makeCluster('tool');
+        const res = await c.a.protocol.saveMetaItem({ type: 'tool', name: NAME, packageId: BETA, item: { name: NAME, label: 'row-beta', description: 'row-beta', parameters: { type: 'object', properties: {} } } });
+        expect(res.success).toBe(true);
+        await settle();
+        expect([c.a.serves(), c.b.serves()]).toEqual([[null, 'row-beta', 'row-beta'], [null, 'row-beta', 'row-beta']]);
+        expect([await read(c.a.protocol, 'tool', BETA), await read(c.a.protocol, 'tool')]).toEqual(['row-beta', 'row-beta']);
+    });
+});
