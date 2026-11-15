@@ -1358,22 +1358,30 @@ export class DeleteAndAggregateFacet {
         const hasDateBucket = structuredItems.some((g) => !!g?.dateGranularity);
         const tzRequiresInMemory = !!tz && tz !== 'UTC' && hasDateBucket;
         // [#10576] Per-aggregation filters (`aggregations[].filter`, the
-        // contract half of #10413) force the in-memory path: no driver compiles
-        // a conditional aggregate (SQL `FILTER (WHERE …)` / `CASE WHEN`) from
-        // this key today, and pushing it down would aggregate the UNFILTERED
-        // rows — the silent drop #10413 measured. Same correct-first two-tier
-        // shape as date bucketing and HAVING above: a driver that grows native
-        // support must advertise a capability flag, at which point this fork
-        // becomes its fallback tier. The driver faces also refuse the key
-        // loudly (NOT_IMPLEMENTED/501) if reached directly, so neither seam can
-        // drop it in silence. `{}` counts as no filter (the vacuous-filter
-        // convention `where` / `having` already follow).
+        // contract half of #10413) go to `driver.aggregate` only on a driver
+        // that declares it compiles them: [#33698] `supports.aggregationFilter`
+        // (spec `DriverCapabilities`), read together with the method's presence
+        // above, because a driver can carry `aggregate()` without compiling the
+        // key (its face refuses it loudly, NOT_IMPLEMENTED/501) and a subclass
+        // can inherit a compiler its own transport refuses (TursoDriver's remote
+        // mode turns the bit off). Pushing a filtered measure to any other
+        // driver would aggregate the UNFILTERED rows — the silent drop #10413
+        // measured — so every driver without the bit keeps the in-memory path
+        // below, unchanged. Same correct-first two-tier shape as date bucketing
+        // and HAVING: the in-memory evaluation is the fallback tier, and the
+        // pushed-down conditional aggregate answers what it answers. The filter
+        // the driver receives is the lowered one (`resolveThenLowerWhere`
+        // above), and the read scope and tenant wall stay on the statement's
+        // `where`, so the measure filter only narrows inside them. `{}` counts
+        // as no filter (the vacuous-filter convention `where` / `having`
+        // already follow).
         const hasAggregationFilter = (Array.isArray(ast.aggregations) ? ast.aggregations : [])
             .some((a) => {
                 const f = (a as { filter?: unknown })?.filter;
                 return f != null && typeof f === 'object' && Object.keys(f).length > 0;
             });
-        if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory && !hasAggregationFilter) {
+        const aggregationFilterNative = drv?.supports?.aggregationFilter === true;
+        if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory && (!hasAggregationFilter || aggregationFilterNative)) {
             // HAVING is engine-owned (#4286): applied AFTER aggregation, over
             // the aggregated row's own columns (aggregation aliases + groupBy
             // projections), identically on both paths. No driver implements it
@@ -1414,11 +1422,10 @@ export class DeleteAndAggregateFacet {
         //     the author's own measure name, i.e. a plausible wrong number
         //     rather than a refusal.
         //
-        // Both driver refusals document themselves as "unreachable through
-        // `engine.aggregate`, which lowers in memory for every driver"
-        // (`driver-memory`'s `refusePerAggregationFilter`, `driver-sql`'s
-        // `unsupportedAggregationFilterError`); this is the line that makes
-        // that true. `having` goes with them: `applyHaving` below is the
+        // The driver refusals of the key (`driver-memory`'s
+        // `refusePerAggregationFilter`, the Turso remote transport's) document
+        // themselves as unreachable through `engine.aggregate`; this line, and
+        // the `aggregationFilter` gate above, are what make that true. `having` goes with them: `applyHaving` below is the
         // authority on it and no driver evaluates it in `find`.
         const rowsAst: QueryAST = { ...ast };
         delete rowsAst.groupBy;

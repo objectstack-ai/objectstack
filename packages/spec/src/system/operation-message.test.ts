@@ -549,3 +549,60 @@ describe('operation message catalog — the duplicate refusal', () => {
     }
   });
 });
+
+/**
+ * The master-detail write gate's refusal (ADR-0055 §3): the user's half of a
+ * `controlled_by_parent` write refused for want of edit (or read) access on
+ * the master record. The named forms carry the master's label; the opaque
+ * forms, for a writer who cannot read the master reference or a master with no
+ * label, carry none. The emitter is pinned in
+ * `packages/plugins/plugin-security/src/controlled-by-parent-master-edit-user-message.test.ts`.
+ */
+describe('operation message catalog — the master-detail write refusal', () => {
+  const NAMED = ['master_record_edit_denied', 'master_record_read_denied'] as const;
+  const OPAQUE = ['master_record_edit_denied_opaque', 'master_record_read_denied_opaque'] as const;
+  const GRANT_VOCABULARY = /controlled_by_parent|master_detail|allowEdit|modifyAllRecords|_id\b|\[Security\]|Access denied/;
+
+  it('every locale defines all four: the named forms take {{master}} only, the opaque forms no placeholder', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of NAMED) {
+        expect(catalog[key], `${locale} defines ${key}`).toBeTypeOf('string');
+        expect(new Set(catalog[key].match(/\{\{\w+\}\}/g)), `${locale}.${key}`).toEqual(new Set(['{{master}}']));
+        expect(catalog[key], `${locale}.${key}`).not.toMatch(GRANT_VOCABULARY);
+      }
+      for (const key of OPAQUE) {
+        expect(catalog[key], `${locale} defines ${key}`).toBeTypeOf('string');
+        expect(catalog[key], `${locale}.${key} placeholder-free`).not.toMatch(/[{}]/);
+        expect(catalog[key], `${locale}.${key}`).not.toMatch(GRANT_VOCABULARY);
+      }
+    }
+  });
+
+  it('edit and read are two sentences, and neither is a sibling restated, in any locale', () => {
+    const SIBLINGS = ['permission_denied', 'record_access_denied', 'record_write_denied'] as const;
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      expect(catalog.master_record_edit_denied, locale).not.toBe(catalog.master_record_read_denied);
+      expect(catalog.master_record_edit_denied_opaque, locale).not.toBe(catalog.master_record_read_denied_opaque);
+      for (const key of [...NAMED, ...OPAQUE]) {
+        for (const sibling of SIBLINGS) expect(catalog[key], `${locale}.${key} vs ${sibling}`).not.toBe(catalog[sibling]);
+      }
+    }
+  });
+
+  it('names the master label in the caller locale', () => {
+    expect(renderOperationMessage({ messageKey: 'master_record_edit_denied', params: { master: 'Contract' } }, { locale: 'en' }))
+      .toBe('You need edit access to the Contract this record belongs to. Contact the person who owns that Contract, or your administrator, if you need access.');
+    expect(renderOperationMessage({ messageKey: 'master_record_edit_denied', params: { master: '合同' } }, { locale: 'zh-CN' }))
+      .toBe('您需要拥有这条记录所属合同的编辑权限，如需访问请联系该合同的负责人或管理员。');
+  });
+
+  it('a deployment translation override wins, under the shared `errors.` address', () => {
+    for (const key of [...NAMED, ...OPAQUE]) {
+      expect(operationMessageTranslationKey(key)).toBe(`errors.${key}`);
+      const translate = (k: string) => (k === `errors.${key}` ? '部署自定义文案。' : k);
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'zh-CN', translate })).toBe('部署自定义文案。');
+    }
+  });
+});
