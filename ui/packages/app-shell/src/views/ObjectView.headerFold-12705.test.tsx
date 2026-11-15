@@ -99,6 +99,9 @@ vi.mock('@object-ui/plugin-grid', async (importOriginal) => ({
   ImportWizard: ({ open }: { open: boolean }) => (open ? <div data-testid="import-wizard" /> : null),
 }));
 
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView, declaredPrimaryToolbarAction } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
