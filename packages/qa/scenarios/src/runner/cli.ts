@@ -69,6 +69,7 @@ import { CAPABILITY_AREAS_DIR, locateLibraryRoot } from './library.js';
 import { minutesText, runCard, type ProjectOps } from './orchestrate.js';
 import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleWorkspaceProject, workspaceScaffolder, type PackageSource, type PackagesMode } from './packages.js';
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
+import { rebaseScenario } from './run-date.js';
 import { cardScorecard, renderScorecard, runRecord } from './scorecard.js';
 
 /** The dev admin `objectstack dev --fresh` seeds; the runner and the gallery exporter sign in as it. */
@@ -296,8 +297,15 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
   const date = new Date().toISOString().slice(0, 10);
 
-  for (const scenario of chosen) {
+  for (const loaded of chosen) {
+    // The card's dates move onto the day this card starts, so its "today", its
+    // seeded rows and the app's own clock agree (`run-date.ts`).
+    const runDate = new Date().toISOString().slice(0, 10);
+    const scenario = rebaseScenario(loaded, runDate);
     console.log(`\n▶ ${scenario.card.id} (${args.modes.join(' + ')})`);
+    if (loaded.card.asOf !== undefined && loaded.card.asOf !== scenario.card.asOf) {
+      console.log(`dates: the card's ${loaded.card.asOf} is run as ${scenario.card.asOf}, every card date moved by the same days`);
+    }
     publishedVersions = new Set();
     const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}) });
     const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
