@@ -281,9 +281,34 @@ export interface RouteErrorOptions {
  * does an error that crossed a second copy of `@objectstack/core` — the read
  * `resolveThrownHttpError`, the `/data` classification and the batch row error
  * make, so the doors cannot recognise two different sets.
+ *
+ * The shared recogniser answers the refusal's list as `readonly unknown[]`
+ * (it cannot name core's holder type), so each element is checked here before
+ * the list is answered as holders: a list with any element that is not a
+ * holder is answered as no list, the rule the recogniser already applies to a
+ * `candidates` that is not an array. Every holder core constructs passes.
  */
 function packageScopedRefusalCandidates(error: unknown): readonly PackageScopedHolder[] | undefined {
-    return sharedPackageScopedRefusalCandidates(error) as readonly PackageScopedHolder[] | undefined;
+    const candidates = sharedPackageScopedRefusalCandidates(error);
+    return candidates?.every(isPackageScopedHolder) ? candidates : undefined;
+}
+
+/**
+ * One element of a package-scoped refusal's `candidates`, checked against the
+ * four kinds of core's `PackageScopedHolder`: `package` (with a string
+ * `packageId`), `environment`, `platform` and `residual` (with a string
+ * `ownerId`).
+ */
+function isPackageScopedHolder(candidate: unknown): candidate is PackageScopedHolder {
+    if (typeof candidate !== 'object' || candidate === null) return false;
+    const holder = candidate as { kind?: unknown; packageId?: unknown; ownerId?: unknown };
+    switch (holder.kind) {
+        case 'package': return typeof holder.packageId === 'string';
+        case 'residual': return typeof holder.ownerId === 'string';
+        case 'environment':
+        case 'platform': return true;
+        default: return false;
+    }
 }
 
 function resolveErrorResponse(error: any, object?: string, options?: RouteErrorOptions): { status: number; body: Record<string, unknown> } {
