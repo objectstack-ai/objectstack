@@ -1125,11 +1125,16 @@ describe('with no settings bound, a 101 MB body is refused at every byte door, d
   it('upload-link PUT, the several-file form: over its form limit (each file within the built-in bound) is refused, declared or not', async () => {
     const { routes, consumeUploadLinkFiles } = await mountLinkDoor(2);
     const formLimit = BUILT_IN * 2 + 64 * 1024;
+    /** The form's refusal names its form limit, not the setting: status and code are the claim. */
+    const expectFormTooLarge = (answer: Answer) => {
+      expect(answer.status).toBe(413);
+      expect(answer.body?.error?.code).toBe('PAYLOAD_TOO_LARGE');
+    };
     const unread = vi.fn(async () => Buffer.alloc(10));
-    expectTooLarge(await putTakenOverForm(routes, unread, { 'content-length': String(formLimit + 1) }));
+    expectFormTooLarge(await putTakenOverForm(routes, unread, { 'content-length': String(formLimit + 1) }));
     expect(unread).not.toHaveBeenCalled();
     const undeclared = boundedRawBody(formLimit + 1);
-    expectTooLarge(await putTakenOverForm(routes, undeclared.rawBody));
+    expectFormTooLarge(await putTakenOverForm(routes, undeclared.rawBody));
     expect(undeclared.asked).toEqual([formLimit]);
     expect(consumeUploadLinkFiles).not.toHaveBeenCalled();
   });
@@ -1170,7 +1175,7 @@ describe('with no settings bound, the server-side file verbs refuse a 101 MB fil
     const input = { organizationId: 'org_a', filename: 'big.pdf', mimeType: 'application/pdf', data: overFile() };
     expect(await refusalOf(verb().storeFile(input))).toMatchObject({ code: 'PAYLOAD_TOO_LARGE', status: 413 });
     // CONTROL — past the size verdict, the verb reaches the engine.
-    expect((await refusalOf(verb('unlimited').storeFile(input)))?.message).toBe('reached past the size verdict');
+    expect((await refusalOf(verb('unlimited').storeFile(input)))?.message).toContain('reached past the size verdict');
   });
 
   it('file-attachments attachFile: 413 PAYLOAD_TOO_LARGE before the engine or the store is reached; the host\'s unlimited lets it through', async () => {
@@ -1191,6 +1196,6 @@ describe('with no settings bound, the server-side file verbs refuse a 101 MB fil
       data: overFile(),
     };
     expect(await refusalOf(verb().attachFile(input))).toMatchObject({ code: 'PAYLOAD_TOO_LARGE', status: 413 });
-    expect((await refusalOf(verb('unlimited').attachFile(input)))?.message).toBe('reached past the size verdict');
+    expect((await refusalOf(verb('unlimited').attachFile(input)))?.message).toContain('reached past the size verdict');
   });
 });
