@@ -3410,6 +3410,9 @@ importers:
       '@objectstack/plugin-audit':
         specifier: workspace:*
         version: link:../../plugins/plugin-audit
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../service-settings
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

@@ -28,7 +28,7 @@
  * consumer gets is the door; what it never gets is a handle on any gate:
  *
  * - {@link MountStorageRoutesOptions} carries the wire knobs only (`basePath`,
- *   the three TTLs, a logger). It has no `resolveSession`, no
+ *   the three TTLs, the upload bound, a logger). It has no `resolveSession`, no
  *   `authorizeFileRead`, no `resolveFileHolder` — the three option keys of
  *   `registerStorageRoutes` this door exists to keep off the host's side.
  *   An object literal naming one of them is a type error, and a widened
@@ -57,6 +57,13 @@
 
 import type { IHttpServer, IDataEngine, IStorageService } from '@objectstack/spec/contracts';
 import {
+  parseHostMaxUploadMb,
+  announceUploadBound,
+  resolveStorageLimits,
+  type HostMaxUploadMb,
+  type StorageLimitsSnapshot,
+} from './storage-limits.js';
+import {
   composeStorageRoutes,
   toGateRegistry,
   type StorageRouteKernel,
@@ -80,14 +87,30 @@ export interface MountStorageRoutesOptions {
    * and that plugin is bound to the `storage` settings namespace, a SAVED
    * `presigned_ttl` wins over this option, and this option wins over the
    * namespace default — the same precedence the plugin's own mount applies.
-   * The saved `max_upload_mb` reaches this door the same way.
    */
   presignedTtl?: number;
   /** Default chunked upload session TTL in seconds; a SAVED `session_ttl` wins over it. @default 86400 */
   sessionTtl?: number;
+  /**
+   * Upload size bound in MB (counted as MiB), or `'unlimited'` to accept
+   * uploads of any size — the host layer, exactly like the TTLs: a SAVED
+   * `max_upload_mb` wins over it, it wins over the namespace default, and
+   * left out the namespace default or else the built-in 100 MB applies (a
+   * bare adapter, an unbound plugin). Never unset by omission. Anything but a
+   * positive number or `'unlimited'` throws before a route is mounted.
+   *
+   * Bounds THIS mount's doors. The server-side file verbs on the kernel take
+   * the storage plugin's own `maxUploadMb`.
+   * @default 100 (via the storage settings, else built in)
+   */
+  maxUploadMb?: HostMaxUploadMb;
   /** TTL of the signed URL minted on a GATED download. @default 300 */
   downloadTtl?: number;
-  /** Receives the door's one-time notices (open upload mode, unbound gates). */
+  /**
+   * Receives the door's one-time notices (the upload bound in force, open
+   * upload mode, unbound gates). Without one, an explicit `maxUploadMb:
+   * 'unlimited'` is still announced, on `console.warn`.
+   */
   logger?: { info(msg: string): void; warn(msg: string): void };
 }
 
@@ -106,12 +129,14 @@ export interface MountStorageRoutesOptions {
  * against.
  *
  * @throws when `kernel` has no `storage` service — there is nothing to mount.
+ * @throws when `opts.maxUploadMb` is neither a positive number nor `'unlimited'`.
  */
 export function mountStorageRoutes(
   http: IHttpServer,
   kernel: StorageRouteKernel,
   opts: MountStorageRoutesOptions = {},
 ): StorageRoutesMountReport {
+  const maxUploadMb = parseHostMaxUploadMb(opts.maxUploadMb, 'mountStorageRoutes');
   let storage: IStorageService | undefined;
   try {
     storage = kernel.getService<IStorageService>('storage');
@@ -141,9 +166,22 @@ export function mountStorageRoutes(
     basePath: opts.basePath,
     presignedTtl: opts.presignedTtl,
     sessionTtl: opts.sessionTtl,
+    maxUploadMb,
     downloadTtl: opts.downloadTtl,
     logger: opts.logger,
   });
+
+  // The upload bound this mount's doors meet now, and the layer it came from:
+  // the kernel has bootstrapped, so a bound plugin's settings are read.
+  // No bound is said at `warn` whether or not the host passed a logger.
+  const carrier = storage as { getLimitsSnapshot?: () => StorageLimitsSnapshot | undefined };
+  announceUploadBound(
+    'mountStorageRoutes',
+    resolveStorageLimits(typeof carrier.getLimitsSnapshot === 'function' ? carrier.getLimitsSnapshot() : undefined, {
+      maxUploadMb,
+    }),
+    opts.logger,
+  );
 
   const unbound: string[] = [];
   if (!report.sessionResolver) {
