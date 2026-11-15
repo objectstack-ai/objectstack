@@ -5308,9 +5308,9 @@ export class ObjectQL implements IObjectQLEngine {
    *   with no `beginTransaction`, remote Turso, OData). The in-memory driver
    *   is not one: it implements `beginTransaction` / `rollback` over a
    *   snapshot of its whole store, so the callback runs inside a
-   *   transaction there — one that restores the whole store to its state at
-   *   begin, with no isolation, and whose rollback also discards what other
-   *   callers wrote since that begin (unsafe with concurrent writers). The
+   *   transaction there, with no isolation: its rollback restores the whole
+   *   store to its state at begin, discarding what other callers wrote since
+   *   then too (unsafe with concurrent writers). The
    *   degrade is DECLARED behaviour (ADR-0119 D1), not
    *   a bug to be discovered — but since v17 it is no longer *silent*: the
    *   degrade warns once per driver (#4619, {@link warnTransactionUnsupported}),

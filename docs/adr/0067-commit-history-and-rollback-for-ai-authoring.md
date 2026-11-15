@@ -80,7 +80,7 @@ All metadata writes in a turn execute inside **one `engine.transaction()`**; any
 
 ### D3 — Rollback is first-class and append-only
 
-- `revertCommit(commitId)` — restore every item the commit touched to its **pre-commit** body, atomically (reuse `restoreVersion` per item inside one transaction). Recorded as a **new forward commit** (`operation_type='revert'`), so history is never rewritten and a revert is itself revertible. *(Amended 2026-11-14: no transaction spans the items; the revert runs per item and reports `reverted[]` and `failed[]` — see the Amendment of that date at the end.)*
+- `revertCommit(commitId)` — restore every item the commit touched to its **pre-commit** body, atomically (reuse `restoreVersion` per item inside one transaction). Recorded as a **new forward commit** (`operation_type='revert'`), so history is never rewritten and a revert is itself revertible. *(Amended 2026-11-14: no transaction spans the items; the revert runs per item and reports `reverted[]` and `failed[]`; and reverting a revert commit restores nothing today — see the Amendment of that date at the end.)*
 - `rollbackToPackageCommit(commitId)` — revert the package's HEAD back through every commit after the target, as one transaction. This is the "一层一层回退" the founder described — **commit-granular, not per-artifact** (§Resolved-1). *(Amended 2026-11-14: not one transaction; one `revertCommit` per commit, each step's failures collected — see the Amendment of that date at the end.)*
 - Revert restores **metadata** deterministically. Its effect on **data** is governed by §5.
 
@@ -352,7 +352,7 @@ the gate is `engineCanRollBack` in
 
 ---
 
-## Amendment (2026-11-14, #32504) — Decision-3's revert doors are not atomic across items; a revert runs per item and names what it could not do
+## Amendment (2026-11-14, #32504) — Decision-3's revert doors are not atomic across items; a revert runs per item and reports per item
 
 Decision-3's design — a revert restores every item the commit touched to its
 pre-commit body, reusing `restoreVersion`, and is recorded as a **new forward
@@ -367,26 +367,41 @@ whether a revert should stay this way (below).
 Read from the code on `main` at `ba35dfd7` — a reading of that date, not part
 of the decision:
 
-- **`revertCommit`** walks the commit's items newest first. An item the commit
-  created is soft-removed; an item it modified is restored to its `prevVersion`
-  through `restoreVersion`, as D3 says. Each item's own write — the row and its
-  history event — runs in the repository's per-item `withTxn`, so it rolls back
-  as one where the engine can roll back (the gate of the 2026-11-12 Amendment).
-  **No transaction spans the items**: the function opens none. An item that is
-  refused or throws goes into `failed[]` with its client-facing error (and its
-  code, where it has one), and the walk goes on to the next item. `failed[]` says the item's revert did
-  not complete, not that nothing of it was written: a fault after the item's
-  row write (its registry write-through, say) reports it there too. When the
-  walk ends, the revert commit is written from `reverted[]` — what was
-  reverted, not what the commit named — and the answer's `success` is true
-  only when `failed[]` is empty and at least one item was reverted.
+- **`revertCommit`** walks the commit's items in reverse apply order. An item
+  the commit created is soft-removed; an item it modified is restored to its
+  `prevVersion` through `restoreVersion`, as D3 says. Each item's own write —
+  the row and its history event — runs in the repository's per-item `withTxn`,
+  so it rolls back as one where the engine can roll back (the gate of the
+  2026-11-12 Amendment). **No transaction spans the items**: the function
+  opens none. An item that is refused, or whose removal or restore throws,
+  goes into `failed[]` with its client-facing error (and its code, where it
+  has one), and the walk goes on to the next item. What follows an item's row
+  write does not reach `failed[]`: the registry write-through (or, on the
+  soft-remove limb, the registry heal) and the projector catch their own
+  faults and log them, and their results are not read; storage sync reports on
+  `advisories`. Such an item is still reported in `reverted[]`, and `success`
+  does not see the fault. (One exception, on the soft-remove limb: for an
+  `object_extension` item, a store fault while the heal re-reads the stored
+  extensions is rethrown, so that item lands in `failed[]` with its row
+  already removed.)
+- **An item can also be skipped.** An item recorded as existing before the
+  commit but with no `prevVersion` takes neither limb: it appears in neither
+  `reverted[]` nor `failed[]`. Every revert commit writes its own plan that
+  way (`existedBefore` true for an item it restored, `prevVersion: null`), and
+  a revert commit can be reverted, so reverting a revert commit restores none
+  of the items it restored (and sends the items it removed down the
+  soft-remove limb again, recreating nothing).
+- **The revert commit.** When the walk ends, it is written from `reverted[]` —
+  what was reverted, not what the commit named — and the answer's `success` is
+  true only when `failed[]` is empty and at least one item was reverted.
 - **The revert commit itself is best effort.** `recordPackageCommit` catches
   every error: where `sys_metadata_commit` is unprovisioned it logs once at
   `info`, and where the write fails it logs at `error`, and either way it
   returns no record. `revertCommit` then answers without `revertCommitId` and
-  returns normally. Such a revert is on no timeline and cannot itself be
-  reverted — D3's append-only promise holds only where the record write
-  lands.
+  returns normally. Such a revert is on no package-commit timeline (each
+  item's `sys_metadata_history` event is still written), so there is no
+  commit to revert. Where the record lands, reverting it still restores
+  nothing, as the skipped outcome above says.
 - **`rollbackToPackageCommit`** runs one `revertCommit` per `apply` commit
   newer than the target, newest first. A step that throws, and every item a
   step reports in its own `failed[]`, goes into the rollback's `failed[]`;
@@ -395,7 +410,9 @@ of the decision:
 
 So a revert in which one item fails leaves the package **partly reverted**:
 the item's neighbours are reverted (and recorded, where the record write
-lands), the failed item is named in the response, and `success` is false.
+lands), the failed item is named in the response, and `success` is false. A
+fault after an item's row write is not named there, and a skipped item is
+not named at all.
 That is the half-land shape D2 exists to prevent on publish, here on the
 revert side — reported, not prevented.
 
@@ -406,6 +423,10 @@ revert side — reported, not prevented.
   a revert with one refused item would then revert nothing — and would hold
   only where the engine can roll back. That is a maintainer decision, not made
   here.
+- **Whether a revert commit should carry the versions it restored**, so that
+  D3's "a revert is itself revertible" holds, and **whether a fault after an
+  item's row write should reach `failed[]`**. Both are code questions; this
+  record states what the code does today.
 - It changes nothing in Decision-2, the package-publish door, or the
   2026-08-06 carve-out (audit rows written during rolled-back work still
   remain).
@@ -413,8 +434,10 @@ revert side — reported, not prevented.
 **Recorded by**: the triage of #32504 ("stale text only"), dispatched as a text
 correction: this record follows the code; no historical text is rewritten.
 **Implemented in** `packages/metadata-protocol/src/protocol-package-commits.ts`
-(`revertCommit`, `rollbackToPackageCommit`); the per-item answer is the
-contract stated on `ObjectStackProtocolImplementation#revertCommit` and
-`#rollbackToPackageCommit` in `protocol.ts`. Pinned by
+(`revertCommit`, `rollbackToPackageCommit`). Where the doors' docblocks on
+`ObjectStackProtocolImplementation` in `protocol.ts` say more than the code
+(a revert answering `success: true` is one the process has acted on; a revert
+is itself revertible; each rollback step records its revert commit), this
+record states the code. Pinned by
 `protocol.revert-stored-type-canonical.test.ts` ("reverts the neighbours of a
 refused item and reports the mix honestly").
