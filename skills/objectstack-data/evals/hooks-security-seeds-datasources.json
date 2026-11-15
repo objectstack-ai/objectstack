@@ -190,6 +190,16 @@
         "must_contain": ["membershipKeys", "my_employee_ids", "valueField: 'id'", "employee in current_user.my_employee_ids"],
         "must_not_contain": ["using: 'owner_id"]
       }
+    },
+    {
+      "id": 21,
+      "prompt": "In our project tracker a contractor may create a `task` only when they are its `assignee` (a person field). A contractor asks the assistant \"Add a 'Launch checklist' task to the Website relaunch\" and the create answers 403, because the request names no assignee. Author the field and the contractor permission set's policy so the plain request succeeds, without widening whom a contractor may assign.",
+      "expected_output": "`assignee: { type: 'user', defaultValue: 'current_user' }` on `task`, and on the contractor permission set a `rowLevelSecurity` policy with `object: 'task'`, `operation: 'insert'` and `check: 'assignee == current_user.id'`. The default fills an omitted `assignee` with the acting user before `check` is judged, so a create that names no assignee is admitted and one naming someone else is still refused. The `check` is kept as it is, not loosened or dropped.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'user'", "defaultValue: 'current_user'", "check: 'assignee == current_user.id'"],
+        "must_not_contain": []
+      }
     }
   ]
 }

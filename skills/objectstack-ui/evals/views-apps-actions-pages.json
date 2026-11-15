@@ -170,6 +170,16 @@
         "must_contain": ["tabPermissions", "'hidden'", "requiredPermissions", "systemPermissions"],
         "must_not_contain": ["hidden: true,", "hidden: true }"]
       }
+    },
+    {
+      "id": 18,
+      "prompt": "Sales reps add lines to an invoice from a header button: they pick a `product` and a `quantity`. Reps can neither read nor edit a price. `invoice_line.amount` is a stored `expression` (`record.quantity * record.unit_price`), and the line's `product` lookup declares `lookupAutofill` from the product's `list_price`. Author the action.",
+      "expected_output": "One `defineAction` (`type: 'script'`, `objectName: 'invoice'`) whose `params` are `product` and `quantity`, each borrowed with `objectOverride: 'invoice_line'`, and whose `body` (`capabilities: ['api.read', 'api.write']`) reads `ctx.api.object('product').findOne({ where: { id: input.product } })` and inserts the line with `invoice: ctx.recordId` and `unit_price: product.list_price`. `lookupAutofill` fills only the form and the grid, and the stored expression reads only its own row, so an insert that sends no `unit_price` stores `amount` 0. The body runs trusted, so it reads the price the rep cannot. If lines are also written by the API, an import or an agent, a `beforeInsert` hook on `invoice_line` copies the price instead.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineAction", "ctx.api.object('product').findOne", "unit_price: product.list_price", "api.read"],
+        "must_not_contain": []
+      }
     }
   ]
 }
