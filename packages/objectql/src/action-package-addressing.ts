@@ -62,10 +62,20 @@ export function actionOwnerScopedRegistry(registry: PackageScopedRegistry, owner
       const item = registry.getPackageScopedItem<T>(type, name, packageId, member);
       return type !== 'action' || owns(item) ? item : undefined;
     },
+    // [ADR-0150 D4] The environment-scoped action ON this owner key: a
+    // registry that keeps one package-less action per owner key
+    // (`getEnvironmentScopedActions`) is asked for every one of them, never
+    // only the bare slot's, which may sit on another key.
     getEnvironmentScopedItem: <T>(type: string, name: string, member?: string) => {
+      if (type === 'action' && typeof registry.getEnvironmentScopedActions === 'function') {
+        return registry.getEnvironmentScopedActions<T>(name).find(owns);
+      }
       const item = registry.getEnvironmentScopedItem<T>(type, name, member);
       return type !== 'action' || owns(item) ? item : undefined;
     },
+    ...(typeof registry.getEnvironmentScopedActions === 'function'
+      ? { getEnvironmentScopedActions: <T>(name: string) => registry.getEnvironmentScopedActions!<T>(name).filter(owns) }
+      : {}),
   };
 }
 

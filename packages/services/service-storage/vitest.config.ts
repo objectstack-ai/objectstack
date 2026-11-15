@@ -75,11 +75,17 @@ export default defineConfig({
     // (cloud#3814): the plugin asks its `declaresMultiReplicaOnRedis` whether
     // a local root is refused under declared replicas, and that predicate read
     // from `dist/` would make those pins a verdict about build state.
+    //
+    // `@objectstack/service-settings` joins them for the same reason: the
+    // built-in upload bound is pinned equal to the storage manifest's declared
+    // `max_upload_mb` default, and a manifest read from `dist/` would make that
+    // drift pin a verdict about build state.
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
       { find: /^@objectstack\/plugin-audit$/, replacement: path.resolve(__dirname, '../../plugins/plugin-audit/src/index.ts') },
       { find: /^@objectstack\/service-cluster$/, replacement: path.resolve(__dirname, '../service-cluster/src/index.ts') },
+      { find: /^@objectstack\/service-settings$/, replacement: path.resolve(__dirname, '../service-settings/src/index.ts') },
     ],
   },
 });

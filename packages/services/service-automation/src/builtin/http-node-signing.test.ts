@@ -412,6 +412,23 @@ describe('http node verb — durable with no method sends what the outbox sends,
         expect(result.summary).toMatchObject({ acted: 1, unmeasured: 0 });
     });
 
+    // The changeset names `method: 'GET'` as the opt-out: an authored verb is
+    // sent as written on the fallback, never replaced by the durable default.
+    it.each([
+        { method: 'GET', body: undefined, sentBody: '', summary: { acted: 0, unmeasured: 0 } },
+        { method: 'PUT', body: { a: 1 }, sentBody: '{"a":1}', summary: { acted: 1, unmeasured: 0 } },
+    ])('awaited fallback with an authored method ($method): sends that verb, not the durable POST', async ({ method, body, sentBody, summary }) => {
+        const result = await run(engineWith(), {
+            url: `${baseUrl}/hook`, durable: true, method, ...(body ? { body } : {}),
+        });
+
+        expect(result.success).toBe(true);
+        const req = only();
+        expect(req.method).toBe(method);
+        expect(req.body).toBe(sentBody);
+        expect(result.summary).toMatchObject(summary);
+    });
+
     it('CONTROL: a request/response node with no method still GETs, and counts it as a read', async () => {
         const result = await run(engineWith(), { url: `${baseUrl}/hook`, signingSecret: SECRET });
 

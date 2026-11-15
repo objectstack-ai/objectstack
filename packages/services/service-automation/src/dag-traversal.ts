@@ -111,8 +111,10 @@ export function runUserOf(context: AutomationContext | undefined): EvalUserParse
  * `droppedFields` keeps each element that is a well-typed
  * `DroppedFieldsEventSchema` event and skips the rest: the same per-element
  * filter the run's terminal answer applies when it folds the step log
- * (`foldDropEvents`), so the step and the answer can never disagree about
- * which events were real. `warnings` keeps its string entries. A member with
+ * (`foldDropEvents`), so the step and the answer agree on which events were
+ * well-typed. They part on one shape only: a well-typed event with
+ * `fields: []` stays on the step, while the fold drops it from the answer
+ * (no in-tree producer emits one). `warnings` keeps its string entries. A member with
  * nothing well-typed left is omitted, never `[]`. Total, never throwing: it
  * runs inside the step's `try`, where a throw would read as a node failure.
  */
