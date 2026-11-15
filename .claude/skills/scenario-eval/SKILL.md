@@ -73,6 +73,7 @@ metadata:
 - 回放重评同样立一张 `eval-run` 记录:Scope 写明回放的是哪张记录的录音、评分器在哪个 sha;旧记录不改。
 
 ```bash
+# --only 的三张 control 卡是写本技能时的名单;跑前照 §1 从卡文件重读
 unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
 claude auth status && claude --version
 pnpm install && pnpm --filter '@objectstack/scenarios^...' build
@@ -85,8 +86,8 @@ nohup pnpm --filter @objectstack/scenarios run-scenarios \
 
 ## 5. 记录 —— 一轮一张 `eval-run` issue
 
-维护者令:场景卡评测记录立在 objectstack 公开仓,像 `qa-run`,带全分。(问数基线 ② 的数字仍不对外,
-见 `lanes/eval.md`。)运行产物 ⛔ 不进仓库树:run 记录 JSON、录音、日志留在 git-ignore 的默认
+维护者令(原话):"objectstack 公开仓,像 qa-run"。据此场景卡评测记录立在本仓、带全分(问数基线 ② 的
+数字仍不对外,见 `lanes/eval.md`)。运行产物 ⛔ 不进仓库树:run 记录 JSON、录音、日志留在 git-ignore 的默认
 `--out` 目录或本席的项目文件里;issue 就是报告,纯文本,⛔ 不放图。
 
 - **写入门**:立单、评论、关单全走 pm-dispatch 写入门,照 `checklist-test` §4 那一段;⛔ MCP `issue_write`。
@@ -102,10 +103,13 @@ nohup pnpm --filter @objectstack/scenarios run-scenarios \
   - `## Results` —— 一行一个配置:Build · 问数 · 写操作(均值,括号最小–最大)· 每次重复的泄露标记**数**
     · 搭建分钟 · 问答分钟 · 每次重复名义花费;再一张按卡合并表。泄露只写数,⛔ 不写内容。
   - `## Reading` —— 编号结论,每条按 §3 的噪声规则措辞,并与上一张记录比。
-  - `## Findings filed from this run` —— 每条发现一行,写去向(§6);无则写 `none`。
+  - `## Findings filed from this run` —— 每条发现一行,写去向(§6);无则写 `none`。安全线索那一行只写
+    `security-findings.md` §4 的固定一句,别无其它。
   - `## Records` —— 产物放在哪(路径),说明留在仓库树外、可回放。
 - **收口**:§6 的每条发现都有了去向(卡号或已报的私密渠道)即由本席关 `completed`;
   ⛔ 不为等修复开着,修复的回测进下一轮。上一轮的记录不 supersede:每张都是它那个 sha 上的一次测量。
+- **分诊扫描还不认 `eval-run`**(排除名单只列 `qa-run`):在它补进之前,记录在立单的同一轮关闭;
+  当轮关不了,就告诉分诊席这是一张记录、不是待分诊的卡。
 - 记录立好后给维护者一句话:链接 + 两行 Reading。
 
 ## 6. 发现 —— 各归各主
@@ -115,7 +119,7 @@ nohup pnpm --filter @objectstack/scenarios run-scenarios \
 | **评分误判**:评分器把对的判错、错的判对(含泄露标记误报) | 跑分器主人:`packages/qa/scenarios` 归 `domain:devx`,有开着的评分专题卡就作它的一行 / 子卡(卡号见座位贴),否则走立卡门 |
 | **产品缺陷**:平台拒收合法写、probe 失败、能力缺失 | 立卡门(pm-dispatch `references/filing-gate.md`)交对应车道;probe 失败算平台,不算 agent |
 | **技能文本**:agent 照着已发布技能搭错 | 以 `finding` 报 `domain:skills`;本席 ⛔ 不自改技能 |
-| **泄露 / 任何安全线索** | 只照 pm-dispatch `references/security-findings.md`;记录只写「有泄露标记 N 个」,⛔ 不写内容、不立公开卡 |
+| **泄露 / 任何安全线索** | 只照 pm-dispatch `references/security-findings.md`;Results 只写泄露标记数,Findings 只写该文 §4 的固定一句,⛔ 不写内容、不立公开卡 |
 
 泄露标记先分清是评分误判还是真泄露;真泄露只走最后一行。
 
