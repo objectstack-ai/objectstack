@@ -401,6 +401,17 @@ describe('http node verb — durable with no method sends what the outbox sends,
         expectSameRequest(only(), reference);
     });
 
+    it('awaited fallback with no body: still a POST, and counted as an act — never a read\'s measured zero', async () => {
+        // Before the fix this arm sent a bodyless GET and reported `acted: 0`,
+        // a run claiming it changed nothing. (With a body it did not send at
+        // all: `fetch` refuses a GET that carries one.)
+        const result = await run(engineWith(), { url: `${baseUrl}/hook`, durable: true });
+
+        expect(result.success).toBe(true);
+        expect(only().method).toBe('POST');
+        expect(result.summary).toMatchObject({ acted: 1, unmeasured: 0 });
+    });
+
     it('CONTROL: a request/response node with no method still GETs, and counts it as a read', async () => {
         const result = await run(engineWith(), { url: `${baseUrl}/hook`, signingSecret: SECRET });
 
