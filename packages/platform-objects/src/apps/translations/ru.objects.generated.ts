@@ -3582,7 +3582,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         label: "Обработано строк"
       },
       created_count: {
-        label: "Создано"
+        label: "Создано записей"
       },
       updated_count: {
         label: "Обновлено"
