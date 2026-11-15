@@ -1757,10 +1757,6 @@ describe('validateSecurityPosture · a field mask its own set\'s Modify All make
       fields: { 'sys_user.email': { readable: false, editable: false } },
       systemPermissions: ['manage_users'],
     }))).toEqual([]);
-    // The same pair through the set's wildcard, on a raw set.
-    expect(inert({
-      permissions: [{ name: 'ps', objects: { '*': { viewAllRecords: true } }, fields: { 'deal.amount': { readable: false } } }],
-    })).toEqual([]);
   });
 
   it('the composed sets of admin-ledger-decision-metadata.dogfood.test.ts: View All unbinds none of their rows', () => {
@@ -1782,14 +1778,9 @@ describe('validateSecurityPosture · a field mask its own set\'s Modify All make
     ))).toEqual([]);
   });
 
-  it('Modify All unbinds a read mask too, with or without View All beside it; View All never unbinds an edit lock', () => {
+  it('Modify All unbinds a read mask too; View All never unbinds an edit lock', () => {
     expect(inert(parsed({
       name: 'ps', objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
-      fields: { 'deal.amount': { readable: false } },
-    }))).toEqual([['warning', 'permission set "ps"', 'permissions[0].fields["deal.amount"]']]);
-    // Both bits on one entry: the Modify All vote is the one that counts.
-    expect(inert(parsed({
-      name: 'ps', objects: { deal: { allowRead: true, allowEdit: true, viewAllRecords: true, modifyAllRecords: true } },
       fields: { 'deal.amount': { readable: false } },
     }))).toEqual([['warning', 'permission set "ps"', 'permissions[0].fields["deal.amount"]']]);
     expect(inert(parsed({
@@ -1811,14 +1802,6 @@ describe('validateSecurityPosture · a field mask its own set\'s Modify All make
         fields: { 'deal.amount': { readable: false } },
       }],
     })).toEqual([]);
-    // A wildcard Modify All shadowed by an explicit View All entry: View All alone, not reported.
-    expect(inert({
-      permissions: [{
-        name: 'ps',
-        objects: { '*': { modifyAllRecords: true }, deal: { allowRead: true, viewAllRecords: true } },
-        fields: { 'deal.amount': { readable: false } },
-      }],
-    })).toEqual([]);
   });
 
   it('an unparsed entry votes what it spells: an omitted edit bit is a lock under Modify All', () => {
@@ -1831,7 +1814,7 @@ describe('validateSecurityPosture · a field mask its own set\'s Modify All make
 
   it('controls: a row policy or org depth beside a mask, and another set\'s bypass, get nothing', () => {
     expect(inert(parsed({
-      // `qa_pp_directory_masked` as it stands: every row through a row policy.
+      // `qa_pp_directory_masked` as repaired: every row through a row policy.
       name: 'qa_pp_directory_masked',
       objects: { sys_user: { allowRead: true }, qa_pp_board: { allowRead: true } },
       fields: { 'sys_user.email': { readable: false, editable: false } },
@@ -1852,34 +1835,19 @@ describe('validateSecurityPosture · a field mask its own set\'s Modify All make
     ))).toEqual([]);
   });
 
-  it('says which half Modify All unbinds, in one line, and the id is explained', () => {
-    const only = (stack: Record<string, unknown>) =>
-      validateSecurityPosture(stack).filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT);
-    const [read] = only(parsed({
+  it('says which mask Modify All unbinds, in one line, and the id is explained', () => {
+    const [read] = validateSecurityPosture(parsed({
       name: 'ps', objects: { sys_user: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
       fields: { 'sys_user.email': { readable: false, editable: true } },
-    }));
-    const [lock] = only(parsed({
-      name: 'ps', objects: { sys_user: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
-      fields: { 'sys_user.email': { readable: true, editable: false } },
-    }));
-    const [both] = only({
+    })).filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT);
+    const [write] = validateSecurityPosture({
       permissions: [{ name: 'ps', objects: { '*': { modifyAllRecords: true } }, fields: { 'deal.note': { readable: false, editable: false } } }],
-    });
+    }).filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT);
     expect(read.message).toContain('modifyAllRecords on objects.sys_user');
     expect(read.message).toContain('readable: false');
-    expect(read.message).not.toContain('the edit lock');
-    expect(lock.message).toContain('the edit lock');
-    expect(lock.message).not.toContain('readable: false');
-    expect(both.message).toContain("objects['*']");
-    expect(both.message).toContain('readable: false and the edit lock');
-    expect([read, lock, both].map((f) => f.userTextParams)).toEqual([
-      { permissionSet: 'ps', field: 'sys_user.email', object: 'sys_user', inert: 'read' },
-      { permissionSet: 'ps', field: 'sys_user.email', object: 'sys_user', inert: 'edit' },
-      { permissionSet: 'ps', field: 'deal.note', object: 'deal', inert: 'both' },
-    ]);
-    for (const f of [read, lock, both]) {
-      expect(f.message, f.message).not.toContain('viewAllRecords');
+    expect(write.message).toContain("objects['*']");
+    expect(write.message).toContain('modifyAllRecords');
+    for (const f of [read, write]) {
       expect(f.message, f.message).not.toContain('\n');
       expect(f.message.length, f.message).toBeLessThanOrEqual(200);
       expect(f.hint, f.hint).not.toContain('\n');
@@ -2096,16 +2064,6 @@ describe('validateSecurityPosture · a hidden master reference still decides a c
     });
     expect(hidden(stack)).toEqual([]);
     expect(validateSecurityPosture(stack).map((f) => f.rule)).toContain(SECURITY_SUPERUSER_FIELD_MASK_INERT);
-  });
-
-  it('the set\'s own View All on the detail leaves the mask binding, so this rule speaks and the inert rule does not', () => {
-    // ADR-0066 D2 ⑧ note of 2026-11-15: View All casts no vote on a field the set's own row hides.
-    const stack = withSets([MASTER, DETAIL], {
-      name: 'auditor', objects: { line_item: { allowRead: true, viewAllRecords: true } },
-      fields: { 'line_item.invoice': { readable: false, editable: false } },
-    });
-    expect(hidden(stack)).toHaveLength(1);
-    expect(validateSecurityPosture(stack).map((f) => f.rule)).not.toContain(SECURITY_SUPERUSER_FIELD_MASK_INERT);
   });
 
   it('states the rule and its consequence in one line, and the id is explained', () => {

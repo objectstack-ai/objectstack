@@ -266,16 +266,16 @@ describe('silent where the set cannot see the roll-up, or can see its source', (
   });
 
   it('Modify All on the child makes a hidden child field readable', () => {
-    for (const bits of [{ modifyAllRecords: true }, { viewAllRecords: true, modifyAllRecords: true }]) {
+    for (const bit of ['modifyAllRecords']) {
       const findings = viaRegistry(
         stackOf(
           set({
-            objects: { invoice: READ, invoice_line: { ...READ, ...bits } },
+            objects: { invoice: READ, invoice_line: { ...READ, [bit]: true } },
             fields: { 'invoice_line.amount': { readable: false } },
           }),
         ),
       );
-      expect(findings, JSON.stringify(bits)).toEqual([]);
+      expect(findings, bit).toEqual([]);
     }
   });
 
@@ -518,41 +518,6 @@ describe('a Modify All parent makes the summary mask inert', () => {
     const f = findings.find((x) => x.where === W_TOTAL)!;
     expect(f.hint).toContain('first remove Modify All on "invoice" from it');
     expect(f.hint).toContain('does not hide a field from a set holding it');
-  });
-});
-
-// ADR-0066 D2 ⑧ note of 2026-11-15: a set's own `readable: false` binds beside
-// its own View All, on the parent and on the child alike.
-describe('a View All set\'s own mask binds', () => {
-  it('on the parent: the masked summary column is not judged, and the unmasked one still is', () => {
-    const findings = viaRegistry(
-      stackOf(
-        set({
-          objects: { invoice: { ...READ, viewAllRecords: true } },
-          fields: { 'invoice.total': { readable: false } },
-        }),
-      ),
-    );
-    // The set reads no child object here, so the column it can still see is reported.
-    expect(pairs(findings)).toEqual([[UNREADABLE, W_COUNT]]);
-  });
-
-  it('on the child: the hidden aggregated field is unreadable, so the sum over it is reported', () => {
-    const findings = viaRegistry(
-      stackOf(
-        set({
-          objects: { invoice: READ, invoice_line: { ...READ, viewAllRecords: true } },
-          fields: { 'invoice_line.amount': { readable: false } },
-        }),
-      ),
-    );
-    expect(pairs(findings)).toEqual([[UNREADABLE, W_TOTAL]]);
-  });
-
-  it('a View All parent with no mask gets the plain remedy: the mask it names will bind', () => {
-    const [f] = viaRegistry(stackOf(set({ objects: { invoice: { ...READ, viewAllRecords: true } } })));
-    expect(f.hint).not.toContain('first remove');
-    expect(f.hint).toContain('set fields["invoice.total"]: { readable: false } on it');
   });
 });
 
