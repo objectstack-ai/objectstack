@@ -2558,7 +2558,7 @@
       "title": "A stored flow the engine refused to register no longer reads as running: GET /meta/flow/:name carries registration {state:\"refused\", reason} beside the authored status, the list carries registrations keyed by name, and a good flow reads registered",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2580,7 +2580,7 @@
         {
           "clause": "the registration verdict on the flow read and list — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2617,6 +2617,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[1] names a refused flow that can be stored — checklist-accuracy finding of the 18.0 QA sweep (QA run #24545, automation.flow-registration-verdict-on-read fixtures; wave anchor #24579 §3): the suggested contract-refused builtin node config is refused at parse, and a refused re-registration keeps reading registered. Re-derived at base 9a7838edf5 (packages/services/service-automation/src/engine.ts: recordFlowRefusal ignores a name the engine holds; registerFlow refuses an api flow with no secret after the parse accepts it). Left alone from the same finding: the OS_METADATA_WRITABLE=flow half (flow declares allowRuntimeCreate: true, so a new flow needs no hatch). No clause changed",
           "ref": "#24649"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -2625,7 +2631,7 @@
       "title": "Flow authoring contract on v18, refused at `os validate` — and at PUT /meta/flow for every flow-body arm but the CEL root scope, which only `os validate` judges: single-brace {…} value tokens (CEL only; text slots use {{ }}), $-prefixed bound variable names, builtin node config keys/values the executor does not declare, dangling or repeated edges, `record`/`user.id` roots a flow cannot bind, retryPolicy.maxRetry, and an anonymous endpoint targeting a runAs:\"system\" flow",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -2648,7 +2654,7 @@
         {
           "clause": "every flow authoring refusal at the spec and lint layers — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2709,7 +2715,8 @@
           "change": "automated.ref narrowed per clause — checklist-accuracy finding C8 of QA run #24786 (wave anchor #24579 round 12, round 6's theme-B rule): the ref listed nine spec and lint unit pins with no clause qualifier, though acceptance[1]–[3] need the CLI or the PUT door. The pins are acceptance[0]'s own subject, so `automated` stays, narrowed to it. No clause changed",
           "ref": "#24824"
         },
-        { "revision": 5, "date": "2026-10-31", "change": "acceptance[2] and steps[1] say the endpoint arm needs a tenant flow name. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): a PUT of the runAs:'system' body under a packaged flow's name answered 403 NOT_OVERRIDABLE before the door judged it, so the arm never reached its 422 until the endpoint named a flow no package ships. Re-read at base 488b3ed0: packages/metadata-protocol/src/protocol.ts (a package-shipped item answers NOT_OVERRIDABLE at the meta write door). The 422 assertion is unchanged", "ref": "#27409" }
+        { "revision": 5, "date": "2026-10-31", "change": "acceptance[2] and steps[1] say the endpoint arm needs a tenant flow name. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): a PUT of the runAs:'system' body under a packaged flow's name answered 403 NOT_OVERRIDABLE before the door judged it, so the arm never reached its 422 until the endpoint named a flow no package ships. Re-read at base 488b3ed0: packages/metadata-protocol/src/protocol.ts (a package-shipped item answers NOT_OVERRIDABLE at the meta write door). The 422 assertion is unchanged", "ref": "#27409" },
+        { "revision": 6, "date": "2026-11-15", "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969", "ref": "#34068" }
       ]
     },
     {
@@ -2717,7 +2724,7 @@
       "title": "Flow run semantics on v18: current_user is bound in CEL (null on a schedule run), `record` exists only when the run was handed one, a non-system caller starting a runAs:\"system\" self-triggered flow is refused 403 with nothing run, and a decision with overlapping true edges takes the FIRST",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2741,7 +2748,7 @@
         {
           "clause": "current_user binding, record binding, elevated-start refusal and first-match decisions — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2803,6 +2810,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[2] gives the elevated scratch flow the name steps[1] triggers (qa_elevated) and a body (autolaunched, runAs system, one create_record), which no recipe carried. No clause changed. Read from source at base 87330e89. Source record: QA record #33092 (comment 6850793622) on #32908. Batch E of the #32908 close-out, card #33331",
           "ref": "#33331"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -2811,7 +2824,7 @@
       "title": "Inbound flow hooks accept ONLY the timestamped signature (t=,v1=): a body-only sha256= HMAC, a stale timestamp, an unknown flow and a wrong hook id all answer the SAME 401, and nothing is enqueued",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2834,7 +2847,7 @@
         {
           "clause": "the timestamped-signature-only hook door — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2875,6 +2888,12 @@
           "date": "2026-10-26",
           "change": "acceptance[2].verify says the cross-arm byte comparison is a live measurement the pins do not make. Checklist-accuracy finding of the 18.2.0 sweep (QA run #25815, release-18.2.0-tier1, at 6679644a: a2; wave anchor #25807, card #25840): no pin byte-compares the refusal arms' bodies against each other; the rows assert code + typeof message only, and member-vs-mount parity is per row, not across arms. Re-read at base 9753d1637f (inbound-hook-member.test.ts: the per-arm loop matches error.code and checks typeof error.message; the parity case compares viaMember to viaMount per row). The clause is unchanged",
           "ref": "#25840"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -2883,7 +2902,7 @@
       "title": "Scheduled work is OFF on a stock v18 boot unless OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true: schedule triggers bind and fire only with the flag, and the boot says which (D3 schedule-flow-acting-organization-required)",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2904,7 +2923,7 @@
         {
           "clause": "the per-kernel scheduled-work policy — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -2944,6 +2963,12 @@
           "date": "2026-10-26",
           "change": "acceptance[1].verify and acceptance[2].verify say they are scored on a served boot, not from the pins. Checklist-accuracy finding of the 18.2.0 sweep (QA run #25815, release-18.2.0-tier1, at 6679644a: a1/a2; wave anchor #25807, card #25840): both pins assert that flows are armed (or not) and the refusal sentence on a LiteKernel; neither observes a served boot log line or run rows after intervals. Re-read at base 9753d1637f (both per-kernel-scheduled-work-policy.test.ts files assert getTriggerBindingAudit and the triggers' refusal text). No clause changed",
           "ref": "#25840"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
