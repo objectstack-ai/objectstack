@@ -11332,6 +11332,72 @@ export function selfTest({ tier = 'full' } = {}) {
     }
     t('an unresolvable base ref is refused on its own terms', !!missingBaseErr && /does not resolve/.test(missingBaseErr.message));
 
+    // ── A name git would C-quote still reaches the tier and the gates (#33847)
+    //
+    // Without `-z` git prints a path holding a non-ASCII byte or a control
+    // character C-quoted and octal-escaped, and that spelling starts with a
+    // quote mark, so no glob covers it: a governed `skills/**` file derived as
+    // NO tier and named no gate family. Each of the three reads carries one such
+    // name here: a committed file named in Chinese, an uncommitted edit to
+    // another, and an untracked file whose name holds a newline (the case
+    // `core.quotePath=false` alone would still split in two). The fixture sets
+    // `core.quotePath true` itself so the CONTROL quotes on any machine,
+    // whatever the global config says.
+    //
+    // The CONTROL is the load-bearing half: it reads the same branch the old
+    // way, in the same repo, and must come back quoted, tierless and gateless —
+    // otherwise the rows below would pass against a fixture that never
+    // reproduced the defect.
+    const quoted = nodePath.join(gitTmp, 'quoted-names');
+    mkdirSync(quoted, { recursive: true });
+    g(['init', '--initial-branch=main', '.'], quoted);
+    g(['config', 'core.quotePath', 'true'], quoted);
+    const nonAsciiEdited = 'skills/objectstack-data/\u57fa\u7ebf.md';
+    const nonAsciiCommitted = 'skills/objectstack-data/\u6587\u6863.md';
+    const newlineUntracked = 'skills/objectstack-data/two\nlines.md';
+    commit(quoted, nonAsciiEdited, 'root');
+    g(['update-ref', 'refs/remotes/origin/main', g(['rev-parse', 'main'], quoted)], quoted);
+    g(['checkout', '-b', 'feature'], quoted);
+    commit(quoted, nonAsciiCommitted, 'a skill file named in Chinese');
+    write(quoted, nonAsciiEdited, 'edited, not committed\n');
+    write(quoted, newlineUntracked, 'never added\n');
+
+    const plainRead = [
+      ...g(['diff', '--name-only', '--no-renames', 'origin/main', 'HEAD'], quoted).split('\n'),
+      ...g(['diff', '--name-only', '--no-renames', 'HEAD'], quoted).split('\n'),
+      ...g(['ls-files', '--others', '--exclude-standard'], quoted).split('\n'),
+    ].filter(Boolean);
+    const familiesOf = (paths) =>
+      [...discoverFamilies().byCheck.entries()].filter(([, e]) => classifyEntry(e, paths).verdict === 'matched').map(([check]) => check);
+    t(
+      'the CONTROL reproduces the defect: the plain read quotes all three names, so they derive no tier and name no gate family',
+      plainRead.length === 3 && plainRead.every((p) => p.startsWith('"')) && deriveTier(plainRead).tier === null && familiesOf(plainRead).length === 0,
+      plainRead,
+    );
+
+    const raw = changedPathsFromGit({ cwd: quoted });
+    t(
+      'the derived change set spells each C-quoted name as it is on disk: committed, uncommitted and untracked (newline included)',
+      [nonAsciiCommitted, nonAsciiEdited, newlineUntracked].every((p) => raw.paths.includes(p)) && raw.paths.length === 3 &&
+        raw.counts.committed === 1 && raw.counts.worktree === 1 && raw.counts.untracked === 1,
+      raw.paths,
+    );
+    t(
+      'and those raw names derive the contract-review tier through the skills/** glob',
+      deriveTier(raw.paths).tier === CONTRACT_REVIEW_TIER && deriveTier(raw.paths).hits.length === 3,
+      deriveTier(raw.paths),
+    );
+    t(
+      'and they name the skill gate families the derived --commands list is built from',
+      familiesOf(raw.paths).some((check) => /^check:skill-/.test(check)),
+      familiesOf(raw.paths),
+    );
+    t(
+      'and the untracked newline-named file is counted from disk, not as an unreadable file of 0 lines',
+      raw.size.untrackedFiles === 1 && raw.size.unreadableFiles === 0 && raw.size.additions === 3,
+      raw.size,
+    );
+
     // ── A leftover in-tree test fixture must not reach the change set (#12632)
     //
     // The derivation reads untracked files on purpose, so `.gitignore` is the
