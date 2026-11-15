@@ -78,11 +78,13 @@
  *   one per-run RSA key, which is all `@better-auth/sso` reads to register a
  *   provider. It serves no interactive sign-in: its authorize, token and
  *   userinfo endpoints answer 501, so a clause that needs a federated sign-in
- *   is still not driven by it. It prints the two variables the boot that
- *   registers it needs exported (`OS_SSO_ENABLED=true`, and the stub's origin
- *   in `OS_TRUSTED_ORIGINS` beside the boot's own: the vendor refuses a
- *   loopback discovery URL that is not a trusted origin, `discovery_private_host`)
- *   and the `POST /api/v1/auth/admin/sso/register` body. `--register` sends
+ *   is still not driven by it. It prints what the boot that registers it
+ *   needs exported — `OS_SSO_ENABLED=true` (without it the register door
+ *   answers 404), and only on a boot that is not `os dev` the stub's origin in
+ *   `OS_TRUSTED_ORIGINS` beside the boot's own: the vendor refuses a loopback
+ *   discovery URL that is not a trusted origin (`discovery_private_host`), and
+ *   `os dev` already trusts `http://localhost:*` (`serve.ts`, its `isDev`
+ *   default) — and the `POST /api/v1/auth/admin/sso/register` body. `--register` sends
  *   that body as the admin to the boot at `--base-url` and proves the provider
  *   landed by reading it back through `POST /api/v1/auth/admin/sso/get-groups-claim`.
  *
@@ -802,7 +804,7 @@ async function oidcStub(flags) {
   if (flags.register) {
     const token = await signIn(base, adminOf(flags).email, adminOf(flags).password);
     expectStatus(
-      'register the stub (POST /api/v1/auth/admin/sso/register) — a 400 SSO_REGISTER_FAILED naming "not publicly routable" means the boot lacks the stub origin in OS_TRUSTED_ORIGINS, a 404 that it lacks OS_SSO_ENABLED=true',
+      'register the stub (POST /api/v1/auth/admin/sso/register) — a 404 means the boot lacks OS_SSO_ENABLED=true; a 400 SSO_REGISTER_FAILED naming "not publicly routable" means a boot outside `os dev` lacks the stub origin in OS_TRUSTED_ORIGINS',
       await call(base, 'POST', '/api/v1/auth/admin/sso/register', { token, body: registerBody }),
       200,
     );
@@ -819,7 +821,9 @@ async function oidcStub(flags) {
     replays: 'docs/qa/platform-checklist/areas/identity-auth.json identity-auth.sso-provider-groups-claim fixtures.requires[0]',
     issuer,
     discoveryEndpoint: `${issuer}/.well-known/openid-configuration`,
-    bootEnv: { OS_SSO_ENABLED: 'true', OS_TRUSTED_ORIGINS: `${base},${issuer}` },
+    bootEnv: { OS_SSO_ENABLED: 'true' },
+    // `os dev` trusts http://localhost:* already; a `serve` / `start` boot does not.
+    bootEnvOutsideOsDev: { OS_SSO_ENABLED: 'true', OS_TRUSTED_ORIGINS: `${base},${issuer}` },
     registerBody,
     register: registered ?? `POST ${base}/api/v1/auth/admin/sso/register with registerBody as the admin (or rerun with --register)`,
     signIn: 'not served: authorize, token and userinfo answer 501 — the stub registers a provider and drives its admin doors, never a federated sign-in',
