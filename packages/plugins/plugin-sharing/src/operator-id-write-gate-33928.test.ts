@@ -1,38 +1,33 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The sharing write gate on a write whose `where.id` is an OPERATOR object
- * (`{ $in: [...] }`, `{ $eq: ... }`), not a row id.
+ * The sharing write gate judges BY ID exactly the writes the engine runs by
+ * id, and every other write meets the bulk write scope.
  *
- * The gate used to stringify any `where.id` into the row it judged by id, so
- * `{ $in: ['row_1'] }` was judged as the row "[object Object]", which no caller
- * owns: a member's multi-row delete of rows it owns answered 403 FORBIDDEN and
- * deleted nothing. Only a scalar id names a row now (the engine's own dispatch
- * rule); any other value is a predicate, and takes the bulk branch:
- * `SharingService.buildWriteFilter` ANDed into the predicate.
+ * The rule, as pinned here:
  *
- * What each door answers, pinned here:
+ *  - the by-id / bulk branch is the engine's own dispatch decision for the
+ *    options bag the write carries, over every option shape the gate is
+ *    handed (unit table below, against the middleware itself);
+ *  - a scalar id the engine writes by id is judged by id, as before;
+ *  - a write the engine runs as a predicate (`$in`, `$eq` on `id`) gets the
+ *    answer every bulk write has (`buildWriteFilter`, ADR-0111 D3): the rows
+ *    the caller may write are written, the others are left as they were, no
+ *    error;
+ *  - a cascade delete gives the answer the by-id delete of a refused child
+ *    gives, the same refusal envelope, and deletes nothing, whatever shape the
+ *    engine deletes a parent's children in.
  *
- *  - a user's bulk write over rows it owns and rows it does not keeps the
- *    answer every bulk write has (`buildWriteFilter`, ADR-0111 D3): fewer
- *    rows, no error. The rows it may not write are left as they were;
- *  - a cascade delete gives the answer the by-id delete of the refused child
- *    gives, the same refusal envelope, and deletes nothing. The gate does not
- *    tell a cascade from a user's bulk write: whatever shape the engine deletes
- *    a parent's children in, the child it may not delete refuses as by id;
- *  - another operator shape (`$eq`) is scoped per matched row by the same
- *    filter, never judged as a by-id string;
- *  - a scalar id is judged by id exactly as before.
- *
- * Real stack: an `ObjectKernel` with `ObjectQLPlugin` over better-sqlite3 and
- * `SharingServicePlugin`, so every answer is the middleware the engine runs.
+ * Real stack for the door answers: an `ObjectKernel` with `ObjectQLPlugin` over
+ * better-sqlite3 and `SharingServicePlugin`, so every answer is the middleware
+ * the engine runs.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { SharingServicePlugin } from './sharing-plugin.js';
+import { SharingServicePlugin, buildSharingMiddleware } from './sharing-plugin.js';
 
 const ORG = 'org_opid';
 const ME = 'usr_opid_me';
@@ -115,7 +110,7 @@ function objectsPlugin(): Plugin {
   };
 }
 
-describe('sharing write gate: an operator-valued id is a predicate write, never the row "[object Object]"', () => {
+describe('sharing write gate: a write the engine runs as a predicate meets the bulk write scope (real stack)', () => {
   let kernel: ObjectKernel;
   let ql: ObjectQL;
 
@@ -205,7 +200,7 @@ describe('sharing write gate: an operator-valued id is a predicate write, never 
     });
   });
 
-  describe('another operator shape is scoped per matched row, never judged as a by-id string', () => {
+  describe('another predicate on id is scoped per matched row by the same bulk scope', () => {
     it('an `$eq` delete of an owned row deletes it; of a not-owned row answers no error and leaves it', async () => {
       // `$eq` reaches the gate as `where.id` itself; `$nin` / `$ne` do not (the engine lowers them to a
       // null-aware `$and` first), so `$eq` is the other operator shape the gate used to judge by id.
@@ -249,5 +244,81 @@ describe('sharing write gate: an operator-valued id is a predicate write, never 
         .toMatchObject({ kind: 'landed' });
       expect(await storedLines('c2')).toEqual([]);
     });
+  });
+});
+
+/**
+ * The branch, over every option shape the gate is handed. Each row is the
+ * options bag (and payload) of one write and the branch the ENGINE dispatches
+ * it to (`by-id` with the row it binds, or `bulk`), written out here rather
+ * than computed, so the table is a statement of the rule and not a copy of
+ * the code under test.
+ */
+describe('sharing write gate: the by-id branch is exactly the engine dispatch decision', () => {
+  const CALLER = { userId: 'u_member', tenantId: 'org_1' };
+  type Branch = { kind: 'by-id'; id: string } | { kind: 'bulk' };
+  type Row = readonly [verb: 'update' | 'delete', data: Record<string, unknown> | undefined, options: Record<string, unknown>, branch: Branch];
+  const BY = (id: string): Branch => ({ kind: 'by-id', id });
+  const BULK: Branch = { kind: 'bulk' };
+  const IN = { $in: ['r_1', 'r_2'] };
+
+  const ROWS: readonly Row[] = [
+    // where.id scalar: by id, with or without multi.
+    ['delete', undefined, { where: { id: 'r_1' } }, BY('r_1')],
+    ['delete', undefined, { where: { id: 'r_1' }, multi: true }, BY('r_1')],
+    ['update', { stage: 'x' }, { where: { id: 'r_1' } }, BY('r_1')],
+    ['update', { stage: 'x' }, { where: { id: 'r_1' }, multi: true }, BY('r_1')],
+    // where.id a predicate: bulk, with or without multi.
+    ['delete', undefined, { where: { id: IN } }, BULK],
+    ['delete', undefined, { where: { id: IN }, multi: true }, BULK],
+    ['update', { stage: 'x' }, { where: { id: IN } }, BULK],
+    ['update', { stage: 'x' }, { where: { id: IN }, multi: true }, BULK],
+    // data.id: the payload id the engine binds for an update.
+    ['update', { id: 'r_1', stage: 'x' }, {}, BY('r_1')],
+    ['update', { id: 'r_1', stage: 'x' }, { multi: true }, BY('r_1')],
+    ['update', { id: IN, stage: 'x' }, { where: { stage: 'open' }, multi: true }, BULK],
+    // options.id: no engine dispatch routes on it.
+    ['delete', undefined, { id: 'r_1' }, BULK],
+    ['delete', undefined, { id: 'r_1', where: { stage: 'open' }, multi: true }, BULK],
+    ['update', { stage: 'x' }, { id: 'r_1' }, BULK],
+    ['update', { stage: 'x' }, { id: 'r_1', where: { stage: 'open' }, multi: true }, BULK],
+    // options.filter.id: no engine dispatch routes on it.
+    ['delete', undefined, { filter: { id: 'r_1' } }, BULK],
+    ['delete', undefined, { filter: { id: 'r_1' }, where: { stage: 'open' }, multi: true }, BULK],
+    ['delete', undefined, { filter: { id: 'r_1' }, where: { id: IN }, multi: true }, BULK],
+    ['update', { stage: 'x' }, { filter: { id: 'r_1' }, where: { stage: 'open' }, multi: true }, BULK],
+    ['update', { stage: 'x' }, { filter: { id: 'r_1' }, where: { id: IN }, multi: true }, BULK],
+    // where.id scalar beside another predicate key under multi: the engine runs a predicate.
+    ['delete', undefined, { where: { id: 'r_1', stage: 'open' }, multi: true }, BULK],
+    ['update', { stage: 'x' }, { where: { id: 'r_1', stage: 'open' }, multi: true }, BULK],
+  ];
+
+  function service() {
+    return {
+      admitsByIdWrite: vi.fn(async () => true),
+      buildWriteFilter: vi.fn(async () => ({ owner_id: 'u_member' })),
+    };
+  }
+
+  it.each(ROWS)('a %s write meets the branch the engine dispatches it to (row %#)', async (verb, data, options, branch) => {
+    const svc = service();
+    const mw = buildSharingMiddleware(svc as never, { warn: () => {} } as never) as unknown as (
+      ctx: Record<string, unknown>, next: () => Promise<void>,
+    ) => Promise<void>;
+    const bag = { ...options, context: CALLER };
+    const ctx: Record<string, unknown> = { object: 'deal', operation: verb, options: bag, context: CALLER, ...(data ? { data } : {}) };
+    let reached = false;
+
+    await mw(ctx, async () => { reached = true; });
+
+    expect(reached).toBe(true);
+    if (branch.kind === 'by-id') {
+      expect(svc.admitsByIdWrite).toHaveBeenCalledWith('deal', branch.id, verb, CALLER);
+      expect(svc.buildWriteFilter).not.toHaveBeenCalled();
+    } else {
+      expect(svc.admitsByIdWrite).not.toHaveBeenCalled();
+      expect(svc.buildWriteFilter).toHaveBeenCalledWith('deal', CALLER, verb);
+      expect(JSON.stringify((ctx.ast as { where?: unknown } | undefined)?.where)).toContain('"owner_id":"u_member"');
+    }
   });
 });
