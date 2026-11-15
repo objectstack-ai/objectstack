@@ -615,6 +615,7 @@ import {
   LOW_RISK_CHANGESET_PATH,
   SELF_REPO_ID,
   WORKFLOWS_PREFIX,
+  addOnlyDiffArgv,
   applyGeneratedExceptions,
   applyLowRiskArm,
   applyWorkflowSplit,
@@ -2059,7 +2060,17 @@ export function catalogFilesOf(entry, runGit) {
     for (let i = 0; i + 1 < tokens.length; i += 2) {
       const meta = /^:(\d{6}) (\d{6}) [0-9a-f]+ [0-9a-f]+ ([A-Z])/.exec(tokens[i].trim());
       if (!meta || tokens[i + 1] === '') continue;
-      files.push({ path: tokens[i + 1], status: RAW_STATUS[meta[3]] ?? meta[3], oldMode: meta[1], mode: meta[2] });
+      const row = { path: tokens[i + 1], status: RAW_STATUS[meta[3]] ?? meta[3], oldMode: meta[1], mode: meta[2] };
+      // The ADR leg (#33539): a modified file under an add-only row carries this commit's diff against its first
+      // parent, at full context; a read that throws is carried as no diff, which the arm reads as H.
+      if (row.status === 'modified' && GOVERNED_SURFACES.some((s) => s.lowRisk?.addOnly === true && row.path.startsWith(s.prefix))) {
+        try {
+          row.patch = String(runGit(addOnlyDiffArgv(['diff-tree', '-p', '--no-commit-id', '-m', '--first-parent'], [sha], row.path)));
+        } catch {
+          row.patch = null;
+        }
+      }
+      files.push(row);
     }
   }
   return { measured: true, reason: null, files };

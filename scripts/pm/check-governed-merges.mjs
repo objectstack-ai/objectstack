@@ -1170,13 +1170,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
   '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 74,
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 51,
+  '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 25,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too. Raised 35 → 36 with the
 // workflows split battery (ruling record 6722205630): one battery, one row.
-// Raised 36 → 37 with the low-risk skills arm battery (#33501), 37 → 38 with its post-merge leg (#33603).
-const SELF_TEST_BATTERY_FLOOR = 38;
+// Raised 36 → 37 with the low-risk skills arm battery (#33501), 37 → 38 with its post-merge leg (#33603),
+// 38 → 39 with its ADR leg (#33539).
+const SELF_TEST_BATTERY_FLOOR = 39;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1336,7 +1338,7 @@ export const HUMAN_MERGE_LINE_THRESHOLD = 3000;
 export const WORKFLOWS_PREFIX = '.github/workflows/';
 
 export const GOVERNED_SURFACES = Object.freeze([
-  Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', tier: GOVERNED_TIER_H, what: 'architecture decision records' }),
+  Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', tier: GOVERNED_TIER_H, lowRisk: Object.freeze({ repos: Object.freeze(['objectstack']), addOnly: true }), what: 'architecture decision records' }),
   Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', tier: GOVERNED_TIER_S, tierRepos: Object.freeze(['objectstack']), what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
   Object.freeze({ id: 'skills-catalog', prefix: 'skills/', glob: 'skills/**', tier: GOVERNED_TIER_H, lowRisk: Object.freeze({ repos: Object.freeze(['objectstack']) }), what: 'the published skills catalog' }),
   Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', tier: GOVERNED_TIER_H, what: 'the repo-root agent instruction file' }),
@@ -2285,6 +2287,164 @@ function lowRiskArmIn(surface, repo) {
  */
 export const LOW_RISK_ARM_FILE_PATTERNS = Object.freeze([/\.md$/, /(?:^|\/)evals\/[^/]+\.json$/]);
 
+// ── the ADR leg of the arm: add-only notes (card #33539, same ruling) ────────
+
+/**
+ * The file SHAPE an add-only row (`lowRisk.addOnly`, the `adr` row) may change:
+ * a Markdown record or index, nothing else. An image, a JSON or any other file
+ * under `docs/adr/**` keeps the PR H.
+ */
+export const LOW_RISK_ADD_ONLY_FILE_PATTERNS = Object.freeze([/\.md$/]);
+
+/**
+ * The context the add-only diff is read at: enough lines that ONE hunk carries
+ * the whole file, so the heading every added line sits under is read off the
+ * diff itself rather than a second read of the head. A file longer than this
+ * reads as several hunks, which the reader refuses (H).
+ */
+export const LOW_RISK_ADD_ONLY_CONTEXT = 1000000;
+
+/** A heading whose text names the decision or the status: every line under it is the record's ruling or its state. */
+export const LOW_RISK_ADD_ONLY_RULED_HEADING = /decision|\bstatus\b/i;
+
+/** A status line, after its quote markers, list bullet, table bar and emphasis are stripped: `Status:` or `| Status |`. */
+export const LOW_RISK_ADD_ONLY_STATUS_LINE = /^status\b[ \t]*[:|]/i;
+
+/**
+ * The git argv that reads one add-only file's diff at full context: `head` the subcommand and its own flags
+ * (`['diff']`, or `['diff-tree', '-p', …]` at the queue), `revs` the two ends or the one commit. Pure.
+ */
+export function addOnlyDiffArgv(head, revs, path) {
+  return [...head, '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', `--unified=${LOW_RISK_ADD_ONLY_CONTEXT}`, ...revs, '--', path];
+}
+
+/** One Markdown line with its blockquote markers, list bullet, table bar and emphasis stripped. Pure. */
+function addOnlyBareLine(line) {
+  return String(line)
+    .replace(/^[ \t]*(?:>[ \t]?)*/, '')
+    .replace(/^[ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+)?/, '')
+    .replace(/^\|[ \t]*/, '')
+    .replace(/\*\*|__|[`*_]/g, '')
+    .trim();
+}
+
+/**
+ * Each new-side line's heading reading: `{ heading: null | { level, text }, under: [{ level, text }] }` —
+ * `under` the headings the line sits beneath (its own excluded). ATX headings and setext underlines, inside a
+ * blockquote too; never inside a ``` or ~~~ fence or a leading frontmatter block. The FIRST level-1 heading is
+ * the record's title and scopes nothing; every other heading does, at any level. Pure.
+ */
+export function addOnlyHeadingReading(lines) {
+  const list = Array.isArray(lines) ? lines.map(String) : [];
+  const unquote = (l) => l.replace(/^[ \t]{0,3}(?:>[ \t]?)*/, '');
+  const out = list.map(() => ({ heading: null, under: [] }));
+  const kinds = list.map(() => null);
+  let fence = null;
+  let start = 0;
+  if (list[0]?.trim() === '---') {
+    const close = list.findIndex((l, i) => i > 0 && l.trim() === '---');
+    if (close > 0) start = close + 1;
+  }
+  for (let i = start; i < list.length; i += 1) {
+    const bare = unquote(list[i]);
+    const marker = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(bare);
+    if (marker) {
+      fence = fence === null ? marker[1][0] : marker[1][0] === fence ? null : fence;
+      kinds[i] = 'fence';
+      continue;
+    }
+    if (fence !== null) continue;
+    const atx = /^[ \t]{0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/.exec(bare);
+    if (atx) {
+      kinds[i] = { level: atx[1].length, text: String(atx[2] ?? '').trim() };
+      continue;
+    }
+    const underline = /^[ \t]{0,3}(=+|-+)[ \t]*$/.exec(bare);
+    const prev = i - 1 >= start ? unquote(list[i - 1]) : '';
+    if (underline && i - 1 >= start && kinds[i - 1] === null && prev.trim() !== '') {
+      kinds[i - 1] = { level: underline[1][0] === '=' ? 1 : 2, text: prev.trim() };
+      kinds[i] = { underline: true };
+    }
+  }
+  const stack = [];
+  let titled = false;
+  for (let i = 0; i < list.length; i += 1) {
+    const kind = kinds[i];
+    if (kind && typeof kind.level === 'number') {
+      while (stack.length > 0 && stack[stack.length - 1].level >= kind.level) stack.pop();
+      out[i] = { heading: kind, under: [...stack] };
+      if (kind.level === 1 && !titled) titled = true;
+      else stack.push(kind);
+      continue;
+    }
+    // A setext underline belongs to the heading above it.
+    out[i] = { heading: kind?.underline ? out[i - 1].heading : null, under: kind?.underline ? out[i - 1].under : [...stack] };
+  }
+  return out;
+}
+
+/**
+ * Why one ADR file's diff is not an add-only note, or [] when it is. `patch` is the file's unified diff read at
+ * `LOW_RISK_ADD_ONLY_CONTEXT` (merge base to head on `--pr` and the relay, each commit against its first parent at
+ * the queue), so ONE hunk carries the whole file. Pure.
+ *
+ * Add-only: the hunk removes no line and adds at least one; its counts match the header; no added line is a status
+ * line (`LOW_RISK_ADD_ONLY_STATUS_LINE`, quoted, bulleted, tabled or bold), a heading that names the decision or the
+ * status (`LOW_RISK_ADD_ONLY_RULED_HEADING`), or a line under such a heading (`addOnlyHeadingReading`). A diff that
+ * does not parse as exactly one text hunk of one existing file is a reason too: ⛔ fail closed.
+ */
+export function addOnlyNoteReasons(file) {
+  const path = String(file?.path ?? '(unnamed)');
+  if (typeof file?.patch !== 'string') return [`the diff of \`${path}\` was not read`];
+  const lines = file.patch.split('\n').map((l) => l.replace(/\r$/, ''));
+  if (lines.filter((l) => l.startsWith('diff --git ')).length > 1) return [`the diff of \`${path}\` carries more than one file`];
+  if (lines.some((l) => /^Binary files /.test(l) || l === 'GIT binary patch')) return [`\`${path}\` reads as a binary diff`];
+  const headers = lines.map((l, i) => [l, i]).filter(([l]) => l.startsWith('@@ '));
+  if (headers.length === 0) return [`the diff of \`${path}\` shows no hunk`];
+  if (headers.length > 1) return [`the diff of \`${path}\` reads as ${headers.length} hunks, where the whole file at full context is one`];
+  const [[header, at]] = headers;
+  const counts = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(header);
+  if (!counts) return [`the hunk header of \`${path}\` does not parse (${quoteLine(header, 60)})`];
+  const oldCount = counts[2] === undefined ? 1 : Number(counts[2]);
+  const newCount = counts[4] === undefined ? 1 : Number(counts[4]);
+  if (oldCount === 0) return [`\`${path}\` was empty or absent at the base, so the diff creates it`];
+  const newLines = [];
+  const added = [];
+  let removed = 0;
+  let context = 0;
+  const body = lines.slice(at + 1);
+  while (body.length > 0 && body[body.length - 1] === '') body.pop();
+  for (const line of body) {
+    if (line.startsWith('\\')) continue;
+    const mark = line[0];
+    if (mark === '+') {
+      added.push(newLines.length);
+      newLines.push(line.slice(1));
+    } else if (mark === ' ') {
+      context += 1;
+      newLines.push(line.slice(1));
+    } else if (mark === '-') removed += 1;
+    else return [`the diff of \`${path}\` carries a line that is no hunk line (${quoteLine(line, 60)})`];
+  }
+  const reasons = [];
+  if (context + removed !== oldCount || context + added.length !== newCount) reasons.push(`the hunk of \`${path}\` reads ${context + removed} old and ${context + added.length} new line(s), where its header says ${oldCount} and ${newCount}`);
+  if (removed > 0) reasons.push(`\`${path}\` removes ${removed} line(s) — an add-only note changes no existing line`);
+  if (added.length === 0) reasons.push(`\`${path}\` adds no line`);
+  const headings = addOnlyHeadingReading(newLines);
+  const ruled = (h) => LOW_RISK_ADD_ONLY_RULED_HEADING.test(h.text);
+  const statusLines = added.filter((i) => LOW_RISK_ADD_ONLY_STATUS_LINE.test(addOnlyBareLine(newLines[i])));
+  const ruledHeadings = added.filter((i) => headings[i].heading && ruled(headings[i].heading));
+  const underRuled = added.filter((i) => !ruledHeadings.includes(i) && headings[i].under.some(ruled));
+  const at1 = (list) => list.slice(0, 3).map((i) => `${i + 1}`).join(', ') + (list.length > 3 ? ` (+${list.length - 3} more)` : '');
+  if (statusLines.length > 0) reasons.push(`\`${path}\` adds a \`Status:\` line at line ${at1(statusLines)}`);
+  if (ruledHeadings.length > 0) reasons.push(`\`${path}\` adds a heading that names the decision or the status at line ${at1(ruledHeadings)}`);
+  if (underRuled.length > 0) {
+    const names = [...new Set(underRuled.map((i) => headings[i].under.filter(ruled).pop().text))].slice(0, 2);
+    reasons.push(`\`${path}\` adds line ${at1(underRuled)} under ${names.map((n) => quoteLine(n, 50)).join(', ')}, a heading that names the decision or the status`);
+  }
+  return reasons;
+}
+
 /**
  * The security NAME test (maintainer ruling on the security-scope card, 「标签和路径都读」):
  * a changed path under a catalog row whose name below the row — any segment, so a
@@ -2409,10 +2569,15 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
   if (paths.length === 0) reasons.push('the reading carries no path list');
   const armPrefixes = armRows.map((s) => s.prefix).filter(Boolean);
   const underArm = (p) => armPrefixes.some((prefix) => p.startsWith(prefix));
+  // The ADR leg (#33539): a row whose arm reads `addOnly` takes Markdown only, and each of its files is read hunk by hunk.
+  const addOnlyPrefixes = armRows.filter((s) => s.lowRisk.addOnly === true).map((s) => s.prefix).filter(Boolean);
+  const underAddOnly = (p) => addOnlyPrefixes.some((prefix) => p.startsWith(prefix));
   const stray = paths.filter((p) => !underArm(p) && !LOW_RISK_RIDER_PATTERNS.some((re) => re.test(p)));
   if (stray.length > 0) reasons.push(`a path outside skills wording and prose: ${more(stray, 4)}`);
-  const odd = paths.filter((p) => underArm(p) && !LOW_RISK_ARM_FILE_PATTERNS.some((re) => re.test(p)));
+  const odd = paths.filter((p) => underArm(p) && !underAddOnly(p) && !LOW_RISK_ARM_FILE_PATTERNS.some((re) => re.test(p)));
   if (odd.length > 0) reasons.push(`a skills file that is neither Markdown nor an \`evals/*.json\`: ${more(odd, 4)}`);
+  const oddRecord = paths.filter((p) => underAddOnly(p) && !LOW_RISK_ADD_ONLY_FILE_PATTERNS.some((re) => re.test(p)));
+  if (oddRecord.length > 0) reasons.push(`an ADR-tree file that is not Markdown: ${more(oddRecord, 4)}`);
   const securityNamed = paths.filter((p) => {
     const prefix = armPrefixes.find((pre) => p.startsWith(pre));
     return prefix !== undefined && LOW_RISK_SECURITY_NAME.test(p.slice(prefix.length));
@@ -2446,6 +2611,12 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
       if (notModified.size > 0) reasons.push(`a catalog file added, deleted or renamed rather than modified: ${more([...notModified], 4)}`);
       if (notRegular.size > 0) reasons.push(`a catalog path that is not a regular file at both ends: ${more([...notRegular], 4)}`);
       if (modeChanged.size > 0) reasons.push(`a catalog file whose mode changed: ${more([...modeChanged], 4)}`);
+      // ⭐ The ADR leg: every row of every ADR file read add-only (`addOnlyNoteReasons`); a row with no diff is H.
+      const notAddOnly = new Set();
+      for (const p of armPaths.filter(underAddOnly)) {
+        for (const r of catalog.files.filter((f) => f?.path === p && f?.status === 'modified')) for (const why of addOnlyNoteReasons({ path: p, patch: r.patch })) notAddOnly.add(why);
+      }
+      if (notAddOnly.size > 0) reasons.push(`an ADR change that is not an add-only note: ${more([...notAddOnly], 3)}`);
     }
   }
   const listed = new Set(paths);
@@ -2457,8 +2628,12 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
   }
   const changesetPaths = paths.filter((p) => LOW_RISK_CHANGESET_PATH.test(p));
   const changesets = reading.changesets;
-  if (changesetPaths.length === 0) reasons.push('the PR carries no changeset');
-  else if (!changesets || changesets.measured !== true) reasons.push(`its changesets were not read at the head (${changesets?.reason ?? 'no reading'})`);
+  // The catalog publishes and owes its changeset; an ADR note publishes nothing (`skip-changeset`), so an
+  // ADR-only PR owes none — any changeset it does carry is read and held to the same clean shape.
+  const owesChangeset = paths.some((p) => underArm(p) && !underAddOnly(p));
+  if (changesetPaths.length === 0) {
+    if (owesChangeset) reasons.push('the PR carries no changeset');
+  } else if (!changesets || changesets.measured !== true) reasons.push(`its changesets were not read at the head (${changesets?.reason ?? 'no reading'})`);
   else {
     const files = Array.isArray(changesets.files) ? changesets.files : [];
     for (const path of changesetPaths) {
@@ -4341,9 +4516,14 @@ export function pullCatalogReading({ derivation, statuses, paths, sameCheckout, 
     return tree.ok ? (/^(\d{6}) /.exec(tree.out)?.[1] ?? null) : null;
   };
   const wanted = new Set((Array.isArray(paths) ? paths : []).filter((p) => GOVERNED_SURFACES.some((s) => s.lowRisk && p.startsWith(s.prefix))));
+  // The ADR leg (#33539): a modified file under an add-only row carries its diff, merge base to head, at full context.
+  const addOnly = (p) => GOVERNED_SURFACES.some((s) => s.lowRisk?.addOnly === true && p.startsWith(s.prefix));
   const files = statuses.filter((f) => wanted.has(f.path)).map((f) => {
     if (f.status !== 'modified') return { ...f, oldMode: null, mode: null };
-    return { ...f, oldMode: modeAt(mergeBase.out, f.path), mode: modeAt(headSha, f.path) };
+    const row = { ...f, oldMode: modeAt(mergeBase.out, f.path), mode: modeAt(headSha, f.path) };
+    if (!addOnly(f.path)) return row;
+    const diff = run(addOnlyDiffArgv(['diff'], [mergeBase.out, headSha], f.path));
+    return { ...row, patch: diff.ok ? diff.out : null };
   });
   return { measured: true, reason: null, files };
 }
@@ -6178,10 +6358,12 @@ async function selfTest() {
     const tier = (paths, reading, repo = REPO) => governedTierFor(paths, repo, GOVERNED_SURFACES, null, reading);
     const reasons = (paths, reading) => lowRiskArmVerdict(governedPathsIn(paths, REPO), REPO, reading).reasons.join(' | ');
 
-    // The register: the two catalog rows carry the arm, scoped to objectstack; the row tier stays H for every path-only reader.
+    // The register: the two catalog rows and the ADR row (#33539, add-only) carry the arm, scoped to objectstack;
+    // the row tier stays H for every path-only reader.
     const armRows = GOVERNED_SURFACES.filter((s) => s.lowRisk);
-    assert('the-arm-rides-exactly-the-two-catalog-rows-scoped-to-objectstack-and-both-keep-row-tier-H',
-      armRows.map((s) => s.id).join() === 'skills-catalog,ui-skills-catalog' && armRows.every((s) => s.tier === GOVERNED_TIER_H && Object.isFrozen(s.lowRisk) && s.lowRisk.repos.join() === REPO), JSON.stringify(armRows.map((s) => [s.id, s.tier, s.lowRisk])));
+    assert('the-arm-rides-exactly-the-two-catalog-rows-and-the-ADR-row-scoped-to-objectstack-and-all-keep-row-tier-H',
+      armRows.map((s) => s.id).join() === 'adr,skills-catalog,ui-skills-catalog' && armRows.every((s) => s.tier === GOVERNED_TIER_H && Object.isFrozen(s.lowRisk) && s.lowRisk.repos.join() === REPO) &&
+      armRows.filter((s) => s.lowRisk.addOnly === true).map((s) => s.id).join() === 'adr', JSON.stringify(armRows.map((s) => [s.id, s.tier, s.lowRisk])));
     const rider = (p) => LOW_RISK_RIDER_PATTERNS.some((re) => re.test(p));
     assert('the-rider-allowlist-is-changesets-and-Markdown-prose-under-the-docs-trees-only', Object.isFrozen(LOW_RISK_RIDER_PATTERNS) && [CS, 'docs/agents/x.md', 'content/docs/guides/x.mdx'].every(rider) && !['.changeset/config.json', 'docs/x.ts', 'content/docs/x.json', 'content/x.md', 'packages/docs/x.md', '.changeset/a/b.md'].some(rider));
 
@@ -6352,7 +6534,7 @@ async function selfTest() {
         pullChangesetReading({ derivation: { headSha: H, pull: 2 }, paths: [CS], sameCheckout: false, run }).measured === false &&
         pullChangesetReading({ derivation: { headSha: null, pull: 2 }, paths: [CS], sameCheckout: true, run }).measured === false;
     })());
-    assert('lowRiskRowHit-reads-the-arm-rows-only', lowRiskRowHit([SK]) && lowRiskRowHit(['x', UISK]) && !lowRiskRowHit(['.claude/x.md', 'packages/a.ts', 'docs/adr/1.md']) && !lowRiskRowHit(null));
+    assert('lowRiskRowHit-reads-the-arm-rows-only', lowRiskRowHit([SK]) && lowRiskRowHit(['x', UISK]) && lowRiskRowHit(['docs/adr/1.md']) && !lowRiskRowHit(['.claude/x.md', 'packages/a.ts', 'ui/docs/adr/1.md', 'docs/NORTH-STAR.md']) && !lowRiskRowHit(null));
   }
 
   battery('the nested `ui/` workspace rows, on the register (#25712)');
@@ -9047,6 +9229,140 @@ async function selfTest() {
     fakeApi.closeAllConnections?.();
     fakeApi.close();
     rmSync(argvFx, { recursive: true, force: true });
+  }
+
+  battery('⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H');
+  {
+    const REPO = 'objectstack';
+    const ADR = 'docs/adr/0097-upstream-availability.md';
+    const SK = 'skills/objectstack-data/SKILL.md';
+    const CS = '.changeset/33539-adr-note.md';
+    const CS_TEXT = "---\n'@objectstack/skills': patch\n---\n\nwording\n\nClause-②: no\nMetadata-protocol: none\n";
+    const RECORD = ['# ADR-0097: Upstream availability', '', '**Status**: Accepted (2026-07-15)', '', '## Context', '', 'Why.', '', '## Decision', '', '### D1 — refuse', '', 'Refuse it.', '', '## Consequences', '', 'Some.'];
+    // A full-context unified diff over `ops` ([' ', text] | ['+', text] | ['-', text]), the shape `addOnlyDiffArgv` reads.
+    const patchOf = (ops, path = ADR) => {
+      const oldN = ops.filter(([m]) => m !== '+').length;
+      const newN = ops.filter(([m]) => m !== '-').length;
+      return `diff --git a/${path} b/${path}\nindex 1111111..2222222 100644\n--- a/${path}\n+++ b/${path}\n@@ -1,${oldN} +1,${newN} @@\n${ops.map(([m, t]) => `${m}${t}`).join('\n')}\n`;
+    };
+    const keep = (lines = RECORD) => lines.map((t) => [' ', t]);
+    // The note a seat lands: a new section after the last one, a blank line first.
+    const NOTE = [...keep(), ['+', ''], ['+', '## Amendment notes'], ['+', ''], ['+', '> **Note (2026-11-15, #1).** The refusal now names its code.']];
+    const insertAfter = (index, ...added) => [...keep(RECORD.slice(0, index + 1)), ...added.map((t) => ['+', t]), ...keep(RECORD.slice(index + 1))];
+    const adrRow = (patch, over = {}) => ({ path: ADR, status: 'modified', oldMode: '100644', mode: '100644', patch, ...over });
+    const read = (paths, catalog, over = {}) => ({
+      measured: true, reason: null, paths, body: 'Fixes #1\n\nClause-②: no\nMetadata-protocol: none\n', labels: [],
+      timeline: { measured: true, reason: null, events: [] },
+      fork: { measured: true, isFork: false, headRepo: 'o/r', baseRepo: 'o/r' },
+      changesets: { measured: true, reason: null, files: paths.filter((p) => LOW_RISK_CHANGESET_PATH.test(p)).map((path) => ({ path, text: CS_TEXT })) },
+      catalogFiles: { measured: true, reason: null, files: catalog },
+      ...over,
+    });
+    const tier = (paths, reading, repo = REPO) => governedTierFor(paths, repo, GOVERNED_SURFACES, null, reading);
+    const why = (paths, reading) => lowRiskArmVerdict(governedPathsIn(paths, REPO), REPO, reading).reasons.join(' | ');
+    const noteOnly = read([ADR], [adrRow(patchOf(NOTE))]);
+
+    // ⭐ Row 1: an add-only note passes — no changeset owed (the record publishes nothing), the verdict says Tier S.
+    assert('⭐ ROW-1-an-add-only-ADR-note-on-Clause-2-no-is-Tier-S-with-no-changeset', tier([ADR], noteOnly) === GOVERNED_TIER_S && testVerdict([ADR], { repo: REPO, lowRisk: noteOnly }).tier === GOVERNED_TIER_S, why([ADR], noteOnly));
+    assert('⭐ a-note-inserted-under-Context-or-a-note-in-a-quote-under-Consequences-is-Tier-S', [insertAfter(6, '', '> **Note (2026-11-15).** Context grew.'), insertAfter(16, '', '> Note: still true.')].every((ops) => tier([ADR], read([ADR], [adrRow(patchOf(ops))])) === GOVERNED_TIER_S));
+    assert('an-ADR-note-beside-its-docs-prose-rider-and-a-skills-wording-change-with-its-changeset-is-Tier-S', tier([ADR, SK, CS, 'docs/agents/x.md'], read([ADR, SK, CS, 'docs/agents/x.md'], [adrRow(patchOf(NOTE)), { path: SK, status: 'modified', oldMode: '100644', mode: '100644' }])) === GOVERNED_TIER_S);
+    assert('a-changeset-an-ADR-note-carries-is-still-read-and-held-to-the-catalog-patch-shape', tier([ADR, CS], read([ADR, CS], [adrRow(patchOf(NOTE))])) === GOVERNED_TIER_S && tier([ADR, CS], read([ADR, CS], [adrRow(patchOf(NOTE))], { changesets: { measured: true, reason: null, files: [{ path: CS, text: "---\n'@objectstack/spec': patch\n---\n\nClause-②: no\nMetadata-protocol: none\n" }] } })) === GOVERNED_TIER_H);
+    // ⛔ Row 2: a removed line — an edit is a removal plus an addition.
+    const edited = patchOf([...keep(RECORD.slice(0, 12)), ['-', 'Refuse it.'], ['+', 'Refuse it loudly.'], ...keep(RECORD.slice(13))]);
+    assert('⛔ ROW-2-a-removed-or-edited-line-stays-H', tier([ADR], read([ADR], [adrRow(edited)])) === GOVERNED_TIER_H && /removes 1 line/.test(why([ADR], read([ADR], [adrRow(edited)]))) && tier([ADR], read([ADR], [adrRow(patchOf([...keep(RECORD.slice(0, 16)), ['-', 'Some.']]))])) === GOVERNED_TIER_H);
+    // ⛔ Row 3: a changed Status — and an ADDED status line in any spelling, with no removal at all.
+    const restatus = patchOf([...keep(RECORD.slice(0, 2)), ['-', RECORD[2]], ['+', '**Status**: Superseded by ADR-0200'], ...keep(RECORD.slice(3))]);
+    assert('⛔ ROW-3-a-changed-Status-line-stays-H', tier([ADR], read([ADR], [adrRow(restatus)])) === GOVERNED_TIER_H && /adds a `Status:` line at line 3/.test(why([ADR], read([ADR], [adrRow(restatus)]))));
+    assert('⛔ an-added-Status-line-bold-bulleted-quoted-tabled-or-in-frontmatter-spelling-stays-H-even-with-no-removal',
+      ['**Status**: Amended (2026-11-15)', '- **Status:** Accepted', '> Status: Superseded', '| **Status** | Deprecated |', 'status: superseded'].every((l) => tier([ADR], read([ADR], [adrRow(patchOf(insertAfter(3, l)))])) === GOVERNED_TIER_H));
+    // ⛔ Row 4: a line under a Decision heading — nested sub-headings, a blank line and a Decision heading of one's own included.
+    assert('⛔ ROW-4-a-line-under-a-Decision-heading-stays-H', tier([ADR], read([ADR], [adrRow(patchOf(insertAfter(12, '', '> **Note.** D1 now also logs.')))])) === GOVERNED_TIER_H && /under `?D1 — refuse`?|under .*Decision/.test(why([ADR], read([ADR], [adrRow(patchOf(insertAfter(12, '', '> **Note.** D1 now also logs.')))]))));
+    assert('⛔ a-blank-line-under-Decision-a-new-Decision-heading-or-a-Status-section-stays-H',
+      [insertAfter(9, ''), [...keep(), ['+', ''], ['+', '## Decision addendum'], ['+', 'More.']], [...keep(), ['+', ''], ['+', '## Status'], ['+', 'Superseded.']], [...keep(), ['+', ''], ['+', 'Decisions'], ['+', '---'], ['+', 'Setext.']]]
+        .every((ops) => tier([ADR], read([ADR], [adrRow(patchOf(ops))])) === GOVERNED_TIER_H));
+    // ⛔ Rows 5 and 6: a new ADR file and a rename (read with `--no-renames`, so a delete plus an add) — and a delete.
+    const created = { path: 'docs/adr/0200-new.md', status: 'added', oldMode: null, mode: null };
+    assert('⛔ ROW-5-a-new-ADR-file-stays-H', tier(['docs/adr/0200-new.md'], read(['docs/adr/0200-new.md'], [created])) === GOVERNED_TIER_H && /added, deleted or renamed/.test(why(['docs/adr/0200-new.md'], read(['docs/adr/0200-new.md'], [created]))));
+    const moved = ['docs/adr/0097-upstream-availability.md', 'docs/adr/0097-upstream.md'];
+    assert('⛔ ROW-6-a-renamed-or-deleted-ADR-file-stays-H', tier(moved, read(moved, [{ path: moved[0], status: 'deleted', oldMode: '100644', mode: '000000' }, { path: moved[1], status: 'added', oldMode: '000000', mode: '100644' }])) === GOVERNED_TIER_H &&
+      tier(moved, read(moved, [{ path: moved[1], status: 'renamed', oldMode: null, mode: null }, { path: moved[0], status: 'renamed', oldMode: null, mode: null }])) === GOVERNED_TIER_H &&
+      tier([ADR], read([ADR], [{ path: ADR, status: 'deleted', oldMode: '100644', mode: '000000' }])) === GOVERNED_TIER_H);
+
+    // ⛔ Fail closed: no diff, an unparseable one, several hunks, a short read, a binary, a non-Markdown file.
+    assert('⛔ a-modified-ADR-row-with-no-diff-read-stays-H', tier([ADR], read([ADR], [adrRow(null)])) === GOVERNED_TIER_H && /the diff of `docs\/adr\/0097-upstream-availability\.md` was not read/.test(why([ADR], read([ADR], [adrRow(null)]))) && tier([ADR], read([ADR], [adrRow(undefined)])) === GOVERNED_TIER_H);
+    assert('⛔ several-hunks-no-hunk-a-binary-a-second-file-or-counts-that-disagree-stay-H', [
+      `${patchOf(NOTE)}@@ -40,1 +44,2 @@\n x\n+y\n`, 'diff --git a/x b/x\n', 'diff --git a/x b/x\nBinary files a/x and b/x differ\n', `${patchOf(NOTE)}diff --git a/y b/y\n`, patchOf(NOTE).replace(/@@ -1,(\d+) \+1,(\d+) @@/, '@@ -1,$1 +1,99 @@'),
+    ].every((p) => tier([ADR], read([ADR], [adrRow(p)])) === GOVERNED_TIER_H));
+    assert('⛔ an-image-or-JSON-under-the-ADR-tree-stays-H', tier(['docs/adr/img/x.png'], read(['docs/adr/img/x.png'], [{ path: 'docs/adr/img/x.png', status: 'modified', oldMode: '100644', mode: '100644' }])) === GOVERNED_TIER_H && /not Markdown/.test(why(['docs/adr/img/x.png'], read(['docs/adr/img/x.png'], []))));
+    assert('⛔ two-commits-one-add-only-and-one-editing-stays-H-every-row-is-read', tier([ADR], read([ADR], [adrRow(patchOf(NOTE)), adrRow(edited)])) === GOVERNED_TIER_H);
+    // ⛔ The arm's other conditions, reused for the ADR leg, not re-spelled.
+    assert('⛔ the-arm-conditions-hold-for-the-ADR-leg-Clause-2-yes-a-security-label-or-name-a-fork-or-an-unmeasured-reading-is-H',
+      tier([ADR], read([ADR], [adrRow(patchOf(NOTE))], { body: 'Clause-②: yes\nMetadata-protocol: none\n' })) === GOVERNED_TIER_H &&
+      tier([ADR], read([ADR], [adrRow(patchOf(NOTE))], { labels: ['security'] })) === GOVERNED_TIER_H &&
+      tier(['docs/adr/0143-connector-auth-open-tier.md'], read(['docs/adr/0143-connector-auth-open-tier.md'], [adrRow(patchOf(NOTE), { path: 'docs/adr/0143-connector-auth-open-tier.md' })])) === GOVERNED_TIER_H &&
+      tier([ADR], read([ADR], [adrRow(patchOf(NOTE))], { fork: { measured: true, isFork: true, headRepo: 'x/f', baseRepo: 'o/r' } })) === GOVERNED_TIER_H &&
+      tier([ADR], { measured: false, reason: 'unread' }) === GOVERNED_TIER_H && tier([ADR], null) === GOVERNED_TIER_H && governedTierFor([ADR], REPO) === GOVERNED_TIER_H);
+    assert('⛔ the-ADR-leg-moves-nothing-beside-another-governed-row-in-another-repository-or-under-ui-docs-adr',
+      tier([ADR, 'docs/NORTH-STAR.md'], read([ADR, 'docs/NORTH-STAR.md'], [adrRow(patchOf(NOTE))])) === GOVERNED_TIER_H &&
+      tier([ADR, 'AGENTS.md'], read([ADR, 'AGENTS.md'], [adrRow(patchOf(NOTE))])) === GOVERNED_TIER_H &&
+      ['objectui', 'cloud', 'hotcrm'].every((r) => tier([ADR], noteOnly, r) === GOVERNED_TIER_H) &&
+      tier(['ui/docs/adr/0001-x.md'], read(['ui/docs/adr/0001-x.md'], [adrRow(patchOf(NOTE), { path: 'ui/docs/adr/0001-x.md' })])) === GOVERNED_TIER_H);
+    assert('⛔ a-skills-change-beside-an-ADR-note-still-owes-its-changeset', tier([ADR, SK], read([ADR, SK], [adrRow(patchOf(NOTE)), { path: SK, status: 'modified', oldMode: '100644', mode: '100644' }])) === GOVERNED_TIER_H && /no changeset/.test(why([ADR, SK], read([ADR, SK], [adrRow(patchOf(NOTE)), { path: SK, status: 'modified', oldMode: '100644', mode: '100644' }]))));
+
+    // The heading reader: the title scopes nothing; fences and frontmatter hide headings; setext and quoted headings count.
+    const h = addOnlyHeadingReading(['---', 'title: x', '---', '# ADR: a decision record', 'top', '```', '## Decision', '```', 'after fence', 'Decision', '========', 'under setext', '> ## Status', 'under quoted']);
+    assert('addOnlyHeadingReading-the-title-scopes-nothing-fences-and-frontmatter-hide-headings-setext-and-quoted-ones-count',
+      h[4].under.length === 0 && h[6].heading === null && h[8].under.length === 0 && h[9].heading?.text === 'Decision' && h[10].heading?.text === 'Decision' &&
+      h[11].under.map((x) => x.text).join() === 'Decision' && h[12].heading?.text === 'Status' && h[13].under.map((x) => x.text).join() === 'Decision,Status', JSON.stringify(h));
+    assert('a-title-naming-a-decision-does-not-make-every-note-H-and-CRLF-reads-the-same', tier([ADR], read([ADR], [adrRow(patchOf([[' ', '# ADR-0099: one axis for tier decisions'], [' ', ''], [' ', 'Body.'], ['+', ''], ['+', '> Note.']]))])) === GOVERNED_TIER_S &&
+      tier([ADR], read([ADR], [adrRow(patchOf(NOTE).replace(/\n/g, '\r\n'))])) === GOVERNED_TIER_S);
+    assert('the-ADR-constants-are-frozen-and-read-as-the-card-says', Object.isFrozen(LOW_RISK_ADD_ONLY_FILE_PATTERNS) && LOW_RISK_ADD_ONLY_FILE_PATTERNS.length === 1 && LOW_RISK_ADD_ONLY_RULED_HEADING.test('2. Decision') && LOW_RISK_ADD_ONLY_RULED_HEADING.test('Current status') && !LOW_RISK_ADD_ONLY_RULED_HEADING.test('Consequences') && !LOW_RISK_ADD_ONLY_RULED_HEADING.test('Statuses'));
+    assert('the-H-words-name-the-ADR-reason', /low-risk skills arm .*Tier H/.test(renderTestVerdict(testVerdict([ADR], { repo: REPO, lowRisk: read([ADR], [adrRow(edited)]) }))) && /not an add-only note/.test(renderTestVerdict(testVerdict([ADR], { repo: REPO, lowRisk: read([ADR], [adrRow(edited)]) }))));
+
+    // `--pr` and the relay: `pullCatalogReading` carries each modified ADR file's diff, merge base to head, at full context.
+    assert('pullCatalogReading-carries-the-full-context-diff-of-a-modified-ADR-file-and-none-for-a-skill-or-an-added-file', (() => {
+      const [Hd, Bs, Mb] = ['a'.repeat(40), 'b'.repeat(40), 'c'.repeat(40)];
+      const seen = [];
+      const run = (argv) => {
+        if (argv[0] === 'cat-file') return { ok: true, out: '' };
+        if (argv[0] === 'merge-base') return { ok: true, out: Mb };
+        if (argv[0] === 'ls-tree') return { ok: true, out: `100644 blob ${'f'.repeat(40)}\t${argv[3]}` };
+        if (argv[0] === 'diff') { seen.push(argv); return { ok: true, out: patchOf(NOTE).trim() }; }
+        return { ok: false, out: '' };
+      };
+      const statuses = [{ path: ADR, status: 'modified' }, { path: SK, status: 'modified' }, { path: 'docs/adr/0200-new.md', status: 'added' }];
+      const r = pullCatalogReading({ derivation: { headSha: Hd, baseSha: Bs, pull: 2 }, statuses, paths: [ADR, SK, 'docs/adr/0200-new.md'], sameCheckout: true, run });
+      const failed = pullCatalogReading({ derivation: { headSha: Hd, baseSha: Bs, pull: 2 }, statuses: [{ path: ADR, status: 'modified' }], paths: [ADR], sameCheckout: true, run: (argv) => (argv[0] === 'diff' ? { ok: false, out: '' } : run(argv)) });
+      return r.measured === true && typeof r.files[0].patch === 'string' && !('patch' in r.files[1]) && !('patch' in r.files[2]) &&
+        seen.length === 1 && seen[0].join(' ') === addOnlyDiffArgv(['diff'], [Mb, Hd], ADR).join(' ') && seen[0].includes(`--unified=${LOW_RISK_ADD_ONLY_CONTEXT}`) && seen[0].includes('--no-renames') && seen[0].includes('--no-textconv') &&
+        tier([ADR], read([ADR], r.files.filter((f) => f.path === ADR))) === GOVERNED_TIER_S && failed.files[0].patch === null && tier([ADR], read([ADR], failed.files)) === GOVERNED_TIER_H;
+    })());
+
+    // REAL git: the argv reads one hunk over the whole file, trimmed as `tryGit` trims, in both directions.
+    const adrFx = mkdtempSync(join(tmpdir(), 'governed-merges-adr-leg-'));
+    try {
+      const fg = (cwd, ...rest) =>
+        execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
+          { cwd, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+      fg(adrFx, 'init', '-q', '.');
+      mkdirSync(join(adrFx, 'docs/adr'), { recursive: true });
+      const long = [...RECORD, '', '## Notes', '', ...Array.from({ length: 40 }, (_, i) => `Filler ${i}.`)];
+      writeFileSync(join(adrFx, ADR), `${long.join('\n')}\n`);
+      fg(adrFx, 'add', '-A');
+      fg(adrFx, 'commit', '-qm', 'seed');
+      const base = fg(adrFx, 'rev-parse', 'HEAD').trim();
+      const at = (lines) => { writeFileSync(join(adrFx, ADR), `${lines.join('\n')}\n`); fg(adrFx, 'commit', '-qam', 'x'); return fg(adrFx, 'rev-parse', 'HEAD').trim(); };
+      const noted = at([...long.slice(0, 3), '', '> Note (2026-11-15): seen.', ...long.slice(3), '', '> **Note.** And at the end.']);
+      const underD = at([...long.slice(0, 12), 'Also log.', ...long.slice(12)]);
+      const viaGit = (from, to) => addOnlyNoteReasons({ path: ADR, patch: tryGit(adrFx, addOnlyDiffArgv(['diff'], [from, to], ADR)).out });
+      const viaTree = (sha) => addOnlyNoteReasons({ path: ADR, patch: git(adrFx, addOnlyDiffArgv(['diff-tree', '-p', '--no-commit-id', '-m', '--first-parent'], [sha], ADR)) });
+      assert('⭐ REAL-git-an-add-only-note-far-apart-from-another-reads-as-ONE-hunk-and-passes-by-diff-and-by-diff-tree', viaGit(base, noted).length === 0 && viaTree(noted).length === 0, JSON.stringify([viaGit(base, noted), viaTree(noted)]));
+      assert('⛔ REAL-git-a-line-under-Decision-a-status-edit-and-the-two-commits-read-together-stay-reasons', viaTree(underD).some((r) => /under/.test(r)) && viaGit(noted, underD).some((r) => /removes/.test(r)) && viaGit(base, underD).some((r) => /under/.test(r)));
+    } catch (error) {
+      assert('the-ADR-leg-real-git-fixture-could-be-built-and-run', false, String(error?.message ?? error).split('\n')[0]);
+    } finally {
+      rmSync(adrFx, { recursive: true, force: true });
+    }
   }
 
   battery('⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record');
