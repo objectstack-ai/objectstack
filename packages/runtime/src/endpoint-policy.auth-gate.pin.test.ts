@@ -41,6 +41,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+// The dispatcher's reach loads `@objectstack/metadata` inside a function body
+// (`standalone-stack.ts`); paid here, during collection, so no case's clocked
+// window pays that first load (`check:test-source-alias`).
+import '@objectstack/metadata';
 import { LiteKernel, Plugin, PluginContext, isAuthGateAllowlisted, hashApiKey } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { ApiEndpointSchema, type ApiEndpoint } from '@objectstack/spec/api';
