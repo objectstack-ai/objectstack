@@ -192,6 +192,14 @@ function connectorPairKey(node: Record<string, unknown> | null | undefined): str
   return JSON.stringify([str(block.connectorId), str(block.actionId)]);
 }
 
+/** A node's committed connector and action, as the registry lookup takes them. */
+function connectorPair(node: Record<string, unknown>): [string | undefined, string | undefined] {
+  const cc = node.connectorConfig;
+  const block = cc && typeof cc === 'object' && !Array.isArray(cc) ? (cc as Record<string, unknown>) : {};
+  const str = (v: unknown) => (typeof v === 'string' && v !== '' ? v : undefined);
+  return [str(block.connectorId), str(block.actionId)];
+}
+
 /** Whether a field writes the connector or the action of a `connector_action` node. */
 function isConnectorPairPath(path: readonly string[]): boolean {
   return path.length === 2 && path[0] === 'connectorConfig' && (path[1] === 'connectorId' || path[1] === 'actionId');
@@ -595,8 +603,12 @@ export function FlowNodeInspector({
     // location, so the node never carries a stale duplicate (engine + designer agree).
     if (field.fallbackPath) nextNode = setAtPath(nextNode, field.fallbackPath, undefined);
     // objectstack#33346 (row 254) — a new connector or action resets the Input
-    // map to the new pair's inputs (none, unless this inspector set some aside
-    // for that pair earlier), so the old action's keys are never saved or sent.
+    // map to the new pair's inputs, so the old action's undeclared keys are
+    // never saved or sent. A map this inspector set aside for that pair earlier
+    // comes back; otherwise, when the new action's input schema is known, every
+    // held key it DECLARES is kept as it was (value or binding) and the rest are
+    // dropped; with no known schema (no catalog, an action id mid-typing) the
+    // map is empty: nothing undeclared is guessed through.
     if (isConnectorPairPath(path)) {
       const fromKey = connectorPairKey(node);
       const toKey = connectorPairKey(nextNode);
@@ -606,7 +618,18 @@ export function FlowNodeInspector({
         const held = cc && typeof cc === 'object' && !Array.isArray(cc) ? (cc as Record<string, unknown>).input : undefined;
         if (held !== undefined) stash.set(JSON.stringify([node.id, fromKey]), held);
         const back = stash.get(JSON.stringify([node.id, toKey]));
-        nextNode = setAtPath(nextNode, [...CONNECTOR_INPUT_PATH], back ?? (held === undefined ? undefined : {}));
+        let reset: unknown = back;
+        if (reset === undefined && held !== undefined) {
+          const declared = connectorInputFields(connectorActionInputSchema(connectors, ...connectorPair(nextNode)))?.declaredKeys;
+          const kept: Record<string, unknown> = {};
+          if (declared && held && typeof held === 'object' && !Array.isArray(held)) {
+            for (const [k, v] of Object.entries(held as Record<string, unknown>)) {
+              if (declared.includes(k)) kept[k] = v;
+            }
+          }
+          reset = kept;
+        }
+        nextNode = setAtPath(nextNode, [...CONNECTOR_INPUT_PATH], reset);
       }
     }
     const patch = loc.write(withoutSpecRefusedKeys(nextNode));

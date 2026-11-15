@@ -2,7 +2,9 @@
 
 /**
  * FlowNodeInspector — switching a `connector_action` node's action resets its
- * Input map to the new action's inputs (objectstack#33346, row 254).
+ * Input map to the new action's inputs (objectstack#33346, row 254): the held
+ * keys the new action declares are kept as they were, the rest are dropped,
+ * and with no known schema for the new action the map is empty.
  *
  * The defect: the Action box wrote `connectorConfig.actionId` alone, so the
  * previous action's input keys stayed in `connectorConfig.input`. They drew as
@@ -48,6 +50,14 @@ const POST_MESSAGE = {
     thread_ts: { type: 'string', description: 'Thread root ts to reply into' },
   },
 };
+const SCHEDULE_MESSAGE = {
+  type: 'object',
+  required: ['channel', 'post_at'],
+  properties: {
+    channel: { type: 'string', description: 'Channel id, user id, or #name' },
+    post_at: { type: 'string', description: 'Unix time to post at' },
+  },
+};
 const ADD_REACTION = {
   type: 'object',
   required: ['name'],
@@ -74,6 +84,7 @@ function mockRegistry() {
                 state: 'ready',
                 actions: [
                   { key: 'chat.postMessage', label: 'Post Message', inputSchema: POST_MESSAGE },
+                  { key: 'chat.scheduleMessage', label: 'Schedule Message', inputSchema: SCHEDULE_MESSAGE },
                   { key: 'reactions.add', label: 'Add Reaction', inputSchema: ADD_REACTION },
                 ],
               },
@@ -87,6 +98,8 @@ function mockRegistry() {
 }
 
 const STORED_INPUT = { channel: 'C123', thread_ts: '111.222', legacy_note: 'keep me' };
+/** `channel` bound to an expression, so a kept key is seen to keep its stored form, not only a value. */
+const CHANNEL_BINDING = { dialect: 'cel', source: 'trigger.record.slack_channel' };
 
 function makeDraft(connectorConfig: Record<string, unknown>) {
   return {
@@ -136,7 +149,26 @@ function switchAction(live: ReturnType<typeof renderLive>, from: string, to: str
 }
 
 describe('#33346 row 254 — switching the action resets the Input map', () => {
-  it('saves none of the previous action\'s inputs, and draws none of them', async () => {
+  it('keeps the held inputs the new action declares, as they were, and drops the rest', async () => {
+    mockRegistry();
+    const live = renderLive(
+      makeDraft({ connectorId: 'slack', actionId: 'chat.postMessage', input: { ...STORED_INPUT, channel: CHANNEL_BINDING } }),
+    );
+    expect(await screen.findByText('Channel')).toBeTruthy();
+
+    switchAction(live, 'chat.postMessage', 'chat.scheduleMessage');
+
+    const saved = live.savedConfig();
+    expect(saved.actionId).toBe('chat.scheduleMessage');
+    // `channel` is declared by both actions: its binding stays; `thread_ts` and
+    // the undeclared `legacy_note` are not saved (so not sent).
+    expect(saved.input).toEqual({ channel: CHANNEL_BINDING });
+    expect(await screen.findByText('Unix time to post at')).toBeTruthy();
+    expect(screen.queryByDisplayValue('111.222')).toBeNull();
+    expect(screen.queryByDisplayValue('keep me')).toBeNull();
+  });
+
+  it('CONTROL — a new action that shares no key saves none of the previous inputs, and draws none', async () => {
     mockRegistry();
     const live = renderLive(makeDraft({ connectorId: 'slack', actionId: 'chat.postMessage', input: STORED_INPUT }));
     expect(await screen.findByText('Channel')).toBeTruthy();
@@ -167,12 +199,13 @@ describe('#33346 row 254 — switching the action resets the Input map', () => {
     expect(live.savedConfig().input).toEqual({});
   });
 
-  it('typing back to the first action gives its inputs back (never saved meanwhile)', async () => {
+  it('an action with no known schema (mid-typing) gets an empty map; typing back gives the inputs back', async () => {
     mockRegistry();
     const live = renderLive(makeDraft({ connectorId: 'slack', actionId: 'chat.postMessage', input: STORED_INPUT }));
     expect(await screen.findByText('Channel')).toBeTruthy();
 
-    // The box commits per keystroke: deleting the last letter is already a switch.
+    // The box commits per keystroke: deleting the last letter is already a switch,
+    // to an action the catalog does not know, so nothing is guessed through.
     switchAction(live, 'chat.postMessage', 'chat.postMessag');
     expect(live.savedConfig().input).toEqual({});
     switchAction(live, 'chat.postMessag', 'chat.postMessage');
