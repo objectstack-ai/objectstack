@@ -62,7 +62,7 @@ import { isCloudManaged } from '@objectstack/core';
 import { VENDOR_ROLE_SCALAR_ADMIN_PATHS } from './admin-impersonate-endpoint.js';
 import { setAuthActorResolver } from './auth-actor-attribution.js';
 import { AuthManager } from './auth-manager.js';
-import { passwordSignInDoorOf } from './auth-manager-sign-in-lockout.js';
+import { passwordSignInDoorOf, recordRequestSessionOfRecord } from './auth-manager-sign-in-lockout.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import {
   isLastLocalCredentialHolder,
@@ -213,6 +213,14 @@ export async function globalBeforeHook(
   // read nothing, so they keep their place. `one-account-per-request.ts`
   // states the rule and how each credential is read.
   await refuseRequestNamingDifferentAccounts(ctx);
+
+  // ── ADR-0069 D2: the session of record this request presents ─────
+  // Read from the store before the endpoint runs (and before it can replace
+  // that row), so the lock's refusal at session creation tells a sign-in
+  // from a new session for an account the caller is already signed in as by
+  // the session of record, never by the request's own view of it. Lockout
+  // on only; see `auth-manager-sign-in-lockout.ts`.
+  await recordRequestSessionOfRecord.call(this, ctx);
 
   // ── [#33203] Cloud-managed: no reset door sets a local password ──
   // A hosted environment sets no local password for anyone, a platform

@@ -24,6 +24,8 @@ import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 import type { AuthSessionAuditEventInput } from './auth-session-audit';
+import { PLATFORM_IDP_PROVIDER_ID } from './implicit-account-linking';
+import { refuseLockedAccountSession } from './auth-manager-sign-in-lockout';
 // Vendor modules paid at module load, never inside a clocked case.
 import 'better-auth';
 import 'better-auth/api';
@@ -79,6 +81,16 @@ function totp(secret: Buffer): string {
   return String(code % 1_000_000).padStart(6, '0');
 }
 
+/** The unsigned value of the response cookie whose name ends with `suffix`. */
+const cookieValue = (res: Response, suffix: string): string | undefined => {
+  const pair = (res.headers.getSetCookie?.() ?? [])
+    .map((c) => c.split(';')[0])
+    .find((p) => p.split('=')[0].endsWith(suffix));
+  if (!pair) return undefined;
+  const raw = decodeURIComponent(pair.split('=').slice(1).join('='));
+  return raw.slice(0, raw.lastIndexOf('.'));
+};
+
 /** A response's Set-Cookie values as one request Cookie header (expired ones dropped). */
 const cookieHeader = (res: Response): string =>
   (res.headers.getSetCookie?.() ?? [])
@@ -100,7 +112,7 @@ const arrange = async (lockoutRefusal: Refusal = 'uniform', options: { lockoutTh
     lockoutThreshold: options.lockoutThreshold ?? THRESHOLD,
     lockoutDurationMinutes: 15,
     lockoutRefusal,
-    plugins: { twoFactor: true, phoneNumber: true, magicLink: true, admin: true },
+    plugins: { twoFactor: true, phoneNumber: true, magicLink: true, admin: true, deviceAuthorization: true },
     emailVerification: { autoSignInAfterVerification: true },
     getAuditSink: () => ({
       recordAuthEvent: async (event: AuthSessionAuditEventInput) => {
@@ -215,6 +227,22 @@ const answerOf = async (res: Response) => {
 /** What `/sign-in/email` answers this locked account with the correct password: the reference. */
 const passwordSignInAnswer = async (rig: Rig, email: string) =>
   answerOf(await rig.post('/sign-in/email', { email, password: PASSWORD }));
+
+/**
+ * Stage the second factor's one-time code for a pending challenge exactly as
+ * the vendor stores it (`2fa-otp-` + the challenge cookie's value, `CODE:0`,
+ * kept in plain): this deployment wires no sender for that code.
+ */
+const stageSecondFactorOtp = async (rig: Rig, challenged: Response, code: string) => {
+  const key = cookieValue(challenged, 'two_factor');
+  expect(key, 'the challenge set its two-factor cookie').toBeTruthy();
+  const auth: any = await rig.manager.getAuthContext();
+  await auth.internalAdapter.createVerificationValue({
+    identifier: `2fa-otp-${key}`,
+    value: `${code}:0`,
+    expiresAt: new Date(Date.now() + 5 * 60_000),
+  });
+};
 
 const EXPECTED_CODE: Record<Refusal, string> = {
   explicit: 'ACCOUNT_LOCKED',
@@ -356,6 +384,21 @@ describe.each(['explicit', 'uniform'] as const)(
       expect(rig.sessionRows(rig.enrolledId), 'no session row was written').toBe(rowsBefore);
     }, 60_000);
 
+    it('/two-factor/verify-otp: an enrolled account locked after its challenge gets no session', async () => {
+      const rig = await arrange(refusal);
+      const challenged = await rig.post('/sign-in/email', { email: ENROLLED.email, password: PASSWORD });
+      expect(((await challenged.clone().json()) as any).twoFactorRedirect).toBe(true);
+      await stageSecondFactorOtp(rig, challenged, '424242');
+      rig.lock(ENROLLED.email);
+      const reference = await passwordSignInAnswer(rig, ENROLLED.email);
+      const rowsBefore = rig.sessionRows(rig.enrolledId);
+
+      const res = await rig.post('/two-factor/verify-otp', { code: '424242' }, { cookie: cookieHeader(challenged) });
+
+      expect(await answerOf(res)).toEqual(reference);
+      expect(rig.sessionRows(rig.enrolledId), 'no session row was written').toBe(rowsBefore);
+    }, 60_000);
+
     it('a code door gives an enrolled locked account no second-factor challenge, and no session', async () => {
       const rig = await arrange(refusal);
       rig.lock(ENROLLED.email);
@@ -439,6 +482,18 @@ describe('an unlocked account, and a lock that has run out, still sign in at eve
     const rig = await arrange();
     const res = await rig.post('/sign-in/phone-number', { phoneNumber: PLAIN.phone, password: PASSWORD });
     expect(res.status, await res.clone().text()).toBe(200);
+  }, 60_000);
+
+  it('CONTROL: /two-factor/verify-otp completes the challenge for an unlocked enrolled account', async () => {
+    const rig = await arrange();
+    const challenged = await rig.post('/sign-in/email', { email: ENROLLED.email, password: PASSWORD });
+    await stageSecondFactorOtp(rig, challenged, '424242');
+    const rowsBefore = rig.sessionRows(rig.enrolledId);
+
+    const res = await rig.post('/two-factor/verify-otp', { code: '424242' }, { cookie: cookieHeader(challenged) });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(rig.sessionRows(rig.enrolledId)).toBe(rowsBefore + 1);
   }, 60_000);
 
   it('CONTROL: the second-factor challenge is unchanged for an unlocked enrolled account', async () => {
@@ -561,5 +616,237 @@ describe('CONTROL: administrative sessions for a locked account keep working', (
     const minted = await rig.manager.mintPrincipalSession({ userId: rig.plainId, principalKind: 'human' } as any, { ttlSeconds: 60 });
 
     expect(typeof minted.token).toBe('string');
+  }, 60_000);
+});
+
+describe('the device grant: a locked account is not signed in on a device', () => {
+  /** Start a device sign-in, approve it as the account, and poll for the device's session. */
+  const deviceSignIn = async (rig: Rig, approverCookie: string) => {
+    const started = await rig.post('/device/code', { client_id: 'locked-door-cli' });
+    expect(started.status, await started.clone().text()).toBe(200);
+    const { device_code, user_code } = (await started.json()) as { device_code: string; user_code: string };
+    const approved = await rig.post('/device/approve', { userCode: user_code }, { cookie: approverCookie });
+    expect(approved.status, await approved.clone().text()).toBe(200);
+    return rig.post('/device/token', {
+      grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+      device_code,
+      client_id: 'locked-door-cli',
+    });
+  };
+
+  it.each(['explicit', 'uniform'] as const)('a locked account gets no device session (lockoutRefusal: %s)', async (refusal) => {
+    const rig = await arrange(refusal);
+    rig.lock(PLAIN.email);
+    const reference = await passwordSignInAnswer(rig, PLAIN.email);
+    const rowsBefore = rig.sessionRows(rig.plainId);
+
+    const res = await deviceSignIn(rig, rig.plainCookie);
+
+    expect(await answerOf(res)).toEqual(reference);
+    expect(rig.sessionRows(rig.plainId), 'no session row was written').toBe(rowsBefore);
+    const rows = rig.events.filter((e: any) => e?.action === 'login_failed' && e.userId === rig.plainId);
+    expect(rows.map((e: any) => e.context)).toEqual([{ endpoint: '/device/token', reason: 'ACCOUNT_LOCKED' }]);
+  }, 60_000);
+
+  it('CONTROL: an unlocked account gets its device session', async () => {
+    const rig = await arrange();
+    const rowsBefore = rig.sessionRows(rig.plainId);
+
+    const res = await deviceSignIn(rig, rig.plainCookie);
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(typeof ((await res.json()) as any).access_token).toBe('string');
+    expect(rig.sessionRows(rig.plainId)).toBe(rowsBefore + 1);
+  }, 60_000);
+});
+
+describe('external-identity sign-in: a locked account is not signed in through its identity provider', () => {
+  const IDP = 'https://idp.locked-door.test';
+  const IDP_EMAIL = 'idp-person@example.test';
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!url.startsWith(IDP)) return realFetch(input, init);
+      if (url.endsWith('/token')) {
+        return new Response(JSON.stringify({ access_token: 'at-idp', token_type: 'Bearer', expires_in: 3600 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/userinfo')) {
+        return new Response(
+          JSON.stringify({ sub: 'idp-sub-1', id: 'idp-sub-1', email: IDP_EMAIL, email_verified: true, name: 'IdP Person' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return new Response('not found', { status: 404 });
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const idpDeployment = (lockoutRefusal: Refusal) => {
+    const engine: any = createMemoryEngine();
+    const events: AuthSessionAuditEventInput[] = [];
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: ORIGIN,
+      dataEngine: engine,
+      lockoutThreshold: THRESHOLD,
+      lockoutDurationMinutes: 15,
+      lockoutRefusal,
+      oidcProviders: [
+        {
+          providerId: PLATFORM_IDP_PROVIDER_ID,
+          clientId: 'idp-client',
+          clientSecret: 'idp-secret',
+          authorizationUrl: `${IDP}/authorize`,
+          tokenUrl: `${IDP}/token`,
+          userInfoUrl: `${IDP}/userinfo`,
+          pkce: false,
+        },
+      ],
+      getAuditSink: () => ({
+        recordAuthEvent: async (event: AuthSessionAuditEventInput) => {
+          events.push(event);
+        },
+      }),
+    } as any);
+    const signInWithIdp = async (): Promise<Response> => {
+      const begin = await manager.handleRequest(
+        new Request(`${BASE}/sign-in/social`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: ORIGIN },
+          body: JSON.stringify({ provider: PLATFORM_IDP_PROVIDER_ID, callbackURL: `${ORIGIN}/after-sign-in`, disableRedirect: true }),
+        }),
+      );
+      expect(begin.status, await begin.clone().text()).toBe(200);
+      const state = new URL(((await begin.json()) as { url: string }).url).searchParams.get('state');
+      return manager.handleRequest(
+        new Request(`${BASE}/callback/${PLATFORM_IDP_PROVIDER_ID}?code=code-1&state=${encodeURIComponent(String(state))}`, {
+          headers: { cookie: cookieHeader(begin) },
+        }),
+      );
+    };
+    const userRow = () => ((engine.tables.get('sys_user') ?? []) as any[]).find((r) => r.email === IDP_EMAIL);
+    const sessionRows = () =>
+      ((engine.tables.get('sys_session') ?? []) as any[]).filter((r) => String(r.user_id ?? r.userId) === String(userRow()?.id)).length;
+    return { manager, events, signInWithIdp, userRow, sessionRows };
+  };
+
+  it.each(['explicit', 'uniform'] as const)('a locked account gets no session from its identity provider (lockoutRefusal: %s)', async (refusal) => {
+    const d = idpDeployment(refusal);
+    const first = await d.signInWithIdp();
+    expect(first.status, await first.clone().text()).toBe(302);
+    expect(d.userRow(), 'the first sign-in made the account').toBeDefined();
+    const row = d.userRow();
+    row.locked_until = new Date(Date.now() + 10 * 60_000);
+    const rowsBefore = d.sessionRows();
+
+    const res = await d.signInWithIdp();
+
+    expect(res.status).toBe(EXPECTED_STATUS[refusal]);
+    expect((await answerOf(res)).code).toBe(EXPECTED_CODE[refusal]);
+    expect(d.sessionRows(), 'no session row was written').toBe(rowsBefore);
+    const rows = d.events.filter((e: any) => e?.action === 'login_failed' && e.userId === row.id);
+    expect(rows.map((e: any) => e.context)).toEqual([{ endpoint: '/callback/:id', reason: 'ACCOUNT_LOCKED' }]);
+  }, 60_000);
+
+  it('CONTROL: an unlocked account signs in through its identity provider', async () => {
+    const d = idpDeployment('explicit');
+    await d.signInWithIdp();
+    const rowsBefore = d.sessionRows();
+
+    const res = await d.signInWithIdp();
+
+    expect(res.status, await res.clone().text()).toBe(302);
+    expect(d.sessionRows()).toBe(rowsBefore + 1);
+  }, 60_000);
+});
+
+describe("a password door's session is admitted only on its own gate's verdict", () => {
+  it.each(['explicit', 'uniform'] as const)(
+    'with no gate verdict recorded, a locked account gets no session at /sign-in/email (lockoutRefusal: %s)',
+    async (refusal) => {
+      const rig = await arrange(refusal);
+      vi.spyOn(rig.manager as any, 'admitSignInAttempt').mockResolvedValue(undefined);
+      rig.lock(PLAIN.email);
+      const rowsBefore = rig.sessionRows(rig.plainId);
+
+      const res = await rig.post('/sign-in/email', { email: PLAIN.email, password: PASSWORD });
+
+      expect(res.status).toBe(EXPECTED_STATUS[refusal]);
+      expect((await answerOf(res)).code).toBe(EXPECTED_CODE[refusal]);
+      expect(rig.sessionRows(rig.plainId), 'no session row was written').toBe(rowsBefore);
+    },
+    60_000,
+  );
+
+  it('CONTROL: with no gate verdict recorded, an unlocked account still signs in', async () => {
+    const rig = await arrange();
+    vi.spyOn(rig.manager as any, 'admitSignInAttempt').mockResolvedValue(undefined);
+
+    const res = await rig.post('/sign-in/email', { email: PLAIN.email, password: PASSWORD });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+  }, 60_000);
+});
+
+describe('every exemption holds only when its condition is established (fail closed)', () => {
+  const config = { lockoutThreshold: THRESHOLD, lockoutRefusal: 'explicit' } as any;
+  const lockedRow = { locked_until: new Date(Date.now() + 10 * 60_000) };
+  const refusalOf = async (session: any, ctx: any) => {
+    try {
+      await refuseLockedAccountSession.call({ config }, session, ctx, lockedRow);
+      return 'admitted';
+    } catch (e: any) {
+      return e?.body?.code ?? e?.code ?? 'threw';
+    }
+  };
+
+  it('a session made outside an endpoint call is refused unless it carries the principal mint token', async () => {
+    expect(await refusalOf({ userId: 'u1', token: 'plainToken123' }, undefined)).toBe('ACCOUNT_LOCKED');
+    expect(await refusalOf({ userId: 'u1' }, null)).toBe('ACCOUNT_LOCKED');
+  });
+
+  it('an impersonation mark without a live session of record for the administrator is refused', async () => {
+    expect(await refusalOf({ userId: 'u1', impersonatedBy: 'admin1' }, { path: '/admin/impersonate-user' })).toBe('ACCOUNT_LOCKED');
+    expect(await refusalOf({ userId: 'u1', impersonatedBy: 'admin1' }, { path: '/magic-link/verify' })).toBe('ACCOUNT_LOCKED');
+  });
+
+  it("the request's own view of a session for the same account is not a session of record", async () => {
+    const ctx = { path: '/verify-email', context: { session: { user: { id: 'u1' }, session: { userId: 'u1' } } } };
+    expect(await refusalOf({ userId: 'u1' }, ctx)).toBe('ACCOUNT_LOCKED');
+  });
+
+  it('a password door with no gate verdict is refused', async () => {
+    expect(await refusalOf({ userId: 'u1' }, { path: '/sign-in/phone-number', body: { phoneNumber: '+15550143' } })).toBe('ACCOUNT_LOCKED');
+  });
+
+  it('CONTROL: an unlocked account is never refused', async () => {
+    await expect(
+      refuseLockedAccountSession.call({ config }, { userId: 'u1' }, { path: '/magic-link/verify' }, { locked_until: null }),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('CONTROL: a session presented that is no longer of record exempts nothing', () => {
+  it('an expired session of the same account does not stand in for a sign-in at a code door', async () => {
+    const rig = await arrange('explicit');
+    for (const row of (rig.engine.tables.get('sys_session') ?? []) as any[]) {
+      if (String(row.user_id ?? row.userId) === rig.plainId) {
+        row.expires_at = new Date(Date.now() - 60_000);
+        row.expiresAt = row.expires_at;
+      }
+    }
+    rig.lock(PLAIN.email);
+    const code = await smsCode(rig, PLAIN.phone);
+    const rowsBefore = rig.sessionRows(rig.plainId);
+
+    const res = await rig.post('/phone-number/verify', { phoneNumber: PLAIN.phone, code }, { cookie: rig.plainCookie });
+
+    expect((await answerOf(res)).code).toBe('ACCOUNT_LOCKED');
+    expect(rig.sessionRows(rig.plainId)).toBe(rowsBefore);
   }, 60_000);
 });

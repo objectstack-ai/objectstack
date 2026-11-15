@@ -549,7 +549,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     {
         code: 'INVALID_EMAIL_OR_PASSWORD',
         file: 'packages/plugins/plugin-auth/src/sign-in-lockout-refusal.ts',
-        shape: 'apierrorarg',
+        shape: 'objlit',
         door: 'none',
         verdict: 'foreign-vocabulary',
         why:
@@ -557,8 +557,10 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             "wrong password (`dist/api/routes/sign-in.mjs`, `APIError.from('UNAUTHORIZED', " +
             "BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD)`). ADR-0069 D2's `lockoutRefusal: 'uniform'` " +
             'answers a locked account at every other door that ends in a session with exactly that ' +
-            "answer, built from the vendor's own constant (never retyped) and raised inside a " +
-            "better-auth endpoint, so it leaves as the vendor's own `Response` on the vendor's wire. " +
+            "answer: the sentence is read off the vendor's constant, the code is the vendor's spelling, " +
+            'and `locked-account-every-sign-in-door.test.ts` holds the whole answer equal to the one ' +
+            "`/sign-in/email` gives, so a vendor rename turns that pin red rather than minting a local " +
+            "code. Raised inside a better-auth endpoint, it leaves as the vendor's own `Response`. " +
             'Registering it would promote a vendor spelling into the platform vocabulary, for the ' +
             'reason the section note above gives.',
     },

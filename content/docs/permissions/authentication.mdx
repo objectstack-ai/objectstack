@@ -635,8 +635,11 @@ every sign-in that resolves to the account, the correct password included, and a
 successful sign-in under any spelling clears the counter.
 Every password sign-in door (email and password, phone number and password) counts
 toward that one lock and checks it before the password, and a locked account is
-refused on every door that ends in a session for it, one-time codes, sign-in links and
-the second-factor step included, with the answer password sign-in gives.
+refused, with the answer password sign-in gives, on every door that ends in a session
+for it: one-time codes, sign-in links, an address-change confirmation opened without a
+session, the second-factor step, sign-in through an identity provider (social, generic
+OAuth, enterprise SSO) and the device grant, so the lock also reaches an account that
+has no password.
 
 Setting `lockout_threshold` to `0` disables the **password-stage** lockout only.
 Two-factor verification keeps a built-in limit of 10 attempts per 15 minutes,

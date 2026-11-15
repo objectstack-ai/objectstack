@@ -93,16 +93,47 @@ export const ACCOUNT_LOCKED_MESSAGE =
  * The answer password sign-in gives a locked account under the deployment's
  * `lockoutRefusal`, as an error to throw: `'explicit'` is `403
  * ACCOUNT_LOCKED`; anything else is the answer a wrong password gets at
- * `/sign-in/email`, better-auth's own `401 INVALID_EMAIL_OR_PASSWORD`, built
- * from the vendor's constant so the two never part.
+ * `/sign-in/email`, better-auth's own `401 INVALID_EMAIL_OR_PASSWORD`. Its
+ * sentence is read off the vendor's constant, and its code is the vendor's
+ * spelling, which `locked-account-every-sign-in-door.test.ts` holds equal to
+ * the answer `/sign-in/email` itself gives, so the two never part.
  */
 export async function lockedAccountRefusal(lockoutRefusal: unknown): Promise<Error> {
+  const { APIError } = await import('better-auth/api');
   if (lockoutRefusal === 'explicit') {
-    const { APIError } = await import('better-auth/api');
     return new APIError('FORBIDDEN', { message: ACCOUNT_LOCKED_MESSAGE, code: 'ACCOUNT_LOCKED' });
   }
-  const { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');
-  return APIError.from('UNAUTHORIZED', BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD);
+  const { BASE_ERROR_CODES } = await import('@better-auth/core/error');
+  return new APIError('UNAUTHORIZED', {
+    message: BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD.message,
+    code: 'INVALID_EMAIL_OR_PASSWORD',
+  });
+}
+
+/**
+ * The account whose live session of record (its stored `sys_session` row,
+ * unexpired) the running request presented, read before the endpoint runs
+ * (`auth-manager-sign-in-lockout.ts`, `recordRequestSessionOfRecord`).
+ * `undefined` when the request presented none or it could not be read.
+ */
+const sessionOfRecordState = defineRequestState<{ userId: string } | undefined>(() => undefined);
+
+/** Record the account of the session the running request presented. Never throws. */
+export async function recordSessionOfRecord(holder: { userId: string } | undefined): Promise<void> {
+  try {
+    await sessionOfRecordState.set(holder);
+  } catch {
+    /* no request state is open: nothing is recorded, so nothing is exempted */
+  }
+}
+
+/** The account of the session the running request presented, if one was read. Never throws. */
+export async function readSessionOfRecord(): Promise<{ userId: string } | undefined> {
+  try {
+    return await sessionOfRecordState.get();
+  } catch {
+    return undefined;
+  }
 }
 
 /**

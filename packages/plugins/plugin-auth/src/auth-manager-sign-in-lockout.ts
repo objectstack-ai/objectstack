@@ -67,9 +67,12 @@ import {
 } from './auth-session-audit.js';
 import { canonicalClientAddress } from './client-address-canonical.js';
 import { readRequestClientAddress } from './request-client-address.js';
+import { PRINCIPAL_SESSION_TOKEN_PREFIX } from './principal-session-mint.js';
 import {
   lockedAccountRefusal,
+  readSessionOfRecord,
   readSignInAttempt,
+  recordSessionOfRecord,
   recordSignInAttempt,
   type SignInAttempt,
   type SignInLockStamp,
@@ -575,25 +578,83 @@ export async function findSignInAccount(
 /** The `sys_user` column {@link refuseLockedAccountSession} reads, beside the other session refusals' columns. */
 export const LOCKED_ACCOUNT_ROW_FIELDS = ['locked_until'] as const;
 
+/** The administrator-gated route whose sessions carry `impersonatedBy` (the vendor's and plugin-auth's own). */
+const IMPERSONATE_USER_PATH = '/admin/impersonate-user';
+
 /**
- * Whether a new session for `session.userId` is a sign-in: a session the
- * caller is given for an account it is not already signed in as.
+ * Read, before the endpoint runs, the account whose live session of record
+ * the request presents — the stored `sys_session` row its session token
+ * names, unexpired — and record it for {@link refuseLockedAccountSession}.
+ * Read from the store, never from a session cache or the request's own view,
+ * and BEFORE the endpoint can replace that row (a password change that ends
+ * the other sessions deletes it first).
  *
- * Not a sign-in, and so never refused by the lock:
- *
- *  - a session made outside any endpoint call (no `path`): the server's own
- *    in-process work, never a caller signing in;
- *  - an administrator's impersonation session (`impersonatedBy`);
- *  - a new session for the account the caller already holds a live session
- *    for (enrolling a second factor, a password change that ends the other
- *    sessions, a signed-in verification): that caller is signed in already.
+ * Only while the lockout is on, and only for a request that presents a
+ * session token. Records nothing when the token names no live row or the read
+ * fails, and nothing recorded exempts nothing. Never throws.
  */
-function isSignInSession(session: any, ctx: any): boolean {
-  if (typeof ctx?.path !== 'string' || ctx.path === '') return false;
-  if (typeof session?.impersonatedBy === 'string' && session.impersonatedBy !== '') return false;
-  const held = ctx?.context?.session;
-  const heldUserId = held?.user?.id ?? held?.session?.userId;
-  return !(typeof heldUserId === 'string' && heldUserId === session?.userId);
+export async function recordRequestSessionOfRecord(
+  this: Pick<SignInLockoutHost, 'config'>,
+  ctx: any,
+): Promise<void> {
+  if ((Number(this.config.lockoutThreshold) || 0) <= 0) return;
+  // A request state starts with nothing recorded, and the first record in it
+  // stands: a nested call never replaces the outer call's.
+  if (await readSessionOfRecord()) return;
+  try {
+    const token = await presentedSessionToken(ctx);
+    if (!token || typeof ctx?.context?.adapter?.findOne !== 'function') return;
+    const row: any = await ctx.context.adapter.findOne({ model: 'session', where: [{ field: 'token', value: token }] });
+    const userId = row?.userId ?? row?.user_id;
+    const expiresAt = row?.expiresAt ?? row?.expires_at;
+    if (typeof userId !== 'string' || userId === '') return;
+    if (!expiresAt || !(new Date(expiresAt).getTime() > Date.now())) return;
+    await recordSessionOfRecord({ userId });
+  } catch {
+    /* unread: nothing recorded */
+  }
+}
+
+/**
+ * The session token the request presents: the bearer credential, or the
+ * session cookie whose signature verifies. The stored token is the unsigned
+ * value; a bearer may carry the signed `TOKEN.SIGNATURE` spelling.
+ */
+async function presentedSessionToken(ctx: any): Promise<string | undefined> {
+  const header = (name: string): string =>
+    String(ctx?.headers?.get?.(name) ?? ctx?.request?.headers?.get?.(name) ?? '');
+  const bearer = /^Bearer\s+(.+)$/i.exec(header('authorization'))?.[1]?.trim();
+  if (bearer) return bearer.split('.')[0] || undefined;
+  const name = ctx?.context?.authCookies?.sessionToken?.name;
+  if (typeof name !== 'string' || typeof ctx?.getSignedCookie !== 'function') return undefined;
+  const signed = await ctx.getSignedCookie(name, ctx.context.secret);
+  return typeof signed === 'string' && signed !== '' ? signed : undefined;
+}
+
+/**
+ * Whether a new session for `session.userId` is NOT a sign-in, judged
+ * fail-closed: each exemption holds only when its condition is established,
+ * and a condition that cannot be established is a sign-in.
+ *
+ *  - The server's in-process principal session: made outside any endpoint
+ *    call, and carrying the token prefix only the mint writes
+ *    (`principal-session-mint.ts`). A session made outside an endpoint call
+ *    without that prefix is judged a sign-in.
+ *  - An administrator's impersonation session: made on the administrator-gated
+ *    impersonation route, naming as `impersonatedBy` the account whose live
+ *    session of record made the request, which is not the account itself.
+ *  - A new session for the account whose live session of record made the
+ *    request (enrolling a second factor, a password change that ends the
+ *    other sessions, an impersonating administrator's own rotation).
+ */
+async function isNotASignIn(session: any, ctx: any): Promise<boolean> {
+  if (typeof ctx?.path !== 'string' || ctx.path === '') {
+    return typeof session?.token === 'string' && session.token.startsWith(PRINCIPAL_SESSION_TOKEN_PREFIX);
+  }
+  const holder = (await readSessionOfRecord())?.userId;
+  if (typeof holder !== 'string' || holder === '') return false;
+  if (holder === session?.userId) return true;
+  return ctx.path === IMPERSONATE_USER_PATH && session?.impersonatedBy === holder;
 }
 
 /**
@@ -601,19 +662,20 @@ function isSignInSession(session: any, ctx: any): boolean {
  * session for that account, with the answer password sign-in gives under the
  * deployment's `lockoutRefusal` ({@link lockedAccountRefusal}). Composed into
  * `session.create.before`, the one write every sign-in door ends in, so a door
- * is held by the lock whichever credential it checks.
+ * is held by the lock whichever credential it checks, or none.
  *
  * The lock is the one password sign-in reads: `locked_until` still in the
  * future while `lockoutThreshold` is on. An expired lock admits, and with the
- * threshold off no lock is read, as at `/sign-in/email`. Only a sign-in is
- * refused ({@link isSignInSession}). A password door
- * ({@link passwordSignInDoorOf}) is refused by its own gate before its
- * credential is checked ({@link admitSignInAttempt}), with that door's own
- * wrong-password answer under `'uniform'`, and the gate also settles its
- * counter and writes its row, so it is left to that gate.
+ * threshold off no lock is read, as at `/sign-in/email`.
  *
- * A refused sign-in writes the account's `login_failed` row with the lock as
- * its reason, as password sign-in's does. The counter is not moved.
+ * A password door ({@link passwordSignInDoorOf}) is held by its own gate,
+ * before its credential is checked ({@link admitSignInAttempt}), which also
+ * settles its counter and writes its row; here it is admitted only on that
+ * gate's recorded `admitted` verdict for this account and identifier in this
+ * request, and refused when that verdict is absent. Any other door refuses a
+ * sign-in ({@link isNotASignIn}) and writes the account's `login_failed` row
+ * with the lock as its reason, as password sign-in does. The counter is not
+ * moved.
  *
  * @param row the `sys_user` row the session refusals composed before this one
  *   read, with {@link LOCKED_ACCOUNT_ROW_FIELDS} among its columns.
@@ -628,11 +690,21 @@ export async function refuseLockedAccountSession(
   if (threshold <= 0 || !row || !lockHolds(row.locked_until, Date.now())) return;
   const userId = session?.userId;
   if (typeof userId !== 'string' || userId === '') return;
-  if (passwordSignInDoorOf(ctx) || !isSignInSession(session, ctx)) return;
+  const passwordDoor = passwordSignInDoorOf(ctx);
+  if (passwordDoor) {
+    const attempt = await readSignInAttempt();
+    if (
+      attempt?.verdict === 'admitted'
+      && attempt.userId === userId
+      && attempt.identifier === passwordDoor.identifier.toLowerCase()
+    ) return;
+    throw await lockedAccountRefusal(this.config.lockoutRefusal);
+  }
+  if (await isNotASignIn(session, ctx)) return;
   await emitAuthSessionAuditEvent(
     this.config.getAuditSink?.(),
     signInFailureEventFor(userId, {
-      path: ctx.path,
+      path: typeof ctx?.path === 'string' ? ctx.path : '',
       reason: 'ACCOUNT_LOCKED',
       fingerprint: signInClientFingerprint(ctx, await readRequestClientAddress()),
     }),
