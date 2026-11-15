@@ -16,8 +16,10 @@
  * (its served operations leave `get` out, `servesRecordRead`). The host hands
  * that answer down as `rowOpensRecord`, and each card face reads it: the
  * gallery card, the board card and the phone card draw no pointer and no hover
- * lift, and a tap on one opens nothing. Card actions stay (the phone card's
- * "⋮"), and a board card the reader may drag keeps its grab cursor.
+ * lift, and a tap on one opens nothing. A board card that cannot be dragged
+ * either is no control at all: no `button` role, no tab stop, no title hover.
+ * Card actions stay (the phone card's "⋮"), and a board card the reader may
+ * drag keeps its drag semantics.
  *
  * Driven through the real `ObjectView`, `ListView`, gallery, board and grid,
  * and the real `MePermissionsProvider`: one differential per face, the same
@@ -273,6 +275,16 @@ async function phoneCard(title: string): Promise<HTMLElement> {
   return card as HTMLElement;
 }
 
+/** Whether the board card's wrapper is a control: a `button` a Tab reaches. */
+function isBoardControl(control: HTMLElement): boolean {
+  return control.getAttribute('role') === 'button' && control.getAttribute('tabindex') === '0';
+}
+
+/** Whether the board card's face drives its title's hover colour (`group` → `group-hover:text-primary`). */
+function hasTitleHover(face: HTMLElement): boolean {
+  return /(^|\s)group(\s|$)/.test(face.className) && face.querySelector('[class*="group-hover:"]') !== null;
+}
+
 /** Whether `el` wears a clickable face: the pointer, or a hover lift / wash. */
 function looksClickable(el: HTMLElement): boolean {
   return /(^|\s)(cursor-pointer|hover:shadow-lg|hover:bg-accent\/50)(\s|$)/.test(el.className);
@@ -334,17 +346,41 @@ describe('objectstack#33548 — board cards on a list whose rows open nothing', 
     expect(openSpy).not.toHaveBeenCalled();
   });
 
-  it('authored `none`, a card the reader may drag: the grab cursor stays, and no pointer is added', async () => {
-    await mountList({ view: { type: 'kanban', navigation: { mode: 'none' } } });
-    const { face } = await boardCard('c1');
-    expect(face.className).toMatch(/(^|\s)cursor-grab(\s|$)/);
-    expect(face.className).not.toMatch(/(^|\s)cursor-pointer(\s|$)/);
+  it('authored `none`, a card the reader may not drag: the card is no control — no button role, no tab stop, no title hover', async () => {
+    await mountList({ view: { type: 'kanban', navigation: { mode: 'none' } }, allowEdit: false });
+    const { control, face } = await boardCard('c1');
+    expect(isBoardControl(control)).toBe(false);
+    expect(hasTitleHover(face)).toBe(false);
   });
 
-  it('CONTROL — the default drawer, a card the reader may not drag: the card wears the pointer and a tap opens the drawer', async () => {
+  it('a list-only object, a card the reader may not drag: the card is no control either', async () => {
+    await mountList({ view: { type: 'kanban' }, apiOperations: LIST_ONLY_OPERATIONS, allowEdit: false });
+    const { control, face } = await boardCard('c1');
+    expect(isBoardControl(control)).toBe(false);
+    expect(hasTitleHover(face)).toBe(false);
+  });
+
+  it('authored `none`, a card the reader may drag: it keeps its drag semantics — the grab cursor, the button role and the tab stop — and gains no pointer', async () => {
+    await mountList({ view: { type: 'kanban', navigation: { mode: 'none' } } });
+    const { control, face } = await boardCard('c1');
+    expect(face.className).toMatch(/(^|\s)cursor-grab(\s|$)/);
+    expect(face.className).not.toMatch(/(^|\s)cursor-pointer(\s|$)/);
+    expect(isBoardControl(control)).toBe(true);
+  });
+
+  it('CONTROL — the default drawer, a card the reader may not drag: a control with the pointer and title hover; Enter opens the drawer', async () => {
     await mountList({ view: { type: 'kanban' }, allowEdit: false });
     const { control, face } = await boardCard('c1');
     expect(face.className).toMatch(/(^|\s)cursor-pointer(\s|$)/);
+    expect(isBoardControl(control)).toBe(true);
+    expect(hasTitleHover(face)).toBe(true);
+    fireEvent.keyDown(control, { key: 'Enter' });
+    await waitFor(() => expect(location()).toContain('recordId=c1'));
+  });
+
+  it('CONTROL — the default drawer: a tap on the card opens the drawer', async () => {
+    await mountList({ view: { type: 'kanban' }, allowEdit: false });
+    const { control } = await boardCard('c1');
     fireEvent.click(control);
     await waitFor(() => expect(location()).toContain('recordId=c1'));
   });

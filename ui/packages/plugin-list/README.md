@@ -248,8 +248,9 @@ view's own `rowOpensRecord`:
   text and its row context menu offers no Open; on a phone its row cards draw no
   pointer and no hover wash;
 - the gallery's cards draw no pointer and no hover lift;
-- the board's cards (see `@object-ui/plugin-kanban`) draw no pointer, and no
-  hover lift where the card cannot be dragged either.
+- the board's cards (see `@object-ui/plugin-kanban`) draw no pointer; a card
+  that cannot be dragged either is no control (no `button` role, no tab stop,
+  no hover lift).
 
 The click still reaches `onRowClick` on every face, and row and card actions
 stay. No other view type is handed it. This is a React prop for the host app,

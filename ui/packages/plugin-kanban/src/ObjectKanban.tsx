@@ -424,8 +424,9 @@ export interface ObjectKanbanComponentProps {
    * Whether a click on a card opens anything, as the host that owns the click
    * (`onRowClick`) knows it — the grid's `rowOpensRecord`, handed down by
    * `ListView` (objectstack#33548). `false` ⇒ a card that cannot be dragged
-   * draws no pointer; the click still reaches `onRowClick`, and a draggable
-   * card keeps its grab cursor. Absent (or `true`) ⇒ every card is drawn as
+   * is no control (no `button` role, tab stop, key activation, pointer or
+   * hover); the click still reaches `onRowClick`, and a draggable card keeps
+   * its grab cursor and drag semantics. Absent (or `true`) ⇒ every card is drawn as
    * before.
    *
    * A RUNTIME prop, never authored metadata: the host resolves it, and no node

@@ -229,8 +229,8 @@ export interface KanbanBoardProps {
   /**
    * Whether a click on a card opens anything, as the host that owns the click
    * knows it — `ObjectKanban`'s `rowOpensRecord` (objectstack#33548). `false` ⇒
-   * a card that cannot be dragged draws no pointer; the click still reaches
-   * `onCardClick`. Absent (or `true`) ⇒ every card is drawn as before.
+   * a card that cannot be dragged is no control (no `button` role, tab stop,
+   * key activation, pointer or hover); the click still reaches `onCardClick`. Absent (or `true`) ⇒ every card is drawn as before.
    */
   rowOpensRecord?: boolean
   /**
@@ -328,6 +328,10 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
   // `aria-disabled` (objectui#12082).
   const movable = React.useContext(KanbanCardsMovable)
   const opens = React.useContext(KanbanCardsOpenRecord)
+  // A card that neither drags nor opens (objectstack#33548) is no control: no
+  // `button` role, no tab stop, no key activation and no hover-as-link face.
+  // Its click still reaches `onCardClick`, which the host routes to nothing.
+  const control = movable || opens
   const {
     attributes,
     listeners,
@@ -359,7 +363,7 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
     // description dnd-kit points `aria-describedby` at (objectui#12837) stays
     // on the focusable element, where it is read.
     <div role="listitem" aria-label={card.title}>
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners} role="button" aria-label={card.title}
+    <div ref={setNodeRef} style={style} {...(control ? attributes : {})} {...listeners} role={control ? 'button' : undefined} aria-label={control ? card.title : undefined}
       // objectui#12725 — names the card's record on its element, so a host
       // (the Studio canvas) can tell which card a click landed on.
       data-kanban-card={card.id}
@@ -367,7 +371,7 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
       onKeyDown={(e) => {
         // A key on something inside the card (a link a field renders) is that
         // element's own; only the card's own key opens it.
-        if (e.target !== e.currentTarget) return
+        if (!control || e.target !== e.currentTarget) return
         if (e.key === 'Enter') {
           e.preventDefault()
           onCardClick?.(card, e)
@@ -379,16 +383,16 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
         }
       }}
       onKeyUp={(e) => {
-        if (e.target !== e.currentTarget) return
+        if (!control || e.target !== e.currentTarget) return
         if (e.key === ' ') {
           e.preventDefault()
           onCardClick?.(card, e)
         }
       }}
     >
-      {/* A card that neither drags nor opens (objectstack#33548) draws no
-          pointer and no hover lift: nothing about it answers a click. */}
-      <Card className={cn("mb-2 border-border border-l-4 border-l-primary/40 bg-card/60 transition-all duration-300 group touch-manipulation", (movable || opens) && "hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10", movable ? "cursor-grab active:cursor-grabbing" : opens && "cursor-pointer")} style={cardStyles}>
+      {/* A card that is no control draws no pointer, no hover lift and no
+          title hover (`group` drives the title's `group-hover:text-primary`). */}
+      <Card className={cn("mb-2 border-border border-l-4 border-l-primary/40 bg-card/60 transition-all duration-300 touch-manipulation", control && "group hover:border-primary/40 hover:shadow-lg hover:shadow-primary/10", movable ? "cursor-grab active:cursor-grabbing" : opens && "cursor-pointer")} style={cardStyles}>
         {card.coverImage && (
           <div className="w-full h-32 overflow-hidden rounded-t-lg">
             <img

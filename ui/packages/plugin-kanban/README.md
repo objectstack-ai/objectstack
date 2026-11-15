@@ -211,8 +211,9 @@ opens nothing.
 
 A host that owns the card click (`onRowClick`) and knows it opens nothing for
 these cards passes the React prop `rowOpensRecord={false}` (objectstack#33548):
-a card that cannot be dragged then draws no pointer and no hover lift, and a
-card that can keeps its grab cursor. The click still reaches `onRowClick`.
+a card that cannot be dragged then is no control at all (no `button` role, no
+tab stop, no Enter/Space activation, no pointer, hover lift or title hover), and
+a card that can keeps its grab cursor and its drag semantics. The click still reaches `onRowClick`.
 Absent (or `true`), every card is drawn as before. It is a host prop, not a
 schema key: `ListView` hands it down, and the console passes `false` for a view
 authored `navigation: { mode: 'none' }` and for a list-only object.
