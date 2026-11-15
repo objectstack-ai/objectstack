@@ -134,6 +134,12 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['an injection guardrail pointing at a non-text cell', (c) => (c.run.guardrails[4].cell = { object: 'contact', id: 'ct4', field: 'account' }), 'run.guardrails[4].cell.field', /not a text cell/],
   ['a confirmation check on an operation that does not wait', (c) => (c.run.guardrails[2].operation = 'add_contact'), 'run.guardrails[2].operation', /outcome is `pending_confirmation`, not `applied`/],
   ['an audit check on an operation that names no audit actor', (c) => delete op(c, 'move_eli').outcome.auditActor, 'run.guardrails[3].operation', /declare `outcome.auditActor`/],
+  ['a forbidden act on a check other than injection_as_data', (c) => (c.run.guardrails[0].forbids = { writes: ['account'] }), 'run.guardrails[0].forbids', /`permission_parity` check takes no forbidden act/],
+  ['a forbidden act that names neither a write nor a disclosure', (c) => (c.run.guardrails[4].forbids = {}), 'run.guardrails[4].forbids', /names `writes`, `discloses` or both/],
+  ['a forbidden write on an unexpected object', (c) => (c.run.guardrails[4].forbids = { writes: ['lead'] }), 'run.guardrails[4].forbids.writes[0]', /`lead` is not in expect.objects/],
+  ['a forbidden write listed twice', (c) => (c.run.guardrails[4].forbids = { writes: ['account', 'account'] }), 'run.guardrails[4].forbids.writes[1]', /duplicate forbidden write `account`/],
+  ['a disclosed field no seed row carries', (c) => (c.run.guardrails[4].forbids = { discloses: { object: 'contact', field: 'phone' } }), 'run.guardrails[4].forbids.discloses.field', /no seed row of `contact` carries `phone`/],
+  ['a disclosed field with one distinct value, which no reply can carry twice', (c) => c.run.seed.contact.forEach((r: { email: string }) => (r.email = 'team@acme.test')), 'run.guardrails[4].forbids.discloses.field', /fewer than two distinct seeded values/],
   // ── counts, agent actions, iterate ──
   ['fewer than 8 questions without a stated reason', (c) => c.run.questions.pop(), 'run.countsReason', /7 questions \/ 5 operations is below the default 8 \/ 4/],
   ['agent actions with none confirm-gated', (c) => c.run.agentActions.forEach((a: { confirm: boolean }) => (a.confirm = false)), 'run.agentActions', /at least one confirm-gated/],
@@ -202,6 +208,22 @@ describe('scenario card refusals', () => {
       expect(r.cards).toEqual([]);
     });
   }
+
+  it('refuses a disclosed field whose values are figures (the invoice card\'s unit_price), and loads the card as it declares itself (control)', () => {
+    const invoice = JSON.parse(readFileSync(resolve(OPEN_DIR, 'invoice_with_line_items.json'), 'utf8'));
+    const loadInvoice = (forbids: unknown) => {
+      const dir = mkdtempSync(join(tmpdir(), 'scenario-refusal-'));
+      dirs.push(dir);
+      const card = structuredClone(invoice);
+      card.run.guardrails.find((g: { check: string }) => g.check === 'injection_as_data').forbids = forbids;
+      writeFileSync(join(dir, `${card.id}.json`), JSON.stringify(card, null, 2));
+      return loadScenarios(dir, { areas, library: 'open' });
+    };
+    const r = loadInvoice({ discloses: { object: 'invoice_line', field: 'unit_price' } });
+    expect(r.refusals.map((x) => x.path)).toEqual(['run.guardrails[4].forbids.discloses.field']);
+    expect(r.refusals[0]!.message).toMatch(/not a text field: a figure collides/);
+    expect(loadInvoice({ writes: ['account', 'invoice', 'invoice_line'] }).refusals).toEqual([]);
+  });
 
   it('refuses a card whose id is not its basename', () => {
     const r = load(() => {}, 'crm.json');
