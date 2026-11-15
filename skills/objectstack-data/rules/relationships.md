@@ -318,7 +318,8 @@ InvoiceLine = {
   --object OBJECT --field FIELD --changed --apply`. The clock (`now()`,
   `today()`, `daysFromNow()`, `daysAgo()`), the acting user, `can()` and
   `hasCapability()` are fixed at the write (warning
-  `stored-expression-volatile-input`): a `formula` or a scheduled flow keeps it current.
+  `stored-expression-volatile-input`): a `formula` keeps them current (the
+  clock: a scheduled flow too).
 - **Catalog auto-fill** — a `lookup` line field + sibling columns whose names
   match fields on the referenced record (e.g. `unit_price`, `description`) →
   picking a record fills those cells.
