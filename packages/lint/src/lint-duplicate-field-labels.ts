@@ -203,7 +203,16 @@ export interface DuplicateFieldLabelOptions {
  * Report every object that serves two or more visible fields under one label.
  * Returns a (possibly empty) list of findings; never throws.
  */
-export function lintDuplicateFieldLabels(
+export function lintDuplicateFieldLabels(stack: AnyRec): DuplicateFieldLabelFinding[] {
+  return duplicateFieldLabelFindings(stack);
+}
+
+/**
+ * {@link lintDuplicateFieldLabels} with what the `object_extension` publish
+ * door states beyond the stack. The registry entry calls this; it is not on
+ * the package's entries, so the published signature is unchanged.
+ */
+export function duplicateFieldLabelFindings(
   stack: AnyRec,
   options: DuplicateFieldLabelOptions = {},
 ): DuplicateFieldLabelFinding[] {

@@ -157,7 +157,7 @@ import { lintConnectorCredentialLiterals } from './lint-connector-credential-lit
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
-import { lintDuplicateFieldLabels } from './lint-duplicate-field-labels.js';
+import { duplicateFieldLabelFindings } from './lint-duplicate-field-labels.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
 import { validateEmailTemplateHoleGrammar } from './validate-email-template-hole-grammar.js';
@@ -372,7 +372,8 @@ export interface AuthoringRuleContext {
    * the door judges the definition the build judges:
    * `validateStackExpressions`' extension walk
    * (`StackExpressionOptions.storedObjectExtensions`) and (#33644)
-   * `lintDuplicateFieldLabels` (`DuplicateFieldLabelOptions`).
+   * `lintDuplicateFieldLabels` (`DuplicateFieldLabelOptions`, read by the
+   * module-internal `duplicateFieldLabelFindings`).
    */
   storedObjectExtensions?: readonly StoredObjectExtension[];
   /**
@@ -2400,7 +2401,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['object', 'object_extension'],
     run: (stack, ctx) =>
-      lintDuplicateFieldLabels(stack, {
+      duplicateFieldLabelFindings(stack, {
         ...(ctx.storedObjectExtensions !== undefined ? { storedObjectExtensions: ctx.storedObjectExtensions } : {}),
         ...(ctx.runtimeWriteType === 'object_extension' ? { servedObjects: true } : {}),
       }).map((f) => ({
