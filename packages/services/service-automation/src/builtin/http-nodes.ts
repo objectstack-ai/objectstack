@@ -427,8 +427,12 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                     }
                 }
                 // No outbox available — degrade to a best-effort inline call,
-                // which sends the verb the outbox would have and signs exactly
-                // as the outbox would have.
+                // which sends the verb the outbox would have. It sends and signs
+                // its own serialization (see `sendInline`), which is the
+                // outbox's bytes for an object body only: with no body it sends
+                // none and signs '' (the outbox sends and signs '{}'), a string
+                // body goes out JSON-encoded (the outbox sends it verbatim), and
+                // it adds no `Content-Type: application/json` (the outbox does).
                 if (onSavePath(context)) {
                     // Ruling 6810500711, letter D: the record save never waits on
                     // an external system. A run after a record change holds the
