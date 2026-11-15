@@ -33,7 +33,7 @@
 
 ## 区内规则
 
-- 区会话署本席签名,`Session:` 填区会话 ID;开轮互斥读法照 `seat-lifecycle.md`。
+- 区会话署本席签名,签名第三位与 `Session:` 皆填区会话 ID;开轮互斥读法照 `seat-lifecycle.md`。
 - 认领前重读标签、assignee 与末条评论:他人 assignee、他人 `Claim:` 或他区 `lease:*` ⇒ 不碰。
 - 认领照 `execution-duties.md` 派发原子对,同笔加 `lease:<区>`;`Branch:` 照 AGENTS.md 命名。
 - 认领后回读标签(SKILL.md 标签写四步):缺 `lease:` 或 `pm:dispatched` 即重挂;首推即开 draft PR。
