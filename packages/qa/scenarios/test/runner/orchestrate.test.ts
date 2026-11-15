@@ -14,7 +14,7 @@
  * fails its Build half.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,12 +22,12 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
-import { truthFigures } from '../../src/score/index.js';
+import { buildDeniesWrite, truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
 import { RecordedDriver, RecordingDriver, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
 import { namespacedScenario } from '../../src/runner/namespace.js';
-import { runCard, seedApp, type ProjectOps } from '../../src/runner/orchestrate.js';
-import { cardScorecard, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
+import { runCard, runHalf, seedApp, type ProjectOps } from '../../src/runner/orchestrate.js';
+import { buildDenialFindings, cardScorecard, opsTally, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
@@ -1146,5 +1146,114 @@ describe('runCard — the authoring cost a driver reports is stated only when ev
     const olderTable = renderScorecard({ ...older, modes: older.modes.map(({ authorCost: _mode, ...m }) => m) });
     expect(olderTable).toContain('author cost: not reported\n');
     expect(olderTable).toContain('| Author cost | not reported | skipped |');
+  });
+});
+
+describe('runHalf — a write the build denies the persona is charged to the build, replayed from eval#1 round 1 (#33596)', () => {
+  /**
+   * The recorded turns (eval#1 round 1, 2026-11-14, published 18.4.0, scratch
+   * mode) of the four operations whose 403 the round charged to the
+   * operation. The fixture keeps each turn's reply and its write calls
+   * verbatim; the read calls before them are trimmed (an answer is read off a
+   * turn's write calls whenever it made one). The app below answers the
+   * runner's own probe as that build would have: it denies `contractor` every
+   * write on tasks, and refuses `sales_rep`'s declared invoice line, which
+   * carries no unit price, as the agent's first create was refused.
+   */
+  const FIXTURE = resolve(HERE, 'fixtures/eval-r1-build-denial.recording.json');
+  const REPLAY = RecordedDriver.fromFile(FIXTURE);
+  const RECORDED = JSON.parse(readFileSync(FIXTURE, 'utf8')) as { turns: Record<string, ParsedTurn> };
+  const DENIED = JSON.stringify({ error: { code: 'PERMISSION_DENIED', message: 'You do not have permission to perform this action.', status: 403 } });
+  const REASON = `${buildDeniesWrite}: the runner's probe of the declared write was refused PERMISSION_DENIED (403), and nothing was written`;
+
+  class DenyingApp extends FakeApp {
+    /** The probe's answer, by `apiKey tool objectName`; anything else is applied. */
+    constructor(private readonly answers: Readonly<Record<string, string>>) {
+      super();
+    }
+    override async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
+      this.toolCalls.push({ apiKey, tool, args });
+      const answer = this.answers[`${apiKey} ${tool} ${String(args.objectName)}`];
+      if (answer !== undefined) return { output: answer, isError: true };
+      const rows = (this.rows[String(args.objectName)] ??= []);
+      rows.push({ id: `probe-${rows.length}`, ...(args.data as Record<string, unknown>) });
+      return { output: JSON.stringify({ id: `probe-${rows.length - 1}` }), isError: false };
+    }
+  }
+
+  /** The card's own namespace, with only the recorded operations and no question turns. */
+  function only(file: string, ops: readonly string[]): LoadedScenario {
+    const scenario = namespacedScenario(load(resolve(HERE, `../../../../../docs/qa/scenarios/${file}`)));
+    const run = { ...scenario.card.run, questions: [], operations: scenario.card.run.operations.filter((o) => ops.includes(o.id)) };
+    return { ...scenario, card: { ...scenario.card, run } };
+  }
+  const ref = { card: '', mode: 'scratch', phase: 'run' } as const;
+
+  it('project_with_tasks as contractor: add_task (applied) and task_without_title (the validation write) are not measured, each a Build finding; drop_packing grades as before', async () => {
+    const scenario = only('project_with_tasks.json', ['add_task', 'drop_packing', 'task_without_title']);
+    const app = new DenyingApp({ 'key-contractor create_record demoproject_task': DENIED });
+    const half = await runHalf(scenario, app, REPLAY, { ...ref, card: 'project_with_tasks' });
+    const op = (id: string) => half.operations.find((o) => o.operation === id)!;
+
+    // The runner sent each declared create itself, as contractor: the applied one because the agent's write met 403.
+    expect(app.toolCalls.map((c) => [c.apiKey, c.tool, c.args.objectName, (c.args.data as Record<string, unknown>).title ?? null])).toEqual([
+      ['key-contractor', 'create_record', 'demoproject_task', 'Launch checklist'],
+      ['key-contractor', 'create_record', 'demoproject_task', null],
+    ]);
+    for (const id of ['add_task', 'task_without_title']) {
+      expect(op(id).error, id).toBeUndefined();
+      expect(op(id).observation!.answer, id).toEqual({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+      expect(op(id).observation!.probe, id).toEqual({ answer: { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 }, writes: 0 });
+      expect([op(id).notMeasured, op(id).grade!.pass, op(id).grade!.notMeasured], id).toEqual([REASON, false, REASON]);
+      expect(op(id).buildDenial, id).toEqual({ persona: 'contractor', object: 'demoproject_task', verb: 'create' });
+    }
+    // The delete the card wants confirmed first: the agent sent `confirm: true` itself (the door's gate answers
+    // before its permission check), so its 403 is no build denial. No probe, graded as before.
+    expect(RECORDED.turns['project_with_tasks/scratch/run/drop_packing/contractor']!.toolCalls[0]!.input).toMatchObject({ confirm: true });
+    expect([op('drop_packing').notMeasured, op('drop_packing').grade!.pass, op('drop_packing').buildDenial]).toEqual([undefined, false, undefined]);
+    expect(op('drop_packing').observation!.probe).toBeUndefined();
+
+    // On the scorecard: out of numerator and denominator, and a Build finding naming persona, object and verb.
+    expect(opsTally(half)).toEqual({ passed: 0, total: 1, notMeasured: 2 });
+    expect(buildDenialFindings(half, 'build')).toEqual([
+      'build: the build denies contractor the create on demoproject_task that the card gives it (operation add_task: its probe of the declared write was refused PERMISSION_DENIED (403))',
+      'build: the build denies contractor the create on demoproject_task that the card gives it (operation task_without_title: its probe of the declared write was refused PERMISSION_DENIED (403))',
+    ]);
+  });
+
+  it('invoice_with_line_items add_line as sales_rep: the declared line reaches the app\'s rule for the runner, so the agent\'s 403 stays the operation\'s', async () => {
+    const scenario = only('invoice_with_line_items.json', ['add_line']);
+    const required = JSON.stringify({ error: { code: 'VALIDATION_FAILED', message: 'Unit Price is required', status: 400 } });
+    const app = new DenyingApp({ 'key-sales_rep create_record demoinvoice_invoice_line': required });
+    const half = await runHalf(scenario, app, REPLAY, { ...ref, card: 'invoice_with_line_items' });
+    const [res] = half.operations;
+    expect(app.toolCalls).toHaveLength(1);
+    expect(res!.observation!.probe).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED', status: 400 }, writes: 0 });
+    expect([res!.notMeasured, res!.grade!.notMeasured, res!.grade!.pass, res!.buildDenial]).toEqual([undefined, undefined, false, undefined]);
+    expect(opsTally(half)).toEqual({ passed: 0, total: 1, notMeasured: 0 });
+  });
+
+  it('⛔ a probe the door applies is the agent\'s fail, measured, and the runner\'s row stays (the state impact of this probe)', async () => {
+    const scenario = only('project_with_tasks.json', ['add_task']);
+    const app = new DenyingApp({});
+    const half = await runHalf(scenario, app, REPLAY, { ...ref, card: 'project_with_tasks' });
+    const [res] = half.operations;
+    expect(res!.observation!.probe).toEqual({ answer: { kind: 'applied' }, writes: 1 });
+    expect([res!.notMeasured, res!.grade!.pass, res!.buildDenial]).toEqual([undefined, false, undefined]);
+    expect(app.rows.demoproject_task!.filter((r) => r.title === 'Launch checklist')).toHaveLength(1);
+  });
+
+  it('⛔ an applied operation whose agent write landed is never probed', async () => {
+    const scenario = only('project_with_tasks.json', ['add_task']);
+    const app = new DenyingApp({});
+    const landed: ParsedTurn = {
+      replyText: 'Added.',
+      toolCalls: [{ name: 'create_record', rawName: 'mcp__app__create_record', input: { objectName: 'demoproject_task', data: { title: 'Launch checklist', project: 'p1', status: 'todo' } }, output: '{"id":"t9"}' }],
+      meta: {},
+    };
+    const driver = new RecordedDriver({ driver: { driver: 'claude-code-cli', apiBilled: false }, turns: { 'project_with_tasks/scratch/run/add_task/contractor': landed }, files: {} });
+    const half = await runHalf(scenario, app, driver, { ...ref, card: 'project_with_tasks' });
+    expect(app.toolCalls).toEqual([]);
+    expect(half.operations[0]!.observation!.probe).toBeUndefined();
   });
 });
