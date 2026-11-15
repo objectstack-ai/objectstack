@@ -108,7 +108,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         help: "La langue dans laquelle cet utilisateur voit l’interface et reçoit ses notifications, sous forme d’étiquette de langue telle que zh-CN ou ja-JP. Si elle n’est pas définie, la langue par défaut du déploiement s’applique."
       },
       manager_id: {
-        label: "Responsable",
+        label: "Responsable hiérarchique",
         help: "Le responsable direct de cet utilisateur. Forme la chaîne hiérarchique que parcourt la portée hiérarchique `own_and_reports`."
       },
       primary_business_unit_id: {
@@ -120,7 +120,8 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         help: "Comment cette identité a été créée — idp_provisioned (JIT par SSO fédéré) ou env_native (inscription locale / utilisateur final de l’application). Géré par le système ; ne pas modifier.",
         options: {
           idp_provisioned: "Provisionné par l’IdP",
-          env_native: "Compte local"
+          env_native: "Compte local",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {
@@ -2167,6 +2168,18 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             label: "URL de découverte",
             helpText: "Facultatif. URL du document de découverte OIDC (https). Laissez vide pour utiliser `<issuer>/.well-known/openid-configuration`. Un point de terminaison indiqué ici est approuvé pour ce fournisseur."
           },
+          authorizationEndpoint: {
+            label: "Authorization URL",
+            helpText: "Optional. OIDC authorization endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names an authorization host the server does not trust."
+          },
+          tokenEndpoint: {
+            label: "Token URL",
+            helpText: "Optional. OIDC token endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a token host the server does not trust. Google: https://oauth2.googleapis.com/token"
+          },
+          jwksEndpoint: {
+            label: "JWKS URL",
+            helpText: "Optional. URL of the IdP’s signing-key set (JWKS, https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a key-set host the server does not trust. Google: https://www.googleapis.com/oauth2/v3/certs"
+          },
           userInfoEndpoint: {
             label: "URL userinfo",
             helpText: "Facultatif. URL du point de terminaison userinfo OIDC (https), utilisée à la place de celle indiquée par le document de découverte. Un point de terminaison indiqué ici est approuvé pour ce fournisseur : renseignez-le lorsque l’enregistrement est refusé parce que le document de découverte indique un hôte userinfo auquel le serveur ne fait pas confiance."
@@ -2253,6 +2266,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             label: "Mappage : attribut groupes",
             helpText: "Facultatif. Attribut d’assertion qui contient les groupes de l’utilisateur. Chaque connexion accorde les ensembles d’autorisations mappés à ces groupes. Laissez vide pour ne mapper aucun groupe.",
             placeholder: "groups"
+          },
+          mapAccountKey: {
+            label: "Map: Account key attribute",
+            helpText: "Optional. Assertion attribute with one stable value per person that the IdP sets and the user cannot edit (Entra ID object id, Okta user id; never an email, name or other attribute a user can change), used as the account key instead of the NameID, so a sign-in from your sign-in page and one from the IdP’s app portal reach the same account, and an email change keeps it. Leave blank for the default: Microsoft Entra ID (IdP Entity ID on sts.windows.net or login.microsoftonline.com) uses http://schemas.microsoft.com/identity/claims/objectidentifier, every other IdP the NameID. Set it when the provider is registered: accounts already made keep the key they were made with.",
+            placeholder: "http://schemas.microsoft.com/identity/claims/objectidentifier"
           }
         }
       },

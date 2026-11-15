@@ -23,7 +23,13 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 // (ui/AGENTS.md, flaky-test discipline). Specifiers identical to the previews'.
 import '@object-ui/plugin-report';
 import '@object-ui/plugin-dashboard';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
+// The object picker under the dataset form loads the linter and the formula
+// engine lazily: pay both loads while the file is collected, never inside a
+// case's timeout (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@objectstack/formula';
+import { ObjectStackAdapter } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../../../data-objectstack/src/sharedDiscovery';
 import { StudioDatasetAuthoringContext } from '../../studio-design/datasetCreate';
 
 const current = vi.hoisted(() => ({ adapter: null as unknown }));

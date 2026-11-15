@@ -741,6 +741,9 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       start_time: record.startTime ?? null,
       finished_at: record.finishedAt ?? now,
       duration_ms: record.durationMs ?? null,
+      // [#32284] The part of `duration_ms` the run spent suspended. `?? null`
+      // because this is an upsert: a rewrite must not inherit a stale wait.
+      wait_ms: record.waitMs ?? null,
       error: record.error ?? null,
       // [#15788] The rendered refusal, in its OWN column beside `status:
       // 'refused'` — ⛔ never folded into `error`, which would tell every
@@ -888,6 +891,8 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       startTime: typeof row.start_time === 'number' ? row.start_time : undefined,
       finishedAt: row.finished_at ?? undefined,
       durationMs: typeof row.duration_ms === 'number' ? row.duration_ms : undefined,
+      // [#32284] A row written before the column existed reads "not recorded".
+      waitMs: typeof row.wait_ms === 'number' ? row.wait_ms : undefined,
       error: row.error ?? undefined,
       // [#15788] `?? undefined` (never `?? ''`): a row written before this
       // column existed, and every non-refused row, genuinely carries no
@@ -1001,6 +1006,9 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       screen_json: run.screen ? JSON.stringify(run.screen) : null,
       started_at: run.startedAt,
       start_time: run.startTime ?? null,
+      // [#32284] The wait clock, so a run resumed after a restart or on
+      // another replica still sums every pause into its `waitMs`.
+      active_ms: run.activeMs ?? null,
     };
   }
 
@@ -1021,6 +1029,7 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       context: parseJson<SuspendedRun['context']>(row.context_json, {}),
       startedAt,
       startTime: typeof row.start_time === 'number' ? row.start_time : (Date.parse(startedAt) || Date.now()),
+      ...readActiveMs(row),
       correlation: row.correlation ?? undefined,
       screen: parseJson<SuspendedRun['screen']>(row.screen_json, undefined as any),
     };
@@ -1049,6 +1058,8 @@ function serializeConsumedSuspension(
     correlation: null,
     // [#28405] The identity a restore re-arms the pause pinned to.
     flow_checksum: null,
+    // [#32284] The wait clock a restore re-arms the pause with.
+    active_ms: null,
   };
   if (!run) return empty;
   const variables_json = JSON.stringify(run.variables ?? {});
@@ -1092,6 +1103,11 @@ function serializeConsumedSuspension(
     node_type: run.nodeType ?? null,
     correlation: run.correlation ?? null,
     flow_checksum: run.flowChecksum ?? null,
+    // [#32284] The consumed pause's wait clock, in the column the paused row
+    // keeps it in — so a restore from this row re-arms the pause with it and
+    // the run's eventual `waitMs` still sums every pause. `wait_ms` on this
+    // row is the FAILED record's own wait; the two never share a column.
+    active_ms: run.activeMs ?? null,
   };
 }
 
@@ -1111,6 +1127,15 @@ function readFlowPackage(row: any): { flowPackage?: string } {
  */
 function readFlowChecksum(row: any): string | undefined {
   return typeof row.flow_checksum === 'string' && row.flow_checksum !== '' ? row.flow_checksum : undefined;
+}
+
+/**
+ * [#32284] A paused row's (or a consumed snapshot's) wait clock, as
+ * `SuspendedRun.activeMs` — nothing for a row written before the column
+ * existed, whose run then records no `waitMs` rather than a guessed one.
+ */
+function readActiveMs(row: any): { activeMs?: number } {
+  return typeof row.active_ms === 'number' ? { activeMs: row.active_ms } : {};
 }
 
 /**
@@ -1157,6 +1182,7 @@ function deserializeConsumedSuspension(row: any): SuspendedRun | undefined {
     context: parseJson<SuspendedRun['context']>(row.context_json, {}),
     startedAt,
     startTime: typeof row.start_time === 'number' ? row.start_time : (Date.parse(startedAt) || Date.now()),
+    ...readActiveMs(row),
     correlation: row.correlation ?? undefined,
     screen: parseJson<SuspendedRun['screen']>(row.screen_json, undefined as any),
   };

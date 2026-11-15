@@ -183,6 +183,10 @@ export function createRegistryModuleMock(
     // a refused registration is put back. The double runs the body as given:
     // it records nothing, so it has nothing to put back.
     restoringOnRefusal: vi.fn((register: () => unknown) => register()),
+    // [#33050] …and inside that run, through this member, so a re-registered
+    // body withdraws what its previous one shipped. The double keeps no item
+    // slots, so it has nothing to withdraw and runs the body as given.
+    replacingPackageBody: vi.fn((_packageId: unknown, _manifest: unknown, register: () => unknown) => register()),
     // [#31564] …and records, for a run another caller opened, the engine's
     // own entries a body writes. The double opens no run, so it records nothing.
     recordRestoreOnRefusal: vi.fn(),

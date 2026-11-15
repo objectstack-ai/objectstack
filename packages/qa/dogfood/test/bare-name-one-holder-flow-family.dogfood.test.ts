@@ -14,10 +14,9 @@
 //   - the cold boot of a deployment that already holds the clash — two
 //     `AppPlugin` packages, `alpha` and `beta`, shipping one flow, one webhook,
 //     one connector and one email template under the same names — boots, and
-//     logs ONE bare-name warning line naming the connector alone, both
-//     packages and its rename (the flow's, the email template's and the
-//     webhook's rules narrowed to the namespace, ADR-0150 D9 #31696 and
-//     #31699: two namespaces' flows, templates or webhooks are no clash, and a
+//     logs NO bare-name warning line (every one of the four rules narrowed to
+//     the namespace, ADR-0150 D9 #31696 and #31699, the connector last: two
+//     namespaces' flows, templates, webhooks or connectors are no clash, and a
 //     send of the template name is refused naming both); the automation engine
 //     arms EACH flow in its own slot and refuses the bare name naming both, and
 //     the declared webhook's by-name read refuses the held name naming both
@@ -26,12 +25,15 @@
 //   - `POST /marketplace/install-local` of a third namespace's package
 //     declaring the held flow name installs (#31696), and the engine arms its
 //     flow in a third slot beside the two; the bare name stays refused;
-//   - the same door refusing a package that declares the held connector and
-//     webhook names and the showcase's own flow and email template names, for
-//     the connector alone, naming its holders — and no longer the held webhook
-//     name or the showcase's flow or template name, which another namespace may
-//     now ship (`flow-name-per-namespace.dogfood.test.ts` pins the flow's
-//     narrowing at every door);
+//   - the same door admitting a package that declares the held connector name
+//     and the showcase's own flow and email template names, which another
+//     namespace may now ship (#31699: the connector, the last; the refusal it
+//     answered before is gone; `flow-name-per-namespace.dogfood.test.ts` pins
+//     the flow's narrowing at every door);
+//   - the connector's narrowing (#31699, the narrowing PR): the bare
+//     `/meta/connector/NAME` refuses the name naming every holder, the
+//     namespace address reads one holder's own declaration, and a co-owner of
+//     `alpha`'s namespace is still refused;
 //   - the webhook's narrowing (#31699 PR 2): each holder is its own slot, the
 //     activation door's bare address refuses the name naming both while its
 //     namespace address switches one holder's own row, that holder alone is
@@ -65,7 +67,6 @@ import { defineStack } from '@objectstack/spec';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { bootShowcase } from './showcase-boot.js';
 
-const SHOWCASE_PKG = 'com.example.showcase';
 const SHOWCASE_FLOW = 'showcase_task_completed';
 const SHOWCASE_TEMPLATE = 'showcase_task_done_email';
 const FLOW = 'qa_shared_flow';
@@ -132,11 +133,6 @@ async function captureOutput<T>(run: () => Promise<T>): Promise<{ value: T; line
     (process.stderr as any).write = stderr;
     console.warn = warn;
   }
-}
-
-/** The level of one kernel-logger line (`<ISO time> <LEVEL> <message> …`), or `undefined`. */
-function levelOf(line: string): string | undefined {
-  return /^(?:\S+Z\s+)?(DEBUG|INFO|WARN|ERROR|FATAL)\b/.exec(line.trim())?.[1];
 }
 
 const codeOf = (body: any) =>
@@ -228,25 +224,13 @@ describe('one package holder per flow, webhook, connector and email template nam
     if (storageDir) rmSync(storageDir, { recursive: true, force: true });
   });
 
-  it('the cold boot of a deployment holding the clash boots, and warns once naming the one unnarrowed name (the connector), both packages and its rename', async () => {
+  it('[FROM one warning naming the connector TO none] the cold boot of a deployment holding the four names in two namespaces boots with no bare-name warning', async () => {
+    // [ADR-0150 D9, #31696, #31699] Two namespaces' flows, email templates,
+    // webhooks (PR 2) and connectors (the narrowing, the last) are no clash.
     const warnings = bootLines.filter((l) => l.includes('Bare-name conflict at boot'));
-    expect(warnings, 'one warning line').toHaveLength(1);
-    const line = warnings[0]!;
-    expect(levelOf(line)).toBe('WARN');
-    // [ADR-0150 D9, #31696] Two namespaces' flows are no clash.
-    expect(line).not.toContain(`the flow "${FLOW}"`);
-    expect(line).toContain(`the connector "${CONN}"`);
-    // [ADR-0150 D9, #31699] Two namespaces' email templates, and webhooks (PR 2), are no clash.
-    expect(line).not.toContain(`the email template "${TPL}"`);
-    expect(line).not.toContain(`the webhook "${HOOK}"`);
-    expect(line, `the rename of ${CONN}`).toContain(`"beta_${CONN}"`);
-    expect(line).toContain('package "com.qa.bare.alpha"');
-    expect(line).toContain('package "com.qa.bare.beta"');
-    // The platform's built-in templates are the overridable baseline: never named by the warning.
-    const baseline = builtInTemplatePackage();
-    expect(baseline, 'the built-in templates are registered under a package').toBeDefined();
-    expect(line).not.toContain(BUILT_IN_TPL);
-    expect(line).not.toContain(baseline!);
+    expect(warnings, 'no warning line').toEqual([]);
+    // The platform's built-in templates are the overridable baseline, registered under a package.
+    expect(builtInTemplatePackage(), 'the built-in templates are registered under a package').toBeDefined();
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
     // [ADR-0150 D4, #31696] The engine arms each flow (it had refused the arming).
     expect(bootLines.some((l) => l.includes('failed to register flow') && l.includes(`"${FLOW}"`))).toBe(false);
@@ -265,26 +249,17 @@ describe('one package holder per flow, webhook, connector and email template nam
     await expectEachSlotArmedAndBareRefused();
   });
 
-  it('install-local of a package declaring the held connector and webhook names and the showcase\'s own flow and email template names is refused for the connector alone, naming its holders and never the showcase', async () => {
-    const before = await packageIds();
+  it('[FROM 422 TO admitted] install-local of a third namespace\'s package declaring the held connector name and the showcase\'s own flow and email template names installs', async () => {
+    // [#31696, #31699] Another namespace may ship the showcase's flow and
+    // template names, and (the narrowing, the last) the held connector name.
+    // The held webhook name's admission is pinned in its own block below.
     const { status, body } = await installLocal(inline('delta', {
       flows: [flow('delta', SHOWCASE_FLOW)],
-      webhooks: [webhook('delta')],
       connectors: [connector('delta')],
       emailTemplates: [template('delta', SHOWCASE_TEMPLATE)],
     }));
-    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
-    const message = String(body?.error?.message ?? '');
-    // [#31696, #31699] Another namespace may ship the showcase's flow and template names.
-    expect(message).not.toContain(`the flow "${SHOWCASE_FLOW}"`);
-    expect(message).not.toContain(`the email template "${SHOWCASE_TEMPLATE}"`);
-    // [#31699 PR 2] Another namespace may declare the held webhook name.
-    expect(message).not.toContain(`the webhook "${HOOK}"`);
-    expect(message).not.toContain(SHOWCASE_PKG);
-    expect(message).toContain(`the connector "${CONN}"`);
-    expect(message).toContain('com.qa.bare.alpha');
-    expect(message).toContain(`"delta_${CONN}"`);
-    expect(await packageIds(), 'the package list is unchanged').toEqual(before);
+    expect(status, JSON.stringify(body)).toBeLessThan(300);
+    expect(await packageIds()).toContain('com.qa.bare.delta');
     await expectHeldWebhookRefused();
   });
 
@@ -373,6 +348,48 @@ describe('one package holder per flow, webhook, connector and email template nam
       expect(await packageIds()).toEqual(before);
     });
   });
+  describe('the connector\'s rule narrowed to the namespace (ADR-0150 D3/D5/D9, #31699, the narrowing)', () => {
+    const HOLDERS = ['com.qa.bare.alpha', 'com.qa.bare.beta', 'com.qa.bare.delta'];
+
+    it('[FROM the first registered declaration TO 409] the bare /meta/connector/NAME of the held name refuses it, naming every holder', async () => {
+      const res = await stack.apiAs(admin, 'GET', `/meta/connector/${CONN}`);
+      const body = (await res.json()) as any;
+      expect([res.status, codeOf(body)], JSON.stringify(body)).toEqual([409, 'RESOURCE_CONFLICT']);
+      for (const holder of HOLDERS) expect(JSON.stringify(body)).toContain(holder);
+    });
+
+    it('each holder\'s namespace address reads that holder\'s own declaration', async () => {
+      for (const ns of ['alpha', 'beta', 'delta']) {
+        const res = await stack.apiAs(admin, 'GET', `/meta/connector/${ns}/${CONN}`);
+        const body = (await res.json()) as any;
+        expect(res.status, JSON.stringify(body)).toBe(200);
+        expect(JSON.stringify(body)).toContain(`${ns} connector body`);
+      }
+    });
+
+    it('CONTROL — install-local of a co-owner of alpha\'s namespace declaring the held connector name is refused, naming alpha only; nothing is installed', async () => {
+      // Unlike the email template, a connector is not override-gated, so the
+      // bare-name rule answers the co-owner itself: one holder per namespace.
+      const before = await packageIds();
+      const { status, body } = await installLocal({
+        manifest: {
+          id: 'com.qa.bare.alphaconn', namespace: 'alpha', name: 'alphaconn', version: '1.0.0', type: 'app', scope: 'project',
+          engines: { protocol: `^${PROTOCOL_MAJOR}` },
+          dependencies: { 'com.qa.bare.alpha': '^1.0.0' },
+          objects: [item('alpha_alphaconn')],
+          connectors: [connector('alphaconn')],
+        },
+      });
+      expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
+      const message = String(body?.error?.message ?? '');
+      expect(message).toContain(`the connector "${CONN}"`);
+      expect(message).toContain('already held by package "com.qa.bare.alpha"');
+      expect(message).not.toContain('com.qa.bare.beta');
+      expect(message).not.toContain('com.qa.bare.delta');
+      expect(await packageIds()).toEqual(before);
+    });
+  });
+
   describe('the webhook\'s rule narrowed to the namespace (ADR-0150 D3/D4/D5/D9, #31699 PR 2)', () => {
     const declared = () => (stack.kernel as any).getService('declaredWebhooks');
     const slotsOf = async (name: string) => ((await declared().list()) as Array<{ webhook: { name: string }; packageId?: string; active: boolean }>)

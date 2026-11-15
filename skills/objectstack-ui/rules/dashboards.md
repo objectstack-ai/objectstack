@@ -10,7 +10,7 @@
 
 Dashboards are a grid of widgets (`columns` × `rowHeight`) sharing a
 `dateRange` scrubber and `globalFilters`. Each widget binds a `dataset`
-(below), picks a chart `type`, and sets a `layout: {x,y,w,h}` (ADR-0021).
+(below), picks a chart `type`, and sets a `layout: {x,y,w,h}`.
 
 ### Widget Types
 
@@ -31,7 +31,7 @@ A widget's `type` is its **chart type** (`ChartTypeSchema`; defaults to
 
 ### Dataset-Bound Widgets
 
-Every persisted chart is **dataset-backed** (ADR-0021 single-form cutover): a
+Every persisted chart is **dataset-backed**: a
 dashboard widget, a report, and a list `type:'chart'` view all **bind a `dataset`
 and select named `dimensions` + `values`**; the dataset owns the base object,
 allowed joins, intrinsic filter, dimensions, and certified measures. A widget
@@ -97,9 +97,10 @@ Standardized answers to the recurring ambiguous cases:
 - **Total over a computed value.** `sum`/`avg`/`min`/`max` need a STORED numeric
   or boolean field (`percent` not under `sum`; `min`/`max` also dates); a `formula`
   has no column: refused whatever its `returnType` says. Make it a field of its
-  return type with the same `expression` (computed and stored on write; existing rows
-  stay empty until rewritten, no hosted backfill yet) or title the widget the `count`
-  it is. Leave days (`date` fields: no `duration`): the `formula` `days_requested` ⇒ a
+  return type with the same `expression` (computed and stored on write, from its own
+  row only: objectstack-data → Relationships → Computed column; rows a publish did
+  not fill: `os migrate stored-expressions --apply`) or title the widget the `count` it is.
+  Leave days (`date` fields: no `duration`): the `formula` `days_requested` ⇒ a
   `readonly` `number` `days_count` with its `expression`, then `{ name: 'days_sum', aggregate: 'sum', field: 'days_count' }`.
 - **Breakdown by a multi-value field.** `multiselect`/`checkboxes`/`tags` and
   any `multiple: true` field is refused as a dataset or cube dimension and as
@@ -265,7 +266,7 @@ import type { DashboardWidget } from '@objectstack/spec/ui';
 const widgets: DashboardWidget[] = [
 // Metric — WoW delta
 { id: 'done_this_week', type: 'metric', dataset: 'crm_task_metrics', values: ['task_count'],
-  filter: { assignee: '{current_user_id}', status: 'done',
+  filter: { owner_id: '{current_user_id}', status: 'done',
             completed_at: { $gte: '{week_start}' } },
   compareTo: { kind: 'previousPeriod' } },
 
@@ -304,13 +305,13 @@ defineDataset({
 // measure `currency` → the field's `defaultCurrency` (`fixed` only) →
 // tenant `localization.currency`; omit it for counts. A
 // `currencyMode: 'record'` amount refuses `currency`, and sum/avg/min/max
-// unless grouped by its code field; then the column carries
-// `currencyField` (the per-row code column); a `count` never does. A `fixed`
+// unless grouped by its code field (a parent-path `currencyField` admits
+// none, objectstack-data → Field Types → Currency: measure its `homeAmount`
+// field or the parent's `summary`). A `fixed`
 // field, or a derived sum/difference over one `fixed` code, refuses another
 // `currency` (delete it, the column takes that code; restating is fine); a
 // derived measure refuses operands in two `fixed` codes (derive from one
-// currency or drop one). Not judged: `currency` over a `dynamic` field, a
-// `fixed` code against the tenant's.
+// currency or drop one).
 
 // The widget just selects the dimension by name:
 const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
@@ -400,7 +401,7 @@ export const PipelineCoverageReport = defineReport({
   type: 'matrix',
   dataset: 'crm_opportunity_metrics',
   rows: ['forecast_category'],   // down axis
-  columns: ['close_date'],       // across axis (ADR-0021 D2) — matrix pivots rows × columns
+  columns: ['close_date'],       // across axis — matrix pivots rows × columns
   values: ['amount_sum'],        // measures placed in the cells
   runtimeFilter: { stage: { $ne: 'closed_lost' } },
   // Period: ONE `type: 'date'` dataset dimension, not a dashboard-style raw `field`.
@@ -414,7 +415,7 @@ export const PipelineCoverageReport = defineReport({
 
 > **`rows`** are the report's grouping dimensions (selected from the dataset by
 > name). A `summary` groups *down* by `rows`. A `matrix` pivots `rows` (down) ×
-> **`columns`** (across, ADR-0021 D2) with `values` in the cells — do **not**
+> **`columns`** (across) with `values` in the cells — do **not**
 > put both axes in `rows`. Multi-level grouping on either axis = multiple
 > dimension names in that array.
 > **`order`** sorts the result server-side — a list of `{ by, direction }`, most

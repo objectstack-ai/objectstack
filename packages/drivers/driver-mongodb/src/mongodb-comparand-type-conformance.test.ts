@@ -35,8 +35,11 @@ import { BSON } from 'mongodb';
 import {
   FILTER_COMPARAND_TYPE_CASES,
   FILTER_COMPARAND_TYPE_ROWS,
+  FILTER_STRING_STORED_COMPARAND_CASES,
+  FILTER_STRING_STORED_COMPARAND_ROWS,
   parseFilterAST,
   type ComparandTypeRow,
+  type StringStoredComparandRow,
   type FilterCondition,
 } from '@objectstack/spec/data';
 import { translateFilter } from './mongodb-filter.js';
@@ -106,7 +109,7 @@ function matchField(value: unknown, cond: unknown): boolean {
   return value === cond;
 }
 
-function matchDoc(row: ComparandTypeRow, doc: Record<string, unknown>): boolean {
+function matchDoc(row: ComparandTypeRow | StringStoredComparandRow, doc: Record<string, unknown>): boolean {
   for (const [key, value] of Object.entries(doc)) {
     switch (key) {
       case '$and':
@@ -188,4 +191,25 @@ describe('[#7872] driver-mongodb — comparand-type conformance (server-free, be
     expect(FILTER_COMPARAND_TYPE_ROWS.filter((row) => matchDoc(row, wire)).map((r) => r.id))
       .toEqual(['1', '2']);
   });
+});
+
+/**
+ * [#29486] `FILTER_STRING_STORED_COMPARAND_CASES`, the driver's half: a number
+ * or boolean comparand on a text- or option-family field reaches
+ * `translateFilter` already narrowed to the string the write door stored (the
+ * engine's declared-type door, pinned in `@objectstack/objectql`), so each
+ * case's `stored()` filter, translated and wire-round-tripped, must select
+ * exactly its rows — judged by the same strict reader as the table above.
+ */
+describe('[#29486] driver-mongodb — a number or boolean comparand on a string-stored field, as the door hands it', () => {
+  for (const c of FILTER_STRING_STORED_COMPARAND_CASES) {
+    it(c.name, () => {
+      const doc = translateFilter(parseFilterAST(c.stored()) as FilterCondition) as Record<string, unknown>;
+      const wire = BSON.deserialize(BSON.serialize(doc)) as Record<string, unknown>;
+      const selected = FILTER_STRING_STORED_COMPARAND_ROWS.filter((row) => matchDoc(row, wire))
+        .map((row) => row.id)
+        .sort((x, y) => x.localeCompare(y));
+      expect(selected, c.note).toEqual([...c.expected]);
+    });
+  }
 });

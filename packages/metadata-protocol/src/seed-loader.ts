@@ -34,7 +34,7 @@ import { resolveSeedRecord } from '@objectstack/formula';
 import {
   bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup,
   temporalComparandKind, temporalStorageForm, type TemporalComparandKind, isMissing,
-  blankAsNullColumns, blankStorageForm, type BlankAsNullReach, resolveTenantFieldName,
+  blankAsNullColumns, blankStorageForm, type BlankAsNullReach, resolveTenantFieldName, DEFAULT_TENANT_FIELD,
 } from '@objectstack/core';
 // [#8442] The repo's ONE recogniser for "this throw is a record-validation
 // failure" — duck-typed on `code`/`name`, the same predicate `mapDataError` and
@@ -486,23 +486,32 @@ type SoleOrganizationReading =
   | { kind: 'no-organization-object' };
 
 /**
- * [ADR-0131 D9] Does a seed row of this object need an organization?
+ * [ADR-0131 D9] The column a seed row of this object carries its organization
+ * in, or `null` when a row of it carries none.
  *
- * The object carries an `organization_id` column on its REGISTERED schema —
- * authored, or injected by the system-column pass — and has not opted out of
- * tenancy. The injected half is `resolveInjectedSystemColumns`, the single
- * source `applySystemFields` itself consumes, so this answers what the engine
- * will register, not what the author happened to type. `organization_id` and
- * only it, because that is the column this loader stamps.
+ * The object is tenant-scoped on its REGISTERED schema and has not opted out
+ * of tenancy. The column is the one the tenant wall scopes it by: a declared
+ * `tenancy.tenantField` the object really has, else `organization_id` —
+ * authored, or injected by the system-column pass. Both halves are the shared
+ * readings, never a third: `resolveTenantFieldName` (`@objectstack/core`) is
+ * the predicate the engine and the driver wall by, and
+ * `resolveInjectedSystemColumns` is the single source `applySystemFields`
+ * itself consumes, so this answers what the engine will register, not what
+ * the author happened to type. It is the column this loader stamps with the
+ * load's organization, the one a per-organization replay matches existing
+ * rows on, and the one a row's own organization is read from.
  */
+function seedRowTenantColumn(definition: unknown): string | null {
+  if (!definition || typeof definition !== 'object') return null;
+  if (isTenancyDisabled(definition)) return null;
+  const resolved = resolveTenantFieldName(definition);
+  if (resolved !== null) return resolved;
+  return resolveInjectedSystemColumns(definition).tenant ? DEFAULT_TENANT_FIELD : null;
+}
+
+/** [ADR-0131 D9] Does a seed row of this object need an organization? See {@link seedRowTenantColumn}. */
 function seedRowNeedsOrganization(definition: unknown): boolean {
-  if (!definition || typeof definition !== 'object') return false;
-  if (isTenancyDisabled(definition)) return false;
-  const fields = (definition as { fields?: unknown }).fields;
-  if (fields && typeof fields === 'object' && Object.prototype.hasOwnProperty.call(fields, 'organization_id')) {
-    return true;
-  }
-  return resolveInjectedSystemColumns(definition).tenant;
+  return seedRowTenantColumn(definition) !== null;
 }
 
 /**
@@ -521,6 +530,18 @@ function carriesOrganizationColumn(definition: unknown): boolean {
   }
   return resolveInjectedSystemColumns(definition).tenant;
 }
+
+/**
+ * [#33207] How an organization-scoped load probes one reference target
+ * (`SeedLoaderService.probeScopeOf`). The `organization` scope names the
+ * column the probe filters on: the target's resolved tenant column, the one
+ * its rows are walled by.
+ */
+type ProbeScope =
+  | { readonly kind: 'organization'; readonly tenantColumn: string }
+  | { readonly kind: 'members' }
+  | { readonly kind: 'own-organization' }
+  | { readonly kind: 'global' };
 
 /** [#33207] A reference probe the engine refused: it never ran. */
 interface ProbeRefusal {
@@ -781,7 +802,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    * reference target ({@link probeScopeOf}). Cleared per load for the reason
    * {@link declaresNameColumnCache} is.
    */
-  private probeScopeCache = new Map<string, 'organization' | 'members' | 'own-organization' | 'global'>();
+  private probeScopeCache = new Map<string, ProbeScope>();
   /** [#33207] The refused probes this {@link load} has already said, one line each. */
   private refusedProbes = new Set<string>();
   /**
@@ -1670,6 +1691,12 @@ export class SeedLoaderService implements ISeedLoaderService {
     // judge, and nothing here refuses a row for an owner it cannot prove.
     const objectDefinition = await this.resolveObjectDefinition(objectName);
     const rowsCarryOrganization = objectDefinition == null || seedRowNeedsOrganization(objectDefinition);
+    // The column a row of this dataset holds its organization in: the one the
+    // stamp below writes, a refusal names, and a row's own organization is
+    // read from (`seedRowTenantColumn`). A declared `tenancy.tenantField` is
+    // that column for an object walled by it; an unresolved definition keeps
+    // `organization_id`, as it keeps the stamp.
+    const organizationColumn = seedRowTenantColumn(objectDefinition) ?? DEFAULT_TENANT_FIELD;
     this.warnOnUndeclaredSeedColumns(dataset, objectDefinition);
     // How a replay compares each field (`isNoOpReplay`): [#24562] a temporal
     // field in its stored form, [#24624] a field the read path masks never by
@@ -1820,28 +1847,31 @@ export class SeedLoaderService implements ISeedLoaderService {
       // `config.organizationId`, or (when none was pinned) the install's sole
       // organization. [ADR-0131 D3] `sys_` / `cloud_` / `ai_` seeds take it
       // too: their exemption ("intentionally global") is withdrawn, since no
-      // platform-global seeds remain. A record that supplies its own
-      // `organization_id` always wins. An object with no organization column
-      // gets no stamp (`rowsCarryOrganization` above): the engine refuses an
-      // undeclared field, so a stamp there would drop the row.
+      // platform-global seeds remain. The stamp lands in `organizationColumn`:
+      // `organization_id`, or the declared `tenancy.tenantField` of an object
+      // walled by another column, which the wall reads as the organization
+      // the same way. A record that supplies its own value there always wins.
+      // An object with no organization column gets no stamp
+      // (`rowsCarryOrganization` above): the engine refuses an undeclared
+      // field, so a stamp there would drop the row.
       const tenantOrg = rowsCarryOrganization ? (config.organizationId ?? this.fallbackOrgId) : undefined;
-      if (refuseUnownedRows && tenantOrg === undefined && record['organization_id'] == null) {
+      if (refuseUnownedRows && tenantOrg === undefined && record[organizationColumn] == null) {
         // [ADR-0131 D9] No owner to stamp — refuse the row, loudly, by name.
         errored++;
         const count = this.unownedOrganizationCount ?? 0;
         const error: ReferenceResolutionError = {
           sourceObject: objectName,
-          field: 'organization_id',
+          field: organizationColumn,
           targetObject: 'sys_organization',
           targetField: 'id',
           attemptedValue: null,
           recordIndex: i,
           message:
-            `Seed record #${i} of '${objectName}' was REFUSED: '${objectName}' carries an organization_id ` +
-            `column, this seed load names no organization (config.organizationId) and none can be derived — ` +
+            `Seed record #${i} of '${objectName}' was REFUSED: '${objectName}' carries its organization in ` +
+            `${organizationColumn}, this seed load names no organization (config.organizationId) and none can be derived — ` +
             `the install holds ${count === 0 ? 'no organization at all' : 'several organizations'}. Every seed ` +
             `row of an organization-owned object is stamped with its organization or refused; writing it would ` +
-            `store a row no organization owns. Fix it by setting organization_id on the record — a seed ` +
+            `store a row no organization owns. Fix it by setting ${organizationColumn} on the record — a seed ` +
             `published through a package carries no caller organization (ADR-0131 D12), so the record is ` +
             `where its owner is named; a direct SeedLoader caller may instead pass config.organizationId. ` +
             `Under the 'single' tenancy ` +
@@ -1881,8 +1911,8 @@ export class SeedLoaderService implements ISeedLoaderService {
       // survived: see `apps/ee-tenant-crm-showcase` in the cloud repo, which
       // reproduces it end-to-end.
       let stampedTenantOrg = false;
-      if (tenantOrg && record['organization_id'] == null) {
-        record['organization_id'] = tenantOrg;
+      if (tenantOrg && record[organizationColumn] == null) {
+        record[organizationColumn] = tenantOrg;
         stampedTenantOrg = true;
       }
 
@@ -2029,7 +2059,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         // Never re-resolve the tenant stamp we just wrote (see above). A seed
         // that authors `organization_id` ITSELF still goes through resolution,
         // so naming an org by its natural key keeps working.
-        if (stampedTenantOrg && ref.field === 'organization_id') continue;
+        if (stampedTenantOrg && ref.field === organizationColumn) continue;
         // [#25761] A create-only reference on a row the load matched is no
         // part of that row's write: not resolved, not dropped for failing to
         // resolve, and not deferred — pass 2's back-fill would write it after
@@ -2325,8 +2355,8 @@ export class SeedLoaderService implements ISeedLoaderService {
       if (datasetFiles) {
         const matched = existingRecords?.get(this.externalIdKey(record, externalId));
         const organizationOfRow =
-          typeof record['organization_id'] === 'string' && record['organization_id'] !== ''
-            ? (record['organization_id'] as string)
+          typeof record[organizationColumn] === 'string' && record[organizationColumn] !== ''
+            ? (record[organizationColumn] as string)
             : null;
         const outcome = await datasetFiles.prepareRow({
           record,
@@ -2416,14 +2446,14 @@ export class SeedLoaderService implements ISeedLoaderService {
 
       // Insert/upsert the record
       if (!config.dryRun) {
-        rowOrganizationByRecordIndex.set(i, record['organization_id']); // [#33206]
+        rowOrganizationByRecordIndex.set(i, record[organizationColumn]); // [#33206]
         if (hasSelfRef) {
           // Self-referencing dataset: keep the historical sequential
           // per-record write so a later record can resolve its self-ref
           // against an earlier one via `insertedRecords` — see `hasSelfRef`.
           try {
             const result = await this.writeRecord(
-              objectName, record, mode, externalId, existingRecords, comparands
+              objectName, record, mode, externalId, existingRecords, comparands, record[organizationColumn],
             );
 
             if (result.action === 'inserted') written.inserted++;
@@ -2490,7 +2520,7 @@ export class SeedLoaderService implements ISeedLoaderService {
               insertedRecords.get(objectName)!.set(externalIdValue, decision.id);
             }
             try {
-              const rowOpts = this.writeOptionsFor(record['organization_id']) as any; // [#33206]
+              const rowOpts = this.writeOptionsFor(record[organizationColumn]) as any; // [#33206]
               await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.update(objectName, { ...record, id: decision.id }, rowOpts)));
               written.updated++;
               await settleSeedFiles(i, decision.id); // [#25779]
@@ -2513,7 +2543,7 @@ export class SeedLoaderService implements ISeedLoaderService {
           } else {
             // Insert: buffer for the batched flush rather than writing now.
             // [#33206] A row written as another organization starts its own batch.
-            const rowOpts = this.writeOptionsFor(record['organization_id']);
+            const rowOpts = this.writeOptionsFor(record[organizationColumn]);
             if (pendingInserts.length > 0 && rowOpts !== batchOpts) await flushPendingInserts();
             batchOpts = rowOpts;
             pendingInserts.push({ recordIndex: i, externalIdValue, record });
@@ -2751,7 +2781,15 @@ export class SeedLoaderService implements ISeedLoaderService {
 
     // Not a natural key (an internal id, or a non-string the engine will
     // reject on its own terms) — keep it verbatim.
-    if (typeof value !== 'string' || this.looksLikeInternalId(value)) {
+    //
+    // [#33280] Except a person on an organization-scoped load: an id names a
+    // person exactly as a name does, so it is judged by the same membership
+    // rule. A member's id resolves to itself; an id of someone outside the
+    // organization gets the refusal a name gets. A shape the pattern does not
+    // recognise (`usr_…`) already reached the probe through its `id` leg, so
+    // keeping the recognised shapes verbatim was the only door past the rule.
+    if (typeof value !== 'string') return { status: 'kept', value };
+    if (this.looksLikeInternalId(value) && !(await this.judgesInternalIdByMembership(ref.targetObject, config))) {
       return { status: 'kept', value };
     }
 
@@ -2809,13 +2847,15 @@ export class SeedLoaderService implements ISeedLoaderService {
     // [#33207] How an organization-scoped load may look into this target. With
     // no organization on the load (the single-tenant boot, a publish, a hot
     // reload) every probe is unscoped, exactly as before.
-    const scope = organizationId ? await this.probeScopeOf(targetObject) : 'unscoped';
+    const scope: ProbeScope | { readonly kind: 'unscoped' } = organizationId
+      ? await this.probeScopeOf(targetObject)
+      : { kind: 'unscoped' };
     let refusal: ProbeRefusal | undefined;
     let nonMemberMatched = false;
 
     for (const probeField of probeFields) {
       try {
-        if (scope === 'members') {
+        if (scope.kind === 'members') {
           const outcome = await this.probeOrganizationMember(probeField, value, organizationId!);
           if (outcome.id) return { id: outcome.id };
           nonMemberMatched ||= outcome.nonMemberMatched;
@@ -2826,11 +2866,14 @@ export class SeedLoaderService implements ISeedLoaderService {
         // A tenant-carrying target (or one the registry cannot describe) is
         // AND-scoped to the load's organization, so a row of another
         // organization is never borrowed as the reference (that would be a
-        // cross-organization link). The organization table itself answers only
-        // for the load's own organization. A global target (its author gave it
-        // no organization column) has no tenant to borrow from.
-        if (scope === 'organization') where.organization_id = organizationId;
-        else if (scope === 'own-organization') {
+        // cross-organization link). The filter names the column the target's
+        // rows are walled by (#33393): a declared `tenancy.tenantField` holds
+        // the organization there, and `organization_id` may not exist at all.
+        // The organization table itself answers only for the load's own
+        // organization. A global target (its author gave it no organization
+        // column) has no tenant to borrow from.
+        if (scope.kind === 'organization') where[scope.tenantColumn] = organizationId;
+        else if (scope.kind === 'own-organization') {
           if (probeField === 'id' && value !== organizationId) continue;
           where.id = organizationId;
         }
@@ -2852,7 +2895,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         // chain still moves on (a later leg may answer), the load is never
         // refused for it, and the refusal is carried to the reference's own
         // verdict and said once per target, field and code.
-        refusal ??= this.reportRefusedProbe(scope === 'members' ? SystemObjectName.USER : targetObject, probeField, err);
+        refusal ??= this.reportRefusedProbe(scope.kind === 'members' ? SystemObjectName.USER : targetObject, probeField, err);
       }
     }
     return { id: null, ...(refusal ? { refusal } : {}), ...(nonMemberMatched ? { nonMemberOf: organizationId } : {}) };
@@ -2860,20 +2903,30 @@ export class SeedLoaderService implements ISeedLoaderService {
 
   /**
    * [#33207] Resolve a person for an organization-scoped load: `sys_user`
-   * carries no organization (identity lives above the organization), so the
-   * candidates the field names are kept only when they hold a `sys_member` row
-   * in the load's organization. ⛔ A person who is not a member is never
-   * resolved, however exactly the name matches: they could not even read the
-   * row they would be made to own. The member with the lowest id wins: the
-   * candidates are read in id order, so the answer does not depend on the
-   * driver's row order.
+   * carries no organization (identity lives above the organization), so a
+   * person resolves only when they hold a `sys_member` row in the load's
+   * organization. ⛔ A person who is not a member is never resolved, however
+   * exactly the name matches: they could not even read the row they would be
+   * made to own. The member with the lowest id wins, so the answer does not
+   * depend on the driver's row order.
    *
-   * A name is not unique above the organization (every organization may sign
-   * its people up under the same seeded names), so the candidates are read
-   * page by page until a member is found or none is left: "not a member" is
-   * said only after every person the key names has been asked about, never
-   * on a truncated read. A refused membership read is reported as a refusal
-   * on `sys_member`, the table that refused it.
+   * The probe is driven from the organization's member set, never from the
+   * people the key names (#33280): a name is not unique above the organization
+   * (every organization may sign its people up under the same seeded names),
+   * so reading the same-named people first made the cost grow with the
+   * deployment. The members are read in `user_id` order, a page at a time, by
+   * keyset (`user_id` greater than the last one seen) — an offset page shifts
+   * under a concurrent delete and skips a member, which is a false "not a
+   * member". Each page is asked ONE `sys_user` read constrained to that page's
+   * people AND the key; the pages ascend, so the first page that answers holds
+   * the lowest-id member and the walk stops there. "Not a member" is said only
+   * after every member was asked about; whether anyone outside the
+   * organization answers to the key is then one bounded read (`limit: 1`),
+   * which only words the verdict.
+   *
+   * The `id` key needs no member page: the membership row of that one person
+   * is read directly. A refused membership read is reported as a refusal on
+   * `sys_member`, the table that refused it.
    */
   private async probeOrganizationMember(
     probeField: string,
@@ -2881,37 +2934,61 @@ export class SeedLoaderService implements ISeedLoaderService {
     organizationId: string,
   ): Promise<{ id: string | null; nonMemberMatched: boolean; refusal?: ProbeRefusal }> {
     const page = SeedLoaderService.MEMBER_PROBE_PAGE;
-    let nonMemberMatched = false;
-    for (let offset = 0; ; offset += page) {
-      const userProbe: EngineQueryOptions = {
-        where: { [probeField]: value },
+    const firstUser = async (where: Record<string, unknown>): Promise<string | null> => {
+      const users = (await this.engine.find(SystemObjectName.USER, {
+        where,
         fields: ['id'],
         orderBy: [{ field: 'id', order: 'asc' }],
-        limit: page,
-        offset,
+        limit: 1,
         context: { isSystem: true },
-      };
-      const users = (await this.engine.find(SystemObjectName.USER, userProbe)) as Array<Record<string, unknown>> | undefined;
-      const candidates = (users ?? []).map((u) => String(u.id ?? u._id)).filter((id) => id !== 'undefined');
-      if (candidates.length === 0) return { id: null, nonMemberMatched };
-      const memberProbe: EngineQueryOptions = {
-        where: { user_id: candidates.length === 1 ? candidates[0] : { $in: candidates }, organization_id: organizationId },
+      } satisfies EngineQueryOptions)) as Array<Record<string, unknown>> | undefined;
+      const id = users?.[0]?.id ?? users?.[0]?._id;
+      return id === undefined || id === null ? null : String(id);
+    };
+    const readMembers = async (where: Record<string, unknown>, limit: number): Promise<string[]> => {
+      const members = (await this.engine.find(SystemObjectName.MEMBER, {
+        where: { ...where, organization_id: organizationId },
         fields: ['user_id'],
-        limit: candidates.length,
+        orderBy: [{ field: 'user_id', order: 'asc' }],
+        limit,
         context: { isSystem: true },
-      };
-      let members: Array<Record<string, unknown>> | undefined;
+      } satisfies EngineQueryOptions)) as Array<Record<string, unknown>> | undefined;
+      return (members ?? [])
+        .map((m) => m.user_id)
+        .filter((id) => id !== undefined && id !== null && id !== '')
+        .map(String);
+    };
+
+    if (probeField === 'id') {
+      let isMember: boolean;
       try {
-        members = (await this.engine.find(SystemObjectName.MEMBER, memberProbe)) as Array<Record<string, unknown>> | undefined;
+        isMember = (await readMembers({ user_id: value }, 1)).length > 0;
       } catch (err) {
         return { id: null, nonMemberMatched: false, refusal: this.reportRefusedProbe(SystemObjectName.MEMBER, 'user_id', err) };
       }
-      const memberIds = new Set((members ?? []).map((m) => String(m.user_id)));
-      const member = candidates.find((id) => memberIds.has(id));
-      if (member) return { id: member, nonMemberMatched: false };
-      nonMemberMatched = true;
-      if ((users ?? []).length < page) return { id: null, nonMemberMatched };
+      const person = await firstUser({ id: value });
+      if (person === null) return { id: null, nonMemberMatched: false };
+      return isMember ? { id: person, nonMemberMatched: false } : { id: null, nonMemberMatched: true };
     }
+
+    for (let after: string | undefined; ;) {
+      let memberIds: string[];
+      try {
+        memberIds = await readMembers(after === undefined ? {} : { user_id: { $gt: after } }, page);
+      } catch (err) {
+        return { id: null, nonMemberMatched: false, refusal: this.reportRefusedProbe(SystemObjectName.MEMBER, 'user_id', err) };
+      }
+      if (memberIds.length > 0) {
+        const member = await firstUser({
+          [probeField]: value,
+          id: memberIds.length === 1 ? memberIds[0] : { $in: memberIds },
+        });
+        if (member !== null) return { id: member, nonMemberMatched: false };
+      }
+      if (memberIds.length < page) break;
+      after = memberIds[memberIds.length - 1];
+    }
+    return { id: null, nonMemberMatched: (await firstUser({ [probeField]: value })) !== null };
   }
 
   /**
@@ -2920,7 +2997,10 @@ export class SeedLoaderService implements ISeedLoaderService {
    *
    * - `organization` — the target carries an `organization_id` column (declared,
    *   or injected by the system-column pass), or the registry cannot describe
-   *   it: probe within the load's organization, as always.
+   *   it: probe within the load's organization, as always. The filter is on
+   *   the target's tenant column (`resolveTenantFieldName`, falling back to
+   *   `organization_id` when it resolves none), the column the wall scopes
+   *   the target by (#33393).
    * - `members` — `sys_user`, which carries no organization: a person resolves
    *   only through membership in the load's organization.
    * - `own-organization` — `sys_organization`, the tenant table itself: the load
@@ -2933,10 +3013,12 @@ export class SeedLoaderService implements ISeedLoaderService {
    *   probe, and its refusal is reported, not swallowed: a platform-managed
    *   table is not a seed target, and an object that resolves another tenant
    *   column (`tenancy.tenantField`) is walled per organization, so an
-   *   unscoped probe would borrow another organization's row. A scope rule
-   *   for either is not this loader's to invent.
+   *   unscoped probe would borrow another organization's row: it is probed
+   *   within the load's organization on that column. A platform-managed table
+   *   that resolves no tenant column keeps the `organization_id` filter, whose
+   *   refusal is reported; a scope rule for it is not this loader's to invent.
    */
-  private async probeScopeOf(targetObject: string): Promise<'organization' | 'members' | 'own-organization' | 'global'> {
+  private async probeScopeOf(targetObject: string): Promise<ProbeScope> {
     const memoised = this.probeScopeCache.get(targetObject);
     if (memoised !== undefined) return memoised;
     let definition: unknown;
@@ -2946,11 +3028,12 @@ export class SeedLoaderService implements ISeedLoaderService {
       // The registry could not answer: an unknown is not a tenant-less verdict,
       // so the probe keeps today's organization filter.
     }
-    let scope: 'organization' | 'members' | 'own-organization' | 'global' = 'organization';
+    const tenantColumn = resolveTenantFieldName(definition) ?? DEFAULT_TENANT_FIELD;
+    let scope: ProbeScope = { kind: 'organization', tenantColumn };
     if (definition && typeof definition === 'object' && !carriesOrganizationColumn(definition)) {
-      if (targetObject === SystemObjectName.USER) scope = 'members';
-      else if (targetObject === SystemObjectName.ORGANIZATION) scope = 'own-organization';
-      else if (!(definition as { managedBy?: unknown }).managedBy && resolveTenantFieldName(definition) === null) scope = 'global';
+      if (targetObject === SystemObjectName.USER) scope = { kind: 'members' };
+      else if (targetObject === SystemObjectName.ORGANIZATION) scope = { kind: 'own-organization' };
+      else if (!(definition as { managedBy?: unknown }).managedBy && resolveTenantFieldName(definition) === null) scope = { kind: 'global' };
     }
     this.probeScopeCache.set(targetObject, scope);
     return scope;
@@ -3437,11 +3520,13 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   /**
-   * [#33207] How many same-named people one page of the membership probe
-   * weighs. A name is not unique above the organization, so the probe pages
-   * through every person the key names; the page only bounds each read.
+   * [#33207] How many members of the load's organization one page of the
+   * membership probe weighs (#33280: the probe pages the organization's
+   * members by keyset, never the people a key names). The page only bounds
+   * each read and the `$in` list the person read carries; an organization
+   * smaller than one page is answered by one member read and one person read.
    */
-  private static readonly MEMBER_PROBE_PAGE = 50;
+  private static readonly MEMBER_PROBE_PAGE = 500;
 
   /**
    * The engine write {@link writeRecoveringSummary} guards, as a NAMED callee.
@@ -3551,9 +3636,11 @@ export class SeedLoaderService implements ISeedLoaderService {
     externalId: string | string[],
     existingRecords: Map<string, any> | undefined,
     comparands: ReplayComparands,
+    rowOrganization: unknown,
   ): Promise<{ action: 'inserted' | 'updated' | 'skipped'; id?: string; uncompared?: readonly string[] }> {
     const existing = existingRecords?.get(this.externalIdKey(record, externalId));
-    const opts = this.writeOptionsFor(record['organization_id']) as any; // [#33206]
+    // [#33206] The organization the row carries, read from its tenant column by the caller.
+    const opts = this.writeOptionsFor(rowOrganization) as any;
 
     switch (mode) {
       case 'insert': {
@@ -4263,6 +4350,22 @@ export class SeedLoaderService implements ISeedLoaderService {
    * is certified (D10), and a new write without an organization is stamped or
    * refused (D9).
    */
+  /**
+   * The column `objectName`'s rows are walled per organization by:
+   * `resolveTenantFieldName` on its definition, `organization_id` when that
+   * resolves none or the definition cannot be read — the one reading
+   * {@link probeScopeOf} scopes a reference target by.
+   */
+  private async organizationColumnOf(objectName: string): Promise<string> {
+    let definition: unknown;
+    try {
+      definition = await this.resolveObjectDefinition(objectName);
+    } catch {
+      // The registry could not answer: keep the organization filter.
+    }
+    return resolveTenantFieldName(definition) ?? DEFAULT_TENANT_FIELD;
+  }
+
   private async loadExistingRecords(
     objectName: string,
     externalId: string | string[],
@@ -4280,7 +4383,12 @@ export class SeedLoaderService implements ISeedLoaderService {
       // Per-tenant replay: restrict to the target tenant's own rows
       // so upsert key matching never returns another tenant's record
       // (would silently steal/overwrite rows across orgs).
-      if (organizationId) findArgs.where = { organization_id: organizationId };
+      // The match runs on the column the object is walled by — a declared
+      // `tenancy.tenantField`, else `organization_id` — the same reading the
+      // reference probe scopes a target by (`probeScopeOf`). An object walled
+      // by another column may carry no `organization_id` at all, and a filter
+      // on it is refused by the driver.
+      if (organizationId) findArgs.where = { [await this.organizationColumnOf(objectName)]: organizationId };
       const records = await this.engine.find(objectName, findArgs as any);
       for (const record of records || []) {
         const key = this.externalIdKey(record, externalId);
@@ -4491,6 +4599,21 @@ export class SeedLoaderService implements ISeedLoaderService {
         references: ledger.withdrawnReferences,
       },
     );
+  }
+
+  /**
+   * [#33280] Whether an internal-id-shaped reference value is still judged by
+   * the membership rule: only on a load pinned to an organization (the probe
+   * is unscoped without one), never on a dry run (which reads no database),
+   * and only for the target that resolves through membership (`sys_user`,
+   * the `members` probe scope). Every other target keeps its id verbatim.
+   */
+  private async judgesInternalIdByMembership(
+    targetObject: string,
+    config: { dryRun?: boolean; organizationId?: string },
+  ): Promise<boolean> {
+    if (!config.organizationId || config.dryRun) return false;
+    return (await this.probeScopeOf(targetObject)).kind === 'members';
   }
 
   private looksLikeInternalId(value: string): boolean {

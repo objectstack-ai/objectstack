@@ -65,6 +65,8 @@ import { PackageScopedNameRefusedError } from '@objectstack/core';
 import type { ApiError, DatasetQueryBatchEntry, GetMetaItemRequest } from '@objectstack/spec/api';
 import { DATASET_QUERY_BATCH_MAX_QUERIES, DatasetQueryBatchRequestSchema } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+// The ledger's `dataset_query` row: one per saved-dataset query that reached the read.
+import { runAuditedDatasetQuery } from './analytics-dataset-query-audit.js';
 import {
     boundedDeclaredUserMessage,
     classifiedRefusalAnswer,
@@ -82,7 +84,7 @@ import { logError } from './log.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { mayReadPendingDrafts, metaItemPackageBinding, type RestServer } from './rest-server.js';
 import { metaCallerPackageQuery, metaItemCallerPackageRefusalMessage } from './meta-item-read-gate.js';
-import { admitRefusedDatasetHolders } from './analytics-dataset-admission-order.js';
+import { admitRefusedDatasetHolders, isPackageScopedRefusal } from './analytics-dataset-admission-order.js';
 
 /**
  * The `RestServer` members {@link registerAnalyticsEndpoints} reads — every
@@ -100,6 +102,8 @@ export interface AnalyticsRouteHost {
     enforceAuth: RestServer['enforceAuth'];
     resolveProtocol: RestServer['resolveProtocol'];
     translateMetaItem: RestServer['translateMetaItem'];
+    /** The `audit` slot, for the ledger's `dataset_query` row ({@link runAuditedDatasetQuery}). */
+    resolveAuditService: RestServer['resolveAuditService'];
 }
 
 /**
@@ -234,19 +238,6 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
         },
         metadata: { summary: 'Run several semantic-layer dataset queries in one request', tags: ['analytics'] },
     });
-}
-
-/**
- * [#32072] A package-scoped resolver's refusal, by class or by shape: `code`
- * `RESOURCE_CONFLICT` with a `refusal` whose `status` is `'refused'`. The same
- * predicate the `/meta` dispatcher reads (`isPackageScopedRefusal` in
- * `@objectstack/runtime`'s `domains/meta.ts`), so one refusal is a 409 at both
- * doors whichever copy of the class threw it.
- */
-function isPackageScopedRefusal(e: unknown): e is { code: 'RESOURCE_CONFLICT'; refusal: PackageScopedNameRefusedError['refusal'] } {
-    if (e instanceof PackageScopedNameRefusedError) return true;
-    const thrown = e as { code?: unknown; refusal?: { status?: unknown } } | null | undefined;
-    return thrown?.code === 'RESOURCE_CONFLICT' && thrown.refusal?.status === 'refused';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -563,6 +554,8 @@ async function answerDatasetQuery(
         // Resolve the dataset definition: inline draft (Studio
         // preview) or a saved dataset by name.
         let dataset = body.dataset;
+        // The item the by-name read served, for the ledger row's holder package.
+        let served: unknown;
         if (!dataset && body.datasetName) {
             const p = await this.resolveProtocol(environmentId, req);
             // [#32072, ADR-0150 D3/D5] The saved dataset is read BY
@@ -688,6 +681,35 @@ async function answerDatasetQuery(
                     svc,
                     context,
                     readHolder: (holder) => readOne({ ...baseRequest, packageId: holder }),
+                    // [#32948] A holder whose own address is contended (ADR-0150
+                    // D4) is judged on its own item as the list scoped to it
+                    // serves it: that list withholds the row no one holder owns.
+                    // A list that FAILED is a failed read, answered `503` as
+                    // `readOne` answers one; a protocol with no list read leaves
+                    // the holder undetermined.
+                    listHolder: async (holder) => {
+                        if (typeof p?.getMetaItems !== 'function') return undefined;
+                        let listed: any;
+                        try {
+                            listed = await p.getMetaItems({
+                                type: 'dataset', packageId: holder, names: [body.datasetName],
+                                ...(previewDrafts ? { previewDrafts } : {}),
+                            });
+                        } catch (listError) {
+                            if (isPackageScopedRefusal(listError)) throw listError;
+                            throw Object.assign(
+                                new Error(
+                                    `The dataset "${body.datasetName}" could not be resolved: the dataset read failed. `
+                                    + 'This is a server-side fault, not a missing dataset.',
+                                ),
+                                { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true, cause: listError },
+                            );
+                        }
+                        const items: unknown[] = Array.isArray(listed) ? listed : Array.isArray(listed?.items) ? listed.items : [];
+                        // Only the holder's own item: one the list serves under
+                        // another package is not this holder's.
+                        return items.find((it: any) => it?.name === body.datasetName && it?._packageId === holder);
+                    },
                 });
                 if (judged.kind === 'rethrow') throw refused;
                 if (judged.kind === 'refused') throw judged.error;
@@ -698,12 +720,16 @@ async function answerDatasetQuery(
                             `Read access to the dataset "${body.datasetName}" could not be determined, so the query was not run. `
                             + 'This is a server-side fault, not a permission denial.',
                         ),
-                        { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true },
+                        // [#32826] Which holders could not be judged, and why:
+                        // on `cause`, so the door's `logError` prints it for the
+                        // operator; the body keeps the sentence above only.
+                        { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true, cause: new Error(judged.cause) },
                     );
                 }
                 read = judged.read;
             }
             dataset = read?.item;
+            served = read?.item;
             if (!dataset) {
                 return datasetNotFoundAnswer(body.datasetName);
             }
@@ -768,12 +794,16 @@ async function answerDatasetQuery(
             };
         }
 
-        const result = await svc.queryDataset(
+        // The read. A saved dataset's query hands the ledger one
+        // `dataset_query` event here, answered or failed; every refusal above
+        // returned before it and hands none ({@link runAuditedDatasetQuery}).
+        const queried = { req, environmentId, context, dataset, served, selection, datasetName: body.dataset ? undefined : body.datasetName };
+        const result = await runAuditedDatasetQuery(this, queried, () => svc.queryDataset(
             dataset,
             selection,
             context ?? undefined,
             previewDrafts ? { previewDrafts: true } : undefined,
-        );
+        ));
         return { status: 200, body: result };
     } catch (error: any) {
         return datasetQueryFaultAnswer(error);

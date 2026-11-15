@@ -934,11 +934,11 @@ export default class Lint extends Command {
         'Also report i18n coverage for platform built-in metadata forms (hidden by default — the platform packages ship those translations)',
     }),
     'i18n-strict': Flags.boolean({
-      description: 'Treat missing translations in non-default locales as errors',
+      description: 'Treat missing translations in non-source locales as errors',
     }),
     'default-locale': Flags.string({
       description:
-        "Default locale for i18n coverage (must be 100% translated). Defaults to the config's i18n.defaultLocale, else 'en'.",
+        "Source locale for i18n coverage: the language inline labels are written in, which they satisfy and errors are raised against. Overrides the config's i18n.sourceLocale, else its i18n.defaultLocale, else 'en'.",
     }),
   };
 

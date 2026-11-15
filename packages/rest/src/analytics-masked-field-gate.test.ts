@@ -347,12 +347,10 @@ for (const strategy of ['native', 'objectql'] as const) {
         const unmasker = await answerOf(() => h.service.query(query, UNMASKER_CTX as never));
         const system = await answerOf(() => h.service.query(query, SYS_CTX as never));
         expect(normalized(unmasker), `${label}: the unmasker`).toEqual(normalized(system));
-        // The ObjectQL strategy serves no cross-object filter to anyone — the
-        // engine cannot join in an aggregate — so that one case is answered by
-        // the strategy's own refusal, for the system caller too. Every other
-        // case is served rows.
-        const joinedFilter = strategy === 'objectql' && label === 'a joined masked field as a filter member';
-        if (!joinedFilter) expect((unmasker as { answered?: { rows: unknown[] } }).answered?.rows.length, `${label}: rows`).toBeGreaterThan(0);
+        // Every case is served rows on both compositions: on the ObjectQL one
+        // the joined filter is the engine's nested-relation condition, read as
+        // the caller (#33335), where it used to be the strategy's own refusal.
+        expect((unmasker as { answered?: { rows: unknown[] } }).answered?.rows.length, `${label}: rows`).toBeGreaterThan(0);
       }
       const ds = await h.dataset(UNMASKER_CTX, { measures: ['row_count'], dimensions: ['code_dim'] });
       expect(ds.status, JSON.stringify(ds.body)).toBe(200);

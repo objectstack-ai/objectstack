@@ -11,9 +11,24 @@
  * batch registers, answers both ways wrong. Only a SINGLE save or publish that
  * makes one body live and relays the refusal to its author asks it; on a
  * sealed registry it then also asks the record-currency doors that read other
- * objects (D6's roll-up half, and the follow door, which nothing else asks),
- * so a refused body is answered `422 INVALID_METADATA` and nothing is stored
- * or promoted.
+ * objects (D6's roll-up half, and the follow door), so a refused body is
+ * answered `422 INVALID_METADATA` and nothing is stored or promoted.
+ *
+ * The follow door is not that save's alone. `registerObject` never asks it —
+ * a unit registers in an order a later member can still complete — so each
+ * asker asks once its unit is whole, on a sealed registry
+ * (`recordCurrencyFollowRefusal` in `@objectstack/objectql`'s
+ * `record-currency-aggregate-door.ts` holds the same list):
+ *  - a single save or publish, of its one body before it registers (above);
+ *  - a batch writer, of each object row once all its rows are registered
+ *    (`batch-object-registration.ts`, below);
+ *  - a registration run on a running server — an install, an upgrade, a
+ *    reload — of every object layer it registered, once at the end of the
+ *    outermost run (`SchemaRegistry.restoringOnRefusal`). It calls neither
+ *    callee below, so it is no producer in
+ *    {@link REGISTRY_QUESTION_PRODUCERS}.
+ * An `extend` layer is asked only of its own roll-ups (the door's `partial`
+ * rule), by whichever asker registers it.
  *
  * Every other producer (a draft save, the batch writers, a package publish)
  * keeps the body-only question per row. A batch that makes object rows live

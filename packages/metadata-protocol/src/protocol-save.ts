@@ -80,6 +80,7 @@ import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { SaveMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange } from './protocol-stored-expression-fill.js';
+import { reportObjectRegistryRefusal } from './protocol-registry-hydration.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
@@ -1726,6 +1727,9 @@ export class ProtocolSaveFacet {
             // has carried it all along, it just never reached the gate. Null
             // (a bare tenant overlay) narrows nothing.
             packageId: request.packageId ?? null,
+            // [#32656] The locales the door stated for the findings' user
+            // sentences (`advisories[].userMessage`, the 422's `issues[]`).
+            ...(request.userTextLocales !== undefined ? { userTextLocales: request.userTextLocales } : {}),
             // [#20611] The redaction context. The read path withholds a
             // credential from every served definition (a flow's start-node
             // `config.secret`), so a body saved back after a read arrives
@@ -1787,6 +1791,7 @@ export class ProtocolSaveFacet {
                 name: request.name,
                 state: mode === 'draft' ? 'draft' : 'active',
                 body: request.item,
+                ...(request.userTextLocales !== undefined ? { userTextLocales: request.userTextLocales } : {}),
             });
         }
 
@@ -2130,7 +2135,7 @@ export class ProtocolSaveFacet {
                 : undefined;
             let storageSyncRefused = false;
             if (mode === 'publish') {
-                await host.applyRegistryWriteThrough({
+                const registryRefusal = await host.applyRegistryWriteThrough({
                     type: singularTypeForRepo,
                     name: request.name,
                     item: request.item,
@@ -2138,6 +2143,10 @@ export class ProtocolSaveFacet {
                     // [#6602] The SAME scope the row was just written with.
                     organizationId: null,
                 });
+                // [#33005] A registry that refused the object is told the same
+                // way, ahead of the storage notice: the row is written, the
+                // object is not served.
+                if (registryRefusal) saveNotices.push(reportObjectRegistryRefusal(request.name, registryRefusal));
                 // [#30635] A refused storage sync is told to the caller too:
                 // one `warning` on this answer's `advisories`, after the
                 // gate's findings and the save's own notices. The save is not

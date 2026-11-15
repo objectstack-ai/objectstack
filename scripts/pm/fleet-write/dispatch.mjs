@@ -521,7 +521,19 @@
  *     (2); no answer, or any other status, is PREREQUISITE NOT MET (3): ⛔ an unread kind is never a pass. A
  *     `labels_add` the rule does not govern reads nothing.
  *
- * `labels_remove` is never asked: taking a label off is how a wrong one comes off.
+ * `labels_remove` is never asked by the kind rule: taking a label off is how a wrong one comes off.
+ *
+ * ## The stateless write — no open card left with no state, no parked card left with a holder
+ *
+ * label-write's `refuseStatelessWrite` (its header's section of the same name) is asked here of an actions file, per
+ * card, ⛔ never restated: `stateGuardRows` picks each card the stroke takes a `pm:*` state off (`labels_remove`),
+ * parks (`labels_add` of `PARKED_STATE_LABELS`) or assigns someone to (`assign`, since only the read knows whether the
+ * card already sits parked) without closing it (`issue_patch state: closed` in the same stroke is
+ * the third legal exit), `readStateGuard` READS it once — the same `GET`, place and route as the kind rule, sharing its
+ * answer when both read one card — and `judgeStateGuard` applies the stroke's steps in order and asks the predicate. A
+ * refusal is usage (2) and an unread card PREREQUISITE NOT MET (3), nothing sent for the whole file, a dry run
+ * included. A stroke that touches no card state and assigns no one reads nothing. Its last `issue_patch` with a
+ * `state` decides the card's end: `closed` is the legal exit, `open` makes the card judged OPEN whatever its read says.
  *
  * ## Exit codes — capture them BEFORE any pipe
  *
@@ -529,12 +541,12 @@
  *       reads back as the bytes sent, and every run it started is listed.
  *   2   usage, the packed payload refused by the validator, a seat's edit body
  *       carrying no signature line, a trailer-signed `issue_patch` body whose
- *       target the platform answers is an issue, or an adding op refused by the
- *       kind rule (nothing sent).
+ *       target the platform answers is an issue, an adding op refused by the
+ *       kind rule, or a stroke refused by the stateless write (nothing sent).
  *   3   PREREQUISITE NOT MET — no token, no session in dispatch mode, the
  *       dispatch route dead (401/407/0), the run list unreadable, or the target
- *       of a trailer-signed `issue_patch` body or of a governed `labels_add`
- *       unreadable (nothing sent).
+ *       of a trailer-signed `issue_patch` body, of a governed `labels_add` or of
+ *       a card the stateless write judges unreadable (nothing sent).
  *   4   NOT STORED — the run succeeded and the read-back shows a body the board
  *       does not hold as sent (op, object and first differing byte printed).
  *       Go READ it; ⛔ do not retry.
@@ -554,10 +566,10 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../../invoked-as.mjs';
-import { EXIT_PREREQUISITE_NOT_MET, LANE_LABEL_ALIASES, PROXY_FLAG, proxyRearmPlan, proxyRoute, readSignatureLine, SEAT_SIGNATURE_LINE, SEAT_SIGNATURE_SHAPE, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
+import { DECISION_INBOX_LABEL, EXIT_PREREQUISITE_NOT_MET, LANE_LABEL_ALIASES, PM_EXCLUSIVE_STATE_LABELS, PROXY_FLAG, proxyRearmPlan, proxyRoute, readSignatureLine, SEAT_SIGNATURE_LINE, SEAT_SIGNATURE_SHAPE, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
 // The roster's generator marker, IMPORTED so the one generated body this door exempts is named by its own writer.
 import { ROSTER_MARKER } from '../fleet-roster.mjs';
-import { KIND_ISSUE, KIND_PULL, KIND_RULE_AWAITING_MERGE_PR_ONLY, KIND_RULE_PATH, KIND_RULE_STATES_ON_ISSUES, classifyHttp, readTargetKind, refuseKindLabels } from '../label-write.mjs';
+import { KIND_ISSUE, KIND_PULL, KIND_RULE_AWAITING_MERGE_PR_ONLY, KIND_RULE_PATH, KIND_RULE_STATES_ON_ISSUES, PARKED_RULE, PARKED_STATE_LABELS, STATELESS_RULE, classifyHttp, labelKey, readTargetKind, refuseKindLabels, refuseStatelessWrite } from '../label-write.mjs';
 import { DEFAULT_BATCH_GAP_MS, DEFAULT_BATCH_THRESHOLD, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
 import {
   ADVISORY_NOTE_DIGEST_KEY_BYTES,
@@ -1052,8 +1064,8 @@ export function kindRuleRows(actions) {
  *
  * @returns {Promise<{ action: number, issue: unknown, verdict: 'pass'|'refused'|'unread', kind: string|null, refusal: string|null }[]>}
  */
-export async function readLabelTargetKinds(reads, { repo, api = DEFAULT_API, fetch, token = '' } = {}) {
-  const seen = new Map();
+export async function readLabelTargetKinds(reads, { repo, api = DEFAULT_API, fetch, token = '', cache = new Map() } = {}) {
+  const seen = cache;
   const rows = [];
   for (const c of reads) {
     const path = `/repos/${repo}/issues/${c.issue}`;
@@ -1070,6 +1082,94 @@ export async function readLabelTargetKinds(reads, { repo, api = DEFAULT_API, fet
     rows.push({ action: c.action, issue: c.issue, verdict: 'unread', kind: null, refusal: refuseKindLabels({ kind: null, why, add: c.labels, ref }) });
   }
   return rows;
+}
+
+/** The ops whose effect on ONE card the stateless write judges (header: "The stateless write"). */
+export const STATE_GUARD_OPS = Object.freeze(['labels_add', 'labels_remove', 'assign', 'unassign', 'issue_patch']);
+
+/**
+ * The stateless write at the relay's door (header: "The stateless write"), asked of an actions file: per card, the
+ * stroke's steps in order, whether the stroke closes it, and whether it must be READ — it takes a `pm:*` state off
+ * (`labels_remove`), parks the card (`labels_add` of `PARKED_STATE_LABELS`) or assigns someone to it (`assign`: the
+ * card may already be parked), and does not close it. Cards the stroke neither strips, parks nor assigns, and cards
+ * it closes, read nothing. The judgement is label-write's `refuseStatelessWrite`,
+ * ⛔ never restated here. Pure.
+ *
+ * The stroke's LAST `issue_patch` with a `state` decides the card's end state: `closed` closes it (`closes`), `open`
+ * reopens it (`reopens`), and a reopened card is judged OPEN whatever its read says — a stroke that reopens a closed
+ * card and strips its last state leaves an open card with none.
+ *
+ * @returns {{ action: number, issue: unknown, steps: { op: string, names: string[] }[], closes: boolean, reopens: boolean }[]}
+ */
+export function stateGuardRows(actions) {
+  if (!Array.isArray(actions)) return [];
+  // Asked inside the call, never at module scope: label-write imports this file, so its constants may not exist yet there.
+  const pmStates = new Set(PM_EXCLUSIVE_STATE_LABELS.filter((l) => l !== DECISION_INBOX_LABEL).map(labelKey));
+  const parked = new Set(PARKED_STATE_LABELS.map(labelKey));
+  const byIssue = new Map();
+  actions.forEach((a, i) => {
+    if (!a || typeof a !== 'object' || !STATE_GUARD_OPS.includes(a.op)) return;
+    if (!byIssue.has(a.issue)) byIssue.set(a.issue, { action: i + 1, issue: a.issue, steps: [], closes: false, reopens: false, judged: false });
+    const row = byIssue.get(a.issue);
+    if (a.op === 'issue_patch') {
+      if ('state' in a) {
+        row.closes = a.state === 'closed';
+        row.reopens = a.state === 'open';
+      }
+      return;
+    }
+    const names = Array.isArray(a.labels) ? a.labels : Array.isArray(a.assignees) ? a.assignees : [];
+    row.steps.push({ op: a.op, names: [...names] });
+    if (a.op === 'labels_remove' && names.some((l) => pmStates.has(labelKey(l)))) row.judged = true;
+    if (a.op === 'labels_add' && names.some((l) => parked.has(labelKey(l)))) row.judged = true;
+    // An assign may land a holder on a card ALREADY parked: only the read can say, so any assign is read.
+    if (a.op === 'assign' && names.length > 0) row.judged = true;
+  });
+  return [...byIssue.values()].filter((r) => r.judged && !r.closes).map(({ judged, ...r }) => r);
+}
+
+/**
+ * One card's stroke applied to its READ: the label and assignee sets before and after, in the stroke's order, and the
+ * stateless write's verdict on them. Labels union and drop case-insensitively, as GitHub matches them. Pure.
+ */
+export function judgeStateGuard(row, card) {
+  const names = (raw, key) => (Array.isArray(raw) ? raw : []).map((x) => (typeof x === 'string' ? x : x?.[key])).filter(Boolean);
+  const current = names(card?.labels, 'name');
+  const currentAssignees = names(card?.assignees, 'login');
+  let target = [...current];
+  let assigneeTarget = [...currentAssignees];
+  for (const { op, names: ns } of row.steps) {
+    if (op === 'labels_add') for (const l of ns) if (!target.some((x) => labelKey(x) === labelKey(l))) target.push(l);
+    if (op === 'labels_remove') target = target.filter((x) => !ns.some((l) => labelKey(l) === labelKey(x)));
+    if (op === 'assign') for (const u of ns) if (!assigneeTarget.includes(u)) assigneeTarget.push(u);
+    if (op === 'unassign') assigneeTarget = assigneeTarget.filter((u) => !ns.includes(u));
+  }
+  const { kind } = readTargetKind(card);
+  // A stroke that reopens the card is judged on the card it leaves: OPEN, whatever the read said.
+  const state = row.reopens ? 'open' : (card?.state ?? 'open');
+  return refuseStatelessWrite({ state, closes: row.closes, kind, current, target, currentAssignees, assigneeTarget });
+}
+
+/**
+ * Each judged card READ once (`GET /repos/{repo}/issues/{issue}`) and its stroke judged: `pass`, `refused` (the
+ * sentence), or `unread` (any answer but a 200 object, or none — ⛔ never a pass). Reads only, never paced; never throws.
+ */
+export async function readStateGuard(rows, { repo, api = DEFAULT_API, fetch, token = '', cache = new Map() } = {}) {
+  const out = [];
+  for (const row of rows) {
+    const path = `/repos/${repo}/issues/${row.issue}`;
+    // `cache` is the kind rule's own read of the same card when it made one: ONE GET per number per stroke.
+    if (!cache.has(row.issue)) cache.set(row.issue, await rest(api, path, {}, { fetch, token }));
+    const r = cache.get(row.issue);
+    if (r.status === 200 && r.json !== null && typeof r.json === 'object' && !Array.isArray(r.json)) {
+      const refusal = judgeStateGuard(row, r.json);
+      out.push({ action: row.action, issue: row.issue, verdict: refusal === null ? 'pass' : 'refused', refusal });
+      continue;
+    }
+    const why = `GET ${path} answered ${r.status === 0 ? `nothing — ${r.detail}` : `HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}`}`;
+    out.push({ action: row.action, issue: row.issue, verdict: 'unread', refusal: `the stroke takes a pm state off ${repo}#${row.issue}, parks it or assigns someone to it, and the card could not be read to judge it: ${why}` });
+  }
+  return out;
 }
 
 export function packRequest({ repo, session, actions, requestId = null, now = Date.now } = {}) {
@@ -2388,7 +2488,9 @@ export async function resolveRoute(env = process.env, deps = {}) {
 // injected clock, an injected throttle, no network.
 // ---------------------------------------------------------------------------
 
+const STATELESS_DOOR_BATTERY = "the stateless write at the relay's door: an actions file that takes a card's last pm state off, or parks it with a holder (an assign onto a parked card included), is refused before the dry-run exit with label-write's own sentence; the card read ONCE, shared with the kind rule; an unread card never a pass; a stroke closing its card reads nothing";
 const SELF_TEST_BATTERIES = Object.freeze({
+  [STATELESS_DOOR_BATTERY]: 10,
   'the selector: OS_FLEET_TRANSPORT wins; auto is dispatch only under all three conditions and direct otherwise': 8,
   'the session: OS_FLEET_SESSION first, else derived from the container (cse_<id> → session_<id>), the reason naming the source; refused in dispatch mode when absent, never invented': 14,
   'the three conditions of auto: cloud, session and a live relay — each alone failing is direct with its line, all three is dispatch, explicit dispatch stays strict': 16,
@@ -2425,7 +2527,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // hierarchy link seat battery, 24 → 25 with the pull request body battery, 25 → 26 with the advisory rows' seat
 // battery, 26 → 27 with advisory_read's seat battery, 27 → 28 with the retired lane aliases battery, 29 → 30 with
 // advisory_list's seat battery, 30 → 31 with advisory_note's seat battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 31;
+const SELF_TEST_BATTERY_FLOOR = 32;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -4186,7 +4288,7 @@ export async function selfTest() {
       t('⭐ CLI: an UNREADABLE kind on labels_add is PREREQUISITE NOT MET (3), the rule quoted, no payload — never a pass', [cliBlind.code, cliBlind.err.includes('PREREQUISITE NOT MET') && RULE(cliBlind.err), cliBlind.out.includes('"event_type"')], [EXIT_PREREQUISITE, true, false], cliBlind.err.slice(-300));
       const cliLegal = await cli([{ op: 'labels_add', issue: 2, labels: ['pm:queue'] }], { [at(2)]: ISSUE(2) });
       t('a state on an issue packs: exit 0, one GET, the payload printed with the labels as written', [cliLegal.code, cliLegal.seen, cliLegal.code === EXIT_OK ? JSON.parse(cliLegal.out).client_payload.actions[0].labels : null], [EXIT_OK, [`GET ${at(2)}`], ['pm:queue']], cliLegal.err.slice(-300));
-      const cliQuiet = await cli([{ op: 'labels_add', issue: 1, labels: ['tooling'] }, { op: 'labels_remove', issue: 1, labels: ['pm:queue', 'Needs-User-Decision'] }], {});
+      const cliQuiet = await cli([{ op: 'labels_add', issue: 1, labels: ['tooling'] }, { op: 'labels_remove', issue: 1, labels: ['pm:awaiting-merge', 'Needs-User-Decision'] }], {});
       t('⛔ a removal is never refused and an ungoverned labels_add reads nothing: exit 0, ZERO reads', [cliQuiet.code, cliQuiet.seen], [EXIT_OK, []], cliQuiet.err.slice(-300));
       const cliWhole = await cli([{ op: 'comment', issue: 2, body: 'domain:skills#3 · huangyiirene · ' + SESSION + '\nnote' }, { op: 'labels_add', issue: 1, labels: ['pm:blocked'] }], { [at(1)]: PULL(1) }, { dryRun: false });
       t('⭐ a refusal sends NOTHING for the whole file: a real (non-dry) run with a legal comment beside it is usage (2) with zero requests sent', [cliWhole.code, cliWhole.sent, cliWhole.err.includes('REFUSED — action 2 (labels_add)')], [EXIT_USAGE, [], true], cliWhole.err.slice(-300));
@@ -4199,6 +4301,42 @@ export async function selfTest() {
         const read = body.indexOf('readLabelTargetKinds(labelReads');
         return rows > body.indexOf('rewriteRetiredLaneActions(actions)') && rows < body.indexOf('const session = opts.session') && read > body.indexOf('packRequest(') && read < body.indexOf('if (opts.dryRun)');
       })());
+
+      // ── the stateless write at the relay's door (same fixtures: the kind rule's read is the guard's read) ──
+      battery(STATELESS_DOOR_BATTERY);
+      const CARD = (n, labels, assignees = []) => ({ status: 200, json: { number: n, state: 'open', html_url: `https://github.com/${REPO}/issues/${n}`, labels: labels.map((name) => ({ name })), assignees: assignees.map((login) => ({ login })) } });
+      t('rows: a stroke taking a pm state off, parking, or assigning is judged; a stroke closing the card, or touching no state and assigning no one, is not', [
+        stateGuardRows([{ op: 'labels_remove', issue: 3, labels: ['pm:dispatched'] }]).map((r) => r.issue),
+        stateGuardRows([{ op: 'labels_remove', issue: 3, labels: ['pm:dispatched'] }, { op: 'issue_patch', issue: 3, state: 'closed', state_reason: 'completed' }]).length,
+        stateGuardRows([{ op: 'labels_remove', issue: 3, labels: ['size/l', DECISION_INBOX_LABEL] }, { op: 'unassign', issue: 3, assignees: ['os-x'] }]).length,
+        stateGuardRows([{ op: 'labels_add', issue: 4, labels: ['PM:Blocked'] }]).map((r) => r.issue),
+        stateGuardRows([{ op: 'assign', issue: 5, assignees: ['os-x'] }]).map((r) => r.issue),
+      ], [[3], 0, 0, [4], [5]]);
+      t('judge: the stroke applied in order, label-write\'s own sentence', [
+        typeof judgeStateGuard(stateGuardRows([{ op: 'labels_remove', issue: 3, labels: ['pm:dispatched'] }])[0], CARD(3, ['pm:dispatched']).json),
+        judgeStateGuard(stateGuardRows([{ op: 'labels_add', issue: 3, labels: ['pm:queue'] }, { op: 'labels_remove', issue: 3, labels: ['pm:dispatched'] }, { op: 'unassign', issue: 3, assignees: ['os-x'] }])[0], CARD(3, ['pm:dispatched'], ['os-x']).json),
+        typeof judgeStateGuard(stateGuardRows([{ op: 'labels_add', issue: 3, labels: ['pm:queue'] }, { op: 'labels_remove', issue: 3, labels: ['pm:dispatched'] }])[0], CARD(3, ['pm:dispatched'], ['os-x']).json),
+      ], ['string', null, 'string']);
+      const cliStrip = await cli([{ op: 'labels_remove', issue: 3, labels: ['pm:dispatched'] }], { [at(3)]: CARD(3, ['pm:dispatched', 'domain:skills']) }, { dryRun: false });
+      t('⭐ CLI: a stroke leaving an open card with no state is usage (2), refused before the dry-run exit, ZERO requests sent', [cliStrip.code, cliStrip.sent, cliStrip.err.includes('REFUSED') && cliStrip.err.includes(STATELESS_RULE)], [EXIT_USAGE, [], true], cliStrip.err.slice(-300));
+      const cliRelease = await cli([{ op: 'labels_add', issue: 3, labels: ['pm:queue'] }, { op: 'labels_remove', issue: 3, labels: ['pm:dispatched'] }, { op: 'unassign', issue: 3, assignees: ['os-x'] }], { [at(3)]: CARD(3, ['pm:dispatched'], ['os-x']) });
+      t('…the release shape (pm:queue on, pm:dispatched off, holder off) packs: exit 0 on ONE GET, shared with the kind rule', [cliRelease.code, cliRelease.seen], [EXIT_OK, [`GET ${at(3)}`]], cliRelease.err.slice(-300));
+      const cliUnread = await cli([{ op: 'labels_remove', issue: 8, labels: ['pm:on-hold'] }], { [at(8)]: { status: 503, json: { message: 'down' } } });
+      t('…an UNREADABLE card is PREREQUISITE NOT MET (3), never a pass', [cliUnread.code, cliUnread.out.includes('"event_type"')], [EXIT_PREREQUISITE, false], cliUnread.err.slice(-300));
+      const cliClose = await cli([{ op: 'labels_remove', issue: 9, labels: ['pm:queue'] }, { op: 'issue_patch', issue: 9, state: 'closed', state_reason: 'not_planned' }], {});
+      t('…a stroke that closes the card it strips reads nothing and packs', [cliClose.code, cliClose.seen], [EXIT_OK, []], cliClose.err.slice(-300));
+      // An assign-only stroke: label-write refuses a holder landed on a parked card on its own read, and so does this door.
+      const cliAssignParked = await cli([{ op: 'assign', issue: 10, assignees: ['os-x'] }], { [at(10)]: CARD(10, ['pm:queue', 'domain:skills']) }, { dryRun: false });
+      t('⭐ CLI: an assign-ONLY stroke onto a card sitting in pm:queue is usage (2), refused on ONE read, ZERO requests sent', [cliAssignParked.code, cliAssignParked.seen, cliAssignParked.sent, cliAssignParked.err.includes('REFUSED') && cliAssignParked.err.includes(PARKED_RULE)], [EXIT_USAGE, [`GET ${at(10)}`], [], true], cliAssignParked.err.slice(-300));
+      const cliAssignFlight = await cli([{ op: 'assign', issue: 11, assignees: ['os-x'] }], { [at(11)]: CARD(11, ['pm:dispatched', 'domain:skills']) });
+      t('…the same assign onto a pm:dispatched card packs: exit 0 on ONE GET', [cliAssignFlight.code, cliAssignFlight.seen], [EXIT_OK, [`GET ${at(11)}`]], cliAssignFlight.err.slice(-300));
+      // A stroke that REOPENS a closed card is judged on the open card it leaves, never on the read's `closed`.
+      const CLOSED = (n, labels) => ({ status: 200, json: { ...CARD(n, labels).json, state: 'closed' } });
+      const REOPEN = (n) => ({ op: 'issue_patch', issue: n, state: 'open' });
+      const cliReopenStrip = await cli([REOPEN(12), { op: 'labels_remove', issue: 12, labels: ['pm:dispatched'] }], { [at(12)]: CLOSED(12, ['pm:dispatched', 'domain:skills']) }, { dryRun: false });
+      t('⭐ CLI: reopen + taking the last pm state off a CLOSED card is usage (2): the card it leaves is open with no state, ZERO sent', [cliReopenStrip.code, cliReopenStrip.sent, cliReopenStrip.err.includes(STATELESS_RULE)], [EXIT_USAGE, [], true], cliReopenStrip.err.slice(-300));
+      const cliReopenState = await cli([REOPEN(13), { op: 'labels_add', issue: 13, labels: ['pm:queue'] }, { op: 'labels_remove', issue: 13, labels: ['pm:dispatched'] }], { [at(13)]: CLOSED(13, ['pm:dispatched', 'domain:skills']) });
+      t('…reopen + a new state in the same stroke packs: exit 0 on ONE GET', [cliReopenState.code, cliReopenState.seen], [EXIT_OK, [`GET ${at(13)}`]], cliReopenState.err.slice(-300));
     }
 
     // ── the no-run conformance ──────────────────────────────────────────────
@@ -4555,12 +4693,16 @@ export async function main(argv, deps = {}) {
   // The same read, and the same place, decide a governed labels_add's target kind (header: "The kind rule").
   const candidates = pullRequestBodyCandidates(actions);
   const labelReads = kindRule.reads;
+  const guardRows = stateGuardRows(actions);
+  const cardReads = new Map();
   const readToken = env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
-  if (candidates.length > 0 || labelReads.length > 0) {
+  if (candidates.length > 0 || labelReads.length > 0 || guardRows.length > 0) {
     if (!readToken) {
       const needs = candidates.length > 0
         ? `action ${candidates[0].action} (issue_patch)'s body is signed by its trailer, which passes only on a pull request`
-        : `action ${labelReads[0].action} (labels_add) adds a label the kind rule allows on only one kind`;
+        : labelReads.length > 0
+          ? `action ${labelReads[0].action} (labels_add) adds a label the kind rule allows on only one kind`
+          : `the stroke takes a pm state off card ${guardRows[0].issue} or parks it, which the stateless write judges on the card`;
       console.error(`fleet-write/dispatch: PREREQUISITE NOT MET — ${needs}, and with no GITHUB_TOKEN / GH_TOKEN in the environment the target cannot be read. Nothing was sent.`);
       return EXIT_PREREQUISITE;
     }
@@ -4585,7 +4727,7 @@ export async function main(argv, deps = {}) {
     }
   }
   if (labelReads.length > 0) {
-    const kinds = await readLabelTargetKinds(labelReads, { repo: opts.repo, token: readToken, ...(deps.read ?? {}) });
+    const kinds = await readLabelTargetKinds(labelReads, { repo: opts.repo, token: readToken, cache: cardReads, ...(deps.read ?? {}) });
     for (const r of kinds) {
       if (r.verdict === 'pass') console.error(`fleet-write/dispatch: action ${r.action} (labels_add) — ${opts.repo}#${r.issue} reads as ${r.kind === KIND_ISSUE ? 'an' : 'a'} ${r.kind}, and its labels are legal there.`);
       else console.error(`fleet-write/dispatch: ${r.verdict === 'unread' ? 'PREREQUISITE NOT MET' : 'REFUSED'} — action ${r.action} (labels_add): ${r.refusal}`);
@@ -4594,6 +4736,17 @@ export async function main(argv, deps = {}) {
     if (refused.length > 0 || kinds.some((r) => r.verdict === 'unread')) {
       console.error('fleet-write/dispatch: nothing was sent.');
       return refused.length > 0 ? EXIT_USAGE : EXIT_PREREQUISITE;
+    }
+  }
+  if (guardRows.length > 0) {
+    const judged = await readStateGuard(guardRows, { repo: opts.repo, token: readToken, cache: cardReads, ...(deps.read ?? {}) });
+    for (const r of judged) {
+      if (r.verdict === 'pass') console.error(`fleet-write/dispatch: ${opts.repo}#${r.issue} — the stroke leaves it with a state and no holder on a parked state.`);
+      else console.error(`fleet-write/dispatch: ${r.verdict === 'unread' ? 'PREREQUISITE NOT MET' : 'REFUSED'} — ${opts.repo}#${r.issue}: ${r.refusal}`);
+    }
+    if (judged.some((r) => r.verdict !== 'pass')) {
+      console.error('fleet-write/dispatch: nothing was sent.');
+      return judged.some((r) => r.verdict === 'refused') ? EXIT_USAGE : EXIT_PREREQUISITE;
     }
   }
   if (opts.dryRun) {

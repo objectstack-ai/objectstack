@@ -238,6 +238,27 @@ Without it every row is unchanged. The console uses it on Setup → Users on a
 cloud-managed environment, to mark a user who holds no permission set beyond
 the baseline.
 
+### Host prop: `rowOpensRecord`
+
+A host whose `onRowClick` opens nothing for these rows passes
+`rowOpensRecord={false}`. The list hands it to the view it draws, as that
+view's own `rowOpensRecord`:
+
+- the grid (see `@object-ui/plugin-grid`) draws its record-link cells as plain
+  text and its row context menu offers no Open; on a phone its row cards draw no
+  pointer and no hover wash;
+- the gallery's cards draw no pointer and no hover lift;
+- the board's cards (see `@object-ui/plugin-kanban`) draw no pointer; a card
+  that cannot be dragged either is no control (no `button` role, no tab stop,
+  no hover lift).
+
+The click still reaches `onRowClick` on every face, and row and card actions
+stay. No other view type is handed it. This is a React prop for the host app,
+not a schema key: list metadata cannot set it. Without it every row and card is
+unchanged. The console passes `false` for a view authored
+`navigation: { mode: 'none' }` and for a list-only object (objectstack#33317,
+objectstack#33548).
+
 ### Host prop: `viewDefaults`
 
 A host that stores the user's own hidden fields or density and lays that

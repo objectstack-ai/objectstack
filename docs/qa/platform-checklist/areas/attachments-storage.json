@@ -8,7 +8,7 @@
     "qa-scratch-authz": {
       "title": "Scratch authz parents (qa_vault / qa_shared / qa_nofiles) + two real member personas",
       "why": "Stock showcase has NO private files-enabled parent: its only `enable.files` object is showcase_project, which is public_read_write AND readable through the showcase `everyone` baseline. Without this recipe the entire authz core of this area — the 403 deny side of download-authz-both-sides, the invisible-parent case of read-inherits-parent-rls, and the read-but-not-edit split of attach-requires-parent-edit — is blocked(fixture) on every run. Run #7635 closed the gap at runtime and scored those items instead of blocking them; this block is that provisioning made permanent and replayable.",
-      "provenance": "run #7635 (framework 92f26f75) → #7670 Step 6 gained persona B's sys_attachment read after QA run #23166 met the panel's up-front refusal (#23169). Step 6 pinned the three persona set payloads (#24036, from the intent QA run #23929 recorded; replayed on main c91af8ed6: 200 saves, 201 bindings, the split proof as stated), and step 5 mints three members, invited first. #26791: replayed steps 1-4 on a fresh stock showcase boot at main 8eef9a8d (REST only, 2026-10-27). As written (no namespace) step 1 answered 201 with the derived namespace 'attachments' and steps 2-4 each answered 422 NAMESPACE_PREFIX; with step 1 declaring namespace 'qa', step 1 answered 201 and steps 2-4 each answered 200; on that boot step 6's three set saves answered 200 and the teardown DELETE answered 200, removing the three objects and the three sets. Step 5's sign-ups present the invitation's id since the invite_only gate admits a sign-up only by the invitation it presents.",
+      "provenance": "run #7635 (framework 92f26f75) → #7670 Step 6 gained persona B's sys_attachment read after QA run #23166 met the panel's up-front refusal (#23169). Step 6 pinned the three persona set payloads (#24036, from the intent QA run #23929 recorded; replayed on main c91af8ed6: 200 saves, 201 bindings, the split proof as stated), and step 5 mints three members, invited first. #26791: replayed steps 1-4 on a fresh stock showcase boot at main 8eef9a8d (REST only, 2026-10-27). As written (no namespace) step 1 answered 201 with the derived namespace 'attachments' and steps 2-4 each answered 422 NAMESPACE_PREFIX; with step 1 declaring namespace 'qa', step 1 answered 201 and steps 2-4 each answered 200; on that boot step 6's three set saves answered 200 and the teardown DELETE answered 200, removing the three objects and the three sets. Step 5's sign-ups present the invitation's id since the invite_only gate admits a sign-up only by the invitation it presents. #33329 (2026-11-14, from QA run #33081's note, comment 6850173588, ledger row 202 of #32908 routed from #33331): qa_att_editor's sys_attachment grant gains allowDelete, so persona C, the uploader, can reach the uploader-delete gate of attach-requires-parent-edit instead of an RBAC 403; the run measured that shape by re-saving the set with delete added.",
       "app": "showcase",
       "requires": [
         "an admin session that holds the `manage_metadata` capability — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough (packages/rest/src/rest-route-ledger.ts, the `PUT /api/v1/meta/:type/:name` row)",
@@ -114,7 +114,8 @@
                 "sys_attachment": {
                   "allowRead": true,
                   "allowCreate": true,
-                  "allowEdit": true
+                  "allowEdit": true,
+                  "allowDelete": true
                 },
                 "sys_file": {
                   "allowRead": true
@@ -122,7 +123,7 @@
               }
             }
           },
-          "expect": "each set save answers 200 (qa_att_reader and qa_att_editor carry an info advisory, security-private-no-readscope on qa_vault — intended: the vault is owner-only), each binding 201. Members hold NO baseline grant on runtime-authored objects (every list answers 403 PERMISSION_DENIED before binding), which is why the sets are pinned here. persona A = read-but-NOT-edit on the scratch objects (the attach-requires-parent-edit split); persona B = no grant on the parents beyond the everyone baseline (the parent-invisible persona) but read/create/delete on sys_attachment; persona C = read/create/edit on the scratch objects (an uploader that can attach to a row it owns). Measured split on main c91af8ed6: A reads qa_shared 200 / edit 403 and an admin-owned qa_vault record 404; B reads neither parent (403 PERMISSION_DENIED) and lists sys_attachment 200; C reads qa_shared 200 and an edit of an admin-owned row 403. Prove the split INDEPENDENTLY before scoring any storage clause: read the parent as each persona and confirm the intended visibility, so a later 403 is attributable to the storage gate rather than to a mis-bound persona. ⚠ Persona B needs READ on sys_attachment itself (and nothing on the scratch parents), unless its grants and the everyone baseline already carry it: without it the console's attachments panel refuses up front — 'You don't have access to these attachments.' — before any download is attempted, which is the listing gate answering, not the download gate the deny clauses score (QA run #23166). Check B's sys_attachment read as part of the independent split proof.",
+          "expect": "each set save answers 200 (qa_att_reader and qa_att_editor carry an info advisory, security-private-no-readscope on qa_vault — intended: the vault is owner-only), each binding 201. Members hold NO baseline grant on runtime-authored objects (every list answers 403 PERMISSION_DENIED before binding), which is why the sets are pinned here. persona A = read-but-NOT-edit on the scratch objects (the attach-requires-parent-edit split); persona B = no grant on the parents beyond the everyone baseline (the parent-invisible persona) but read/create/delete on sys_attachment; persona C = read/create/edit on the scratch objects and read/create/edit/delete on sys_attachment (an uploader that can attach to a row it owns, and detach its own upload: without allowDelete on sys_attachment the uploader-delete leg of attachments-storage.attach-requires-parent-edit meets the RBAC refusal before the uploader-or-editor gate it scores — QA run #33081, comment 6850173588, re-saved the set with delete added). Measured split on main c91af8ed6: A reads qa_shared 200 / edit 403 and an admin-owned qa_vault record 404; B reads neither parent (403 PERMISSION_DENIED) and lists sys_attachment 200; C reads qa_shared 200 and an edit of an admin-owned row 403. Prove the split INDEPENDENTLY before scoring any storage clause: read the parent as each persona and confirm the intended visibility, so a later 403 is attributable to the storage gate rather than to a mis-bound persona. ⚠ Persona B needs READ on sys_attachment itself (and nothing on the scratch parents), unless its grants and the everyone baseline already carry it: without it the console's attachments panel refuses up front — 'You don't have access to these attachments.' — before any download is attempted, which is the listing gate answering, not the download gate the deny clauses score (QA run #23166). Check B's sys_attachment read as part of the independent split proof.",
           "source": "sys_user_permission_set insert in system context, mirroring showcase-permission-zoo.dogfood.test.ts — the binding shape access-security.json's permission-set items already replay. NOTE (ADR-0090 D5): every authenticated member ALSO holds the everyone baseline additively, so persona B's effective access is the UNION of its grants and that baseline — compute the union before calling a read 'invisible'."
         }
       ],
@@ -254,7 +255,7 @@
       "title": "Gated downloads: 401 anonymous, 403 parent-invisible, signed URL for the entitled — per gating class (attachments-scope / field-owned / public_read opt-out / ungated)",
       "since": "v15.1",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (uploader/owner)", "signed-up member who cannot read the parent record (qa-scratch-authz persona B: the API deny clauses)",
@@ -271,16 +272,16 @@
         "knownGaps": [
           "MARKER (QA run #9401 finding 5, carried here so runs stop re-deriving it): the CROSS-TENANT clauses of this area are structurally unprovable in the OSS workspace. `@objectstack/organizations` is open core since ADR-0132 (Apache-2.0, published on npm) — ⛔ it being closed-source is NOT the reason and has not been since #16215. The reason is ADR-0132's entitlement boundary: no framework package may declare `@objectstack/organizations` (pinned by `packages/plugins/organizations/src/no-framework-dependents.pin.test.ts` — apps declare it, packages do not), so `packages/qa/dogfood` cannot depend on it and the dogfood matrix's cross-tenant block is gated behind `describe.skipIf(!organizationsAvailable)` and skips BY DESIGN here. That is blocked(dependency), never a pass and never a defect. A run that is supposed to ship the package sets OS_TEST_MULTI_ORG_ENABLED=1, which turns the skip into a hard failure instead of a silent one.",
           "CLOSED by the qa-scratch-authz recipe (#7670): stock showcase's only files-enabled object (showcase_project) is public_read_write, so no stock parent is invisible to any member. The 403 deny side is otherwise reachable only through the pinned dogfood fixture (att_secret, private owner-scoped: fixtures/attachments-fixture.ts). Run the recipe; fall back to the dogfood pin only if it cannot be provisioned, and record which one the verdict rests on.",
-          "[API half CLOSED by #9483] no stock seed mints an acl='public_read' attachments file (the anonymous-embed opt-out) — author one via a system write on a qa_vault-attached file (the recipe gives you the parent; the acl flip is still a system write) or accept the unit-test coverage in storage-routes.test.ts for that variant. What changed: attachments-public-read-acl.dogfood.test.ts performs that system flip at runtime on its own private-parent fixture and asserts both sides plus the flip back, so clause 3 no longer waits on a stock seed. Landing one in the showcase seeds would additionally unblock the BROWSER half (clause 4), which a runtime-only file cannot reach."
+          "[API half CLOSED by #9483] no stock seed mints an acl='public_read' attachments file (the anonymous-embed opt-out) — author one with an admin PATCH of acl on a qa_vault-attached file (the recipe gives you the parent; steps[5] names the door). An uploader-bypass leg that needs a MEMBER's file attached to an admin-owned parent cannot have the admin attach it: that is refused 400 'File cannot reference this file: it is not a file you can open' (packages/services/service-storage/src/referenceable-file.ts), so grant the member the parent's edit for the attach and revoke it after or accept the unit-test coverage in storage-routes.test.ts for that variant. What changed: attachments-public-read-acl.dogfood.test.ts performs that system flip at runtime on its own private-parent fixture and asserts both sides plus the flip back, so clause 3 no longer waits on a stock seed. Landing one in the showcase seeds would additionally unblock the BROWSER half (clause 4), which a runtime-only file cannot reach."
         ]
       },
       "steps": [
-        "as admin, upload + attach a file to a parent record (attachments scope) and separately upload a receipt into an invoice line (field-owned; verify ref_object='showcase_invoice_line' and ref_id are stamped on its sys_file row)",
+        "as admin, upload + attach a file to a parent record (attachments scope) and separately upload a receipt into an invoice line (field-owned; verify ref_object='showcase_invoice_line' and ref_id are stamped on its sys_file row). Over REST that is an upload with scope 'user' and then a PATCH of the line's `receipt` with the fileId: the record write's claim stamps ref_object / ref_id / ref_field (packages/services/service-storage/src/field-file-service.ts)",
         "GET /api/v1/storage/files/<fileId>/url with NO auth for each gated file and capture the refusals",
         "GET the same routes as a member who cannot read the parent record (private parent per the fixture note) and capture the refusals — note the two DISTINCT deny codes",
         "GET the same routes as the uploader/admin and follow the signed URL",
         "compare TTLs: the gated grant uses the short downloadTtl (default 300s), not the 3600s presignedTtl — read expiry material from the minted URL/descriptor where the adapter exposes it",
-        "flip one file to acl='public_read' (system write) and GET /files/<fileId> anonymously — the opt-out must restore the stable anonymous capability URL",
+        "flip one file to acl='public_read' — a plain admin PATCH /api/v1/data/sys_file/ID {acl:'public_read'} answers 200 (acl is a writable select, packages/services/service-storage/src/objects/system-file.object.ts; a member's PATCH of the same column answers 403 PERMISSION_DENIED, on its own file or another's) — and GET /files/<fileId> anonymously — the opt-out must restore the stable anonymous capability URL",
         "in the browser, as persona A (reads qa_shared through its qa_att_reader binding, qa-scratch-authz step 6), open a qa_shared record that carries an attachments-scope file (/_console/apps/showcase_app/qa_shared/record/ID), find its attachments panel and confirm the file is listed. Where the panel sits depends on the record page's width tier, measured on the page's container, not the viewport (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor): at a 1600px window with the sidebar expanded the page is three-column and the panel closes the resident related column; at 1280px it is two-column, the related column is a rail behind the 'Related' toggle above the columns (data-testid record-related-rail-toggle), closed by default with its panels unmounted, so open the rail first; narrower than the two-column floor, the panel closes the Related tab. There is no separate Attachments tab. Use 1600px, or open the rail, and record which; then, server-side and WITHOUT reloading the page, remove A's read (as admin DELETE /api/v1/data/sys_user_permission_set/BINDING_ID, A's qa_att_reader row), click the listed file's Download, and capture the 403 on GET /api/v1/storage/files/FILE_ID/url plus the panel's surfaced copy; re-bind A afterwards (POST the same row back). Persona B cannot stand in for A here: with no read on the parent the record page itself refuses first ('You don't have access to qa_vault records'), so RecordAttachmentsPanel never mounts and there is no download to attempt. A reload after the revoke re-runs the record and listing gates and refuses before any download, which is not the download denial acceptance[4] scores"
       ],
       "acceptance": [
@@ -377,6 +378,12 @@
           "date": "2026-10-31",
           "change": "steps[6] said to open the record's 'Attachments tab'. QA run #27409 saw no attachments panel at 1280px and found it at 1600px. The synthesized record page lays out by its container's width tier (recordPageTierFor: three-column from 1440px of window with the sidebar expanded; two-column below that, where the related column, attachments last, is a rail behind the 'Related' toggle and unmounted until opened; tabs below the two-column floor, where attachments close the Related tab). The step now names the viewport and the toggle. No clause changed. Read from source at base 22ce3d13fe (ui/packages/plugin-detail). Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
           "ref": "#27409"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-14",
+          "change": "steps[0], steps[5] and fixtures.knownGaps[2] re-pointed (QA run #33048, comment 6846028996): the field-owned receipt is reachable over REST (upload scope user, then PATCH the line's receipt; the claim stamps ref_object/ref_id/ref_field, packages/services/service-storage/src/field-file-service.ts); the acl flip is a plain admin PATCH on sys_file (system-file.object.ts), not a system write; and the uploader-bypass leg needs the temp-grant-then-revoke shape, since an admin attaching a member's file is refused (referenceable-file.ts). No clause changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -385,7 +392,7 @@
       "title": "sys_attachment reads inherit parent visibility: a restricted member sees neither rows nor counts for invisible parents",
       "since": "v15.1",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": ["member who can read the parent record", "member who cannot read the parent record"],
@@ -411,7 +418,7 @@
         "as the same member, GET the invisible parent's attachment by id directly",
         "run the same reads as the entitled member",
         "as the restricted member, run an unscoped sys_attachment list and record which rows appear",
-        "run a count/aggregate over sys_attachment as both personas and compare totals"
+        "run a count over sys_attachment as both personas and compare totals: POST /api/v1/data/sys_attachment/query {aggregations:[{function:'count',alias:'n'}]} (the query door, packages/rest/src/rest-route-ledger.ts 'POST /api/v1/data/:object/query'; QuerySchema.aggregations, packages/spec/src/data/query.zod.ts)"
       ],
       "acceptance": [
         {
@@ -494,6 +501,12 @@
           "date": "2026-10-27",
           "change": "qa-scratch-authz step 1 now declares manifest.namespace 'qa' (#26791). Replayed on a fresh stock showcase boot at main 8eef9a8d: as written, the install derived namespace 'attachments' from the package id and steps 2-4 each answered 422 NAMESPACE_PREFIX, so a literal replay provisioned no scratch parent and this item's recipe-backed clauses would have scored blocked(fixture). With the declared namespace, steps 1-4 answered 201/200/200/200 and step 6's three set saves 200. The object names (qa_vault / qa_shared / qa_nofiles) are unchanged, so no step or clause of this item changed",
           "ref": "#26791"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-14",
+          "change": "steps[5] names the working count door (QA run #33081's B-api note, comment 6850173588): POST /api/v1/data/sys_attachment/query with an aggregations count (rest-route-ledger.ts query route, QuerySchema.aggregations). No clause changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },
@@ -935,7 +948,7 @@
       "title": "Per-line Receipt upload cells in the invoice inline grid: auto-derived file column, real upload control, opaque sys_file reference in the atomic batch",
       "since": "v15.1",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -958,7 +971,7 @@
         "fill the header (name INV-QA-<ts>, pick an account, status draft) and submit while capturing the POST /api/v1/batch request",
         "inspect the batch's showcase_invoice_line operation: the receipt value must be the bare opaque `sys_file` id string (ADR-0104 D3 stored form) — NOT a resolved {name, url} object, and NOT a data:/blob: placeholder",
         "read the referenced sys_file row as admin and confirm the field-ownership stamp fired: status 'committed' with ref_object='showcase_invoice_line', ref_id=<the created line's id>, ref_field='receipt', acl='private'",
-        "re-open the created invoice and confirm the line's receipt renders as a chip/thumbnail, not a text value — the {id, name, size, mimeType, url} shape the UI reads is the ADR-0104 EXPANDED form, derived at read time from the sys_file row, never the stored value"
+        "re-open the created invoice's edit form (the record page's Edit → the Edit Invoice dialog) and confirm the line's receipt renders as a chip/thumbnail in its Line Items grid, not a text value — the {id, name, size, mimeType, url} shape the UI reads is the ADR-0104 EXPANDED form, derived at read time from the sys_file row, never the stored value. ⛔ Not the record page's first screen: the invoice's record page is a custom layout (Invoice / Amounts sections) that does not draw the line items there (QA run #33048)"
       ],
       "acceptance": [
         {
@@ -1022,6 +1035,12 @@
           "date": "2026-10-28",
           "change": "steps[0] names the base URL. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): the spec navigates /apps/showcase_app/… on the console dev server (LIVE_APP_URL, default port 5180), while a showcase boot serves the built console under /_console; the step named the path only. Re-read at base fd246c22: ui/playwright.live.config.ts (LIVE_APP_URL || http://localhost:5180), ui/e2e/live/grid-file-upload.spec.ts (its page.goto). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-14",
+          "change": "steps[8] re-pointed (QA run #33048, comment 6846028996): the chip is read in the Edit Invoice dialog's Line Items grid, the same inline grid steps[0] creates in (showcase_invoice.lines.inlineColumns), since the invoice record page's first screen does not draw the line items. No clause changed. Read at base 87330e89",
+          "ref": "#33329"
         }
       ]
     },

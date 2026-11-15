@@ -163,6 +163,44 @@ export interface MetadataUnregisterOptions extends MetadataWriteOptions {
 }
 
 /**
+ * [#32985; maintainer decision 2026-11-14 on #32985]
+ * {@link MetadataManager.unregisterPackage}'s and
+ * {@link MetadataManager.unregisterPackageWithReport}'s options. Class-level, as
+ * {@link MetadataUnregisterOptions} is: the spec's `IMetadataService`
+ * signature is not widened here.
+ */
+export interface MetadataUnregisterPackageOptions {
+  /**
+   * Also remove the package's items whose stored row names the package by the
+   * `_packageId` stamp alone, with its `package_id` column empty — the rows
+   * the removal otherwise keeps and reports
+   * ({@link MetadataUnregisterPackageResult.kept}). Such a row may be the
+   * environment's own, stamped with the host by a 17.0.0–18.3.0 boot; pass it
+   * only once `detectStampOnlyRows` (`@objectstack/metadata/migrations`) or
+   * the row's history shows the kept rows are the package's own.
+   */
+  force?: boolean;
+}
+
+/** [#32985] What {@link MetadataManager.unregisterPackageWithReport} removed and what it kept. */
+export interface MetadataUnregisterPackageResult {
+  /** Each item removed, from the registry and from every loader. */
+  removed: Array<{ type: string; name: string }>;
+  /**
+   * Each item kept, in the registry and in every loader, because a loader
+   * holds a row of it that names the package by the `_packageId` stamp alone
+   * ({@link MetadataUnregisterPackageOptions.force}); with the rows, by loader.
+   * Empty when `force` is passed.
+   */
+  kept: Array<{
+    type: string;
+    name: string;
+    reason: 'stamp-only-row';
+    rows: Array<{ loader: string; id: string; source: string | null }>;
+  }>;
+}
+
+/**
  * [#22113, #32198] Whether `item` belongs to `packageId`: any of the three
  * keys that name a package on an item names it — `packageId` (the publish
  * envelope's own key, and what a caller that registers an item for a package
@@ -2659,8 +2697,35 @@ export class MetadataManager implements IMetadataService {
    * [#32986] Of every other type, an environment row the boot priming pass
    * stamped with this package (the host's) is not one of its items, and stays
    * ({@link isStampedEnvironmentRow}).
+   *
+   * [#32985; maintainer decision 2026-11-14] Fail-closed for the rows a
+   * 17.0.0–18.3.0 boot stamped: an item is kept — in the registry and in every
+   * loader — when a loader holds a row of it whose `package_id` column is empty
+   * and whose stored body names this package by the `_packageId` stamp alone
+   * (`MetadataLoader.stampOnlyRows`), whichever writer stored the row. The row
+   * may be the environment's own, and from the row alone it cannot be told
+   * from the package's: a package's row may be kept, an environment row is
+   * never deleted. Each kept item is reported in one `warn`, and in the
+   * result {@link unregisterPackageWithReport} answers; `force` removes them
+   * too. Every row is checked before anything is removed, so a failed check
+   * removes nothing.
+   *
+   * This method answers `void`, as the spec's `IMetadataService.unregisterPackage`
+   * does, so a caller cannot see what was kept. An uninstall UI calls
+   * {@link unregisterPackageWithReport} and shows each `kept` item instead,
+   * or the uninstall looks complete while those items stay live.
    */
-  async unregisterPackage(packageName: string): Promise<void> {
+  async unregisterPackage(packageName: string, options?: MetadataUnregisterPackageOptions): Promise<void> {
+    await this.unregisterPackageWithReport(packageName, options);
+  }
+
+  /**
+   * [#32985] {@link unregisterPackage}, answering what it removed and what it
+   * kept ({@link MetadataUnregisterPackageResult}). A method of its own because
+   * the spec's `IMetadataService.unregisterPackage` answers `void`, and the
+   * published contract is not widened here.
+   */
+  async unregisterPackageWithReport(packageName: string, options?: MetadataUnregisterPackageOptions): Promise<MetadataUnregisterPackageResult> {
     // Collect all items to delete (type and name pairs). [#32517] One entry
     // per slot: a bundled type's members of one slot are removed together,
     // with the one `deleted` announcement the slot made before.
@@ -2684,13 +2749,56 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
+    // [#32985] Every item a loader holds a stamp-only row of is kept, checked
+    // for all of them before the first removal.
+    const result: MetadataUnregisterPackageResult = { removed: [], kept: [] };
+    const removals: Array<{ type: string; name: string; keys: string[] }> = [];
+    for (const entry of itemsToDelete.values()) {
+      const rows = options?.force ? [] : await this.stampOnlyRowsOf(entry.type, entry.name, packageName);
+      if (rows.length > 0) result.kept.push({ type: entry.type, name: entry.name, reason: 'stamp-only-row', rows });
+      else removals.push(entry);
+    }
+    if (result.kept.length > 0) {
+      this.logger.warn(
+        `[Metadata] unregisterPackage(${packageName}) kept ${result.kept.length} item(s) whose stored row names the package ` +
+          'by its `_packageId` stamp alone, its `package_id` column empty. @objectstack/metadata 17.0.0–18.3.0 wrote the host\'s ' +
+          'stamp into the environment\'s own rows on a host that declares its package, so such a row may be the ' +
+          'environment\'s and is not removed. List them with their history evidence with `detectStampOnlyRows` ' +
+          '(@objectstack/metadata/migrations); pass `{ force: true }` to remove them once they are the package\'s own.',
+        { packageId: packageName, kept: result.kept.map(({ type, name }) => `${type}/${name}`) },
+      );
+    }
+
     // Delete each item using unregister() to ensure deletion from both registry and loaders
-    for (const { type, name, keys } of itemsToDelete.values()) {
+    for (const { type, name, keys } of removals) {
       await this.unregisterAt(type, name, undefined, {
         keys,
         ...(PACKAGE_SLOTTED_STORE_TYPES.has(type) ? { packageId: packageName } : {}),
       });
+      result.removed.push({ type, name });
     }
+    return result;
+  }
+
+  /**
+   * [#32985] The rows of `(type, name)` each loader holds that name
+   * `packageId` by the `_packageId` stamp alone, their `package_id` column
+   * empty ({@link MetadataLoader.stampOnlyRows}). A loader's read failure is
+   * thrown: the removal that asks has removed nothing yet.
+   */
+  private async stampOnlyRowsOf(
+    type: string,
+    name: string,
+    packageId: string,
+  ): Promise<MetadataUnregisterPackageResult['kept'][number]['rows']> {
+    const rows: MetadataUnregisterPackageResult['kept'][number]['rows'] = [];
+    for (const loader of this.loaders.values()) {
+      if (typeof loader.stampOnlyRows !== 'function') continue;
+      for (const row of await loader.stampOnlyRows(type, name, packageId)) {
+        rows.push({ loader: loader.contract.name, id: row.id, source: row.source });
+      }
+    }
+    return rows;
   }
 
   /**
@@ -4568,9 +4676,12 @@ export class MetadataManager implements IMetadataService {
    *
    * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
    * `options.packageId` reads that package's versions only (`null`: the
-   * environment's, recorded under no package); naming none, a
-   * name more than one row slot holds is refused 409 naming every holder
-   * (`PackageScopedNameRefusedError`), and one holder answers as before.
+   * environment's, recorded under no package) — [#32717] with, when that
+   * address's slot is the name's one row slot, the versions attributed to no
+   * package and the environment's own, which a rollback addressing it
+   * restores; naming none, a name more than one row slot holds is refused 409
+   * naming every holder (`PackageScopedNameRefusedError`), and one holder
+   * answers as before.
    */
   async getHistory(
     type: string,
@@ -4599,10 +4710,18 @@ export class MetadataManager implements IMetadataService {
    *
    * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
    * `options.packageId` names whose row is restored, and the version must be
-   * that package's ("not found" otherwise). Naming none, the name's one row is
-   * restored; several are refused 409 naming every holder, and so is a version
-   * of a package that holds no row of the name (`not-held-by-qualifier`) —
-   * ⛔ never written into another package's row.
+   * one its addressed history lists ("not found" otherwise): that package's,
+   * and — [#32717, seat ruling 6885958183] when its slot is the name's one row
+   * slot — one attributed to no package or the environment's own, which land
+   * in that row as they do naming no package (ADR-0150 D4: a package-less row
+   * at a held name is its one holder's customization). Naming none, the
+   * name's one row is restored; several are refused 409 naming every holder,
+   * and so is a version attributed to none while several hold the name,
+   * addressed or not, and a version of a package that holds no row of the
+   * name (`not-held-by-qualifier`) — ⛔ never written into another package's
+   * row. The body stored, filed and returned is stamped for the row slot it
+   * is written into (`DatabaseLoader.registerRollback`), never for another
+   * package its snapshot names.
    */
   async rollback(
     type: string,
@@ -4636,22 +4755,27 @@ export class MetadataManager implements IMetadataService {
 
     // Restore the metadata using the dedicated rollback path so that a single
     // 'revert' history entry is written (instead of a conflicting 'update' entry)
-    const restoredMetadata = targetVersion.metadata;
+    let restoredMetadata = targetVersion.metadata;
     // [#33003] A version restored over an environment row the boot pass
     // stamped is that row (a version a rewrite stored before #33003 carries the
     // host stamp): stored without the stamp, as {@link register} stores it.
     const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
     if (!slotted) this.carryEnvironmentRowMark(this.registry.get(type)?.get(name), restoredMetadata);
     const stamp = this.environmentRowStamp(restoredMetadata);
-    await dbLoader.registerRollback(
+    const handed = stamp === undefined ? restoredMetadata : withoutEnvironmentRowStamp(restoredMetadata as Record<string, unknown>, stamp);
+    const written = await dbLoader.registerRollback(
       type,
       name,
-      stamp === undefined ? restoredMetadata : withoutEnvironmentRowStamp(restoredMetadata as Record<string, unknown>, stamp),
+      handed,
       version,
       options?.changeNote,
       options?.recordedBy,
       address,
     );
+    // [#32717] A by-package snapshot stamped for another package than the
+    // slot it lands in is written re-stamped for that slot: the registry files
+    // the body the row stores, ⛔ never the snapshot's stamp.
+    if (slotted && written !== handed) restoredMetadata = written as typeof restoredMetadata;
 
     // Update in-memory registry with the restored metadata. [#32351] A
     // package's restored version that names no package itself (a package-less
@@ -4793,6 +4917,9 @@ function keyedEntryOf<T>(entry: MetadataKeyedItem<T>): MetadataKeyedItem<T> {
  * value ({@link sameBody}, key order aside), so only a loader whose `loadMany`
  * answers more bodies than its keyed read is compared at all, and the
  * comparison decides what is kept, never a package.
+ *
+ * The order handed on is therefore the keyed entries first, then the unkeyed
+ * bodies, FROM `loadMany`'s row order (#32680).
  */
 async function keyedEntryBodies<T>(loader: MetadataLoader, type: string, options?: MetadataLoadOptions): Promise<T[]> {
   const entries = await loader.loadManyKeyed!<T>(type, options);

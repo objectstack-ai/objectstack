@@ -245,4 +245,39 @@ describe('AiChatPage — the server’s advisory reaches the author (objectui#10
     await waitFor(() => expect(publishResult).toMatchObject({ ok: true }));
     expect(toast.warning).not.toHaveBeenCalled();
   });
+
+  // objectstack#33277 — the registry refused the object of a batch that
+  // landed: the batch answers `published_unregistered` with `success: false`,
+  // and the object's element carries the `object-registry-refused` warning.
+  // The author reads that warning and the card its published verdict, as they
+  // did while the server answered `published` for this, never "Publish failed".
+  it('a published_unregistered batch still reaches the author as its warning, not as a failure', async () => {
+    const refused = {
+      severity: 'warning' as const,
+      rule: 'object-registry-refused',
+      where: 'object "ticket"',
+      path: '',
+      message: "object 'ticket' was published, but the runtime registry refused it, so it is NOT served",
+      hint: 'Resolve the registry\'s refusal, then publish the object again, or restart the server.',
+    };
+    batchBody = {
+      success: true,
+      data: {
+        success: false,
+        outcome: 'published_unregistered',
+        publishedCount: 1,
+        failedCount: 0,
+        published: [{ type: 'object', name: 'ticket', advisories: [refused] }],
+        failed: [],
+        unregistered: [{ type: 'object', name: 'ticket', rule: 'object-registry-refused' }],
+      },
+    };
+    await publishFromAChatCard();
+
+    await waitFor(() => expect(publishResult).toMatchObject({ ok: true }));
+    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    const [, options] = vi.mocked(toast.warning).mock.calls[0] as [string, { description?: string } | undefined];
+    expect(options?.description).toContain(refused.rule);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
 });

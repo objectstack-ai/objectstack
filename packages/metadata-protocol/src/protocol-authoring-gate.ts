@@ -56,6 +56,7 @@ import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVe
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { StoredObjectExtension } from '@objectstack/lint/runtime';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -185,6 +186,7 @@ export async function runAuthoringGate(
     this: Pick<AuthoringGateHost, 'authoringGates' | 'engine' | 'isArtifactBacked'>,
     evt: {
     type: string; name: string; state: 'draft' | 'active'; body: unknown;
+    userTextLocales?: readonly (string | undefined)[];
 }): Promise<void> {
     const singular = PLURAL_TO_SINGULAR[evt.type] ?? evt.type;
     const gate = this.authoringGates.get(singular);
@@ -203,6 +205,9 @@ export async function runAuthoringGate(
         body: evt.body,
         isArtifactBacked: artifactBacked,
         ...(declaredBody !== undefined ? { declaredBody } : {}),
+        ...(evt.userTextLocales !== undefined
+            ? { userTextLocales: evt.userTextLocales.filter((l): l is string => typeof l === 'string' && l.length > 0) }
+            : {}),
     });
 }
 
@@ -218,10 +223,10 @@ export async function runAuthoringGate(
  * are not being written and stay served. `undefined` (the ordinary fold) for
  * every other write type, and for a write naming no package or no target.
  *
- * A package-wide draft publish (`publishPackageDrafts`) whose drafts depend on
- * a sibling extension draft is refused, because that batch's pending set
- * carries no extension drafts (#33152); publishing the extension first through
- * the per-item door works.
+ * [#33152] A package-wide draft publish (`publishPackageDrafts`) carries its
+ * other extension drafts in its pending set, and the gate folds them onto
+ * their targets (`foldPendingObjectExtensions`), so a draft that depends on a
+ * sibling extension draft is judged against the target as the batch serves it.
  */
 export function objectExtensionWriteFold(
     singularType: string,
@@ -235,6 +240,56 @@ export function objectExtensionWriteFold(
     const target = typeof extend === 'string' && extend !== '' ? extend : name;
     if (typeof target !== 'string' || target === '') return undefined;
     return { options: { withoutExtensionsOf: packageId }, target };
+}
+
+/**
+ * [#33494] The OTHER packages' published extensions of an `object_extension`
+ * write's target, as the registry holds them: each `extend` contribution
+ * (`getObjectContributors`) of a package other than `writtenPackage`, with its
+ * package, its merge priority and its fields, in the registry's own order
+ * (ascending priority, equal priorities in registration order). A disabled
+ * package's is left out, as every served fold withholds it
+ * (`isPackageDisabled`). The target as served carries their fields as plain
+ * fields with no priority; the gate folds the written entry among these by
+ * priority instead (`objectsAsServed` in `@objectstack/lint`, the build's own
+ * fold), so it judges the definition the build judges. `[]` for a registry
+ * that cannot answer (a metadata-only host, a test double): the write is then
+ * judged over the target as served, as before.
+ */
+export function otherPackagesExtensionsOf(
+    registry: unknown,
+    target: string,
+    writtenPackage: string,
+): StoredObjectExtension[] {
+    const reg = registry as {
+        getObjectContributors?: (fqn: string) => readonly unknown[];
+        isPackageDisabled?: (packageId?: string) => boolean;
+    } | null | undefined;
+    if (typeof reg?.getObjectContributors !== 'function') return [];
+    const disabled = (packageId: string | undefined): boolean =>
+        typeof reg.isPackageDisabled === 'function' && reg.isPackageDisabled(packageId) === true;
+    const out: StoredObjectExtension[] = [];
+    try {
+        for (const contributor of reg.getObjectContributors(target)) {
+            if (contributor === null || typeof contributor !== 'object') continue;
+            const c = contributor as { ownership?: unknown; packageId?: unknown; priority?: unknown; definition?: unknown };
+            if (c.ownership !== 'extend') continue;
+            const packageId = typeof c.packageId === 'string' ? c.packageId : undefined;
+            if (packageId === writtenPackage || disabled(packageId)) continue;
+            const definition = c.definition !== null && typeof c.definition === 'object'
+                ? c.definition as { fields?: unknown }
+                : {};
+            out.push({
+                extend: target,
+                ...(typeof c.priority === 'number' ? { priority: c.priority } : {}),
+                fields: definition.fields,
+                ...(packageId !== undefined ? { packageId } : {}),
+            });
+        }
+    } catch {
+        return [];
+    }
+    return out;
 }
 
 /**
@@ -323,6 +378,12 @@ export async function judgeRuntimeAuthoringRules(
      * round trip for a secret it still holds.
      */
     restoredCredentialPaths?: () => Promise<readonly string[]>;
+    /**
+     * [#32656] The locales the findings' user-facing sentences are composed in
+     * (the write request's `userTextLocales`: the request's locale, then the
+     * workspace default). Absent ⇒ `en`. Selects a language, never a verdict.
+     */
+    userTextLocales?: readonly (string | undefined)[];
 }): Promise<RuntimeAuthoringVerdict> {
     const clean: RuntimeAuthoringVerdict = { error: null, advisories: [] };
     // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
@@ -379,6 +440,7 @@ export async function judgeRuntimeAuthoringRules(
                 state: evt.state,
                 body: evt.body,
                 ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
+                ...(evt.userTextLocales !== undefined ? { userTextLocales: evt.userTextLocales } : {}),
             }).advisories,
         };
     }
@@ -551,6 +613,13 @@ export async function judgeRuntimeAuthoringRules(
         ? packagedRuleCopyRefusalOf(this.engine, evt.name, evt.body)
         : undefined;
 
+    // [#33494] On an `object_extension` write, the target's other packages'
+    // published extensions with their priorities: the gate folds the written
+    // entry among them as the build does (see {@link otherPackagesExtensionsOf}).
+    const storedObjectExtensions = extensionWrite !== undefined
+        ? otherPackagesExtensionsOf(this.engine.registry, extensionWrite.target, extensionWrite.options.withoutExtensionsOf)
+        : undefined;
+
     const verdict = evaluateRuntimeAuthoringGate({
         type: singular,
         name: evt.name,
@@ -572,6 +641,7 @@ export async function judgeRuntimeAuthoringRules(
         ...(tenancyPostureInForce !== undefined ? { tenancyPostureInForce } : {}),
         ...(engineJudge !== undefined ? { judgeFilter: engineJudge } : {}),
         ...(restoredCredentialPaths !== undefined ? { restoredCredentialPaths } : {}),
+        ...(evt.userTextLocales !== undefined ? { userTextLocales: evt.userTextLocales } : {}),
         // [#20312] The deployment's component manifest, read per publish;
         // with it the gate compiles an html page's source (ADR-0080 §5).
         ...(sduiManifest !== undefined ? { sduiManifest } : {}),
@@ -582,6 +652,8 @@ export async function judgeRuntimeAuthoringRules(
         ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
         // [#28448] With it the gate refuses a rule copy that changes what the package owns.
         ...(packagedRuleCopyRefusal !== undefined ? { packagedRuleCopyRefusal } : {}),
+        // [#33494] With them the extension walk folds the written entry by priority.
+        ...(storedObjectExtensions !== undefined ? { storedObjectExtensions } : {}),
     });
     return verdict;
 }

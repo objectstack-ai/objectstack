@@ -38,7 +38,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { FilterOperatorError } from '@object-ui/core';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from './index';
+import { ObjectStackAdapter } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 function makeAdapter() {
   const calls: string[] = [];

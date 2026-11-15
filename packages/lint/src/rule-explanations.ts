@@ -763,6 +763,12 @@ const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION: RuleExplanation = {
       'keyed only on another user field — `owner == current_user.id`, where `owner` is the detail\'s own ' +
       'accountable-person field — stays a narrowing with or without the opt-in, and the rule says so in ' +
       'both states instead of prescribing an opt-in that would not admit that user.',
+    'The second opt-in, `sharing: { controlledByParent: { writeRequiresMasterRead: true } }`, makes READ ' +
+      'access to the master the gate\'s question for every write of the detail: insert, update and delete, ' +
+      'by anyone the detail\'s own permissions admit. On such a detail a policy keyed on the caller no longer ' +
+      'narrows master editors; it decides among everyone who reads the master, as authored, whichever user ' +
+      'field it keys. So the rule is not reported there. It is refused beside `ownerMayEdit: true`, which ' +
+      'it already covers.',
     'This is a warning, not an error: a narrowing can be meant (only the owner among the master\'s ' +
       'editors may update), and no runtime door refuses the shape. To fix a policy keyed on `owner_id`, ' +
       'declare the opt-in on the detail when the owner is meant to write with read on the master, or ' +
@@ -779,15 +785,15 @@ const SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION: RuleExplanation = {
   covers: 'why a hidden master reference still decides a detail write',
   paragraphs: [
     'A `controlled_by_parent` detail derives its record access from its master (ADR-0055). Creating, ' +
-      'editing or deleting a detail row needs edit access to the master record its master reference names, ' +
-      'and the platform reads that reference from the stored row, whatever the writer may read. So a ' +
+      'editing or deleting a detail row needs edit access to the master record its master reference names ' +
+      '(read access, on a detail that declares `writeRequiresMasterRead`), and the platform reads that reference from the stored row, whatever the writer may read. So a ' +
       'permission set\'s `readable: false` on the master reference hides the field from the set\'s holders ' +
       'and does not take it out of the decision: the master it names still decides whether each holder may ' +
       'write the row.',
     'What the field-level security does change is the refusal. A writer who can read the master reference ' +
       'is told which master\'s edit access the write needs and which check refused it. A writer who cannot ' +
       'read it gets the same `403 PERMISSION_DENIED` with a generic sentence, "no edit permission on the ' +
-      'parent record of this detail", which names no master object, no master record and no check. The ' +
+      'parent record of this detail" ("no read permission" where read is the question), which names no master object, no master record and no check. The ' +
       'writer has no way to tell from the refusal which record to ask for access to.',
     'Reported for each permission set whose own entry for the master reference reads `readable: false` (an ' +
       'omitted `readable` is `true`), on a detail this stack declares with one master. Not reported when the ' +
@@ -4484,14 +4490,21 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       'form `{ account: { status: VALUE } }` instead); a field computed on read, such as a `formula` ' +
       '(denormalise it onto the child as a stored field); and, beneath a relation, a key the related ' +
       'object lacks, a dotted key or a second relation holding a condition of its own.',
-    '`lookupColumns`, `dependsOn` and `indexes[].fields` are read verbatim (a picker column key, a ' +
-      'record key, a physical column), so a dotted name there is one name no field carries; the ' +
+    'Two scalar pointers of the object are judged too: the record title pointer `nameField` (and ' +
+      'its deprecated alias `displayNameField`; a name the two share is reported once, at the alias), ' +
+      'whose miss titles every record by its id, and each `activityMilestones[].field`, whose miss ' +
+      'never transitions, so the milestone never fires. Each reader takes the name as a record key, so ' +
+      'a column the platform injects on the object (`id`, `created_at`, `owner_id` on an owned object) ' +
+      'is a correct name.',
+    '`lookupColumns`, `dependsOn`, `indexes[].fields` and the two scalar pointers are read verbatim (a ' +
+      'picker column key, a record key, a physical column), so a dotted name there is one name no field ' +
+      'carries; the ' +
       'other positions resolve a relationship path. Not judged: an object this stack does not ' +
       'define, an object with no readable field map (`external`, an introspected schema), a ' +
       'registry-injected system column (resolved per object, so `owner_id` resolves on an owned ' +
       'object and misses under `ownership: \'none\'`), and the positions other rules own: ' +
       '`searchableFields` (`searchable-field-unknown`), list views (the list-view rules) and the ' +
-      'scalar role pointers.',
+      '`stageField` role pointer (`semantic-role-field-unknown`).',
     'The verdict names the nearest field of the addressed object when one is close ("Did you mean"), ' +
       'and the fix line names the position\'s remedy only, without listing that object\'s fields.',
   ],
@@ -4979,6 +4992,27 @@ const FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION: RuleExplanation = {
     'Distinct from the run-time erased-condition guard, which REFUSES this node at run time when a condition ' +
       'you WROTE evaluated to nothing: that guard is keyed on "a written condition is gone" and deliberately ' +
       'not on "the filter is empty", which is the fact this rule judges at authoring time.',
+  ],
+};
+
+const FLOW_MULTI_UPDATE_MOVES_STORED_INPUT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-multi-update-moves-stored-input',
+  covers: 'a multi update that moves a stored expression input',
+  paragraphs: [
+    'A stored computed field is any field but a `formula` that declares an `expression`: the engine computes it ' +
+      'from the row each write stores. A predicate update (`multi: true`) is one statement that writes one patch ' +
+      'to every matched row, and it is never split into single-row writes, so the computed value can be stored ' +
+      'only when it is the same on every matched row. When the patch moves an input to values that compute ' +
+      'differently on different rows, the whole update is refused with `VALIDATION_FAILED` and nothing is written.',
+    'The shape that always works reads the rows, loops and updates each by id: a `get_record` with the same ' +
+      'filter and a `limit` above 1 bound to an `outputVariable`, a `loop` over that list, and inside the loop ' +
+      'an `update_record` with `filter: { id: item.id }` (the loop\'s `iteratorVariable`) and no `multi`. Each row ' +
+      'is then computed from its own stored row. Wrap the loop body in a `try_catch` if one refused row should ' +
+      'not end the sweep.',
+    'An input is a field the `expression` reads as `record.FIELD`, or through a reference field, or through ' +
+      'another stored field that reads it. Setting a stored field itself is not reported: its value is computed, ' +
+      'never taken from the patch. This is a warning, not a gate: a patch that sets the inputs to values that ' +
+      'compute the same result on every matched row is stored, and which case a run meets depends on its rows.',
   ],
 };
 
@@ -5482,6 +5516,9 @@ const MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION: RuleExplanation = {
       'one edit. The fix line offers both ways out: drop the verbs, or open the affordance, and only ' +
       'for a write a user context may really perform, once the guard that enforces it exists ' +
       '(ADR-0092 D4: an affordance never ships ahead of its guard).',
+    'On a `synced` object `userActions` cannot open a write at all (ADR-0153 D4: the parse refuses ' +
+      'it), so the fix line offers only the removal, and a write goes through a declared action ' +
+      '(ADR-0153 D5).',
   ],
 };
 
@@ -6104,6 +6141,36 @@ const STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FIELD_LABEL_DUPLICATE_EXPLANATION: RuleExplanation = {
+  rule: 'field-label-duplicate',
+  covers: 'which fields and which labels are compared',
+  paragraphs: [
+    'Every surface that draws an object\'s fields names a column by its label: the list grid\'s header, the ' +
+      'kanban card\'s field line, the form\'s caption, the export and import columns. Two visible fields with one ' +
+      'label are two columns a person cannot tell apart, and editing one reads as editing the other. The common ' +
+      'case is a field added beside a platform field it duplicates, such as a `user` field labelled like the ' +
+      '`owner_id` column the platform adds to every user-owned object (served as "Owner" in English and under ' +
+      'its translated label in other languages).',
+    'Compared: the fields the object serves, that is its own fields plus every `objectExtensions` field of the ' +
+      'same stack, and the columns the platform injects on it (`owner_id` and the `created_*` / `updated_*` ' +
+      'audit columns; the organization, business-unit and queue columns are hidden). A field you declare under ' +
+      'one of those names replaces the injected column. A field with `hidden: true` is not compared, and a field ' +
+      'with no label is drawn under its unique name and is not compared either.',
+    'Labels are compared as a reader is served them, trimmed, otherwise exactly: once as written, and once per ' +
+      'locale, for every locale a `translations` bundle of the stack carries and every locale the platform ' +
+      'translates the injected columns into (`en`, `zh-CN`, `ja-JP`, `es-ES`). The second set needs no bundle: ' +
+      'a reader in one of those languages sees the injected columns translated while your untranslated field ' +
+      'keeps the label you wrote, so a field labelled "负责人" clashes with `owner_id` for a `zh-CN` reader only, ' +
+      'and the finding names that locale.',
+    'An error at `os build`, `os validate`, `os lint` and the metadata publish door. At the door a write of ' +
+      'another object is never refused for a clash a stored object carries, while saving the object itself is ' +
+      'refused until its clash is fixed; nothing on the boot path runs the rule, so an installed app keeps ' +
+      'loading. To fix it, give each ' +
+      'visible field its own label (in the translation bundle too, when only a translation clashes), set ' +
+      '`hidden: true` on the field readers should not see, or drop the duplicate and use the platform\'s column.',
+  ],
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -6288,6 +6355,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION.rule]: FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION,
   [FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION.rule]: FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION,
   [FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION.rule]: FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION,
+  [FLOW_MULTI_UPDATE_MOVES_STORED_INPUT_EXPLANATION.rule]: FLOW_MULTI_UPDATE_MOVES_STORED_INPUT_EXPLANATION,
   [FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION.rule]: FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION,
   [FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION.rule]: FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION,
   [FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION.rule]: FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION,
@@ -6336,6 +6404,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_REGION_SHAPE_INVALID_EXPLANATION.rule]: FLOW_REGION_SHAPE_INVALID_EXPLANATION,
   [STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION,
   [STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION,
+  [FIELD_LABEL_DUPLICATE_EXPLANATION.rule]: FIELD_LABEL_DUPLICATE_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

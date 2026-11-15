@@ -247,6 +247,7 @@ async function boot(
 ) {
     const ql = await dataEngine();
     const provider = grantedProvider();
+    let captured: any;
     const kernel = new LiteKernel({ logger: { level: 'debug', format: 'json' } } as never);
     kernels.push(kernel);
     kernel.use(new AutomationServicePlugin({
@@ -260,6 +261,7 @@ async function boot(
         version: '1.0.0',
         dependencies: ['com.objectstack.service-automation'],
         async init(ctx: any) {
+            captured = ctx;
             const listItems = (t: string) => (t === 'connector' ? declared : []);
             const registry = opts.registry ? Object.assign(Object.create(opts.registry), { listItems }) : { listItems };
             ctx.registerService('objectql', { registry });
@@ -283,7 +285,9 @@ async function boot(
         const query = opts2.query ?? { code: opts2.code ?? GOOD_CODE, state };
         return { begun, state, done: () => engine.completeConnectorConnection({ query: { state, ...query }, context: (opts2.as ?? context) as never }) };
     };
-    return { ql, engine, provider, call, connect, kernel };
+    /** Fire the reload hook: the runtime reconcile, over `declared` as it stands now. */
+    const reload = async () => { await captured.trigger('metadata:reloaded'); await flush(); };
+    return { ql, engine, provider, call, connect, kernel, reload };
 }
 
 const rowsOf = async (ql: ObjectQL) => (await ql.find(CONNECTOR_CONNECTION_OBJECT, { context: SYSTEM } as never)) as any[];
@@ -655,7 +659,7 @@ describe('ADR-0143 D3/D6 — what a grant leaves behind', () => {
             }
         }
         // The logs did record the connect — the pin is not passing on silence.
-        expect(out.text()).toContain("connector instance 'crm' connected for organization 'org_a' by user 'usr_admin'");
+        expect(out.text()).toContain("connector instance 'crm' of package 'com.example.crm' connected for organization 'org_a' by user 'usr_admin'");
         expect(out.text()).toContain(
             "[Automation] connector instance 'crm' needs to be reconnected for organization 'org_a': its authorization server refused the grant",
         );
@@ -918,7 +922,7 @@ describe("ADR-0143 D2.1 — an instance that takes the installer's OAuth client"
             expect(text.includes(INSTALLER_SECRET), `${where} carries the installer's secret`).toBe(false);
         }
         // Not passing on silence: the connect was logged and the read named the client.
-        expect(out.text()).toContain("connector instance 'crm' connected for organization 'org_a' by user 'usr_admin'");
+        expect(out.text()).toContain("connector instance 'crm' of package 'com.example.crm' connected for organization 'org_a' by user 'usr_admin'");
         expect(surfaces.answers).toContain(INSTALLER_ID);
     });
 
@@ -1105,6 +1109,81 @@ describe('ADR-0150 D4 [#31699] — the connection door connects one instance, by
         expect(await rowsOf(ql)).toHaveLength(0);
     });
 
+    it('[3b; the narrowing, review nit] the materializer registers the instance by its package, and its handle reads that package\'s connection; a second holder refuses the bare name until the reconcile drops the entry', async () => {
+        const registry = registryHolding('com.example.crm');
+        const { connect, call, engine, reload } = await boot([crm({ _packageId: undefined })], { registry });
+        await (await connect()).done();
+        expect(engine.resolveConnectorInstanceFor('crm', null)).toEqual({ status: 'instance', packageId: 'com.example.crm' });
+        await expect(call('org_a')).resolves.toMatchObject({ status: 200 });
+        // A second durable holder: the unstamped entry is no one package's any
+        // more. The bare name is refused at resolution, naming both (no flow
+        // dispatches it). The registered instance is still com.example.crm's
+        // until the reconcile, and its handle reads that package's row, fixed
+        // (FROM: re-resolved on every read, answering no package's row).
+        hold(registry, OTHER);
+        expect(engine.resolveConnectorInstanceFor('crm', null).status).toBe('refused');
+        await expect(engine.resolveConnectorAction('crm', 'request', 'com.example.crm')!({}, { automation: { tenantId: 'org_a' } } as never))
+            .resolves.toMatchObject({ status: 200 });
+        // The reconcile refuses the entry: it is materialized as neither holder's.
+        await reload();
+        expect(engine.resolveConnectorAction('crm', 'request', 'com.example.crm')).toBeUndefined();
+        expect(engine.resolveConnectorAction('crm', 'request', OTHER)).toBeUndefined();
+    });
+
+    it('[3b; the narrowing] the holder of an unstamped entry is replaced, leaving one holder: once the reconcile re-registers it, the dispatch keeps its connection', async () => {
+        const registry = registryHolding('com.example.crm');
+        const { connect, call, engine, reload } = await boot([crm({ _packageId: undefined })], { registry });
+        await (await connect()).done();
+        registry.uninstallPackage('com.example.crm');
+        registry.unregisterItemsByPackage('com.example.crm');
+        hold(registry, OTHER);
+        // Before the reconcile: the name resolves to OTHER, which has no
+        // instance yet. FROM (3b's fallback arm) the one instance of the name,
+        // registered under the uninstalled package; TO none, never another
+        // package's instance.
+        expect(engine.resolveConnectorInstanceFor('crm', null)).toEqual({ status: 'none' });
+        await reload();
+        expect(engine.resolveConnectorInstanceFor('crm', null)).toEqual({ status: 'instance', packageId: OTHER });
+        await expect(call('org_a')).resolves.toMatchObject({ status: 200 });
+    });
+
+    it('[3b, review M1] the package an unstamped entry is registered under follows the name\'s holder, and a removed entry leaves no instance behind', async () => {
+        // Not connected: the instance is the degraded husk.
+        const registry = registryHolding('com.example.crm');
+        const declared: unknown[] = [crm({ _packageId: undefined })];
+        const { engine, reload } = await boot(declared, { registry });
+        expect(engine.resolveConnectorInstanceFor('crm', null)).toEqual({ status: 'instance', packageId: 'com.example.crm' });
+        expect(engine.getConnectorDegradedReason('crm')).toBeDefined();
+        // The holder is uninstalled; the declared list is unchanged. The
+        // reconcile registers the instance again, under no package.
+        registry.uninstallPackage('com.example.crm');
+        registry.unregisterItemsByPackage('com.example.crm');
+        await reload();
+        expect(engine.resolveConnectorInstanceFor('crm', null)).toEqual({ status: 'instance', packageId: null });
+        expect(engine.getConnectorDescriptors().filter((d) => d.name === 'crm')).toHaveLength(1);
+        // The entry is removed: no instance of the name is left, under any package.
+        declared.length = 0;
+        await reload();
+        expect(engine.getRegisteredConnectors()).not.toContain('crm');
+        expect(engine.getConnectorDegradedReason('crm')).toBeUndefined();
+    });
+
+    it('[3b, review M1] an entry removed while its package holds the name: both the degraded and the live instance are dropped', async () => {
+        const declared: unknown[] = [crm({ _packageId: undefined })];
+        const degraded = await boot(declared, { registry: registryHolding('com.example.crm') });
+        declared.length = 0;
+        await degraded.reload();
+        expect(degraded.engine.getRegisteredConnectors()).not.toContain('crm');
+
+        const declaredLive: unknown[] = [crm({ _packageId: undefined })];
+        const live = await boot(declaredLive, { registry: registryHolding('com.example.crm') });
+        await (await live.connect()).done();
+        expect(live.engine.getConnectorDegradedReason('crm')).toBeUndefined();
+        declaredLive.length = 0;
+        await live.reload();
+        expect(live.engine.getRegisteredConnectors()).not.toContain('crm');
+    });
+
     it('a resolved holder no declared entry is the instance of: the one declared entry is served, with its own package', async () => {
         const { connect, ql } = await boot([crm({ _packageId: OTHER })], { registry: registryHolding('com.example.crm') });
         await expect((await connect()).done()).resolves.toMatchObject({ status: 'connected' });
@@ -1132,5 +1211,141 @@ describe('ADR-0150 D4 [#31699] — the connection door connects one instance, by
         await (await connect()).done();
         const rows = await rowsOf(ql);
         expect(rows.map((r) => [r.id, r.connector_package])).toEqual([[row.id, 'com.example.crm']]);
+    });
+});
+
+// ─── ADR-0150 D9 [#31699, the narrowing] two live instances of one name ───
+
+describe('ADR-0150 D9 [#31699] — two packages of different namespaces each hold an instance of one name', () => {
+    const CRM = 'com.example.crm';
+    const OTHER = 'com.example.other';
+    function hold(r: SchemaRegistry, id: string): SchemaRegistry {
+        r.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() } as never, 'code');
+        r.registerItem('connector', crm({ _packageId: id }) as never, 'name' as never, id);
+        return r;
+    }
+    const registryHoldingBoth = () => hold(hold(new SchemaRegistry({ multiTenant: false }), CRM), OTHER);
+    const both = () => [crm({ _packageId: CRM }), crm({ _packageId: OTHER })];
+    const connectAt = async (engine: AutomationEngine, pkg: string | undefined, context = ADMIN_A) => {
+        const begun = await engine.beginConnectorConnection({ connector: 'crm', context: context as never, ...(pkg ? { package: pkg } : {}) });
+        const state = new URL(begun.authorizationUrl).searchParams.get('state')!;
+        return engine.completeConnectorConnection({ query: { state, code: GOOD_CODE }, context: context as never });
+    };
+    const dispatchAt = (engine: AutomationEngine, pkg: string, organizationId = 'org_a') =>
+        engine.resolveConnectorAction('crm', 'request', pkg)!({}, { automation: { tenantId: organizationId } } as never);
+
+    it('both instances materialize, each under its package (FROM: the boot refused the name, naming both)', async () => {
+        const { engine } = await boot(both(), { registry: registryHoldingBoth() });
+        expect(engine.getConnectorDescriptors().filter((d) => d.name === 'crm').map((d) => d.packageId).sort()).toEqual([CRM, OTHER]);
+        expect(engine.getConnectorDegradedReason('crm', CRM)).toBeDefined();
+        expect(engine.getConnectorDegradedReason('crm', OTHER)).toBeDefined();
+    });
+
+    it('the bare connection door is refused 409 naming both; the addressed door connects each package\'s instance, each with its own row and token', async () => {
+        const { engine, ql, provider } = await boot(both(), { registry: registryHoldingBoth() });
+        await expect(engine.beginConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
+            .rejects.toMatchObject({ status: 409, message: expect.stringContaining(OTHER) });
+        await expect(connectAt(engine, CRM)).resolves.toMatchObject({ status: 'connected' });
+        // Connecting one leaves the other unconnected.
+        expect(await engine.getConnectorConnection({ connector: 'crm', package: OTHER, context: ADMIN_A as never }))
+            .toMatchObject({ status: 'not_connected' });
+        await expect(connectAt(engine, OTHER)).resolves.toMatchObject({ status: 'connected' });
+        const rows = await rowsOf(ql);
+        expect(rows.map((r) => r.connector_package).sort()).toEqual([CRM, OTHER]);
+        // Each dispatch presents its own instance's token (two live grant handles).
+        await expect(dispatchAt(engine, CRM)).resolves.toMatchObject({ status: 200 });
+        await expect(dispatchAt(engine, OTHER)).resolves.toMatchObject({ status: 200 });
+        expect(provider.state.sent).toHaveLength(2);
+        expect(new Set(provider.state.sent).size).toBe(2);
+        // The bare read is ambiguous: 409, never one of them.
+        await expect(engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
+            .rejects.toMatchObject({ status: 409 });
+    });
+
+    it('revoking one package\'s connection leaves the other\'s connection and token serving', async () => {
+        const { engine, ql, provider } = await boot(both(), { registry: registryHoldingBoth() });
+        await connectAt(engine, CRM);
+        await connectAt(engine, OTHER);
+        await dispatchAt(engine, OTHER);
+        const otherToken = provider.state.sent[provider.state.sent.length - 1];
+        await engine.revokeConnectorConnection({ connector: 'crm', package: CRM, context: ADMIN_A as never });
+        expect((await rowsOf(ql)).map((r) => r.connector_package)).toEqual([OTHER]);
+        // CRM's instance is held degraded, with no connection to present: nothing of it dispatches.
+        expect(engine.getConnectorDegradedReason('crm', CRM)).toBeDefined();
+        expect(engine.resolveConnectorAction('crm', 'request', CRM)).toBeUndefined();
+        expect(engine.getConnectorDegradedReason('crm', OTHER)).toBeUndefined();
+        await expect(dispatchAt(engine, OTHER)).resolves.toMatchObject({ status: 200 });
+        expect(provider.state.sent[provider.state.sent.length - 1]).toBe(otherToken);
+    });
+
+    // [review S5] One of the two holders disabled, in both registration
+    // orders. The registry lists no item of a disabled package, so the
+    // declaration the reconcile and the door read is the enabled holder's.
+    for (const order of ['crm first', 'other first'] as const) {
+        const oneDisabled = () => {
+            const r = new SchemaRegistry({ multiTenant: false });
+            for (const id of order === 'crm first' ? [CRM, OTHER] : [OTHER, CRM]) hold(r, id);
+            r.disablePackage(CRM);
+            return r;
+        };
+
+        it(`[${order}] CRM disabled: the bare door connects OTHER's instance, the one served holder`, async () => {
+            const { engine, ql } = await boot([crm({ _packageId: OTHER })], { registry: oneDisabled() });
+            await expect(connectAt(engine, undefined)).resolves.toMatchObject({ status: 'connected' });
+            expect((await rowsOf(ql)).map((r) => r.connector_package)).toEqual([OTHER]);
+        });
+
+        it(`[${order}] CRM disabled: the door addressed to CRM finds no declared instance (404) and writes nothing`, async () => {
+            const { engine, ql } = await boot([crm({ _packageId: OTHER })], { registry: oneDisabled() });
+            await expect(engine.getConnectorConnection({ connector: 'crm', package: CRM, context: ADMIN_A as never }))
+                .rejects.toMatchObject({ status: 404 });
+            await expect(engine.beginConnectorConnection({ connector: 'crm', package: CRM, context: ADMIN_A as never }))
+                .rejects.toMatchObject({ status: 404 });
+            expect(await rowsOf(ql)).toEqual([]);
+        });
+    }
+
+    it('an entry with no package of its own under the two holders is refused, naming both, and materialized as neither', async () => {
+        const logged = captureOutput();
+        const { engine } = await boot([...both(), crm({ _packageId: undefined, label: 'unowned' })], { registry: registryHoldingBoth() });
+        expect(engine.getConnectorDescriptors().filter((d) => d.name === 'crm').map((d) => d.packageId).sort()).toEqual([CRM, OTHER]);
+        expect(engine.getConnectorDescriptors().some((d) => d.label === 'unowned')).toBe(false);
+        expect(logged.text()).toContain(`connector instance 'crm' is not materialized`);
+    });
+
+    it('two entries of one package with one name are a duplicate within the package: the boot fails loudly, as a duplicate name did', async () => {
+        await expect(boot([...both(), crm({ _packageId: CRM, label: 'second' })], { registry: registryHoldingBoth() }))
+            .rejects.toThrow(`duplicate declarative connector instance name 'crm' in package '${CRM}'`);
+    });
+
+    it('[#33218 review N6] a row a moved declaration left stamped with its old package is that package\'s again once it declares the name beside the new holder', async () => {
+        // CRM connects; the declaration moves to OTHER (one holder throughout):
+        // the row keeps CRM's stamp and serves OTHER's instance (#33218 F1).
+        const registry = hold(new SchemaRegistry({ multiTenant: false }), CRM);
+        const declared: unknown[] = [crm({ _packageId: CRM })];
+        const { engine, ql, reload } = await boot(declared, { registry });
+        await connectAt(engine, undefined);
+        registry.uninstallPackage(CRM);
+        registry.unregisterItemsByPackage(CRM);
+        hold(registry, OTHER);
+        declared.splice(0, 1, crm({ _packageId: OTHER }));
+        await reload();
+        expect(await engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never })).toMatchObject({ status: 'connected' });
+        expect((await rowsOf(ql)).map((r) => r.connector_package)).toEqual([CRM]);
+        // CRM declares the name again, beside OTHER: two holders. The row
+        // names a holder, so it is that holder's own; OTHER has none. The
+        // stamp is judged, not rewritten: the token was got for CRM's connect.
+        hold(registry, CRM);
+        declared.push(crm({ _packageId: CRM }));
+        await reload();
+        expect(await engine.getConnectorConnection({ connector: 'crm', package: CRM, context: ADMIN_A as never }))
+            .toMatchObject({ status: 'connected' });
+        expect(await engine.getConnectorConnection({ connector: 'crm', package: OTHER, context: ADMIN_A as never }))
+            .toMatchObject({ status: 'not_connected' });
+        expect((await rowsOf(ql)).map((r) => r.connector_package)).toEqual([CRM]);
+    });
+
+    it('CONTROL: with no registry to judge by, one instance per name, as before the narrowing (red line 1): the second is a duplicate', async () => {
+        await expect(boot(both())).rejects.toThrow(/duplicate declarative connector instance name 'crm' — .*serves none/);
     });
 });

@@ -95,6 +95,7 @@ import {
   controlledByParentPredicateWriteMasters,
   type CbpPredicateWriteSelection,
   type CbpWriteGateHost,
+  type MasterGateDenial,
 } from './security-plugin-cbp-write-gate.js';
 // [#25223 cut 4] The controlled-by-parent read leaf (ADR-0055 §2, ADR-0139 D6)
 // and its chain refusal; the methods of the same names below hand each body
@@ -279,7 +280,7 @@ import {
   owdOpenWritesCoversOperation,
 } from './platform-ownership-policies.js';
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
-import { PlatformBaselineSets } from './platform-baseline-sets.js';
+import { PlatformBaselineSets, readPlatformBaselineOverridesOption, type PlatformBaselineOverrides } from './platform-baseline-sets.js';
 import {
   refuseUndeclaredExternalObjectScope,
   registeredObjectsOf,
@@ -786,6 +787,25 @@ interface CbpRelation {
    */
   ownerMayEdit: boolean;
   /**
+   * [ADR-0055 §3 as amended for #33250 · ruling A+] The object opted in to READ
+   * on the master being the master question for every write of its rows —
+   * `sharing.controlledByParent.writeRequiresMasterRead: true`, read through
+   * the spec's one reader (`controlledByParentWriteRequiresMasterRead`,
+   * `@objectstack/spec/data`). Unlike {@link ownerMayEdit} it names no column,
+   * so it is the declaration alone.
+   *
+   * Read by the chain walk of
+   * {@link SecurityPlugin.assertControlledByParentWrite} and by nothing else:
+   * on a hop whose relation carries it, the walk asks whether the principal can
+   * READ the master row, asked of the read door under the principal's own
+   * context, instead of the three edit legs, and ends there (the read door
+   * composes whatever chain stands above that master). Every shape of write the
+   * gate judges reaches the master through that walk — an insert single or
+   * batch, a by-id or predicate update or delete, a body that re-points or
+   * empties the reference — so each follows. `false`: the edit legs, as before.
+   */
+  writeRequiresMasterRead: boolean;
+  /**
    * [ADR-0055 §1 and §2 as amended · #30905 ruling A] The master is OPTIONAL:
    * the object declares no required `master_detail`, and its only one is
    * declared `required: false` (read `=== false`, as the spec's
@@ -1123,6 +1143,29 @@ export interface SecurityPluginOptions {
    * look enforced.
    */
   acceptedDefaultPermissionSets?: readonly string[];
+  /**
+   * [#33132] Narrow what an always-on platform service contributes to the
+   * member baseline (`ISecurityService.contributePlatformBaselineSet`), by
+   * contributed set name and object:
+   *
+   * - `'read'`: members keep the object's read, and its create is withheld;
+   * - `'decline'`: the object's grant is withheld entirely.
+   *
+   * For example, a host on which an organization administrator must not
+   * create attachments declares
+   * `{ storage_attachment_member: { sys_attachment: 'read' } }`.
+   *
+   * Applied where the contribution is admitted, so the data plane, the
+   * explainer, the effective-access read and the `everyone` anchor all read
+   * the narrowed set. It only narrows: a contribution is first held to the
+   * seam's own rules, and an override never adds a bit. A set left granting
+   * nothing joins no baseline. An entry that no contribution matched by the
+   * end of boot is logged at `warn`, so a renamed set or object is said, not
+   * silently left in force. A malformed entry is refused at construction.
+   *
+   * Omitted (the default), every contribution is admitted as contributed.
+   */
+  platformBaselineOverrides?: PlatformBaselineOverrides;
 }
 
 /**
@@ -1612,7 +1655,7 @@ export class SecurityPlugin implements Plugin {
    * reads them, and closed to contributions at `kernel:bootstrapped`. The
    * seam and its rules: `platform-baseline-sets.ts`.
    */
-  private readonly platformBaselineSets = new PlatformBaselineSets();
+  private readonly platformBaselineSets: PlatformBaselineSets;
 
   constructor(options: SecurityPluginOptions = {}) {
     this.bootstrapPermissionSets =
@@ -1628,6 +1671,7 @@ export class SecurityPlugin implements Plugin {
     // with the platform's own, never one displacing the other (ADR-0090 D5).
     this.baselinePermissionSets = composeHumanBaselinePermissionSets(this.fallbackPermissionSet);
     this.acceptedDefaultPermissionSets = readAcceptedDefaultPermissionSetsOption(options.acceptedDefaultPermissionSets);
+    this.platformBaselineSets = new PlatformBaselineSets(readPlatformBaselineOverridesOption(options.platformBaselineOverrides));
     // [ADR-0090 D10] The baseline is held by every signed-in person, so an
     // agent ceiling set is never part of it, however it was named.
     refuseAgentCeilingInBaselineOptions(this.fallbackPermissionSet, this.acceptedDefaultPermissionSets);
@@ -1914,7 +1958,17 @@ export class SecurityPlugin implements Plugin {
       // after the derivation above began is not yet named by the anchor's
       // definition, so the anchor is derived again before anything serves.
       (ctx as any).hook('kernel:bootstrapped', async () => {
-        if (this.platformBaselineSets.close()) await this.declareEveryone(ctx.logger);
+        const owed = this.platformBaselineSets.close();
+        // [#33132] An override nothing matched withheld nothing: say so.
+        for (const entry of this.platformBaselineSets.unmatchedOverrides()) {
+          ctx.logger.warn(
+            `[security] platformBaselineOverrides names '${entry}', which no platform service contributed during boot, ` +
+              'so it withheld nothing. A renamed set or object leaves its grant in force: check the name against the ' +
+              "'[security] platform baseline set' lines of this boot.",
+            { override: entry },
+          );
+        }
+        if (owed) await this.declareEveryone(ctx.logger);
       });
     }
 
@@ -5544,7 +5598,7 @@ export class SecurityPlugin implements Plugin {
     masterId: unknown,
     context: any,
     opCtx: any,
-    masterEditDenied: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => PermissionDeniedError,
+    masterEditDenied: MasterGateDenial,
     denyMasterEdit: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => never,
   ): Promise<void> {
     // [#25223 cut 3] The body moved to `security-plugin-cbp-write-gate.ts` (see `CbpWriteGateHost`).

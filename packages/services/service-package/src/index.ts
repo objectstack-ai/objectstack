@@ -11,7 +11,10 @@ import {
   PACKAGE_TABLE_COLUMNS,
   PACKAGE_ROW_CREATED_AT_SQL,
   PACKAGE_TABLE_STATEMENTS,
+  nextPackageWriteInstant,
   packageRowStamp,
+  packageStampToIso,
+  packageWriteStamp,
   probePackageTable,
   resolvePackageTableDialect,
 } from './package-table.js';
@@ -32,7 +35,9 @@ export interface PackageRecord {
   manifest: ObjectStackManifest;
   metadata: PackageMetadata;
   hash: string;
+  /** When this `(id, version)` row was first written (`YYYY-MM-DD HH:MM:SS` UTC); an overwrite keeps it. */
   created_at: string;
+  /** When this row was last written (`YYYY-MM-DD HH:MM:SS.mmm` UTC from this release on); `latest` orders by it. */
   updated_at: string;
 }
 
@@ -448,6 +453,24 @@ interface PackageStorageDeclaration {
 }
 
 /**
+ * Carry a `sys_packages` row's stored times onto the registry record its boot
+ * hydration just installed: `created_at` as `installedAt`, `updated_at` as
+ * `updatedAt`. The registry keeps and hands out that record object, so it is
+ * set in place, and only for a stamp the row holds in a readable form
+ * ({@link packageStampToIso}). The lifecycle state the install carried
+ * (`status` / `enabled` / `statusChangedAt`) is left as the registry decided
+ * it: `sys_packages` stores no such stamp to carry.
+ */
+function carryStoredLifecycleStamps(installed: unknown, row: Pick<PackageRecord, 'created_at' | 'updated_at'>): void {
+  if (typeof installed !== 'object' || installed === null) return;
+  const record = installed as { installedAt?: string; updatedAt?: string };
+  const installedAt = packageStampToIso(row.created_at);
+  const updatedAt = packageStampToIso(row.updated_at);
+  if (installedAt !== undefined) record.installedAt = installedAt;
+  if (updatedAt !== undefined) record.updatedAt = updatedAt;
+}
+
+/**
  * Package Management Service Plugin
  *
  * Provides package publishing, retrieval, and management capabilities.
@@ -530,7 +553,12 @@ export class PackageServicePlugin implements Plugin {
             .digest('hex');
           // [#31530] The row's stamps, bound by this write, so the answer can
           // name the `created_at` it inserted without reading the row back.
-          const stamp = packageRowStamp(new Date());
+          // `updated_at` is this instant to the millisecond, moved on past this
+          // process's previous write when the clock has not: it is what
+          // `latest` orders by. `created_at` stays the wall clock's second.
+          const now = new Date();
+          const stamp = packageRowStamp(now);
+          const writeStamp = packageWriteStamp(nextPackageWriteInstant(now));
           // [#31530] The row's own `created_at` when `(id, version)` is already
           // stored: the upsert's update arm keeps it, so that is the value to
           // answer. `null` — no row, so the insert arm runs and binds `stamp`.
@@ -550,7 +578,7 @@ export class PackageServicePlugin implements Plugin {
               JSON.stringify(data.metadata),
               hash,
               stamp,
-              stamp,
+              writeStamp,
             ],
           });
 
@@ -602,8 +630,10 @@ export class PackageServicePlugin implements Plugin {
 
       async get(packageId: string, version: string = 'latest') {
         try {
+          // "latest" is the row written last, by `updated_at` — never by
+          // `created_at`, which an overwrite keeps (`PACKAGE_TABLE_STATEMENTS`).
           const sql = version === 'latest'
-            ? `SELECT * FROM sys_packages WHERE id = ? ORDER BY created_at DESC LIMIT 1`
+            ? `SELECT * FROM sys_packages WHERE id = ? ORDER BY updated_at DESC LIMIT 1`
             : `SELECT * FROM sys_packages WHERE id = ? AND version = ?`;
 
           const args = version === 'latest' ? [packageId] : [packageId, version];
@@ -650,13 +680,15 @@ export class PackageServicePlugin implements Plugin {
 
       async list() {
         try {
+          // Each package's row written last, by `updated_at`, as in `get()`.
+          // The boot hydrates from this, so it is what a restart serves.
           const result = await objectql.execute!({
             sql: `
               SELECT * FROM sys_packages
-              WHERE (id, created_at) IN (
-                SELECT id, MAX(created_at) FROM sys_packages GROUP BY id
+              WHERE (id, updated_at) IN (
+                SELECT id, MAX(updated_at) FROM sys_packages GROUP BY id
               )
-              ORDER BY created_at DESC
+              ORDER BY updated_at DESC
             `,
           });
 
@@ -835,8 +867,21 @@ export class PackageServicePlugin implements Plugin {
             // and keep hydrating as stored. The tolerance is this READ's only:
             // a new write of the same manifest is refused at the primitive
             // (pinned in `install-primitive-declaration.test.ts`).
+            //
+            // A rehydrated row is not a fresh install, so it keeps the times
+            // the store holds: `installPackage` stamps `installedAt` /
+            // `updatedAt` with the moment it runs, and a restart used to serve
+            // the boot time as both. The install time is the row's
+            // `created_at` (its version's first write) and the last change is
+            // its `updated_at`, carried onto the record the registry keeps and
+            // serves (`GET /packages/:id` projects it as-is). A stamp the row
+            // does not hold in a readable form leaves the registry's own.
             try {
-              registry.installPackage(convertForward ? convertForward(rec.manifest) : rec.manifest, 'authored');
+              const installed = registry.installPackage(
+                convertForward ? convertForward(rec.manifest) : rec.manifest,
+                'authored',
+              );
+              carryStoredLifecycleStamps(installed, rec);
               hydrated++;
             } catch (refusal) {
               logger.error(

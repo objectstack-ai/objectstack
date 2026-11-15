@@ -25,9 +25,12 @@ vi.mock('./PageBlockCanvas', () => ({
   PageBlockCanvas: () => <div data-testid="mock-page-canvas" />,
 }));
 
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/lint';
 import { PagePreview } from './PagePreview';
 import { buildDefaultPageSchema } from '@object-ui/plugin-detail';
-import { deriveRecordDetailSections, MORE_DETAILS_DEFAULT_LABEL } from '../../recordDetailSections';
+import { deriveRecordDetailSections, MORE_DETAILS_DEFAULT_LABEL, UNGROUPED_SECTION_DEFAULT_LABEL } from '../../recordDetailSections';
 
 afterEach(cleanup);
 
@@ -222,7 +225,10 @@ describe('PagePreview — slotted record page detail sections (objectui#12442)',
   }
 
   it('an object with no fieldGroups: the preview carries the runtime sections, not a bare record:details', async () => {
-    const runtimeSections = deriveRecordDetailSections(flatDef, { moreDetails: MORE_DETAILS_DEFAULT_LABEL });
+    const runtimeSections = deriveRecordDetailSections(flatDef, {
+      moreDetails: MORE_DETAILS_DEFAULT_LABEL,
+      ungrouped: UNGROUPED_SECTION_DEFAULT_LABEL,
+    });
     // Firing control: the split really yields two sections for this fixture.
     expect(runtimeSections).toHaveLength(2);
     const node = await previewDetails(flatDef);
@@ -230,9 +236,15 @@ describe('PagePreview — slotted record page detail sections (objectui#12442)',
     expect(node).toEqual(synthesizedDetails(flatDef, runtimeSections));
   });
 
-  it('CONTROL: an object with fieldGroups previews exactly what the synthesizer alone writes', async () => {
+  it('an object with fieldGroups: the synthesizer\'s group references, the ungrouped bucket headed Other (objectstack#33377)', async () => {
     const node = await previewDetails(groupedDef);
-    expect(node).toEqual(synthesizedDetails(groupedDef));
-    expect(node.properties.sections[0]).toEqual(expect.objectContaining({ group: 'basic_info' }));
+    const plain = synthesizedDetails(groupedDef).properties.sections as Array<Record<string, any>>;
+    const sections = node.properties.sections as Array<Record<string, any>>;
+    expect(sections[0]).toEqual(expect.objectContaining({ group: 'basic_info' }));
+    expect(sections[0]).toEqual(plain[0]);
+    // The bucket is the synthesizer's, headed by the translated text the
+    // running page draws (no provider here: the en default).
+    expect(sections[1]).toEqual({ ...plain[1], label: 'Other' });
+    expect(sections).toHaveLength(2);
   });
 });

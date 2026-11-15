@@ -474,7 +474,13 @@ export const CEILINGS = new Map([
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate). Lowered 42 → 41 when the retired contract-review label's
   // card-side-first line left (ruling record 5770886272 on #19061).
-  ['.claude/skills/pm-dispatch/references/state-machine.md', 41],
+  // Raised 41 → 43 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
+  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
+  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
+  // Two lines: 开着的卡离手恒落一态 in the cross-state rules, and the hold-lowers-the-grade line
+  // (`Restart-grade:`). Every bullet here already sits at its 120-byte minimum, so payment in place
+  // would have deleted a ruled clause. Measured delta +2; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/state-machine.md', 43],
   // Raised 48 → 51 by the clause-② CONTENT-limb applicability ruling (maintainer
   // 2026-08-31, 第 6 场总监席决裁批 #12, verbatim 「同意」, adopting A + C: published
   // `skills/**` changes making a falsifiable operator/contract semantic claim fall
@@ -1259,7 +1265,12 @@ export const CEILINGS = new Map([
   // maintainer's word), maintainer verbatim and untranslated: 「已经把 #3686 插到队首了,插队做不到,你应该立卡改进skills」;
   // letter 「A」 recorded as comment 6729640900. Measured delta +5 (102 → 107);
   // landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/landing-operations.md', 107],
+  // Raised 107 → 108 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
+  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
+  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
+  // The `Part of` close-out pair became three lines: the remainder's state for its lane, the three
+  // legal states, and the comment plus the write door's refusal. Measured delta +1; headroom 0.
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 108],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
   // rolls to production, which the landing window (ends at MERGED) never
   // covered: post-roll placement/latency reading with the waker-bias re-draw
@@ -1335,7 +1346,12 @@ export const CEILINGS = new Map([
   // record: amendment 6595840476 on #29754 (maintainer 「同意：下班席位的卡交给
   // 兄弟席」), which names this file, under #29775 letter A, record 6595514258
   // (「同意29775 A」). Measured delta +2 (96 → 98 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 98],
+  // Raised 98 → 99 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
+  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
+  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
+  // One line: a stay-behind card takes its lane's state in the `seat-offline` stroke, or triage
+  // sets it on reading that knock. Measured delta +1; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 99],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
   // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
@@ -1423,7 +1439,13 @@ export const CEILINGS = new Map([
   // never restating the six; no line of this file restates text another file
   // carries, so a deletion would have dropped a live rule. Measured delta +1
   // (100 → 101); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 101],
+  // Raised 101 → 103 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
+  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
+  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
+  // Two lines: the awaiting-maintainer list with each card's age, and the five disjunctions run by
+  // `scripts/pm/first-touch-sweep.mjs`; the self-repair line took `+降 p3` in place. Measured delta
+  // +2; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 103],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
@@ -1772,6 +1794,17 @@ export const CEILINGS = new Map([
   // NEW file, so this is an added row and no other row moves; set at the
   // landed line count (headroom 0, same convention as every lane charter above).
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 45],
+  // Merge-queue seat charter (`queue#N`): the neutral cross-lane seat that
+  // patrols the queue (the 90-minute stall check, head-ejection causes, flake
+  // anchors, flake-victim re-queues, the front-jump under the existing three
+  // reasons); it holds no lane card and lands nothing of its own. Ruling of
+  // record: the card that ordered this file carries the maintainer's verbatim
+  // 「建议有专人来跟进队列吗？这种操作不应该等我」 (filing gate ③), and triage's
+  // landing-order comment 6889317333 names `references/lanes/queue.md` as its
+  // first PR. A NEW file, so this is an added row and no other row moves; set
+  // at the landed line count (headroom 0, same convention as every lane
+  // charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 30],
   // repo:cloud lane charter: the cloud seats keep first-touch triage of the
   // cloud repo, run the first-touch sweep before they claim, set grade and
   // state when they file, and triage's daily reconciliation is the backstop;
@@ -2601,6 +2634,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/review.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/qa.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 0],
   ['.claude/agents/os-dev.md', 0],
   ['.claude/skills/checklist-test/SKILL.md', 221],

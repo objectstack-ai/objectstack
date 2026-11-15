@@ -75,6 +75,20 @@ export { hasDeclaredVisibilityGate } from './renderers/action/visibility-gate';
 // package, so the direction costs nothing new.
 export { isCustomRowActionVisible } from './renderers/complex/data-table';
 
+// The reason a row action greyed out by its DECLARED `disabled` predicate gives:
+// the text, the tooltip trigger a disabled button sits in, and the menu item's
+// second line with its ARIA. Exported for plugin-grid's row menu item and
+// inline primary button, so a `list_item` / `record_related` action gives the
+// same reason on every row surface as on the record header. plugin-grid already
+// depends on this package, so the direction costs nothing new.
+export {
+  useDisabledReason,
+  DisabledReasonTrigger,
+  DisabledReasonMenuLabel,
+  menuItemReasonAria,
+} from './renderers/action/disabled-reason';
+export type { DisabledReason } from './renderers/action/disabled-reason';
+
 // The span a page block takes in its region's 12-column grid, derived from the
 // block's kind (objectui#12624). Exported so the Studio page designer's block
 // card shows the span the page renderer draws, from this one table, not a copy.

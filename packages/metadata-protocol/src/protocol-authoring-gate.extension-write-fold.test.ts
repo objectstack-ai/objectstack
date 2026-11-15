@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 // first load is paid at collection, never inside a case's clock
 // (`scripts/check-test-source-alias.mjs`).
 import '@objectstack/lint';
-import { objectExtensionWriteFold, withTargetFoldedWithout } from './protocol-authoring-gate.js';
+import { objectExtensionWriteFold, otherPackagesExtensionsOf, withTargetFoldedWithout } from './protocol-authoring-gate.js';
 import { foldObjectExtendersFromRegistry } from './protocol-object-extender-fold.js';
 
 describe('[#33072] objectExtensionWriteFold — which writes narrow the target, and to what', () => {
@@ -75,5 +75,32 @@ describe('[#33072] foldObjectExtendersFromRegistry — what each package argumen
     it('`withoutExtensionsOf` alone, and both together, are each handed over', () => {
         expect(fold(undefined, 'p2')).toEqual([{ withoutExtensionsOf: 'p2' }]);
         expect(fold('p1', 'p2')).toEqual([{ onlyExtensionsOf: 'p1', withoutExtensionsOf: 'p2' }]);
+    });
+});
+
+describe('[#33494] otherPackagesExtensionsOf — the target\'s other packages\' extensions, with their priorities', () => {
+    const contributors = [
+        { ownership: 'own', packageId: 'com.acme.crm', priority: 100, definition: { name: 'crm_account', fields: { name: {} } } },
+        { ownership: 'extend', packageId: 'com.acme.low', priority: 150, definition: { name: 'crm_account', fields: { low__c: {} } } },
+        { ownership: 'extend', packageId: 'com.acme.crm.custom', priority: 200, definition: { name: 'crm_account', fields: { mine__c: {} } } },
+        { ownership: 'extend', packageId: 'com.acme.off', priority: 250, definition: { name: 'crm_account', fields: { off__c: {} } } },
+        { ownership: 'extend', packageId: 'com.acme.high', priority: 300, definition: { name: 'crm_account', fields: { s__c: {} } } },
+    ];
+    const registry = {
+        getObjectContributors: (fqn: string) => (fqn === 'crm_account' ? contributors : []),
+        isPackageDisabled: (id?: string) => id === 'com.acme.off',
+    };
+
+    it('every other package\'s `extend` contribution, in the registry\'s order, with its priority and fields; the owner, the written package and a disabled package left out', () => {
+        expect(otherPackagesExtensionsOf(registry, 'crm_account', 'com.acme.crm.custom')).toEqual([
+            { extend: 'crm_account', priority: 150, fields: { low__c: {} }, packageId: 'com.acme.low' },
+            { extend: 'crm_account', priority: 300, fields: { s__c: {} }, packageId: 'com.acme.high' },
+        ]);
+    });
+
+    it('a registry that cannot answer (no contributors member, or a throw) states none', () => {
+        expect(otherPackagesExtensionsOf(undefined, 'crm_account', 'p')).toEqual([]);
+        expect(otherPackagesExtensionsOf({}, 'crm_account', 'p')).toEqual([]);
+        expect(otherPackagesExtensionsOf({ getObjectContributors: () => { throw new Error('boom'); } }, 'crm_account', 'p')).toEqual([]);
     });
 });

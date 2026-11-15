@@ -37,7 +37,7 @@ const OBJECTS = [
   { name: 'sys_user', _packageId: 'plugin.auth', fields: {} },
 ];
 
-function makeAdapter(calls: string[], apps: unknown[]) {
+function makeAdapter(calls: string[], apps: unknown[], objects: readonly { name: string }[] = OBJECTS) {
   return {
     clearCache: vi.fn(),
     invalidateCache: vi.fn(),
@@ -53,13 +53,13 @@ function makeAdapter(calls: string[], apps: unknown[]) {
       meta: {
         getItems: (type: string, options?: { packageId?: string }) => {
           calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
-          const all = type === 'object' ? OBJECTS : type === 'app' ? apps : [];
+          const all = type === 'object' ? objects : type === 'app' ? apps : [];
           const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
           return Promise.resolve({ type, items: structuredClone(items) });
         },
         getItem: (type: string, name: string) => {
           calls.push(`${type}/${name}`);
-          const item = (type === 'object' ? OBJECTS : []).find((o) => o.name === name);
+          const item = (type === 'object' ? objects : []).find((o) => o.name === name);
           return item ? Promise.resolve({ item: structuredClone(item) }) : Promise.reject(new Error('404'));
         },
       },
@@ -72,12 +72,12 @@ function Prefetch() {
   return null;
 }
 
-function mount(url: string, apps: unknown[]): string[] {
+function mount(url: string, apps: unknown[], objects?: readonly { name: string }[]): string[] {
   // Each mount reads its own app list, not the one a previous mount cached.
   sessionStorage.clear();
   const calls: string[] = [];
   render(
-    <MetadataProvider adapter={makeAdapter(calls, apps)}>
+    <MetadataProvider adapter={makeAdapter(calls, apps, objects)}>
       <MemoryRouter initialEntries={[url]}>
         <Prefetch />
       </MemoryRouter>
@@ -249,5 +249,45 @@ describe('objectstack#29551 — a packaged app asks its lookup targets without v
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(reads(calls)).toEqual([`object?package=${CRM}`]);
     expect(scope()).toBe('crm_account[crm_account.all],crm_contact[crm_contact.all]');
+  });
+});
+
+describe('objectstack#33343 — a hidden lookup asks no definition of its target', () => {
+  /**
+   * The route object carries the injected system scope anchors as the server
+   * serves them: `organization_id` and `owning_business_unit_id`, hidden
+   * lookups to `sys_organization` and `sys_business_unit`. No cell draws a
+   * hidden field, and the metadata door answers a definition the caller may
+   * not read as absent, so a member was answered 404 on every route.
+   */
+  const withAnchors = (hidden: boolean) => [
+    {
+      name: 'crm_account',
+      _packageId: CRM,
+      fields: {
+        owner: { type: 'lookup', reference: 'sys_user' },
+        organization_id: { type: 'lookup', reference: 'sys_organization', hidden, system: true },
+        owning_business_unit_id: { type: 'lookup', reference: 'sys_business_unit', hidden, system: true },
+      },
+    },
+    { name: 'sys_user', _packageId: 'plugin.auth', fields: {} },
+    { name: 'sys_organization', _packageId: 'plugin.auth', fields: {} },
+    { name: 'sys_business_unit', _packageId: 'plugin.security', fields: {} },
+  ];
+
+  it('the route asks its drawn lookup target by name, and never the targets of its hidden lookups', async () => {
+    const calls = mount('/apps/crm/crm_account', APPS, withAnchors(true));
+    await waitFor(() => expect(calls).toContain('object/sys_user'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object/sys_user']);
+  });
+
+  it('CONTROL: the same lookups drawn ask every target by name', async () => {
+    const calls = mount('/apps/crm/crm_account', APPS, withAnchors(false));
+    await waitFor(() => expect(calls).toContain('object/sys_business_unit'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect([...objectCalls(calls)].sort()).toEqual(
+      [`object?package=${CRM}`, 'object/sys_business_unit', 'object/sys_organization', 'object/sys_user'].sort(),
+    );
   });
 });

@@ -55,6 +55,7 @@ import {
   DataEmptyState, EmptyStateLink, resolveIcon,
   HorizontalOverflowBox,
   toast,
+  cn,
 } from '@object-ui/components';
 import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
@@ -102,6 +103,7 @@ import { useObjectGridMobile } from './objectGridMobile';
 import { useObjectGridGenerateColumns } from './objectGridGenerateColumns';
 import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns';
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
+import { useInlineRowActionFold } from './objectGridInlineActionFold';
 import { BULK_SELECT_ALL_MATCHING_CAP } from './bulkSelectAllMatchingCap';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
 export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps, ObjectGridRowGroup } from './objectGridProps';
@@ -309,6 +311,25 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * composes, nothing an author writes, and no node key reaches it.
    */
   recordLinkAdornment?: (record: any) => React.ReactNode;
+  /**
+   * [objectstack#33317] Whether a click on a row opens anything, as the HOST
+   * that owns the row click knows it. `false` ⇒ the row's record-link cells
+   * (the primary field, and columns authored `link: true`) draw their value as
+   * plain text, with no anchor and no `role="link"`, and the row's right-click
+   * menu offers no Open / Open in new tab; its actions stay. On a phone the
+   * row's card draws no pointer and no hover wash (objectstack#33548), and its
+   * "⋮" stays. The row click itself still reaches `onRowClick`, so whatever
+   * else the host routes through it is untouched. Absent (or `true`) ⇒ every
+   * row is drawn as before.
+   *
+   * The grid cannot read this off `onRowClick`: a host passes that handler for
+   * every row and decides inside it, as the console's object list does for a
+   * view authored `navigation.mode: 'none'` or a list-only object.
+   *
+   * A RUNTIME prop, never authored metadata: the host resolves it, and no node
+   * key reaches it.
+   */
+  rowOpensRecord?: boolean;
   /**
    * TWO parameters since objectui#9357, and the second is not decoration: this
    * prop reaches `useNavigationOverlay` as its `onRowClick`, and `handleClick`
@@ -656,6 +677,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   rowOperations,
   rowAdornment,
   recordLinkAdornment,
+  rowOpensRecord,
   onBulkDelete,
   onRowSelect,
   onRowClick,
@@ -756,6 +778,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // Column state persistence: the seed, the external sync and the save, in
   // hook order (`./objectGridColumnState`).
   const { columnState, saveColumnState } = useObjectGridColumnState({ schema, onColumnStateChange });
+
+  // objectstack#33230 — the inline primary row actions fold into the row's
+  // "⋮" menu while the table overflows its scroll box with them, so the
+  // pinned Actions column never widens over a data column for them
+  // (`./objectGridInlineActionFold`). Read off the flat table's scroll box;
+  // read afresh when the rows or the columns change.
+  const inlineActionFold = useInlineRowActionFold(data, JSON.stringify([schema.columns ?? null, columnState ?? null]));
 
   // Pull to refresh and the card-view breakpoint, in hook order (`./objectGridMobile`).
   const { pullRef, isRefreshing, pullDistance } = useObjectGridMobile({
@@ -1418,7 +1447,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const { generateColumns } = useObjectGridGenerateColumns({
     schema, dataSource, data, dataConfig, hasInlineData, objectName, objectSchema, objectFields,
     objectTypesPending, schemaFields, schemaColumns, perms, navigation, executeAction, predicateScope,
-    resolveFieldLabel, translateOptions, uiLanguage, recordLinkAdornment,
+    resolveFieldLabel, translateOptions, uiLanguage, recordLinkAdornment, rowOpensRecord,
   });
 
   // Formats this grid can actually deliver (objectui#2942): the server stream
@@ -1716,7 +1745,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
     wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
     recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
-    setRefreshKey, t,
+    setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
   });
 
   // Density-driven cell padding/font (applied to every column so it actually reaches <td>).
@@ -2684,14 +2713,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         : null;
     // Open is what a click on the row does: a host's `onRowClick` owns it
     // outright, otherwise the navigation config does, and `none` opens nothing.
-    const opens = !!onRowClick || (navigation.mode !== 'none' && !schema.navigation?.preventNavigation);
+    // A host that says its row click opens nothing (`rowOpensRecord: false`,
+    // objectstack#33317) gets neither Open nor Open in new tab.
+    const opens = rowOpensRecord !== false
+      && (!!onRowClick || (navigation.mode !== 'none' && !schema.navigation?.preventNavigation));
+    const openHref = rowOpensRecord === false ? null : newTabHref;
     // Nothing at all to list for this row: no Open, no URL, no action.
-    if (!opens && !newTabHref && !rowOffersAction(row)) return null;
+    if (!opens && !openHref && !rowOffersAction(row)) return null;
     return (
       <RowContextMenuItems
         menu={rowActionMenuProps(row)}
         onOpen={opens ? () => navigation.handleClick(row) : undefined}
-        newTabHref={newTabHref}
+        newTabHref={openHref}
       />
     );
   };
@@ -3322,7 +3355,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         <div
           key={row.id || row._id || idx}
           data-testid="grid-mobile-card"
-          className="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border bg-card px-3 py-2 transition-colors hover:bg-accent/50 touch-manipulation"
+          // A row the host says opens nothing (`rowOpensRecord: false`) draws
+          // no pointer and no hover wash on its card either (objectstack#33548).
+          className={cn(
+            'flex min-w-0 items-center gap-3 rounded-lg border bg-card px-3 py-2 transition-colors touch-manipulation',
+            rowOpensRecord !== false && 'cursor-pointer hover:bg-accent/50',
+          )}
           onClick={() => navigation.handleClick(row)}
         >
           <div className="min-w-0 flex-1">
@@ -3850,7 +3888,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     </div>
   ) : (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex flex-col flex-1 min-h-0">
+      <div
+        ref={inlineActionFold.hostRef}
+        className="flex flex-col flex-1 min-h-0"
+        data-row-actions-inline={inlineActionFold.folded ? 'folded' : undefined}
+      >
         <SchemaRenderer schema={dataTableSchema} />
       </div>
       {summaryFooter}

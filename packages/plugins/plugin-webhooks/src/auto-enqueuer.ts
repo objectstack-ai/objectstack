@@ -593,7 +593,7 @@ export class AutoEnqueuer {
             if (heldByRow.has(name)) {
                 this.reportDeclarationWithheld(
                     name,
-                    declared.filter((s) => s.webhook.name === name).map((s) => declaredWebhookActivationPath(name, s.namespace)),
+                    declared.filter((s) => s.webhook.name === name).map((s) => declaredWebhookActivationPath(name, s.packageId)),
                 );
                 continue;
             }

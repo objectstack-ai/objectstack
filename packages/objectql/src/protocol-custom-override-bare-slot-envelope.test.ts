@@ -797,7 +797,11 @@ describe('[#30504] an app\'s packaged base carries its contributed navigation, s
  * email template) is measured beside them: the list filter judges those rows by
  * their own envelope, not the first shipper's.
  */
-describe('[#33131] two namespaces ship one name, one declares its override: each holder\'s address serves its own item', () => {
+// Each case boots the engine, installs two or three packages and restarts it; about 0.5 s alone,
+// over the 5 s default on a loaded CI shard (merge-queue run 43619123356 timed one out at 5 s while
+// the file took 63 s). The budget is room for load, not for a slower product: the same file runs
+// 11.5-13.3 s on main's sources and 12.2-12.6 s on this branch's, measured back to back.
+describe('[#33131] two namespaces ship one name, one declares its override: each holder\'s address serves its own item', { timeout: 30_000 }, () => {
     const ALPHA = 'com.probe.alpha';
     const BETA = 'com.probe.beta';
     const STRANGER = 'com.probe.stranger';

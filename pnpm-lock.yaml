@@ -1440,6 +1440,9 @@ importers:
         specifier: ^4.6.6
         version: 4.6.7
     devDependencies:
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../objectql
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -2080,6 +2083,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
+      '@objectstack/metadata-protocol':
+        specifier: workspace:*
+        version: link:../../metadata-protocol
       '@objectstack/service-queue':
         specifier: workspace:*
         version: link:../../services/service-queue
