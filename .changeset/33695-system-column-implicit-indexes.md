@@ -5,7 +5,7 @@
 
 feat(driver-sql, driver-turso): schema sync builds the `(created_at, id)` and `(owner_id)` indexes without a declaration
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Schema sync now builds two indexes on system columns that no object has to declare:
@@ -19,4 +19,4 @@ Turso's remote face (`libsql://`) now builds the full implicit set too: these tw
 
 On SQLite, the index does not speed up a default-ordered page yet. While the engine adds the empty controlled-by-parent chain to the query, the SQLite planner still sorts in a temporary B-tree. When the query has no chain, the same page takes 0.16 ms instead of 1.6 s at 1M rows.
 
-`@objectstack/driver-sql` also exports `implicitReferenceIndexes`, which takes an optional `physicalColumns`.
+Widening: `@objectstack/driver-sql` now exports `implicitReferenceIndexes` from its main entry. Its arguments take an optional `physicalColumns` set, and when one is given, a key over a column the table lacks is left out.
