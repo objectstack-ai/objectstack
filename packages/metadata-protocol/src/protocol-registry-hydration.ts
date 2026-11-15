@@ -75,17 +75,24 @@ import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplemen
  * hold) is named as one, with the package the refused read named as the store
  * read it (its `callerPackageId`: a package-less read is "no package") and the
  * holders its message lists. `entry` says what became of the registry entry:
- * left as it was, retired from the bare slot (a refused package-less heal,
- * seat ruling 6812637203 Q2), or none retired because the verb removed nothing
- * (an empty slot, or a packaged artifact it refuses).
+ * left as it was, retired from the bare slot (a refused package-less or
+ * non-holder heal, seat ruling 6812637203 Q2 and epic ruling 6818436831),
+ * retired from the removed row's own package slot only (#32620: the bare slot
+ * held none the heal may remove), or none retired because the verb removed
+ * nothing (an empty slot, or a packaged artifact it refuses).
  */
-function registryHealStoppedMessage(type: string, name: string, error: unknown, entry: 'kept' | 'retired' | 'none-retired' = 'kept'): string {
+function registryHealStoppedMessage(type: string, name: string, error: unknown, entry: 'kept' | 'retired' | 'slot-retired' | 'none-retired' = 'kept'): string {
     const reason = error instanceof Error ? error.message : String(error);
     const refusal = packageScopedRefusalOf(error);
     const named = boundPackageOf(refusal?.callerPackageId);
     const why = refusal !== undefined
         ? `the metadata service refused the baseline read, which named ${named === undefined ? 'no package' : `package '${named}'`}: ${reason}`
         : reason;
+    if (entry === 'slot-retired') {
+        return `[Protocol] the registry heal after the removal of ${type} '${name}' stopped: ${why}. `
+            + 'The removed row\'s registry entry was retired from its own package\'s slot, the bare slot held none the heal may '
+            + 'remove, and no baseline was registered, so a read naming no package answers the store\'s refusal naming every holder.';
+    }
     if (entry === 'none-retired') {
         return `[Protocol] the registry heal after the removal of ${type} '${name}' stopped: ${why}. `
             + 'No registry entry was retired, because the bare slot held none the heal may remove (it was empty, or it holds a '
@@ -125,7 +132,8 @@ type ServiceRead = { data: unknown; degraded: boolean; errors: string[] };
  *   package candidate the refusal lists is asked whether the removal is a pair
  *   row of theirs ({@link isPairRowRemoval}, the delete door's own predicate).
  *   Exactly one base ⇒ its baseline. Otherwise the refusal stands, and the
- *   walk stops with it, logged;
+ *   walk stops with it, logged, retiring the removed row's bare-slot entry
+ *   (epic ruling 6818436831, #32620);
  * - no holder at all (a clean miss) ⇒ the settled miss stands, and the walk
  *   goes on to tier 3: the row was the item;
  * - a degraded read ⇒ degraded: the walk stops without retiring.
@@ -1711,7 +1719,8 @@ export class ProtocolRegistryHydrationFacet {
      * {@link HEAL_BINDING_UNKNOWN} when it never learns the binding (a peer
      * converging on a cluster signal that names no package: one from a
      * replica that predates the signal's `packageId`, #32451). Both read with
-     * no package; only `null` retires on a refusal (below). A peer whose
+     * no package; only `null` retires on a refusal, as a known binding does
+     * (below), and {@link HEAL_BINDING_UNKNOWN} never. A peer whose
      * signal names the package passes that package, as the writer did.
      *
      * Best-effort: a failure must never block the delete that already
@@ -1722,7 +1731,9 @@ export class ProtocolRegistryHydrationFacet {
      * baseline read is named as one, with the holders it lists. For a
      * package-less row that refusal also retires the removed row's bare-slot
      * entry and registers no baseline (seat ruling 6812637203 Q2): the next read
-     * naming no package answers the store's refusal, naming every holder.
+     * naming no package answers the store's refusal, naming every holder. So it
+     * does for a row bound to a non-holder of the name whose pair relation names
+     * zero or several bases (epic ruling 6818436831, #32620).
      */
     static async restoreArtifactRegistryView(host: Pick<ProtocolHost, 'anotherPackageShips' | 'applyRegistryWriteThrough' | 'convertStoredItem' | 'engine' | 'findEnvironmentRows' | 'isArtifactBacked' | 'isUnservedSealedOverlay' | 'readItemFromMetadataService' | 'reconcileViewExpansions' | 'registryTakesStoredRows' | 'resyncStoredObjectExtensions' | 'rethrowUnlessMetadataStoreUnprovisioned'>, type: string,
             name: string,
@@ -1909,22 +1920,30 @@ export class ProtocolRegistryHydrationFacet {
                 // baseline is registered. A read naming no package then answers
                 // the store's refusal, which names every holder, instead of the
                 // removed row's body. `removeOverlayEntry` keeps refusing a
-                // packaged artifact, as on tier 3. A row bound to a package keeps
-                // the logged stop ({@link readHealBaseline}); the ruling names
-                // the package-less heal only. So does a caller that does not know
-                // the binding ({@link HEAL_BINDING_UNKNOWN}, a peer on a
-                // cluster signal naming no package): it cannot tell the removed
-                // row was the package-less one.
-                if (packageId === HEAL_BINDING_UNKNOWN || boundPackageOf(packageId) !== undefined
-                    || packageScopedRefusalOf(error) === undefined) throw error;
+                // packaged artifact, as on tier 3.
+                // [#32620, epic ruling 6818436831] …and so does a row bound to a
+                // NON-HOLDER (a package holding no item of the name, ADR-0146),
+                // where the pair relation names zero or several bases: the only
+                // refusal {@link readHealBaseline} lets through for a bound row.
+                // Its entry sits in the bare slot for a type with no package
+                // overlay slot (`flow`, `permission`), where it kept serving the
+                // deleted body to the non-holder's read and stood as a refused
+                // holder read's candidate. Retiring it picks nobody and restores
+                // each holder's exact address (entry kept → retired).
+                // A caller that does not know the binding
+                // ({@link HEAL_BINDING_UNKNOWN}, a peer on a cluster signal
+                // naming no package) keeps the logged stop: it cannot tell
+                // whose entry the bare slot holds.
+                if (packageId === HEAL_BINDING_UNKNOWN || packageScopedRefusalOf(error) === undefined) throw error;
                 // What the verb answers is what the line says: an empty slot, or
-                // a packaged artifact the verb refuses, retires nothing.
+                // a packaged artifact the verb refuses, retires nothing. A bound
+                // row's own package slot, retired above, is said too.
                 let retired = false;
                 if (typeof registry.removeOverlayEntry === 'function') {
                     retired = registry.removeOverlayEntry(singular, name, memberKey) === true;
                     if (type !== singular) retired = registry.removeOverlayEntry(type, name, memberKey) === true || retired;
                 }
-                console.error(registryHealStoppedMessage(type, name, error, retired ? 'retired' : 'none-retired'));
+                console.error(registryHealStoppedMessage(type, name, error, retired ? 'retired' : slotRetired ? 'slot-retired' : 'none-retired'));
                 return;
             }
             // [#22877] A baseline of ANOTHER member is no baseline of this one:
