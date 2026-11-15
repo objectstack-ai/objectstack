@@ -24,7 +24,7 @@ import { materializeDeclaredFields } from './declared-fields.js';
 import { describeCelFault, type CelFault } from './cel-fault.js';
 import { nullPreviousReadDetail, ruleScope, type PreviousBinding } from './validation/rule-validator.js';
 import { hookRunAs, deriveHookApi, deriveAppAuthoredHookApi, seedHookUserGrants, seedHookUnreadMembership, type HookRunAs } from './hook-run-as.js';
-import { runDetachedHook } from './unit-detach.js';
+import { runDetachedHook, UNIT_ROLLED_BACK } from './unit-detach.js';
 
 /**
  * The logger the hook layer writes its diagnostics to — the `Logger` CONTRACT
@@ -267,7 +267,8 @@ export function declaredHookCondition(meta: Pick<Hook, 'condition'>): (Expressio
  *
  *   1. condition  → skip when the formula evaluates FALSE; abort the operation
  *                   when it cannot be evaluated at all (#4775)
- *   2. async      → fire-and-forget (after* events only)
+ *   2. async      → fire-and-forget (after* events only), on the commit of
+ *                   the unit it fires in, never on its rollback (#33760)
  *   3. retry      → repeat on throw with backoff
  *   4. timeout    → abort if handler runs too long
  *   5. onError    → swallow when set to 'log'
@@ -515,12 +516,26 @@ export function wrapDeclarativeHook(
         // as before this key existed — unless the hook is app-authored, whose
         // derived api (#25653) the same restore would take away.
         const detached = restoreApi === noRestore ? ctx : { ...ctx };
+        // [#33760] A run that waits for its unit's commit starts after both
+        // restores below, so it gets a copy taken now, which keeps the flat
+        // input and the api the handler is owed. One that starts now (outside
+        // any unit) still gets `detached`, by reference as before.
+        const atDispatch = detached === ctx ? { ...ctx } : detached;
+        let dispatching = true;
         // [#33651] And it runs outside every unit of work open at dispatch —
         // the door's own unit for a blocking `after*` beside it (#22782), or a
         // caller's: nothing awaits it, so a unit it joined would commit under
-        // its writes ("Transaction query already complete"). `unit-detach.ts`.
-        void runDetachedHook(detached.api, () => runWithErrorPolicy(detached))
-          .then(() => recordOutcome())
+        // its writes ("Transaction query already complete"). [#33760] Once
+        // that unit commits, and not at all when it rolls back. `unit-detach.ts`.
+        void runDetachedHook(detached.api, () => runWithErrorPolicy(dispatching ? detached : atDispatch))
+          .then((ran) => {
+            if (ran !== UNIT_ROLLED_BACK) { recordOutcome(); return; }
+            logger.debug('[hook] async handler not run: the unit of work it was fired in rolled back', {
+              hook: meta.name,
+              object: ctx.object,
+              event: ctx.event,
+            });
+          })
           .catch((err) => {
             recordOutcome(err);
             // Contract arg order (#5637) — see the `onError=log` site above.
@@ -529,6 +544,7 @@ export function wrapDeclarativeHook(
               error: (err as any)?.message,
             });
           });
+        dispatching = false;
         return;
       }
 

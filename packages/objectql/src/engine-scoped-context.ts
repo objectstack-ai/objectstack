@@ -46,7 +46,7 @@ import { rolledBackRefusal } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import { UnscopedHookApi } from './hook-run-as.js';
-import { runOutsideOpenUnits } from './unit-detach.js';
+import { newUnitCommitQueue, runOutsideOpenUnitsOnCommit, settleUnitCommitQueue, type UNIT_ROLLED_BACK } from './unit-detach.js';
 import { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 import type { HookRunAs, HookRunAsRef } from './hook-run-as.js';
 import { scopedContextHost } from './engine-scoped-hosts.js';
@@ -168,10 +168,11 @@ export class ScopedContextFacet {
   }
 
   /** The body of `ScopedContext#[DETACHED_HOOK_RUN]`; the method's docblock there is its contract. */
-  static detachedHookRun<T>(this: Pick<ScopedContextHost, 'engine' | 'executionContext'>, body: () => T): T {
-    // The engine's ambient store, reached the `as any` way `transaction` below reaches it.
-    const txStore = (this.engine as any)?.txStore;
-    return runOutsideOpenUnits(txStore, this.executionContext?.transaction, body);
+  static detachedHookRun<T>(this: Pick<ScopedContextHost, 'engine' | 'executionContext'>, body: () => Promise<T>): Promise<T | typeof UNIT_ROLLED_BACK> {
+    // The engine's ambient store and its published units, reached the `as any`
+    // way `transaction` below reaches them.
+    const engine = this.engine as any;
+    return runOutsideOpenUnitsOnCommit(engine?.txStore, engine?.openedUnits, this.executionContext?.transaction, body);
   }
 
   /** The body of `ScopedContext#transaction`; the method's docblock there is its contract. */
@@ -239,23 +240,30 @@ export class ScopedContextFacet {
     // when the callback settles, so work the callback started and did not await
     // (an `async: true` hook) no longer keeps the finished handle, neither the
     // ambient one nor the `trxCtx` one threaded above.
+    // [#33760] With the engine's `ObjectQL.transaction` twin, the queue the
+    // `async` after-hooks dispatched in this unit wait on for its outcome.
+    const commitQueue = newUnitCommitQueue();
     const runIn = <R>(fn: () => Promise<R>): Promise<R> =>
-      typeof engine.runOpenedUnit === 'function' ? engine.runOpenedUnit(trx, driver, fn) : fn();
+      typeof engine.runOpenedUnit === 'function' ? engine.runOpenedUnit(trx, driver, fn, commitQueue) : fn();
 
+    let result: any;
     try {
       // Reached only with no ambient transaction to join, so this call really
       // did open one and the callback owns the outcome (#5696 / #6168).
-      const result = await runIn(() => callback(trxCtx, { owned: true }));
+      result = await runIn(() => callback(trxCtx, { owned: true }));
       if (driver.commit) await driver.commit(trx);
       else if (driver.commitTransaction) await driver.commitTransaction(trx);
-      return result;
     } catch (error) {
+      settleUnitCommitQueue(commitQueue, false);
       if (driver.rollback) await driver.rollback(trx);
       else if (driver.rollbackTransaction) await driver.rollbackTransaction(trx);
       // [#21274] The engine surface's twin (`ObjectQL.transaction`), the
       // stale-roll-up conversion included.
       throw redactPropagatedDriverFault(rolledBackRefusal(error));
     }
+    // Committed: start the waiting runs, outside the `try`, never awaited.
+    settleUnitCommitQueue(commitQueue, true);
+    return result;
   }
 
   /**
