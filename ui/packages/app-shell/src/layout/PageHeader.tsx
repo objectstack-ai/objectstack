@@ -135,7 +135,9 @@ export interface ConsolePageHeaderProps {
    * The header measures its own width, not the viewport's. The page declares
    * which action is primary by being the one that names it here; the header
    * never guesses it from `actions`. A page that passes no `foldedActions`
-   * keeps `actions` at every width.
+   * keeps `actions` at every width, and a page with no primary to keep
+   * labelled passes none (objectstack#33988): a face of only the `⋯` would
+   * trade the page's actions for its description.
    */
   foldedActions?: React.ReactNode;
   /**

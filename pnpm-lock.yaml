@@ -1310,6 +1310,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../driver-sql
+      '@objectstack/observability':
+        specifier: workspace:*
+        version: link:../../observability
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
