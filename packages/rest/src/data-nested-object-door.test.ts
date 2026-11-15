@@ -585,3 +585,105 @@ for (const cell of CELLS) {
     },
   );
 }
+
+// ── [#33626] the executor boundary: driver options differ → id read, in both directions ──
+
+const OPT_CASE = 'rest_opt_case_33626';
+const OPT_REGION = 'rest_opt_region_33626';
+const OPT_ORG_A = 'org_opt_a';
+const OPT_ORG_B = 'org_opt_b';
+
+/** Both objects are tenant-scoped: the registry cannot tell their driver options apart. */
+const OPT_OBJECTS = [
+  { name: OPT_REGION, label: 'Region O 33626', fields: { name: { name: 'name', type: 'text' as const } } },
+  { name: OPT_CASE, label: 'Case O 33626', fields: { region: { name: 'region', type: 'lookup' as const, reference: OPT_REGION } } },
+];
+
+/** Each organization holds one NA region; each holds one case on its own region and one on the other's. */
+const OPT_SEED: ReadonlyArray<readonly [string, ReadonlyArray<Record<string, unknown>>]> = [
+  [OPT_REGION, [{ id: 'or_a', name: 'NA', organization_id: OPT_ORG_A }, { id: 'or_b', name: 'NA', organization_id: OPT_ORG_B }]],
+  [OPT_CASE, [
+    { id: 'ok_aa', region: 'or_a', organization_id: OPT_ORG_A }, { id: 'ok_ab', region: 'or_b', organization_id: OPT_ORG_A },
+    { id: 'ok_ba', region: 'or_a', organization_id: OPT_ORG_B }, { id: 'ok_bb', region: 'or_b', organization_id: OPT_ORG_B },
+  ]],
+];
+
+/**
+ * name · the object whose read the recorded per-object verdict leaves
+ * unscoped (`none`; the other is scoped to organization B) · the rows the
+ * id read answers. Each direction has its own one-sided edit of the
+ * boundary's comparison that would compose the leaf: a comparison reading
+ * only the outer read's keys misses the first, only the related read's keys
+ * the second.
+ */
+const OPT_DIRECTIONS: ReadonlyArray<readonly [string, string, readonly string[]]> = [
+  ['the outer read is unscoped, the related read scoped', OPT_CASE, ['ok_ab', 'ok_bb']],
+  ['the outer read is scoped, the related read unscoped', OPT_REGION, ['ok_ba', 'ok_bb']],
+];
+
+for (const cell of CELLS) {
+  const config = cell.config();
+  describe.skipIf(!config)(
+    `[#33626] the executor boundary — driver options differ → id read, in both directions — ${cell.label}${config ? '' : ` (skipped: set ${cell.env} to run this cell)`}`,
+    () => {
+      let engine: ObjectQL;
+      let driver: any;
+      const CALLER_B = { userId: 'u_opt_b', tenantId: OPT_ORG_B };
+      // The object a recorded verdict leaves unscoped, per direction.
+      let unscoped: string | undefined;
+
+      const dropTables = async () => {
+        if (cell.id === 'sqlite') return;
+        for (const o of OPT_OBJECTS.map((x) => x.name).reverse()) await driver?.execute(`drop table if exists ${o}`).catch(() => {});
+      };
+
+      beforeAll(async () => {
+        driver = new SqlDriver(config as any);
+        await dropTables();
+        engine = new ObjectQL();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        for (const o of OPT_OBJECTS) engine.registry.registerObject(o as any);
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine);
+        for (const [object, rows] of OPT_SEED) for (const row of rows) await driver.create(object, { ...row });
+        engine.setTenancyPostureProvider(() => 'isolated');
+        // A per-object verdict recorded for the request, as the security
+        // layer records one on each read: the registry cannot predict it, so
+        // the related read is planned and the boundary compares the options.
+        engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+          if (unscoped !== undefined) {
+            opCtx.tenantLayer0Verdict = opCtx.object === unscoped ? { kind: 'none' } : { kind: 'organization', organizationId: OPT_ORG_B };
+          }
+          return next();
+        });
+      });
+
+      afterAll(async () => {
+        await dropTables();
+        try { await engine?.destroy(); } catch { /* noop */ }
+      });
+
+      /** The two-step route as the caller: the region ids, then the cases on them. */
+      const twoStep = async (): Promise<string[]> => {
+        const regions = (await engine.find(OPT_REGION, { where: { name: 'NA' }, fields: ['id'], context: CALLER_B })).map((r: any) => r.id);
+        return (await engine.find(OPT_CASE, { where: { region: { $in: regions } }, fields: ['id'], context: CALLER_B })).map((r: any) => r.id).sort();
+      };
+
+      for (const [name, object, rows] of OPT_DIRECTIONS) {
+        it(`${name}: the related ids are read at the boundary — exactly the two-step route's answer, on find and count`, async () => {
+          unscoped = object;
+          try {
+            const where = { region: { name: 'NA' } };
+            const got = (await engine.find(OPT_CASE, { where, context: CALLER_B })).map((r: any) => r.id).sort();
+            expect(got, name).toEqual([...rows].sort());
+            expect(got, `two-step parity, ${name}`).toEqual(await twoStep());
+            expect(await engine.count(OPT_CASE, { where, context: CALLER_B }), `count, ${name}`).toBe(rows.length);
+          } finally {
+            unscoped = undefined;
+          }
+        });
+      }
+    },
+  );
+}
