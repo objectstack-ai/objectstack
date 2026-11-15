@@ -22,7 +22,8 @@
  * - the seed: the `{ group }` references are the synthesizer's own, the bucket
  *   carries the locale map, and the sections parse under `RecordDetailsProps`;
  * - CONTROL: an object with no field groups seeds no heading on its primary
- *   section (flat), and no section carries the map;
+ *   section (flat), and only its "More details" section carries a map
+ *   (objectstack#33471); a page that writes neither heading loads no catalogue;
  * - the saved seed and the slotted preview's sections, drawn by the real
  *   `record:details` renderer: "Other" in English, 「其他」 in Chinese, after
  *   the group and above the ungrouped field.
@@ -43,7 +44,7 @@ import { RecordContextProvider } from '@object-ui/react';
 import { buildDefaultPageSchema, RecordDetailsRenderer, resolveDetailSections } from '@object-ui/plugin-detail';
 import {
   deriveStudioDetailSections,
-  loadPersistedUngroupedHeading,
+  loadPersistedSectionLabels,
   MORE_DETAILS_DEFAULT_LABEL,
   UNGROUPED_SECTION_DEFAULT_LABEL,
 } from './recordDetailSections';
@@ -139,11 +140,17 @@ describe('objectstack#33377 — a seeded grouped record page heads its ungrouped
   });
 
   it('CONTROL: an object with no field groups seeds a flat primary section with no heading', async () => {
-    expect(await loadPersistedUngroupedHeading(flatDef)).toBe(UNGROUPED_SECTION_DEFAULT_LABEL);
     const sections = theDetailsNode(await fullSeedFor(flatDef)).properties.sections as Array<Record<string, any>>;
     expect(sections.length).toBeGreaterThan(0);
     expect(sections[0].label).toBeUndefined();
-    expect(sections.some((s) => s.label && typeof s.label === 'object')).toBe(false);
+    // Only the "More details" section is headed by a map (objectstack#33471).
+    expect(sections.filter((s) => s.label && typeof s.label === 'object').map((s) => s.name)).toEqual(['details']);
+    // A page that writes neither heading answers the English defaults, unread.
+    const plainDef = { name: 'os_33377_plain', fields: { subject: { label: 'Subject', type: 'text' } } };
+    expect(await loadPersistedSectionLabels(plainDef)).toEqual({
+      moreDetails: MORE_DETAILS_DEFAULT_LABEL,
+      ungrouped: UNGROUPED_SECTION_DEFAULT_LABEL,
+    });
   });
 });
 

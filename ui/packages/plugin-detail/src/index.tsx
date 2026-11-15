@@ -123,6 +123,7 @@ export {
 } from './ConcurrentUpdateDialog';
 export type {
   ConcurrentUpdateConflict,
+  ConcurrentUpdateFieldConflict,
   ConcurrentUpdateDialogProps,
 } from './ConcurrentUpdateDialog';
 // `__clearRecordEditableCache` is test-only and stays off the barrel

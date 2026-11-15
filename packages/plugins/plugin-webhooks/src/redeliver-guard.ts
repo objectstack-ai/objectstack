@@ -72,7 +72,10 @@
  * environment's, or a delivery written before the package coordinate, the
  * 18.x ceremony's re-source among them — is judged by the declaration a
  * caller with no package resolves (D3): with one holder exactly as before;
- * with two it is refused naming both, and sent to neither.
+ * with two it is refused naming both, and sent to neither. A name refused
+ * WHOLE (#33263: the metadata service lists the environment's declaration
+ * beside a package's, so no declaration of it is served) is refused with that
+ * refusal, naming every holder — never as a disabled package.
  * Not declared any more is case 1, switched off (the activation ledger, or a
  * declared `isActive: false` no ledger row overrides) is case 2. Case 3 cannot
  * arise: the signing key is code, held with the declaration. A delivery whose
@@ -87,6 +90,7 @@ import {
     DeclaredWebhookAmbiguousError,
     declaredWebhookActivationPath,
     declaredWebhookAddressOfRefId,
+    wholeNameRefusal,
     type DeclaredWebhookReader,
 } from './declared-webhooks.js';
 import {
@@ -239,6 +243,16 @@ async function judgeDeclared(
         );
     }
     if (!declaration) {
+        // [ADR-0150 D3, #33263] The name is refused WHOLE: its holders all
+        // still declare it, none is served, and nothing is disabled — the
+        // metadata service lists the environment's declaration beside a
+        // package's. Said as that, naming every holder, never as a disable.
+        const whole = declared ? await wholeNameRefusal(declared, name) : undefined;
+        if (whole) {
+            return (
+                `declared webhook '${name}' is not served, so this delivery is refused: ${whole.message}`
+            );
+        }
         // [#31699 round 2] The slot's package (or, for a reference naming no
         // package, the name's one holder) still declares it but is disabled:
         // a disabled package's webhooks are not served, so neither dispatched
@@ -262,7 +276,7 @@ async function judgeDeclared(
         return (
             `declared webhook '${name}' is switched off, and a switched-off webhook is skipped by the dispatcher, `
             + 'so this delivery is refused rather than sent to an endpoint that was switched off. Fix: switch it on '
-            + `(POST ${declaredWebhookActivationPath(name, declaration.namespace)} with { "enabled": true }), then redeliver.`
+            + `(POST ${declaredWebhookActivationPath(name, declaration.packageId)} with { "enabled": true }), then redeliver.`
         );
     }
     return undefined;

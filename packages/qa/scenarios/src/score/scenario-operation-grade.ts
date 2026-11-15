@@ -111,6 +111,13 @@ export type ObservedAnswer =
       code: string;
       /** The envelope's HTTP `status`, when it carried one. */
       status?: number;
+      /**
+       * The envelope's `declaredCode`, when the door served one: the producer's
+       * own unregistered code (a hook's declared refusal, `ASSET_NOT_IN_STOCK`),
+       * demoted off `code`, which then holds the status's catalogue code
+       * (`RESOURCE_CONFLICT` at 409). Absent when the door served none.
+       */
+      declaredCode?: string;
       /** What the runner read of an answer with no code: the door's text, and whose throw it names. */
       note?: string;
     }
@@ -236,37 +243,46 @@ function isValidationCode(code: string): boolean {
 }
 
 /**
- * The refusal met the declared code. Exactly that code, or — for a declared
- * `VALIDATION_FAILED` — the app's own refusal (ruling A on #31999 item 9,
- * comment 6764953017, widening #31145 item 2), read from the door's answer
- * alone:
+ * The refusal met the declared code. Exactly that code, as the door's `code`
+ * or as its `declaredCode`, or — for a declared `VALIDATION_FAILED` — the
+ * app's own refusal (ruling A on #31999 item 9, comment 6764953017, widening
+ * #31145 item 2), read from the door's answer alone:
  *
- *   - a code that is none of the platform's (it fails the spec's `ErrorCode`
- *     catalogue, ADR-0112) at any client-error status (4xx): the app's own
- *     rule answered, whatever status it chose — a hook's declared refusal
+ *   - a `declaredCode` at any client-error status (4xx): the app's own rule
+ *     answered, whatever status it chose. A hook's declared refusal
  *     (`HookSchema.refusals`, `OVER_RECEIPT` at 422, `ASSET_NOT_IN_STOCK` at
- *     409) reaches the MCP door with its own code;
+ *     409) reaches the MCP data tools with `code` set to the status's
+ *     catalogue code (`VALIDATION_ERROR` at 422, `RESOURCE_CONFLICT` at 409)
+ *     and its own code beside it as `declaredCode` (the door's demotion of an
+ *     unregistered code, #31407), whatever the catalogue `code`;
+ *   - a `code` that is none of the platform's (it fails the spec's `ErrorCode`
+ *     catalogue, ADR-0112) at any 4xx status;
  *   - the flow's declared refusal ({@link flowRefused}): the build routed the
  *     write through an action whose flow refused it.
  *
- * Platform codes stay strict: a catalogue code other than the declared one
- * never meets it at any status (a denial at 403, a missing row at 404, a
- * conflict at 409, an error at 500). Nor does an app code with no status or a
- * 5xx one, nor the runner's other parenthesized labels.
+ * Platform codes stay strict: a catalogue code with no `declaredCode`, other
+ * than the declared one, never meets it at any status (a denial at 403, a
+ * missing row at 404, a conflict at 409, an error at 500). Nor does an app
+ * code or a `declaredCode` with no status or a 5xx one, nor the runner's other
+ * parenthesized labels.
  */
 export function refusalMeets(declared: string, answer: ObservedAnswer): boolean {
   if (answer.kind !== 'refused') return false;
-  if (answer.code === declared) return true;
+  if (answer.code === declared || answer.declaredCode === declared) return true;
   if (!isValidationCode(declared)) return false;
   if (answer.code === flowRefused) return true;
   if (answer.status === undefined || answer.code.startsWith('(')) return false;
+  const clientError = answer.status >= 400 && answer.status < 500;
+  if (answer.declaredCode !== undefined) return clientError;
   if (ErrorCode.safeParse(answer.code).success) return false;
-  return answer.status >= 400 && answer.status < 500;
+  return clientError;
 }
 
 const refusalText = (declared: string, a: ObservedAnswer): string => {
   if (!refusalMeets(declared, a) || a.kind !== 'refused' || a.code === declared) return answerText(a);
-  return `${answerText(a)}, ${a.code === flowRefused ? "the app's flow refusal" : 'an app-defined refusal'}`;
+  if (a.code === flowRefused) return `${answerText(a)}, the app's flow refusal`;
+  if (a.declaredCode !== undefined) return `${answerText(a)}, the hook's declared refusal ${a.declaredCode}`;
+  return `${answerText(a)}, an app-defined refusal`;
 };
 
 /** The door refused the probe as a field lock refuses: `PERMISSION_DENIED` at 403. */

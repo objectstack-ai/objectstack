@@ -3381,6 +3381,11 @@ const en = {
         ssoAccountNotInvited: "Your account isn't set up for this system yet. Ask your administrator to invite you.",
         ssoAccountNotLinked: "An account with your email already exists here, but it isn't connected to single sign-on. Sign in another way, or ask your administrator to connect it.",
         ssoResponseRejected: "Your organization's sign-in service sent a response this system could not accept. Ask your administrator to check the single sign-on setup.",
+        // A refused account creation on the sign-in return: the email is not at a domain
+        // this system accepts (`EMAIL_DOMAIN_NOT_ALLOWED`, from the SSO proven-domain rule
+        // or the `email_domain` audience posture), or is not an address (`INVALID_EMAIL`).
+        ssoEmailDomainNotAllowed: "No account was created: your email address isn't at a domain this system accepts new accounts from. Use your organization email, or ask your administrator.",
+        ssoEmailNotAnAddress: "No account was created: your organization's sign-in service did not send a usable email address for you. Ask your administrator to check the single sign-on setup.",
         ssoStartFromLoginPage: "Sign-in has to start from this system's login page. Enter your work email here and choose Sign in with SSO.",
         ssoTechnicalDetails: "Technical details",
         directSignInIncomplete: "Sign-in did not complete: you came back from single sign-on without being signed in. Check that this browser allows cookies for this site, then try again.",
@@ -3394,6 +3399,9 @@ const en = {
         ssoSwitchAccountHint: "Switch account opens your sign-in service in a new tab and signs you out there. Then sign in here again with an account that has access.",
         // A signed-in person's link refused by the callback (`email_does_not_match`), shown where they land.
         linkEmailMismatch: "The account was not linked: its email address doesn't match the one on the account you're signed in with. Link an account that uses the same email address.",
+        // objectstack#33498 — the vendor's other two link refusals, shown the same way.
+        linkAlreadyLinkedToOtherUser: "The account was not linked: it is already linked to a different user of this system. Link a different account, or sign in as the user it is linked to and unlink it there first.",
+        linkUnableToLink: "The account could not be linked. Check that its email address is verified with that sign-in service, then try again. If it still fails, ask your administrator.",
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
         // server's code (`signInRefusalMessages`).
         twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',
@@ -5005,6 +5013,7 @@ const en = {
       objectsAndFields: 'Objects and fields',
       views: 'Views',
       suggestedField: 'suggested',
+      suggestedFieldLegend: 'Fields marked “{{mark}}” were added by the AI; you didn’t ask for them.',
       nameField: 'Name: {{field}}',
     },
     build: {
@@ -5618,6 +5627,9 @@ const en = {
     disableAppNamed: 'Disable {{name}}',
     setDefault: 'Set as default',
     setDefaultNamed: 'Set {{name}} as default',
+    // The disabled star's reason (its tooltip and accessible description)
+    // when the app already is the default.
+    alreadyDefault: 'Already the default app',
     deleteApp: 'Delete app',
     deleteAppNamed: 'Delete {{name}}',
     // Delete is a two-click control: the first click arms it and the label

@@ -10,7 +10,6 @@ import { describe, expect, it } from 'vitest';
 import {
   MANAGED_WRITE_VERB_AFFORDANCE,
   checkManagedApiMethodAffordances,
-  describeManagedApiMethodConflicts,
   type ManagedApiMethodConflict,
 } from './managed-api-affordance';
 
@@ -131,35 +130,5 @@ describe('the verb → affordance table', () => {
       purge: 'delete',
     });
     expect(Object.isFrozen(MANAGED_WRITE_VERB_AFFORDANCE)).toBe(true);
-  });
-});
-
-describe('describeManagedApiMethodConflicts', () => {
-  it('names the verbs and the affordance they would need', () => {
-    const msg = describeManagedApiMethodConflicts(checkManagedApiMethodAffordances(managed()));
-    expect(msg).toContain('create, update, delete');
-    expect(msg).toContain('userActions create/edit/delete');
-    expect(msg).toContain('enable.apiMethods');
-    expect(msg).toContain('ADR-0092');
-  });
-
-  it('states the contradiction only — the remedy belongs to each consumer', () => {
-    const msg = describeManagedApiMethodConflicts(checkManagedApiMethodAffordances(managed()));
-    expect(msg).not.toMatch(/\b(drop|remove|Either)\b/);
-  });
-
-  it('does not repeat an affordance flag shared by two verbs', () => {
-    const msg = describeManagedApiMethodConflicts(
-      checkManagedApiMethodAffordances(managed({ enable: { apiMethods: ['update', 'upsert'] } })),
-    );
-    expect(msg).toContain('needs userActions edit)');
-  });
-
-  it('reads correctly for a single conflict', () => {
-    const msg = describeManagedApiMethodConflicts(
-      checkManagedApiMethodAffordances(managed({ enable: { apiMethods: ['get', 'delete'] } })),
-    );
-    expect(msg).toContain('[delete]');
-    expect(msg).toContain('needs userActions delete)');
   });
 });

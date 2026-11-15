@@ -11,7 +11,7 @@
       "TS18048: 'auditRow' is possibly 'undefined'.": 5,
       "TS2345: Argument of type 'null' is not assignable to parameter of type '…'.": 1,
       "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 1,
-      "TS2493: Tuple type '…' of length '0' has no element at index '0'.": 7,
+      "TS2493: Tuple type '…' of length '0' has no element at index '0'.": 6,
       "TS2493: Tuple type '…' of length '0' has no element at index '1'.": 4
     },
     "src/auth-manager.jwt-eddsa-fallback.test.ts": {

@@ -458,6 +458,19 @@ export const SysAuditLog = ObjectSchema.create({
     // other. Its shipped surfaces are the unfiltered `recent` and `all_events`
     // views above.
     //
+    // `dataset_query` joins the enum WRITER-FIRST. Its writer is
+    // `dataset-query-audit.ts` (`createDatasetQueryAuditWriter`;
+    // `recordDatasetQuery` on the `audit` slot), called by the REST analytics
+    // dataset door (`analytics-routes.ts`) once per query of a saved dataset
+    // that reached the read, for the datasets a deployment opts in through
+    // `AuditPlugin`'s `datasetQueryAudit.datasets` (off by default). One
+    // run-level row (`record_id` null, the dataset's base object in
+    // `object_name`) naming the caller, the dataset, the dimensions and
+    // measures selected, the filtered field names and operators, the row
+    // count and the outcome in `metadata`; never a filtered value or a result
+    // row. Its shipped surfaces are the unfiltered `recent` and `all_events`
+    // views above.
+    //
     // Each option carries a label (#27855): the list, the detail and the System
     // Overview "Audit Events by Action" chart (whose dimension resolves through
     // these options) read it, where the bare-array shorthand made the label the
@@ -483,6 +496,7 @@ export const SysAuditLog = ObjectSchema.create({
           { label: 'Credential Use', value: 'credential_use' },
           { label: 'SCIM Refused', value: 'scim_refused' },
           { label: 'Audit Signing Key Change', value: 'audit_signing_key_change' },
+          { label: 'Dataset Query', value: 'dataset_query' },
         ],
         label: 'Action',
         required: true,

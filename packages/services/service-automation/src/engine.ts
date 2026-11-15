@@ -1294,6 +1294,13 @@ export interface ExecutionLogEntry {
     startedAt: string;
     completedAt?: string;
     durationMs?: number;
+    /**
+     * [#32284] `ExecutionLogSchema.waitMs`: the part of `durationMs` the run
+     * spent suspended, summed over every pause it has left — `0` on a run
+     * that never paused, absent when not recorded. Written beside `durationMs`
+     * at every site that writes one; never derived from it here.
+     */
+    waitMs?: number;
     trigger: { type: string; userId?: string; object?: string; recordId?: string };
     // ↑ built by `buildRunTrigger` at EVERY site — see its doc comment for why
     // that is a chokepoint rather than eight object literals.
@@ -1776,9 +1783,50 @@ export interface SuspendedRun {
     context: AutomationContext;
     startedAt: string;
     startTime: number;
+    /**
+     * [#32284] The run's wait clock: the milliseconds it had spent EXECUTING
+     * (its age at this pause minus every earlier pause) when it paused here.
+     * Nothing executes while the run is parked, so at any later instant the
+     * run's total wait is its age minus this — which is how one number sums
+     * every pause of a run that suspends, resumes and suspends again
+     * ({@link waitOfPausedRun}), and why a restore that re-arms a consumed
+     * pause needs no clock of its own: the snapshot carries this value, and
+     * the time from the pause to the restore is wait like the rest of it.
+     *
+     * Set at every site that builds a suspension ({@link activeMsAtPause});
+     * carried unchanged by every re-save of the SAME pause (`{ ...run }`).
+     * Absent on a suspension recorded before this field existed, or by a
+     * host store that does not round-trip it: such a run's `waitMs` is not
+     * recorded rather than guessed.
+     */
+    activeMs?: number;
     correlation?: string;
     /** Screen the run paused on (screen-flow runtime), for re-fetch + UI render. */
     screen?: ScreenSpec;
+}
+
+/**
+ * [#32284] The `activeMs` a suspension records: the run's age at the pause
+ * minus the wait it has already accumulated. `undefined` when that wait is not
+ * known (the run's previous pause carried no clock), so an unknown wait is
+ * never turned into a precise-looking number further on.
+ */
+export function activeMsAtPause(elapsedMs: number, waitMs: number | undefined): number | undefined {
+    return waitMs === undefined ? undefined : Math.max(0, elapsedMs - waitMs);
+}
+
+/**
+ * [#32284] A paused run's total wait at the moment its pause ENDS — a resume
+ * consumes it, or the run is cancelled, failed or settled where it waits, or a
+ * restore records it paused again: its age then (`elapsedMs`, measured from
+ * `startTime` like `durationMs`) minus the time it had spent executing when it
+ * paused. `undefined` for a suspension with no clock ({@link SuspendedRun.activeMs}).
+ *
+ * Clamped at zero: `startTime` may have been stamped by another replica's
+ * clock, and a published `waitMs` is never negative.
+ */
+export function waitOfPausedRun(run: Pick<SuspendedRun, 'activeMs'>, elapsedMs: number): number | undefined {
+    return typeof run.activeMs === 'number' ? Math.max(0, elapsedMs - run.activeMs) : undefined;
 }
 
 /**
@@ -1868,6 +1916,13 @@ export interface RunRecord {
     /** When the run reached its terminal state. */
     finishedAt?: string;
     durationMs?: number;
+    /**
+     * [#32284] The run's {@link ExecutionLogEntry.waitMs}, persisted beside
+     * `durationMs` (`sys_automation_run.wait_ms`) so a run read back after a
+     * restart or a ring eviction still says how much of its duration was
+     * waiting. Absent on a row written before the column existed.
+     */
+    waitMs?: number;
     /** Failure reason for a `failed` run — what a designer needs to fix it. */
     error?: string;
     /**
@@ -2703,8 +2758,9 @@ export type FlowNameResolver = (
 /**
  * [#31699] The answer of {@link AutomationEngine.resolveConnectorInstanceFor}:
  * the registered instance a name addresses (its package, `null` for none), a
- * refusal naming every candidate, or `none` (not registered, or two instances
- * and nothing to choose by).
+ * refusal naming every candidate, or `none` (not registered, none registered
+ * under the holder the name resolves to, or two instances and nothing to
+ * choose by).
  */
 export type ConnectorInstanceResolution =
     | { readonly status: 'instance'; readonly packageId: string | null }
@@ -4769,8 +4825,11 @@ export class AutomationEngine implements IAutomationService {
      * Handlers are omitted — they are runtime code, not metadata.
      */
     getConnectorDescriptors(): ConnectorDescriptor[] {
-        return this.connectors.values().map(({ def, origin, state, degradedReason }) => ({
+        return this.connectors.entries().map(({ packageId, registered: { def, origin, state, degradedReason } }) => ({
             name: def.name,
+            // [ADR-0150 D9, #31699] two packages' instances of one name are two
+            // descriptors: the package tells them apart.
+            ...(packageId === null ? {} : { packageId }),
             label: def.label,
             type: def.type,
             description: def.description,
@@ -5887,17 +5946,13 @@ export class AutomationEngine implements IAutomationService {
      * The name is resolved for the package that ships the calling flow
      * ({@link flowCallerPackage}: a packaged flow names it from its package; an
      * environment-authored flow, or a call outside a run, names it with no
-     * package). The engine holds ONE instance per name, materialized for the
-     * answer a caller with no package gets (the declared-connector reconcile,
-     * which already refuses a name two packages hold). So a package caller
-     * whose answer is a refusal — two holders in its closure, or holders only
-     * outside it, an environment-only instance included (ADR-0150 D3 (a)) — is
-     * refused with the resolver's own message, naming every candidate. Any
-     * other answer is the instance the engine serves: an environment item
-     * exists only for a name no package holds, so a package caller that
-     * resolves at all resolves to the one package holder the reconcile
-     * materialized. A name the registry holds nothing under (a connector a
-     * plugin registers in code), or a host with no resolver, dispatches by name
+     * package). A refusal — two holders in the caller's closure, holders only
+     * outside it, an environment-only instance included (ADR-0150 D3 (a)), or,
+     * for a caller with no package, two package holders of different
+     * namespaces (ADR-0150 D9) — is answered with the resolver's own message,
+     * naming every candidate ({@link resolveConnectorInstanceFor}). A name the
+     * registry holds nothing under (a connector a plugin registers in code), or
+     * a host with no resolver, dispatches by name
      * as before. Read-only.
      */
     connectorNameRefusal(connectorId: string, context: AutomationContext | undefined): PackageScopedRefusal | undefined {
@@ -5915,32 +5970,60 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [ADR-0150 D3/D4, #31699] Which registered instance the bare name
-     * `connectorId` means for a caller of package `callerPackageId`:
+     * [ADR-0150 D3/D4/D9, #31699] Which registered instance the bare name
+     * `connectorId` means for a caller of package `callerPackageId` (`null`:
+     * no package), over the served holders (a disabled package holds no name,
+     * #32183):
      *
-     * - a package caller: the resolver's answer. `refused` is said with the
-     *   resolver's own message (every candidate named, {@link connectorNameRefusal});
-     *   `resolved` addresses the holder's instance, when one is registered;
-     * - otherwise (no package, no resolver, a name no registry holds, a
-     *   resolved holder with no instance registered under it): the one
-     *   instance of the name, as a dispatch by name answered before; two are
-     *   `none`, never one of them.
+     * - the resolver's `refused` is said with its own message, every
+     *   candidate named ({@link connectorNameRefusal});
+     * - `resolved` addresses exactly the holder's instance (`null`: the
+     *   environment's). When none is registered under that holder (a catalog
+     *   entry, whose runtime a plugin registers in code; or one the reconcile
+     *   has not reached), the instance a plugin registered in code under the
+     *   name answers, as it did before (ADR-0097 §4: a plugin connector and a
+     *   declarative instance never share a name); otherwise `none`. ⛔ Never
+     *   another package's declarative instance, nor the environment's: two
+     *   packages may each hold the name now (ADR-0150 D9), and the one other
+     *   instance is not the caller's (red line 2; the narrowing removed 3b's
+     *   fallback to the one instance of the name);
+     * - a name only disabled packages hold (served: `not-found`; every
+     *   holder: held) is answered as a resolved holder with no instance: a
+     *   disabled package's instance is not served to a caller outside it,
+     *   even before the reconcile drops it (#31699 notes 6816295828 and
+     *   6820178514). A caller of the disabled package itself is answered its
+     *   own instance, as before: the resolver keeps a caller's own holding in
+     *   its served set;
+     * - a name the registry holds nothing under (a connector a plugin
+     *   registers in code), or a host with no resolver: the one instance of
+     *   the name, as a dispatch by name answered before; two are `none`,
+     *   never one of them.
      *
-     * The second arm is the connection door's rule
-     * (`AutomationServicePlugin.connectionDoorInstance`), so the door and the
-     * dispatch address one instance. Read-only.
+     * Read-only.
      */
     resolveConnectorInstanceFor(connectorId: string, callerPackageId: string | null): ConnectorInstanceResolution {
-        if (callerPackageId !== null) {
-            const meant = this.connectorNameResolver?.(connectorId, callerPackageId);
-            if (meant?.status === 'refused') return { status: 'refused', refusal: meant };
-            if (meant?.status === 'resolved') {
-                const packageId = meant.holder.kind === 'package' ? meant.holder.packageId : null;
-                if (this.connectors.get(connectorId, packageId)) return { status: 'instance', packageId };
-            }
+        const resolver = this.connectorNameResolver;
+        const meant = resolver?.(connectorId, callerPackageId);
+        if (meant?.status === 'refused') return { status: 'refused', refusal: meant };
+        if (meant?.status === 'resolved') {
+            const packageId = meant.holder.kind === 'package' ? meant.holder.packageId : null;
+            return this.connectors.get(connectorId, packageId) ? { status: 'instance', packageId } : this.codeRegisteredInstance(connectorId);
+        }
+        if (meant?.status === 'not-found'
+            && resolver?.(connectorId, callerPackageId, { includeDisabledPackages: true })?.status !== 'not-found') {
+            return this.codeRegisteredInstance(connectorId);
         }
         const sole = this.connectors.sole(connectorId);
         return sole ? { status: 'instance', packageId: sole.packageId } : { status: 'none' };
+    }
+
+    /**
+     * [#31699] The instance a plugin registered in code under `connectorId`
+     * (package `null`, origin `plugin`), or `none`: what a name answers when
+     * the holder it resolves to has no instance of its own.
+     */
+    private codeRegisteredInstance(connectorId: string): ConnectorInstanceResolution {
+        return this.connectors.get(connectorId, null)?.origin === 'plugin' ? { status: 'instance', packageId: null } : { status: 'none' };
     }
 
     /**
@@ -7726,6 +7809,8 @@ export class AutomationEngine implements IAutomationService {
                     startedAt,
                     completedAt: new Date().toISOString(),
                     durationMs,
+                    // [#32284] The initial execution never paused: a measured 0.
+                    waitMs: 0,
                     trigger: buildRunTrigger(context),
                     steps,
                     output,
@@ -7824,7 +7909,7 @@ export class AutomationEngine implements IAutomationService {
             if (isRefusalSignal(err)) {
                 return this.finishRefusedRun({
                     runId, flowName, flowVersion: flow.version,
-                    startedAt, durationMs: Date.now() - startTime,
+                    startedAt, durationMs: Date.now() - startTime, waitMs: 0,
                     steps, flow, variables,
                     refusalMessage: err.message, context,
                 });
@@ -7834,6 +7919,9 @@ export class AutomationEngine implements IAutomationService {
             // caller can later `resume()` it. This is NOT a failure.
             if (isSuspendSignal(err)) {
                 const durationMs = Date.now() - startTime;
+                // [#32284] The run's first pause: nothing waited yet, so all
+                // of `durationMs` was execution — the clock the resume reads.
+                const waitMs = 0;
                 // #7639 — ONE snapshot expression feeding BOTH consumers: the
                 // continuation the run will resume from, and the `paused` log
                 // entry run-detail serves. Same object, so what an operator
@@ -7852,6 +7940,7 @@ export class AutomationEngine implements IAutomationService {
                     context: runContext,
                     startedAt,
                     startTime,
+                    activeMs: activeMsAtPause(durationMs, waitMs),
                     correlation: err.correlation,
                     screen: err.screen,
                 });
@@ -7862,6 +7951,7 @@ export class AutomationEngine implements IAutomationService {
                     status: 'paused',
                     startedAt,
                     durationMs,
+                    waitMs,
                     trigger: buildRunTrigger(context),
                     steps,
                     variables: variablesSnapshot,
@@ -7926,6 +8016,7 @@ export class AutomationEngine implements IAutomationService {
                 startedAt,
                 completedAt: new Date().toISOString(),
                 durationMs,
+                waitMs: 0,
                 trigger: buildRunTrigger(context),
                 steps,
                 error: errorMessage,
@@ -9943,6 +10034,8 @@ export class AutomationEngine implements IAutomationService {
         flowVersion?: number;
         startedAt: string;
         durationMs: number;
+        /** [#32284] The run's `waitMs` — `undefined` only where it is not recorded. */
+        waitMs: number | undefined;
         steps: StepLogEntry[];
         /** Read for its `isOutput` variable declarations — see `output` below. */
         flow: FlowParsed;

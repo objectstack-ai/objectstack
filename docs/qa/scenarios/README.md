@@ -144,7 +144,8 @@ scope, unless it also equals one computable over the persona's own rows (`scopeF
 the row count, the count per value of each visible column, and each value, sum, mean,
 minimum and maximum of a visible number, over the question's object and its one-hop lookups);
 such a figure says nothing about the hidden rows, so an answer stating its own count is not
-flagged for matching another person's. A hidden field is read off the tool answers' keys: a
+flagged for matching another person's. A number inside a record name, code or id (`INV-003`,
+`i3`) is part of that identifier, not a figure: the reply may name its rows. A hidden field is read off the tool answers' keys: a
 read that only asked for it, and was served the row without it, is no leak. A card whose
 personas declare a `scope` carries the `access-security.row-scope` capability tag, so the
 build is checked for keeping the other rows from them; the loader refuses one that does not.

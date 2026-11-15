@@ -281,7 +281,10 @@ export interface WithheldDeclaredWebhook {
   organizationId: string | null;
   /**
    * [#33016] Set when that package is disabled: it holds nothing for the
-   * activation door until it is enabled again, so its address answers `409`.
+   * activation door until it is enabled again, so its address refuses the
+   * switch — `404` while it is the name's only holder, `409` naming the
+   * holders the door serves while another package declares the name too
+   * (#33263, record nit N5: this said `409` for both).
    */
   packageDisabled?: true;
 }
@@ -866,7 +869,9 @@ const CATEGORY_LINES: Record<FindingKey, (count: number) => string> = {
     'delete the row to let the declaration answer; to keep the row as well, rename it, and switch the declared ' +
     `one off if it must not fire (${WEBHOOK_SWITCH_DOOR}, with { "enabled": false }; the package is the one the ` +
     'finding names). A finding marked packageDisabled names a disabled package: it does not fire now, and that ' +
-    'address answers 409 until the package is enabled again, so enable the package first, then switch it there.',
+    'address refuses the switch until the package is enabled again (404 while the package is the name\'s only ' +
+    'holder, 409 naming the other holders while another package declares it too), so enable the package first, ' +
+    'then switch it there.',
   overlayOrphans: (n) =>
     `[security] upgrade impact: ${n} customization(s) of a view, dashboard, report, translation or email template ` +
     'are bound to a package that no longer ships the item, so each is served as an item of its own beside ' +

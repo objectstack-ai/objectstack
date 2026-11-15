@@ -448,8 +448,9 @@ export function assertSameOriginOrFree(
 /**
  * [#31699] Where a registration lands: the instance of `(packageId, name)`,
  * replaced in place. With `soleOfName`, every other instance of `name` of the
- * same origin is dropped first: the declared-connector reconcile keeps one
- * instance per name until the one-holder backstop narrows.
+ * same origin is dropped first, for a caller that wants one instance per
+ * name (the declared-connector reconcile no longer asks for it: ADR-0150 D9,
+ * each package's instance is kept beside the other's).
  */
 function placeInstance(
     connectors: ConnectorInstances,
