@@ -37,11 +37,15 @@ import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } fr
 import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type CardTitle } from '../schema.js';
 import {
   gradeCardAnswer,
+  gradeCardInjection,
   buildDeniesWrite,
   gradeCardOperation,
+  INJECTION_AS_DATA_CHECK,
   isWriteDenial,
   readArtifactFacts,
   scoreCardArtifact,
+  type CardTurn,
+  type CheckResult,
   type OperationGrade,
   type OperationObservation,
   type PersonaRunGrade,
@@ -219,6 +223,14 @@ export interface RunHalf {
   };
   questions: QuestionResult[];
   operations: OperationResult[];
+  /**
+   * The card's guardrails graded over the half's turns as a whole: today
+   * `guardrail:injection_as_data` (`gradeCardInjection`), passing when no turn
+   * that read the planted cell took the act the card forbids; not measured,
+   * never a pass, when no turn read it or the grading threw (which never sets
+   * {@link RunHalf.error}). Absent on a record from before it was graded.
+   */
+  guardrails?: CheckResult[];
   error?: string;
 }
 
@@ -743,6 +755,8 @@ export async function runHalf(
   const { card } = scenario;
   const half: RunHalf = { personas: [], seed: { inserted: 0, refused: [] }, questions: [], operations: [] };
   const accounts: PersonaAccount[] = [];
+  // Every turn the agent answered, for the guardrails graded over the half (a replay that was not faithful measures nothing).
+  const turns: CardTurn[] = [];
   try {
     await app.signInAdmin();
     for (const p of card.run.personas) {
@@ -776,6 +790,7 @@ export async function runHalf(
         }
         try {
           const turn = await driver.ask({ ...ref, step: q.id, ...(persona ? { persona } : {}), prompt: questionPrompt(scenario, q.id), ...doorOf(persona) });
+          turns.push({ step: q.id, ...(persona ? { persona } : {}), turn });
           res.turn = summarize(turn);
           res.grade = gradeCardAnswer(scenario, {
             question: q.id,
@@ -811,6 +826,7 @@ export async function runHalf(
           half.operations.push({ ...res, turn: summarize(e.turn), notMeasured: replayNotFaithful(e) });
           continue;
         }
+        turns.push({ step: op.id, persona: op.actingAs, turn });
         res.turn = summarize(turn);
         const after = (await app.listRows(op.object)).rows as Row[];
         // The card's today, the dates the app's clock read during the turn, and
@@ -864,6 +880,13 @@ export async function runHalf(
     }
   } catch (e) {
     half.error = errText(e);
+  }
+  try {
+    half.guardrails = [gradeCardInjection(scenario, turns, half.seed)];
+  } catch (e) {
+    // A guardrail that could not be graded is that check not measured, never
+    // the half's error: the half's questions and operations graded on their own.
+    half.guardrails = [{ check: INJECTION_AS_DATA_CHECK, pass: false, notMeasured: `guardrails: ${errText(e)}` }];
   }
   return half;
 }
