@@ -202,7 +202,8 @@ describe('os audit verify on a stack that declares queues and assignmentRules (A
   });
 
   it('1. the command boots, reads the sealed ledger and gives its verdict: every row unmodified, exit 0', () => {
-    expect(run.code, run.stderr.slice(-2000)).toBe(0);
+    // stdout first: a refused boot's `--json` document names the refusal.
+    expect(run.code, `${run.stdout.slice(0, 2000)}\n${run.stderr.slice(-2000)}`).toBe(0);
     const doc = JSON.parse(run.stdout);
     expect(doc.error).toBeUndefined();
     expect(doc.report).toMatchObject({ ok: true, sealed: true, objects: [LEDGER], faults: [], rows: [] });
