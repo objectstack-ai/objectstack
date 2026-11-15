@@ -303,7 +303,8 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     membership), so ask the maintainer at once to remove a queued PR by hand — then confirm from the remote that it is
     in neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
     spent approval or a standing record IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses a
-    governed diff without its tier's record; CODEOWNERS routes every Tier H surface to the approvers, and the relay
+    governed diff without its tier's record; CODEOWNERS routes every Tier H surface to the approvers except the
+    low-risk arm's catalog rows, which are left to the relay's per-pull plan; on every other row the relay
     requests them on drafts (a summons, no barrier); the post-merge audit (`scripts/pm/check-governed-merges.mjs`) lists
     every governed-surface merge with its approver and merger — a merger the maintainer does not recognise, any agent
     approval, or a Tier S merge without a PASS record is a seat violation, filed and rolled back. No seat judges this.
