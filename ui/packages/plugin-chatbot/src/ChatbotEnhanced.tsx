@@ -1197,8 +1197,22 @@ function writtenRecordOf(
 /** The item a selected model none of the offered models carries is shown by. */
 const OUTSIDE_MODELS = 'outside';
 
-/** objectstack#33660 — a pick at this cost multiplier or above asks before it applies. */
+/** objectstack#33660 — a pick whose DRAWN cost multiplier is this or above asks before it applies. */
 const EXPENSIVE_MODEL_MULTIPLIER = 20;
+
+/**
+ * objectstack#33660 — a model's cost multiplier as the picker draws it, or
+ * `undefined` when it has none to draw (absent, non-finite or not positive).
+ * At 1 and above it is rounded to two decimals; below 1 to two significant
+ * digits, so a small positive multiplier never reads ×0. The ×20 question
+ * compares this drawn value, so what the person reads and whether they are
+ * asked always agree.
+ */
+function drawnMultiplierOf(model: ChatbotModelOption): number | undefined {
+  const n = model.costMultiplier;
+  if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return undefined;
+  return n >= 1 ? Math.round(n * 100) / 100 : Number(n.toPrecision(2));
+}
 
 /**
  * objectui#11865 — the composer's model picker, drawn with the shared `Select`,
@@ -1214,10 +1228,10 @@ const EXPENSIVE_MODEL_MULTIPLIER = 20;
  *   native control showed the first model there. Picking that item writes
  *   nothing.
  * - objectstack#33660: a model's `costMultiplier` is drawn as `×N` beside its
- *   label (none drawn when it has none). A pick at
+ *   label (none drawn when it has none). A pick whose drawn multiplier is
  *   {@link EXPENSIVE_MODEL_MULTIPLIER} or above asks once before it is written;
- *   Cancel writes nothing. Every chat host renders this picker, so none can
- *   skip the question.
+ *   Cancel writes nothing, and a model that leaves the list while asked is
+ *   dropped. Every chat host renders this picker, so none can skip the question.
  */
 function ModelPicker({
   label,
@@ -1233,16 +1247,21 @@ function ModelPicker({
   allowanceUsedFraction?: number;
 }) {
   const { t, language } = useObjectTranslation();
-  // The model a ×20-or-above pick is waiting to apply; `null` while nothing is asked.
-  const [confirming, setConfirming] = React.useState<ChatbotModelOption | null>(null);
+  // The id a ×20-or-above pick is waiting to apply; `null` while nothing is asked.
+  const [confirmingId, setConfirmingId] = React.useState<string | null>(null);
+  // Read from the CURRENT list, so Confirm writes a model that is still offered.
+  const confirming = confirmingId !== null ? models.find((m) => m.id === confirmingId) : undefined;
+  // The asked-about model left the list while the question was open: drop the pick.
+  if (confirmingId !== null && confirming === undefined) setConfirmingId(null);
   const at = models.findIndex((m) => m.id === value);
-  const multiplierText = (n: number) => formatNumber(n, { locale: language, maximumFractionDigits: 2 });
+  // The drawn value is already rounded (drawnMultiplierOf); this only spells it.
+  const multiplierText = (n: number) => formatNumber(n, { locale: language, maximumSignificantDigits: 15 });
   // The share of the allowance left, as the console's usage ring reads it; only
   // with usage served and a multiplier to set it against (rule D5: a fraction, never a count).
   const allowanceLeft =
     typeof allowanceUsedFraction === 'number' &&
     Number.isFinite(allowanceUsedFraction) &&
-    models.some((m) => m.costMultiplier !== undefined)
+    models.some((m) => drawnMultiplierOf(m) !== undefined)
       ? formatNumber(Math.min(1, Math.max(0, 1 - allowanceUsedFraction)), {
           locale: language,
           style: 'percent',
@@ -1257,7 +1276,7 @@ function ModelPicker({
           // `undefined` for the outside item: it is the host's own model, so there is nothing to write.
           const picked = models[Number(token)];
           if (!picked) return;
-          if ((picked.costMultiplier ?? 0) >= EXPENSIVE_MODEL_MULTIPLIER) setConfirming(picked);
+          if ((drawnMultiplierOf(picked) ?? 0) >= EXPENSIVE_MODEL_MULTIPLIER) setConfirmingId(picked.id);
           else onPick(picked.id);
         }}
       >
@@ -1269,17 +1288,20 @@ function ModelPicker({
         </SelectTrigger>
         <SelectContent>
           {at === -1 && <SelectItem value={OUTSIDE_MODELS}>{value}</SelectItem>}
-          {models.map((m, i) => (
-            <SelectItem key={`${i}:${m.id}`} value={String(i)}>
-              {m.label ?? m.id}
-              {m.provider ? ` · ${m.provider}` : ''}
-              {m.costMultiplier !== undefined ? (
-                <span className="ml-1.5 tabular-nums text-muted-foreground" data-testid="model-cost-multiplier">
-                  ×{multiplierText(m.costMultiplier)}
-                </span>
-              ) : null}
-            </SelectItem>
-          ))}
+          {models.map((m, i) => {
+            const drawn = drawnMultiplierOf(m);
+            return (
+              <SelectItem key={`${i}:${m.id}`} value={String(i)}>
+                {m.label ?? m.id}
+                {m.provider ? ` · ${m.provider}` : ''}
+                {drawn !== undefined ? (
+                  <span className="ml-1.5 tabular-nums text-muted-foreground" data-testid="model-cost-multiplier">
+                    ×{multiplierText(drawn)}
+                  </span>
+                ) : null}
+              </SelectItem>
+            );
+          })}
           {allowanceLeft !== undefined ? (
             <p
               className="mt-1 max-w-64 border-t px-2 pb-1 pt-1.5 text-[11px] leading-snug text-muted-foreground"
@@ -1294,7 +1316,7 @@ function ModelPicker({
           ) : null}
         </SelectContent>
       </Select>
-      <AlertDialog open={confirming !== null} onOpenChange={(open) => { if (!open) setConfirming(null); }}>
+      <AlertDialog open={confirming !== undefined} onOpenChange={(open) => { if (!open) setConfirmingId(null); }}>
         {confirming ? (
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -1306,14 +1328,14 @@ function ModelPicker({
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {t('chatbot.modelPicker.confirmBody', {
-                  multiplier: multiplierText(confirming.costMultiplier ?? 0),
+                  multiplier: multiplierText(drawnMultiplierOf(confirming) ?? 0),
                   defaultValue:
                     'Each message on this model uses {{multiplier}} times as much of your AI allowance as one on the default model.',
                 })}
                 {allowanceLeft !== undefined
                   ? ` ${t('chatbot.modelPicker.confirmAllowance', {
                       left: allowanceLeft,
-                      multiplier: multiplierText(confirming.costMultiplier ?? 0),
+                      multiplier: multiplierText(drawnMultiplierOf(confirming) ?? 0),
                       defaultValue: '{{left}} of it is left, and on this model it runs out {{multiplier}} times as fast.',
                     })}`
                   : null}
@@ -1324,7 +1346,7 @@ function ModelPicker({
               <AlertDialogAction
                 onClick={() => {
                   onPick(confirming.id);
-                  setConfirming(null);
+                  setConfirmingId(null);
                 }}
               >
                 {t('chatbot.modelPicker.confirmAction', { defaultValue: 'Switch model' })}

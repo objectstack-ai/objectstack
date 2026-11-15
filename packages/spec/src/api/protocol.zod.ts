@@ -4168,9 +4168,10 @@ export const AiModelsResponseSchema = lazySchema(() => z.object({
       default: z.boolean().describe('Whether this is the environment default'),
       costMultiplier: z.number().positive().optional().describe(
         'Factor by which one message on this model draws on the AI allowance, compared with one message on the '
-        + "environment's default model (which is 1): 20 means one message here uses as much allowance as 20 on the "
-        + "default. Written by cloud service-ai's GET /api/v1/ai/models from the model's cost weight; absent when "
-        + 'the service reports none, and then nothing is shown for it.',
+        + "environment's default model: 20 means one message here uses as much allowance as 20 on the default. "
+        + 'Normalised to the default: the entry with `default: true` carries 1, and every other entry carries its '
+        + "model's cost weight divided by the default model's cost weight. Written by cloud service-ai's "
+        + 'GET /api/v1/ai/models; absent when the service reports none, and then nothing is shown for it.',
       ),
     }),
   ])).describe('Models this system offers'),

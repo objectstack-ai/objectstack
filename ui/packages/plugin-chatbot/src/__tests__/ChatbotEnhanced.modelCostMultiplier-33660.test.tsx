@@ -23,13 +23,17 @@
  *     writes nothing, Confirm writes the pick;
  *   - CONTROL: a ×1 or ×5 pick writes at once, with no dialog;
  *   - the allowance note shows the share left when usage is served, and is
- *     absent without it.
+ *     absent without it;
+ *   - the drawn (rounded) multiplier is what the ×20 question compares, a small
+ *     one never reads ×0, and a non-finite or zero value draws nothing;
+ *   - Confirm writes the asked-about model as the CURRENT list has it, and a
+ *     model that leaves the list while asked is dropped.
  */
 
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react';
 import { ChatbotEnhanced, type ChatbotModelOption } from '../ChatbotEnhanced';
 
 afterEach(() => cleanup());
@@ -43,16 +47,22 @@ const MODELS: ChatbotModelOption[] = [
 
 function mount(extra: Record<string, unknown> = {}, models: ChatbotModelOption[] = MODELS) {
   const onModelChange = vi.fn();
-  render(
+  const element = (list: ChatbotModelOption[]) => (
     <ChatbotEnhanced
-      models={models}
+      models={list}
       selectedModelId="haiku"
       onModelChange={onModelChange}
       onSendMessage={vi.fn()}
       {...extra}
-    />,
+    />
   );
-  return { onModelChange, trigger: () => screen.getByRole('combobox', { name: 'Model' }) };
+  const view = render(element(models));
+  return {
+    onModelChange,
+    trigger: () => screen.getByRole('combobox', { name: 'Model' }),
+    /** The host hands the picker a new model list. */
+    relist: (list: ChatbotModelOption[]) => view.rerender(element(list)),
+  };
 }
 
 async function openPicker(trigger: HTMLElement): Promise<HTMLElement> {
@@ -93,6 +103,55 @@ describe('ChatbotEnhanced — the model picker shows each model’s cost multipl
     ]);
     const options = within(await openPicker(trigger())).getAllByRole('option');
     expect(options.map(multiplierOf)).toEqual(['×1', '×0.5']);
+  });
+
+  it('the drawn number decides the question: 19.996 reads ×20 and asks, 19.994 reads ×19.99 and applies at once', async () => {
+    const edge: ChatbotModelOption[] = [
+      { id: 'haiku', label: 'Fast', costMultiplier: 1 },
+      { id: 'over', label: 'Over', costMultiplier: 19.996 },
+      { id: 'under', label: 'Under', costMultiplier: 19.994 },
+    ];
+    const { onModelChange, trigger } = mount({}, edge);
+    const options = within(await openPicker(trigger())).getAllByRole('option');
+    expect(options.map(multiplierOf)).toEqual(['×1', '×20', '×19.99']);
+    fireEvent.click(options[1]);
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+    expect(onModelChange).not.toHaveBeenCalled();
+    await pick(trigger(), 'Under');
+    expect(onModelChange.mock.calls).toEqual([['under']]);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('a small multiplier never reads ×0, and a value that is no multiplier draws nothing', async () => {
+    const { trigger } = mount({}, [
+      { id: 'haiku', label: 'Fast', costMultiplier: 0.004 },
+      { id: 'nan', label: 'NaN', costMultiplier: Number.NaN },
+      { id: 'inf', label: 'Inf', costMultiplier: Number.POSITIVE_INFINITY },
+      { id: 'zero', label: 'Zero', costMultiplier: 0 },
+    ]);
+    const options = within(await openPicker(trigger())).getAllByRole('option');
+    expect(options.map(multiplierOf)).toEqual(['×0.004', null, null, null]);
+  });
+
+  it('Confirm writes the asked-about model from the current list, and a model that left the list while asked is dropped', async () => {
+    const { onModelChange, trigger, relist } = mount();
+    await pick(trigger(), 'Expert');
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    // The list reorders while the question is open: Confirm still writes Expert.
+    relist([MODELS[2], MODELS[0], MODELS[1], MODELS[3]]);
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Switch model' }));
+    expect(onModelChange.mock.calls).toEqual([['opus']]);
+
+    await pick(trigger(), 'Expert');
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    // Expert leaves the list: the question closes and nothing is written.
+    relist([MODELS[0], MODELS[1], MODELS[3]]);
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    // It comes back: the dropped pick does not ask again on its own.
+    relist(MODELS);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(onModelChange.mock.calls).toEqual([['opus']]);
   });
 
   it('a ×20 pick asks first; Cancel keeps the model in force and writes nothing', async () => {
