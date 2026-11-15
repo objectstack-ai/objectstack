@@ -129,7 +129,7 @@ import { quoteLine, readClause2Line } from './clause2-line.mjs';
 // A mailbox message's `To:` line names a SEAT, spelled as the mailbox opener spells a seat — its
 // `seatKey`, imported, ⛔ never a second seat shape. That file imports nothing of this graph's
 // top-level-await half (only the relay validator and `gh-pages.mjs`), so the edge adds no cycle.
-import { MAILBOX_LABEL, seatKey } from './mailbox-open.mjs';
+import { MAILBOX_LABEL, MAILBOX_LOCK_CANARY, seatKey } from './mailbox-open.mjs';
 // Who may ring a mailbox: the relay's identity (`RELAY_COMMENT_AUTHOR`, the op table's — that file is already
 // in this graph through `mailbox-open.mjs`) and the maintainers (`GOVERNED_APPROVERS`), judged by the queue
 // guard's own author predicate, ⛔ never a second list of logins. The guard imports nothing of this graph at
@@ -1669,14 +1669,23 @@ export const MAILBOX_IGNORED_AUTHOR = 'ignored: not a fleet or maintainer author
  * 〈Closed to outsiders〉), and the lock leaves the maintainers able to write anything. So a row counts as a knock
  * only when its `user.login` is in `MAILBOX_KNOCK_AUTHORS` (`recordAuthorTrusted`, the queue guard's predicate:
  * an absent or unreadable author is untrusted); any other row reads `{ state: 'ignored', reason }` and its body is
- * ⛔ never handed to `readMailboxLine` — no field, line or reason of it survives, so no reader can echo it. A
- * trusted row is read as `readMailboxLine` reads its body. Pure.
+ * ⛔ never handed to `readMailboxLine` — no field, line or reason of it survives, so no reader can echo it. The
+ * relay's own canary — `MAILBOX_LOCK_CANARY` alone above the footer, posted when `mailbox-open.mjs` locks the
+ * conversation, the proof that a knock still lands — reads `{ state: 'canary' }`: no knock and no half-state.
+ * Any other trusted row is read as `readMailboxLine` reads its body. Pure.
  *
  * @param {{ body?: string, user?: { login?: string } }} row — a REST comment row
  */
 export function readMailboxComment(row) {
   if (!recordAuthorTrusted(row, MAILBOX_KNOCK_AUTHORS)) return { state: 'ignored', reason: MAILBOX_IGNORED_AUTHOR };
+  if (recordAuthorTrusted(row, [RELAY_COMMENT_AUTHOR]) && isLockCanary(row?.body)) return { state: 'canary' };
   return readMailboxLine(row?.body);
+}
+
+/** The canary's body: one leading signature line allowed, then `MAILBOX_LOCK_CANARY` alone, then footer lines only. Pure. */
+function isLockCanary(text) {
+  const lines = stripSignatureLine(String(text ?? '')).split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '');
+  return lines[0] === MAILBOX_LOCK_CANARY && lines.slice(1).every((l) => FOOTER_RULE.test(l) || FOOTER_LINE.test(l));
 }
 
 /**
@@ -1687,15 +1696,16 @@ export function readMailboxComment(row) {
  * `id` (the key id) can never shadow the comment id. A row the author fence ignores is NOT an event and
  * NOT a half-state — it is not the fleet's bell, and a half-state's remedy (the sender rings from the
  * table) has nobody to address — so it is listed apart in `ignored`, stamped with its comment, time and
- * author alone: never its body.
+ * author alone: never its body. The relay's lock canary is neither an event nor a half-state either; it is
+ * listed apart in `canaries`.
  *
  * @param {{ id?: number, body?: string, created_at?: string, user?: { login?: string } }[]} rows
  */
 export function mailboxEvents(rows) {
   if (!Array.isArray(rows)) return { state: 'unreadable', gaps: ["the mailbox's comment thread"] };
   const stamped = rows.map((row) => ({ ...readMailboxComment(row), comment: row?.id ?? null, at: row?.created_at ?? null, by: row?.user?.login ?? null }));
-  const events = stamped.filter((e) => e.state !== 'ignored');
-  return { state: 'read', events, halfStates: events.filter((e) => e.state !== 'read').map((e) => e.comment), ignored: stamped.filter((e) => e.state === 'ignored') };
+  const events = stamped.filter((e) => e.state !== 'ignored' && e.state !== 'canary');
+  return { state: 'read', events, halfStates: events.filter((e) => e.state !== 'read').map((e) => e.comment), ignored: stamped.filter((e) => e.state === 'ignored'), canaries: stamped.filter((e) => e.state === 'canary') };
 }
 
 /**
@@ -2449,7 +2459,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // Raised 44 → 51 with the author fence (a knock counts only from the relay or GOVERNED_APPROVERS): the authors pin,
   // the fleet-read and drive-by-refused pins, the look-alike author pin, the apart-listing pin, the printout pin and
   // the H72 pin that a drive-by row is never listed.
-  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 51,
+  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 55,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
   '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 24,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
@@ -3116,6 +3126,11 @@ export async function selfTest() {
   t('⛔ …and so is a row whose author is missing, empty, a look-alike of the relay or a seat account — the match is exact, an unreadable author untrusted', [{ body: DB.ut }, { user: {}, body: DB.ut }, DB_ROW(DB.ut, 1, 'x', ''), DB_ROW(DB.ut, 1, 'x', 'objectstack-fleet'), DB_ROW(DB.ut, 1, 'x', 'objectstack-fleet[bot] '), DB_ROW(DB.ut, 1, 'x', 'os-bill'), null].every((row) => readMailboxComment(row).state === 'ignored'));
   t('⭐ `mailboxEvents` lists an ignored row APART — comment, time and author, never its body — and neither as an event nor as a half-state', (() => { const r = mailboxEvents([DB_ROW(DB.cr, 5101), DB_ROW(DRIVE_BY, 5109, '2026-10-28T07:30:00Z', 'drive-by-commenter'), DB_ROW('thanks, on it', 5102)]); return r.events.map((e) => e.comment).join() === '5101,5102' && r.halfStates.join() === '5102' && r.ignored.length === 1 && JSON.stringify(r.ignored[0]) === JSON.stringify({ state: 'ignored', reason: MAILBOX_IGNORED_AUTHOR, comment: 5109, at: '2026-10-28T07:30:00Z', by: 'drive-by-commenter' }) && !JSON.stringify(r).includes('MARKER'); })());
   t('…and `--mailbox-keys` tells a sender who may ring, naming both declarations\' accounts', mailboxKeyLines().some((l) => MAILBOX_KNOCK_AUTHORS.every((a) => l.includes(a)) && l.includes('body never read')));
+  // ⭐ The lock canary (mailbox-open.mjs 〈Closed to outsiders〉): the relay's one comment after it locks a mailbox.
+  const CANARY = `${MAILBOX_LOCK_CANARY}\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_`;
+  t('⭐ the relay\'s lock canary reads `canary` — with or without a leading signature line — never a knock or a half-state', [readMailboxComment(DB_ROW(CANARY)), readMailboxComment(DB_ROW(`domain:skills#1 · os-steve · session_01ABC\n${CANARY}`)).state, readMailboxLine(CANARY).state], [{ state: 'canary' }, 'canary', 'refused']);
+  t('⛔ …but only the relay\'s, only the line alone: the line by a maintainer, with a second line under it, or a knock carrying it reads as before — and an outsider\'s is ignored', [readMailboxComment(DB_ROW(CANARY, 1, 'x', GOVERNED_APPROVERS[0])).state, readMailboxComment(DB_ROW(`${MAILBOX_LOCK_CANARY}\nRequest: urgent-triage · #1 · x`)).state, readMailboxComment(DB_ROW(`To: triage\n${MAILBOX_LOCK_CANARY}`)).state, readMailboxComment(DB_ROW(CANARY, 1, 'x', 'drive-by-commenter')).state], ['refused', 'refused', 'refused', 'ignored']);
+  t('⭐ `mailboxEvents` lists the canary APART in `canaries`, neither an event nor a half-state, beside the knocks around it', (() => { const r = mailboxEvents([DB_ROW(CANARY, 5100), DB_ROW(DB.cr, 5101)]); return r.events.map((e) => e.comment).join() === '5101' && r.halfStates.length === 0 && r.canaries.length === 1 && r.canaries[0].comment === 5100 && r.canaries[0].by === RELAY_COMMENT_AUTHOR; })());
   t('a thread that is not an array is a read that could not be made, never an empty one', mailboxEvents(null).state === 'unreadable' && mailboxEvents([]).state === 'read' && mailboxEvents([]).events.length === 0);
   t('⛔ no gate reads it: the queue guard\'s record reading is untouched — a doorbell comment beside a record on this head still reads FOUND', (() => { const r = locateReviewOfRecord(pairOf({ prComments: [RECORD_ON_9AF9, DB_ROW(DB.nc, 5104)] })); return r.state === 'found' && r.id === 3301; })());
   {
@@ -3133,6 +3148,7 @@ export async function selfTest() {
     const row = String(hs.h72OffTableMailboxLines(mailboxEvents(rows72), NOW72) ?? '');
     t('⭐ ONE reader: check-half-states H72 judges the REAL reader\'s readings — a free-form question, an off-table key and a five-field `seat-online` are listed, a table key is not, and a bell older than the window has aged out', row.includes('3 comment(s)') && ['comment 7002', 'comment 7003', 'comment 7004'].every((c) => row.includes(c)) && !row.includes('comment 7001') && !row.includes('comment 7005') && hs.h72OffTableMailboxLines(mailboxEvents([rows72[0]]), NOW72) === null);
     t('⛔ …and a drive-by comment inside the window is NOT listed by H72 — not the fleet\'s bell, its body never read — while the fleet\'s off-table bell beside it still is', hs.h72OffTableMailboxLines(mailboxEvents([DB_ROW(DRIVE_BY.replace('Request: urgent-triage', 'Notify: surface'), 7101, '2026-11-01T13:30:00Z', 'drive-by-commenter')]), NOW72) === null && String(hs.h72OffTableMailboxLines(mailboxEvents([DB_ROW(DRIVE_BY, 7102, '2026-11-01T13:30:00Z', 'drive-by-commenter'), rows72[2]]), NOW72) ?? '').includes('1 comment(s)'));
+    t('⭐ …and the relay\'s lock canary inside the window is NOT listed by H72 — the proof a knock lands, not a half-state', hs.h72OffTableMailboxLines(mailboxEvents([DB_ROW(`${MAILBOX_LOCK_CANARY}\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_`, 7103, '2026-11-01T13:30:00Z')]), NOW72) === null);
     t('⭐ …and its population is the OPENER\'s label — an open mailbox touched inside the window owes a page, the same PR without the label does not', hs.h72NeedsThread({ number: 28646, state: 'open', labels: [{ name: MAILBOX_LABEL }], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === true && hs.h72NeedsThread({ number: 28646, state: 'open', labels: [], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === false);
   }
   t('the roster: twenty-two keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 22 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 22 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 22 && MAILBOX_LINE_MAX_BYTES === 200);

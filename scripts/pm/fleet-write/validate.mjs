@@ -1112,7 +1112,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the platform ceilings: ten top-level properties and under 64KB, pinned with their source': 6,
   'refused by construction: no row reaches a merge, a review, a ref, contents, a workflow, a release or an org endpoint': 24,
   "the mailbox_branch_delete row: pull and a claude/mailbox-* branch and nothing else, any other name refused before the dispatch and never echoed; ONE bodiless DELETE of that one ref, carrying the pull and the branch to the executor's fences; contents write, a literal grant, so the mint widens nothing; and it rides the close stroke": 6,
-  "the conversation_lock row: issue alone, a positive integer, and nothing that widens it; ONE PUT of that issue's lock whose body is the table's one reason, never the caller's; issues write, a literal grant, so the mint widens nothing; and it rides any stroke": 5,
+  "the conversation_lock and conversation_unlock rows: issue alone, a positive integer, and nothing that widens it; ONE PUT of that issue's lock whose body is the table's one reason, never the caller's, or ONE DELETE of it with no body, each handing the pull to the executor's pm:mailbox fence; issues write, a literal grant, so the mint widens nothing; and they ride any stroke": 7,
   'the normalised payload: only judged keys travel': 3,
   'the CLI: a file, the event file, GitHub outputs, and the exit ladder': 12,
   'the transfer row: an issue never a pull, a target from the governed roster never the source, a stroke of its own to one target, labels never created': 12,
@@ -1133,7 +1133,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 11 → 12 with the run_rerun_failed battery, 12 → 13 with the hierarchy rows' battery, 13 → 15 with the event
 // file's battery and the advisory rows' battery, 15 → 16 with advisory_read's, 16 → 17 with mailbox_branch_delete's,
 // 17 → 18 with advisory_list's, 18 → 19 with pr_enqueue_front's: one battery, one row; 19 → 20 with the workflow
-// table's repository key; 20 → 21 with advisory_note's; 21 → 22 with pr_dequeue's; 22 → 23 with conversation_lock's.
+// table's repository key; 20 → 21 with advisory_note's; 21 → 22 with pr_dequeue's; 22 → 23 with conversation_lock's (conversation_unlock joined its battery).
 const SELF_TEST_BATTERY_FLOOR = 23;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
@@ -1284,7 +1284,7 @@ export async function selfTest() {
       automerge_enable: { pull: 1 },
       automerge_disable: { pull: 1 },
       pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, pr_dequeue: { pull: 1, expected_head_sha: SHA, cause: 'conflict', reason: 'r' },
-      mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, conversation_lock: { issue: 1 },
+      mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, conversation_lock: { issue: 1 }, conversation_unlock: { issue: 1 },
       transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
       sub_issue_add: { issue: 1, sub_issue: 2 },
       sub_issue_remove: { issue: 1, sub_issue: 2 },
@@ -1400,18 +1400,22 @@ export async function selfTest() {
     t('contents write, a literal grant, no alsoSpends, not alone: the close stroke — comment, close, delete — is accepted and its token is the five literal grants, nothing stroke-scoped', [OPS.mailbox_branch_delete.permission, STROKE_SCOPED_PERMISSIONS.includes('contents'), OPS.mailbox_branch_delete.alsoSpends ?? null, OPS.mailbox_branch_delete.alone ?? false, close.ok, close.ok ? tokenPermissionsOf(close.payload) : null, close.ok ? outputLine(close.payload, 'permission_actions') : null], ['contents', false, null, false, true, { issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read' }, 'permission_actions=']);
   }
 
-  // ── the conversation_lock row ─────────────────────────────────────────────
-  battery("the conversation_lock row: issue alone, a positive integer, and nothing that widens it; ONE PUT of that issue's lock whose body is the table's one reason, never the caller's; issues write, a literal grant, so the mint widens nothing; and it rides any stroke");
+  // ── the conversation_lock and conversation_unlock rows ──────────────────────
+  battery("the conversation_lock and conversation_unlock rows: issue alone, a positive integer, and nothing that widens it; ONE PUT of that issue's lock whose body is the table's one reason, never the caller's, or ONE DELETE of it with no body, each handing the pull to the executor's pm:mailbox fence; issues write, a literal grant, so the mint widens nothing; and they ride any stroke");
   {
     const REPO = `${TARGET_OWNER}/objectstack`;
     const lock = (extra = {}) => fixturePayload({ actions: [{ op: 'conversation_lock', issue: 32588, ...extra }] });
     t('issue alone is accepted', validatePayload(lock()).ok, true);
     t('⛔ closed keys: issue required, a non-integer issue refused, and a caller-sent reason or any other key refused — the reason is the table\'s', [refuses(fixturePayload({ actions: [{ op: 'conversation_lock' }] }), 'issue'), refuses(lock({ issue: '32588' }), 'positive integer'), refuses(lock({ lock_reason: 'spam' }), 'actions[0].lock_reason is not a key `conversation_lock` takes'), refuses(lock({ pull: 1 }), 'actions[0].pull is not a key `conversation_lock` takes')], [true, true, true, true]);
     const req = OPS.conversation_lock.requests({ op: 'conversation_lock', issue: 32588 }, REPO);
-    t("⭐ the action shape the relay sends: ONE PUT of the issue's lock path, its body exactly { lock_reason: 'resolved' } — and no refused family reaches it", [req.length, req[0].verb, req[0].path, req[0].body, CONVERSATION_LOCK_REASON, REFUSED_PATH_FAMILIES.filter((re) => re.test(req[0].path)).length], [1, 'PUT', `/repos/${REPO}/issues/32588/lock`, { lock_reason: 'resolved' }, 'resolved', 0]);
+    t("⭐ the action shape the relay sends: ONE PUT of the issue's lock path, its body exactly { lock_reason: 'resolved' }, the pull handed to the executor's fence asking locked — and no refused family reaches it", [req.length, req[0].verb, req[0].path, req[0].body, req[0].mailboxLock, CONVERSATION_LOCK_REASON, REFUSED_PATH_FAMILIES.filter((re) => re.test(req[0].path)).length], [1, 'PUT', `/repos/${REPO}/issues/32588/lock`, { lock_reason: 'resolved' }, { pull: 32588, locked: true }, 'resolved', 0]);
     const opened = validatePayload(fixturePayload({ actions: [{ op: 'conversation_lock', issue: 32588 }, { op: 'comment', issue: 32588, body: 'b' }] }));
     t('issues write, a literal grant, no alsoSpends, not alone: a stroke carrying it beside a comment is accepted and its token is the five literal grants, nothing stroke-scoped', [OPS.conversation_lock.permission, STROKE_SCOPED_PERMISSIONS.includes('issues'), OPS.conversation_lock.alsoSpends ?? null, OPS.conversation_lock.alone ?? false, opened.ok, opened.ok ? tokenPermissionsOf(opened.payload) : null], ['issues', false, null, false, true, { issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read' }]);
-    t('⛔ no unlock row: conversation_lock is the one op naming a lock (an unlock is a maintainer\'s act), and the PUT pin above lists its path as the only lock path', OP_NAMES.filter((op) => /lock/.test(op)), ['conversation_lock']);
+    const unlock = (extra = {}) => fixturePayload({ actions: [{ op: 'conversation_unlock', issue: 32588, ...extra }] });
+    t('⛔ the unlock\'s keys are closed the same way: issue alone accepted, issue required, a non-integer or any other key refused', [validatePayload(unlock()).ok, refuses(fixturePayload({ actions: [{ op: 'conversation_unlock' }] }), 'issue'), refuses(unlock({ issue: '32588' }), 'positive integer'), refuses(unlock({ lock_reason: 'spam' }), 'actions[0].lock_reason is not a key `conversation_unlock` takes')], [true, true, true, true]);
+    const ureq = OPS.conversation_unlock.requests({ op: 'conversation_unlock', issue: 32588 }, REPO);
+    t("⭐ the unlock the relay sends: ONE DELETE of the same lock path, no body, the pull handed to the executor's fence asking unlocked; issues write, a literal grant, not alone", [ureq.length, ureq[0].verb, ureq[0].path, 'body' in ureq[0], ureq[0].mailboxLock, OPS.conversation_unlock.permission, OPS.conversation_unlock.alsoSpends ?? null, OPS.conversation_unlock.alone ?? false, REFUSED_PATH_FAMILIES.filter((re) => re.test(ureq[0].path)).length], [1, 'DELETE', `/repos/${REPO}/issues/32588/lock`, false, { pull: 32588, locked: false }, 'issues', null, false, 0]);
+    t('⛔ exactly two ops name a lock — the lock and its unlock — and every request either sends carries the executor\'s fence', [OP_NAMES.filter((op) => /lock/.test(op)), ['conversation_lock', 'conversation_unlock'].every((op) => OPS[op].requests({ op, issue: 1 }, REPO).every((r) => r.mailboxLock?.pull === 1))], [['conversation_lock', 'conversation_unlock'], true]);
   }
 
   // ── the normalised payload ────────────────────────────────────────────────
@@ -1500,7 +1504,7 @@ export async function selfTest() {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
-      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, pr_dequeue: { pull: 1, expected_head_sha: SHA, cause: 'conflict', reason: 'r' }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, conversation_lock: { issue: 1 }, workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, pr_dequeue: { pull: 1, expected_head_sha: SHA, cause: 'conflict', reason: 'r' }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, conversation_lock: { issue: 1 }, conversation_unlock: { issue: 1 }, workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
       run_rerun_failed: { run_id: 1 }, sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
       advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_versions: { ghsa_id: GHSA, versions: [VERSION] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
@@ -1707,7 +1711,7 @@ export async function selfTest() {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
-      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, pr_dequeue: { pull: 1, expected_head_sha: SHA, cause: 'conflict', reason: 'r' }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, conversation_lock: { issue: 1 }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, pr_dequeue: { pull: 1, expected_head_sha: SHA, cause: 'conflict', reason: 'r' }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, conversation_lock: { issue: 1 }, conversation_unlock: { issue: 1 }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
       sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
       advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_versions: { ghsa_id: GHSA, versions: [VERSION] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
@@ -2054,7 +2058,7 @@ export async function selfTest() {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
-      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, pr_dequeue: { pull: 1, expected_head_sha: SHA, cause: 'conflict', reason: 'r' }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, conversation_lock: { issue: 1 }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
+      automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, pr_enqueue_front: { pull: 1, expected_head_sha: SHA }, pr_dequeue: { pull: 1, expected_head_sha: SHA, cause: 'conflict', reason: 'r' }, mailbox_branch_delete: { pull: 1, branch: 'claude/mailbox-ui-3' }, conversation_lock: { issue: 1 }, conversation_unlock: { issue: 1 }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
       sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
       workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF }, run_rerun_failed: { run_id: 1 },
     };
