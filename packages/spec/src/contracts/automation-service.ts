@@ -1566,15 +1566,20 @@ export interface FlowDryRunReadStep extends FlowDryRunStepBase {
  * Whether the named user may make a simulated write, as far as a dry run can
  * judge it without writing.
  *
- *  - `'allowed'` / `'refused'`: the answer of the object-level write check
- *    (`canWriteObject`, insert or update) for the named user. `'allowed'` says
- *    that check admits the write, never that the write would succeed.
- *  - `'not_judged'`: what that check does not judge. Every delete (the check
- *    has no delete arm). For an insert or update, nothing else is judged
- *    either: row-level and post-image rules (the RLS `using` pre-image and
- *    `check` post-image), controlled-by-parent, the tenant post-image,
- *    provenance gates and the `owner_id` forge are never reported. ⛔
+ *  - `'allowed'` / `'refused'`: an insert or an update, answered by the
+ *    object-level write check (`canWriteObject`, insert or update) for the
+ *    named user. `'allowed'` says that check admits the write, never that the
+ *    write would succeed.
+ *  - `'not_judged'`: every delete (the check has no delete arm), and every
+ *    write when no object-level check is installed. `canWriteObject` is a
+ *    method of `@objectstack/plugin-security`'s service, not of
+ *    `ISecurityService`, so a kernel without that plugin has none. ⛔
  *    `'not_judged'` never means allowed.
+ *
+ * Never reported, for any operation, whatever the answer: the refusals that
+ * check does not judge, which are row-level and post-image rules (the RLS
+ * `using` pre-image and `check` post-image), controlled-by-parent, the tenant
+ * post-image, provenance gates and the `owner_id` forge.
  */
 export type FlowDryRunWritePermission = 'allowed' | 'refused' | 'not_judged';
 
@@ -1663,8 +1668,9 @@ export interface FlowDryRunResult {
      * several unconditional out-edges) are listed one branch after another, in
      * declaration order (`config.branches`, then out-edges), each branch's
      * steps together; an inclusive decision's branches likewise, as the live
-     * run takes them one at a time. Otherwise steps are in the order the run
-     * executed them.
+     * run takes them one at a time. For unconditional out-edges that is the
+     * dry run's own order, and it can differ from the live step log, which can
+     * interleave them. Otherwise steps are in the order the run executed them.
      */
     steps: FlowDryRunStep[];
     /** Set exactly when `status` is `'refused'`: why the run never started. */
@@ -1772,17 +1778,21 @@ export interface IAutomationService {
      *    own `name`: throws what {@link registerFlow} throws for it. Nothing is
      *    registered.
      *  - A `tenantId` naming an organization the named user is not a member
-     *    of, then admission, then the trigger-time refusal {@link execute}
-     *    classifies before dispatch (`FLOW_INPUT_SCHEMA_INVALID`):
-     *    `status: 'refused'` with that code in `refusal` and no steps. No node
-     *    has run.
-     *  - A start node whose `condition` does not hold for the supplied `record`
-     *    / `previous`: `status: 'condition_not_met'`, the condition and its
-     *    value in `startCondition`, and no steps. This mirrors the live run's
-     *    skip exit, which evaluates the same condition at the same point
+     *    of, then admission: `status: 'refused'`, `PERMISSION_DENIED` in
+     *    `refusal`, and no steps.
+     *  - Then the start condition. A start node whose `condition` does not hold
+     *    for the supplied `record` / `previous` answers
+     *    `status: 'condition_not_met'`, the condition and its value in
+     *    `startCondition`, and no steps. This mirrors the live run's skip exit
      *    (`execute`, `output: { skipped: true, reason: 'condition_not_met' }`,
-     *    `engine.ts` in `@objectstack/service-automation`).
-     *  - Otherwise the nodes run, as described below.
+     *    `engine.ts` in `@objectstack/service-automation`), in the live run's
+     *    order: `execute` evaluates the start condition before its node
+     *    input-schema check, so a condition that does not hold answers first.
+     *  - Then the node input-schema check {@link execute} runs before dispatch:
+     *    `status: 'refused'`, `FLOW_INPUT_SCHEMA_INVALID` in `refusal`, and no
+     *    steps.
+     *  - No node has run before any of these answers. Otherwise the nodes run,
+     *    as described below.
      *
      * **The name.** The definition's own `name` is the flow's name for the
      * call: the name registration judges, and the one nodes read their per-flow
@@ -1846,13 +1856,19 @@ export interface IAutomationService {
      *    refuse for a validation rule, a uniqueness constraint or a required
      *    field reports as it would be made.
      *  - Each write step carries a three-way `permission`
-     *    ({@link FlowDryRunWritePermission}): `'allowed'` or `'refused'` from
-     *    the object-level write check (`canWriteObject`, insert or update) for
-     *    the named user, and `'not_judged'` for every delete and for every
-     *    refusal that check does not judge (row-level and post-image rules,
-     *    controlled-by-parent, the tenant post-image, provenance gates, the
-     *    `owner_id` forge). `'not_judged'` never means allowed. A `'refused'`
-     *    write is a refusal the step met (below).
+     *    ({@link FlowDryRunWritePermission}). An insert or an update answers
+     *    `'allowed'` or `'refused'`, from the object-level write check
+     *    (`canWriteObject`, insert or update) for the named user; `'allowed'`
+     *    never means the write would succeed. A delete answers `'not_judged'`,
+     *    since that check has no delete arm. With no object-level check
+     *    installed, every write step answers `'not_judged'`.
+     *    `'not_judged'` never means allowed.
+     *  - The refusals that check does not judge are never reported, for any
+     *    operation: row-level and post-image rules, controlled-by-parent, the
+     *    tenant post-image, provenance gates, the `owner_id` forge.
+     *  - A `'refused'` write is a refusal the step met: its step carries
+     *    `refusal` (`code: 'PERMISSION_DENIED'`), and the run goes on as after
+     *    any refusal (below).
      *
      * **Reads.** `get_record` reads live data, in the named user's scope.
      *
@@ -1887,7 +1903,9 @@ export interface IAutomationService {
      * unconditional out-edges) are listed one branch after another in
      * declaration order, each branch's steps together, as the `parallel` node's
      * own run record lists them; an inclusive decision's branches likewise, as
-     * the live run takes them one at a time.
+     * the live run takes them one at a time. For a node's unconditional
+     * out-edges this is the dry run's own order: the live run runs those
+     * branches under `Promise.all`, and its step log can interleave them.
      *
      * @param definition - The flow definition (raw, pre-parse), as
      *   {@link registerFlow} takes it

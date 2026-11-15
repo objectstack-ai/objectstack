@@ -18,7 +18,7 @@
  *  3. **The closed unions.** The five statuses, the two refusal codes (each
  *     an existing `AutomationResult.code` member, none minted), the seven
  *     step kinds, the three-way write permission and the six stop reasons.
- *  4. **The documented semantics.** The method's doc block states each ruled
+ *  4. **The documented semantics, and the answer order.** The method's doc block states each ruled
  *     point (writes, identity, admission, approvals and waits, outbound
  *     nodes, unarmed and unregistered, the start condition, step order). Prose is unassertable except by
  *     reading it, so the contract source is read.
@@ -143,6 +143,7 @@ export const failedOnPermission: FlowDryRunResult = {
             recordIds: ['opp_1'],
             values: { stage: 'closed' },
             permission: 'refused',
+            refusal: { code: 'PERMISSION_DENIED', message: 'the named user may not update opportunity' },
         },
     ],
     error: 'update_record close_deal: the named user may not update opportunity',
@@ -206,8 +207,23 @@ describe('IAutomationService.dryRun — the contract (#33757)', () => {
             'holds only the fields the flow set',
             'each branch\'s steps together',
             'could not continue past this',
+            'With no object-level check\n     *    installed, every write step answers `\'not_judged\'`.',
+            "its step carries\n     *    `refusal` (`code: 'PERMISSION_DENIED'`)",
+            "For a node's unconditional\n     * out-edges this is the dry run's own order",
         ]) {
             expect(doc, sentence).toContain(sentence);
         }
+    });
+
+    it('answers in the live run\'s order: admission, then the start condition, then the input-schema check', () => {
+        const source = readFileSync(fileURLToPath(new URL('./automation-service.ts', import.meta.url)), 'utf8');
+        const end = source.indexOf('dryRun?(definition: unknown, options: FlowDryRunOptions)');
+        const doc = source.slice(source.lastIndexOf('/**', end), end);
+        const order = [
+            doc.indexOf("then admission: `status: 'refused'`, `PERMISSION_DENIED` in"),
+            doc.indexOf('Then the start condition.'),
+            doc.indexOf('Then the node input-schema check'),
+        ];
+        expect(order.every((i) => i >= 0) && order[0] < order[1] && order[1] < order[2], `answer order at ${order.join(', ')}`).toBe(true);
     });
 });
