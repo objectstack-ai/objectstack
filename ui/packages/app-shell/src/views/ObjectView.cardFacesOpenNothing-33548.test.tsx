@@ -35,6 +35,7 @@ import { render, cleanup, screen, fireEvent, waitFor } from '@testing-library/re
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { SchemaRendererProvider } from '@object-ui/react';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -71,6 +72,10 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 // `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
 // collection, never inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+// Registers the real `object-kanban` renderer, the one `ListView` mounts, and
+// loads the board's lazy chunk at module scope.
+import '@object-ui/plugin-kanban';
+import '../../../plugin-kanban/src/KanbanImpl';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
@@ -210,8 +215,11 @@ async function mountList(opts: {
     Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
   }
   const objects = objectsWith(opts.view);
+  const dataSource = dataSourceFor(objects);
   window.history.replaceState(null, '', LIST_PATH);
   render(
+    // The board reads the renderer context the console's app root provides.
+    <SchemaRendererProvider dataSource={dataSource}>
     <MePermissionsProvider initialPermissions={answer(opts)}>
       <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })}>
         <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'admin' }}>
@@ -221,7 +229,7 @@ async function mountList(opts: {
                 path="/apps/:appName/:objectName/view/:viewId"
                 element={
                   <>
-                    <ObjectView dataSource={dataSourceFor(objects)} objects={objects} onEdit={() => {}} />
+                    <ObjectView dataSource={dataSource} objects={objects} onEdit={() => {}} />
                     <LocationProbe />
                   </>
                 }
@@ -231,7 +239,8 @@ async function mountList(opts: {
           </MemoryRouter>
         </ExpressionProvider>
       </I18nProvider>
-    </MePermissionsProvider>,
+    </MePermissionsProvider>
+    </SchemaRendererProvider>,
   );
 }
 
