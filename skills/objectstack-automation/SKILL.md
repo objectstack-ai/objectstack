@@ -130,7 +130,7 @@ A recipient string, written or evaluated, may be an audience selector:
 
 - `team:ID` — that team's members.
 - `owner_of:OBJECT:ID` — that record's owner; a computed id: `source: "'owner_of:crm_case:' + record.case_id"`.
-- `org:members` — every member of the run's organization, else that of the record the notification is about, else nobody (a `schedule` flow declaring no organization, no record). Any other `org:` value reaches nobody too. Each warns in the server log only; the node succeeds.
+- `org:members` — every member of the run's organization, else that of the record the notification is about, else nobody (`single` posture: a `schedule` flow declaring no `organization`, no record). Any other `org:` value reaches nobody too. Each warns in the server log only; the node succeeds.
 
 An option label in a notice: `{{ stage | option:opportunity.stage }}` in the mail
 `template` (each recipient's language; mail-only, refused in inline `title` /
