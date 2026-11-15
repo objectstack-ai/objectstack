@@ -1090,6 +1090,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         handleListRowsChange,
         recordOpen,
         openAsPage,
+        // objectstack#33317 — the resolved mode: `none` for an authored
+        // `none` and for a list-only object (`servesRecordRead`).
+        rowOpensRecord: navOverlay.mode !== 'none',
         phoneTitle: !pageHeaderShown && titleSwitcher ? (
             <span className="flex min-w-0 max-w-full items-center gap-1.5 text-base font-semibold" data-testid="list-phone-title">
                 <span className="flex min-w-0">{titleSwitcher}</span>

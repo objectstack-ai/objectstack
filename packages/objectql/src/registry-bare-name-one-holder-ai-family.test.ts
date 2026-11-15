@@ -343,7 +343,8 @@ describe('the narrowing — agent, skill and tool hold one name per namespace (A
 
   it('the switch holds agent, skill and tool, the later families\' narrowed types, and no other covered type', () => {
     // Later child B cards append their own type, each pinned in its family's file.
-    const SWITCHED: readonly string[] = [...NARROWED, 'action', 'email_template', 'flow', 'picklist', 'mapping', 'dataset', 'api', 'function', 'webhook'];
+    // [#31699 PR 3] The connector is the last: every covered type has narrowed.
+    const SWITCHED: readonly string[] = [...NARROWED, 'action', 'email_template', 'flow', 'picklist', 'mapping', 'dataset', 'api', 'function', 'webhook', 'connector'];
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toEqual(SWITCHED);
     for (const type of BARE_NAME_ONE_HOLDER_TYPES) {
       // A type that has not narrowed meets every holder, namespaces or not.

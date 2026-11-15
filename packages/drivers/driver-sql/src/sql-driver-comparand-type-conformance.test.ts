@@ -77,6 +77,8 @@ import type { Knex } from 'knex';
 import {
   FILTER_COMPARAND_TYPE_CASES,
   FILTER_COMPARAND_TYPE_ROWS,
+  FILTER_STRING_STORED_COMPARAND_CASES,
+  FILTER_STRING_STORED_COMPARAND_ROWS,
   parseFilterAST,
   type FilterCondition,
 } from '@objectstack/spec/data';
@@ -109,6 +111,55 @@ for (const cell of DIALECT_CELLS) {
     continue;
   }
   declareComparandTypeSweep(cell);
+  declareStringStoredSweep(cell);
+}
+
+/**
+ * [#29486] `FILTER_STRING_STORED_COMPARAND_CASES`, the driver's half: a number
+ * or boolean comparand on a text- or option-family field reaches this driver
+ * already narrowed to the string the write door stored (the engine's
+ * declared-type door, pinned in `@objectstack/objectql`), so each case's
+ * `stored()` filter must select exactly its rows here. The columns are the
+ * ones `syncSchema` gives a `text` and a `select` field: strings.
+ */
+function declareStringStoredSweep(cell: DialectCell): void {
+  describe(`[#29486] SqlDriver — a number or boolean comparand on a string-stored field, as the door hands it (${cell.label})`, () => {
+    const STRING_TABLE = 'os29486_string_stored';
+    let driver: SqlDriver;
+    let knexInstance: Knex;
+
+    beforeAll(async () => {
+      driver = new SqlDriver(cell.config());
+      knexInstance = driver.getKnex();
+      await knexInstance.schema.dropTableIfExists(STRING_TABLE);
+      await knexInstance.schema.createTable(STRING_TABLE, (t: Knex.TableBuilder) => {
+        t.string('id').primary();
+        t.string('code');
+        t.string('stage');
+      });
+      await knexInstance(STRING_TABLE).insert(FILTER_STRING_STORED_COMPARAND_ROWS.map((r) => ({ ...r })));
+    });
+
+    afterAll(async () => {
+      await knexInstance?.schema.dropTableIfExists(STRING_TABLE).catch(() => {});
+      await driver?.disconnect?.();
+    });
+
+    const ids = async (where: FilterCondition | undefined): Promise<string[]> => {
+      const rows = await driver.find(STRING_TABLE, { fields: ['id'], where });
+      return rows.map((r: any) => String(r.id)).sort((x, y) => x.localeCompare(y));
+    };
+
+    it('the fixture really is every row', async () => {
+      expect(await ids(undefined)).toEqual(FILTER_STRING_STORED_COMPARAND_ROWS.map((r) => r.id));
+    });
+
+    for (const c of FILTER_STRING_STORED_COMPARAND_CASES) {
+      it(c.name, async () => {
+        expect(await ids(parseFilterAST(c.stored())), c.note).toEqual([...c.expected]);
+      });
+    }
+  });
 }
 
 function declareComparandTypeSweep(cell: DialectCell): void {

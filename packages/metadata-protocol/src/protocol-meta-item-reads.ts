@@ -604,7 +604,7 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // checked against it once they have ({@link exactQualifierItem}).
     const exactAddress = await admitExactQualifier(host, {
         type: request.type, name: request.name, packageId: request.packageId, member,
-    });
+    }, { storedRowBases: true });
     let item: unknown;
     // [ADR-0131 D6] Environment → code: the environment's stored row,
     // else the code packages' definition. No organization's row is read —
@@ -763,9 +763,11 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // [#28238] The content, though, is {@link packagelessContentPackage}'s:
     // the code package that ships the name is a candidate too, so a row
     // another package stored under the name is not served for it.
-    const contentPackageId = request.packageId || (packagelessAddressed
+    // [#32662] A pair address admitted at the one base whose stored row holds
+    // the name serves that base's stored content ({@link admitExactQualifier}).
+    const contentPackageId = exactAddress?.storedRowBase ?? (request.packageId || (packagelessAddressed
         ? packagelessContentPackage(packagelessAddressed, host.shippedArtifactsOf(request.type, request.name))
-        : undefined);
+        : undefined));
 
     // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
     // (admin-gated upstream), prefer a `state='draft'` row if one exists, else

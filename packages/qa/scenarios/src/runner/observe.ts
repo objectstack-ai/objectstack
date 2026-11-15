@@ -139,17 +139,19 @@ export function writeCallsOn(turn: Pick<ParsedTurn, 'toolCalls'>, object: string
  * not a coded refusal (or nothing on the object was called).
  */
 export function lastReadRefusal(turn: Pick<ParsedTurn, 'toolCalls'>, object: string): string | undefined {
-  return lastReadRefusalOf(turn, object)?.code;
+  const output = lastReadRefusalOutput(turn, object);
+  return output === undefined ? undefined : refusalOf(output)?.code;
 }
 
-function lastReadRefusalOf(turn: Pick<ParsedTurn, 'toolCalls'>, object: string): ReturnType<typeof refusalOf> {
+/** The output of the last read on `object` when it carries a coded refusal, else `undefined`. */
+function lastReadRefusalOutput(turn: Pick<ParsedTurn, 'toolCalls'>, object: string): unknown {
   const reads = turn.toolCalls.filter((c) => {
     if ((WRITE_TOOLS as readonly string[]).includes(c.name) || c.output === undefined) return false;
     const input = (typeof c.input === 'object' && c.input !== null ? c.input : {}) as Record<string, unknown>;
     return input.objectName === object;
   });
   const last = reads[reads.length - 1];
-  return last === undefined ? undefined : refusalOf(last.output);
+  return last !== undefined && refusalOf(last.output) !== undefined ? last.output : undefined;
 }
 
 /**
@@ -205,13 +207,54 @@ export function withheldWrite(turn: ParsedTurn, object: string, writes: number):
 
 const failed = (c: RunnerToolCall) => c.isError === true || refusalCodeOf(c.output) !== undefined || flowRefusalOf(c.output) !== undefined;
 
-const refusedBy = (r: NonNullable<ReturnType<typeof refusalOf>>): ObservedAnswer =>
-  r.status !== undefined ? { kind: 'refused', code: r.code, status: r.status } : { kind: 'refused', code: r.code };
+/**
+ * The `declaredCode` of the envelope {@link refusalOf} reads in `output` — the
+ * producer's own unregistered code the door demoted off `code` (#31407: the
+ * MCP data tools' `{ error: { code, message, status, declaredCode } }`, the
+ * resource's flat `{ error, code, status, declaredCode }`) — or `undefined`
+ * when the door served none. The same envelope as {@link refusalOf}: the
+ * nested `error` object when it carries a string `code`, else the flat body.
+ */
+function declaredCodeOf(output: unknown): string | undefined {
+  let v: unknown = output;
+  if (typeof output === 'string') {
+    v = undefined;
+    // The same two readings as `refusalOf`: the whole text, else from its first `{`.
+    for (const text of [output, output.slice(Math.max(0, output.indexOf('{')))]) {
+      try {
+        v = JSON.parse(text);
+        break;
+      } catch {
+        // try the next reading
+      }
+    }
+  }
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined;
+  const body = v as Record<string, unknown>;
+  const nested = body.error;
+  const env = typeof nested === 'object' && nested !== null && !Array.isArray(nested) && typeof (nested as Record<string, unknown>).code === 'string'
+    ? (nested as Record<string, unknown>)
+    : body;
+  return typeof env.declaredCode === 'string' && env.declaredCode !== '' ? env.declaredCode : undefined;
+}
+
+/** The refused answer of an output carrying a coded refusal: its `code`, `status` and `declaredCode`, each only when served. */
+function refusedBy(output: unknown): ObservedAnswer | undefined {
+  const r = refusalOf(output);
+  if (r === undefined) return undefined;
+  const declaredCode = declaredCodeOf(output);
+  return {
+    kind: 'refused',
+    code: r.code,
+    ...(r.status !== undefined ? { status: r.status } : {}),
+    ...(declaredCode !== undefined ? { declaredCode } : {}),
+  };
+}
 
 /** A write call's refusal by rule 3: its coded refusal, or its flow's declared one; `undefined` when it carries neither. */
 function refusalAnswerOf(c: RunnerToolCall): ObservedAnswer | undefined {
-  const coded = refusalOf(c.output);
-  if (coded !== undefined) return refusedBy(coded);
+  const coded = refusedBy(c.output);
+  if (coded !== undefined) return coded;
   const text = flowRefusalOf(c.output);
   if (text === undefined) return undefined;
   return text === '' ? { kind: 'refused', code: flowRefused } : { kind: 'refused', code: flowRefused, note: `the flow answered ${JSON.stringify(text)}` };
@@ -224,8 +267,8 @@ export function observedAnswer(turn: ParsedTurn, object: string, writes: number)
   const refusals = calls.map(refusalAnswerOf).filter((r) => r !== undefined);
   if (refusals.some((r) => r.kind === 'refused' && r.code === CONFIRMATION_REQUIRED_CODE)) return { kind: 'pending_confirmation' };
   if (refusals.length > 0) return refusals[refusals.length - 1]!;
-  const readRefusal = calls.length === 0 ? lastReadRefusalOf(turn, object) : undefined;
-  if (readRefusal !== undefined) return refusedBy(readRefusal);
+  const readRefusal = calls.length === 0 ? refusedBy(lastReadRefusalOutput(turn, object)) : undefined;
+  if (readRefusal !== undefined) return readRefusal;
   if (calls.length === 0 && asksToConfirm(turn.replyText)) return { kind: 'pending_confirmation' };
   if (calls.length > 0) {
     const last = calls[calls.length - 1]!;

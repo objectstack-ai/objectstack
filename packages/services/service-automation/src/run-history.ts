@@ -270,6 +270,9 @@ export function runRecordToLogEntry(r: RunRecord): ExecutionLogEntry {
         startedAt: r.startedAt,
         completedAt: r.finishedAt,
         durationMs: r.durationMs,
+        // [#32284] The persisted wait — absent on a row written before the
+        // column existed, which reads "not recorded", never "did not wait".
+        waitMs: r.waitMs,
         // #7533 — the persisted trigger attribution, so a run rehydrated
         // after a restart still says what fired it and (for a record
         // change) which record. `type` falls back to `''` ONLY for rows
@@ -615,6 +618,9 @@ export function recordLog(
             startedAt: entry.startedAt,
             finishedAt: entry.completedAt,
             durationMs: entry.durationMs,
+            // [#32284] Beside `durationMs`, so the durable row answers "how
+            // much of that was waiting?" after a restart as the ring does.
+            waitMs: entry.waitMs,
             error: entry.error,
             // [#15788] The rendered refusal, carried onto the durable row
             // beside `status: 'refused'`. Set by exactly one producer
@@ -717,6 +723,8 @@ export function finishRefusedRun(this: Pick<RunHistoryHost, 'recordLog' | 'logge
     flowVersion?: number;
     startedAt: string;
     durationMs: number;
+    /** [#32284] The run's `waitMs` — `undefined` only where it is not recorded. */
+    waitMs: number | undefined;
     steps: StepLogEntry[];
     /** Read for its `isOutput` variable declarations — see `output` below. */
     flow: FlowParsed;
@@ -746,6 +754,7 @@ export function finishRefusedRun(this: Pick<RunHistoryHost, 'recordLog' | 'logge
             startedAt: args.startedAt,
             completedAt: new Date().toISOString(),
             durationMs: args.durationMs,
+            waitMs: args.waitMs,
             trigger: buildRunTrigger(args.context),
             steps: args.steps,
             output,

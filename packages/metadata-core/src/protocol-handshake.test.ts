@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it, vi } from 'vitest';
+import { MIGRATION_SUPPORT_FLOOR } from '@objectstack/spec/migrations';
 import {
   assertProtocolCompat,
   checkProtocolCompat,
@@ -11,6 +12,10 @@ import {
 } from './protocol-handshake.js';
 
 const RT = '11.0.0'; // runtime protocol version used across these tests
+// A runtime whose majors one behind it sit at or above `migrate meta`'s support
+// floor (16), for the tests that pin a `--from N` prescription: under `RT`,
+// every behind major is below that floor and gets none (#33031).
+const RT_ABOVE_FLOOR = '18.0.0';
 
 describe('rangeAdmitsMajor', () => {
   it('caret pins the major', () => {
@@ -135,35 +140,35 @@ describe('checkProtocolCompat', () => {
   });
 
   it('incompatible with a structured diagnostic when it does not', () => {
-    const r = checkProtocolCompat({ id: 'com.acme.crm', engines: { protocol: '^10' } }, RT);
+    const r = checkProtocolCompat({ id: 'com.acme.crm', engines: { protocol: '^17' } }, RT_ABOVE_FLOOR);
     expect(r.status).toBe('incompatible');
     if (r.status !== 'incompatible') return;
     expect(r.diagnostic.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
     expect(r.diagnostic.packageId).toBe('com.acme.crm');
-    expect(r.diagnostic.requiredRange).toBe('^10');
+    expect(r.diagnostic.requiredRange).toBe('^17');
     expect(r.diagnostic.rangeSource).toBe('engines.protocol');
     // The protocol version the manifest was judged against. Spelled
     // `runtimeVersion` until this release, where the machine face read as the
     // installed package version; removed OUTRIGHT, so the absence is pinned
     // beside the new key rather than only the new key being pinned.
-    expect(r.diagnostic.protocolVersion).toBe(RT);
+    expect(r.diagnostic.protocolVersion).toBe(RT_ABOVE_FLOOR);
     expect(Object.keys(r.diagnostic)).not.toContain('runtimeVersion');
-    expect(r.diagnostic.targetMajor).toBe(10);
-    expect(r.diagnostic.migrateCommand).toBe('objectstack migrate meta --from 10');
+    expect(r.diagnostic.targetMajor).toBe(17);
+    expect(r.diagnostic.migrateCommand).toBe('objectstack migrate meta --from 17');
     // The message names both versions and the command — the whole point of D1.
-    expect(r.diagnostic.message).toContain('^10');
-    expect(r.diagnostic.message).toContain('11.0.0');
-    expect(r.diagnostic.message).toContain('migrate meta --from 10');
+    expect(r.diagnostic.message).toContain('^17');
+    expect(r.diagnostic.message).toContain('18.0.0');
+    expect(r.diagnostic.message).toContain('migrate meta --from 17');
   });
 
-  it('the diagnostic is identical in shape one major behind or five', () => {
-    const near = checkProtocolCompat({ id: 'p', engines: { protocol: '^10' } }, RT);
-    const far = checkProtocolCompat({ id: 'p', engines: { protocol: '^6' } }, RT);
+  it('the diagnostic is identical in shape one major behind or five, while both are at or above the floor', () => {
+    const near = checkProtocolCompat({ id: 'p', engines: { protocol: '^20' } }, '21.0.0');
+    const far = checkProtocolCompat({ id: 'p', engines: { protocol: '^16' } }, '21.0.0');
     expect(near.status).toBe('incompatible');
     expect(far.status).toBe('incompatible');
     if (near.status !== 'incompatible' || far.status !== 'incompatible') return;
     expect(Object.keys(near.diagnostic).sort()).toEqual(Object.keys(far.diagnostic).sort());
-    expect(far.diagnostic.migrateCommand).toBe('objectstack migrate meta --from 6');
+    expect(far.diagnostic.migrateCommand).toBe('objectstack migrate meta --from 16');
   });
 
   it('protocol-first precedence over platform and legacy engine', () => {
@@ -201,14 +206,14 @@ describe('checkProtocolCompat', () => {
 describe('assertProtocolCompat', () => {
   it('throws ProtocolIncompatibleError on a positive mismatch', () => {
     expect(() =>
-      assertProtocolCompat({ id: 'p', engines: { protocol: '^10' } }, RT, () => {}),
+      assertProtocolCompat({ id: 'p', engines: { protocol: '^17' } }, RT_ABOVE_FLOOR, () => {}),
     ).toThrow(ProtocolIncompatibleError);
     try {
-      assertProtocolCompat({ id: 'p', engines: { protocol: '^10' } }, RT, () => {});
+      assertProtocolCompat({ id: 'p', engines: { protocol: '^17' } }, RT_ABOVE_FLOOR, () => {});
     } catch (e) {
       expect(e).toBeInstanceOf(ProtocolIncompatibleError);
       expect((e as ProtocolIncompatibleError).code).toBe('OS_PROTOCOL_INCOMPATIBLE');
-      expect((e as ProtocolIncompatibleError).diagnostic.migrateCommand).toContain('--from 10');
+      expect((e as ProtocolIncompatibleError).diagnostic.migrateCommand).toContain('--from 17');
     }
   });
 
@@ -270,16 +275,16 @@ describe('assertProtocolCompat', () => {
 describe('[#21762] protocolIncompatibleAnswer: the one answer every HTTP door gives the refusal', () => {
   function refusalFor(range: string): ProtocolIncompatibleError {
     try {
-      assertProtocolCompat({ id: 'com.acme.crm', engines: { protocol: range } }, RT, () => {});
+      assertProtocolCompat({ id: 'com.acme.crm', engines: { protocol: range } }, RT_ABOVE_FLOOR, () => {});
     } catch (e) {
       if (isProtocolIncompatibleError(e)) return e;
       throw e;
     }
-    throw new Error(`'${range}' was admitted under ${RT}`);
+    throw new Error(`'${range}' was admitted under ${RT_ABOVE_FLOOR}`);
   }
 
   it('carries the declared status, the code and the error\'s own message', () => {
-    const err = refusalFor('^10');
+    const err = refusalFor('^17');
     const answer = protocolIncompatibleAnswer(err);
     expect(answer.status).toBe(422);
     expect(answer.status).toBe(err.status);
@@ -289,21 +294,21 @@ describe('[#21762] protocolIncompatibleAnswer: the one answer every HTTP door gi
   });
 
   it('details are exactly the five diagnostic members, valued from the diagnostic', () => {
-    const answer = protocolIncompatibleAnswer(refusalFor('^10'));
+    const answer = protocolIncompatibleAnswer(refusalFor('^17'));
     expect(Object.keys(answer.details).sort()).toEqual(
       ['migrateCommand', 'protocolVersion', 'rangeSource', 'requiredRange', 'targetMajor'],
     );
     expect(answer.details).toEqual({
-      requiredRange: '^10',
+      requiredRange: '^17',
       rangeSource: 'engines.protocol',
-      protocolVersion: RT,
-      targetMajor: 10,
-      migrateCommand: 'objectstack migrate meta --from 10',
+      protocolVersion: RT_ABOVE_FLOOR,
+      targetMajor: 17,
+      migrateCommand: 'objectstack migrate meta --from 17',
     });
   });
 
   it('is a CLOSED shape, not a spread: a member the diagnostic gains does not reach details', () => {
-    const err = refusalFor('^10');
+    const err = refusalFor('^17');
     const widened = new ProtocolIncompatibleError({
       ...err.diagnostic,
       ...({ internalNote: 'must not reach the wire' } as object),
@@ -448,11 +453,16 @@ describe('[#26480] a package AHEAD of this runtime is told to upgrade, never to 
   });
 
   it('CONTROL: a package behind this runtime keeps its --from prescription', () => {
-    const d = refuse('^10');
-    expect(d.migrateCommand).toBe('objectstack migrate meta --from 10');
-    expect(d.message.endsWith('Run: objectstack migrate meta --from 10')).toBe(true);
+    const behind = (range: string) => {
+      const r = checkProtocolCompat({ id: 'com.acme.past', engines: { protocol: range } }, RT_ABOVE_FLOOR);
+      if (r.status !== 'incompatible') throw new Error(`'${range}' was not refused under ${RT_ABOVE_FLOOR}`);
+      return r.diagnostic;
+    };
+    const d = behind('^17');
+    expect(d.migrateCommand).toBe('objectstack migrate meta --from 17');
+    expect(d.message.endsWith('Run: objectstack migrate meta --from 17')).toBe(true);
     // A union that reaches back below this runtime still has metadata to move.
-    expect(refuse('^10 || ^12').migrateCommand).toBe('objectstack migrate meta --from 10');
+    expect(behind('^17 || ^19').migrateCommand).toBe('objectstack migrate meta --from 17');
   });
 });
 
@@ -506,9 +516,9 @@ describe('[#26546] the refusal reads the comparator direction, so an exclusive b
   });
 
   it('a bounded range targets its floor, whichever order its comparators are written in', () => {
-    expectBehind('>=15 <18', 15);
-    expectBehind('<18 >=15', 15);
-    expectBehind('>15 <18', 16);
+    expectBehind('>=16 <18', 16);
+    expectBehind('<18 >=16', 16);
+    expectBehind('>16 <18', 17);
   });
 
   it('a union still targets its lowest alternative', () => {
@@ -563,5 +573,81 @@ describe('[#30326] assertProtocolCompat answers the verdict it admitted the pack
     const admitted = assertProtocolCompat(manifest, RT, () => {});
     expect(admitted.status).toBe('ok');
     expect(admitted).toEqual(checkProtocolCompat(manifest, RT));
+  });
+});
+
+describe('[#33031] a package BELOW the migration floor is never told to run a `--from` the chain refuses', () => {
+  // `objectstack migrate meta --from N` refuses every N under
+  // `MIGRATION_SUPPORT_FLOOR` (ADR-0087 D3). Below it the refusal names the
+  // remedies that apply, the way the AHEAD arm does, and carries no command.
+  const refuse = (range: string, runtime = RT_ABOVE_FLOOR) => {
+    const r = checkProtocolCompat({ id: 'com.acme.legacy', engines: { protocol: range } }, runtime);
+    expect(r.status).toBe('incompatible');
+    if (r.status !== 'incompatible') throw new Error(`'${range}' was not refused under ${runtime}`);
+    return r.diagnostic;
+  };
+
+  it('the floor this module reads is the spec\'s: a --from is prescribed exactly at and above MIGRATION_SUPPORT_FLOOR', () => {
+    const runtimeMajor = MIGRATION_SUPPORT_FLOOR + 3;
+    const prescribed: number[] = [];
+    const withheld: number[] = [];
+    for (let major = 0; major < runtimeMajor; major++) {
+      const d = refuse(`^${major}`, `${runtimeMajor}.0.0`);
+      expect(d.targetMajor).toBe(major);
+      (d.migrateCommand === undefined ? withheld : prescribed).push(major);
+    }
+    expect(withheld).toEqual(Array.from({ length: MIGRATION_SUPPORT_FLOOR }, (_, i) => i));
+    expect(prescribed).toEqual([MIGRATION_SUPPORT_FLOOR, MIGRATION_SUPPORT_FLOOR + 1, MIGRATION_SUPPORT_FLOOR + 2]);
+  });
+
+  it.each([15, 0])('^%i carries no migrateCommand, and names a build for this protocol and the floor', (major) => {
+    const d = refuse(`^${major}`);
+    expect(d.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+    expect(d.targetMajor).toBe(major);
+    expect(d).not.toHaveProperty('migrateCommand');
+    // The command the chain refuses is never offered, nor a `Run:` line for one.
+    expect(d.message).not.toContain(`--from ${major}`);
+    expect(d.message).not.toContain('Run:');
+    expect(d.message).toContain("a build of 'com.acme.legacy' for protocol 18");
+    expect(d.message).toContain(`protocol ${MIGRATION_SUPPORT_FLOOR}`);
+  });
+
+  it('a union whose lowest alternative is below the floor targets it, and is withheld too', () => {
+    const d = refuse('^15 || ^17');
+    expect(d.targetMajor).toBe(15);
+    expect(d).not.toHaveProperty('migrateCommand');
+  });
+
+  it('AT the floor: ^16 keeps prescribing --from 16', () => {
+    const d = refuse('^16');
+    expect(d.targetMajor).toBe(MIGRATION_SUPPORT_FLOOR);
+    expect(d.migrateCommand).toBe('objectstack migrate meta --from 16');
+    expect(d.message.endsWith('Run: objectstack migrate meta --from 16')).toBe(true);
+  });
+
+  it('CONTROL: a major between the floor and the runtime keeps its --from, and an undeterminable target its bare command', () => {
+    const d = refuse('^17');
+    expect(d.migrateCommand).toBe('objectstack migrate meta --from 17');
+    expect(d.message.endsWith('Run: objectstack migrate meta --from 17')).toBe(true);
+    expect(refuse('<0').migrateCommand).toBe('objectstack migrate meta');
+  });
+
+  it('the HTTP answer carries the four members that apply, and still declares 422', () => {
+    let thrown: unknown;
+    try {
+      assertProtocolCompat({ id: 'com.acme.legacy', engines: { protocol: '^15' } }, RT_ABOVE_FLOOR, () => {});
+    } catch (e) {
+      thrown = e;
+    }
+    expect(isProtocolIncompatibleError(thrown)).toBe(true);
+    const answer = protocolIncompatibleAnswer(thrown as ProtocolIncompatibleError);
+    expect(answer.status).toBe(422);
+    expect(answer.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+    expect(answer.details).toEqual({
+      requiredRange: '^15',
+      rangeSource: 'engines.protocol',
+      protocolVersion: RT_ABOVE_FLOOR,
+      targetMajor: 15,
+    });
   });
 });

@@ -274,3 +274,91 @@ describe('Studio homeAmount editor (ADR-0144 D5)', () => {
     expect(screen.queryByTestId('currency-config-home-amount')).toBeNull();
   });
 });
+
+// `CurrencyConfigSchema.homeAmount` takes its three pointers together or not at
+// all, and every commit here reaches the draft the autosave sends. So a pick
+// that leaves one or two pointers set is held in the editor, never committed,
+// with one inline hint naming the pointers still to pick; the commit comes when
+// all three are set or all are empty. The spec is the oracle for what commits.
+describe('Studio homeAmount editor holds a partial pick back from the draft', () => {
+  const RO_CURRENCY = { type: 'currency', label: 'Home', readonly: true };
+  const RO_NUMBER = (label: string) => ({ type: 'number', label, readonly: true });
+  const RECORD = { currencyMode: 'record', currencyField: 'currency_code' } as const;
+  const OBJECT: Record<string, Record<string, unknown>> = {
+    currency_code: CODE,
+    other_code: { ...CODE, label: 'Other currency' },
+    invoice_date: { type: 'date', label: 'Invoice date' },
+    amount: { type: 'currency', label: 'Amount', currencyConfig: RECORD },
+    amount_home: RO_CURRENCY,
+    amount_rate: RO_NUMBER('Rate'),
+    other_rate: RO_NUMBER('Other rate'),
+  };
+  const COMPLETE = { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' };
+  const withHome = (homeAmount: Record<string, string>) => ({ ...OBJECT, amount: { ...OBJECT.amount, currencyConfig: { ...RECORD, homeAmount } } });
+  const parses = (fields: Record<string, unknown>) => ObjectSchema.safeParse({ name: 'invoice', label: 'Invoice', fields }).success;
+  const held = () => screen.queryByTestId('currency-config-home-amount-held');
+  const shows = (label: string, value: string) => expect(screen.getByRole('combobox', { name: label })).toHaveTextContent(value);
+
+  it('the fixture parses bare and with a complete homeAmount', () => {
+    expect(parses(OBJECT)).toBe(true);
+    expect(parses(withHome(COMPLETE))).toBe(true);
+  });
+
+  it('the first pick commits nothing, keeps the pick on screen, and names the two pointers still to pick', async () => {
+    const { onPatch } = renderAmountLive(OBJECT);
+    expect(held()).toBeNull();
+    await pick('Home amount field', 'amount_home');
+    expect(onPatch).not.toHaveBeenCalled();
+    shows('Home amount field', 'amount_home');
+    expect(held()).toHaveTextContent('Document date');
+    expect(held()).toHaveTextContent('Rate field');
+    expect(held()).not.toHaveTextContent('Home amount field');
+  });
+
+  it('the second pick commits nothing; the third commits once, with all three, and the object parses', async () => {
+    const { onPatch, saved } = renderAmountLive(OBJECT);
+    await pick('Home amount field', 'amount_home');
+    await pick('Document date', 'invoice_date');
+    expect(onPatch).not.toHaveBeenCalled();
+    expect(held()).toHaveTextContent('Rate field');
+    expect(held()).not.toHaveTextContent('Document date');
+    await pick('Rate field', 'amount_rate');
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    expect(saved().amount.currencyConfig).toEqual({ ...RECORD, homeAmount: COMPLETE });
+    expect(parses(saved())).toBe(true);
+    expect(held()).toBeNull();
+  });
+
+  it('clearing a complete homeAmount holds until the last pointer is cleared, then commits once with none', async () => {
+    const { onPatch, saved } = renderAmountLive(withHome(COMPLETE));
+    await pick('Home amount field', '— Not stored —');
+    expect(onPatch).not.toHaveBeenCalled();
+    expect(held()).toHaveTextContent('Home amount field');
+    await pick('Document date', '— Pick a date field —');
+    expect(onPatch).not.toHaveBeenCalled();
+    await pick('Rate field', '— Pick a number field —');
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    expect(saved().amount.currencyConfig).toEqual(RECORD);
+    expect(parses(saved())).toBe(true);
+    expect(held()).toBeNull();
+  });
+
+  it('a commit from elsewhere in the section keeps the held picks and the hint, and sends no partial homeAmount', async () => {
+    const { onPatch, saved } = renderAmountLive(OBJECT);
+    await pick('Home amount field', 'amount_home');
+    await pick(/Currency field/, 'other_code');
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    expect(saved().amount.currencyConfig).toEqual({ currencyMode: 'record', currencyField: 'other_code' });
+    shows('Home amount field', 'amount_home');
+    expect(held()).toHaveTextContent('Document date');
+  });
+
+  it('CONTROL: a complete homeAmount edited to another complete one commits once', async () => {
+    const { onPatch, saved } = renderAmountLive(withHome(COMPLETE));
+    await pick('Rate field', 'other_rate');
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    expect(saved().amount.currencyConfig).toEqual({ ...RECORD, homeAmount: { ...COMPLETE, rateField: 'other_rate' } });
+    expect(parses(saved())).toBe(true);
+    expect(held()).toBeNull();
+  });
+});

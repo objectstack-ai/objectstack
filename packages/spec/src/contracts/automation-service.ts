@@ -768,7 +768,8 @@ export interface AutomationResult {
      */
     userMessage?: string;
     /**
-     * The refusal a node's write met inside the run, structured —
+     * The refusal a node met inside the run (a data node's read or write, or a
+     * `script` node's function resolution), structured —
      * `{ code, message }`, `code` in its WIRE spelling (`UNIQUE_VIOLATION`
      * for a unique refusal), the shape a record save of the same write
      * answers with (ruling B′ on #24914; #24996).
@@ -1381,6 +1382,16 @@ export interface ConnectorConnectionState {
 export interface ConnectorConnectionRequest {
     /** The declarative connector instance, by name. */
     connector: string;
+    /**
+     * ADR-0150 D9 (#31699) — the package whose instance of `connector` is
+     * meant, when two packages of different namespaces each declare one of the
+     * name. The namespace-addressed connection door
+     * (`/automation/connectors/:ns/:name/connection`) fills it from the address;
+     * left out, the bare name must resolve to one instance or the call is
+     * refused `409` (ambiguity is reported, never guessed). A connect that
+     * already recorded a connection keeps that connection's package.
+     */
+    package?: string;
     /** The caller — its organization selects the connection, its user stamps the row. */
     context?: ExecutionContext;
     /**

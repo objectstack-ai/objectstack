@@ -580,3 +580,47 @@ describe('AuditPlugin — sys_comment access gates are mounted', () => {
     expect(denials[0].reason).toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
   });
 });
+
+describe('AuditPlugin — a host hands an app-supplied instance its crypto provider (ADR-0154 D2, D6; seat ruling 6884540128 item 3)', () => {
+  const crypto = (label: string) => ({ label }) as never;
+  /** The sealer `startSealer` composes over a storage double whose registry holds no sealed object: its pass seals nothing. */
+  const sealerOf = async (plugin: AuditPlugin): Promise<{ crypto?: unknown } | null> => {
+    const engine = { getDriverForObject: () => undefined, registry: { getAllObjects: () => [] } };
+    const ctx = { logger: { info() {}, warn() {}, error() {}, debug() {} }, getService: () => undefined };
+    (plugin as unknown as { startSealer(e: unknown, c: unknown): void }).startSealer(engine, ctx);
+    const sealer = (plugin as unknown as { sealer: { options: { crypto?: unknown }; stop(): Promise<void> } | null }).sealer;
+    await sealer?.stop();
+    return sealer && sealer.options;
+  };
+
+  it('takes the host provider when it was composed with none, and seals under it', async () => {
+    const plugin = new AuditPlugin({ readAudit: { objects: [] } });
+    const host = crypto('host');
+    expect(plugin.adoptHostCryptoProvider(() => host, { armSealer: true })).toBe(true);
+    expect((await sealerOf(plugin))?.crypto).toBe(host);
+  });
+
+  it('never overrides a provider the app composed it with', async () => {
+    const own = crypto('own');
+    const plugin = new AuditPlugin({ cryptoProvider: own });
+    expect(plugin.adoptHostCryptoProvider(() => crypto('host'), { armSealer: true })).toBe(false);
+    expect((await sealerOf(plugin))?.crypto).toBe(own);
+  });
+
+  it("keeps the sealer off on a host's one-shot boot, and an app's own `armSealer: false` stands", async () => {
+    const oneShot = new AuditPlugin();
+    expect(oneShot.adoptHostCryptoProvider(() => crypto('host'), { armSealer: false })).toBe(true);
+    expect(await sealerOf(oneShot)).toBeNull();
+    const off = new AuditPlugin({ armSealer: false });
+    expect(off.adoptHostCryptoProvider(() => crypto('host'), { armSealer: true })).toBe(true);
+    expect(await sealerOf(off)).toBeNull();
+  });
+
+  it('composes no provider when the host has none to hand: the sealer reports it once, at error (D3)', async () => {
+    const plugin = new AuditPlugin();
+    expect(plugin.adoptHostCryptoProvider(() => undefined, { armSealer: true })).toBe(true);
+    const sealer = await sealerOf(plugin);
+    expect(sealer).not.toBeNull();
+    expect(sealer?.crypto).toBeUndefined();
+  });
+});

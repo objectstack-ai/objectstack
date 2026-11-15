@@ -473,6 +473,18 @@ describe('/automation/connectors/:ns/:name/connection — a connector instance b
         expect(automation.getConnectorConnection).not.toHaveBeenCalled();
     });
 
+    it('[ADR-0150 D9, #31699] a name two packages hold: each namespace\'s address reads, connects and revokes its own package\'s instance (FROM: 409 naming both)', async () => {
+        const { call, automation } = dispatcherWith(connectors);
+        for (const [ns, pkg] of [['crm', CRM], ['hr', HR]] as const) {
+            const read = await call(`/connectors/${ns}/mail/connection`, 'GET');
+            expect(read.status, JSON.stringify(read.body)).toBe(200);
+            expect(automation.getConnectorConnection.mock.calls.at(-1)?.[0]).toMatchObject({ connector: 'mail', package: pkg });
+        }
+        // CONTROL: the one-holder address names no package; the bare door names none.
+        await call('/connectors/crm/stripe/connection', 'GET');
+        expect(automation.getConnectorConnection.mock.calls.at(-1)?.[0]).not.toHaveProperty('package');
+    });
+
     it('CONTROL — the literal segments keep their routes: `oauth` and `credential-refs` are never read as a namespace', async () => {
         // A package booted under `oauth` (held before the install refusal) holds `stripe`.
         const { call, automation } = dispatcherWith({ packages: { 'connector:stripe': [HR] }, namespaces: { [HR]: 'oauth' } });

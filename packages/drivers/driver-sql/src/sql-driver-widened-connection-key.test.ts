@@ -24,12 +24,10 @@
  *    package's connection.
  *
  * The live cells (PostgreSQL, MySQL) run the same upgrade over a real server
- * with the statement `metadata-protocol` runs there. On MySQL the guard is a
- * functional key part, which `driver-sql`'s introspection reads as an
- * expression rather than as a partial guard, so the widening arm KEEPS the old
- * key: a declared limit, pinned so that teaching the driver to read it turns the
- * pin red on purpose. It loosens nothing; the old key keeps refusing what it
- * refused.
+ * with the statement `metadata-protocol` runs there, and answer alike: one SAFE
+ * replace. On MySQL the guard is a functional key part, the driver's hash-shadow
+ * digest under `CASE WHEN connector_package IS NULL`, which the widening arm
+ * reads as the partial unique it is (`parseFunctionalRowScopedGuard`).
  *
  * The table first shipped in 18.3.0, after plain organization keys (18.1.0), so
  * no released database carries its old key in ADR-0120 D3's NULL-safe form.
@@ -179,10 +177,7 @@ for (const cell of [PG_CELL, MYSQL_CELL]) {
       };
       const drift = async () => ((await live!.detectManagedDrift()) as any[]).filter((e) => e.table === CONNECTIONS);
 
-      it(c.id === 'pg'
-        ? 'with the guard: one SAFE replace, applied; re-plan empty; a second package admitted, a second package-less row refused'
-        : 'DECLARED LIMIT: the functional guard is not read as the partial guard, so the old key is KEPT and still refuses a second package',
-      async () => {
+      it('with the guard: one SAFE replace, applied; re-plan empty; a second package admitted, a second package-less row refused', async () => {
         live = new SqlDriver(c.config());
         (live as any).logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
         await live.execute(`drop table if exists ${CONNECTIONS}`);
@@ -192,24 +187,16 @@ for (const cell of [PG_CELL, MYSQL_CELL]) {
         await live.execute(c.id === 'pg' ? GUARD_SQL : MYSQL_GUARD_SQL);
 
         const plan = await drift();
-        if (c.id === 'pg') {
-          expect(plan.map((e) => [e.op.type, e.category])).toEqual([['replace_unique_index', 'safe']]);
-          expect(plan[0].op).toMatchObject({ dropIndexNames: [OLD_KEY_NAME] });
-          const { applied, skipped } = await live.applyMigrationEntries(plan);
-          expect([applied.length, skipped]).toEqual([1, []]);
-          expect(await drift()).toEqual([]);
-          expect(await lands('p1', 'com.acme.crm')).toBe(true);
-          expect(await lands('p2', 'com.acme.hr')).toBe(true);
-          expect(await lands('p3', 'com.acme.crm')).toBe(false);
-          expect(await lands('n1', null)).toBe(true);
-          expect(await lands('n2', null)).toBe(false);
-        } else {
-          // Nothing offered — neither the replace nor an orphan drop of either index.
-          expect(plan.filter((e) => String(e.op.type).endsWith('_index'))).toEqual([]);
-          expect(await lands('p1', 'com.acme.crm')).toBe(true);
-          expect(await lands('p2', 'com.acme.hr')).toBe(false);
-          expect(await lands('n1', null)).toBe(false);
-        }
+        expect(plan.map((e) => [e.op.type, e.category])).toEqual([['replace_unique_index', 'safe']]);
+        expect(plan[0].op).toMatchObject({ dropIndexNames: [OLD_KEY_NAME] });
+        const { applied, skipped } = await live.applyMigrationEntries(plan);
+        expect([applied.length, skipped]).toEqual([1, []]);
+        expect(await drift()).toEqual([]);
+        expect(await lands('p1', 'com.acme.crm')).toBe(true);
+        expect(await lands('p2', 'com.acme.hr')).toBe(true);
+        expect(await lands('p3', 'com.acme.crm')).toBe(false);
+        expect(await lands('n1', null)).toBe(true);
+        expect(await lands('n2', null)).toBe(false);
       });
     });
   });

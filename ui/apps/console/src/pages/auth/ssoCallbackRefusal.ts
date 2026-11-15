@@ -64,6 +64,18 @@ const ACCESS_DENIED: RefusalCopy = {
     "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
 };
 
+const EMAIL_DOMAIN_NOT_ALLOWED: RefusalCopy = {
+  key: 'auth.login.errors.ssoEmailDomainNotAllowed',
+  defaultValue:
+    "No account was created: your email address isn't at a domain this system accepts new accounts from. Use your organization email, or ask your administrator.",
+};
+
+const EMAIL_NOT_AN_ADDRESS: RefusalCopy = {
+  key: 'auth.login.errors.ssoEmailNotAnAddress',
+  defaultValue:
+    "No account was created: your organization's sign-in service did not send a usable email address for you. Ask your administrator to check the single sign-on setup.",
+};
+
 const GENERIC: RefusalCopy = {
   key: 'auth.login.errors.oauthCallbackFailed',
   defaultValue:
@@ -96,6 +108,20 @@ const GENERIC: RefusalCopy = {
  *    `oauth-authorize-refusal.ts`), and the callback hands it on unchanged.
  *    Its sentence says the same as that provider's own refusal page, and the
  *    page offers the same two ways on ({@link accessDeniedExits}).
+ *  - `EMAIL_DOMAIN_NOT_ALLOWED`: two emitters send it here. With SSO domain
+ *    verification on, an identity provider asked for a new account whose
+ *    email is not at a domain it has proven (plugin-auth
+ *    `sso-account-at-proven-domain.ts`); and the `email_domain` audience
+ *    posture refused a self-serve creation, a social sign-up included, whose
+ *    email is not on the approved-domain list (plugin-auth
+ *    `audience-posture.ts`). The sentence is true of both: nothing was
+ *    created, the address is not at a domain this system accepts new accounts
+ *    from, and a second attempt meets the same rule, so it names the
+ *    organization email and the administrator, not trying again;
+ *  - `INVALID_EMAIL`: the provider asked for a new account and the sign-in
+ *    resolved to a value that is not an email address (no email attribute or
+ *    claim mapped). Nothing was created; only the administrator can fix the
+ *    mapping.
  *
  * A code missing here keeps the generic sentence.
  */
@@ -109,6 +135,8 @@ const SSO_CALLBACK_REFUSALS: Readonly<Record<string, RefusalCopy>> = {
   direct_sign_in_unavailable: DIRECT_SIGN_IN_UNAVAILABLE,
   direct_sign_in_rate_limited: DIRECT_SIGN_IN_RATE_LIMITED,
   access_denied: ACCESS_DENIED,
+  EMAIL_DOMAIN_NOT_ALLOWED: EMAIL_DOMAIN_NOT_ALLOWED,
+  INVALID_EMAIL: EMAIL_NOT_AN_ADDRESS,
 };
 
 /**

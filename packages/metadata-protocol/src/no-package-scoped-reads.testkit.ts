@@ -23,9 +23,13 @@
  * (`readsByPackage`): its bare read goes through `resolveItem`, which here is
  * the double's own `getItem` read (nothing, for a double with none), as the
  * registry's resolver answers a name one holder (or none) holds.
+ *
+ * [#31699 PR 3] `connector` is read the same way once its one-holder rule
+ * narrows to the namespace: `SchemaRegistry` reads it by package too, so a
+ * double that pins a connector read answers it through its own `getItem`.
  */
 export const NO_PACKAGE_SCOPED_READS = Object.freeze({
-    readsByPackage: (type: string): boolean => type === 'flow',
+    readsByPackage: (type: string): boolean => type === 'flow' || type === 'connector',
     resolveItem(this: { getItem?(type: string, name: string, packageId?: string, member?: string): unknown },
         type: string, name: string, callerPackageId?: string | null, member?: string): unknown {
         return typeof this.getItem === 'function' ? this.getItem(type, name, callerPackageId ?? undefined, member) : undefined;
