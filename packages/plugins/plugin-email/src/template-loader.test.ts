@@ -513,6 +513,7 @@ describe('createRegistryEmailTemplateLoader — a disabled package holds no name
   };
   const STATES: Record<string, State> = {
     'two holders': { holders: [ALPHA, BETA], besideRow: 'none', adderDisabled: false, auth: false },
+    'one holder': { holders: [ALPHA], besideRow: 'none', adderDisabled: false, auth: false },
     'two holders, the dependent disabled': { holders: [ALPHA, BETA], besideRow: 'none', adderDisabled: true, auth: false },
     'one holder beside the environment\'s item, registered first': { holders: [ALPHA], besideRow: 'environment item first', adderDisabled: false, auth: false },
     'one holder beside the environment\'s item, registered last': { holders: [ALPHA], besideRow: 'environment item last', adderDisabled: false, auth: false },
@@ -630,17 +631,19 @@ describe('createRegistryEmailTemplateLoader — a disabled package holds no name
         BUILTIN: ['409 outside-closure [BETA]', '409 outside-closure [BETA]'],
       },
     },
-    { // rows 27, 28 and 30, the pair's row the enabled holder's own
+    { // rows 27, 28 and 30, the enabled holder's side its own; the one served
+      // holder is read from the environment-wide list, so every caller but the
+      // disabled one answers as the CONTROL below, where only ALPHA holds it
       state: 'two holders', disabled: [BETA],
       protocol: {
-        omitted: ['ALPHA en-US', 'PAIR fr-FR'],
-        null: ['ALPHA en-US', 'PAIR fr-FR'],
-        ALPHA: ['ALPHA en-US', 'PAIR fr-FR'],
+        omitted: ['ALPHA en-US', 'ADDER fr-FR'],
+        null: ['ALPHA en-US', 'ADDER fr-FR'],
+        ALPHA: ['ALPHA en-US', 'ADDER fr-FR'],
         BETA: ['no template', 'no template'],
-        BOTH: ['ALPHA en-US', 'PAIR fr-FR'],
-        VIA_ALPHA: ['ALPHA en-US', 'PAIR fr-FR'],
+        BOTH: ['ALPHA en-US', 'ADDER fr-FR'],
+        VIA_ALPHA: ['ALPHA en-US', 'ADDER fr-FR'],
         NEITHER: ['409 outside-closure [ALPHA]', '409 outside-closure [ALPHA]'],
-        ADDER: ['ALPHA en-US', 'PAIR fr-FR'],
+        ADDER: ['ALPHA en-US', 'ADDER fr-FR'],
         BUILTIN: ['409 outside-closure [ALPHA]', '409 outside-closure [ALPHA]'],
       },
       registry: {
@@ -650,6 +653,21 @@ describe('createRegistryEmailTemplateLoader — a disabled package holds no name
         BOTH: ['ALPHA en-US', 'no template'],
         VIA_ALPHA: ['ALPHA en-US', 'no template'],
         ADDER: ['ALPHA en-US', 'no template'],
+      },
+    },
+    { // CONTROL: only ALPHA holds the name, nothing disabled (the world above
+      // with BETA holding nothing)
+      state: 'one holder', disabled: [],
+      protocol: {
+        omitted: ['ALPHA en-US', 'ADDER fr-FR'],
+        null: ['ALPHA en-US', 'ADDER fr-FR'],
+        ALPHA: ['ALPHA en-US', 'ADDER fr-FR'],
+        BETA: ['409 outside-closure [ALPHA]', '409 outside-closure [ALPHA]'],
+        BOTH: ['ALPHA en-US', 'ADDER fr-FR'],
+        VIA_ALPHA: ['ALPHA en-US', 'ADDER fr-FR'],
+        NEITHER: ['409 outside-closure [ALPHA]', '409 outside-closure [ALPHA]'],
+        ADDER: ['ALPHA en-US', 'ADDER fr-FR'],
+        BUILTIN: ['409 outside-closure [ALPHA]', '409 outside-closure [ALPHA]'],
       },
     },
     { // rows 31 and 36
