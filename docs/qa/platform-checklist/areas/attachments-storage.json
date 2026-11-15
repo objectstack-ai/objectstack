@@ -1180,7 +1180,7 @@
       "title": "Upload contract on v18: a declared size over the limit (100 MiB default, moved live by the max_upload_mb setting) is 413 with nothing written, an unknown scope is 400 naming the allowed values (public is retired), only the uploader may complete or poll an upload, an unclaimed private file is 401 to anonymous, and a file id copied from another record hydrates as {id, metadataRefused:true}",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1205,7 +1205,7 @@
         {
           "clause": "limits, scope vocabulary, uploader-only doors, unclaimed-download floor and file hydration — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -1281,6 +1281,12 @@
           "date": "2026-10-31",
           "change": "acceptance[5] and steps[4] say how the copied-id state is reached and for whom. QA run #27409 noted that a data-API write of a copied file id is copy-on-write, so only a driver-level write reaches the state, and that a reader holding sys_file read sees the foreign file in full. file-reference-lifecycle.ts copies a file another record owns on claim (copyOwnedFile). engine-file-reference-hydration.ts mints {id, metadataRefused:true} only on the refused-sys_file-read arm, judged per record. The step plants the id below the hooks and reads the column back. The reader is one refused sys_file read, as the run drove it (reader D: qa_shared read, no sys_file). Stronger, not weaker: the raw read rules out a minted copy passing as the planted id. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
           "ref": "#27409"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -1289,7 +1295,7 @@
       "title": "Chunked upload integrity on v18: complete with a missing chunk is 409 with details.missingChunks and the session stays in_progress, a re-sent chunk counts once, parallel chunks all record, and an org switch mid-upload answers 409 on chunk and complete, and on progress only once the session's expiry stamp is due",
       "since": "v18",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1315,7 +1321,7 @@
         {
           "clause": "chunk accounting and the missing-chunk refusal — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand). The org-switch guard of acceptance[3] is pinned at the chunked doors by storage-upload-organization-change.wall.test.ts (knownGaps[0])",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -1399,6 +1405,12 @@
           "date": "2026-11-08",
           "change": "fixtures.knownGaps gains acceptance[3]'s second-organization fixture gap and the group boot that would serve it. Coverage gap of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
           "ref": "#31499"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },

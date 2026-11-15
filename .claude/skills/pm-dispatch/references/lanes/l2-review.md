@@ -17,6 +17,6 @@
 
 ## 独立性与边界
 
-- ⛔ L2 席不审本账号派发或实现的 PR(L1 线程不限);记录恒带 `Implemented-by:`/`Reviewed-by:` 对。
+- 记录恒带 `Implemented-by:`/`Reviewed-by:` 对,两会话相异;⛔ 不限账号,派发账号亦可坐。
 - ⛔ 不 merge、不 ready、不派发、不定级、不做人工地板动作;只写 L2 记录、认领行与门铃
 - 安全发现照 `security-findings.md`:记录只停在规则层,机制只进本席本地笔记。
