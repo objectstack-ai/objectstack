@@ -2,8 +2,8 @@
   "number": 33545,
   "kind": "issue",
   "title": "build validation: report two visible fields with the same label on one object (split from #33506)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "domain:spec",
     "enhancement",
     "finding",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:07:13Z",
-  "updated_at": "2026-11-15T02:19:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T05:58:45Z",
+  "closed_at": "2026-11-15T05:57:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33545",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a split owed by a card in flight). Card #33506 (p2) found an AI-built object on staging carrying the system `owner_id` (label 「负责人」) and a new `assignee` user field also labelled 「负责人」: the grid shows two 「负责人」 columns and the kanban card shows owner twice. Triage's first touch (6886116954) put the authoring rule with the skills lane and named the build check as the build validation lane's work, to be split if the skills seat does not carry it. The skills seat carries the authoring rule on #33506; this card is the check.\n\n## What lands\n\n1. The object build or validation step that authors run (the one the AI builder's integrity check calls) reports an object with two or more visible fields sharing one label (system fields included, after locale resolution) as an error with a readable message naming both field names.\n2. Decide and record whether it is an error or a warning for objects already installed, so existing apps do not stop loading. That decision belongs to the owning lane; if it needs the maintainer, say so on this card.\n3. A test pinning the `owner_id` + same-label user field case from #33506.\n\n## Reader\n\nWhichever lane owns object build validation (spec or server). Triage routes and grades.\n\nPart of #33506\n"

@@ -2,8 +2,8 @@
   "number": 33498,
   "kind": "issue",
   "title": "console: linking a social/OIDC account that is already linked to another user, or that cannot be linked, still brings the signed-in person back with no word",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T22:40:11Z",
-  "updated_at": "2026-11-15T02:20:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:22:15Z",
+  "closed_at": "2026-11-15T04:21:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33498",
   "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ① a user-visible defect with a named producer. The #33063 os-dev read it on the vendor code, not live (report 6885304558, `out_of_scope_findings[0]`, class a), and it surfaced beside PR #33496.\nReader: `domain:ui` (`ui/apps/console` auth pages + `@object-ui/i18n`). Grade p3, self-graded by the seat under the maintainer's 「定级你可以自己决定」: a refused link says nothing, but no data is wrong and the person can retry.\nDedupe: `is:issue is:open account_already_linked_to_different_user` and `unable_to_link_account` find only #33063 (the sibling `email_does_not_match` code).\n\n## 维护者速读\n\n已登录用户在账号设置里关联第三方（社交 / OIDC）账号时，如果该第三方账号已经关联到别的用户，或者关联失败，better-auth 会带着错误码回到 Console，但页面什么都不说。#33063（PR #33496）只给「邮箱不一致」这一种拒绝加了提示，这两种同族的拒绝还是没有任何提示。\n\n## Producer\n\n- better-auth 1.7.12 `linkOAuthAccount` (`oauth2/link-account.mjs`) refuses a signed-in link with `account_already_linked_to_different_user` or `unable_to_link_account`. It redirects to the same Console login error URL as `email_does_not_match`.\n- After PR #33496, the console keeps only the link codes it has a sentence for (`SIGNED_IN_LINK_REFUSALS`) and shows them through `LinkRefusalNotice`. These two codes have no entry, so the person lands back with no notice.\n\n## Acceptance\n\n- Both codes reach the signed-in person as one persistent, translated notice, through the same path PR #33496 adds: one `SIGNED_IN_LINK_REFUSALS` entry and one key in all 11 locales per code. The wording says what happened and what to do; it names no other user.\n- Pin through the real App, as #33063's pins do, for each code under `en` and `zh-Hans`. CONTROL: `email_does_not_match` still shows its own sentence, and an unknown code still shows nothing new.\n- Measure each code live, or on the vendor code if live is out of reach, and say which in the PR.\n- ⛔ Lands after PR #33496 (same files)."

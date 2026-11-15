@@ -13,20 +13,18 @@
   "labels": [
     "domain:server",
     "lease:A5",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T23:40:13Z",
-  "updated_at": "2026-11-15T00:34:06Z",
+  "updated_at": "2026-11-15T05:12:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33527",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cxHwXNcGcAHNerZsom\n\nLoose-ends card for #33302 (landed as #33448). ⛔ Not a claim.\n\n## What happens\n\nreview#2's PASS on #33448 (comment 6885113780) and the os-dev report (comment 6885073938 on #33302) left these outside that PR's surface:\n\n1. **Probe first: do the withdrawal doors leave a package armed?** `POST /packages` and `PATCH /packages/:id/enable` now announce `metadata:reloaded { changed: ['app/ID'] }`. `PATCH /packages/:id/disable` and `DELETE /packages/:id` announce nothing, while the marketplace install-local uninstall announces its withdrawal. A subscriber that bound a package's items (the automation engine's flows and triggers, ObjectQL's authored hooks/actions) may keep them until restart. Not measured. Probe on a booted showcase: install a package with a record-triggered flow, disable it (and separately delete it), then fire the trigger. Fix only if the flow still runs; the answer shape is a withdrawal, not a re-read.\n2. **Stale comments (N1).** `packages/plugins/plugin-security/src/position-renamed-holder-carry.ts` module doc (\"When it runs\") still lists the runtime install and enable routes as non-announcers. The comment beside the hook in `security-plugin-start-hooks.ts` lists only install-local, publish and publish-drafts as announcers.\n3. **Jsdoc precision (N2).** `announcePackageReload` in `packages/runtime/src/domains/packages.ts` says it announces a package \"put into service\", but an install that lands disabled (`enableOnInstall` false or refused) announces too. Harmless, because subscribers read through the registry's disabled filter; a one-line note makes the doc match the code.\n\n## Expected\n\n1. A measured answer for disable and DELETE; a fix only if the probe shows a withdrawn package stays armed.\n2. and 3. Comments and jsdoc say what the code does.\n\nDedupe words: `package disable delete metadata:reloaded withdraw`, `position-renamed-holder-carry announcer comment`, `announcePackageReload disabled install`.\nRelated: #33302, #33448, #33238."

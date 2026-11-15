@@ -1,0 +1,33 @@
+{
+  "number": 33670,
+  "kind": "issue",
+  "title": "objectql: hook-binder and the bare-name cold-boot warning still say a clashing function name is refused; the bind fails and the owner group stays unbound",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "finding",
+    "lease:E2",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T05:27:10Z",
+  "updated_at": "2026-11-15T05:49:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33670",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (code-side remainder named by card #33569, whose skills fix is PR #33668; the skills lane does not edit `packages/objectql/**`).\n\nTwo texts in `packages/objectql` still describe a clashing bare **function** name the way the skill used to (\"refused\"), while on `main` no install door judges a function: the hook binder's bind (`claimBareNameFunctions`) throws, `bindAppArtifactHandlers` catches it per owner group and logs \"Failed to bind declarative hooks\" at `error`, the package installs, and every function and hook of that owner group stays unbound.\n\n1. `packages/objectql/src/hook-binder.ts` around lines 210 to 216: the comment says \"this refusal stays until the trailing backstop child (ADR-0150 D9) narrows it\". That child has landed; the comment should say what the bind does now (and that the throw is caught per owner group).\n2. `packages/objectql/src/registry.ts` `bareNameColdBootWarning` (around line 2960): \"a further package declaring the name is refused at install\". True for the registry's covered types; for a function the bind fails instead. Make the sentence type-accurate (or name functions apart), and keep any pinned test text in step.\n\n## What lands\n\nThe two texts corrected against the code on `main`, with any test that pins the warning text updated. Whether the bind should instead refuse the install, or bind the non-clashing members of the group, is the owning lane's design call: say so on this card if it wants a ruling.\n\n## Reader\n\nThe lane that owns `packages/objectql` (server). Not graded here; triage decides.\n"
+}

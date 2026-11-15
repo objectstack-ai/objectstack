@@ -1,0 +1,38 @@
+{
+  "number": 33633,
+  "kind": "issue",
+  "title": "SQL performance M0 (epic #33631): inventory every engine path that does in the app what SQL could do, and a benchmark baseline on SQLite and PostgreSQL",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "lease:A3",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T03:25:25Z",
+  "updated_at": "2026-11-15T06:32:59Z",
+  "closed_at": "2026-11-15T06:32:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33633",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed, the M0 child of epic #33631 (「开一个SQL性能优化专题」「p1」, 2026-11-15). ⛔ Not a claim.\n\n## 维护者速读\n\n先测量再动手：列出引擎里所有「本可以交给数据库、却在应用层做」的路径，比如先查 id 再 `IN`、应用层关联、逐行查询（N+1）、应用层聚合或排序，以及权限范围在应用层展开。在 SQLite 和 PostgreSQL 上建一个固定的基准（10 万 / 100 万行），给每一项量出耗时，按收益排序。M2 的卡从这份清单拆出来。\n\n## What lands\n\n1. **Inventory.** On SQL drivers (driver-sql dialects, Turso), list each engine or service path that does any of the following:\n   - materializes an id list, then re-queries with `$in` (e.g. `lowerRelationConditions`, `engine-query-lowering.ts:181-217`; `RELATION_FILTER_ID_CAP`);\n   - joins, sorts, groups or aggregates in application memory where the SQL could;\n   - issues one query per row or per record (N+1: lookups, expand, summaries, hooks reading parents);\n   - expands a read scope (RLS, sharing, controlled_by_parent) in the app instead of a SQL predicate;\n   - runs on a lookup or master_detail column with **no database index**. Check whether schema sync creates one by default.\n\n   For each item: file:line, the trigger (which API or query shape), and the SQL shape it should become.\n2. **Baseline.** A repeatable benchmark (script under `scripts/` or `packages/qa`) on SQLite and PostgreSQL, seeded at 100k and 1M child rows with 2–3 levels of parents. It covers list reads with filters and sorts, cross-object filters, dataset aggregates, record pages with related lists, and read-scoped reads as a non-admin. It records p50/p95 and query counts per scenario.\n3. **Ranked list** posted on epic #33631: item → measured cost → expected gain → area → rough size. The maintainer picks what M2 files.\n\n## Not in scope\n\nFixing anything (M2 does that), and memory or mongo drivers (#5499; under this epic they may refuse).\n\n## Grade\n\np1, the epic's grade (the maintainer's word).\n\nReader: `domain:server`; `domain:server#5` assigns it within the area-lease pilot (#33059). It spans A3, A4 and E1/E2."
+}

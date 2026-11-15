@@ -1,0 +1,34 @@
+{
+  "number": 33722,
+  "kind": "issue",
+  "title": "skills(objectstack-data): the data-hooks reference still filters task on a hand-named owner, not owner_id (follow-up of #33560)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T07:30:44Z",
+  "updated_at": "2026-11-15T08:13:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33722",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a follow-up owed by work in flight: the at-tier contract review 6891083453 on PR #33720, card #33560, found this outside its diff, by reading).\n\nPR #33555 (card #33506) teaches that a record's owner is the injected `owner_id`, and PR #33720 (card #33560) moved the ui, query and automation examples onto it. `skills/objectstack-data/references/data-hooks.md` line 304 (on `main`) still filters `task` on a hand-named `{ owner: uid }`, the same family the two PRs retired. An agent copying it declares or reads an `owner` field beside the injected one.\n\n## What lands\n\nPoint the example at `owner_id`. No restatement of the data rule. `@objectstack/skills` patch changeset. `skills/**` only, `Clause-②: no`.\n"
+}

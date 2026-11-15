@@ -1,0 +1,30 @@
+{
+  "number": 33624,
+  "kind": "issue",
+  "title": "runtime: the protocol package-uninstall door (DELETE /api/v1/packages/:id) may leave an uninstalled package's engine action handlers bound until restart; measure, then share the install-local door's cleanup",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T03:12:03Z",
+  "updated_at": "2026-11-15T03:12:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33624",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4czXwx6JtQPvacrzzUw\n\nFollow-up of #33536 / PR #33622 (area E2, area-lease pilot #33059). The seat filed this unleased during the pilot drain, so it is queued for the next dispatcher.\n\n## Premise (UNMEASURED: read from code only)\nPR #33622 makes the install-local DELETE door unbind an uninstalled package's engine action handlers (`unbindAppArtifactHandlers`). The protocol door, `DELETE /api/v1/packages/:id` (`deletePackage` in packages/metadata-protocol plus runtime `packages.ts`), appears not to call it, so the handlers would stay bound until restart.\n\n## Step 1: measure\nInstall a package with an action handler, uninstall it through the protocol door, then invoke the action. Record whether the handler still runs. If it does not reproduce, close this card with the measurement.\n\n## Step 2 (only if reproduced): proposed fix A\nRegister `unbindAppArtifactHandlers` as a `runtime.package-handlers` uninstall cleanup, so both doors share one path. Cost: the uninstall responses' cleanup lists gain a row, and the pins on those lists move (Clause-② table needed). The alternative B leaves the handlers bound until restart.\n\nThe seat rules A vs B once Step 1 is measured.\n\n## Owners\npackages/metadata-protocol belongs to E1, and packages/runtime (outside action routes) belongs to A5. Whoever claims it coordinates with both."
+}

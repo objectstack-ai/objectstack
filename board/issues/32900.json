@@ -2,8 +2,8 @@
   "number": 32900,
   "kind": "issue",
   "title": "metadata-protocol: the registry's bare slot keeps only the row hydrated last when a pair row and a package-less row of the same member are both stored",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T23:00:00Z",
-  "updated_at": "2026-11-14T23:14:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T03:23:14Z",
+  "closed_at": "2026-11-15T03:23:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

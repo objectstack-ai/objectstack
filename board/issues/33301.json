@@ -3,7 +3,7 @@
   "kind": "issue",
   "title": "docs + spec: ADR-0150 D7 addendum, PositionSchema.renamedFrom describe and the position liveness line still say the renamedFrom holder carry runs at boot only (after PR #33245)",
   "state": "open",
-  "state_reason": null,
+  "state_reason": "reopened",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T16:15:46Z",
-  "updated_at": "2026-11-15T01:04:49Z",
+  "updated_at": "2026-11-15T06:06:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33301",
   "body": "domain:server#7 · sunhaolin · session_017xRBcSZ51q2s3nMfakhdJ3\n\nFollow-up from #33238 (PR #33245, contract review PASS 6880449445 at `428a7426`). ⛔ Not a claim; triage sets the lane and grade. review#2 flagged this on both rounds (6879548824, 6880449445) as owed with the change, in a separate Tier H docs PR.\n\n**What PR #33245 changes:** the `renamedFrom` holder carry in plugin-security still runs at `kernel:bootstrapped`, over every claim, as before. It now also runs after each `metadata:reloaded` that follows the boot run, and only over the claims of what that announcement names as registered: `app/ID` while package `ID` is held, and `position/NAME`. Carried at once: a hot install-local install, a per-item publish of a position, and the positions of a publish-drafts. Carried at the next restart, as before: a hot upgrade over a version the running kernel still serves, the runtime `POST /packages` install and enable routes (they do not announce), and an artifact reload.\n\n**Stale text, read on `origin/main`:**\n- `docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md` ~L288, the 2026-11-13 addendum (ruling A1, record 6841971722). It says the carry runs \"at `kernel:bootstrapped`\", and later: \"It runs at boot only: a package installed or upgraded into a running kernel is carried at the next restart.\" The maintainer's confirmation 6845410998 records the same.\n- `packages/spec/src/identity/position.zod.ts` ~L170, `PositionSchema.renamedFrom` `.describe()`: \"At boot the platform moves every holder of an old name …\".\n- `packages/spec/liveness/position.json` ~L40, the `evidence` text for `renamedFrom`: \"at kernel:bootstrapped, from SecurityPlugin's start hooks …\".\n\n**Expected:** each of the three says what PR #33245 does: boot over every claim, plus a reload over the claims the announcement names, with the doors that still wait for a restart. The ADR line is Tier H and needs a GOVERNED_APPROVER. The dev's suggested wording: \"It runs at boot and again on each metadata:reloaded after it, which a hot install announces; a door that does not announce, and an upgrade over a version the running kernel still serves, carry at the next restart.\"\n\n**Also (jsdoc nits, review 6880449445 ④):** the \"When it runs\" section of `position-renamed-holder-carry.ts` and the hook comment in `security-plugin-start-hooks.ts` describe the admitted `app/ID` and `position/NAME` entries more narrowly than the code admits. These two are plugin-security files; triage may split them off. review#2 holds the detail of nit 1.\n\n**Serial:** after PR #33245 merges.\n\nDedupe: `renamedFrom ADR-0150 boot only` → #33238 only (the parent card)."

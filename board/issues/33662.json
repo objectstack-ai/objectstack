@@ -1,0 +1,37 @@
+{
+  "number": 33662,
+  "kind": "pull_request",
+  "title": "test(qa): SQL performance M0 baseline — SQLite and PostgreSQL at 100k and 1M rows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T05:06:05Z",
+  "updated_at": "2026-11-15T06:32:58Z",
+  "closed_at": "2026-11-15T06:32:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T06:32:56Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33662",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DWLrF6ZURGN6BVpSbuDyHTg)_\n\nFixes #33633\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:在 `packages/qa/dogfood/bench/sql-perf/` 加了一套 SQL 性能基准(固定测试应用 + HTTP 基准脚本 + \"现状 SQL 对比目标 SQL\"脚本),只测量,不动任何产品代码。\n- 为什么改:SQL 性能专题(#33631)的 M0 要求先量后修:在 SQLite 和 PostgreSQL 上、10 万和 100 万行规模下给出每条路径的耗时和 SQL 条数,排出 M2 的优先级。排序清单已贴在 #33631。\n- 风险与回滚:无运行时风险——私有包里的脚本与夹具,不发布、不进测试套件;回滚即删除该目录并还原 dogfood 的 tsconfig 一行。\n- 先看:`packages/qa/dogfood/bench/sql-perf/bench.mjs`(场景定义与计数方式)、`micro.mjs`(每个\"预期收益\"数字的来源)、`app/objectstack.config.ts`(数据形状)。\n- 两分钟验证:`pnpm --filter '@objectstack/cli...' build` 之后跑 `node packages/qa/dogfood/bench/sql-perf/bench.mjs --dialect sqlite --scale 1000 --iterations 3`,预期约 1 分钟内打印 19 个场景并写出 `results/sqlite-1000.md`,其中 `cross_object_filter_large` 在此规模为 200、`cascade_delete_opportunity` 为 155 条 SQL。\n- 需要你做的:在 #33631 的排序清单里挑出 M2 要立的卡。\n\n## What changes\n\n- `packages/qa/dogfood/bench/sql-perf/app/objectstack.config.ts` — the fixture app: `bench_region` (20) -> `bench_account` (scale/100, private OWD) -> `bench_opportunity` (scale/10, controlled_by_parent) -> `bench_line_item` (scale, controlled_by_parent, lookup `bench_product`). A default permission set gives a member `own` read on accounts, so the member's reads compose the nested master chain.\n- `bench.mjs` — boots the fixture with `os dev --no-watch` on SQLite (`better-sqlite3` SqlDriver) or PostgreSQL, mints a member, writes one template row per object through the API, stops the server, bulk-loads the tables directly, runs `ANALYZE`, reboots and times 18 read scenarios (admin and member) plus a cascade delete over HTTP. Per scenario: client p50/p95, server total, and the exact SQL statement count from the `db` mark of `Server-Timing` (`OS_SERVER_TIMING=true`); the admin's SQL text from `X-OS-Debug-Timing: json`. Every phase has a deadline; the server is torn down by process group.\n- `micro.mjs` — on a seeded database, times the statement the engine runs today beside the statement it could run (the \"expected gain\" column of the ranked list), including two temporary-index pairs it drops again.\n- `README.md` — how to run and read it.\n- `packages/qa/dogfood/tsconfig.json` — `include` gains `bench/**/*.ts`, so the fixture config is type-checked with the package. Vitest still collects `test/**` only; nothing here runs in CI's test jobs.\n\nThe inventory, the baseline tables and the ranked list are on the epic: #33631 (ranked-list comment). (Corrected after review#2, see the correction comment on #33631.) Headline: R1 per-measure aggregation filter loads every row into the app (PG 7.3 s at 1M). A conditional aggregate does it in 0.14 s: that was `sum(case when … end)`, and PG `FILTER (WHERE …)` measures the same. R2 an analytics dimension through a lookup answers 500 above the bind limit on both dialects. R3 the default sort column `created_at` has no index. On PG the index alone takes the admin default page, as emitted today, from 229 ms to 0.9 ms at 1M. On SQLite it helps only together with R4: the chained page keeps its plan, and the page goes 1.2–1.7 s to 0.09 ms only once the vacuous chain is dropped. R5: 400 INVALID_FILTER at 100k (~2,000 matching opportunities; ~20,000 at 1M).\n\n## Tests\n\nNo product code changed, so no unit test; the deliverable is the harness and its readings.\n\n<details><summary>Benchmark runs (all four cells of the card's matrix)</summary>\n\n- SQLite 100k, SQLite 1M, PG 100k, PG 1M — every scenario measured; seed 1.2 s / 9.3 s / 3.7 s / 32.6 s. Runs were taken at `fc532017` and (PG 1M) `e78703bd`; `bench.mjs` and the fixture are byte-identical between the two and the final head.\n- Smoke at scale 1000: 19 scenarios, exit 0.\n- Lock verdicts: `VERDICT command-exit 0` (100k pair), `VERDICT batch-last-exit 0` (1M pair, both parts printed their `wrote … .json` line), `VERDICT command-exit 0` (SQL pairs, both dialects).\n\n</details>\n\n## Acceptance notes\n\n- PostgreSQL ran on a private cluster in the container (`fsync=off`, `synchronous_commit=off` to speed the bulk load; reads are what is timed). The box is shared with other agents: statement counts are exact, milliseconds indicative.\n- The member's SQL text is not shown (the server discloses `X-OS-Debug-Timing-Detail` to an admin only); its statement count is exact.\n- Not covered by this fixture, so not measured: sharing grants (`sys_record_share`), roll-up summaries, Turso remote, a network database. They are in the ranked list as unmeasured items.\n- Read-only inference, not reproduced, not filed: `SharingService#buildReadFilter` reads at most 5000 `sys_record_share` rows into an `id IN (…)`, so grants past 5000 look silently dropped (fail-closed). Needs a share-seeding leg to measure.\n- Location: the harness lives in the private `@objectstack/dogfood` package because it needs `@objectstack/spec` (for `defineStack`), the `os` binary and driver-sql's clients, all already dependencies there — no lockfile change, no new package.\n\n## Verification\n\n<details><summary>Local gates at head (this PR's derived families)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands`: 46 families derived from the diff; all 46 run and reconciled with `--ran` (46 derived, 46 run, 0 unrun). 43 exit 0.\n- NOT MEASURED locally (environment, not the diff): `check:dts-closure` (exit 1 — this worktree built the CLI closure with `OS_SKIP_DTS=1`, so declaration files are absent), `check:dual-build-cjs-loads` (exit 3, PREREQUISITE NOT MET — no full `pnpm build`), `check-plugin-teardown-shape.mjs --self-test` (exit 3 — shallow clone cannot reach its pinned positive-control commit). CI's full build runs all three.\n- `tsc -p` over the dogfood compiler options restricted to `bench/**/*.ts`: exit 0, `objectstack.config.ts` in the program (`--listFiles`).\n- `eslint --no-inline-config packages/qa/dogfood/bench`: exit 0.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4d1QwJJ5KGZTThP4fnq)_\n\n<!-- signed: domain:server#5 · os-elon-musk · session_016WV4d1QwJJ5KGZTThP4fnq -->\n"
+}

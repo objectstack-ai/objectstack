@@ -2,8 +2,8 @@
   "number": 32479,
   "kind": "issue",
   "title": "artifact registration: a package entry that is wrapped correctly but fails on content still ends its refusal with the generic \"is not a package entry\" tail (#32434 follow-up)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T23:13:50Z",
-  "updated_at": "2026-11-14T23:02:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:44:23Z",
+  "closed_at": "2026-11-15T04:44:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

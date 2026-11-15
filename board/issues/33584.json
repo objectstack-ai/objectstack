@@ -2,8 +2,8 @@
   "number": 33584,
   "kind": "issue",
   "title": "plugin-security: member_default grants sys_comment_reaction read + create, so a stock member can react to comments they can read",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T01:41:52Z",
-  "updated_at": "2026-11-15T01:50:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T05:07:47Z",
+  "closed_at": "2026-11-15T05:07:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33584",
   "body": "domain:server#5 · os-elon-musk · session_016WV4czXwx6JtQPvacrzzUw\n\nArea-lease pilot #33059, lease:E1. Maintainer decision 2026-11-15T01:40Z: option A, \"members may react by default\". This settles the open question on #22566 of which shipped set carries these bits, for `member_default` only.\n\n## Premise (measured on main ba35dfd7, E1)\nA stock showcase member has no grant on `sys_comment_reaction`. The record page falls back to the column store and offers the reaction control. Clicking it PATCHes the retired `sys_comment.reactions` column and answers 400 INVALID_FIELD, while `POST /data/sys_comment_reaction` answers 403.\n\n## Fix\n- In `packages/plugins/plugin-security/src/objects/default-permission-sets.ts`, `member_default` gets `sys_comment_reaction: { allowRead: true, allowCreate: true, allowEdit: false, allowDelete: false }`, beside the `sys_comment` line. No row policy: the tripwire in default-permission-sets.test.ts forbids one.\n- `external_default` is not covered. Portal users keep today's answer unless that is ruled separately.\n- Update the header of `comment-reaction-own-record-floor.test.ts`, which calls this \"an open decision on #22566\".\n- Add a dogfood pin: a stock member reacts to a readable comment (201), unreacts their own reaction, cannot remove another member's reaction, and reads reactions only on comments they can read.\n\n## Why it is safe (reviewed)\n- Reads are narrowed to readable comments (`installCommentReadVisibility`).\n- Inserts refuse unreadable comments and stamp `user_id` from the session (`authorizeReactionInsert`).\n- Unreact removes only `created_by == caller` rows, and there is no update method.\n\n## Out of scope\nThe console store-choice bug is #33521."

@@ -2,7 +2,7 @@
   "number": 33361,
   "kind": "pull_request",
   "title": "fix(plugin-email)!: the email template send judges the served holders, so a disabled package holds no name at the send (ADR-0150 D3)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T17:30:20Z",
-  "updated_at": "2026-11-15T00:14:22Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-15T04:13:47Z",
+  "closed_at": "2026-11-15T04:13:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T04:13:46Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/33361",

@@ -2,8 +2,8 @@
   "number": 33487,
   "kind": "issue",
   "title": "fix(automation): durable http node with no method sends POST via the outbox but GET on the no-outbox fallback",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -24,11 +24,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T22:27:59Z",
-  "updated_at": "2026-11-15T01:45:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:45:48Z",
+  "closed_at": "2026-11-15T04:45:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33487",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (found while reviewing in-flight work). Contract review of PR #33482 (card #32525) read `packages/services/service-automation/src/builtin/http-nodes.ts` on main to judge a skill sentence, and found this outside its diff. The seat confirmed it on main.\n\n## What is wrong\n\nA durable `http` node (`config.durable: true`) authored without `method` sends a different verb depending on whether an outbox is wired:\n\n- **Outbox wired:** the enqueue passes `method: cfg.method ?? 'POST'`.\n- **No outbox (the degrade path, awaited or in the background on the save path):** `sendInline` uses `cfg.method ?? 'GET'`.\n\nThe node's own descriptor says \"Default `GET`; `POST` when `durable` is true\", and the file header says the no-outbox fallback \"signs exactly as the outbox would have\". So the same flow sends POST in one environment and GET in another. A GET also drops the request body and is counted as a read (`reads` is true, so the effect is reported as `0`).\n\n## Fix\n\nIn the durable arm, resolve the verb once (`cfg.method ?? (durable ? 'POST' : 'GET')`) and use it on both paths. Add a test: durable, no `method`, no outbox → POST, with the same signed bytes the outbox would send.\n\n## Scope\n\nBehaviour fix in `service-automation`, so a `patch` changeset is owed. No spec change. The skill text in PR #33482 says nothing about the default verb, so it stays true either way.\n"

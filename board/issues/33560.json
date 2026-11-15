@@ -2,8 +2,8 @@
   "number": 33560,
   "kind": "issue",
   "title": "skills(objectstack-ui, query, automation): stop teaching assigned_to / assignee as the record owner beside owner_id (follow-up of #33506)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:33:21Z",
-  "updated_at": "2026-11-15T00:48:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T08:21:17Z",
+  "closed_at": "2026-11-15T08:21:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33560",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a follow-up owed by work in flight). PR #33555 (card #33506) teaches in objectstack-data that a request's owner, assignee, 负责人 or 处理人 maps to the injected `owner_id`, and that a separate handler field must carry a label no other field on the object uses. Its at-tier contract review found the other skills still teach the opposite, so an agent loading both gets conflicting teaching and the #33506 staging shape (two 「负责人」 columns) is prevented for the data skill only.\n\n## Where (measured on `main` `8e63ed87`)\n\n- `skills/objectstack-ui/rules/list-views.md` line 60: `{ field: 'assigned_to', label: 'Owner' }`, a second field carrying the injected owner's label; line 101 filters \"mine\" on `assigned_to`; lines 265 and 270 use `assignee`.\n- `skills/objectstack-ui/evals/views-apps-actions-pages.json` eval 1 answers the prompt word \"owner\" with `assigned_to`; eval 12 repeats the filter.\n- `skills/objectstack-ui/rules/actions.md` line 44 takes `assigned_to` as a param.\n- `skills/objectstack-ui/rules/dashboards.md` line 268, `skills/objectstack-query/SKILL.md` lines 290 to 292, `skills/objectstack-automation/SKILL.md` line 116: `assignee` used as the owner.\n- After #33555 the ui examples and eval 1 name a `support_case.assigned_to` the data template no longer declares.\n\n## What lands\n\nPoint each to `owner_id` where the owner is meant (label 「负责人」 / Owner is the injected one), or, where a separate handler is genuinely meant, keep it with a label that does not collide and say it grants no access. One cross-reference to the objectstack-data rule, no restatement. Evals updated to match. `@objectstack/skills` patch changeset.\n\n## Scope\n\n`skills/**` only. `Clause-②: no`.\n\nBlocked-by: #33506 (PR #33555)\n"

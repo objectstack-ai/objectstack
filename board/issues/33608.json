@@ -1,0 +1,32 @@
+{
+  "number": 33608,
+  "kind": "issue",
+  "title": "cli: os migrate summary-nulls refuses to boot an app that declares queues and assignmentRules (\"no 'ownership-queue' service is registered\"), so the summary backfill cannot run on a queue-using app",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:A5",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T02:31:23Z",
+  "updated_at": "2026-11-15T02:46:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33608",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n## What happens (@objectstack 18.4.0, HotCRM, 2026-11-15)\n\nHotCRM 1b (hotcrm#2464) adds summary fields to `crm_contract` and `crm_account` through objectExtensions. A summary declared after its parent rows exist reads blank on those rows until a child row is written, and `os migrate summary-nulls` is the documented backfill. Run against the HotCRM stack, it refuses to boot:\n\n> declares queues (2) and assignmentRules (2), but no 'ownership-queue' service is registered\n\nHotCRM adopted ADR-0142 queues (hotcrm#2402). `os serve` registers the ownership-queue service, but the migrate command's boot does not. So any app that uses queues cannot run the summary backfill.\n\n## Ask\n\nThe `os migrate` boot registers the services that the stack's declared metadata needs (here ownership-queue), or treats queue and assignment-rule metadata as inert for a data migration. Either way, `os migrate summary-nulls` must run on a queue-using app.\n\n## Acceptance\n\n1. `os migrate summary-nulls` (preview and apply) runs on a stack that declares queues and assignmentRules, and fills the new summaries on existing parent rows.\n2. Other `os migrate` subcommands that boot the stack get the same fix, or each is shown not to need it.\n3. A regression test boots a fixture app with one queue and one assignment rule through the migrate path."
+}

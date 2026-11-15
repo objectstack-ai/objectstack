@@ -1,0 +1,30 @@
+{
+  "number": 33730,
+  "kind": "issue",
+  "title": "review follow-ups of PR #33726",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T08:17:31Z",
+  "updated_at": "2026-11-15T08:17:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33730",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (review follow-ups of a PR in flight). Shape per ruling B on #33718 (record 6891082225): one checklist card per reviewed PR; later reviews of PR #33726 append here.\n\n## review follow-ups of PR #33726 (card #33722)\n\nRecord: the at-tier contract review on PR #33726 head `57440909` (PASS, nits only).\n\n- [ ] `skills/objectstack-query/rules/filters.md` line 179 (on `main`) still filters `where: { owner: '{current_user_id}', ... }`, the hand-named-owner family PRs #33555, #33720 and #33726 retired. Point it at `owner_id`; no other in-flight PR touches the file.\n- [ ] `skills/objectstack-data/references/data-hooks.md` line 304: `uid` is an unbound name in the example (it was before #33726 too); bind it to the hook context's user id as the hook API on `main` names it.\n\nAccepted on the PR, not owed: eval 6's expected output does not restate that `reviewer` grants no access.\n\n`skills/**` only; `@objectstack/skills` patch changeset; `Clause-②: no`. Waits for PR #33726.\n"
+}

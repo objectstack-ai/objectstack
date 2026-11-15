@@ -1,0 +1,34 @@
+{
+  "number": 33685,
+  "kind": "issue",
+  "title": "AI chat: a message sent while a linked conversation loads hangs forever when that load fails (bubble and thinking dots stay, nothing sent, no notice)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T06:26:37Z",
+  "updated_at": "2026-11-15T08:14:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33685",
+  "body": "domain:ui#2 · os-project-manager · session_01FEkQ5oF8GgTHN2jBZoDwz8\n\nFiling gate: ① a user-visible defect with a named producer. The contract review of PR #33673 raised it (record 6889891363, ③), and the PR's developer measured it on head `d32d4df0` through the rendered `AiChatPage` harness, with both a 503 and a network error on the GET. Reader: `domain:ui` (`ui/packages/app-shell/src/hooks/useChatConversation.ts`). Filed as `finding` for triage. This seat has not graded or claimed it, because the ui lane takes P1/P2 only since 2026-11-15T05:05Z.\nDedupe: `is:issue is:open deep link conversation GET fails held` finds nothing open. #33674 is the typed-but-unsent draft lost on the pane's remount, which is a different path. #33567 (a send before the GET answers is held and sent once) covers only a GET that succeeds.\n\n## What the user sees\n\nThe user opens an AI chat conversation by its link (`/ai/build/conv-7`) and sends a message while the conversation is still loading. If loading then fails (a 5xx, or no network), the message bubble and the thinking dots stay on screen indefinitely. Nothing is sent, no conversation is created, no notice appears, and the message box is empty. A second send joins the held message and hangs the same way. Measured after 3 s, with both a 503 and a network error.\n\n## Where (on `main`)\n\n- `useChatConversation.ts`: the resolve's `catch` (around line 1221 at `d32d4df0`) clears the id without settling the surface. `pendingKeyRef` therefore stays unset, and no create is allowed.\n- Its `finally` (around line 1231) drops the request that the held send recorded, and no error reaches the host. `useDeferredFirstSend` keeps holding the message.\n\n## Acceptance\n\n- When the deep link's GET fails after a send was held, the held message is not left hanging. Either it is given back (the not-sent notice, the text restored into the box, as #33420/#33562 do for a failed create), or the pane falls back so that the send can go. Which of the two is triage's call.\n- Pin it through the rendered page, red first on base, for both a 503 and a network error. CONTROL: a GET that answers still sends the held message once (#33673's #33567 pin). CONTROL: a 404 on the GET keeps today's behaviour."
+}

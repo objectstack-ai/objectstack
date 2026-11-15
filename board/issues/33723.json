@@ -1,0 +1,29 @@
+{
+  "number": 33723,
+  "kind": "issue",
+  "title": "Chat markdown: bold next to full-width punctuation renders as literal asterisks (「**《书名》，借书人**」)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T07:59:13Z",
+  "updated_at": "2026-11-15T07:59:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33723",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nPart of objectstack-ai/cloud#3825 (seen on 11-13 in the hosted chat). Ruled on objectstack-ai/cloud#3825 by the account owner in seat session `session_01Q4EjjPP1zuWBNq3nBXVei9`: 「同意」 to the decision request (comment 6891267721), so all four items as recommended. The promotion bar is unchanged: ≥95% correct, 100% cited, 0 leaks (comment 6721225525).\n\n## Change\n\nIn the chat renderer (`ui/packages/plugin-chatbot`), `**…**` next to CJK full-width punctuation renders as literal asterisks. Fix the emphasis parsing for CJK punctuation boundaries so that 「**《书名》，借书人**」 renders bold. Add tests.\n\n<!-- signed: repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9 -->"
+}

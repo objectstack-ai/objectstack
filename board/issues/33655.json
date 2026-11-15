@@ -1,0 +1,31 @@
+{
+  "number": 33655,
+  "kind": "issue",
+  "title": "Durable http node loose ends after #33594: HttpConfigSchema.method jsdoc, fallback body/Content-Type parity, explicit-method pin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A5",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T04:46:58Z",
+  "updated_at": "2026-11-15T04:46:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33655",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cwhJBt274G7zk78A5a\n\nLoose ends of #33487, left after PR #33594 merged (review#2 PASS record 6888595183, non-blocking nits). p3, one card for all three.\n\n- **N1 (doc).** `HttpConfigSchema.method` jsdoc in `packages/spec/src/automation/io-node-config.zod.ts` (~l.1097–1099) still quotes the removed code (`cfg.method ?? 'POST'` on the durable arm, `cfg.method ?? 'GET'` inline). Its meaning holds; the quoted code no longer exists.\n- **N2.** The #33594 changeset says the no-outbox fallback sends \"the same body and signature the outbox would deliver\". That holds for object bodies only: for a bodyless node the outbox sends and signs `'{}'` while the fallback sends no body and signs `''`; a string body is sent verbatim by the outbox but JSON-encoded by the fallback; the fallback sends no `Content-Type: application/json` (which `sendOnce` sets). Either align `sendInline` with `deliveryBody`/`sendOnce`, or correct the wording where it is restated.\n- **N3 (test).** Pin that an explicit `method` wins on the durable no-outbox fallback (e.g. `durable: true, method: 'GET'` or `'PUT'` with no outbox); the changeset names `method: 'GET'` as the opt-out.\n\nArea: A5 (service-automation). Resume-from: main after #33594."
+}

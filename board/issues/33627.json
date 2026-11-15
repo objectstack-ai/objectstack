@@ -1,0 +1,37 @@
+{
+  "number": 33627,
+  "kind": "issue",
+  "title": "pm/skills: write the SQL-first rule down — a capability the memory or mongo driver cannot run is refused there, never served by a slower path kept for parity",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T03:20:38Z",
+  "updated_at": "2026-11-15T07:34:06Z",
+  "closed_at": "2026-11-15T07:34:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33627",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. In the triage seat session on 2026-11-15, verbatim: 「有的功能如果Mongo内存不支持，那就不需要支持，首先保sql,应该用最高性能的方案，而不能为了兼容而兼容」. It generalises the 2026-08-05 freeze anchored on #5499 (driver-memory and driver-mongodb: no new investment; memory to be replaced by SQLite in-memory). Today the rule lives only on cards (#5499, #33619, #33626), so a design or a review can still choose a driver-agnostic slow path. ⛔ Not a claim.\n\n## 维护者速读\n\n把一条设计原则写进规则文件：SQL 驱动（含 Turso）优先，用性能最高的方案；内存和 Mongo 驱动做不到的能力就在那里明确拒绝，不为了兼容去保留一条更慢的通用路径。今天这条只散在几张卡上，设计和复审时仍可能选「各驱动都能跑但慢」的方案（例如跨对象过滤先查 id 再 `IN`、1000 上限）。\n\n## What lands\n\n1. **AGENTS.md** (governed; Tier H, maintainer merge): one rule near the engine and driver guidance. A capability is designed for SQL drivers first, at the highest-performing shape (push-down: JOIN or semi-join, aggregates in the database). Drivers that cannot run it refuse with a stable code. A slower driver-agnostic path is never built only for parity. Cite #5499 and this card.\n2. **`pm-dispatch` decision analysis** (`references/decision-analysis.md`): under 项目长远合理性, an option that slows SQL to keep memory/mongo parity counts against itself.\n3. **Contract review** (`references/contract-review.md`): a reviewer flags a new id-materialisation or in-app join on a path SQL can push down, unless the PR names why.\n4. **Skills** (authoring guidance that mentions drivers): state that memory and mongo may refuse capabilities that SQL serves.\n\n## Grade\n\np2 (a rule that steers every design; tooling-class)."
+}

@@ -2,8 +2,8 @@
   "number": 33579,
   "kind": "issue",
   "title": "docs(flows): 'org:members reaches nobody' with no organization holds under the single posture only; under group the notify step fails",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T01:22:43Z",
-  "updated_at": "2026-11-15T01:46:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:45:48Z",
+  "closed_at": "2026-11-15T04:45:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33579",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (an out-of-diff observation of the at-tier contract review 6887230505 of PR #33577, card #32961; the in-diff twin is that record's should-fix on the skill line). `reach:` an author reading `flows.mdx` expects a notify step with no organization to succeed with no recipients; under the `group` posture the step fails instead.\n\n**What is wrong.** `content/docs/automation/flows.mdx` (on `main`, around lines 346 to 349) says: \"where there is none, `org:members` reaches nobody ... each with a warning in the server log.\" That holds under the `single` posture only. Under `group`, a `schedule` flow that declares no organization is a legal armed shape, and the messaging service's `emit()` writes the `sys_notification` event row before it resolves the audience. With no organization that write is refused with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`, and the notify node's catch returns `success: false` (`notify-node.ts`, around lines 1385 to 1394), so the step fails rather than reaching nobody. Under `isolated` such a flow never binds.\n\n**What lands.** Name the posture in the sentence: under `single` it reaches nobody with a server-log warning and the step succeeds; under `group` the step fails with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`; the remedy is the schedule flow's declared acting organization. Re-read the three files above on `main` before writing. If the server lane ever passes the resolver the organization stamped on the event row instead of the producer's (`messaging-service.ts` around lines 1400 to 1420, intended per its comment), this sentence and the skill line in `skills/objectstack-automation/SKILL.md` must move together.\n\nDocs only, `skip-changeset`. `Clause-②: no`.\n\nDedupe (open AND closed): `is:issue \"org:members\" posture` and `is:issue flows.mdx org:members` → #32961 (the skill side) only. **New.**\n"

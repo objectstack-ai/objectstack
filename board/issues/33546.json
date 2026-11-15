@@ -2,7 +2,7 @@
   "number": 33546,
   "kind": "pull_request",
   "title": "fix(runtime): the package disable and DELETE routes announce the withdrawal",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:07:34Z",
-  "updated_at": "2026-11-15T00:38:35Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-15T04:13:48Z",
+  "closed_at": "2026-11-15T04:13:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T04:13:46Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/33546",

@@ -2,8 +2,8 @@
   "number": 33153,
   "kind": "issue",
   "title": "A formula field an object extension adds that reads itself, or two that read each other, is refused at neither the publish door nor os build",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T21:08:44Z",
-  "updated_at": "2026-11-14T23:44:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T03:23:14Z",
+  "closed_at": "2026-11-15T03:23:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

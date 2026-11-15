@@ -2,8 +2,8 @@
   "number": 31797,
   "kind": "issue",
   "title": "audit: running a report writes no sys_audit_log row",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T04:18:19Z",
-  "updated_at": "2026-11-15T00:33:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:44:20Z",
+  "closed_at": "2026-11-15T04:44:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 8,
   "locked": false,

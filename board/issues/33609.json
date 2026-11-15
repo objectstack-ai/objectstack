@@ -1,0 +1,31 @@
+{
+  "number": 33609,
+  "kind": "issue",
+  "title": "rest(record page): a `record:related_list` whose `relationshipValueField` names a lookup on the parent passes `os validate`, then the one-request record page refuses it with 400 `invalid_relationship` and the whole page fails to load",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T02:31:26Z",
+  "updated_at": "2026-11-15T02:45:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33609",
+  "body": "## Summary\n\nThe spec allows `relationshipValueField` to name any parent field whose value the child's `relationshipField` stores (`packages/spec/src/ui/component.zod.ts:1663-1667`).\n\nThat includes a lookup on the parent that points at a *third* object. Example: a sales order's `selected_plan` → `crm_allocation_plan`, with the child list being the plan's lines.\n\n`os validate` accepts such a page (exit 0). At runtime the one-request record page refuses it:\n\n```\nPOST /api/v1/data/crm_cb_order/<id>/page\n400 VALIDATION_FAILED\n  code: invalid_relationship\n  'allocation_plan' on 'crm_allocation_line' is not a … field that references 'crm_cb_order'\n```\n\nThe check is `packages/rest/src/record-page-routes.ts:222`:\n\n```ts\nif (!def || referenceOf(def) !== object)\n```\n\nIt requires `relationshipField` to reference the route's own object, whatever `relationshipValueField` says.\n\nOne refused related list takes down the whole record page: the Console shows 「无法加载此记录」 (record cannot be loaded).\n\n## Repro (18.4.0)\n\nDeclare this component on a record page of `crm_cb_order`:\n\n```ts\n{ type: 'record:related_list', id: 'plan_lines',\n  properties: { objectName: 'crm_allocation_line', relationshipField: 'allocation_plan', relationshipValueField: 'selected_plan' } }\n```\n\nHere `crm_cb_order.selected_plan` is a lookup to `crm_allocation_plan`, and `crm_allocation_line.allocation_plan` is a lookup to `crm_allocation_plan`.\n\n1. Run `objectstack validate`. It exits 0.\n2. Open any order full page in the Console. `/page` answers 400 `invalid_relationship` and the page does not render.\n\nMeasured downstream in steedos-labs/os-project-blackcat-crm#45 (read-only probe, 2026-11-15).\n\n## Expected (either is fine; the platform decides)\n\n- **A.** The record page door serves the list. When `relationshipValueField` names a lookup on the parent, the related list filters by `child[relationshipField] = parent[relationshipValueField]`, and `relationshipField` only has to reference the lookup's target.\n- **B.** If that shape is not meant to be supported, `os validate` refuses it at build time with the same reason.\n\nIn both cases a single bad related list should not blank the whole page. Either degrade that one block, or refuse at build time.\n\n## Notes\n\n- Related: #29946 (`invalid_relationship` for a related list keyed by a user field, fixed); #23134 (parent-side binding key).\n- Not a duplicate of #33112, which covers the console's object scope for drawer levels."
+}

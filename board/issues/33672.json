@@ -1,0 +1,35 @@
+{
+  "number": 33672,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): distinct labels for three duplicate field pairs in ru, ar and fr bundles",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T05:35:49Z",
+  "updated_at": "2026-11-15T07:19:23Z",
+  "closed_at": "2026-11-15T07:19:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T07:19:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33672",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X3uspdPcdPc3xnBZPMB1GpS)_\n\nFixes #33645\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：平台对象的三份翻译包各改一个字段标签：俄语导入任务的「创建数量」改为「Создано записей」，阿拉伯语 OAuth 资源的「资源标识 URI」改为「معرّف URI للمورد」，法语用户的「直属上级」改为「Responsable hiérarchique」。另在现有的翻译包测试里加了一条检查：任何语言下，同一平台对象的两个可见字段不能显示同一个标签。\n- **为什么改**：这三处各让同一对象的两个字段在该语言下同名（俄语「创建数量」和「创建时间」都叫 Создано，阿语 ID 和资源标识都叫 المعرّف，法语「负责人」和「直属上级」都叫 Responsable），表头出两列一样的名字，用户分不清。\n- **风险与回滚**：只改了三个已翻译的字符串值，英文标签和翻译包结构不变；回滚即 revert。新检查只读本包的翻译包和对象定义，以后有人给平台对象加字段时若在某语言撞名会变红。\n- **先看**：`packages/platform-objects/src/apps/translations/fr.objects.generated.ts`（`manager_id`），`ru.objects.generated.ts`（`created_count`），`bundle-ownership.test.ts`（新检查）。\n- **两分钟验证**：`pnpm --filter @objectstack/platform-objects exec vitest run --maxWorkers=2 src/apps/translations/bundle-ownership.test.ts`，预期 18 个用例全绿，其中 12 个是每种语言一条的撞名检查。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\nEach pair below is two non-hidden fields of one platform object that one locale served under one label. One leaf of each pair is re-translated from its English source label and description; the bundle structure is untouched and none of the edited leaves has a `source-hashes` row.\n\n| Locale | Object | Field kept | Field re-translated | Before | After |\n|:--|:--|:--|:--|:--|:--|\n| ru | `sys_import_job` | `created_at` \"Создано\" (Created At; the word every other ru `created_at` leaf uses but one en echo) | `created_count` (Created, a row count in the Progress group) | \"Создано\" | \"Создано записей\" |\n| ar | `sys_oauth_resource` | `id` \"المعرّف\" (ID; the word most other ar `id` leaves use) | `identifier` (Identifier, the RFC 8707 resource indicator URI) | \"المعرّف\" | \"معرّف URI للمورد\" |\n| fr | `sys_user` | `accountable_user_id` \"Responsable\" (Accountable Owner; matches the `register_service_account` `ownerId` param) | `manager_id` (Manager, the direct manager in the reporting chain) | \"Responsable\" | \"Responsable hiérarchique\" |\n\n- **Pin** (`bundle-ownership.test.ts`, a new `describe` beside the file's existing per-locale pin): for every owned object (read from the package's own `identity`, `audit`, `metadata`, `system` barrels plus `SysMetadataCommitObject`, cross-checked equal to the file's `OWNED_OBJECTS` list) and for the authored labels plus all 11 `*.objects.generated.ts` bundles, no two fields without `hidden: true` resolve to one trimmed label (bundle leaf when present, else the authored label). This is the comparison `field-label-duplicate` (#33545) makes on app metadata, which does not judge platform objects.\n- **Changeset:** `.changeset/33645-platform-duplicate-field-labels.md`, `@objectstack/platform-objects` patch.\n\n## Tests\n\n- `bundle-ownership.test.ts`: 18/18 passed (2 ownership, 3 sys_metadata_commit, 1 definition-roster, 12 per-locale label checks).\n- Ablation (on committed head `63dfd530`, via `scripts/ablation-replace.mjs`): fr `manager_id` put back to \"Responsable\" ⇒ `fr` case red with `sys_user: accountable_user_id and manager_id both read \"Responsable\"` (1 failed, 17 passed); restored, blob back to the HEAD blob `7beab32c`, `git diff HEAD` empty.\n- Package suite and typecheck: see Verification.\n\n## Acceptance notes\n\n- **Sweep, measured:** a throwaway script (not committed) walked the 53 objects of `packages/platform-objects/scripts/i18n-extract.config.ts` across the authored labels and all 11 locale bundles in this folder. Two readings: (1) declared fields, leaf else authored label; (2) fields as served, the spec's `injectedSystemColumnDefs` under the declared fields, labels resolved through `translateObject` for every bundle locale plus `BUILTIN_SYSTEM_FIELD_LABEL_LOCALES`. Both found exactly the three pairs the card names and nothing else; a case-insensitive rerun of (1) found the same three. After the fix both report 0.\n- Observed, not changed: ru `sys_metadata_commit.created_at` still reads the English fill \"Created At\" (it has a `ru.source-hashes.generated.ts` row, so it is a tracked untranslated fill, not a duplicate). Outside this card.\n- Not changed: the fr action params (`set_user_manager.managerId`, `register_service_account.ownerId`) both still read \"Responsable\". They are dialog params on two different actions, not two columns of one object, so they are outside this class.\n\n## Verification\n\nAll on head `63dfd530`. Full log: 64 lines, every one `exit 0`.\n\n- `pnpm --filter @objectstack/platform-objects test`: exit 0, Test Files 122 passed (122), Tests 1971 passed (1971).\n- `pnpm --filter @objectstack/platform-objects typecheck`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 62 families for this diff; all 62 ran, exit 0. `--ran` reconciliation: \"62 derived famil(ies) accounted for — 62 run, 0 NOT-MEASURED\".\n- `pnpm check:i18n` (bundle drift against a fresh extract): exit 0, after a full `pnpm build` (119/119 tasks), so the leaf-only edits leave no structural drift. `pnpm check:i18n-stale-fill`: exit 0.\n- First runs at exit 3 that were missing prerequisites, each exit 0 on rerun: `check-plugin-teardown-shape --self-test` (pinned commit fetched), `check:dual-build-cjs-loads`, `check:i18n`, `check:lean-entry-closure` (dist missing before the full build).\n- CI owns the rest (the lint farm, Test Core including `test:repo`, Build Core); nothing in this diff edits a `repo` project test.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5mfWBE8d7DqDdosHuK\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5mfWBE8d7DqDdosHuK)_\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 33715,
+  "kind": "issue",
+  "title": "pm(relay): a raw comment / comment_edit carrying a contract-review record is not judged for tier",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T07:16:46Z",
+  "updated_at": "2026-11-15T07:49:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33715",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a follow-up owed by work in flight: card #33603's verifier residual 7, deferred by PR #33711 and judged sound to defer by at-tier record 6890932729).\n\n`post-stamped.mjs` and `label-write.mjs` refuse an at-tier record without `--tier-evidence` (since PR #33616). A raw relay `comment` or `comment_edit` op sent through `scripts/pm/fleet-write/dispatch.mjs` with the same body is not judged for tier at all, so a record that claims `CONTRACT_REVIEW_TIER` can still reach a PR without its transcript being read.\n\n## What lands\n\n`scripts/pm/fleet-write/` (one reader: `verify-review-tier.mjs` and the record recognisers): a `comment` or `comment_edit` whose body is a contract-review record claiming a tier is refused unless the action carries the same tier evidence the stamped writers require, or is routed to them. Self-test rows both ways.\n\nCard #33603's PR says `Fixes #33603`; this residual moves here. Same-file serial: after PR #33686 (#33540) merges.\n"
+}

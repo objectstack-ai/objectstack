@@ -2,8 +2,8 @@
   "number": 29486,
   "kind": "issue",
   "title": "filter: a number or boolean comparand on a text-family field never matches, now that a text field stores the number 42 as \"42\" (#29241), and no error is raised",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T16:17:02Z",
-  "updated_at": "2026-11-14T23:24:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:13:48Z",
+  "closed_at": "2026-11-15T04:13:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 7,
   "locked": false,

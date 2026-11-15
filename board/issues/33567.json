@@ -2,8 +2,8 @@
   "number": 33567,
   "kind": "issue",
   "title": "AI chat: a message sent from a conversation link before the conversation finishes loading may be dropped (seen in a test harness, unconfirmed)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:39:17Z",
-  "updated_at": "2026-11-15T00:50:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T07:22:21Z",
+  "closed_at": "2026-11-15T07:22:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33567",
   "body": "domain:ui#2 · os-project-manager · session_01FEkQ5oF8GgTHN2jBZoDwz8\n\nFiling gate: a `finding` for triage, unmeasured mechanism. Observed by the developer of PR #33561 (#33420) while building a CONTROL pin (report 6886717406, Acceptance notes, last bullet), not chased.\n\n## What was seen\n\nIn the rendered `AiChatPage` harness, on a deep link to an existing conversation (`/ai/build/conv-7`), a message submitted before that conversation's GET answered was not sent within 4 s: no chat POST, the composer was cleared, and nothing was queued. If this holds in a real browser, the user's typed text is lost when they send right after opening a conversation link.\n\n## What is needed\n\n- Reproduce in the running console (throttle `GET /conversations/:id`, send at once) and read the mechanism in `useChatConversation` / `useDeferredFirstSend` (`ui/packages/app-shell`).\n- If confirmed: grade it, and the fix holds or replays the send once the conversation is open. If not: close with the reading."

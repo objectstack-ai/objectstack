@@ -1,0 +1,33 @@
+{
+  "number": 33718,
+  "kind": "issue",
+  "title": "pm/skills: one checklist card per reviewed PR for its review follow-ups, p3 copy nits into area loose-ends cards, and a dedupe step for retro reviews",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T07:19:23Z",
+  "updated_at": "2026-11-15T07:53:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33718",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. Rewritten on ruling **B**, 2026-11-15 (comment below; the maintainer's answer was 「b」). The first draft of this card flipped the review default (\"fix nits in the same PR\"). A Fable review found that draft would undo the 2026-11-07/08 ruling (#31179 → PR #31289: a nit-only round gets no re-review, to save tokens). It also conflicts with the 2026-11-11 ruling 6797014134 (#32179 → PR #32486: skills/ADR wording goes on its own cards), and it overestimated the gain. So the default stays. This card changes only **how** review follow-ups become cards. ⛔ Not a claim.\n\n## 维护者速读\n\n不改「复审的小问题拆出去」的默认做法（11-07 和 11-11 两次裁决保留），只改拆出去的形态：\n1. 每个 PR 的复审后续合成**一张清单卡**，不再一个问题一张。\n2. p3 文案和文档类小问题并进该区已有的收尾卡。\n3. PR 合并后才做的追溯复审，立卡前先查这个 PR 已有的后续卡，有就补进去。\n4. 分诊巡逻每 3 小时报一次 24 小时的开卡数、关卡数、净变化，以及复审带出的卡数。\n\n「在原 PR 里修」的版本（带 ≤30 行阈值，并给门禁加「只改小问题」的续管）并入区域租约试点 #33059 的 R5，等试点数据出来一起裁决，本卡不另起一套。\n\n## Evidence (Fable review, 2026-11-15)\n\n- 24h: 210 issues created, 221 closed, 232 PRs merged. About 64 new cards cite a contract review, but citing a review is not the same as an in-diff nit.\n- Sample of 19 review-born cards: 13 were out-of-diff or cross-lane real follow-ups, 3 were in-diff but reviewed only after merge (#33566, #33571, #33572), 2 could have been fixed in the PR, and 1 was split because the head had already passed review.\n- **Fan-out:** PR #33531 alone produced 6 cards (#33539, #33540, #33541, #33601, #33603, #33604).\n- **Duplicates:** items 1–2 of #33571 repeat items 1–2 of #33432.\n\n## What lands\n\n1. **One checklist card per reviewed PR** (`references/contract-review.md` L42-43, where the nit clause says 「转后续卡」; and `filing-gate.md`):\n   - All follow-ups a review leaves on one PR (nits, accepted deviations, out-of-diff findings in the same lane) go into **one** card, titled `review follow-ups of PR #N` and ticked item by item.\n   - A later review of the same PR (a delta review or a retro review) appends to that card instead of filing new ones.\n   - Exception, kept: under the 11-11 ruling, skills/ADR/spec wording owed by a code PR still gets its own `domain:skills` (or spec) card. One such card per PR, not one per finding.\n2. **p3 copy and docs nits go into area loose-ends cards:** a p3 copy or docs nit is added to the area's open loose-ends card (`<area> loose ends`) when one exists, and opens one only when none exists.\n3. **The retro-review dedupe step:** before filing, the reviewer searches open issues for `PR #N` and for the finding's file path, and appends to a hit. The filing gate's per-defect rule (#25687) still holds for real defects; dedupe merges only repeats of the same finding.\n4. **The 24h flow line:** triage's round record, on its 3-hourly board refresh, states issues created / closed / net, PRs merged, open p1, and how many new cards cite a contract review. The patrol prompt already carries this.\n\n## Not in scope\n\nChanging the review default, the queue guard's record carry, or the 11-07/11-11 rulings. \"Fix in the same PR with a threshold\" is #33059's R5.\n\n## Grade\n\np2: it cuts card fan-out and duplicates, and adds no gate change.\n"
+}

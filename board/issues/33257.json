@@ -2,8 +2,8 @@
   "number": 33257,
   "kind": "issue",
   "title": "skills (data-hooks): a hook that enforces a business rule declares `refusals` and refuses by code, not a bare onError abort (HOOK_ABORTED)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T15:00:37Z",
-  "updated_at": "2026-11-14T23:07:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:13:58Z",
+  "closed_at": "2026-11-15T04:13:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

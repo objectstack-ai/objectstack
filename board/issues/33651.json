@@ -1,0 +1,32 @@
+{
+  "number": 33651,
+  "kind": "issue",
+  "title": "objectql: adding a synchronous `afterUpdate` hook on an object makes an existing `async` afterUpdate hook's writes fail with \"Transaction query already complete\" (18.4.0; #22855 symptom returns)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:E2b",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T04:27:42Z",
+  "updated_at": "2026-11-15T05:13:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33651",
+  "body": "## Summary\n\nOn `@objectstack/*` 18.4.0, an app had one `async: true`, `runAs: 'system'` afterUpdate hook on `crm_quote`. That hook drafts a contract when a quote is accepted, writing through `ctx.api`.\n\nAdding a second, **synchronous** afterUpdate hook on the same object (priority 400, no `runAs`) breaks the async hook. Its writes then fail with:\n\n```\nTransaction query already complete, run with DEBUG=knex:tx for more information\n```\n\nRemoving the synchronous after-hook brings the async hook's writes back. Converting the new hook to `async: true` also brings them back.\n\nThe symptom matches #22855 (an async hook's later write inside an ambient transaction is lost), which is closed. Either this is a regression, or a second path to the same symptom: the one that opens when a synchronous after-hook joins the chain.\n\n## Measured downstream\n\nIn steedos-labs/os-project-blackcat-crm PR #128 (head `6266ddb`), adding the synchronous leg turned 40 tests red across 6 files:\n- quote-accepted-payment-terms\n- quote-accepted-draft-defaults\n- hooks-runtime-sales\n- quote-accepted-lookups\n- contract-drafted-notice\n- record-id-not-in-prose\n\nBisected: with only that synchronous leg removed, the hooks-runtime-sales contract-draft tests went from 4 failed to 4 passed. The producer is `quote_accepted_contract_draft` (async afterUpdate, `runAs: 'system'`).\n\n## Suspected cause\n\nWhen a synchronous after-hook runs in the chain, the async hook's `ctx.api` (or its ambient-transaction entry) stays bound to the parent write's knex transaction. By the time the async hook writes, that transaction has already committed.\n\n## Expected\n\nAn `async` hook always writes outside the parent write's transaction, however many synchronous hooks share the event.\n\n## Downstream status\n\nNot worked around in a way that depends on the fix. The downstream hook was redesigned as a `beforeUpdate` snapshot plus an `async` afterUpdate recheck, which suits the feature anyway. The defect still bites any app that adds a synchronous after-hook beside an async one."
+}

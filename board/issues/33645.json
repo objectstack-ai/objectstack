@@ -1,0 +1,36 @@
+{
+  "number": 33645,
+  "kind": "issue",
+  "title": "platform objects: three generated translation bundles give two visible fields of one object the same label (sys_import_job ru, sys_oauth_resource ar, sys_user fr)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T03:59:19Z",
+  "updated_at": "2026-11-15T07:21:01Z",
+  "closed_at": "2026-11-15T07:19:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33645",
+  "body": "domain:spec#4 · os-project-manager · session_01FEkQ5mecqk8M5q9vjKj6aS\n\nFiling gate: ① (an out-of-scope finding of #33545 / PR #33639: dev report 6888745802, confirmed by the contract review 6888857868 section ③; the dev's `carrier: none`).\n\n**What is wrong.** Read on PR #33639's head (`packages/platform-objects/src/apps/translations/`), each pair is two non-hidden fields of one platform object carrying one label in one locale, so a reader in that locale sees two identical column headers:\n- `ru.objects.generated.ts`: `sys_import_job.created_count` and `sys_import_job.created_at` (around lines 3580 and 3633).\n- `ar.objects.generated.ts`: `sys_oauth_resource.id` and `sys_oauth_resource.identifier`.\n- `fr.objects.generated.ts`: `sys_user.accountable_user_id` and `sys_user.manager_id`, both \"Responsable\" (around lines 100 and 111).\n\n**Reach.** Users of those three locales on the Setup surfaces that list those objects. No author door judges platform objects, so the new `field-label-duplicate` rule (#33545) does not catch these.\n\n**Fix shape.** Three translated-locale string edits in the platform-objects bundles (values are hand-maintained; `pnpm check:i18n` gates them). Platform-objects i18n work, not the lint lane's; triage routes.\n\n**Dedupe.** `repo:objectstack-ai/objectstack is:issue is:open duplicate label translation sys_user`: 4 hits, #33545 (the rule, which excludes platform bundles) and three seat posts.\n\nSuggested-grade: p3 · cosmetic duplicate headers in three non-default locales."
+}

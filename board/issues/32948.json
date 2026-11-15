@@ -2,8 +2,8 @@
   "number": 32948,
   "kind": "issue",
   "title": "rest: the dataset query door answers 503 at an App pair two modules share beside a package-less row under plugin-wired admission, where ADR-0150 D4 calls for 409 naming both (follow-up of #32292)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -24,9 +24,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T00:13:44Z",
-  "updated_at": "2026-11-14T22:33:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T02:51:51Z",
+  "closed_at": "2026-11-15T02:51:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

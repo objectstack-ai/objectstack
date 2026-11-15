@@ -1,0 +1,32 @@
+{
+  "number": 33704,
+  "kind": "issue",
+  "title": "CODEOWNERS still requests both maintainers on a low-risk skills PR the relay no longer summons them for",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T06:50:00Z",
+  "updated_at": "2026-11-15T07:51:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33704",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a follow-up owed by work in flight: the at-tier contract review 6890432656 on PR #33686, card #33540, escalated this outside its diff).\n\n## 维护者速读\n\n#33540 让中继在「低风险技能臂」读成 Tier S 的 PR 上不再请你和 os-zhuang 审。但 `.github/CODEOWNERS` 第 43、53 行把 `/skills/` 和 `/ui/skills/` 指给你们两位，草稿转 ready 时 GitHub 会自己按 code owner 请审，所以这类 PR 仍会出现在你们的待审列表里。CODEOWNERS 是受管面(Tier H),改不改、怎么改由你定。\n\n## Facts (on `main`)\n\n- `.github/CODEOWNERS` L43 `/skills/ @os-zhuang @hotlong`, L53 `/ui/skills/ @os-zhuang @hotlong`.\n- GitHub requests code owners itself when a draft PR is marked ready, whatever the relay plans. So the harm card #33540 names (the maintainers summoned on a PR they are not asked to merge) is not removed by PR #33686 alone.\n- Whether the ruleset requires code-owner review is a separate setting; this card does not assume it.\n\n## Options for the maintainer\n\n- A. Leave CODEOWNERS as is: low-risk skills PRs show in your queue; the seat still lands them and nobody waits on you.\n- B. Narrow the two rows (for example to the security-named catalog paths and `evals/`-free files is not expressible; so likely a team or a single owner), accepting that CODEOWNERS cannot read the arm's other conditions.\n- C. Remove the two rows and rely on the governed register plus the relay plan.\n\n## Scope\n\n`.github/CODEOWNERS` only, Tier H. ⛔ Not a claim. Grading is triage's.\n"
+}

@@ -2,8 +2,8 @@
   "number": 33541,
   "kind": "issue",
   "title": "pm: the queue guard's Tier S record leg checks a same-head record exists but never reads its verdict",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,25 @@
   "labels": [
     "domain:skills",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:00:49Z",
-  "updated_at": "2026-11-15T02:20:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T07:19:26Z",
+  "closed_at": "2026-11-15T07:19:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33541",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a follow-up owed by work in flight). Contract review 6886243839 of PR #33531 (card #33501) observed, outside that diff, that `scripts/pm/check-governed-queue-guard.mjs` passes a Tier S PR when a same-head contract-review record exists and where it came from, and never reads the record's `VERDICT`. Its own self-test pins that a FAIL record still clears. AGENTS.md Prime Directive 14 says the seat lands Tier S on \"a PASS verdict\", so the gate is weaker than the rule it enforces. PR #33531 is asked to read the verdict for its new low-risk arm; this card covers every other Tier S path (`.claude/**`, `scripts/pm/**` and the rest of the register's S rows).\n\n## What lands\n\n1. The record leg parses the record's final `VERDICT:` line and passes only on `PASS`. A FAIL, a missing verdict line or two verdict lines is refused, with the record's comment id in the reason.\n2. If several same-head records exist, the latest one decides.\n3. Flip the self-test row that clears a FAIL record, and add rows for no verdict and for a FAIL after a PASS.\n\n## Scope\n\n`scripts/pm/**`. Tier S. `skip-changeset`. `Clause-②: no`.\n"

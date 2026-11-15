@@ -1,0 +1,33 @@
+{
+  "number": 33660,
+  "kind": "issue",
+  "title": "AI model picker: carry each model's cost multiplier to the browser, show it per model, and confirm before switching to an expensive model",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T04:54:10Z",
+  "updated_at": "2026-11-15T06:42:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33660",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nThe framework half of objectstack-ai/cloud#4536. The account owner wants the paid model picker opened on production, with Claude models only, on one condition: 「只要选择时能够看清楚倍数」, so that a person sees the multiplier at the moment of choice. Measured read-only at objectstack main c32bb6ccbb2 and cloud main 3a9efce29: today the picker shows a label only.\n\n## 维护者速读\n\n1. **问题**：聊天和 Studio 里的模型选择器，每个模型只显示一个名字（比如「Advanced · Claude Sonnet 5」）。用户看不到倍数，看不到对剩余额度的影响，切换到贵的模型时也没有任何确认。\n2. **为什么**：维护者要求开放付费版的模型选择时，用户在选的那一刻必须看清楚倍数。\n3. **修法**：\n   - 模型列表的接口增加一个可选的「倍数」字段，云端负责填；\n   - 选择器在每个模型旁显示「×20」这样的倍数；\n   - 结合现有的额度用量（百分比），提示大约还能用多少；\n   - 切换到 20 倍及以上的模型时，确认一次。\n4. **验收**：三个使用选择器的页面（AI 对话、对话侧栏、Studio 助手）都显示倍数，切换贵模型时都有确认；有测试覆盖。\n5. **范围**：框架的接口定义和界面，加上云端一行（停止丢弃倍数），云端那行另开卡。\n6. **需要你做的**：无。\n\n## Facts (file:line at the shas above)\n\n- **Contract.** `packages/spec/src/api/protocol.zod.ts:4127-4142`, `AiModelsResponseSchema`, is `{ id, label, default }` or a bare string, plus `defaultModel`. It has no cost field.\n- **Hook.** `ui/packages/plugin-chatbot/src/useAiModels.ts:60-64`: `normalize` keeps only `id` and `label`.\n- **Picker.**\n  - `ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx:1128-1132`: `ChatbotModelOption` is `{ id, label?, provider? }`.\n  - `:1175-1213`, `ModelPicker`: it renders the label and provider, and `onValueChange` calls `onPick` at once (`:1190-1194`), with no confirm.\n- **Hosts.**\n  - `ui/packages/app-shell/src/console/ai/AiChatPage.tsx:2073` (wired at `:2979`)\n  - `ui/packages/app-shell/src/layout/ChatDockConversation.tsx:145`\n  - `ui/packages/app-shell/src/views/studio-design/StudioAiCopilot.tsx:118`\n- **Allowance reading that already exists.**\n  - `GET /api/v1/ai/usage`, served by cloud, answers `pool.fraction` (0..1), already weighted per model. By rule D5 it answers no token counts.\n  - `ui/packages/app-shell/src/hooks/useAiUsage.ts` and `AiUsageIndicator.tsx` read it.\n  - A multiplier is a ratio, not a token count, so D5 does not forbid it. The owner's words above ask for it explicitly.\n\n## Change\n\n- **Spec:** add an optional `costMultiplier` (a positive number; the default model is 1) to the model entry of `AiModelsResponseSchema`. Document it as the factor by which one message on this model draws on the allowance compared with the default.\n- **UI:**\n  - `useAiModels` keeps the field.\n  - `ChatbotModelOption` carries it.\n  - `ModelPicker` renders `×N` beside each label. With `useAiUsage` it shows a plain-language note of what the pick does to the remaining allowance; the wording is the implementer's, and it must not invent token numbers.\n  - A pick at ×20 or above asks once before applying, in all three hosts.\n- **Tests and ablation.**\n\nSeam: spec: `AiModelsResponseSchema` model entry `costMultiplier` → runtime: cloud `packages/service-ai/src/routes/ai-routes.ts` `GET /api/v1/ai/models` fills it from `cost_weight` (cloud card, `Blocked-by` this one, once a release carries it).\n\n<!-- signed: repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9 -->"
+}

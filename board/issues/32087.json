@@ -2,8 +2,8 @@
   "number": 32087,
   "kind": "issue",
   "title": "SSO end-user UX: every refusal says \"the sign-in link expired\", internal terms reach end users, a refused IdP-initiated sign-in is silent, and Log out leaves the IdP session so the next click signs straight back in",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -24,9 +24,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T07:13:21Z",
-  "updated_at": "2026-11-14T23:35:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T03:33:01Z",
+  "closed_at": "2026-11-15T03:33:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 27,
   "locked": false,

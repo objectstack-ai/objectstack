@@ -1,0 +1,35 @@
+{
+  "number": 33684,
+  "kind": "issue",
+  "title": "Automation: subflow and map start a child flow without checking the child's requiredPermissions",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:A5",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T06:21:32Z",
+  "updated_at": "2026-11-15T07:45:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33684",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFound by the cloud os-dev agent on objectstack-ai/cloud PR #4525 (card objectstack-ai/cloud#4441). It is an out-of-scope finding, class b, with a named producer. The owner's ruling on cloud#4441 (option A, item 4) is that `subflow` opens on the cloud MCP build door only once the caller must satisfy the child flow's `requiredPermissions`. Until then cloud withholds both `subflow` and `map`.\n\n## What happens (framework pin 181ad7d4; main d4e3dcc6e4c not re-read)\n\n- `FlowSchema.requiredPermissions` doc: \"A parent flow's subflow node is not a door and is not checked again.\"\n- `service-automation` `subflow-required-permissions.test.ts` pins that a gated child runs from its parent for a member who holds no capability.\n- `builtin/map-node.ts` calls `engine.execute(flowName, childContext)` with no flow-start admission. The spec sentence does not name `map`.\n\nSo a flow author can reach a gated child flow, one that requires a capability the running user lacks, by wrapping it in a parent's `subflow` or `map` step.\n\n## Change\n\nWhen a `subflow` or `map` step starts a child, require the acting user to satisfy the child's `requiredPermissions`, through the same flow-start admission a by-name start uses (`flowStartRefusal`), or state an explicit system-identity rule. Update the spec sentence. Pin both nodes with tests: a member without the capability is refused, and a member with it runs.\n\nSeam: spec: `FlowSchema.requiredPermissions` → runtime: `service-automation` `builtin/subflow-node.ts`, `builtin/map-node.ts`. Consumer: the cloud MCP build door, which opens both once a release carries this.\n\n<!-- signed: repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9 -->"
+}

@@ -2,8 +2,8 @@
   "number": 33522,
   "kind": "issue",
   "title": "spec: `describeManagedApiMethodConflicts` is a published export with no production caller, and its sentence still prescribes `userActions` on a `synced` object",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T23:24:55Z",
-  "updated_at": "2026-11-15T02:11:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:22:10Z",
+  "closed_at": "2026-11-15T04:21:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33522",
   "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nOut-of-scope finding of #32134 (PR #33517, dev report 6885841810; seat amendment 6885418970). Class b, published text / dead surface.\n\n**What is there:** `packages/spec/src/data/managed-api-affordance.ts` exports `describeManagedApiMethodConflicts(conflicts)`, whose sentence ends \"(needs userActions …) — see ADR-0092 / ADR-0103\". Since the lint rule `object/managed-api-method-unaffordable` builds its own message (`packages/lint/src/validate-managed-api-methods.ts`; the lint CHANGELOG records it \"no longer appends the spec's `describeManagedApiMethodConflicts` sentence\"), the helper has **no production caller** in this repo, only its own test. It receives no bucket (`ManagedApiMethodConflict` is `verb`/`needs`/`index`), so on a `synced` object (ADR-0153 D4, PR #32118) its sentence points at a key the parse refuses. PR #33517 fixes the two sentences an author actually sees and leaves this export untouched by ruling.\n\n**TO (the lane picks one, measured first):**\n- **Retire:** confirm no consumer outside this repo needs it (cloud, objectui, published docs/skills that name it), then remove the export through the repo's removal route (deprecation note or a semver-appropriate removal with changeset).\n- **Or align:** if a consumer exists, make the sentence true on every bucket without widening the signature (e.g. drop the userActions remedy clause, or point at the lint rule).\n\n`Clause-②`: per the route chosen (a removal narrows the published surface). Lane spec, Grade p3 (dead export, wrong only where nobody reads it today).\n\nclass: b · type: Cleanup · Grade: p3 · domain: spec"

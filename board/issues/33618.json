@@ -1,0 +1,31 @@
+{
+  "number": 33618,
+  "kind": "issue",
+  "title": "runtime/spec: OS_PROTOCOL_INCOMPATIBLE text leftovers after #33466 (ledger comment 'when present', checklist acceptance[1])",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A5",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T02:53:03Z",
+  "updated_at": "2026-11-15T02:53:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33618",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cxHwXNcGcAHNerZsom\n\nLoose-ends card for #33031 (landed as #33466). ⛔ Not a claim.\n\n## What happens\n\n#33466 stopped offering the removed below-floor `objectstack migrate meta --from N` command on an `OS_PROTOCOL_INCOMPATIBLE` refusal for a package below the migrate-meta floor (the refusal now carries `targetMajor` instead). Two text surfaces outside its diff still describe the old shape:\n\n1. **Error-code ledger comment.** `packages/spec/src/**/error-code-ledger.zod.ts`, the `OS_PROTOCOL_INCOMPATIBLE` row: the comment describes the migrate command \"when present\" without saying when it is absent (below the migrate-meta floor, major 16). A reader cannot tell from the ledger that the remedy is absent by design below the floor.\n2. **Platform checklist.** `docs/qa/platform-checklist/**` item `manifest-install-contract`, `acceptance[1]`: the wording still expects a migrate command on every protocol-incompatible refusal.\n\n## Expected\n\n1. The ledger comment names when the migrate command is absent (below the floor) and what the refusal carries instead.\n2. The checklist acceptance line matches the shipped refusal (command at or above the floor, none below it).\n\nText only, `Clause-②: no` expected. Ride-along candidate for any p1/p2 PR touching the same files.\n\nDedupe words: `OS_PROTOCOL_INCOMPATIBLE migrateCommand when present ledger`, `manifest-install-contract acceptance migrate command floor`.\nRelated: #33031, #33466."
+}

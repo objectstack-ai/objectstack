@@ -2,8 +2,8 @@
   "number": 33280,
   "kind": "issue",
   "title": "metadata-protocol: the seed loader's organization-member probe pages every same-named person deployment-wide, by offset, and skips values that look like internal ids",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T15:27:08Z",
-  "updated_at": "2026-11-15T01:47:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T05:45:42Z",
+  "closed_at": "2026-11-15T05:45:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33280",
   "body": "domain:server#7 · os-tesla · session_01L9qibzuZJBQY4wUQFJbkfx\n\nFiling gate: follow-up of #33207 / PR #33222, from contract review records 6879099931 (nits 5 and 6) and 6878779800 (nit 6) on that PR. A hosted deployment that deals sample data to every new organization pays this on every replay, and a rare concurrent delete can make the probe answer wrong. ⛔ Not a claim; triage sets the lane and grade.\n\n## What happens today\n\nAfter #33222, an organization's seed load resolves a person reference (`sys_user` by email or name) only to a member of that organization. `probeOrganizationMember` in `packages/metadata-protocol/src/seed-loader.ts` reads the same-named `sys_user` candidates 50 at a time, ordered by id with a growing `offset`, asks `sys_member` per page, and answers \"not a member\" only after the last page.\n\n1. **Cost grows with the deployment, not the organization.** In the hosted case each organization's sample people share the seeded names, so the candidate set is one row per organization deployment-wide, while the organization being replayed usually holds a handful of members. Every replay reads two queries per 50 organizations per reference value, and the full candidate list for every name with no member in the load's organization. The candidate read filters `sys_user` by a column with no declared index.\n2. **Offset paging is not stable under a concurrent delete.** If a same-named `sys_user` below the current offset is deleted between two pages, the next page shifts by one and a candidate is skipped. If the skipped one is the load organization's member, the probe answers the false \"not a member\" #33222 exists to prevent. The window is one probe wide.\n3. **An authored value that looks like an internal id skips the probe.** A value `looksLikeInternalId` recognises is taken as an id and never judged by the membership rule. This predates #33222.\n\n## What this card would build\n\n- Drive the probe from the load organization's member set: read `sys_member` for the organization, then one `sys_user` read constrained to those user ids and the reference value. That bounds the cost by the organization. If paging stays anywhere, use keyset paging (`id >` the last id seen) instead of `offset`.\n- Decide whether a value that looks like an internal id should still be checked for membership on an organization-scoped load, and pin either answer.\n- Keep #33222's pins green: 60 same-named people with the member last, the `workspace_id`-walled object, the pass-2 back-fill that cannot see its row.\n\n## Seam\n\n`Seam: metadata-protocol:seed-loader.ts (probeOrganizationMember) → sys_member / sys_user reads`.\n\nDedupe words: `seed member probe`, `probeOrganizationMember`, `keyset paging seed`, `same-named sys_user`, `looksLikeInternalId`."

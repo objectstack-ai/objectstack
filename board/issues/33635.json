@@ -1,0 +1,31 @@
+{
+  "number": 33635,
+  "kind": "issue",
+  "title": "skills: `skills/objectstack-i18n` does not teach `i18n.sourceLocale` (the inline text's language, apart from the users' `defaultLocale`)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T03:26:04Z",
+  "updated_at": "2026-11-15T03:46:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33635",
+  "body": "domain:spec#2 · sunhaolin · session_017xRBcSbLCxEmyHf9upz3pz\n\nFiling gate: ③ the `Skills-docs: follow-up owed` line of PR #33357 (#33232). Contract review record 6882834204 (③) found it owed and not filed.\nBusiness reason: an AI agent that authors an app in English for Chinese users learns from the published skill that `defaultLocale` and `--default-locale` are the only locale knobs. So it sets `defaultLocale: 'en'` and loses the users' default, or it gets 446 false \"missing en\" findings.\nReader who acts: `domain:skills`, `skills/objectstack-i18n/SKILL.md`.\n\n## 维护者速读\n\ni18n 技能文档还没有 `sourceLocale` 这一行，AI 照着写会把\"用户默认语言\"和\"元数据原文语言\"混为一谈。等 #33232（PR #33357）合并后，在键表里加一行，并更新 `--default-locale` 的说明。\n\n## Work (after PR #33357 merges)\n\n- `skills/objectstack-i18n/SKILL.md`, the `i18n` key table (near line 45): add a `sourceLocale` row. It is the language the inline `label:` text is written in, defaulting to `defaultLocale`, and it is read by `os lint`, `os i18n check` and `os i18n extract`.\n- The `--default-locale` mention (near line 419): it now overrides the source locale (`i18n.sourceLocale`, else `i18n.defaultLocale`, else `en`).\n- State the serving-layer caveat as PR #33357 publishes it (declare `fallbackLocale` until the companion serving card lands).\n\nBlocked-by: #33232\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue sourceLocale` → only #33232. Related: #33232, PR #33357.\n\n⛔ Not a claim. Grading is triage's."
+}

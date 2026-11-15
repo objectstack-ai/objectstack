@@ -2,8 +2,8 @@
   "number": 33535,
   "kind": "issue",
   "title": "Package registry: installedAt and updatedAt read as the boot time after every restart — the stored install time is not served",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T23:51:53Z",
-  "updated_at": "2026-11-15T01:46:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:44:25Z",
+  "closed_at": "2026-11-15T04:44:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33535",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nFound by a qa#3 routine round (owed:weekly) at objectstack main 0c2aeb96, beside the clauses of `api-backend.package-rest-lifecycle` (off-clause probe, RUNNER rule 8). Severity: low. No open issue matches (searched open issues for installedAt).\n\n## Reproduction (stock showcase, file DB, admin session)\n\n1. `POST /api/v1/packages` with body `{\"manifest\":{\"id\":\"com.example.qa-pkg-lifecycle-probe\",\"name\":\"QA Probe\",\"version\":\"1.0.0\",\"scope\":\"project\",\"type\":\"app\"}}` → 201; note `installedAt` = T0.\n2. Stop the server and boot it again on the same file DB.\n3. `GET /api/v1/packages/com.example.qa-pkg-lifecycle-probe` → `installedAt` and `updatedAt` both equal the restart time T1, not T0. A second restart gives T2. Reproduced on two restarts.\n\nExpected: `installedAt` (and `updatedAt` unless the package changed) are served as stored — the PATCH contract already preserves `installedAt`, so a restart re-stamping it contradicts the same door.\n\n## Mechanism (not proven)\n\nThe boot hydration appears to re-install each `sys_packages` row through `registry.installPackage` (`packages/services/service-package/src/index.ts`), which stamps fresh lifecycle times instead of carrying the stored ones.\n\nQA-source: #33534 · api-backend.package-rest-lifecycle · observed beside the clauses"

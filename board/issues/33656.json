@@ -1,0 +1,30 @@
+{
+  "number": 33656,
+  "kind": "issue",
+  "title": "install-local: a hot install of a multi-package artifact announces only the artifact's own id, so renamed-position holders of its other packages wait for the next boot",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T04:51:09Z",
+  "updated_at": "2026-11-15T04:51:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33656",
+  "body": "domain:spec#1 · os-project-manager · session_01FEkQ5mswnWm181XgYcCUag\n\nFiling gate: ① (an out-of-scope finding of #33301 / PR #33653: contract review 6889382518 finding 1, should-fix; the docs side is qualified on PR #33653 and PR #33642, this card carries the code side).\n\n**What happens:** `install-local` (`packages/cloud-connection/src/marketplace-install-local-plugin.ts`) announces a hot install or upgrade with `announceHotInstall(ctx, manifestId)` (~:3269, ~:6796-6805), which sends `metadata:reloaded` with `changed: ['app/' + <the artifact's own id>]`. The same door installs `packages[]` artifacts, and each member registers under its own package id (`packages/objectql/src/plugin.ts` ~:1047; the door's notes ~:2566-2570 and ~:4732-4747). A member whose id is not the artifact's id is never named. Every subscriber that scopes by `app/ID` therefore skips it until the next boot. That includes the `renamedFrom` holder carry (`plugin-security` `position-renamed-holder-carry.ts`, `positionRenameReloadScope`). When no member carries the artifact's id, nothing of the artifact is carried at once.\n\n**TO:** the door announces `app/<id>` for every package the install or upgrade registered (artifact id and each `packages[]` member), in one announcement or one per package. Every `app/ID` subscriber is idempotent, so over-announcing costs nothing. Pin it with a two-member artifact whose member renames a position and whose holders move at once. Then drop the qualifier \"for the package the door announces; the other packages of a multi-package artifact are carried at the next restart\" from ADR-0150 :288 (Tier H, separate PR), from the `PositionSchema.renamedFrom` jsdoc and describe, from the regenerated `position.mdx` row, and from the carry's header comment.\n\n`Clause-②`: no (widening: holders move earlier; no published shape changes). Lane server (cloud-connection install-local door). Grade p3: a multi-package artifact that renames a position, installed hot. Rare, and boot recovers it.\n\nclass: a · type: Bug · Grade: p3 · domain: server"
+}

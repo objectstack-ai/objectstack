@@ -2,8 +2,8 @@
   "number": 33420,
   "kind": "issue",
   "title": "AI chat: on a new conversation the user's first message is not drawn until POST /conversations answers, so the thread sits blank for that long",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T19:53:01Z",
-  "updated_at": "2026-11-15T01:20:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:14:55Z",
+  "closed_at": "2026-11-15T04:13:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33420",
   "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ① a user-visible gap with a named producer. The mechanism reproduces on the tree, read by the #32984 os-dev (PR #33333, Acceptance notes, \"The card's 'Also seen, smaller'\"); the reported ~5 s was not timed here. It is split out of #32984 at that PR's merge (`ba32e79d`).\nReader: `domain:ui` (`ui/packages/app-shell`). Grade p3, self-graded by the seat under the maintainer's 「定级你可以自己决定」: the message is not lost (it is sent once the id lands), it only shows late.\nDedupe: `is:issue is:open \"useDeferredFirstSend\"` and `is:issue is:open chatbot first bubble blank` find nothing open on this.\n\n## What the user sees\n\nThe user starts a new conversation and sends the first message. The thread stays empty, with no bubble and no \"sending\" state, until the server mints the conversation id. #32984 reported roughly 5 s.\n\n## Mechanism (on `main` at `bd439f17`)\n\n`ui/packages/app-shell/src/console/ai/AiChatPage.tsx` `useDeferredFirstSend` (~L914–960, used ~L1246–1274):\n- While `POST /conversations` is in flight, the first message waits in the hook's stash, outside the transcript.\n- The pane remounts on the new id and the stash is replayed then, so nothing is drawn in the meantime.\n- Since #33333, a second message typed during that wait joins the held first message. It is not dropped, but it is not drawn either.\n\n## Acceptance\n\n- The held first message is drawn in the thread at once, as the user's bubble with a pending state, and survives the id-keyed remount without being drawn twice.\n- If the create fails, the existing not-sent rollback applies: the text goes back in the box and the bubble is removed.\n- Pins:\n  - A first send whose create is held open draws the bubble before the create resolves, and exactly once after.\n  - The joined second message, from #33333, shows too.\n  - CONTROL: an existing conversation sends and draws as today.\n- ⛔ No server change. The latency of `POST /conversations` is out of scope."

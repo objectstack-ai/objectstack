@@ -1,0 +1,30 @@
+{
+  "number": 33628,
+  "kind": "issue",
+  "title": "objectql: uninstallPackage, disablePackage and enablePackage never ask the record-currency follow door, so a disabled supplier extension or a re-enabled bad extension can leave a following amount served without judgment",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T03:20:48Z",
+  "updated_at": "2026-11-15T03:20:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33628",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4czXwx6JtQPvacrzzUw\n\nFollow-up of #33593 / PR #33621 (area E2b, area-lease pilot #33059). The seat filed this unleased during the pilot drain.\n\n## Premise (read from code by E2b's os-dev, not measured)\n`uninstallPackage`, `disablePackage` and `enablePackage` never ask the record-currency follow door (the R1–R7 rules of #33593).\n- Disabling or uninstalling a supplier extension can leave a following amount served against a parent that has no code field.\n- Enabling a package can bring back a bad extension amount without judging it.\n\n## Step 1\nMeasure each of the three doors with a supplier extension and a following amount.\n\n## Step 2\nIf it reproduces, judge the served fold at each door under #33593's rules. Disable or uninstall is refused when it would leave a bad pair served, naming the package and field. Enable is refused when it would complete a bad pair. Clause-② table, contract review. The seat rules if the measurement shows a different shape.\n\nDedupe words: record-currency follow door disable supplier extension; enablePackage follow pair; uninstall supplier code field."
+}

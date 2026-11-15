@@ -1,0 +1,32 @@
+{
+  "number": 33683,
+  "kind": "issue",
+  "title": "Two sharing rules that name the same user on the same record keep one share row: the last rule written wins, so an edit grant can be overwritten by a read grant",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:A2",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T06:20:03Z",
+  "updated_at": "2026-11-15T06:49:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33683",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAjTvcDNgUCBhULRSRe\n\n## What happens (@objectstack 18.4.0, HotCRM Project Delivery phase 1a, hotcrm#2316, 2026-11-15)\n\nHotCRM's `crm_project` is `private` and carries two record-relative criteria rules, both `condition: record.id != \"\"`:\n\n| Rule | Access | `sharedWith` |\n| --- | --- | --- |\n| `project_team_read` | read | `{ type: 'field', value: 'team_members' }` (a `multiple` user lookup) |\n| `project_manager_edit` | edit | `{ type: 'field', value: 'project_manager' }` |\n\nThe project manager is always one of the team, so both rules name the same user on the same record. One `afterUpdate` hook write sets both columns.\n\nOn a dev server for the branch:\n\n1. The admin staffs user P as the project's manager. The hook writes `team_members: [P]` and `project_manager: P` in one update.\n2. `GET /api/v1/data/sys_record_share?record_id=<project>` returns **one** row for P: `access_level: 'read'`, `source_id: 'project_team_read'`. No row carries `project_manager_edit`.\n3. P runs `PATCH /api/v1/data/crm_project/<id>` and gets **403** \"You do not have access to this record\". P also cannot staff the project: the `crm_project_member` insert is refused with \"requires edit access to its master record\".\n\nThe edit grant was written and then overwritten by the read grant.\n\n## Why (source, main at d4e3dcc6 and the 18.4.0 dist)\n\n`SharingService.grant` (`packages/plugins/plugin-sharing/src/sharing-service.ts`, around line 2007) looks up an existing row by `(object_name, record_id, recipient_type, recipient_id, source)`. `source_id` is not part of that key. When a row is found, it is **updated in place**:\n\n- `access_level` takes the incoming grant's value;\n- `source_id` becomes the incoming rule's id.\n\n`SharingRuleService.grantOrAbsorbOrganizationRefusal` (around line 2568) calls it once per rule with `source: 'rule'` and `sourceId: rule.id`. Two rules that reach one user on one record therefore share one row, and the last rule applied wins, whatever its level.\n\nThe revoke side is keyed by `source_id` (`where: { source: 'rule', source_id: rule.id }`, line 377). So the merged row belongs to whichever rule wrote last:\n\n- **Under-grant.** If `project_manager_edit` wrote last and P then stops being the manager but stays on the team, that rule's revoke deletes the row. P also loses the read that `project_team_read` still grants, until a full reconcile.\n- **Over-grant.** If P leaves the team while still the manager, the team rule's revoke finds no row of its own and deletes nothing. The surviving row's level is whatever was written last, not what the remaining rule grants.\n\nThe same collision hits any two rules on one object whose recipients overlap. Examples are a position rule and a field rule (HotCRM's `project_finance_edit_*` edit rules for finance positions, beside the team read rule, when a finance user is also staffed), or two position rules held by one person.\n\n## Expected\n\nEach user ends with the most permissive access any of their rules grants on a record. Revoking one rule never removes access that another rule still grants. Two shapes would deliver that:\n\n- key rule rows by `source_id` too (one row per rule and recipient), and take the maximum on read; or\n- keep one row, and recompute its level from every rule that still reaches the user each time a rule grants or revokes.\n\n## HotCRM side\n\nNo workaround. HotCRM keeps the two rules as designed (hotcrm#2316 phase 1a). Until this ships, a project manager who does not own the project reads it but cannot edit or staff it. A manager who opened the project owns it and is unaffected. The phase-1a PR records the gap and links here."
+}

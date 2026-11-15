@@ -2,8 +2,8 @@
   "number": 33293,
   "kind": "issue",
   "title": "console first load: a dashboard route waits on a 2.29 MB (gzip) eager closure that carries grid, form and Studio code it does not draw — 17.9 s blank on a cold cache at 1.5 Mbps",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T15:55:06Z",
-  "updated_at": "2026-11-15T01:23:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:45:20Z",
+  "closed_at": "2026-11-15T04:44:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33293",
   "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ① a user-visible slowness with a named producer, measured by the #33034 measurement (record 6880118403, os-dev-report 6880126393, out_of_scope_findings[0], class a).\nReader: `domain:ui` (`ui/apps/console`). Grade p3, self-graded by the seat under the maintainer's 「定级你可以自己决定」: the first visit per browser per release, on a slow link; warm loads are 2.3–3.7 s.\nDedupe: `is:issue \"eager closure\"` 67 hits, none open about the closure's dashboard-route contents (nearest closed: #25925 spec subpath duplication, #30588 / #32225 language-pack ceiling); `is:issue is:open \"first load\" console` 10 hits, none on this.\n\n## 维护者速读\n\n浏览器缓存为空时（每次发版后的第一次访问），控制台要先下载约 2.29 MB（gzip）的脚本才开始请求数据。在 1.5 Mbps 的慢网络上，仪表盘要 17.9 秒才出第一个图表；缓存热的时候同样的网络只要 3.2 秒。这堆脚本里有不少是仪表盘页面根本用不到的代码（表格、表单、Studio 语言包等）。\n\n## Measured (#33034, 2026-11-14, HotCRM 18.4.0 and showcase at `origin/main` `d4fbb4db`)\n\n- The Console's `dist/eager-closure.json`: **105 chunks, 2,286,732 B gzip** (7,710,567 B raw), loaded before the second boot API call goes out.\n- On a dashboard route that closure still carries code the route does not draw: `plugin-grid` (159 KB gz), `plugin-form` (44 KB), `PackageFormDialog` (44 KB), `RecordDetailView` (27 KB), `i18n-ns-studio-en` (64 KB), beside `vendor-objectstack` (634 KB) and `ui-components` (327 KB). The dashboard's own code and the chart chunks are already lazy.\n- Last chart drawn, browser cold → warm: 1.5 Mbps / 300 ms **17.9 s → 3.2 s**; 1 Mbps / 400 ms **25.6 s → 3.7 s**; 20 Mbps / 40 ms 3.6 s → 2.9 s. The dataset batch itself is 40–160 ms of server time in every run.\n- Asset names are content-hashed, so every release makes every browser cold again.\n\n## Producer\n\n`ui/apps/console/vite.config.ts`: the `advancedChunks` groups and the entry's static imports decide what is eager. The existing eager-closure size gate is a ceiling against growth, not a target, so it does not cover this.\n\n## Acceptance\n\n1. A dashboard route's eager closure no longer carries `plugin-grid`, `plugin-form`, `PackageFormDialog`, `RecordDetailView` or the Studio i18n namespace, or the card records, per chunk, why one must stay eager.\n2. The new `eager-closure.json` totals are recorded on the PR against the 2,286,732 B baseline above.\n3. No route regresses: a list, a record and a Studio route still load (a lazy chunk fetched on demand, no blank page).\n\nObservations from the same measurement, not filed: the dashboard's data request is the fifth serial wave of boot API calls (a five-RTT floor, about 2.0 s at 400 ms even warm); `GET /api/v1/packages` answers about 410 KiB to the dev admin on every Console load and is not HTTP-cached (off the dashboard's critical path)."

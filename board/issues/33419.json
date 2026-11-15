@@ -2,8 +2,8 @@
   "number": 33419,
   "kind": "issue",
   "title": "AI build chat: the plan card's dashed 「· 补充」 field chip has no legend and its tooltip shows only the machine name, so nothing says what \"suggested\" means",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T19:52:35Z",
-  "updated_at": "2026-11-15T00:20:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:00:37Z",
+  "closed_at": "2026-11-15T03:58:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33419",
   "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ① a user-visible defect with a named producer. It reproduces on the tree and was measured by the #32984 os-dev (PR #33333, Acceptance notes, \"The card's 'Also seen, smaller'\"). It is split out of #32984 at that PR's merge (`ba32e79d`).\nReader: `domain:ui` (`ui/packages/plugin-chatbot`). Grade p3, self-graded by the seat under the maintainer's 「定级你可以自己决定」: a wording gap on one chip, with no wrong data.\nDedupe: `is:issue is:open suggestedField` and `is:issue is:open \"补充\" chatbot` find only #32984 itself.\n\n## What the user sees\n\nOn the AI build chat's plan card, a field the user's words did not name is drawn as a dashed chip ending in 「· 补充」 (en `· suggested`). Nothing on the card says what that mark means. The chip's tooltip (`title`) is the field's machine name, so hovering does not explain it either.\n\n## Where (on `main` at `bd439f17`)\n\n- `ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx` `PlanCardObjectRows` (~L6164–6217):\n  - `suggestedMark = t('chatbot.plan.suggestedField')`\n  - the chip sets `title={f.name}`\n  - `{f.suggested ? <span>· {suggestedMark}</span> : null}`\n- `chatbot.plan.suggestedField`: zh-Hans 「补充」, zh-Hant 「補充」, en `suggested`.\n\n## Acceptance\n\n- A user can tell from the card what a suggested field is: the AI added it, and the user did not ask for it. This can be a one-line legend under the field rows when any field is suggested, or a tooltip sentence on the chip, through the i18n pack in every shipped locale. The machine name stays reachable.\n- Pin: a rendered plan card with one suggested and one named field shows the explanation for the suggested one only. CONTROL: with no suggested field, there is no legend.\n- ⛔ No producer change: `suggested` is already on the wire."

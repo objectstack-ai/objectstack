@@ -2,7 +2,7 @@
   "number": 33495,
   "kind": "pull_request",
   "title": "docs(rest): name the 503 row and add the partial-judgement row in the released 2fc3fce CHANGELOG entry",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T22:36:15Z",
-  "updated_at": "2026-11-15T01:29:09Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-15T02:51:51Z",
+  "closed_at": "2026-11-15T02:51:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T02:51:49Z",
   "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/33495",

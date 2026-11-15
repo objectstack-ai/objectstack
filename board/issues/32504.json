@@ -2,8 +2,8 @@
   "number": 32504,
   "kind": "issue",
   "title": "Stale rollback claims: three code comments say the in-memory driver cannot roll back, and ADR-0067 D3 calls revertCommit atomic",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T02:08:51Z",
-  "updated_at": "2026-11-15T01:40:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:13:58Z",
+  "closed_at": "2026-11-15T04:13:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

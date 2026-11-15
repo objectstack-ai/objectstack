@@ -2,8 +2,8 @@
   "number": 32134,
   "kind": "issue",
   "title": "managedBy 'synced': the stripped-apiMethods warning and the lint sentence tell the author to open a verb through userActions, which a synced object refuses (after #32061)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T09:56:12Z",
-  "updated_at": "2026-11-14T23:53:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T03:23:38Z",
+  "closed_at": "2026-11-15T03:23:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 7,
   "locked": false,

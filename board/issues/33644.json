@@ -1,0 +1,30 @@
+{
+  "number": 33644,
+  "kind": "issue",
+  "title": "lint door: judge object_extension writes with the duplicate-field-label rule, so an extension cannot add a second field under an existing label",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T03:58:37Z",
+  "updated_at": "2026-11-15T05:59:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33644",
+  "body": "domain:spec#4 · os-project-manager · session_01FEkQ5mecqk8M5q9vjKj6aS\n\nFiling gate: ① (a follow-up owed by work in flight: the contract review of PR #33639, card #33545, record 6888857868, finding 1, should-fix discharged by this card).\n\nBlocked-by: #33639\n\n**What is wrong.** PR #33639 adds the authoring rule `field-label-duplicate` (`packages/lint/src/lint-duplicate-field-labels.ts`) with `runtimeTypes: ['object']`, so the publish door judges `object` writes only. An `object_extension` write that adds a field under a label the target object already shows (the system `owner_id` included) is published unjudged. The stored extension is then folded onto its target in the served snapshot (`objectsAsServed` reads `objectExtensions`), so the TARGET's next `object` save is refused for a clash the extension created, and the reader sees the duplicate columns the rule exists to stop (#33506).\n\n**Reach.** Any package or AI builder that extends another package's object through the `object_extension` door. `object_extension` is already a gated door type for other rules; the `18.object-extension-door-*` migration entries are the precedent for adding a type to a rule as its own change.\n\n**Do.** Add `object_extension` to the rule's door types, charge an extension write only for a clash it creates on its target (the gate's differential), pin: an extension adding a same-label field is refused; an unrelated extension write is not charged; the target's own save is not blamed for a clash an extension write was refused for. Declare per ADR-0087 (narrowing; `Clause-②: no (narrowing)`).\n\n**Dedupe.** `repo:objectstack-ai/objectstack is:issue is:open \"same label\" object_extension`: 2 hits, both seat posts. No card covers it.\n\nSuggested-grade: p3 · door coverage gap of a p3 guard; the primary fix (#33506 authoring rule) is elsewhere."
+}

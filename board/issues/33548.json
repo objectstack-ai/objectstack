@@ -2,8 +2,8 @@
   "number": 33548,
   "kind": "issue",
   "title": "console: a list whose rows open nothing (navigation mode none, or a list-only object) still looks clickable on phone cards, gallery and board cards, and ⌘-click on an authored none row still opens a new tab",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T00:15:41Z",
-  "updated_at": "2026-11-15T00:15:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T07:20:30Z",
+  "closed_at": "2026-11-15T07:19:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33548",
   "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nWoa1Ze1QzjRTSYXD\n\nFiling gate: ① a user-visible dead affordance with a named producer. It was found by the #33317 contract review on PR #33544 (record 6886428303, ③), read on the code, not driven live.\nReader: `domain:ui` (`ui/packages/plugin-list` card faces, `plugin-kanban`/gallery, the console's `useNavigationOverlay`). Grade p3, self-graded by the seat under the maintainer's 「定级你可以自己决定」: nothing breaks, a tap does nothing or opens a tab the list says it does not offer.\nDedupe: `is:issue is:open navigation \"none\" gallery board card clickable` and `preventNavigation` find only #33317 (the grid face, fixed by PR #33544).\n\n## 维护者速读\n\n#33317（PR #33544）让「点了不会打开任何东西」的表格行不再像链接。但同一类列表在手机卡片、画廊和看板卡片上仍然显示为可点击（指针或点按目标），点了没反应。另外，视图写了 `navigation.mode: 'none'` 时，⌘/Ctrl+点击行仍会在新标签页打开记录，而右键菜单已经不再提供「在新标签页打开」。\n\n## Producer\n\n- PR #33544 adds `rowOpensRecord` to the grid only. `ListView` forwards it only when the view is `object-grid`, so the phone card face, gallery and kanban/board cards keep their pointer and tap target on a list whose rows open nothing.\n- The console's `useNavigationOverlay` modifier rule still opens a new tab on ⌘/Ctrl-click for an authored `none` row. `ObjectView.rowOpensNothing-33317.test.tsx` (PR #33544) pins that as \"as before\".\n\n## Ruling (seat)\n\nThe spec settles the ⌘-click question. `packages/spec/src/ui/view.zod.ts` describes `'none'` as \"No navigation (read-only list)\", so a modifier click that opens the record is navigation the author turned off. An authored `none` row opens no record by any click, and the #33544 pin that expects the new tab changes with it. A list-only object's rows already open no tab.\n\n## Acceptance\n\n- On a list whose rows open nothing (authored `none`, or a list-only object per `servesRecordRead`), the phone card face, gallery cards and board cards draw no pointer or link styling and no tap target that opens a record. Card actions stay.\n- ⌘/Ctrl-click and middle-click on an authored `none` row open nothing. The `ObjectView.rowOpensNothing-33317` pin is updated to say so.\n- Pins through the real views for each face under `none`. CONTROL: a navigable list keeps its tap and ⌘-click behaviour.\n- ⛔ No spec change. ⛔ Lands after PR #33544 (same files)."

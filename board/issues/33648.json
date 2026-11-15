@@ -1,0 +1,31 @@
+{
+  "number": 33648,
+  "kind": "issue",
+  "title": "GET /api/v1/me/apps still lists a disabled package's app (HotCRM crm_o2c) while /meta/app/<name> answers 404 and the console launcher drops it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A5",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T04:17:50Z",
+  "updated_at": "2026-11-15T04:49:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33648",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n## What happens (@objectstack 18.4.0, HotCRM browser pass of hotcrm#2466, 2026-11-15)\n\nHotCRM's Order to Cash module (`app.objectstack.hotcrm.o2c`) declares the app `crm_o2c`. With the package **disabled**:\n\n- `GET /api/v1/me/apps` still lists `crm_o2c` for the `sales_manager` and `ar_accountant` holders. Their `tabPermissions` mark it visible, or leave it unhidden.\n- `GET /api/v1/meta/app/crm_o2c` answers 404.\n- The console launcher drops the app, and opening its URL shows \"This app can't be opened\".\n\nSo the API that answers \"which apps can this member open\" disagrees with the metadata and with the console. Any other client of `/me/apps` (a mobile shell, an integration, an agent) offers an app that cannot be opened.\n\n## Ask\n\n`/me/apps` applies the same disabled-package filter that `/meta/app` and the launcher apply: a disabled package's apps are not listed, whatever `tabPermissions` say.\n\n## Acceptance\n\n1. Disable a package that declares an app, and `/me/apps` omits that app for every member, including one whose set states it `visible`.\n2. Re-enable the package, and the app returns.\n3. A test pins `/me/apps`, `/meta/app` and the launcher source against each other for a disabled package."
+}

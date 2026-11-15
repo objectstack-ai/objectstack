@@ -2,8 +2,8 @@
   "number": 33597,
   "kind": "issue",
   "title": "Scenario grader: Build does not check that each persona's permission set covers the reads and writes the card gives it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -16,16 +16,22 @@
     "pm:epic",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T02:14:57Z",
-  "updated_at": "2026-11-15T02:14:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T07:35:13Z",
+  "closed_at": "2026-11-15T07:34:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33597",
-  "body": "eval#1 · os-tesla · session_01L9qibzr7AespGQoymAnLtn\n\nFiling-gate category: ③ maintainer-directed child of #33595 (M1), quoted there; also ① grader gap, measured. `reach:` eval#1 round 1, 2026-11-14 (control cards, scratch, published 18.4.0, runner `d683e6f3`): Build 32/32 on `invoice_with_line_items` and 30/30 on `project_with_tasks`, yet the built apps refused `sales_rep` a line-item create and `contractor` a task create, update and delete that the cards' operations give them (403).\n\n## Why it matters\n\nThe build is what a customer ships. A permission set that locks a role out of its own work is a broken app, and today only the Run half finds it, where it is charged to the agent (sibling child of #33595).\n\n## Carrier\n\n- `packages/qa/scenarios/src/score/scenario-score.ts` (`expect` by name and shape) and `scenario-tags.ts` (`access-security.*` checks) read the built artifact; neither derives the persona grants the card implies.\n- The runner's data contract already names each persona's permission set (`src/runner/prompts.ts`, `permissionSetName` in `src/runner/namespace.ts`).\n\n## Done when\n\n- From the card alone (questions a persona answers ⇒ read on that object; operations with outcome `applied` or `pending_confirmation` ⇒ the verb on that object; `refused PERMISSION_DENIED` ⇒ the verb must be absent), the Build half adds one check per persona × object × verb against the built permission set, named `persona-grant:<persona>:<object>:<verb>`.\n- The build prompt states nothing new: the grants already trace to the prompt through the data contract (`docs/qa/scenarios/README.md` \"Build checks trace to the prompt\"); if a grant does not, the card is fixed instead.\n- Tests pin a grant missing, a grant present, and a grant the card refuses.\n\n## Reader\n\nThe epic PM of #33595 dispatches it to `os-dev` (`domain:devx`).\n\nDedup: see #33595."
+  "body": "epic:#33595#1 · os-tesla · session_01L9qiby1cctpVpRbJzjccvY\n\nFiled by eval#1 · os-tesla · session_01L9qibzr7AespGQoymAnLtn.\n\nFiling-gate category: ③ maintainer-directed child of #33595 (M1), quoted there; also ① grader gap, measured. `reach:` eval#1 round 1, 2026-11-14 (control cards, scratch, published 18.4.0, runner `d683e6f3`): Build 32/32 on `invoice_with_line_items` and 30/30 on `project_with_tasks`, yet the built apps refused `sales_rep` a line-item create and `contractor` a task create, update and delete that the cards' operations give them (403).\n\n## Why it matters\n\nThe build is what a customer ships. A permission set that locks a role out of its own work is a broken app, and today only the Run half finds it, where it is charged to the agent (sibling child of #33595).\n\n## Carrier\n\n- `packages/qa/scenarios/src/score/scenario-score.ts` (`expect` by name and shape) and `scenario-tags.ts` (`access-security.*` checks) read the built artifact; neither derives the persona grants the card implies.\n- The runner's data contract already names each persona's permission set (`src/runner/prompts.ts`, `permissionSetName` in `src/runner/namespace.ts`).\n\n## Done when\n\n_Edited by epic:#33595#1: the refused arm of item 1 reads \"the persona's set refuses the write\", not \"the verb is absent\" (premise correction 6888060472: a 403 also comes from a field lock or a row policy, and `requisition_to_receipt` declares the same persona, object and verb both applied and refused)._\n\n- From the card alone (questions a persona answers ⇒ read on that object; operations with outcome `applied` or `pending_confirmation` ⇒ the verb on that object; `refused PERMISSION_DENIED` ⇒ the persona's set refuses the write: the verb is not granted, or an unconditioned field entry the write names is not editable; not measured when only a row policy or a row-conditioned field entry could refuse it), the Build half adds one check per persona × object × verb against the built permission set, named `persona-grant:<persona>:<object>:<verb>`.\n- The build prompt states nothing new: the grants already trace to the prompt through the data contract (`docs/qa/scenarios/README.md` \"Build checks trace to the prompt\"); if a grant does not, the card is fixed instead.\n- Tests pin a grant missing, a grant present, and a grant the card refuses.\n\n## Reader\n\nThe epic PM of #33595 dispatches it to `os-dev` (`domain:devx`).\n\nDedup: see #33595.\n"
 }

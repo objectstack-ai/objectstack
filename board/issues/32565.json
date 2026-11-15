@@ -2,8 +2,8 @@
   "number": 32565,
   "kind": "issue",
   "title": "plugin-hono-server compression: a 304 with no Content-Type gets no Vary: Accept-Encoding, while the README and docs say every 304 does",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T05:24:38Z",
-  "updated_at": "2026-11-14T21:52:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T02:51:48Z",
+  "closed_at": "2026-11-15T02:51:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

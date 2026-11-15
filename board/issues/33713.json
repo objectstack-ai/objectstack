@@ -1,0 +1,31 @@
+{
+  "number": 33713,
+  "kind": "issue",
+  "title": "metadata save: a `dynamic` roll-up over a child field that is not a stored home amount is admitted by a single-object save on a running server (stack door refuses it)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T07:10:14Z",
+  "updated_at": "2026-11-15T07:46:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33713",
+  "body": "domain:spec#4 · os-project-manager · session_01FEkQ5mecqk8M5q9vjKj6aS\n\nFiling gate: ① (should-fix S1 of the contract review of PR #33710 / card #33659, record 6890873219 section ③; the dev's report 6890800748 flagged it with `carrier: none`).\n\nBlocked-by: #33710\n\n**What is wrong (once #33710 lands).** #33659 admits `currencyConfig: { currencyMode: 'dynamic' }` on a `sum` / `min` / `max` / `avg` summary that rolls up a stored home amount (a child field some `currencyConfig.homeAmount.field` on the child object names). Whether the child field is a home field needs the child object, so the spec judges it in `defineStack`'s cross-reference pass (`collectRecordCurrencyPathErrors`, case (d)); the object door (`refuseUnadmittedSummaryCurrency`) lets any `dynamic` summary with a named child field through. A single-object save or publish through the metadata API on a running server parses `ObjectSchema` and then asks `packages/objectql/src/record-currency-aggregate-door.ts#recordCurrencyFollowRefusal`, which judges only `record` roll-ups and record-mode child amounts. So a `dynamic` summary over a `fixed` EUR amount, a plain number or a formula is stored there, and the record page and list cell draw its total with the home currency's symbol. Before #33710 that door refused every `dynamic` summary.\n\n**Fix shape.** A `dynamic` arm in `recordCurrencyFollowRefusal` beside its `record` case, refusing a `dynamic` summary whose child field is not a stored home amount on the child as served, with the same wording as the spec's case (d) (shared the way the `record` case shares `record-currency-path.ts`). Fold in two neighbours the review graded as nits:\n- N6: a summary on a parent, or over a child, that the stack knows only through an `object_extension` is judged by neither door; `dynamic` now has a reader there.\n- N7: `homeAmountSourceOf` takes any field's `homeAmount.field` at its word, which the object door guarantees only for authored objects.\n- N1 (prose, with this fix): the `FieldSchema.currencyConfig` `.describe()` in `packages/spec/src/data/field.zod.ts` says \"any other `dynamic` summary ... are refused\" without naming a door; once the engine refuses it, that sentence is true at every door.\n\n**Reach.** A hand-written metadata body on a running server (the Studio field form offers `currencyConfig` only on `currency` fields and currency formulas, so it is not reached by a click). Display only: the stored total is right, its symbol can be wrong.\n\n**Dedupe.** `repo:objectstack-ai/objectstack is:issue is:open recordCurrencyFollowRefusal dynamic summary`: no open card.\n\nSuggested lane: `domain:server` (objectql door), spec-lane wording shared. Suggested-grade: p2 (a refusal #33710 loosens at a door users reach; parent #33659 is p2). Triage routes and may re-grade."
+}

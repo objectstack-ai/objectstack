@@ -1,0 +1,36 @@
+{
+  "number": 33650,
+  "kind": "issue",
+  "title": "Console organization invitations: \"Invitation not found!\" and \"User is already a member of this organization\" render as raw English, and an already-accepted invitation reads as 「邀请不可用」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:i18n",
+    "area:identity",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T04:27:17Z",
+  "updated_at": "2026-11-15T07:21:03Z",
+  "closed_at": "2026-11-15T07:19:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33650",
+  "body": "## 维护者速读\n\n组织邀请链路上的两个报错没有本地化，中文界面里直接显示 better-auth 的英文原文：\n\n1. 打开 `/accept-invitation/<id>` 时显示 「邀请不可用」+ **\"Invitation not found!\"**。控制台本来已经为这个情况准备了中文「该邀请已失效或已过期。」，但没匹配上。\n2. 邀请成员弹窗里显示 **\"User is already a member of this organization\"**：这个错误码没有映射。\n\n另外，**已经接受过的邀请**再次打开链接（或接受后刷新页面），看到的也是「邀请不可用」。被邀请人其实已经在组织里了，应该提示「你已加入该组织」并带他进去，而不是看起来像出错。\n\n## Facts (objectstack `main`, better-auth 1.7.12, 2026-11-15)\n\n- **Why (1) is untranslated.** better-auth's `GET /organization/get-invitation` (`dist/plugins/organization/routes/crud-invites.mjs:503`) throws `APIError.fromStatus(\"BAD_REQUEST\", { message: \"Invitation not found!\" })`, with **no `code`**. Unlike `accept-invitation` (L268), it does not use `ORGANIZATION_ERROR_CODES.INVITATION_NOT_FOUND`. `resolveOrgErrorMessage` (`ui/packages/app-shell/src/console/organizations/orgErrorMessage.ts:180`) looks up by code first, so the existing `INVITATION_NOT_FOUND` entry (L141) is never hit. It then returns `err.message` as is, and the page's own localized fallback (`AcceptInvitationPage.tsx:83`) is never reached because the message is non-empty.\n- **One message, six states.** That throw covers: unknown id (typo, deleted organization, link from another environment), `accepted`, `rejected`, `canceled`, `expired` (`invitation-expired-supersede.ts`), and `expiresAt` in the past (default 48 h, `invitationExpiresIn` unset). The page cannot tell them apart.\n- **Why (2) is untranslated.** `USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION` is missing from `ORG_ERROR_MESSAGE_KEYS` (invite-path section, L88–100), so the invite dialog draws the vendor's English message.\n- **Observed together:** inviting `zhang.wei@…` answered \"User is already a member of this organization\", and opening that person's earlier invitation link answered \"Invitation not found!\". The invitation had already been accepted.\n\n## Expected\n\n- Both errors are drawn in the console's language: 「该邀请已失效或已过期。」 and a localized \"already a member\" sentence.\n- When the signed-in user opening the link is already a member of the invitation's organization, the page says so and offers to enter that organization, instead of the error card.\n\n## Suggested fix\n\n1. In `resolveOrgErrorMessage` (or the `@object-ui/auth` client's `getInvitation`), treat the code-less \"Invitation not found!\" from `get-invitation` as `INVITATION_NOT_FOUND`, or let `AcceptInvitationPage` prefer its localized fallback for any `get-invitation` 400.\n2. Add `USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION` to `ORG_ERROR_MESSAGE_KEYS`, with i18n keys in every locale pack.\n3. On a not-found answer, check whether the current user already belongs to an organization the console knows about for this invitation, and show the \"already joined\" state. If the id alone cannot tell, at least word the error so it covers the accepted case (\"已被使用、已过期或已撤销\")."
+}

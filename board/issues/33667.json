@@ -1,0 +1,30 @@
+{
+  "number": 33667,
+  "kind": "issue",
+  "title": "Loose ends after #33606: #32761 non-finite status readers (decision) + review nits N1–N3",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T05:15:39Z",
+  "updated_at": "2026-11-15T05:50:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33667",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4czrwT7WKAde95kC4cg\n\nLoose-ends card filed at the landing of PR #33606 (Fixes #32744), as the review (comment 6888028210) and the area handover planned. Unleased; p3; DRAIN applies (not dispatched until the drain ends).\n\n## 1. #32761 — measured, not fixed (needs a decision)\n#32761 (\"metadata-protocol + types: a batch row error whose throw declares a non-finite status ships `httpStatus: null`\") was folded into #32744 and closed as a duplicate. #33606 measured it and did not change it: its TO is a decision (what a non-finite declared status should answer), and the fix reaches metadata-protocol (lease E1 paths). The card text and evidence are on #32744 and #32761.\n\n## 2. Review nits from #33606 (non-blocking at landing)\n- N1. The holder shape is spelled out twice: core's `PackageScopedHolder` (`package-scoped-resolution.ts:363-367`) and the types alias (`thrown-http-error.ts:255-259`). Only one direction is compiler-checked: types' shape must be assignable to core's (`error-response.ts:291`). If core adds a fifth kind, everything still compiles, and every door then silently withholds `details.candidates` for a real refusal that names it. A type-level assertion in rest closes that gap, for example `const _coreHoldersPass: NonNullable<ReturnType<typeof sharedPackageScopedRefusalCandidates>>[number] = {} as PackageScopedHolder;`. The jsdoc at `error-response.ts:285-288` should then say the check runs both ways.\n- N2. The changeset says the move happens on \"a batch row's error\". That door, `toRowApiError` (`protocol-client-failures.ts:168`), has no malformed-list pin at this head; the types and rest suites cover the other exits. One row-error case in metadata-protocol would pin it. If adding it is out of the lease, a loose-ends card is enough.\n- N3. `packageScopedRefusalCandidates` is public, and its signature now names a type that callers cannot import (`PackageScopedRefusalHolder` is not exported). This is harmless, because `ReturnType<>` reaches it and `check:api-surface` records only that an export exists. Exporting it, or adding a jsdoc line saying it is core's `PackageScopedHolder`, would help a reader of the `.d.ts`.\n\nFolded #32761 was measured and not fixed. Sending it to the loose-ends card at landing is right: its TO is a decision, and the fix reaches metadata-protocol (lease E1).\n\n## Acceptance\n- #32761: a ruling on the TO, then a pinned fix (or a recorded \"keep\" with a pin of today's answer).\n- N1: a compile-time two-way check between core's `PackageScopedHolder` and the types alias.\n- N2: one malformed-list row-error pin on `toRowApiError` in metadata-protocol.\n- N3: export the holder type or add the jsdoc line."
+}

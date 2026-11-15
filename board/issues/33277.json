@@ -2,8 +2,8 @@
   "number": 33277,
   "kind": "issue",
   "title": "publish: a publish whose registry refused an object answers a distinct outcome naming it, not \"published\" (follow-up A of #33005)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T15:23:06Z",
-  "updated_at": "2026-11-14T23:43:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T04:13:48Z",
+  "closed_at": "2026-11-15T04:13:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

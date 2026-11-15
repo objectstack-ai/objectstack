@@ -2,9 +2,9 @@
   "number": 33594,
   "kind": "pull_request",
   "title": "fix(service-automation): a durable http node with no method sends POST on the no-outbox fallback too",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T02:12:17Z",
-  "updated_at": "2026-11-15T02:13:24Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 1,
+  "updated_at": "2026-11-15T04:45:48Z",
+  "closed_at": "2026-11-15T04:45:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-15T04:45:46Z",
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/33594",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DH9e4qEZ6HPSFPqXCYcdFui)_\n\nFixes #33487\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`durable: true` 且未写 `method` 的 flow `http` 节点,在没有接 outbox 的环境里(同步降级与保存路径上的后台发送)现在发 POST,和走 outbox 时一致;动词只解析一次,两条路径共用。\n- 为什么改:同一个流程有 outbox 时发 POST、没有时发 GET;带 body 的 GET 被 `fetch` 直接拒绝(请求根本没发出),无 body 的 GET 被记成「只读、零影响」,运行摘要说什么都没改。\n- 风险与回滚:只影响「durable + 未写 method + 未接 outbox」这一组合;显式写了 `method` 的节点、非 durable 节点不变。回滚即 revert 本 PR;想保留旧行为的流程写 `method: 'GET'`。\n- 先看:`packages/services/service-automation/src/builtin/http-nodes.ts`(`const method = ...` 一行及其两处使用);`src/builtin/http-node-signing.test.ts` 新增的 describe。\n- 两分钟验证:`pnpm --filter @objectstack/service-automation exec vitest run src/builtin/http-node-signing.test.ts`,预期 33/33 通过,其中「http node verb」组 5 条。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`packages/services/service-automation/src/builtin/http-nodes.ts` resolves the request verb once, next to `durable`: `const method = cfg.method ?? (durable ? 'POST' : 'GET')`. The durable arm's outbox enqueue and the inline send (which is also the durable arm's no-outbox fallback, awaited or in the background on the save path) both read that value. Before, the enqueue used `cfg.method ?? 'POST'` and the inline send `cfg.method ?? 'GET'`, so a durable node with no `method` and no outbox:\n\n- with a body did not send at all: `fetch` refuses a GET that carries a body (`TypeError: Request with GET/HEAD method cannot have body.`, measured on this container's node). The awaited fallback failed the node; the save-path background send logged it as lost.\n- without a body sent a bodyless GET counted as a read (`acted: 0`), so the run reported it changed nothing.\n\nThe `reads` / effect accounting already derives from the verb, so it now follows the resolved verb: an accepted fallback POST counts `acted: 1`.\n\nDecision on the axes (correctness of what a flow sends, then smallest change, then effort): one resolution for the whole node, rather than a durable-only local, because it is the smallest diff that makes both durable paths read the same value and keeps the request/response default (`GET`) unchanged. The descriptor and the spec's `HttpConfigSchema.method` describe already say \"default GET; POST when durable\"; no text there changes.\n\n## Tests\n\nNew top-level `describe` in the existing real-receiver harness `src/builtin/http-node-signing.test.ts` (\"http node verb — durable with no method sends what the outbox sends, on every arm\"). The outbox arm is driven end to end (`MessagingService` + `MemoryHttpOutbox` + `HttpDispatcher`) and its received request is the reference:\n\n- awaited fallback, no messaging service: same method (`POST`), same body bytes, same `X-Objectstack-Signature`, verifies; summary `acted: 1, unmeasured: 0`.\n- awaited fallback, messaging with no HTTP outbox: same assertions.\n- background fallback on the save path (`afterUpdate`): same method, bytes and signature, as received by the receiver.\n- awaited fallback with no body: `POST`, `acted: 1`.\n- CONTROL: a request/response node with no method still sends `GET` with the empty-body signature and counts `acted: 0`.\n\nAblation (one-off, not kept): the pre-fix inline default `const method = cfg.method ?? 'GET'` re-inserted at the top of `sendInline` through `scripts/ablation-replace.mjs` (anchor 1 -> 0, blob `84df15f07f99` -> `60835e9151ba`) turns 4 of the 5 new tests red (the CONTROL stays green); restore proved by blob == HEAD and an empty `git diff HEAD`. The test imports `http-nodes.ts` by relative source path, so no `dist/` is in the path.\n\n<details><summary>Readings at 2393fb35ac</summary>\n\n- `pnpm --filter @objectstack/service-automation test`: Test Files 281 passed (281), Tests 3921 passed (3921); lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/service-automation typecheck` (includes `check:test-typecheck`): VERDICT command-exit 0.\n- Ablation run: `Tests 4 failed | 29 passed (33)`; failures `expected false to be true` (the awaited fallbacks: the GET-with-body `fetch` refusal), `expected [] to have a length of 1` (the background send never arrived), `expected 'GET' to be 'POST'` (the bodyless arm).\n- `eslint --no-inline-config` on both changed `.ts` files: exit 0, no output.\n- `node scripts/check-test-source-alias.mjs`: exit 0. `node scripts/check-nul-bytes.mjs`: exit 0.\n- Dispatch-gates derived list (67 commands): reconciled in the os-dev report on the card.\n\n</details>\n\n## Acceptance notes\n\n- Bodyless and string-body durable fallbacks still send different bytes than the outbox would: the outbox posts `deliveryBody(payload ?? {})` (`{}` for no body, a string verbatim), the inline send posts no body and JSON-encodes a string. That is the file header's documented \"each arm signs what it sends\", and the existing harness pins the string case; the verb is now the same on every arm. Not changed here.\n- `packages/spec/src/automation/io-node-config.zod.ts`'s `method` jsdoc quotes the two old spellings (`cfg.method ?? 'POST'` on the durable arm, `const method = cfg.method ?? 'GET'` on the inline one). Its meaning stays true (two values for an absent key, decided by `durable`); the quoted spellings are now stale. Outside this card's file surface.\n\n## Verification\n\nSession: `session_016WV4cxHwXNcGcAHNerZsom`, seat `domain:server#5`, area A5 of the server area-lease pilot.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"

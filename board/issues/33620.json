@@ -1,0 +1,31 @@
+{
+  "number": 33620,
+  "kind": "issue",
+  "title": "pm(queue-guard): enumerateRows reads diff-tree without -z, so a governed path with a non-ASCII or control character is quoted and matches no governed prefix",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T02:57:40Z",
+  "updated_at": "2026-11-15T03:48:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33620",
+  "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (a follow-up owed by work in flight: at-tier delta review 6888217778 on PR #33531, card #33501, found this outside its diff, from reading the code, not from a run).\n\n`scripts/pm/check-governed-queue-guard.mjs` `enumerateRows` lists a merge group's paths with `git diff-tree -r --no-commit-id --no-renames --name-only` (both the range read and the per-commit read) without `-z`, and nothing sets `core.quotePath=false`. Git then prints a path holding a non-ASCII or control character as a C-quoted string (`\"skills/x/\\346\\226\\207.md\"`), which matches no governed prefix. Inside the low-risk arm this fails closed to Tier H; outside it, the queue leg does not see that governed file at all.\n\n## What lands\n\n1. Every path read in `enumerateRows` (and any sibling read in `check-governed-merges.mjs` that lists paths for a governed match) uses `-z` and splits on NUL, as the arm's own `catalogFilesOf` and the carried-head read (`git diff -z --name-only --no-renames`) already do.\n2. A self-test row with a non-ASCII path and a path with a newline under a governed prefix, read through the real-git fixture (`gitFreeEnv()`), proving the path is governed.\n\nWait for #33531 to merge first (same file). Sized p2.\n"
+}

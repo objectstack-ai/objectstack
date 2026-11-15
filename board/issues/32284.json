@@ -2,8 +2,8 @@
   "number": 32284,
   "kind": "issue",
   "title": "automation run record: a resumed run's durationMs counts the time it waited for the user, so a screen flow reads as 18.7 s of work",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T16:15:07Z",
-  "updated_at": "2026-11-14T23:47:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T03:23:14Z",
+  "closed_at": "2026-11-15T03:23:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

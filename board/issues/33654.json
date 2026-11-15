@@ -1,0 +1,31 @@
+{
+  "number": 33654,
+  "kind": "issue",
+  "title": "Package registry loose ends after #33610: PATCH-time installedAt doc, PG +00 stamp parse, test order, seeded-disabled statusChangedAt",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:A5",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-15T04:45:51Z",
+  "updated_at": "2026-11-15T04:45:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/33654",
+  "body": "domain:server#5 · os-elon-musk · session_016WV4cwhJBt274G7zk78A5a\n\nLoose ends of #33535, left after PR #33610 merged (review#2 PASS record 6888273785, non-blocking nits). p3, one card for all four.\n\n- **N1 (doc).** A version-changing PATCH restamps the package row, so after a restart `installedAt` reads the PATCH time, not the first install time. Either document this on the PATCH contract or carry the original `installedAt` through a version change.\n- **N2.** A `sys_packages` stamp written before #31530 on Postgres carries a `+00` offset suffix that the restore path does not parse, so such a row still falls back to the boot time.\n- **N3 (test).** The new restart tests depend on run order through the shared `lastPackageWriteMs`; make each case independent.\n- **N4.** A package seeded as disabled gets `statusChangedAt` = boot time on every restart (objectql package registry), the same class of bug as #33535 on a different field.\n\nArea: A5 (service-package / objectql registry). Resume-from: main after #33610."
+}

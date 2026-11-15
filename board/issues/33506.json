@@ -2,8 +2,8 @@
   "number": 33506,
   "kind": "issue",
   "title": "AI 搭建新增的「负责人」字段与系统字段 owner_id 同名，表格出现两列「负责人」、看板卡片重复显示",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T22:51:49Z",
-  "updated_at": "2026-11-15T00:43:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-15T05:57:49Z",
+  "closed_at": "2026-11-15T05:57:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33506",
   "body": "coordinator#1 · hotlong · session_0b694aec78a6416c9b4b75ecd4ac7112\n\nFiling gate: ① 用户可见的体验缺陷，reach: 界面实测一次（staging 上 2026-11-14 刚搭的应用）。\n\n## 来源\n\n2026-11-15 staging 浏览器全量测试（cloud 部署 `c4153027`，objectstack pin `181ad7d4`），环境 `os-6hf1jq` 的「工单管理」应用 `app.e9gv`，安装时间 2026-11-14T22:06Z（在该部署之后用 AI 搭建）。\n\n## 现象\n\n对象 `e9gv_ticket` 有两个字段都叫「负责人」：\n\n- 系统字段 `owner_id`（lookup → sys_user，label「负责人」）\n- AI 新建的 `assignee`（type `user`，label「负责人」）\n\n结果：Studio 数据表格出现两列「负责人」；看板卡片既显示右上角负责人头像，又显示一行「负责人 JIANGUO Zhuang」；用户无法分辨「改负责人」到底改的是哪一个。\n\n## 业务理由\n\n工单、任务、项目这类最常被 AI 搭建的应用都会有「负责人/处理人」概念；与系统 owner 同名意味着权限归属（owner_id 驱动记录可见性）和业务指派各走一套，用户改了一个以为改了另一个。\n\n## 修复方向\n\nAI 搭建在新增字段时，若 label 与对象上已有字段（含系统字段 `owner_id`）重名，应复用系统字段，或改用不冲突的名字（如「处理人」），并在完整性检查里把同 label 字段作为错误报出。\n\n## 验收\n\n1. 用 AI 搭建一个工单应用（提示里含「负责人」），生成的对象里没有两个同 label 的可见字段。\n2. 对象上出现同 label 字段时，构建校验给出可读的提示。\n\n## Reader\n\nobjectstack AI 构建车道（`area:ai`），改字段生成规则与完整性检查。\n\n## Dedupe\n\n- `repo:objectstack-ai/objectstack 负责人 owner_id assignee label` → 19 条（含 closed），均不涉及 AI 生成字段与系统字段重名。\n- `repo:objectstack-ai/objectstack system field label collision owner` → 243 条，前列为无关的 id 冲突与系统列卡片，没有同 label 字段的卡。"
