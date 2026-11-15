@@ -42,8 +42,10 @@
  * may hold further declared sentences under `reasons`; a throw that names a
  * `reason` is answered with that sentence
  * (`hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`), the code's
- * status and the code on the wire, unchanged. A reason the code does not
- * declare is refused loudly, like an undeclared code. An entry that declares
+ * status and the code on the wire, unchanged. Under a code that declares
+ * `reasons`, a reason it does not declare is refused loudly, like an
+ * undeclared code; under a code that declares none, a thrown `reason` is not
+ * read, exactly as before. An entry that declares
  * `params` is a template: its picked sentence (translated or declared) has its
  * `{{ NAME }}` holes filled from the throw's `params` through the formula
  * template engine — the engine the flow `end` refusal renders through
@@ -207,11 +209,23 @@ export function declaredRefusalMessage(
   logger?: { warn?: (...args: any[]) => void },
   address?: HookRefusalAddress,
 ): string {
-  const reason = address?.reason;
-  const declaredSentence = reason !== undefined && entry.reasons?.[reason] ? entry.reasons[reason]!.message : entry.message;
+  const reason = declaredReason(entry, address);
+  const declaredSentence = reason !== undefined ? entry.reasons![reason]!.message : entry.message;
   const picked = pickTranslatedSentence(hookName, code, reason, declaredSentence, locale, i18n, logger);
   const params = Array.isArray(entry.params) ? entry.params : [];
   return params.length > 0 ? fillHookRefusalParams(hookName, picked, params, address?.params, logger) : picked;
+}
+
+/**
+ * The reason a throw names that the entry declares, or `undefined`. A reason
+ * under a code that declares no `reasons` is not part of the refusal — the
+ * catalogue reads it only where `reasons` exists — so such a throw is answered
+ * exactly as before `reasons` existed.
+ */
+function declaredReason(entry: DeclaredRefusal, address: HookRefusalAddress | undefined): string | undefined {
+  const reason = address?.reason;
+  if (reason === undefined || !entry.reasons || typeof entry.reasons !== 'object') return undefined;
+  return Object.prototype.hasOwnProperty.call(entry.reasons, reason) ? reason : undefined;
 }
 
 /** The translation of a declared sentence in `locale`, or the declared sentence itself. */
@@ -260,12 +274,12 @@ function declaredAnswer(
   engineCtx: { session?: { locale?: unknown } } | undefined,
   opts: { i18n?: HookRefusalI18nSource; logger?: { warn?: (...args: any[]) => void } },
 ): { fault: SandboxError } | { message: string; status: number } {
+  // A reason is judged only under a code that declares `reasons`; under any
+  // other code it is ignored, as it was before `reasons` existed.
   const reason = address?.reason;
-  if (reason !== undefined) {
-    const reasons = entry.reasons && typeof entry.reasons === 'object' ? entry.reasons : {};
-    if (!Object.prototype.hasOwnProperty.call(reasons, reason)) {
-      return { fault: new SandboxError(undeclaredHookRefusalReasonAtRun(String(hook.name), thrownCode, reason, Object.keys(reasons))) };
-    }
+  const reasons = entry.reasons && typeof entry.reasons === 'object' ? entry.reasons : undefined;
+  if (reason !== undefined && reasons && !Object.prototype.hasOwnProperty.call(reasons, reason)) {
+    return { fault: new SandboxError(undeclaredHookRefusalReasonAtRun(String(hook.name), thrownCode, reason, Object.keys(reasons))) };
   }
   const locale = engineCtx?.session?.locale;
   const message = declaredRefusalMessage(

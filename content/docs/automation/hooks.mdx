@@ -379,12 +379,14 @@ export const planGate = {
 - **It works whichever way the hook is written.** A TypeScript `handler` (run
   in-process on a source boot such as `bootStack(config)`, and lowered to a
   `js` body by `os build`) and a sandboxed `js` body answer the same envelope.
-- **Loud on a mistake.** A code, or a reason, the catalogue does not declare is
-  refused when the hook is saved if the hook names it literally in a `throw`.
+- **Loud on a mistake.** A code the catalogue does not declare, or a reason a
+  code with `reasons` does not declare, is refused when the hook is saved if
+  the hook names it literally in a `throw`.
   Otherwise it is refused when the hook runs, as a `500` that names the hook
   and the code. A throw with no code is refused the same way. An error a
   `ctx.api` call raised and the hook let through unchanged, and a crash, pass
-  through as they always did.
+  through as they always did. Under a code that declares no `reasons`, a
+  `reason` on the throw is not read: the entry's own sentence answers.
 - **Translated by key.** Each sentence has a key the translation bundle
   writes, `hooks.<hook>.refusals.<CODE>.message` and
   `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`; `os i18n extract`

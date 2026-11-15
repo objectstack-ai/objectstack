@@ -254,7 +254,9 @@ function refuseHookBodyMailGrant(
  * metadata save door, `defineStack` / `os validate`, compile, an artifact's
  * parse — so the author meets the refusal before any write does. One issue per
  * code. A code that arrives any other way is the run-time refusal's. The same
- * holds for a reason under a code (#33214, `hookRefusalReasonsThrownIn`).
+ * holds for a reason under a code that declares `reasons` (#33214,
+ * `hookRefusalReasonsThrownIn`); under a code that declares none, a thrown
+ * `reason` is not read at all, as before.
  *
  * [#33214, ruling 6879477573 letter A] The catalogue is answered on every path
  * a hook runs on: a sandboxed `js` body, and an in-process `handler` — an
@@ -321,8 +323,11 @@ function refuseUndeclaredLiteralRefusalCode(
   }
   for (const { code, reason } of hookRefusalReasonsThrownIn(read.source)) {
     if (!Object.prototype.hasOwnProperty.call(hook.refusals, code)) continue;
-    const reasons = hook.refusals[code]?.reasons ?? {};
-    if (Object.prototype.hasOwnProperty.call(reasons, reason)) continue;
+    // A `reason` is read only under a code that declares `reasons`: under any
+    // other code it is not part of the refusal, exactly as before `reasons`
+    // existed, so a hook that already throws one is answered as it was.
+    const reasons = hook.refusals[code]?.reasons;
+    if (!reasons || Object.prototype.hasOwnProperty.call(reasons, reason)) continue;
     ctx.addIssue({
       code: 'custom',
       path,
@@ -355,8 +360,8 @@ const HookRefusalReasonSchema = lazySchema(() => strictObject(
   {
     message: z.string().trim().min(1).describe(
       'The sentence the user reads when the hook throws this reason under its code — in the source locale, '
-      + 'translated through hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message in the caller\'s locale; a {{ }} '
-      + 'hole names one of the entry\'s params',
+      + 'translated through hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message in the caller\'s locale; its {{ }} '
+      + 'holes follow the entry\'s message rule',
     ),
   },
 ));
@@ -391,13 +396,18 @@ function hookRefusalMessageRefusal(message: string, params: readonly string[] | 
  *  - `reasons` — further sentences under the SAME code, keyed by a snake_case
  *    reason. The hook throws `{ code, reason }`; the runtime answers with the
  *    reason's sentence, the code's status and the code on the wire, unchanged.
- *    A reason the code does not declare is refused loudly, like a code.
+ *    A reason the code does not declare is refused loudly, like a code. Under
+ *    a code that declares no `reasons`, a thrown `reason` is not read, as before.
  *  - `params` — the names the entry's sentences may fill. The hook throws
  *    `{ code, params: { NAME: value } }`, and each `{{ NAME }}` hole renders
  *    through the template engine the flow `end` refusal renders with. A hole
- *    over a name the entry does not declare is refused at save; an entry that
- *    declares no `params` is plain text and every `{{ }}` hole in it is
- *    refused, as before.
+ *    over a name the entry does not declare is refused at parse; a hole
+ *    holding logic, an unknown formatter, an empty hole and a `currency`
+ *    formatter with no code (a hook refusal carries no default currency) are
+ *    refused where the sentence is compiled — `os validate`, `compile` and the
+ *    publish gate (`@objectstack/lint` `validate-hook-refusal-templates.ts`).
+ *    An entry that declares no `params` is plain text and every `{{ }}` hole
+ *    in it is refused, as before.
  */
 export const HookRefusalSchema = lazySchema(() => strictObject(
   {
@@ -418,8 +428,9 @@ export const HookRefusalSchema = lazySchema(() => strictObject(
   {
     message: z.string().trim().min(1).describe(
       'The sentence the user reads when the hook throws this code — in the source locale, translated whole through '
-      + 'hooks.<hook>.refusals.<CODE>.message in the caller\'s locale; a {{ }} hole is refused unless it names one '
-      + 'of the entry\'s params',
+      + 'hooks.<hook>.refusals.<CODE>.message in the caller\'s locale. With no params every {{ }} hole is refused; '
+      + 'with params a hole is a path over one of them with an optional known formatter, and a hole over another name, '
+      + 'a hole holding logic, an unknown formatter, an empty hole and a currency formatter with no code are refused',
     ),
     status: z.number().int().min(400).max(499).optional().describe(
       'HTTP status the refusal is answered with (4xx; a refusal is never a fault). Absent: 400. A status the '
@@ -433,16 +444,17 @@ export const HookRefusalSchema = lazySchema(() => strictObject(
     ).optional().describe(
       'Further sentences under this same code, keyed by the snake_case reason the hook throws beside the code '
       + '({ code, reason }): { message }. The wire code and status stay this entry\'s. A reason not declared here '
-      + 'is refused loudly. Absent: the code has the one sentence',
+      + 'is refused loudly. Absent: the code has the one sentence, and a thrown reason is not read',
     ),
     params: z.array(
       z.string().regex(HOOK_REFUSAL_PARAM_PATTERN, {
         message: 'A refusal param is an identifier (e.g. state) — the root a {{ }} hole names',
       }),
     ).optional().describe(
-      'The names this entry\'s sentences may fill: a {{ NAME }} hole renders the value the hook throws in '
-      + '`params` ({ code, params: { NAME: value } }). A hole over any other name is refused. Absent: the '
-      + 'sentences are plain text and a {{ }} hole is refused',
+      'The names this entry\'s sentences may fill: a {{ NAME }} or {{ NAME | formatter }} hole renders the value '
+      + 'the hook throws in `params` ({ code, params: { NAME: value } }). A hole over any other name, logic, an '
+      + 'unknown formatter, an empty hole and a currency formatter with no code are refused. Absent: the sentences '
+      + 'are plain text and a {{ }} hole is refused',
     ),
   },
 ).superRefine((entry, ctx) => {
@@ -805,8 +817,9 @@ export const HookSchema = lazySchema(() => strictObject(
    * (or the reason's), translated through `hooks.<hook>.refusals.<CODE>.message`
    * (`….<CODE>.reasons.<REASON>.message`) in the caller's locale with the
    * declared sentence as the fallback, its holes filled from `params`, marked
-   * as the end user's sentence, and its `status`. A code or reason the
-   * catalogue does not declare, or a throw with no code, is refused loudly: at
+   * as the end user's sentence, and its `status`. A code the catalogue does
+   * not declare, a reason a code with `reasons` does not declare, or a throw
+   * with no code, is refused loudly: at
    * save where the hook's source names it literally, otherwise when it runs,
    * as a fault naming the hook and the code. An error a host call raised and
    * the hook let through unchanged (a `ctx.api` write refused by the engine, a
@@ -830,8 +843,9 @@ export const HookSchema = lazySchema(() => strictObject(
     'Refusal catalogue keyed by the SCREAMING_SNAKE code the hook throws: { message, status?, reasons?, params? }. '
     + 'The hook (a js body or a handler) refuses by code only, optionally with a declared reason and params; the '
     + 'runtime answers with the declared message (translated through hooks.<hook>.refusals.<CODE>.message, or '
-    + '….<CODE>.reasons.<REASON>.message, in the caller\'s locale, holes filled from params) and status. A code or '
-    + 'reason not declared here is refused loudly — at save when the hook throws it literally, otherwise at run time',
+    + '….<CODE>.reasons.<REASON>.message, in the caller\'s locale, holes filled from params) and status. A code not '
+    + 'declared here, or a reason a code with reasons does not declare, is refused loudly — at save when the hook throws '
+    + 'it literally, otherwise at run time; under a code with no reasons a thrown reason is not read',
   ),
 
   /**

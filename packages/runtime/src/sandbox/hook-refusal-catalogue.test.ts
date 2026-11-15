@@ -308,12 +308,15 @@ describe('[#33214] a declared reason under a code — the body path', () => {
         expect(mapDataError(err, 'plan').status).toBe(500);
     });
 
-    it('a reason under a code that declares no reasons is the same fault', async () => {
+    it('a reason under a code that declares no reasons is not read: the entry answers as before', async () => {
         const err = await rejectionOf(planBody(
             "const r = 'x' + 'y'; throw { code: 'CREDIT_LIMIT', reason: r, message: 'x' };",
-        )(planCtx()));
-        expect(err.message).toContain("reason 'xy'");
-        expect(mapDataError(err, 'plan').status).toBe(500);
+        )(planCtx('zh-CN')));
+        const wire = mapDataError(err, 'plan');
+        expect(wire.status).toBe(400);
+        expect(wire.body.declaredCode).toBe('CREDIT_LIMIT');
+        // The code's own key is read, never a reason key under it.
+        expect(wire.body.userMessage).toBe('超出信用额度。');
     });
 });
 
@@ -342,6 +345,30 @@ describe('[#33214] declared params fill the sentence\'s holes — the body path'
         const sentence = mapDataError(err, 'plan').body.userMessage;
         expect(sentence).toBe('The plan is  and can no longer change.');
         expect(sentence).not.toContain('leak');
+    });
+});
+
+describe('[#33214] a main-shaped hook that throws a `reason` answers exactly as on main', () => {
+    // A catalogue with no `reasons`, a body that throws a `reason` property:
+    // main never read `reason`, so the declared message answers, 4xx.
+    it('the body path', async () => {
+        const err = await rejectionOf(boundHook(
+            "throw Object.assign(new Error('internal detail'), { code: 'ACCOUNT_ON_HOLD', reason: 'plan_locked' });",
+        )(ctx()));
+        const wire = mapDataError(err, 'order');
+        expect(wire.status).toBe(409);
+        expect(wire.body.declaredCode).toBe('ACCOUNT_ON_HOLD');
+        expect(wire.body.userMessage).toBe('The account is on hold.');
+    });
+
+    it('the in-process path', async () => {
+        const fn = withInProcessHookTitle(async () => {
+            throw Object.assign(new Error('internal detail'), { code: 'ACCOUNT_ON_HOLD', reason: 'plan_locked' });
+        }, {}, { name: 'credit_guard', refusals: REFUSALS } as any);
+        const wire = mapDataError(await rejectionOf(fn(ctx())), 'order');
+        expect(wire.status).toBe(409);
+        expect(wire.body.declaredCode).toBe('ACCOUNT_ON_HOLD');
+        expect(wire.body.userMessage).toBe('The account is on hold.');
     });
 });
 

@@ -323,18 +323,23 @@ describe('HookRefusal.reasons — further sentences under one code (#33214, S1)'
     );
   });
 
-  it('refuses at `handler` a literal reason under a code with no `reasons`', () => {
+  it('reads no reason under a code with no `reasons` — a handler throwing one saves, as before', () => {
     const handler = async () => {
       const e: any = new Error('x');
       e.code = 'CREDIT_LIMIT';
       e.reason = 'over_by_far';
       throw e;
     };
-    const r = HookSchema.safeParse({ ...base, handler, refusals: { CREDIT_LIMIT: { message: 'Over.' } } });
-    expect(r.success).toBe(false);
-    const issue = r.error!.issues.find((i) => i.path.join('.') === 'handler')!;
-    expect(issue.message).toContain("reason 'over_by_far'");
-    expect(issue.message).toContain('declared: none');
+    expect(HookSchema.safeParse({ ...base, handler, refusals: { CREDIT_LIMIT: { message: 'Over.' } } }).success).toBe(true);
+  });
+
+  it('a main-shaped body hook throwing a `reason` under a code with no `reasons` saves unchanged', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("throw Object.assign(new Error('x'), { code: 'CREDIT_LIMIT', reason: 'plan_locked' });"),
+      refusals: { CREDIT_LIMIT: { message: 'Over the credit limit.' } },
+    });
+    expect(r.success).toBe(true);
   });
 });
 

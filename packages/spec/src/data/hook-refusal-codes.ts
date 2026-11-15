@@ -13,8 +13,9 @@
  * answers with the declared message, translated through
  * `hooks.<hook>.refusals.<CODE>.message` (or
  * `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`) in the caller's
- * locale, and the declared status. A code, or a reason, the catalogue does not
- * declare is refused loudly:
+ * locale, and the declared status. A code the catalogue does not declare, or a
+ * reason a code that declares `reasons` does not declare, is refused loudly (a
+ * thrown `reason` under a code with no `reasons` is not read, as before):
  *
  *  - at save time, where the hook's source names it literally in a `throw`
  *    ({@link hookRefusalCodesThrownIn}, {@link hookRefusalReasonsThrownIn}) —
