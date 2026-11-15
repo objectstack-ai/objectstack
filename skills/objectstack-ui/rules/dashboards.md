@@ -98,8 +98,8 @@ Standardized answers to the recurring ambiguous cases:
   or boolean field (`percent` not under `sum`; `min`/`max` also dates); a `formula`
   has no column: refused whatever its `returnType` says. Make it a field of its
   return type with the same `expression` (computed and stored on write, from its own
-  row only: objectstack-data → Relationships → Computed column; existing rows:
-  `os migrate stored-expressions --apply`) or title the widget the `count` it is.
+  row only: objectstack-data → Relationships → Computed column; existing rows stay
+  NULL until `os migrate stored-expressions --apply`) or title the widget the `count` it is.
   Leave days (`date` fields: no `duration`): the `formula` `days_requested` ⇒ a
   `readonly` `number` `days_count` with its `expression`, then `{ name: 'days_sum', aggregate: 'sum', field: 'days_count' }`.
 - **Breakdown by a multi-value field.** `multiselect`/`checkboxes`/`tags` and

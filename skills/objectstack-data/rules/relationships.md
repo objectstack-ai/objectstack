@@ -62,7 +62,7 @@ export default ObjectSchema.create({
     invoice_id: {
       type: 'master_detail',
       reference: 'invoice',
-      deleteBehavior: 'cascade',  // Delete line items when invoice deleted
+      deleteBehavior: 'cascade',
       required: true,
     },
     product: { type: 'text', required: true },
@@ -116,7 +116,6 @@ an omitted `required` as `true`.
 ### Many-to-Many: Junction Object
 
 ```typescript
-// Junction: Project Assignment between project and employee
 export default ObjectSchema.create({
   name: 'project_assignment',
   sharingModel: 'public_read_write',
@@ -151,7 +150,7 @@ export default ObjectSchema.create({
     name: { type: 'text', required: true },
     parent_category: {
       type: 'tree',
-      reference: 'category',  // Self-reference
+      reference: 'category',
       required: false,
     },
   }
@@ -314,10 +313,12 @@ InvoiceLine = {
   never stands. It reads only that row: a related record's value
   (`record.product.unit_price`) keeps what it held at this row's last write
   (warning `stored-expression-cross-record-input`), so it stays a `formula`
-  (read time, not totallable) or is a snapshot a flow on the related object
-  writes; repair drift with `os migrate stored-expressions --object OBJECT
-  --field FIELD --changed --apply`. `now()`, `today()`, the acting user and
-  `can()` are fixed at the write (warning `stored-expression-volatile-input`).
+  (read time, not totallable) or a snapshot a flow on the related object
+  writes; repair a field left stored with `os migrate stored-expressions
+  --object OBJECT --field FIELD --changed --apply`. The clock (`now()`,
+  `today()`, `daysFromNow()`, `daysAgo()`), the acting user, `can()` and
+  `hasCapability()` are fixed at the write (warning
+  `stored-expression-volatile-input`): a `formula` or a scheduled flow keeps it current.
 - **Catalog auto-fill** — a `lookup` line field + sibling columns whose names
   match fields on the referenced record (e.g. `unit_price`, `description`) →
   picking a record fills those cells.
