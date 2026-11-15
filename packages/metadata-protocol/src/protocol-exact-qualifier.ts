@@ -946,6 +946,8 @@ export function resolveMetaItemAddress(
  * environment does not hold and a package does is refused
  * (`not-held-by-qualifier`, `callerPackageId: null`); otherwise the read is a
  * caller with no package, which E8's resolver answers environment-first.
+ * [#33385] A disabled package holds no name here either: a name only
+ * disabled packages hold is admitted, and the item face answers its 404.
  * Types outside the covered set keep the bare read, as `?package=` does for
  * them.
  *
@@ -970,14 +972,16 @@ export function admitEnvironmentQualifier(
         refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
         return;
     }
-    // [#32183, epic ruling R4-B2] The served holders, or every holder when no
-    // package serves the name: a name only disabled packages hold is refused
-    // naming them, as before, never read as a caller with no package (that
-    // read can reach a disabled holder's customization pair row).
-    const served = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
-    const holders = served.length > 0
-        ? served
-        : registry.packageScopedHoldersOf(request.type, request.name, null, { includeDisabledPackages: true }) ?? [];
+    // [#32183] The served holders: a disabled package holds no name.
+    // [#33385, #32183 row 17 (ruling R4-B2 on PR #32497)] A name only
+    // disabled packages hold is admitted as a name no package holds, and read
+    // as a caller with no package, so it answers the read's own 404 and never
+    // names a disabled package. R4-B2 held it at a 409 naming them because
+    // that read could reach a disabled holder's customization: the item face
+    // now withholds every such row with its holders, the customization pair's
+    // row (#32814) and a package-less row of the holder's key (#33401), so it
+    // answers as if no row were stored.
+    const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
     if (holders.length === 0) {
         refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
         return;

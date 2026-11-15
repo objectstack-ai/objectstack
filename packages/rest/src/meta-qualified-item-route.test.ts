@@ -353,20 +353,42 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
             expect(labelOf(await drive(ITEM, { type, name: 'shared' }, { package: `${A}.custom` }))).toBe(`alpha ${type}`);
         });
 
-        // [epic ruling R4-B2] `_env` is held at `main`'s answer: with no served
-        // holder it judges every holder, so it refuses naming the disabled one.
-        it(`${type}: only a disabled holder — no holder: 404 on every package address, never a 409 naming it; \`_env\` refuses naming it, as on main`, async () => {
+        // [#33385, #32183 row 17 (ruling R4-B2 on PR #32497)] FROM `_env`
+        // 409 naming the disabled holder (R4-B2 held it there) TO 404: a
+        // disabled package holds no name, so `_env` answers as for a name no
+        // package holds, as every package address does, naming no package.
+        it(`${type}: only a disabled holder — no holder: 404 on every address, \`_env\` included, never a 409 naming it; re-enabled, \`_env\` refuses naming it`, async () => {
             ship(type, 'solo', B);
             registry.disablePackage(B);
             for (const [path, params, query] of [
                 [ITEM, { type, name: 'solo' }, {}],
                 [ITEM, { type, name: 'solo' }, { package: C }],
                 [QUALIFIED, { type, ns: 'gamma', name: 'solo' }, {}],
+                [QUALIFIED, { type, ns: '_env', name: 'solo' }, {}],
             ] as const) {
                 const answer = await drive(path, params, query);
-                expect([answer.status, params, query], JSON.stringify(answer.body)).toEqual([404, params, query]);
+                expect([answer.status, codeOf(answer), params, query], JSON.stringify(answer.body)).toEqual([404, 'RESOURCE_NOT_FOUND', params, query]);
                 expect(JSON.stringify(answer.body ?? null)).not.toContain(B);
             }
+            // CONTROL — the holder enabled: `_env` refuses naming it, unchanged.
+            registry.enablePackage(B);
+            refusedNaming(await drive(QUALIFIED, { type, ns: '_env', name: 'solo' }), [B], [A]);
+        });
+
+        // [#33401, #33385] A package-less row of the disabled holder's key is
+        // its customization (seat ruling 6882483833 on #32814): `_env` and the
+        // bare read answer as if no row were stored, never the row.
+        it(`${type}: only a disabled holder, and a package-less row of its name — \`_env\`, the bare read and its layers answer 404, never the row; re-enabled, \`_env\` refuses naming it`, async () => {
+            ship(type, 'solo', B);
+            registry.registerItem(type, { name: 'solo', label: `custom ${type}`, _provenance: 'org' }, 'name' as never);
+            registry.disablePackage(B);
+            for (const [path, params] of [[ITEM, { type, name: 'solo' }], [LAYERS, { type, name: 'solo' }], [QUALIFIED, { type, ns: '_env', name: 'solo' }]] as const) {
+                const answer = await drive(path, params);
+                expect([answer.status, codeOf(answer), params], JSON.stringify(answer.body)).toEqual([404, 'RESOURCE_NOT_FOUND', params]);
+                expect(JSON.stringify(answer.body ?? null)).not.toContain(`custom ${type}`);
+                expect(JSON.stringify(answer.body ?? null)).not.toContain(B);
+            }
+            registry.enablePackage(B);
             refusedNaming(await drive(QUALIFIED, { type, ns: '_env', name: 'solo' }), [B], [A]);
         });
 

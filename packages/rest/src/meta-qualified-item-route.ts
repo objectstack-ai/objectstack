@@ -13,8 +13,9 @@
  *    the exact qualifier the protocol judges (`admitExactQualifier`): the
  *    package's item with its bound overlay, or `409 RESOURCE_CONFLICT` naming
  *    every holder;
- *  - `_env`: the environment's own item, or `409` naming every holder
- *    (`admitEnvironmentQualifier`), read as a caller with no package.
+ *  - `_env`: the environment's own item, or `409` naming every served
+ *    holder (`admitEnvironmentQualifier`), read as a caller with no package;
+ *    a name only disabled packages hold answers that read's `404` (#33385).
  *
  * D5's order, as the runtime dispatcher's `/meta` domain reads the same path:
  * a sub-resource literal in the last position keeps its route — registered

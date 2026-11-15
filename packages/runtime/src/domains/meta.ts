@@ -2143,9 +2143,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
         try {
             // [ADR-0150 D5, child G1] `/meta/:type/_env/:name`: the
-            // environment's own item, or `409` naming every holder — judged
-            // here, after the gates above, then read as a caller with no
-            // package (the resolver answers that caller environment-first).
+            // environment's own item, or `409` naming every served holder —
+            // judged here, after the gates above, then read as a caller with
+            // no package (the resolver answers that caller environment-first;
+            // a name only disabled packages hold answers its 404, #33385).
             if (environmentQualified) {
                 const qualifierProtocol = await resolveProtocol(deps, _context);
                 qualifierProtocol?.admitEnvironmentQualifier?.({ type: singularType, name, ...memberSelector });
