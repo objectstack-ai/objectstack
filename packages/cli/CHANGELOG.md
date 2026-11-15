@@ -1,5 +1,435 @@
 # @objectstack/cli
 
+## 18.5.0
+
+### Minor Changes
+
+- 0be91f0: feat(spec, cli): `i18n.sourceLocale` names the language the inline metadata text is written in, apart from the users' `defaultLocale`; `os lint`, `os i18n check` and `os i18n extract` read it as the source language
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — `skills/objectstack-i18n/SKILL.md` (the `i18n` key table and the `os i18n extract` flag list teach `defaultLocale` / `--default-locale` as the only locale knobs; it needs a `sourceLocale` row). `content/docs/ui/translations.mdx` and the `os lint` flag row in `content/docs/deployment/cli.mdx` are updated here.
+  
+  `TranslationConfigSchema` (the stack's `i18n` block) gains an optional `sourceLocale`, validated by the same `LocaleSchema` as `defaultLocale` and, like it, not required to be one of `supportedLocales`. `defaultLocale` stays the language a user who has not chosen one gets; `sourceLocale` is the language a plain-string `label:` is written in. Absent, it is `defaultLocale`, so a stack that declares nothing reads exactly as before. Near-miss spellings `sourceLanguage`, `authoringLocale` and `authoringLanguage` are refused with `sourceLocale` as the suggestion.
+  
+  An app authored in English that defaults its users to Chinese declares:
+  
+  ```ts
+  i18n: { defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['en', 'zh-CN', 'es-ES'] }
+  ```
+  
+  **`os lint` and `os i18n check`** count the inline text as the source locale's translation: they ask for no `en` bundle row that restates it, and they report each missing `zh-CN` and `es-ES` row. With `defaultLocale: 'zh-CN'` alone they read the English labels as Chinese: every key was reported missing in `en` (an error under `os lint --strict`) and no `zh-CN` gap was ever reported. On a stack declaring `sourceLocale`, the users' `defaultLocale` is gated even when `supportedLocales` omits it or no bundle for it exists yet; an explicit `--locales` list is still the whole set. `--strict` / `--i18n-strict` help and the closing hint of `os i18n check` now say "non-source locales".
+  
+  **`os i18n extract`** fills the source locale's bundle from the inline text and rewrites it from the source on every merge; every other locale, `defaultLocale` included, keeps its hand translations. On a stack declaring `sourceLocale` it also scaffolds `defaultLocale` when no `--locales` list is given.
+  
+  **`--default-locale`** on all three commands keeps working and still wins over the config for one run; its help text now says it overrides the source locale (`i18n.sourceLocale`, else `i18n.defaultLocale`, else `en`). The `defaultLocale` field of `os i18n check --json` keeps its name and carries the source locale that was used.
+  
+  **Not yet read by the serving layer.** The runtime label resolvers still treat `defaultLocale` as the authored label's language when they decide whether a request walks the fallback chain. With `defaultLocale: 'zh-CN'` and no `fallbackLocale`, an `en` request walks to the `zh-CN` bundle before it reaches the English inline label. Declare `fallbackLocale: 'en'` to keep an `en` request on the authored text.
+
+### Patch Changes
+
+- 0b89b33: feat(service-automation, metadata-protocol, driver-mongodb, cli): a connector connection is unique per organization and instance, the instance being its package and name, and the connections that name no package keep one per organization through a runtime guard (ADR-0150 D4, D8 row R11, #31699)
+  
+  Clause-②: yes (widening) — additive CLI and in-process surfaces: `os migrate plan` lists a second runtime-owned index (and `--json` `schemaSyncIndexes` an entry for it), `os migrate duplicates` probes it, `os migrate stored-references bind` answers the refusal `duplicate` where it threw, and the exports and types listed under In-process APIs grow. The connector doors (the connect door, the OAuth callback, revoke, the connection list) and every automation request answer as before: the store still reads and writes by organization and name, and the one-holder backstop keeps every connector name to one package until #31699's last PR, so no second package's connection is written yet.
+  Metadata-protocol: none
+  Skills-docs: `content/docs/automation/connectors.mdx` says a connection is one per organization and instance; `content/docs/deployment/cli.mdx` lists the guard among the runtime-owned indexes and the bind's `duplicate` refusal. `skills/**` teaches "connect once per organization", which still holds per instance.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. `sys_connector_connection` is a platform object and its `indexes[]` is not authored metadata; the key change is a schema face the drift plan applies, the guard is a runtime-managed physical index, and no stored row is rewritten, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  Part of #31699 (ADR-0150 child B, PR 3a: the storage half). The maintainer's ruling on #31699: a connection is unique by package and name. The store, the connect door and the OAuth callback carry the package in the next PR; this one widens the key, stands the guard that keeps the package-less rows to one, and teaches the two writers of the package column what the wider key can refuse.
+  
+  **The key: `sys_connector_connection`.**
+  
+  - FROM one connection per `(organization_id, connector_name)` (`uniq_sys_connector_connection_organization_id_connector_name`) TO one per `(organization_id, connector_package, connector_name)`. On SQL the drift plan replaces the old key with one `replace_unique_index`, categorized `safe`, create-before-drop, and only once the guard below stands; until then `driver-sql`'s widening arm keeps the old key, so the table is never without a unique rule over its rows. The guard is built at schema sync after the table's drift is read, so on an upgraded database the old key retires on the NEXT sync that runs safe drift (a dev `autoMigrate: 'safe'` boot, or `os migrate apply`, which lists it). Measured on SQLite and PostgreSQL 16: with the guard, the plan is that one safe op and a re-plan is empty; two packages' connections of one name in one organization are admitted, a second connection of one package's instance is refused, and a second package-less connection is refused. On MariaDB the retirement is read from `driver-sql`'s source, not measured: its carrier column is read as a partial unique on the two columns, and on an upgraded MySQL-family database `connector_package` is a TEXT column, so the wide key is built over the driver's hash shadow.
+  
+  **The guard: `uniq_sys_connector_connection_packageless`.**
+  
+  - `connector_package` is NULL on every connection of an instance the environment authored or a plugin registers in code, and of a name the boot backfill could not bind. A SQL UNIQUE treats NULLs as distinct, so for exactly those connections the wider key constrains nothing. The guard keeps them to one per `(organization_id, connector_name)`, as the old key did: two of them would keep two refresh tokens for one instance, and a revoke would leave the other stored.
+  - Built as the permission-set grant's guard is (#32164), at `objectql:schema-synced`, on every kernel that runs the table's DDL; a pass that holds its DDL back builds nothing, a standing guard costs one catalog read, a refusal is reported once per boot. SQLite and PostgreSQL: a partial unique index `WHERE connector_package IS NULL`. MySQL 8.0.13+: a functional key part over the hash-shadow digest. MariaDB 10.3+: a UNIQUE key over an INVISIBLE generated column `uniq_sys_connector_connection_packageless__hash`. MongoDB: `driver-mongodb` builds it at collection sync (`RUNTIME_OWNED_UNIQUES`, `connector_package: null`), keyed `(connector_name)`, because Mongo materialized the earlier declaration's one column, so the widening arm there retires the old index once the guard stands.
+  - Refuse, never keep-one: a database already holding two package-less connections of one key keeps both; the build fails and logs, at `error`, the keys, the consequence and the query that lists them. `os migrate duplicates` lists this index too. It admits nothing the old key refused.
+  
+  **The writers of the table.**
+  
+  - The connection store's first connect (`ConnectorConnectionStore#connect`): the old key refused a second row of one instance in one organization; the wide key admits one when the boot backfill stamped the first connect's row with its package between a second connect's read and its insert. A connect that counts a second row after its insert now deletes its own row and is refused ("its connection changed while this connect was completing … begin the connect again"), nothing kept, as the old key refused it; when both racing connects count two rows, both can be refused and no row stands. Where the engine answers no id for the inserted row, or the delete fails, the connect is refused saying the instance was connected twice and to revoke until it reads as not connected. A first connect with no race is unchanged.
+  - The boot backfill (`stored-reference-package-backfill.ts`, row R11) binds a package-less connection to the one package that holds its name. Under the wider key that row can be a second row of one key, when a connection bound to that package already stands for the same organization and name (a database where a guard build was refused, `driver-memory`, a server with no form, or a pair a racing first connect left when its process died before taking its row back). The wider key makes that unique violation possible, and it would end R11's pass; it is now reported per row: the row is left as it is and listed in the report's new `duplicated` list, once a read confirms the row of that key that already names the holder, named in one `warn` line per pass. A dry run lists the same rows, counting the keys it has already bound in the pass. Any other failed write, a violation no such row confirms, and any violation on R8 or R9 (whose keys do not carry the package) still end the pass.
+  - `os migrate stored-references bind`: FROM a unique violation thrown as an error TO the refusal `duplicate`, naming the row, the package and the key, nothing written.
+  
+  **Declared limits.**
+  
+  - MySQL 8, upgraded databases: `driver-sql` reads the guard's functional key part as the partial unique it is, so the old key retires there as it does on PostgreSQL, as one safe `replace_unique_index` on the next sync that runs safe drift. A database created fresh on MySQL 8 has the wide key and the guard and no old key. MySQL before 8.0.13 and MariaDB before 10.3 build no form, keep the old key (or build it under the driver's generated name where it is missing) and say so at `error` each boot.
+  - `driver-memory` builds no guard (no raw-SQL seam), as for the grant: a pin measures that its unique check treats a NULL package as distinct, so two package-less connections of one instance are admitted there.
+  - The MySQL, MariaDB and real-mongod pins run in suites that run on `main` only, so they first run after this lands.
+  
+  **In-process APIs.** `@objectstack/metadata-protocol` exports `ensureConnectorConnectionPackagelessIndex`, `createConnectorConnectionGuardAtSchemaSync`, `buildConnectorConnectionPackagelessIndexSql`, `buildConnectorConnectionPackagelessIndexPresenceSql`, `buildConnectorConnectionPackagelessDuplicateProbeSql`, `buildConnectorConnectionOldKeySql`, `resolveConnectorConnectionIndexSeam`, `CONNECTOR_CONNECTION_PACKAGELESS_INDEX_NAME`, `CONNECTOR_CONNECTION_PACKAGELESS_INDEX_COLUMNS`, `CONNECTOR_CONNECTION_OLD_KEY_INDEX_NAME` and the result, status and pass-outcome types. `@objectstack/service-automation`'s `StoredReferenceBackfillReport` gains `duplicated`. `@objectstack/cli`'s `BindRefusal` gains `'duplicate'`. All additive.
+- 4f0a5f3: fix(plugin-audit, cli): the audit sealer skips only the chain a chain-local fault belongs to; `os serve` hands its crypto provider to an AuditPlugin the app composed with none
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **The sealer (ADR-0154 D3, S4).** A fault that belongs to one chain of a sealed object — a row a canonical rule refuses, or a malformed checkpoint of that chain (its head among them) — now skips that chain for the rest of the pass instead of stopping the whole object. Every other chain is still sealed. Each chain now resumes from its own oldest unsealed window, as `window` checkpoints, so a skipped chain catches up once its fault is fixed. No checkpoint's `sealed_through` passes a window a skipped chain leaves unsealed. The sealer reports each skipped chain once at `error`, naming the object, the chain, the fault and the window it is unsealed from, and again each hour while it lasts. A lock lapse, a signer, crypto-provider or storage fault still stops the object's pass, as before. `os audit verify` reads the skipped chain's rows in a window another chain sealed as `late` and unsealed, and fails.
+  
+  **An app-supplied AuditPlugin (ADR-0154 D2, D6).** An app that puts its own `AuditPlugin` in its stack `plugins` (to turn on `readAudit`, for example) supersedes the one `os serve` composes, and so lost the host's crypto provider: its sealer sealed nothing and said so at `error`. `os serve` now hands it the host's provider when the app composed it with no `cryptoProvider`, and keeps its sealer off on an `OS_MIGRATE_AND_EXIT=1` boot, as for the instance it composes itself. A provider the app composed is never replaced, an app's `armSealer: false` stays off, and a plugin that only carries the AuditPlugin name is never handed anything. The new `AuditPlugin.adoptHostCryptoProvider(provider, { armSealer })` is the method a host calls to do this.
+- 71ade1a: fix(plugin-webhooks, cli): an activation row a departed package left switches no remaining webhook holder, and the 18.x ownership ceremony writes a two-holder copy's switch as a row naming no package instead of picking one holder (ADR-0150 D8)
+  
+  Clause-②: yes (widening; narrowing on a departed row switched on) — widening: a departed package's row switched off no longer keeps a remaining holder off, so its outbound deliveries start on upgrade. Narrowing: a departed package's row switched on no longer turns on a holder shipped inactive.
+  Metadata-protocol: none
+  
+  **A departed package's activation row (plugin-webhooks).** A declared webhook's slot with no activation row of its own read the name's rows naming a package that no longer declares the name as its switch while the name had one holder, and under two holders such a row switched off kept both off. Such a row was the departed package's switch, and it now switches no remaining holder, in either direction:
+  
+  - one holder, a departed package's row switched off: FROM the holder off TO the holder at its own row, else its declared `isActive`;
+  - one holder shipped inactive, a departed package's row switched on: FROM the holder on TO the holder off (its declared default);
+  - two holders, a departed package's row switched off: FROM both off TO each at its own row or its declared default.
+  
+  The source says so once per name at `warn`, naming the departed package, the holders and the per-holder address (`POST /api/v1/security/_activation/webhook/NAME?package=PACKAGE`). A row naming no package is read exactly as before: the one holder's switch, and under two holders off keeps every holder with no row of its own off and on turns none on. A holder's own row still wins.
+  
+  **Operator action on upgrade.** A webhook you switched off while another package held its name, and which a remaining package now declares, starts delivering again after this release unless that holder has its own row. To keep it off, switch the holder off at its own address: `POST /api/v1/security/_activation/webhook/NAME?package=PACKAGE` (no `package` for the environment's own). The warning above names each such webhook and its holders.
+  
+  **The 18.x ownership ceremony's declared-webhooks step (cli).** A customized `sys_webhook` copy writes the declaration's activation row. When the copy's definition names no package, the row named the holder the composition listed LAST for the name. Of a name one holder declares it still names that holder; of a name two or more holders declare it now names no package — the name-keyed switch the copy was — and the step's notes name every holder and the per-holder address. When the environment is one of those holders, a row naming no package would be the environment's own switch, so the step writes no switch row and its notes report the copy's switch (on or off) and name every holder; switch each at its own address. A copy whose definition names its package writes that package's row, as before.
+- 5844346: fix(cli): with the stdio MCP transport on, what a host plugin writes to the console while serving a call reaches stderr
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An MCP client that spawns `os serve` or `os start` over stdio writes `initialize` at once and its first `tools/call` as soon as that is answered, so those calls are served while the server is still finishing its boot. `serve` holds back boot output during that time so the startup banner stays readable, and it held back the calls' output with it: a host plugin's `console.log`, `console.info` and `console.debug` from a tool-call interceptor or a hook reached neither stdout nor stderr. `console.warn` and `console.error` were not affected.
+  
+  The stdio transport now marks stdout when it claims it, and from that moment `serve` stops holding back console output: it goes to stderr, never to stdout, which still carries only JSON-RPC frames. Under stdio, the part of the boot that runs after the transport starts now prints its own console lines to stderr too, instead of dropping them. A boot without the stdio transport is unchanged.
+- 40c73a8: Clause-②: no (narrowing) — `os validate`, `os build` and `os lint` refuse (`widget-dataset-unknown`, error) a dashboard widget in a package of a multi-package artifact whose `dataset` only a package outside that package's declared dependency closure holds, or two packages inside it hold, where they accepted it. The runtime already refused both reads (`409 RESOURCE_CONFLICT`) since 18.4.0; no runtime answer changes.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` teaches neither cross-package dataset resolution nor `widget-dataset-unknown`.
+  
+  <!-- adr-0087: registered dashboard-dataset-outside-reader-closure-refused -->
+  
+  fix(lint)!: `os validate` and `os build` resolve a dashboard's dataset through the reading package's declared dependency closure, as the runtime does
+  
+  **BREAKING** accept-set narrowing in the authoring doors (`os validate`, `os build`, `os lint`; `@objectstack/lint`'s `widget-dataset-unknown`), for a package of a multi-package artifact (`packages[]`, the `composeStacks(stacks, { manifest: 'preserve' })` shape).
+  
+  - **Before.** The per-package pass resolved a dashboard widget's `dataset` against every package of the artifact, so a widget bound to a dataset another package holds was accepted whether or not the reading package declares it.
+  - **Now.** The name resolves in the reading package, then to the one holder in its declared dependency closure (`manifest.dependencies`, transitively, plus `sys`). A name held only outside that closure, or by two packages inside it, is refused with `widget-dataset-unknown` (error), naming the dataset, the holders and the open fix. When the reading package declares a dependency the artifact does not carry, an outside-closure name is reported (`widget-dataset-unknown`, warning, suppressible with `suppressWarnings`) instead, since that package may hold it once installed; two holders inside the closure are refused even then.
+  - **Unchanged.** A stack without `packages[]`, the union run over the whole artifact, a package's own dataset, a dataset of a declared dependency, and a name no package holds (refused as before). Every runtime answer.
+  - **Fix.** Declare the holding package in the reading package's `dependencies`; where the holder already depends on the reader (a module of the app), move the dashboard into the holder, or move the dataset into the reader. Upgrade-guide entry `dashboard-dataset-outside-reader-closure-refused`.
+  
+  Since 18.2.0 (#25514) the per-package authoring pass resolved a widget's `dataset` against every package of the artifact. The runtime does not: since 18.4.0 a package's dashboard resolves a dataset name in its own package, then in the packages its manifest declares in `dependencies` (transitively) plus `sys`, and refuses the rest (ADR-0150 D3, the maintainer's ruling on #32929). So `os validate` passed a dashboard that answered `409 RESOURCE_CONFLICT` once installed. HotCRM is the first-party app built this way: its app package's CRM Overview read `product_metrics`, which its revenue module holds. Repository examples affected: 0. Other first-party apps outside this repository: not measured.
+  
+  The authoring pass now asks the same question. Who moves: an app whose package dashboard binds a dataset that another package of the same artifact holds, without declaring that package. The finding names the dataset, the holders and the open fix, read off the artifact:
+  
+  - the holder does not depend on the reading package: declare it in the reader's `dependencies`, or move the dataset into the reader;
+  - the holder already depends on the reading package (a module of the app): declaring it back is a dependency cycle the kernel refuses at boot, so move the dashboard into the holder, or move the dataset into the reader;
+  - two holders inside the closure: nothing picks one; keep one, or depend on one.
+  
+  A report's (or a joined block's) `runtimeFilter` reads the same index: on the per-package pass its keys are no longer judged against a dataset the report cannot resolve. No verdict is lost: `chart-dataset-unknown` already refuses that report there, and the union run still judges the filter.
+  
+  The refusal sentences that name a fix for `outside-closure` now name the open one too: the core sentence (`409` at every package-scoped by-name door) says "move the TYPE into P" alone when only the environment holds the item, and asks for a dependency on ONE package when two or more hold it; `os migrate stored-references` (the report and `bind`), the CLI's picklist-reference hint and the publish probe's `widget_not_probed` fix name the move beside the dependency. Which item a read answers, its status, code and `details.candidates` do not change.
+  
+  The remedy (correcting the 18.4.0 note of #32310, which named only the dependency and the `?package=` qualifier): declare the holder in the reading package's `dependencies`; where the holder already depends on the reader, move the reading item into the holder, or move the read item into the reader.
+- 4e1d327: feat(cli): `os migrate audit-side-copies` runs the at-rest side-copy rewrite on the live audit tables and the archive
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Run `os migrate audit-side-copies` once after upgrading from 18.4.0 or earlier, a dry run first:**
+  
+  ```bash
+  os migrate audit-side-copies                         # dry run: counts per table and store, writes no row
+  os migrate audit-side-copies --object sys_audit_log  # only one copy table (repeatable)
+  os migrate audit-side-copies --apply                 # remove the columns (prompts; --yes skips the prompt)
+  os migrate audit-side-copies --apply --yes --json    # CI / scripts
+  ```
+  
+  The audit writer no longer copies a side-copy column (another record's field values, today an approval request's `payload_json`) into `sys_audit_log` (`new_value`, `old_value`) or `sys_activity` (both halves of `metadata`). Copies written before that still carry it. Until they are rewritten, the read-time redaction drops the column and the query guard treats a query naming it as reaching every object, so the command is cleanup, not a gate.
+  
+  - **The command.** It drives `@objectstack/plugin-audit`'s `migrateSideCopies` (the live `sys_audit_log` and `sys_activity` rows) and `migrateArchivedSideCopies` (the archive datasource `sys_audit_log` archives to). It is a dry run by default and writes only with `--apply`. Its flags are `os migrate audit-key-material`'s (`--database-url`, `--apply`, `--yes`, `--force`, `--json`) plus `--object`, which takes `sys_audit_log` or `sys_activity` and narrows the run, hot and archive, to the tables it names. Any other name is refused with `OBJECT_NOT_FOUND`, exit 1, before anything is read. The report gives, per copy table, the copies read and the copies rewritten (or to rewrite), for the hot tables and for the archive each, and never prints a value. It is idempotent: a second `--apply` rewrites nothing. A failed read or write, a sealed row it had to refuse, or an archive it could not reach exits 1, as for its twins.
+  - **The rewrite's name (`@objectstack/plugin-audit`).** A sealed row the rewrite amends (ADR-0154 D7) now records `rewritten_by: 'os migrate audit-side-copies'`, the command that rewrote it, as `audit-mail-bodies`, `audit-key-material` and `audit-metadata-bodies` record theirs. It recorded `side-copy-migration` before, a name no release shipped; a row amended under it on a pre-release build keeps it.
+- 218b012: fix(runtime,cli): `GET /api/v1/ready` reports whether the boot seed has landed, and `os serve` prints the seed result its banner promised
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The inline boot seed can still be writing after the kernel runs: past its budget (`OS_INLINE_SEED_BUDGET_MS`, default 8 s) it continues in the background, and a seed that waits for demo accounts or seed files starts after `kernel:ready`. `/health` and `/ready` answered ready the whole time, and the settle was announced only on the `os serve` IPC channel (`objectstack:seed-settled`), so a script, e2e suite or health check in another process could not tell when the seed rows were there.
+  
+  - **`/ready`.** When the app declares seed data, the 200 body now carries `seed`: `"pending"` while any source is still writing, then `"settled"`, or `"failed"` when a source dropped a record, dropped a reference from a written row, or installed no rows (the same verdict the IPC message calls `ok: false`). A multi-tenant or `skipSeedData` boot runs no inline seed and reads `"settled"`. The status code is unchanged, so a replica stays in rotation while it seeds. An app with no seed data gets exactly the body it got before. To wait for the seed from another process, poll `/api/v1/ready` until `seed` is not `"pending"`.
+  - **`os serve` / `os dev`.** When the ready banner printed `⚠ Seeds:   pending` and "its result prints after this banner", the result now prints, once, when the seed settles: `Seeds:   settled — crm 162 rows`. Before, a clean seed printed nothing, because the seeder's completion lines are logged at `info`, below the default level. A seed that settled before the banner is reported in the banner as before, and nothing more prints.
+- 7f4627c: fix(cli): `os serve` hands the data engine its crypto provider at `kernel:ready`, so a webhook that fires during boot is delivered signed instead of refused for boot order
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `os serve` chose its one crypto provider in the host plugin's `kernel:ready` hook, but handed it to the data engine only after `runtime.start()` returned. The webhook dispatcher arms in a later `kernel:ready` hook and decrypts each subscription's signing secret there, so on every boot it parked each signed webhook (an `error` saying the secret could not be decrypted), and every matching record change in between was recorded as a dead, unsigned delivery that can never be redelivered. The same hook now hands the engine the provider at the moment it is chosen.
+  
+  | During boot, from the host plugin's `kernel:ready` hook until `runtime.start()` returns | FROM | TO |
+  |:---|:---|:---|
+  | The webhook dispatcher's first cache build, for a `sys_webhook` row with a signing secret | `error` "holds an encrypted signing secret that could not be decrypted — the subscription is PARKED", re-armed only once the provider is wired | the secret opens; no `error`, nothing parked |
+  | A record change matching that webhook (an app seed at `kernel:bootstrapped`, a request once the port is open) | a `dead` `sys_http_delivery` row with 0 attempts and no signature, never sent or redelivered | an ordinary delivery, HMAC-signed |
+  | A `secret` field written or resolved through the data engine | refused: "no CryptoProvider is registered" (fail-closed) | sealed or opened by the provider the boot chose |
+  
+  Nothing changes outside that window. A secret is still never sent unsigned and never stored as cleartext: a boot with no usable provider still fails closed exactly as before, a production boot without a stable key still stops at `kernel:ready`, and a provider registered after plugin init, or replaced, still refuses the boot.
+  
+  No action is needed.
+- e540baf: fix: a deployed runtime tells search engines not to index its API and Console
+  
+  Clause-②: yes (widening) — new export `installApiNoindex` from `@objectstack/plugin-hono-server`, which `createHonoApp` (`@objectstack/hono`) now installs; every answer under `/api/` and `/_console/` gains an `X-Robots-Tag: noindex, nofollow` header (the public form page `/_console/f/<slug>` excepted), Console documents gain a `<meta name="robots" content="noindex, nofollow">` tag, and `GET /robots.txt`, which answered 404 on a Console-serving runtime that defines none, now answers a default file. Nothing that was served before is refused.
+  Metadata-protocol: none
+  
+  Search engines were crawling runtime surfaces of deployed ObjectStack instances: Console sign-in pages, the anonymous `GET /api/v1/runtime/config` door, auth routes. They are app and API surfaces, not content, and every self-hosted deployment had the same exposure.
+  
+  - **API.** `HonoHttpServer` (`@objectstack/plugin-hono-server`) adds `X-Robots-Tag: noindex, nofollow` to every answer under `/api` — data, metadata, auth, error envelopes and the unmatched-request 404. A route that sets its own `X-Robots-Tag` keeps it. `createHonoApp` (`@objectstack/hono`) installs the same lane, exported as `installApiNoindex`, so both HTTP doors answer the same headers.
+  - **Console.** The Console static plugin (`os serve`, `os start`, `os dev`) adds the same header to every answer under `/_console/` and writes the robots meta tag into each Console document, except on the public form page `/_console/f/<slug>`, which stays indexable. A Console build that already ships a robots meta tag keeps its own.
+  - **robots.txt.** With the Console mounted, `GET /robots.txt` answers a default that disallows `/api/` and `/_console/` and allows the public form surface (`/forms/`, `/_console/f/`, `/_console/assets/` and the anonymous form door `/api/v1/forms/`). It answers only when nothing else serves the path, so an app's own `robots.txt` route, static mount or fallback wins whichever registered first.
+- Updated dependencies [f229dfd]
+- Updated dependencies [0b89b33]
+- Updated dependencies [199e362]
+- Updated dependencies [687e0a5]
+- Updated dependencies [322ded7]
+- Updated dependencies [2399e39]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [4f0a5f3]
+- Updated dependencies [4aceae5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [7c36f52]
+- Updated dependencies [1cf2a5a]
+- Updated dependencies [3c44a97]
+- Updated dependencies [66919b6]
+- Updated dependencies [605d712]
+- Updated dependencies [3269cab]
+- Updated dependencies [02f55c5]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [df67557]
+- Updated dependencies [28a2f0f]
+- Updated dependencies [128b657]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [895ace4]
+- Updated dependencies [51ceb43]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [d635599]
+- Updated dependencies [8403725]
+- Updated dependencies [4e4b587]
+- Updated dependencies [6a36b79]
+- Updated dependencies [b96dd30]
+- Updated dependencies [a1e0402]
+- Updated dependencies [548f8ff]
+- Updated dependencies [4dfb9f1]
+- Updated dependencies [9951f46]
+- Updated dependencies [103eb7b]
+- Updated dependencies [dd966fc]
+- Updated dependencies [fc283d6]
+- Updated dependencies [0e9ff94]
+- Updated dependencies [6718884]
+- Updated dependencies [d3ceb1d]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [71ade1a]
+- Updated dependencies [de31809]
+- Updated dependencies [46a2ecf]
+- Updated dependencies [4bba8b8]
+- Updated dependencies [8c88db6]
+- Updated dependencies [834d5f5]
+- Updated dependencies [5e250a6]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [932eab5]
+- Updated dependencies [9673030]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [84c66d3]
+- Updated dependencies [118d37a]
+- Updated dependencies [a83c366]
+- Updated dependencies [5c005e0]
+- Updated dependencies [dd4ce50]
+- Updated dependencies [6e4a203]
+- Updated dependencies [796e9d4]
+- Updated dependencies [c09320d]
+- Updated dependencies [a1604ce]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [c05c0c7]
+- Updated dependencies [b462444]
+- Updated dependencies [5ea8ce5]
+- Updated dependencies [e0ce1b5]
+- Updated dependencies [4ace1fa]
+- Updated dependencies [5844346]
+- Updated dependencies [702c562]
+- Updated dependencies [534e115]
+- Updated dependencies [61ed314]
+- Updated dependencies [3c42e63]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [3825f57]
+- Updated dependencies [9317833]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [b4c8461]
+- Updated dependencies [0c2aeb9]
+- Updated dependencies [01d206d]
+- Updated dependencies [01d206d]
+- Updated dependencies [bd439f1]
+- Updated dependencies [ba35dfd]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [fd7b378]
+- Updated dependencies [bf02d33]
+- Updated dependencies [a752057]
+- Updated dependencies [f45c012]
+- Updated dependencies [6e28797]
+- Updated dependencies [87330e8]
+- Updated dependencies [6455104]
+- Updated dependencies [7adb1b5]
+- Updated dependencies [86c18df]
+- Updated dependencies [0bd902c]
+- Updated dependencies [1bed853]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [d4cfbfb]
+- Updated dependencies [9562643]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [6222ecb]
+- Updated dependencies [69c77ad]
+- Updated dependencies [a3a3cea]
+- Updated dependencies [728be58]
+- Updated dependencies [728be58]
+- Updated dependencies [4c15268]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [26b5994]
+- Updated dependencies [28c9b42]
+- Updated dependencies [24f2f40]
+- Updated dependencies [8835532]
+- Updated dependencies [505a239]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4e1d327]
+- Updated dependencies [f45c012]
+- Updated dependencies [9f736f2]
+- Updated dependencies [6e1ab9b]
+- Updated dependencies [cbb876c]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [7e2eadd]
+- Updated dependencies [47a3b95]
+- Updated dependencies [d4fbb4d]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [8a8c21e]
+- Updated dependencies [b194618]
+- Updated dependencies [0be91f0]
+- Updated dependencies [218b012]
+- Updated dependencies [a2be78d]
+- Updated dependencies [4a0c480]
+- Updated dependencies [a674877]
+- Updated dependencies [df9fe94]
+- Updated dependencies [467ec26]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [b95d915]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [e3f0cfd]
+- Updated dependencies [03dc626]
+- Updated dependencies [498c967]
+- Updated dependencies [babd5d4]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [67725f1]
+- Updated dependencies [a27d88d]
+- Updated dependencies [d01f514]
+- Updated dependencies [06b5669]
+- Updated dependencies [b392ff7]
+- Updated dependencies [6107290]
+- Updated dependencies [c92ae14]
+- Updated dependencies [3c231cd]
+- Updated dependencies [489ef5f]
+- Updated dependencies [480246b]
+- Updated dependencies [b937b75]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [c43bffd]
+- Updated dependencies [426bb46]
+- Updated dependencies [ea67b26]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [1c25b50]
+- Updated dependencies [06e53a7]
+- Updated dependencies [481f642]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [1c32f6d]
+- Updated dependencies [b8f6237]
+- Updated dependencies [63fcfb5]
+- Updated dependencies [dd291b8]
+- Updated dependencies [c94a4da]
+- Updated dependencies [e997113]
+- Updated dependencies [1e358cc]
+- Updated dependencies [3eac63a]
+- Updated dependencies [615c67f]
+- Updated dependencies [8d523b5]
+- Updated dependencies [67274ac]
+- Updated dependencies [e540baf]
+- Updated dependencies [1e889b1]
+- Updated dependencies [d7e1a5a]
+- Updated dependencies [de5eb08]
+- Updated dependencies [0a6f193]
+  - @objectstack/spec@18.5.0
+  - @objectstack/objectql@18.5.0
+  - @objectstack/metadata-protocol@18.5.0
+  - @objectstack/service-automation@18.5.0
+  - @objectstack/driver-mongodb@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/metadata@18.5.0
+  - @objectstack/runtime@18.5.0
+  - @objectstack/plugin-audit@18.5.0
+  - @objectstack/rest@18.5.0
+  - @objectstack/plugin-auth@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/lint@18.5.0
+  - @objectstack/mcp@18.5.0
+  - @objectstack/plugin-hono-server@18.5.0
+  - @objectstack/plugin-approvals@18.5.0
+  - @objectstack/plugin-security@18.5.0
+  - @objectstack/plugin-email@18.5.0
+  - @objectstack/service-storage@18.5.0
+  - @objectstack/plugin-webhooks@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/service-messaging@18.5.0
+  - @objectstack/service-analytics@18.5.0
+  - @objectstack/formula@18.5.0
+  - @objectstack/driver-sql@18.5.0
+  - @objectstack/service-package@18.5.0
+  - @objectstack/trigger-api@18.5.0
+  - @objectstack/client@18.5.0
+  - @objectstack/cloud-connection@18.5.0
+  - @objectstack/account@18.5.0
+  - @objectstack/setup@18.5.0
+  - create-objectstack@18.5.0
+  - @objectstack/driver-memory@18.5.0
+  - @objectstack/driver-sqlite-wasm@18.5.0
+  - @objectstack/driver-turso@18.5.0
+  - @objectstack/observability@18.5.0
+  - @objectstack/plugin-pinyin-search@18.5.0
+  - @objectstack/plugin-sharing@18.5.0
+  - @objectstack/service-cache@18.5.0
+  - @objectstack/service-datasource@18.5.0
+  - @objectstack/service-job@18.5.0
+  - @objectstack/service-mailbox@18.5.0
+  - @objectstack/service-push@18.5.0
+  - @objectstack/service-queue@18.5.0
+  - @objectstack/service-realtime@18.5.0
+  - @objectstack/service-settings@18.5.0
+  - @objectstack/service-sms@18.5.0
+  - @objectstack/trigger-record-change@18.5.0
+  - @objectstack/trigger-schedule@18.5.0
+  - @objectstack/verify@18.5.0
+  - @objectstack/console@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

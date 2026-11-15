@@ -1,5 +1,102 @@
 # @objectstack/client
 
+## 18.5.0
+
+### Patch Changes
+
+- d4fbb4d: fix(deps)!: hono moves to ^4.13.16 and @hono/node-server to ^2.1.6, the releases that fix seven public advisories; a request path holding a backslash is answered 400
+  
+  Clause-②: yes (narrowing) — `@hono/node-server` 2.1.6 answers `400 Bad Request` to a request whose path (the part before `?`) holds a backslash, before any route runs. Up to 2.1.5 the backslash was rewritten to `/` and the request reached the route that path names. A backslash after `?` is query data and answers as before. One more edge moves in the same transport: a streamed response whose body stream errors within its first two reads used to be sent as a truncated `200`, and is now a `500` (`text/plain`) with the socket closed. Of ours, only a raw stream passthrough (the AI and MCP stream results) can meet it; the SSE path and the adapter's stream writer never error their stream. No other status, header, body or error text of ours moves; the request-body limit (`413 PAYLOAD_TOO_LARGE`) answers as before.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` and no page under `content/docs/**` teaches request-path spelling at the HTTP door; the moved answer is the transport refusing a malformed request line.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type, stored row or export is added, removed, renamed or re-shaped. What moves is the Node transport refusing a request line whose path holds a backslash, so there is nothing for an author or an operator to migrate. -->
+  
+  **BREAKING** for a client that sends a backslash inside a URL path, such as `GET /api/v1/data\account`: the Node server now answers `400 Bad Request` where it used to route the request as `/api/v1/data/account`. Browsers and WHATWG-URL clients (`fetch`, undici) already turn a backslash into `/` before sending; other clients, `curl` among them, send it as written and meet this. Send the path with `/`.
+  
+  The fixed advisories: `hono` GHSA-3gg2-335m-rxc6, GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-4m76-xfj5-7975 and GHSA-h7mg-cq63-vhpq (fixed in 4.13.16); `@hono/node-server` GHSA-jpvv-r467-5p4w and GHSA-qv5m-9pm6-hqp3 (fixed in 2.1.6). The declared ranges move so that a downstream install, which never sees this workspace's overrides, lands on the fixed releases too. The `@objectstack/hono` peer range on `hono` stays `^4.12.8`.
+- 8f9eb3d: feat(metadata-protocol, spec): a package publish whose runtime registry refused an object answers `published_unregistered` and names the object, instead of `published`
+  
+  Clause-②: yes (widening) — `PublishPackageDraftsResponseSchema.outcome` gains the value `published_unregistered`, and the response gains the optional member `unregistered[]`. Every other answer is byte-identical: a publish the registry takes whole still answers `published` with `success: true` and no `unregistered` key.
+  Metadata-protocol: semantic
+  
+  The authorable-surface shard gains `api/PublishPackageDraftsResponse:unregistered`, and the same server event answers `outcome` / `success` differently; ADR-0087 entry `18.publish-drafts-outcome-published-unregistered`.
+  
+  **What answers differently.** `POST /api/v1/packages/:id/publish-drafts` (and the protocol's `publishPackageDrafts`, and `client.packages.publishDrafts()`) used to answer `outcome: 'published'` and `success: true` when the runtime registry refused one of the objects it had just made live. The object carried the `object-registry-refused` warning on its `published[]` element, but a caller that read `success` or `outcome` saw a clean publish, and a seed load or data read right after it answered `OBJECT_NOT_FOUND`. The same publish now answers:
+  
+  - `outcome: 'published_unregistered'` and `success: false` (`success` is still exactly `outcome === 'published'`);
+  - `unregistered: [{ type: 'object', name, rule: 'object-registry-refused' }]`, one entry per refused object, in publish order;
+  - everything else as before: the drafts landed and stay live, so every object is still in `published[]` (the refused one still carries its warning), `failed[]` is empty, and the commit, seeds, probes and receipts are as they were.
+  
+  **What to do.** Handle the new value wherever you branch on the batch publish answer. Do not treat it as "nothing landed": the metadata is live. Do not seed or read an object `unregistered[]` names until it is registered: publish it again, which re-runs the registration, or restart, which registers every stored object.
+  
+  **The console.** Studio's publish, the package sheet, Home's *Publish all* and the AI chat card read `published_unregistered` as they read the `published` answer the server gave for this before: the refused object's warning reaches the author through the client, and none of them reports the publish as failed.
+  
+  **Unchanged on purpose.** The REST door's app visibility flip (ADR-0045 §3) still runs after this outcome, as it ran after the `published` answer this used to be. The single-item doors (`publishMetaItem`, a publish-mode save) still answer success with the warning on their `advisories`.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/core@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

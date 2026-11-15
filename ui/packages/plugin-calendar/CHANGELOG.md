@@ -1,5 +1,32 @@
 # @object-ui/plugin-calendar
 
+## 18.5.0
+
+### Patch Changes
+
+- Updated dependencies [f530d25]
+- Updated dependencies [f5121e8]
+- Updated dependencies [ba32e79]
+- Updated dependencies [8ed2b89]
+- Updated dependencies [a9da547]
+- Updated dependencies [4c32b96]
+- Updated dependencies [12d090d]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [d574341]
+- Updated dependencies [de476f1]
+- Updated dependencies [159dbe3]
+- Updated dependencies [020ce3d]
+- Updated dependencies [6446935]
+- Updated dependencies [5604aeb]
+  - @object-ui/i18n@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/plugin-detail@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/mobile@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

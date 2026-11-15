@@ -1,5 +1,215 @@
 # @objectstack/verify
 
+## 18.5.0
+
+### Patch Changes
+
+- Updated dependencies [f229dfd]
+- Updated dependencies [0b89b33]
+- Updated dependencies [199e362]
+- Updated dependencies [687e0a5]
+- Updated dependencies [322ded7]
+- Updated dependencies [2399e39]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [4f0a5f3]
+- Updated dependencies [4aceae5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [7c36f52]
+- Updated dependencies [1cf2a5a]
+- Updated dependencies [3c44a97]
+- Updated dependencies [66919b6]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [28a2f0f]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [895ace4]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [d635599]
+- Updated dependencies [4e4b587]
+- Updated dependencies [6a36b79]
+- Updated dependencies [b96dd30]
+- Updated dependencies [a1e0402]
+- Updated dependencies [548f8ff]
+- Updated dependencies [4dfb9f1]
+- Updated dependencies [9951f46]
+- Updated dependencies [dd966fc]
+- Updated dependencies [fc283d6]
+- Updated dependencies [0e9ff94]
+- Updated dependencies [6718884]
+- Updated dependencies [d3ceb1d]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [71ade1a]
+- Updated dependencies [de31809]
+- Updated dependencies [46a2ecf]
+- Updated dependencies [8c88db6]
+- Updated dependencies [834d5f5]
+- Updated dependencies [5e250a6]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [932eab5]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [118d37a]
+- Updated dependencies [a1604ce]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [c05c0c7]
+- Updated dependencies [b462444]
+- Updated dependencies [5ea8ce5]
+- Updated dependencies [e0ce1b5]
+- Updated dependencies [4ace1fa]
+- Updated dependencies [5844346]
+- Updated dependencies [702c562]
+- Updated dependencies [534e115]
+- Updated dependencies [61ed314]
+- Updated dependencies [3c42e63]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [3825f57]
+- Updated dependencies [9317833]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [b4c8461]
+- Updated dependencies [0c2aeb9]
+- Updated dependencies [ba35dfd]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [fd7b378]
+- Updated dependencies [bf02d33]
+- Updated dependencies [a752057]
+- Updated dependencies [f45c012]
+- Updated dependencies [87330e8]
+- Updated dependencies [6455104]
+- Updated dependencies [7adb1b5]
+- Updated dependencies [86c18df]
+- Updated dependencies [0bd902c]
+- Updated dependencies [1bed853]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [d4cfbfb]
+- Updated dependencies [9562643]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [69c77ad]
+- Updated dependencies [a3a3cea]
+- Updated dependencies [728be58]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [28c9b42]
+- Updated dependencies [24f2f40]
+- Updated dependencies [8835532]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4e1d327]
+- Updated dependencies [f45c012]
+- Updated dependencies [9f736f2]
+- Updated dependencies [6e1ab9b]
+- Updated dependencies [cbb876c]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [7e2eadd]
+- Updated dependencies [d4fbb4d]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [8a8c21e]
+- Updated dependencies [b194618]
+- Updated dependencies [0be91f0]
+- Updated dependencies [218b012]
+- Updated dependencies [a2be78d]
+- Updated dependencies [4a0c480]
+- Updated dependencies [df9fe94]
+- Updated dependencies [467ec26]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [e3f0cfd]
+- Updated dependencies [03dc626]
+- Updated dependencies [498c967]
+- Updated dependencies [babd5d4]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [67725f1]
+- Updated dependencies [a27d88d]
+- Updated dependencies [d01f514]
+- Updated dependencies [06b5669]
+- Updated dependencies [b392ff7]
+- Updated dependencies [6107290]
+- Updated dependencies [3c231cd]
+- Updated dependencies [489ef5f]
+- Updated dependencies [480246b]
+- Updated dependencies [b937b75]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [c43bffd]
+- Updated dependencies [426bb46]
+- Updated dependencies [ea67b26]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [1c25b50]
+- Updated dependencies [06e53a7]
+- Updated dependencies [481f642]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [1c32f6d]
+- Updated dependencies [b8f6237]
+- Updated dependencies [63fcfb5]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [1e358cc]
+- Updated dependencies [3eac63a]
+- Updated dependencies [615c67f]
+- Updated dependencies [8d523b5]
+- Updated dependencies [67274ac]
+- Updated dependencies [e540baf]
+- Updated dependencies [de5eb08]
+- Updated dependencies [0a6f193]
+  - @objectstack/spec@18.5.0
+  - @objectstack/objectql@18.5.0
+  - @objectstack/service-automation@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/metadata@18.5.0
+  - @objectstack/runtime@18.5.0
+  - @objectstack/plugin-audit@18.5.0
+  - @objectstack/rest@18.5.0
+  - @objectstack/plugin-auth@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/mcp@18.5.0
+  - @objectstack/plugin-hono-server@18.5.0
+  - @objectstack/plugin-approvals@18.5.0
+  - @objectstack/plugin-security@18.5.0
+  - @objectstack/plugin-email@18.5.0
+  - @objectstack/service-storage@18.5.0
+  - @objectstack/plugin-webhooks@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/service-messaging@18.5.0
+  - @objectstack/service-analytics@18.5.0
+  - @objectstack/service-package@18.5.0
+  - @objectstack/trigger-api@18.5.0
+  - @objectstack/plugin-pinyin-search@18.5.0
+  - @objectstack/plugin-sharing@18.5.0
+  - @objectstack/service-cache@18.5.0
+  - @objectstack/service-datasource@18.5.0
+  - @objectstack/service-job@18.5.0
+  - @objectstack/service-mailbox@18.5.0
+  - @objectstack/service-push@18.5.0
+  - @objectstack/service-queue@18.5.0
+  - @objectstack/service-realtime@18.5.0
+  - @objectstack/service-settings@18.5.0
+  - @objectstack/service-sms@18.5.0
+  - @objectstack/trigger-record-change@18.5.0
+  - @objectstack/trigger-schedule@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

@@ -1,5 +1,694 @@
 # @objectstack/metadata-protocol
 
+## 18.5.0
+
+### Minor Changes
+
+- 89d7bef: fix(metadata-protocol)!: the exact read (`?package=X`) no longer serves an undeclared App-pair row the registry binds to no package (ADR-0150 D4, red line 2)
+  
+  Clause-②: yes (narrowing) — two exact reads that served a row of an App's customization pair now answer the address's own shipped item: `?package=X` for an undeclared pair row of the very bundle member a bundle addition of another package of the App ships, and a package's address for an undeclared pair row while another App's shared pair stores an undeclared row of the name. In both the registry binds the row to no package. First-party packages in either position: 0. The widening is one public method: `SchemaRegistry#overlayRowBinding(type, name, item)`, the registry's binding of a stored row, read-only, which the exact read asks.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered pair-row-exact-read-no-owner -->
+  
+  **BREAKING** for two exact reads, both of an undeclared row of an App's customization pair (`<app>.custom`, a row with no `overrides.package`). An undeclared row that could customize either of two packages' members is not attributed to one of them (red line 2). To keep such a row on the package whose locale it customizes, save it with `overrides.package` naming that package, the package of the App that ships the locale: the save door accepts it (it already prescribes it, refusing `403 NOT_OVERRIDABLE` a new undeclared row of a locale an installed package ships), and `?package=<that package>` then serves the row. A row of a locale no package ships stays readable at `?package=<app>.custom`.
+  
+  The exact read's owner check (`pairRowOnAddress`) counted the holders after the registry had bound the row, so a bundle addition was no holder there, and it never read another App's pair. The registry (`SchemaRegistry#pairRowBinding`, since #32408) counts an addition that ships the row's member as a second owner, and binds a row whose count would read another shared pair's undeclared row to no package. The exact read now adopts that binding: `SchemaRegistry#overlayRowBinding(type, name, item)`, a new read-only method, answers it over the holders the exact read serves (a disabled package holds no name, ADR-0150 D3), and `pairRowOnAddress` treats an undeclared pair row as no member of an address whose one owner it does not bind the row to. It adds no count of its own.
+  
+  What moves (each line FROM → TO), with App A, X a package of A holding an email template's name, Z a package of A depending on X that ships only `fr-FR` of it (a bundle addition), and `A.custom` storing an undeclared `fr-FR` row:
+  
+  - `?package=X&member=fr-FR`: FROM the row TO X's own `fr-FR` (none, `404`). X's list and execution list: FROM carrying the row TO leaving it out. Either order: Z installed before the row (reached by a hydrated row; the save door refuses that write `403 NOT_OVERRIDABLE`, prescribing the declaration) or after it (the row saved and published while X alone held the name, then Z installed). `?package=Z` keeps Z's own `fr-FR`; `?package=A.custom` keeps the row.
+  - `?package=Y` / `?package=P` when App A's pair and App B's pair each store an undeclared row of the name (the registry binds neither): FROM the pair's row TO the package's own item of that member (none). Each pair's own address keeps its row.
+  
+  Unchanged: a row declaring its base (`overrides.package`) binds and serves as declared; the App's own address keeps an undeclared row of its own pair (#28390 ruling A); two holders that could own a row still refuse `409` naming both; a row whose one owner the registry binds it to is served there as before; a registry without `overlayRowBinding` keeps the exact read's own count. With one of two holders of the name disabled, the enabled holder's address, list and execution list keep an undeclared row of the pair (#32183, epic ruling R4-A): the adoption counts the served holders, as the exact read does, while the registry's own readers keep counting every holder, so a disable never moves their binding.
+- 51ceb43: fix(metadata-protocol)!: a row of an App's `.custom` pair declared for a package that still ships the name is never served at a bundle addition's address as its own item (ADR-0150 D4, #32606)
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  Skills-docs: none — `skills/**` and `content/docs/**` teach a declared override served at the package it declares and a tenant's edit following an item that moved between an App's packages (#31593); neither teaches a row declared for one package served at another that still ships nothing of the row's member, so no taught sentence moves.
+  
+  <!-- adr-0087: registered declared-row-not-moved-to-addition -->
+  
+  **BREAKING** for a reader of a bundle addition's member: an App `A` with module packages X and Z, Z depending on A and X; X ships `welcome` in `en-US`, Z ships only `fr-FR` (a bundle addition to X's template), and `A.custom` stores a `fr-FR` row declaring `overrides: { package: X }`.
+  
+  The moved-edit rule (#31593, `isMovedOverrideRowOf` / `isMovedBaseRowOf`) serves a row that declares, or is bound to, a former owner of an item at the package that ships the item now. It asked whether the former owner still ships the item at the MEMBER's grain, so X (which ships `en-US`, not `fr-FR`) read as a package that no longer ships it, and Z took the row as its own moved edit. The rule now asks the former owner at the NAME's grain, as its own header states ("the old owner must not ship the name"): X still holds `welcome`, so the row stays X's alone.
+  
+  **Every moved answer, before → after.** Both registration orders (Z installed first, the row stored first). First-party count 0: no first-party App stores a pair row declaring one module at a locale another module adds.
+  
+  - `GET /meta/email_template/welcome?package=Z&member=fr-FR`: the row declared for X, stamped Z, `_diagnostics.valid: false` → Z's own `fr-FR`, which is what the registry answers at Z (`getPackageScopedItem`).
+  - `GET /meta/email_template?package=Z` (Z's list) and the execution list a send resolved to Z reads (`getMetaItemsForExecution`): the row declared for X → Z's own `fr-FR`. A send resolved to Z sent X's customization of a member Z ships.
+  - `listServedOverrides({ packageId: Z })` (the customizations read): the same row is no longer listed under Z.
+  
+  **Not moved.** X's address, X's list and X's execution list serve the row declared for X, as before. `?package=A.custom` serves it. The read naming no package keeps its 409 naming both holders. A former owner that ships nothing of the name any more still hands its edit to the package that ships it now (#31593's flat → composed and composed → flat moves, and a member that moved together with its whole bundle), pinned as a CONTROL in both orders.
+  
+  The fix for a reader: read the row at the package it declares (`?package=X`). To customize Z's own member, save a row declaring Z.
+- d635599: fix(metadata-protocol)!: a name two enabled packages hold only as stored rows is refused by the plain read, never served by save order (ADR-0150 D3, #32607)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no skill and no doc teaches what the read naming no package answers for a name only stored rows of several packages hold (`skills/**` and `content/docs/**` grepped: the `ambiguous-in-environment` mentions are about flow, queue and permission-set references, not `/meta` reads); the refusal's own sentence names the `?package=` remedy.
+  
+  <!-- adr-0087: registered two-row-holders-bare-read-refused -->
+  
+  **BREAKING** answer narrowing at the `/meta` bare item reads: a name that two or more enabled packages hold only as stored rows, and that no package ships in code, answers 409 `RESOURCE_CONFLICT` naming each of them, where the plain read and `/published` served one of the rows. `/layers` already refused it.
+  
+  The row-aware served-holder judgment that a disabled holder brings in (#32354) now also judges, on the item read, a name with no disabled holder. The holders are judged at one grain, the packages the item's active stored rows are bound to at the member the read addresses, as the read itself binds them, and never united with the registry's holders of the name (with no shipper the registry knows a row-only name through one bare slot, the row written or hydrated last). Two or more of them are refused as the by-name read refuses two package holders (`ambiguous-in-environment`). One holder reads as before. It applies to a type the registry reads by package, when no enabled package ships the name in code at any member, and when no package-less row or environment item of the name is stored.
+  
+  **Every moved answer, before → after.** Both transports (`RestServer` and the runtime `HttpDispatcher`), both registration orders, both save orders, and on the runtime dispatcher before and after a reboot. First-party count 0: no first-party app saves one name into two packages' stored rows.
+  
+  Narrowing:
+  
+  - Bare `GET /meta/:type/:name`: 200 with the row saved first → 409 `RESOURCE_CONFLICT` naming each holder, with `details.candidates`.
+  - Bare `GET /meta/:type/:name/published`: 200 with a row (on `RestServer` the row saved first; on the runtime dispatcher the same package in every save order) → 409 `RESOURCE_CONFLICT` naming each holder.
+  - The execution face (`getMetaItemForExecution`) of the same name: the row saved first → the same refusal.
+  
+  **Not moved.** Bare `GET /meta/:type/:name/layers` keeps its 409 `RESOURCE_CONFLICT`, the package-less writes' own refusal naming the same holders with its `?package=` prescription (#28337), on both transports: each transport's layered chain (`RestServer`'s and the runtime `HttpDispatcher`'s) reads the plain read first to find a disabled owner, and now leaves that read's refusal of row holders, and only that refusal (the protocol marks it), to the package-less refusal step, rethrowing every other refusal as before (two code holders, with or without a stored row each, and two row holders beside a disabled one, keep the plain read's refusal). `?package=` naming either holder serves that holder's row. A name one package holds as a stored row is served as before. A row the reads decline (a shipped flow name's undeclared row, a sealed managed name's row) and a row of a customization pair of another package the rows or the registry name make no holder here, as they make none beside a disabled holder (#32354), so they never turn one holder into a refusal: a package's row beside its pair's undeclared row is one holder in either save order, and no door names the pair. A dependent's added member over a base that holds the name only as a stored row (`email_template`: the base's `en-US` row, the dependent's `fr-FR` row) is the dependent's alone at that member (#28802): the plain read, `/layers` and the execution face at `fr-FR` keep serving the dependent's row. A name an enabled package ships in code at any member (for a bundled type such as `email_template`, a base shipping `en-US` beside another package's `fr-FR` row: the package-less `fr-FR` read keeps its answer), or one with a package-less row or an environment item, is judged as before. The paired customization addresses (`?package=HOLDER.custom`), which after a reboot follow the registry's one bare slot, are unchanged here (#32662 carries them).
+- 84c66d3: fix(metadata-protocol)!: enabling a second holder of an overlay name takes back the package-less row the read-side hydrator laid into the first holder's registry slot while the second was disabled (ADR-0150 D4)
+  
+  Clause-②: no (narrowing) — a served answer that guessed a holder goes away: after the enable, a holder's registry item, its scoped list and its registry list answer the holder's own item where they answered the environment's package-less row as the holder's own. Nothing that was refused is now served, and no export is added (the heal is module-internal).
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` and `content/docs/**` teach no registry read of a holder's item after a disable and enable; the prescription ships in the FROM → TO below.
+  
+  <!-- adr-0087: registered package-less-overlay-row-holder-slot-on-reenable -->
+  
+  **BREAKING** for a registry reader of a holder's item of an overlay-type name (`email_template`, `dashboard`, `report`) that another installed package also holds, when a package-less `sys_metadata` row of the name is stored: `getPackageScopedItem(type, name, holder)` (what a send-time read takes), the list scoped to the holder (`GET /meta/:type?package=<holder>`) and the registry list scoped to it.
+  
+  While one of the two holders is disabled, the other is the one served holder (#32183), so the package-less row is its customization: the read-side hydrator (an unscoped list read, the boot load) lays the row into that holder's slot under its envelope. Enabling the disabled holder ran no hydration, so the slot kept the row, and until the next unscoped list read the holder's registry item and its scoped list answered the environment's row as the holder's own, and its registry list listed both. The protocol's exact read (`?package=<holder>`) already refused it `409` naming both holders.
+  
+  The enable now builds the entry again, as the hydrator builds it for the holders served then: with two served, no holder's envelope, so each holder's slot answers its own item, as when the hydrator ran with both served. It runs inside the enable, so every enable door (`PATCH /packages/:id/enable`, an install's `enableOnInstall`) answers after it. An entry another write replaced after the hydration is that write's, and is not touched.
+  
+  Not changed: the disabled period itself (the one served holder's slot serves the row, as #32183 rules), the exact reads, and a package installed after the hydration that ships the name (the slot keeps the row until the next unscoped hydration, as before: no registry notice reaches the protocol for a new holder).
+  
+  No first-party composition has two packages holding one overlay name with a package-less row, so no answer changes in this repository.
+  
+  The fix:
+  
+  - FROM a package-less overlay row of a name two packages hold, read as one holder's own through the registry after a disable and enable, TO the declared override of that holder in its paired `.custom` package (`?package=<holder>.custom` with `overrides: { package: <holder>, basedOn }`), saved after deleting the package-less row (a package-less delete removes the one bound row there is, so after the save it would remove the override). Before that delete, keep the package-less row's stored body and clear any row of the name bound to a package, as `package-less-row-exact-address-by-type-class` prescribes: the delete hard-deletes the row, and with a bound row present it addresses that row instead.
+- 728be58: fix(objectql,metadata-protocol)!: a stored row bound to a package lives in that package's own registry slot, so each package's address serves its own row in every save order, before and after a restart (ADR-0150 D3/D4)
+  
+  Clause-②: yes (narrowing) — one served answer goes away: an action that two packages hold only as stored rows was served by the read naming no package after a restart (the row hydrated last); it now refuses `409 RESOURCE_CONFLICT` naming both, as every other type the registry reads by package already did (#32607). The widening is on `SchemaRegistry`, exported from `@objectstack/objectql`: `registerItem` takes an optional fifth argument `{ storedRowPackage }`, and one new public method `removePackageOverlaySlots(type, name, member, select)`; and four reads that answered a shipped item, a 404 or a 409 now answer the address's own stored row (below).
+  Metadata-protocol: semantic
+  Skills-docs: none — `skills/**` and `content/docs/**` teach no reading of a name two packages each store a row of (grepped `?package=`, `.custom`, `409`: the hits are the pair's save door, a flow's secret refusal and a permission grant), so no taught sentence moves; the read naming no package keeps its `409` and its `?package=` remedy.
+  
+  <!-- adr-0087: registered stored-row-own-package-slot -->
+  
+  **BREAKING** for a reader of an action that two packages hold only as stored rows, by the read naming no package (`GET /api/v1/meta/action/NAME`), after a restart: it refused before the restart and served the row hydrated last after it; it now refuses `409 RESOURCE_CONFLICT` naming both packages, before and after. The fix: read each package's action by its package (`?package=ID`).
+  
+  The registry kept ONE slot per name for a stored row (`registerItem` with no package), so the row saved or hydrated last took it. Each stored row of a type the registry reads by package (action, tool, agent, skill, webhook, api, email template, picklist, mapping, dataset; flow and permission keep their own slot rules) that is bound to a package — its own, or its `.custom` pair's by the pair-row rule — now lives in that package's own overlay slot, beside the package's code artifact, which it never overwrites.
+  
+  - **#33127 — two packages ship a name and each stores its own row.** At boot (`loadMetaFromDb`) the row hydrated last took the name's slot: that package's registry item and `?package=` read answered its row, the other package's answered its shipped item, which package by row order (tool, webhook, agent, skill measured). Each package now answers its own row in every registration and row order; the read naming no package still refuses `409` naming both.
+  - **#32663 — the writer's registry item.** After alpha then beta saved a row of one name, both replicas' registry items answered `[null, beta's row]` at the two packages (the mirror in the other order) while the exact reads, row-served, answered each package's own row. The registry now agrees with the exact reads on the writer and on the peer (action, tool, email template). A `dashboard` is converged by name, unchanged.
+  - **#32662 — a pair address of a name held only as stored rows.** `?package=ID.custom` answered `404` for both packages before a restart and, after it, `200` for the row hydrated last and `409` naming one package for the other (dashboard, tool, action). Each pair address now answers its base package's row, before and after.
+  - **#32662 scope note (b).** A package's row beside its own pair's undeclared row: the read naming no package served the pair's row when it was saved first while `/published` served the package's own row. Both now serve the package's own row in either order.
+  - **#32900.** A module's locale member stored in its App's pair (declaring the module) beside a package-less row of the same locale: the module's registry item at that locale followed the row order. It now answers the module's own pair row in both orders; the install and seal answers are unchanged.
+  
+  Unchanged, pinned as CONTROLs: a name one package holds (its row in its slot, its exact read and its read naming no package); two packages with one stored row (the other keeps its shipped item); a package-less row (it keeps the bare slot); the read naming no package of a two-holder name (`409` naming both).
+- 1fd5d8a: fix(metadata-protocol): a package that holds a bundle's name only through its own stored row lists the App pair's added member its exact read already serves (ADR-0150 D4)
+  
+  Clause-②: no — no published accept set moves: the list scoped to a package and its execution list now carry one stored row the package's exact read (`?package=ID&member=M`) already served, so the address and its own lists agree. Nothing that was refused is now served.
+  Metadata-protocol: semantic
+  Skills-docs: none — no taught sentence names a package that holds a name only through its own stored row.
+  
+  <!-- adr-0087: registered stored-row-holder-lists-pair-member -->
+  
+  A package X holds an email template's name only through its own stored row (no code artifact ships it), and its App's `.custom` pair stores an undeclared row of another locale. X's exact read served that locale, as X is the name's sole holder (#32561 contract review n1); X's list and the execution list a send resolved to X reads left it out, since they counted only a code package that ships the name.
+  
+  - FROM: `?package=X&member=de-DE` serves `pair de-DE`; X's list and execution list read `['suitex en-US']`.
+  - TO: both read `['pair de-DE', 'suitex en-US']`, in either registration order.
+  
+  Unchanged, pinned as CONTROLs: X holding the name through its composite slot; a second holder of the name beside X (the exact read refuses naming both, the lists leave it out); a pair row that declares another package.
+- 26b5994: fix(metadata-protocol)!: when two packages ship one name and one declares its `.custom` override, each package's address, list entry and registry slot serve that package's own item, for an action, the six sealed types and the env-wide list of every type (ADR-0150 D4)
+  
+  Clause-②: no (narrowing) — two answers that served one package's row under another package go away: the first-registered package's action slot (env-wide list, execution view, registry item) no longer serves the second package's override in place of its own shipped action, and the env-wide list of every type no longer lists a second package's override a second time under the first package. Nothing that was refused is now served under a package it does not customize; the second package's declared override of a page, app, dataset, doc, book or mapping is now served at its own address, as ADR-0150 D4 binds each override to the package it names. No export is added.
+  Metadata-protocol: semantic
+  Skills-docs: none — `skills/**` (the platform skill's customization paragraph) teaches the declared override served at its base's address for every overridable type, with no holder order; that sentence was false only for the second-registered of two namespaces shipping one name, and is now true for both, so no taught sentence moves.
+  
+  <!-- adr-0087: registered two-shipper-declared-override-own-slot -->
+  
+  **BREAKING** for a reader of a name two installed packages ship, one with a declared `.custom` override: the env-wide list (`GET /meta/TYPE` naming no package), the execution view (`getMetaItemsForExecution`) and the registry's item of an action at the first-registered package (`getPackageScopedItem`, with one package overridden). An entry stamped with one package that carried the other package's override is no longer served. Nothing in the workspace reads those entries.
+  
+  Two packages of two namespaces, alpha and beta, ship one name; only one declares an override in its own `.custom` pair.
+  
+  - **An action** (the wrong body ran). The read-side hydrator registered the pair's override row under the bare name wearing the envelope the artifact lookup answers for the pair's id, which ships nothing, so it fell to the first-registered package. Alpha first and only beta overridden, the env-wide list and the execution view read `alpha:OVR-B` beside `beta:OVR-B`: alpha's slot ran beta's override. Beta first and only alpha overridden, `beta:OVR-A` beside `alpha:OVR-A`. The row now wears the envelope of the holder it customizes, by the one pair-row rule `pairRowEnvelopeHolder` (it landed with #32692 while this change was in review, so this change pins that face and adds no second rule for it), and the lists read exactly `beta:OVR-B` and `alpha:SHIPPED-alpha` (or the mirror), each address and each package's registry item agreeing, with either package disabled in turn.
+  - **A page, app, dataset, doc, book or mapping** (the override did nothing). The reads judged the declaration against the name's first-registered package alone, so the second package's override was declined at its own address (plain and layered: its shipped item served), even with the first package disabled, and the boot report `metadata_sealed_overlay_unserved` told the admin to delete it. Now it is judged against every package that ships the name, as a flow's and an action's already are, and the report names it no longer. A stranger's row declaring a holder stays unserved and named.
+  - **The env-wide list of every type** (dashboard, report and email template too). For a name two packages ship, it listed the pair's slot of a declared override beside the overridden package's own entry, stamped with the first-registered package: `alpha:EDITED-beta` beside `beta:EDITED-beta`. The pair's slot is now dropped for every type, as it already was for a flow and an action; a bundle's row only at a member its declared base ships (a pair's added locale is kept).
+  
+  With **both** packages' overrides declared, every read face (the lists, the execution view, each address, plain and layered) serves each package's own override in either registration and save order. The registry's own package-scoped item of an action keeps one bare slot per name: it serves the override published last, and the other package's registry item answers that package's own shipped action, never the other package's override (on `main` it could). That face is pinned as it stands and carried on the card; its fix is the registry's slot model.
+  
+  The read naming no package is pinned too: with both packages enabled it refuses `409` for every type but `doc`; with one disabled it serves the enabled package's own item, its declared override when it has one (on `main`, the second-registered package's override of a sealed type was declined there).
+  
+  Unchanged, pinned as CONTROLs: one package ships the name, with or without its declared override; two packages ship it and neither is overridden.
+  
+  The fix for a reader: read each package's item by its package (`?package=ID`), or from its own entry of the env-wide list.
+- ee627c6: fix(lint, metadata-protocol): the `object_extension` publish door folds the written entry among the other packages' extensions of its target by priority, so it judges the field definition `os build` judges
+  
+  Clause-②: no (narrowing) — at the runtime `object_extension` publish door (Studio, `PUT /api/v1/meta/object_extension/TARGET`, the MCP and AI authoring doors) the expression rule now reads each field of the target as `os build` serves it when another package's published extension adds the same field: one write it accepted is now refused (a higher-priority package's definition of a field the written entry also adds closes a formula cycle through another field of the entry), and two it refused now publish (the written entry ties with another package on that field, or another package outranks it there). `os build` is unchanged. The new gate input (`storedObjectExtensions` on `runRuntimeAuthoringRules` and `evaluateRuntimeAuthoringGate`, the `StoredObjectExtension` type from `@objectstack/lint/runtime`) is optional. Measured first-party exposure: no two first-party packages extend the same object (`examples/app-showcase` one entry on `showcase_account`, `packages/plugins/plugin-auth` one on `sys_sso_provider`, HotCRM `origin/main` 2492ac6 one module, o2c, extending `crm_contract` and `crm_account`), so no first-party write changes verdict.
+  Metadata-protocol: narrowed
+  Skills-docs: none owed — this PR edits `content/docs/deployment/validating-metadata.mdx` (the object extension paragraph states the door's fold); the skills teach `defineObjectExtension({ extend, fields, priority })` and formula fields, and say nothing of how the door read a field two packages add.
+  
+  <!-- adr-0087: not-required (already-registered object-extension-formula-cycle-refused) the unreleased entry this PR updates states the door's fold and covers each changed shape -->
+  
+  **BREAKING** accept-set change of the runtime `object_extension` publish door (narrowing in one shape, widening in two).
+  
+  **Before:** the door's target carried every other package's extension field as a plain field with no package and no priority, and the gate folded the written entry over it, so the door judged the written entry's own definition of every field it adds. A self-reading formula the written entry adds under a field another package adds at the same priority, or at a higher one, was refused although `os build` accepts it; and a higher-priority package's formula closing a cycle through another field of the written entry was not seen, although `os build` refuses it.
+  
+  **Now:** the host states the target's other packages' published extensions (each with its package, priority and fields; a disabled package's left out), and the gate folds the written entry among them by priority through the build's own fold (`objectsAsServed`). The door judges the definition `os build` judges: the written entry's where its priority decides the field, another package's where that one outranks it, and none where two packages add it at the priority that decides it. This corrects the `@objectstack/lint` 33153 note's **Now** clause "(at the door, a name the target already serves included: the written definition is the one served)" and its **Unchanged** sentence "The publish door judges the written entry's own definition of every field it adds, whatever priority another package's extension adds the same field at, so it can refuse a tie, or an entry another package outranks, that `os build` lets through": the written definition is the one judged where the written entry's priority decides the field, and the door no longer refuses a tie or an outranked entry that `os build` accepts. Where that note says "at the same priority", read "at the priority that decides it".
+  
+  **Unchanged:** `os build`, `os validate` and `os lint`; a write the door judges with no other package extending the same field; a host that states no extensions (the written entry is folded over the target as served); a draft save (never gated).
+  
+  **Fix:** a write refused for the new shape: break the cycle, so the formula the entry adds does not read a field that another package's higher-priority formula computes from it, or rename the entry's field so it is not outranked.
+- 06e53a7: feat(objectql)!: a record-mode amount an object extension adds is judged against its object as served, so a bad follow pair is refused at the run that completes it
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered record-currency-follow-extension-judged-as-served -->
+  
+  **BREAKING** for an `objectExtensions` entry (or a stored `object_extension` item) that adds a record-mode amount (`currencyConfig.currencyMode: 'record'`, `currencyField: 'MASTER_DETAIL.CODE'`) whose parent field holds no ISO 4217 code, does not exist, or is reached through the extension's own new master_detail. The record-currency follow door (ADR-0144 D2 and D6, amended) asked an `extend` layer about its own roll-ups only and returned before the following-amount half, so such an amount was admitted and served; every write of it was then refused `ERR_CURRENCY_CODE_REQUIRED`, and the next no-change upgrade of the parent's owner was refused over the extension's field. Every object layer is now judged as its object served with the layer in its slot: the base, every enabled extension, and the incoming body. It is also BREAKING for a roll-up author: a published single save of an `object_extension` item that adds a `sum` / `avg` / `min` / `max` roll-up D6 refuses, or adds a record-mode amount a registered parent's such roll-up reads, is now refused 422 where it was stored (the last line below).
+  
+  The fix: name in the second segment of `currencyField` a field of the master_detail target that declares `valueDomain: 'iso_4217_currency'` (the refusal lists the candidates), or install the package that supplies that field before the extension, or in the same artifact. For a roll-up D6 refuses: roll up through the master_detail the amount follows (`summaryOperations.relationshipField`, on the parent it follows), use `function: 'count'`, or roll up a stored home-currency amount field of the child instead; the refusal says which applies.
+  
+  What moves (each line FROM → TO). The first four lines hold at the end of an install / upgrade / reload run, in the batch writer, and on a published single save of an `object_extension` item; the others name their askers:
+  
+  - an extension-only package adding an amount that follows a parent field holding no code, a missing field, or a field reached through its own new master_detail: FROM admitted (served) TO refused 422 `INVALID_METADATA`, naming the child object and the amount; nothing of the install stays.
+  - the other registration order, the extension registered first (no verdict while nothing owns the extended object) and the owner after it: the owner's install FROM admitted TO refused 422 over the extension's amount.
+  - an extension following a code field another extension supplies: refused when that supplier is not installed or is disabled; admitted when it is installed and enabled, or arrives in the same artifact.
+  - a parent upgrade that removes or de-codes a field an extension's amount follows: still refused 422; the sentence now names the extension's package and field.
+  - at the end of a run ONLY (an install, upgrade or reload): a no-change upgrade of the parent's owner, the child's owner or the extension's package over a pair a cold boot admitted, or an upgrade that only adds an unrelated code field to the parent: FROM refused 422 TO installed. A run is not refused over a pair it leaves as it found it (the pair is compared, not the refusal sentence: for a following amount, the object and field declaring it, the pointer, and the object the pointer's master_detail reaches; for a roll-up, the object and field declaring it and the child object and field it reads). An upgrade of the child's owner that re-points the master_detail onto another parent lacking the code makes a new pair and is still refused 422, as before. The same re-point upgrade of an extension package (its own master_detail, pointer string unchanged) moves FROM installed (`main` never asked an extension layer's following half) TO refused 422.
+  - on a published single save of an `object_extension` item and in the batch writer (a package publish, a duplicate, an import), which judge a layer against its slot left empty: re-publishing an UNCHANGED extension whose amount a cold boot admitted over a bad parent field: FROM saved (single save answered 200, the batch writer saved the row in its own result; the extension's following half was never asked) TO refused 422. An own object body re-published unchanged over such a pair was already refused there, and still is.
+  - a published single save of an `object_extension` item on a `/meta` face now also meets D6's roll-up door (`recordCurrencySummaryRefusal`), as the batch writer's extension row already did, in both directions: an extension adding a `sum` / `avg` / `min` / `max` roll-up of a child amount, or adding an amount a registered parent's such roll-up reads, where that child amount is declared `currencyMode: 'record'` (in each row's own currency, or following a parent's code but not read on that parent through the master_detail it follows): FROM stored and answered 200 (its registration then failed with a `console.warn` only) TO refused 422 `INVALID_METADATA`, nothing stored.
+  
+  Unchanged: the same amount in an own object body is refused 422, and so is a package that owns the parent and extends the child in one install; an extension of an object no package owns is no verdict; the cold boot is not asked. No stored-row migration or heal ships with this change.
+
+### Patch Changes
+
+- 0b89b33: feat(service-automation, metadata-protocol, driver-mongodb, cli): a connector connection is unique per organization and instance, the instance being its package and name, and the connections that name no package keep one per organization through a runtime guard (ADR-0150 D4, D8 row R11, #31699)
+  
+  Clause-②: yes (widening) — additive CLI and in-process surfaces: `os migrate plan` lists a second runtime-owned index (and `--json` `schemaSyncIndexes` an entry for it), `os migrate duplicates` probes it, `os migrate stored-references bind` answers the refusal `duplicate` where it threw, and the exports and types listed under In-process APIs grow. The connector doors (the connect door, the OAuth callback, revoke, the connection list) and every automation request answer as before: the store still reads and writes by organization and name, and the one-holder backstop keeps every connector name to one package until #31699's last PR, so no second package's connection is written yet.
+  Metadata-protocol: none
+  Skills-docs: `content/docs/automation/connectors.mdx` says a connection is one per organization and instance; `content/docs/deployment/cli.mdx` lists the guard among the runtime-owned indexes and the bind's `duplicate` refusal. `skills/**` teaches "connect once per organization", which still holds per instance.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. `sys_connector_connection` is a platform object and its `indexes[]` is not authored metadata; the key change is a schema face the drift plan applies, the guard is a runtime-managed physical index, and no stored row is rewritten, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  Part of #31699 (ADR-0150 child B, PR 3a: the storage half). The maintainer's ruling on #31699: a connection is unique by package and name. The store, the connect door and the OAuth callback carry the package in the next PR; this one widens the key, stands the guard that keeps the package-less rows to one, and teaches the two writers of the package column what the wider key can refuse.
+  
+  **The key: `sys_connector_connection`.**
+  
+  - FROM one connection per `(organization_id, connector_name)` (`uniq_sys_connector_connection_organization_id_connector_name`) TO one per `(organization_id, connector_package, connector_name)`. On SQL the drift plan replaces the old key with one `replace_unique_index`, categorized `safe`, create-before-drop, and only once the guard below stands; until then `driver-sql`'s widening arm keeps the old key, so the table is never without a unique rule over its rows. The guard is built at schema sync after the table's drift is read, so on an upgraded database the old key retires on the NEXT sync that runs safe drift (a dev `autoMigrate: 'safe'` boot, or `os migrate apply`, which lists it). Measured on SQLite and PostgreSQL 16: with the guard, the plan is that one safe op and a re-plan is empty; two packages' connections of one name in one organization are admitted, a second connection of one package's instance is refused, and a second package-less connection is refused. On MariaDB the retirement is read from `driver-sql`'s source, not measured: its carrier column is read as a partial unique on the two columns, and on an upgraded MySQL-family database `connector_package` is a TEXT column, so the wide key is built over the driver's hash shadow.
+  
+  **The guard: `uniq_sys_connector_connection_packageless`.**
+  
+  - `connector_package` is NULL on every connection of an instance the environment authored or a plugin registers in code, and of a name the boot backfill could not bind. A SQL UNIQUE treats NULLs as distinct, so for exactly those connections the wider key constrains nothing. The guard keeps them to one per `(organization_id, connector_name)`, as the old key did: two of them would keep two refresh tokens for one instance, and a revoke would leave the other stored.
+  - Built as the permission-set grant's guard is (#32164), at `objectql:schema-synced`, on every kernel that runs the table's DDL; a pass that holds its DDL back builds nothing, a standing guard costs one catalog read, a refusal is reported once per boot. SQLite and PostgreSQL: a partial unique index `WHERE connector_package IS NULL`. MySQL 8.0.13+: a functional key part over the hash-shadow digest. MariaDB 10.3+: a UNIQUE key over an INVISIBLE generated column `uniq_sys_connector_connection_packageless__hash`. MongoDB: `driver-mongodb` builds it at collection sync (`RUNTIME_OWNED_UNIQUES`, `connector_package: null`), keyed `(connector_name)`, because Mongo materialized the earlier declaration's one column, so the widening arm there retires the old index once the guard stands.
+  - Refuse, never keep-one: a database already holding two package-less connections of one key keeps both; the build fails and logs, at `error`, the keys, the consequence and the query that lists them. `os migrate duplicates` lists this index too. It admits nothing the old key refused.
+  
+  **The writers of the table.**
+  
+  - The connection store's first connect (`ConnectorConnectionStore#connect`): the old key refused a second row of one instance in one organization; the wide key admits one when the boot backfill stamped the first connect's row with its package between a second connect's read and its insert. A connect that counts a second row after its insert now deletes its own row and is refused ("its connection changed while this connect was completing … begin the connect again"), nothing kept, as the old key refused it; when both racing connects count two rows, both can be refused and no row stands. Where the engine answers no id for the inserted row, or the delete fails, the connect is refused saying the instance was connected twice and to revoke until it reads as not connected. A first connect with no race is unchanged.
+  - The boot backfill (`stored-reference-package-backfill.ts`, row R11) binds a package-less connection to the one package that holds its name. Under the wider key that row can be a second row of one key, when a connection bound to that package already stands for the same organization and name (a database where a guard build was refused, `driver-memory`, a server with no form, or a pair a racing first connect left when its process died before taking its row back). The wider key makes that unique violation possible, and it would end R11's pass; it is now reported per row: the row is left as it is and listed in the report's new `duplicated` list, once a read confirms the row of that key that already names the holder, named in one `warn` line per pass. A dry run lists the same rows, counting the keys it has already bound in the pass. Any other failed write, a violation no such row confirms, and any violation on R8 or R9 (whose keys do not carry the package) still end the pass.
+  - `os migrate stored-references bind`: FROM a unique violation thrown as an error TO the refusal `duplicate`, naming the row, the package and the key, nothing written.
+  
+  **Declared limits.**
+  
+  - MySQL 8, upgraded databases: `driver-sql` reads the guard's functional key part as the partial unique it is, so the old key retires there as it does on PostgreSQL, as one safe `replace_unique_index` on the next sync that runs safe drift. A database created fresh on MySQL 8 has the wide key and the guard and no old key. MySQL before 8.0.13 and MariaDB before 10.3 build no form, keep the old key (or build it under the driver's generated name where it is missing) and say so at `error` each boot.
+  - `driver-memory` builds no guard (no raw-SQL seam), as for the grant: a pin measures that its unique check treats a NULL package as distinct, so two package-less connections of one instance are admitted there.
+  - The MySQL, MariaDB and real-mongod pins run in suites that run on `main` only, so they first run after this lands.
+  
+  **In-process APIs.** `@objectstack/metadata-protocol` exports `ensureConnectorConnectionPackagelessIndex`, `createConnectorConnectionGuardAtSchemaSync`, `buildConnectorConnectionPackagelessIndexSql`, `buildConnectorConnectionPackagelessIndexPresenceSql`, `buildConnectorConnectionPackagelessDuplicateProbeSql`, `buildConnectorConnectionOldKeySql`, `resolveConnectorConnectionIndexSeam`, `CONNECTOR_CONNECTION_PACKAGELESS_INDEX_NAME`, `CONNECTOR_CONNECTION_PACKAGELESS_INDEX_COLUMNS`, `CONNECTOR_CONNECTION_OLD_KEY_INDEX_NAME` and the result, status and pass-outcome types. `@objectstack/service-automation`'s `StoredReferenceBackfillReport` gains `duplicated`. `@objectstack/cli`'s `BindRefusal` gains `'duplicate'`. All additive.
+- 322ded7: feat(service-automation)!: two packages of two namespaces may each declare a connector of the same name, each is materialized, connected and dispatched as its own instance, and a flow, a pull and the connection door address one by package (ADR-0150 child B, connector, the narrowing)
+  
+  Clause-②: yes (narrowing) — ten answers move for a caller that worked before. (1) The install door, `registerItem` and the cold-boot seal admit a package declaring a connector name a package of another namespace holds, FROM `422 PLUGIN_REGISTER_FAILED` naming both (a sealed boot clash warned) TO admitted; `os migrate stored-references` lists no sealed clash for it. (2) The boot of two packages' provider-bound instances of one name (the sealed clash), FROM refused naming both (`connector instance 'NAME' is not materialized`, fatal for the host's boot) TO each materialized under its package, whatever their namespaces: a pair the install door still refuses (one namespace, or a package with no namespace), which a code boot only warns about, is materialized too, and is connectable only in process (`ConnectorConnectionRequest.package`), since the namespace door answers `409` for both. (3) The bare `GET /meta/connector/NAME` of a name two packages hold is refused `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming both), where it served the first registered package's declaration, and `MetadataManager` keeps a slot per `(package, name)` for a connector (`PACKAGE_SLOTTED_STORE_TYPES`), so its bare read of such a name is refused and its unscoped plural reads answer both, where the second package's item overwrote the first's. The history and rollback doors (#33193) read the same list (`PACKAGE_SLOTTED_METADATA_TYPES`, `@objectstack/spec`, which `connector` joins): a connector's `?package=` there, FROM refused `400`, TO the addressed holder's versions; a bare connector name two packages hold, or one package's row beside the environment's (the rule every per-package type keeps), FROM served, TO refused `409` naming both. (4) A bare connector read on a metadata engine that cannot read by package is refused `501` (the protocol's fail-closed read for a narrowed type), where it served the engine's `getItem`. (5) A `connector_action` in a flow with no package (an environment-authored flow) naming a connector two packages hold, FROM not dispatched as "not registered" (`none`), or, where each holder declares only a catalog entry beside a connector a plugin registers in code under the name, dispatched to the plugin's connector, TO refused naming both. (6) A flow whose connector name resolves to a package with no live instance of it (a catalog entry, or an instance the reconcile has not registered yet), FROM dispatched to the one instance of the name (3b's fallback arm) TO not dispatched, unless the one instance is a connector a plugin registers in code, which is served as before. (7) A name only disabled packages hold, whose instance is still registered, FROM dispatched to it TO not dispatched for a caller outside those packages (a flow of the disabled package itself still reads its own instance, as before). A disabled package's own entry is removed by the next reconcile; an entry with no package of its own over such a name stays that package's instance, and is not dispatched until the package is enabled again. (8) A connector pull resolves `connectorSource.connector` from the package that holds the mapping: a name that resolves to no single instance, FROM `400 connector_not_registered` (two instances) TO `409 connector_name_refused` naming every candidate; a name that resolves to a package with no instance, FROM pulled through the one instance of the name TO `400 connector_not_registered`. (9) A declared entry with no package of its own (unstamped, or the environment's stored row) under a name two packages hold, FROM the whole name refused TO this entry alone refused naming both, and each package's own instance materialized. (10) Two declared entries of one name in a composition with no package-scoped registry are refused with a sentence that says why (one instance per name where nothing can tell two packages apart), where the duplicate sentence named the package of one of them. Widened beside them: `ConnectorConnectionRequest.package` and `ConnectorDescriptor.packageId` (`@objectstack/spec`, both optional); the namespace connection door `/api/v1/automation/connectors/:ns/:name/connection`, which answered `409` naming both for a name two packages hold, connects, reads and revokes the instance of the addressed namespace's package; `GET /api/v1/automation/connectors` lists every instance, each with its `packageId`; the connector credential listing names each package's instance with its own state.
+  Metadata-protocol: added
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored metadata changes shape: two optional members are added to two TypeScript interfaces and `connector` joins one exported list of type names, and what moves is which second package an install admits and which instance a name addresses -->
+  
+  **BREAKING** for the callers in (3) to (8). A deployment that held one connector name under two packages (sealed at boot with a warning, its boot refused) now boots both: read each declaration by its package (`?package=ID`, or `/meta/connector/NS/NAME`), connect each at its namespace address, and have an environment-authored flow name a connector one package holds. A flow that dispatched through 3b's fallback arm (6) dispatches once its own package's instance is materialized. A pull whose mapping no package holds, naming a connector two packages hold, names a mapping in one of the packages. Nothing in the workspace dispatches through (6) or (7) in a supported state: the reconcile registers a package's instance under its package, and drops a disabled package's own entry on its next run. An entry with no package of its own over a name only a disabled package holds is not dispatched while that package is disabled (7).
+  
+  The bare-name one-holder rule (`bare-name-one-holder.ts`) has narrowed for `connector`, the last covered type, from one package holder per deployment to one per namespace (ADR-0150 D2, D9): `connector` joins `NAMESPACE_SCOPED_BARE_NAME_TYPES` (`@objectstack/core`), `PACKAGE_SCOPED_READ_TYPES` (`@objectstack/objectql`) and `PACKAGE_SLOTTED_STORE_TYPES` (`@objectstack/metadata`). Still refused, with the same envelope and sentence: a co-owner of the holder's namespace, a package that declares no namespace beside any other holder, and two packages of one shareable namespace.
+  
+  - **The reconcile** (`plugin.ts`): the one-holder backstop (`refusedDeclaredConnectorNames`, and `refusedConnectorNames` in `connector-package-scope.ts`) is gone. Each provider-bound entry is the instance of its own package; an entry with no package of its own is the instance of the package its name resolves to over every holder, a disabled one included (the durable judgment), and under two holders it is refused naming both, never registered as either. Its bookkeeping (desired, materialized, degraded, credential-refusal, retry, dematerialize) and the OAuth2 grant handles are keyed by instance (`connectorInstanceKey`: the name, or `PACKAGE/NAME`), so two packages' instances of one name are materialized, degraded, retried and connected each on its own. A name repeated within one package is refused as a duplicate, naming the package. A composition with no package-scoped registry keeps one instance per name (red line 1: nothing there can tell two packages apart). A reloaded artifact supersedes the registry's entries by `(package, name)` (an unstamped item is its manifest's), so a reload of one package leaves another package's instance of the name live (an artifact with no manifest id, or a composition with no package-scoped registry, still supersedes by name, as before); the inert-descriptor audit and the credential listing judge each entry by its own instance.
+  - **Dispatch** (`engine.ts`, `resolveConnectorInstanceFor`): every caller asks the resolver over the served holders, a caller with no package included. `refused` is said with the resolver's message; `resolved` addresses exactly the holder's instance, and with none registered under it, the connector a plugin registers in code under the name (ADR-0097 §4: a plugin's connector and a declarative instance never share a name), else nothing. A name only disabled packages hold answers the same way (#31699 notes 6816295828 and 6820178514: resolve and count over the served set; a disabled package's instance is never served). A name the registry holds nothing under, or a host with no resolver, is answered by the one instance of the name, as before.
+  - **The pull** (`connector-pull.ts`): the mapping's connector is resolved from the mapping's holder package (an environment mapping: as a caller with no package) through the registry's `resolveConnectorInstanceFor`, and its origin, degraded state, provider, action and `inputSchema` are read from that instance. A registry without the member is read by the bare name, as before. New refusal reason `connector_name_refused`.
+  - **The connection door**: `ConnectorConnectionRequest.package` names the instance; the runtime's namespace address admits a connector name two packages hold to the addressed holder (`admitAutomationAddress` answers a slot for a connector as it does for a flow) and passes the package. The bare door keeps its `409` naming both. A callback completes the package its begin recorded, as before.
+  - **Descriptors**: `ConnectorDescriptor.packageId` is set for an instance a package holds; the credential listing matches each declaring entry to its own instance.
+  - **#33218 review N6** (judged, pinned): a connection row a moved declaration left stamped with its old package, once that package declares the name again beside the new holder, is that package's own again and the new holder has none. The row is not restamped: its token was obtained for the old package's connect.
+  
+  One holder: every answer is as before except (6), (7), and an unstamped entry whose holder is replaced, which is not dispatched between the change and the next reconcile (FROM the instance registered under the replaced package).
+- 3269cab: fix(metadata-protocol)!: the metadata lists serve nothing a disabled package's customization pair or a dependent's added bundle member carries for it (ADR-0150 D3, #32354)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are list reads under a reversible package state: no stored row changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a reader of a metadata list while a package is disabled. A disabled package holds no name (ADR-0150 D3), and the by-name reads already withheld what it carries; three lists still served it, by the order things were registered and saved. Measured over a real `SchemaRegistry`, both registration orders, the pair's row stored before and after: package A ships `welcome` in `en-US`; its pair `A.custom` stores a `fr-FR` row of it, or package DEP (depending on A) ships a `fr-FR` addition to A's template; A is disabled.
+  
+  - `GET /meta/email_template` and the execution list (`getMetaItemsForExecution`, no package): the pair's `fr-FR` row and DEP's `fr-FR` addition were listed → not listed, with one holder or beside an enabled second holder of the name. A send naming no package reads this list, so it no longer sends either while A is disabled.
+  - `GET /meta/email_template?package=A` and its execution list: the pair's `fr-FR` row was listed → `[]`, as `?package=A&member=fr-FR` answers 404.
+  - `GET /meta/email_template?package=A.custom`: the pair's `fr-FR` row was listed → not listed, as `?package=A.custom&member=fr-FR` answers 404.
+  
+  The rule is the exact read's: a list scoped to a package serves no name whose exact read at that package is a disabled package's withheld item; the list naming no package leaves out an item whose own package's address is, and a bundle addition whose every base in its dependency closure is disabled. It applies to every package-scoped type, and only while some package is disabled.
+  
+  **Not moved.** With nothing disabled, every list answers as before. DEP's own list (`?package=DEP`) keeps its addition, as its exact read does. An enabled holder's lists, the pair's own item of a name A ships nothing of, and the per-package layer (the package export, which keeps a disabled package's items) answer as before. Re-enabling A restores every list.
+  
+  Until the email send door judges the served holders (#32670), a send made from DEP itself reads the list naming no package for this name, so it no longer finds DEP's `fr-FR` while A is disabled.
+  
+  The fix for a reader: re-enable the package to list its customization again; a dependent's addition stays readable at the dependent's own address.
+- 02f55c5: fix(metadata-protocol)!: a name a disabled package holds through a stored row is judged over the served set, never by save order (ADR-0150 D3, #32354)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no skill or doc teaches the by-name answer for a name a disabled package holds through a stored row; `content/docs/deployment/marketplace-handbook.mdx` already says a disabled module is hidden.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are reads of stored rows under a reversible package state, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** answer narrowing at the `/meta` bare reads: a name held by the stored rows of two or more enabled packages beside a disabled one is refused `409 RESOURCE_CONFLICT` naming only the enabled holders, where the plain read and `/published` answered by save order; and an address naming a disabled customization pair whose base is enabled answers 404, where it served the base's item.
+  
+  A read naming no package of a name a disabled package holds now judges the name's holders over the stored rows as well as the registry. The registry keeps one bare slot per name, so it holds at most one of two packages' stored rows of a name nobody ships, and the answer followed save order. The holders are the registry's served holders and the packages the active stored rows are bound to, less every disabled package. A row the reads decline (a shipped flow name's undeclared row, a sealed managed name's row) and a row bound to a holder's customization pair (bound over every holder it is a pair of, #32408) hold nothing of their own. This applies only while some installed package is disabled, to a type the registry reads by package, when no enabled package ships the name in code, and when no package-less row or environment item of the name is stored. The in-process layered read (`getMetaItemLayered`) is re-addressed to the one served holder but never refuses: its resolution readers (the security catalog echo, the packaged-permission-set lock gate) keep the answer they had, and the `/layers` door refuses.
+  
+  **Every moved answer, before → after** (before = 18.4.0). Both transports (`RestServer` and the runtime `HttpDispatcher`), both registration orders, both save orders, before and after a reboot, except where a line names one transport. First-party count 0 for each: no first-party app disables a package at boot.
+  
+  Widening:
+  
+  - Stored rows only (no package ships the name), a row bound to an enabled package E and one bound to a disabled package D. Bare `GET /meta/:type/:name`, `/layers` and `/published`, D's row saved first: 404 → 200 with E's row. E's row saved first: the plain read and `/published` unchanged (E's row); `/layers` 409 naming E and D → 200 with E's layers.
+  - D ships the name in code and E holds it only as a stored row, D disabled: the bare plain read, `/layers` and `/published` 404 → 200 with E's row. The same when D's customization pair also holds D's declared override row of the name (`RestServer`).
+  
+  Narrowing:
+  
+  - Stored rows of two or more enabled packages and of a disabled one, no shipper, the bare plain read and `/published`: 404 (D's row read first and withheld) or 200 with the first-saved enabled row → 409 `RESOURCE_CONFLICT` naming only the enabled holders, with `details.candidates` on the plain read.
+  - `GET /meta/:type/:name?package=PAIR`, PAIR a disabled customization pair whose base is enabled and ships the name, with or without PAIR's declared override row: 200 with the base's item (the override's body when there is one) → 404, PAIR's withheld item (`RestServer`).
+  
+  Same status, the disabled package no longer named:
+  
+  - Two or more enabled packages' rows and a disabled one's, bare `/layers`: 409 naming every row's package, D included → 409 naming only the enabled holders.
+  
+  **Not moved.** `GET /meta/:type/:name?package=D`, D disabled and holding the name only as a stored row while an enabled package ships it: 404 since 18.4.0 (the strict envelope of #32501 leaves D's row its own stamp, which the item face withholds); this change adds a second guard for the same answer. With no disabled package, nothing moves (two enabled packages' stored rows of a name nobody ships keep their answers; #32607 carries that case). A name an enabled package ships in code is judged as before (#32183's registry read). A shipped flow name whose shipper is disabled, with rows of two other packages, answers the missing name as before. Re-enabling the package restores every answer above. The save door is unchanged (#32605 carries it). The environment's own item beside an enabled and a disabled shipper keeps the enabled holder's code layer on `/layers`: the registry answers the environment's item only when no package ships the name, so that shape cannot arise.
+- f31f784: docs(spec, objectql, metadata-protocol): the transaction docblocks no longer say the in-memory driver cannot roll back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  TSDoc only; no behaviour, type or export changes. The edited docblocks land in the shipped `dist/*.d.ts` (and `@objectstack/spec` ships `src/**/*.zod.ts` itself), so they publish:
+  
+  - `driverSupportsTransactions` (`@objectstack/spec`): the in-memory driver is no longer listed among drivers with no `beginTransaction`; it implements `beginTransaction` / `rollback` by snapshotting its whole store.
+  - `EngineTransactionOptions.require` (`@objectstack/spec`): the callers the no-transaction degrade suits are test doubles; the in-memory driver is no longer named among them, since it implements `beginTransaction`.
+  - `ObjectQL.transaction` (`@objectstack/objectql`) and `SysMetadataEngine.transaction` (`@objectstack/metadata-protocol`): the drivers that cannot roll back are a test double with no `beginTransaction` and those declaring `supports.transactionsUnsupported` (remote Turso, OData). The in-memory driver does roll back, restoring the whole store to its state at begin: no isolation, and a rollback also discards what other callers wrote since that begin, so do not rely on it with concurrent writers.
+- 128b657: fix(metadata-protocol): a customization pair's row of a name two namespaces hold is judged against its own base, whichever package registered first — its removal, its commit revert and the boot census (ADR-0150 D4)
+  
+  Clause-②: yes (widening) — answers that refused or misreported the second-registered holder's declared override now admit or leave it, as they already did for the first. For a name two packages of two namespaces ship, each with its paired `.custom` holding a declared override (ADR-0146 D2), three answers depended on which package registered first, because each judged the pair's row against the one package the bare-name artifact lookup answers. Each is now judged against every package that ships the name. First-party callers in any of these positions: 0.
+  Metadata-protocol: none
+  
+  Every row below is the `widening` arm, is pinned in both registration orders in `@objectstack/objectql`'s `protocol-flow-custom-override.test.ts`, and keeps its one-holder answer (the one-holder CONTROL there):
+  
+  | Door | Second-registered holder B, before | Now | One holder (CONTROL) |
+  |:--|:--|:--|:--|
+  | `DELETE /meta/TYPE/NAME?package=<B>.custom` (`deleteMetaItem`); pinned for a flow, and for an action in the list probe below | `403 NOT_OVERRIDABLE` "sealed against removal"; B's override stays | `200`: B's override row removed (runtime-only), A's untouched; afterwards every listed and execution-view entry of the name is its own package's | unchanged: `200`, removed |
+  | `revertCommit` of a commit into `<B>.custom` (the restore limb; the per-item rollback shares the derivation); pinned for a flow | the item in `failed[]`, `NOT_OVERRIDABLE` "sealed against in-place edits"; nothing restored | restored, judged by the override write gate as the pair's declared override | unchanged: restored |
+  | boot census `[metadata_sealed_overlay_unserved]` (`loadMetaFromDb`), a flow or an action only | named B's live declared override as an unserved row to delete | not named | unchanged: the override not named |
+  
+  With one of the two holders disabled (ADR-0150 D3), the bare-name answer is still the first-registered holder, disabled or not, so the same three answers moved the same way whichever holder is disabled: each holder's pair removal and commit revert are admitted now, the disabled holder's pair included, and the census names neither override. A binding never moves with a reversible disable. Pinned in both registration orders with each holder disabled in turn, beside a one-holder disabled CONTROL (its removal and revert admitted, as before).
+  
+  Unchanged in both: a row of a package that is no shipper's pair keeps its removal `403` and is still named by the census.
+  
+  The census judges a row as the reads serve it (`declinesStoredRow`). The reads serve a second holder's declared override per shipper for a flow and an action only (#32613), so only those two types move here. A page, app, dataset, doc, book or mapping keeps the name's first-registered shipper in the census, as in the reads, until #33131 moves them: the second holder's override of such a name is still named, pinned for a mapping in both registration orders.
+  
+  No shipper is picked: the row judged is always the one its own `package_id` names, and the judgement asks only whether that package is a pair of SOME package that ships the name. A name one package ships answers exactly as before (the bare-name answer is read first and alone while it holds).
+- 8403725: fix(metadata-protocol)!: when two packages ship one flow or action name and each has its declared `.custom` override, every read, the lists and the boot pull use each override in its own package's slot, in any registration order (ADR-0150 D4)
+  
+  Clause-②: no (narrowing) — the env-wide lists stop serving the extra entries they served before: for a name two or more packages ship, each with a declared `.custom` override, the entry under the override's pair slot (stamped with the name's first shipper) is no longer listed. For an action name, the package that registered second no longer serves its shipped action in place of its own declared override: ADR-0150 D4 binds each `.custom` override to the package it customizes (rows "registry overlay slot" and R16), so the decline it replaces was never the contract. First-party callers that read those entries: 0.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored row changes shape: what moves is which entries the env-wide lists serve for a name two packages ship, which stored row an action's address serves and which stored row the boot pull arms first, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a caller that read the env-wide flow or action list (`GET /meta/flow`, `GET /meta/action`, `getMetaItemsForExecution`) and used an entry stamped with one package that carried another package's declared override. Such an entry is no longer listed. Read each package's override from its own entry, or by its package (`?package=ID`). Nothing in the workspace reads those entries.
+  
+  Two packages ship a flow or an action of the same name. Each has a declared override in its own `.custom` pair. Before this fix, three places got this wrong.
+  
+  - **The lists.** These are the served list (`GET /meta/flow`, `GET /meta/action`, naming no package) and the execution view (`getMetaItemsForExecution`, which the automation engine arms from). They listed each override a second time, under its pair's slot. The name's first registered shipper stamped its own package on that extra entry. For a flow, alpha first gave `alpha:OVR-A` twice, `alpha:OVR-B` and `beta:OVR-B`. Beta first gave `alpha:OVR-A`, `beta:OVR-A` and `beta:OVR-B` twice. So one package's override was listed under the other package. An action listed the first package's override twice the same way. Now each override is listed once, as its own package's item: exactly `alpha:OVR-A` and `beta:OVR-B`, in either order. With the first registered package disabled, the lists also kept the disabled package's override; now they list the enabled package's override alone, whichever package is disabled. When only one package ships the name, the pair's slot was already dropped, so that case is unchanged.
+  - **An action's override.** The reads judged an action's stored row as a declared override against the name's first registered shipper only. So the second package's declared override was declined at its own address (`?package=`, plain and layered), in its served-overrides list, in the served list and in the execution view, all of which served that package's shipped action instead. Alpha first, the lists gave `alpha:OVR-A` twice and `beta:SHIPPED-beta`. Beta first, they gave `alpha:SHIPPED-alpha` and `beta:OVR-B` twice. With the first package disabled, the enabled package's override was still declined. Now each package's address and both lists serve its own override: exactly `alpha:OVR-A` and `beta:OVR-B`, in either order. A flow was already judged against every shipper.
+  - **The boot pull.** The hydration decides which stored row holds a flow name's bare registry slot. It judged a row as a declared override against the first holder only. So the second holder's override counted as a plain stored row. If a package-less row was read after it, that row took the slot and the override was lost. The automation boot pull then armed that holder's shipped flow until `kernel:ready` re-armed from the protocol's view. A record change in that window ran the wrong body. Now a row is judged against every package that ships the name, and each override is armed in its own package's slot from the first pull.
+  
+  Only flow and action move. For the six sealed types (page, app, dataset, doc, book, mapping), a second holder's declared override is still judged against the name's first registered shipper, and for every other overlay type the env-wide list keeps the pair's entry, as before. Those, and what a registry reader gets for each holder of an action name, are carried to #33131.
+  
+  No door refuses a request it answered before, and no key, value or stored shape changes. The flow's by-name reads (`?package=`) already answered each package's own override and are unchanged.
+- a1e0402: fix(plugin-security): permission refusals speak the caller's language, falling back to the workspace default
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Ruling C on #32440, second half of #32656: a refusal's user-facing sentence is composed in the request's language, else the workspace's default language, else English. Codes, statuses and the diagnostic `message` are unchanged.
+  
+  - **Packaged permission-set lock.** Saving a permission set an installed package provides, and the fail-closed refusal when the system cannot tell, used to answer their `userMessage` in English only. They now answer in the caller's language (English, Simplified and Traditional Chinese, Japanese, Korean, Spanish, French, German, Brazilian Portuguese, Russian and Arabic). The metadata write door hands each type's authoring gate the caller's two languages (`MetadataAuthoringGateContext.userTextLocales`); a caller that states none gets English, as before.
+  - **Permission denials.** The record, field, owner and queue denials of the security middleware were rendered in the request's language only, so a request in a language the platform has no text in fell to English even when the workspace default had text. They now fall back to the workspace default first. A deployment's `errors.<key>` translation override counts as text for its language.
+- 548f8ff: feat(metadata-protocol): a metadata write's advisories and refusals come back in the caller's language
+  
+  Clause-②: yes (widening) — `SaveMetaItemRequestSchema` and `PublishMetaItemRequestSchema` gain an optional, server-stated `userTextLocales` member (at most two locale codes; the doors build these requests member by member, so a wire body never sets it, like `client`), and `ExecutionContextSchema` gains an optional `workspaceLocale`. The batch publish body (`PublishPackageDraftsRequestSchema`) is unchanged; its door states the locales to the protocol call directly. Nothing that was accepted before is refused now; a request that states no locales composes in `en`, and a finding whose rule has no user sentence carries no `userMessage`, exactly as before.
+  Metadata-protocol: added
+  Skills-docs: none — `skills/**` and `content/docs/**` teach what a metadata author writes; `userTextLocales` and `workspaceLocale` are stated by the server from the caller's request and workspace, never authored or sent by a client, so no taught sentence moves. The generated reference pages (`content/docs/references/**`) are regenerated.
+  
+  Ruling C on #32440: the producer of a finding writes its user-facing sentence in the request's language, else the workspace's default language, else English, and every client shows it as received. The authoring rules already carry a sentence in twelve languages for most findings (#32790); this change composes it on the server:
+  
+  - Every `/meta` save, single-item publish and package publish now fills `userMessage` on each advisory, and on each issue of a 422 refusal, for a rule that has a user sentence. `rule`, `message`, `hint`, `path` and `where` are unchanged.
+  - The door states the two languages it resolved: the request's own (its `Accept-Language` header or `locale` query) and the workspace default. The execution context used to fold them into one `locale`, so a request in a language the platform has no text in fell straight to English; it now carries the workspace default on its own as `workspaceLocale`, and the core helper `userTextLocalesOf(ctx)` reads the pair in order.
+  - The REST server and the runtime dispatcher both state them, for saves, publishes and package publishes.
+  
+  Not in this change: the refusal sentences written outside the authoring rules (the packaged permission-set lock, the permission middleware's denials) move onto the same ladder in a follow-up PR on #32656.
+- 16e3486: fix(metadata-protocol)!: a stored row bound to a package that holds no item of its name is no longer laid into the first-registered holder's registry slot when two or more packages hold the name, and a customization pair's row of such a name takes the envelope of the holder it customizes, not the first holder's (ADR-0150 D4)
+  
+  Clause-②: no (narrowing) — served answers that guessed a holder go away: a registry reader of a holder's item stops answering another package's stored row as the holder's own. Nothing that was refused is now served, and no export of either package's entry point is added (`SchemaRegistry#overlayRowBinding` gains an optional `includeDisabledPackages`).
+  Metadata-protocol: none
+  Skills-docs: none — `skills/**` and `content/docs/**` teach no stored row bound to a package that holds none of its name, and no pair row of a two-holder name; the prescription ships in the FROM → TO below.
+  
+  <!-- adr-0087: registered stored-row-of-a-non-holder-under-two-holders -->
+  
+  **BREAKING** for a registry reader of a holder's item of a package-scoped type whose name two or more installed packages hold: `getPackageScopedItem(type, name, holder)` (what a dispatcher takes, such as the declared-webhook dispatch), the list scoped to the holder (`GET /meta/:type?package=<holder>`), the registry list, and the holder's exact read (`GET /meta/:type/:name?package=<holder>`) on a kernel with no metadata service. The types are every type ADR-0150 addresses by `(package, name)` except `flow`, `permission` and the row-served types (`dashboard`, `report`, `email_template`, `page`, `app`, `dataset`, `doc`, `book`, `mapping`): `action`, `hook`, `job`, `webhook`, `connector`, `sharing_rule`, `queue`, `assignment_rule`, `analytics_cube`, `picklist`, `api`, `tool`, `skill`, `agent`.
+  
+  The read-side hydrator (the boot load, an unscoped list read, the write-through of a save) builds a registry entry from each stored `sys_metadata` row. It looked up the envelope of the row's package with a lookup that, when that package holds no item of the name, answers the package registered FIRST. So, with two holders:
+  
+  - a row bound to a package that holds no item of the name (a package installed for an older release, or a row saved under the wrong `?package=`) took the first-registered holder's slot under that holder's envelope, and that holder answered the row as its own: a different holder in each registration order;
+  - a row bound to a customization pair (ADR-0146) took the first holder's envelope the same way, so the first holder answered the second holder's override.
+  
+  Now:
+  
+  - the first is declined, as a package-less row of such a name is (#32568): it lands in no holder's slot, and the boot census `metadata_sealed_overlay_unserved` names it (every type listed above is sealed once a package ships the name, ADR-0131 D6);
+  - a pair row takes the envelope of the holder its binding names (`overlayRowBinding`, the rule the exact read and every overlay-slot reader follow), judged over every holder, a disabled one included, so a disable never moves it (ADR-0150 D3);
+  - a pair row whose binding names no holder (a shared App pair's row that declares no `overrides.package`, or a row declaring a package the pair does not customize) is declined: no registry reader serves it as a holder's item (the exact read at a shared pair's address already refuses its undeclared row `409` naming the holders).
+  
+  Not changed: a name one package holds (every row keeps its reading); a row bound to a package that holds the name itself; `permission` (a stored fork of a permission set keeps its own ruling's disposition, as the boot census already exempts it); the row-served types (their reads answer such a row from the row, as before); `flow` (its rows register as tenant rows).
+  
+  Carried, not fixed here (registry-wide, with the per-package overlay slot on the ADR-0150 epic line): two rows bound to two different holders still leave the last one read in the name's one bare slot; a copy registered while one package held the name (or none) is not taken back when a second holder installs, so until a restart the next unscoped hydration can still lay it into the first holder's slot.
+  
+  No first-party composition has two packages holding one name with such a row, so no answer changes in this repository.
+  
+  The fix:
+  
+  - FROM a stored row bound to a package that holds no item of a name two packages hold, read as one holder's own through the registry, TO nothing for the types above but its removal (`DELETE /api/v1/meta/<type>/<name>?package=<stray package>`): each is sealed, so no stored customization of a shipped item of these types is served (ADR-0131 D6). For an `action`, the one listed type ADR-0146 admits a declared override for, save the change as the declared override of the holder it customizes, in that holder's paired `.custom` package (`?package=<holder>.custom` with `overrides: { package: <holder>, basedOn }`), then delete the stray row.
+  - FROM a pair row of one holder read as another holder's item TO nothing: the row is now read as the item of the holder it customizes. A pair row that names no holder is now served by none; declare `overrides.package` to name the holder it customizes.
+- 4bba8b8: fix(metadata-protocol)!: `judgesPackageLessRows` returns a plain `boolean`, not a type predicate
+  
+  Clause-②: yes (narrowing) — the exported `judgesPackageLessRows`'s return type moves from the predicate `type is PackageScopedType` to `boolean`, so a TypeScript caller that narrowed `type` through its `true` branch no longer compiles. Its runtime answer is unchanged.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored row changes shape: what moves is one exported function's TypeScript return type, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a TypeScript caller that narrows `type` to `PackageScopedType` through `judgesPackageLessRows(registry, type)` (for example `if (judgesPackageLessRows(r, t)) useScoped(t)`): it no longer compiles. Call `isPackageScopedType(type)` from `@objectstack/core` first, as `packageLessRowOwners` now does.
+  
+  `judgesPackageLessRows(registry, type)` was declared `type is PackageScopedType`. Its `false` answer depends on the registry (`readsByPackage`), not on the type alone, so TypeScript narrowed a package-scoped type to `never` in a caller's `false` branch, although a package-scoped type the registry does not read by package (`hook`, for one) lands there. It now returns `boolean`. Its runtime answer is unchanged. To narrow a `string` to `PackageScopedType`, call `isPackageScopedType` from `@objectstack/core`, whose answer depends on the type alone.
+  
+  No read moves. A stored package-less row of a sealed type (`action`, `queue`, `tool`) of a name a package ships, read at a holder's exact address (`?package=`), gets the holder's own item before and after the boot load (`loadMetaFromDb`), around the list read's hydrator, and with a copy in the registry's bare slot. This holds with one holder and with two. The boot load is now pinned beside the other hydration states.
+- 9673030: fix(metadata-protocol)!: the read naming no package withholds a customization pair's row of a name every holder of which is disabled (ADR-0150 D3, #32814)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no skill and no doc teaches what the read naming no package answers at a member only a customization pair stores (`skills/**` and `content/docs/**` grepped for disabled packages: the hits are action and component `disabled` predicates, package lifecycle references and a release page); `content/docs/deployment/marketplace-handbook.mdx` already says a disabled module is hidden.
+  
+  <!-- adr-0087: registered disabled-holder-pair-row-bare-read-withheld -->
+  
+  **BREAKING** answer narrowing at the `/meta` item read that names no package: at a member only a customization pair (an App's `PACKAGE.custom`) stores, for a name every installed package holding it has disabled, the read answers the holder's withheld item (404 `RESOURCE_NOT_FOUND` on the doors), where it served the pair's row. It is the answer the same read gives with no row stored, and the answer the pair's own address (`?package=PACKAGE.custom`) already gave.
+  
+  The read judged the name's holders (`disabledOnlyHolderOf`) only when it reached nothing. It now also judges them when it reaches a row stamped with a customization pair (`pairsOf`) of a package that holds the name. A pair row is bound over the holders it is a pair of and is never a holder of its own, so it is withheld with them.
+  
+  **Every moved answer, before → after.** Both save orders (row before and after the disable), with and without the boot's hydration of the row into the registry, for a module of an App and for the App itself as the holder. First-party count 0: no first-party app disables a package at boot.
+  
+  - Bare `GET /meta/:type/:name?member=MEMBER`: 200 with the pair's row → 404 `RESOURCE_NOT_FOUND`.
+  - Bare `GET /meta/:type/:name/layers?member=MEMBER`: 200 with the pair's row as the effective layer → 404 `RESOURCE_NOT_FOUND` (the layered chain asks the plain read whether a disable withheld the item).
+  - The execution face (`getMetaItemForExecution`) of the same name and member: the pair's row → no item.
+  
+  **Not moved.** Re-enabling a holder serves the pair's row again. Two modules of the App holding the name with one of them enabled: the pair's row is the enabled module's customization and is served as before, in either registration order. A row stored under a holder of the name, a package-less row, a row of a package that is no holder's pair, and every read naming a package are judged as before. The list reads (`getMetaItems`, `getMetaItemsForExecution`) are not changed here.
+- b462444: fix(metadata-protocol)!: the history and rollback doors of a by-package name refuse the bare name two holders hold, and `?package=` addresses one holder's versions (ADR-0150 D3/D4, #32905)
+  
+  Clause-②: yes (narrowing) — narrowed: for a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`), `GET /meta/:type/:name/history` and `POST /meta/:type/:name/rollback` naming no package are refused `409 RESOURCE_CONFLICT` before any row is read or written wherever the bare plain read refuses the name: its active rows held by two or more row slots (two packages', or a package's beside the package-less row; `ambiguous-in-environment`, `details.candidates` naming every holder), one row held while a second package ships the name in code, or a name two packages ship with no stored row (the read's own refusal) — where the history answered every holder's versions as one log and the rollback wrote the chosen version into whichever row the bare read served. An addressed rollback (`?package=`) to a version of another holder's row, or to a version attributed to no package while two hold the name, is refused `404 VERSION_NOT_FOUND` saying whose it is; a `?package=` naming a package that neither holds a row of the name nor ships it is refused `409` (`not-held-by-qualifier`) while another slot holds one, and `422 WRITABLE_PACKAGE_REQUIRED` while no row is stored and no such package is installed; nothing is restored. Widened: both doors accept `?package=` on a by-package type (the `/layers?package=` spelling), which reads or restores that holder's versions only; on any other type it stays refused `400` (now `VALIDATION_ERROR` on param `package`, saying the type is not stored per package), never accepted and dropped. A name one holder holds answers bare exactly as on `main`: its whole log, and its bare rollback restores any of its versions into its row, including a version saved package-less before a package took the name over.
+  Metadata-protocol: added
+  Skills-docs: none — no skill under `skills/` names the history or rollback door, and the docs that do (`content/docs/api/metadata-api.mdx`, `content/docs/kernel/contracts/metadata-service.mdx`, `content/docs/plugins/adding-a-metadata-type.mdx`, `content/docs/permissions/system-context.mdx`) list the routes without teaching how a name two packages hold is addressed, so no sentence there turns false; the generated API reference (`content/docs/references/api/protocol.mdx`) carries the new `packageId` field.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is removed, renamed or re-shaped (one optional request key, `HistoryMetaItemRequest.packageId`, is added, and `RollbackMetaItemRequestSchema` is a new schema declaring a request the door already took, so nothing written before needs rewriting), and no stored row changes shape: `sys_metadata_history.package_id` already existed and is now also written by the `/meta` doors. What moves is which versions a door answers and which row a rollback may write, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a bare history or rollback request of a by-package name two holders hold (two `.custom` pairs, a package's row beside the environment's, one package's row while a second package ships the name, or a name two packages ship with no stored row). The fix:
+  
+  - FROM `GET /meta/TYPE/NAME/history` TO `GET /meta/TYPE/NAME/history?package=PKG`, once per holder the `409` names.
+  - FROM `POST /meta/TYPE/NAME/rollback` TO `POST /meta/TYPE/NAME/rollback?package=PKG`, with `toVersion` one of that holder's versions (its `?package=` history lists them).
+  
+  An `action` name is judged here by its row slots and the registry's package-scoped resolver only: the bare read's own action judges (an object-less name two packages ship, two packages binding the name to their own objects) are not asked by these doors yet, so such a name with no stored row still answers its (empty) history bare.
+  
+  `?package=` names a holder the way the item read does: the row a read naming that package serves — the package's own row, its `.custom` pair's declared override of it (so a base package addresses its customization pair), or the package-less row that read falls back to — else the package's own slot when it ships the name and holds no row yet. A package that neither holds nor ships the name, while another slot holds it, is refused `409` (`not-held-by-qualifier`); with no row stored, a package that is not installed is refused `422` as a save naming it is. `all` and the empty string name no package. For a type not stored per package, `?package=` is refused `400`, as it was before this release.
+  
+  The `/meta` doors' history rows now record whose row they snapshot (`sys_metadata_history.package_id`, the rule `DatabaseLoader` already applies; the package-less row is marked `sys_metadata`). A version recorded before this release carries no attribution, and an environment-attributed version stays with a package that took the package-less row over: each is listed and restorable while the name has one holder, and never guessed once two hold it. `@objectstack/metadata` exports that rule as `historyRowAttribution` and `ENVIRONMENT_HISTORY_MARK`.
+  
+  Levels follow the metadata protocol alone (maintainer ruling A, 2026-10-21): `minor` for `@objectstack/spec`, the one package that carries the added protocol surface (`HistoryMetaItemRequestSchema.packageId`, the authorable-surface entry `api/HistoryMetaItemRequest:packageId`, the new `RollbackMetaItemRequestSchema` that declares the rollback door's request with its `packageId` and a `toVersion` of at least 1, and `PACKAGE_SLOTTED_METADATA_TYPES` / `isPackageSlottedMetaType`, the one list of types stored per package that the doors and the console both read), and the level `Check Changeset` demands for `Metadata-protocol: added`. Every other package is `patch` under the BREAKING banner above: `@objectstack/metadata-protocol` (`historyMetaItem` and `RollbackMetaItemRequest` take `packageId`), `@objectstack/rest` (both doors accept `?package=`; the rollback door reads `toVersion` through its declaration), `@objectstack/metadata` (new exports `historyRowAttribution`, `ENVIRONMENT_HISTORY_MARK`; `PACKAGE_SLOTTED_STORE_TYPES` is now built from the spec list, same members), `@object-ui/data-objectstack` (`history()` / `rollback()` take `packageId`), `@objectstack/metadata-core` (a field description only) and `@object-ui/app-shell` (no exported signature changes: `HistoryPanel` and `StudioItemTools` are not exported, and `MetadataResourceHistoryPage` keeps its props).
+  
+  The console follows: `MetadataClient.history()` and `rollback()` take `packageId` (sent as `?package=`), and the History item tool (routed page, the edit page's sheet and Studio's item tools) names the package its item page reads, for a type stored per package only (`isPackageSlottedMetaType`): an object, view or page opened under a package reads and restores its history bare, as before, since the doors refuse `?package=` on those types.
+- 61ed314: fix(metadata-protocol): deleting an object extension that re-declared a stored computed field fills the object's existing rows with the expression it hands back, as the save door does, and says so per field
+  
+  Clause-②: yes (widening) — adds an optional `advisories` key to `DeleteMetaItemResponseSchema`
+  Metadata-protocol: added
+  
+  `deleteMetaItem` (`DELETE /api/v1/meta/:type/:name`) removed the row and healed the registry, so the object served the definition beneath the removed one, but it ran no stored-expression fill. Deleting an own-package `object_extension` that re-declared a stored computed field (a non-`formula` field declaring `expression`) therefore left every existing row holding the value the removed expression computed, while the object now computed the owner's expression. Totals, filters and reports read those values with no error anywhere.
+  
+  The delete now captures the object's stored computed fields before its registry heal and runs the same fill the save, publish, rollback and revert doors run: each stored computed field the removal makes compute something new is recomputed over the object's existing rows and reported per field on the answer's new optional `advisories` (`stored-expression-filled`, or `stored-expression-fill-incomplete` with what is left and the `os migrate stored-expressions` command that fills it). A draft discard fills nothing. The key is omitted when there is nothing to report, so a clean delete's answer is byte-identical to before. The delete itself never fails on its fill.
+- 40c73a8: Clause-②: no (narrowing) — `os validate`, `os build` and `os lint` refuse (`widget-dataset-unknown`, error) a dashboard widget in a package of a multi-package artifact whose `dataset` only a package outside that package's declared dependency closure holds, or two packages inside it hold, where they accepted it. The runtime already refused both reads (`409 RESOURCE_CONFLICT`) since 18.4.0; no runtime answer changes.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` teaches neither cross-package dataset resolution nor `widget-dataset-unknown`.
+  
+  <!-- adr-0087: registered dashboard-dataset-outside-reader-closure-refused -->
+  
+  fix(lint)!: `os validate` and `os build` resolve a dashboard's dataset through the reading package's declared dependency closure, as the runtime does
+  
+  **BREAKING** accept-set narrowing in the authoring doors (`os validate`, `os build`, `os lint`; `@objectstack/lint`'s `widget-dataset-unknown`), for a package of a multi-package artifact (`packages[]`, the `composeStacks(stacks, { manifest: 'preserve' })` shape).
+  
+  - **Before.** The per-package pass resolved a dashboard widget's `dataset` against every package of the artifact, so a widget bound to a dataset another package holds was accepted whether or not the reading package declares it.
+  - **Now.** The name resolves in the reading package, then to the one holder in its declared dependency closure (`manifest.dependencies`, transitively, plus `sys`). A name held only outside that closure, or by two packages inside it, is refused with `widget-dataset-unknown` (error), naming the dataset, the holders and the open fix. When the reading package declares a dependency the artifact does not carry, an outside-closure name is reported (`widget-dataset-unknown`, warning, suppressible with `suppressWarnings`) instead, since that package may hold it once installed; two holders inside the closure are refused even then.
+  - **Unchanged.** A stack without `packages[]`, the union run over the whole artifact, a package's own dataset, a dataset of a declared dependency, and a name no package holds (refused as before). Every runtime answer.
+  - **Fix.** Declare the holding package in the reading package's `dependencies`; where the holder already depends on the reader (a module of the app), move the dashboard into the holder, or move the dataset into the reader. Upgrade-guide entry `dashboard-dataset-outside-reader-closure-refused`.
+  
+  Since 18.2.0 (#25514) the per-package authoring pass resolved a widget's `dataset` against every package of the artifact. The runtime does not: since 18.4.0 a package's dashboard resolves a dataset name in its own package, then in the packages its manifest declares in `dependencies` (transitively) plus `sys`, and refuses the rest (ADR-0150 D3, the maintainer's ruling on #32929). So `os validate` passed a dashboard that answered `409 RESOURCE_CONFLICT` once installed. HotCRM is the first-party app built this way: its app package's CRM Overview read `product_metrics`, which its revenue module holds. Repository examples affected: 0. Other first-party apps outside this repository: not measured.
+  
+  The authoring pass now asks the same question. Who moves: an app whose package dashboard binds a dataset that another package of the same artifact holds, without declaring that package. The finding names the dataset, the holders and the open fix, read off the artifact:
+  
+  - the holder does not depend on the reading package: declare it in the reader's `dependencies`, or move the dataset into the reader;
+  - the holder already depends on the reading package (a module of the app): declaring it back is a dependency cycle the kernel refuses at boot, so move the dashboard into the holder, or move the dataset into the reader;
+  - two holders inside the closure: nothing picks one; keep one, or depend on one.
+  
+  A report's (or a joined block's) `runtimeFilter` reads the same index: on the per-package pass its keys are no longer judged against a dataset the report cannot resolve. No verdict is lost: `chart-dataset-unknown` already refuses that report there, and the union run still judges the filter.
+  
+  The refusal sentences that name a fix for `outside-closure` now name the open one too: the core sentence (`409` at every package-scoped by-name door) says "move the TYPE into P" alone when only the environment holds the item, and asks for a dependency on ONE package when two or more hold it; `os migrate stored-references` (the report and `bind`), the CLI's picklist-reference hint and the publish probe's `widget_not_probed` fix name the move beside the dependency. Which item a read answers, its status, code and `details.candidates` do not change.
+  
+  The remedy (correcting the 18.4.0 note of #32310, which named only the dependency and the `?package=` qualifier): declare the holder in the reading package's `dependencies`; where the holder already depends on the reader, move the reading item into the holder, or move the read item into the reader.
+- bd439f1: fix(metadata-protocol): a publish whose object the runtime registry refused says so on its answer, under the stable advisory rule `object-registry-refused`, and logs it at error once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The registry write-through runs after the metadata commit (ADR-0067 D2) and used to keep a refused `registerObject` to a `warn` line: `publishPackageDrafts` answered `published` with nothing naming the object, while every data read, write and seed load against it answered `OBJECT_NOT_FOUND` until something registered it.
+  
+  - `publishPackageDrafts`: the refused object's `published[]` element carries one `warning` advisory, rule `object-registry-refused`, `where: object "NAME"`, in the `RuntimeAuthoringIssue` shape the other advisories use. The outcome and `success` are unchanged; a clean publish's answer is byte-unchanged.
+  - `publishMetaItem` and a publish-mode `saveMetaItem` put the same advisory on their own `advisories`.
+  - The server logs one `error` line per refused object of a publish, naming the consequence and the fix (resolve the refusal, then publish the object again, or restart), with the registry's reason as a separate argument. An undeclared failure's text stays out of the 2xx body, as on the `object-storage-sync-refused` advisory.
+  
+  The rule id is stable across releases: a client can key on it now.
+- 3e19223: fix(lint): the runtime `object_extension` publish door judges a computed field an extension adds by the build's field-formula pass, against the extended object as served
+  
+  Clause-②: no (narrowing) — the `object_extension` publish door (Studio's add-field on a `.custom` pair, `PUT /api/v1/meta/object_extension/TARGET`, the MCP and AI authoring doors) now refuses an extension whose computed field carries an `expression` `os build` refuses. No exported type or signature changes. Measured first-party: 0 extension entries with a computed field (`examples/app-showcase` one entry, three plain fields; `packages/plugins/plugin-auth` one, a `secret` field; HotCRM none), so nothing first-party is newly refused.
+  Metadata-protocol: narrowed
+  Skills-docs: none owed — this PR edits `content/docs/deployment/validating-metadata.mdx` (the CEL row's runtime column gains `ᵒˣ`, and the object extension door paragraph names the formula pass); `skills/objectstack-data` teaches `defineObjectExtension({ extend, fields })` and the computed-field rules without saying the runtime door is exempt, so the door now gives the verdict the build already gives.
+  
+  <!-- adr-0087: registered object-extension-door-computed-field-expression-judged -->
+  
+  **BREAKING** accept-set narrowing of the runtime `object_extension` publish door (`validateStackExpressions` joins its `runtimeTypes`).
+  
+  `os build` and `os validate` judge each field an `objectExtensions` entry adds with the field-formula pass, but the publish door that writes an extension at runtime ran only the vocabulary freeze, so a computed field the build refuses published with a 200 and then read null, or failed, on every row.
+  
+  - On an `object_extension` write the expression rule runs exactly one pass: the extension walk over each field the written entry adds, against the door's live objects with the entry folded in (the build's own fold), located as the build locates it for a package with one extension entry: `object 'crm_account' · objectExtensions[0] · field 'score__c' expression` (the door judges the written entry alone, so its index is always `[0]`; a build of a package with several entries names the entry's own index). A refusal is the gate's `422 INVALID_METADATA` with issue rule `expression-invalid`; a stored field that reads another record, the clock or the acting user is an advisory (`stored-expression-cross-record-input`, `stored-expression-volatile-input`), never a refusal.
+  - A republish is judged against the target without the package's own stored extension, which the write replaces, as the build sees the package's one entry: dropping a field the extension's own formula still reads is refused, and a formula over a lookup the same write re-targets is judged over the new target.
+  - An extension of an object the door does not carry is judged on what does not depend on that object's fields (grammar, registered functions, bare and unbound references).
+  - A package-wide draft publish (`publishPackageDrafts`) whose drafts depend on a sibling extension draft is refused, because that batch's pending set carries no extension drafts (#33152); publishing the extension first through the per-item door works.
+  - Unchanged: the object save door, `os build`, `os validate`, a draft save (never gated), and a stored row, which is judged only when it is published again.
+  
+  Migration: before publishing an extension again, fix each refused `expression` the way you would on a declared field of the same object: read `record.FIELD` for a field the object serves, call only registered functions, and make a stored field that reads another record, the clock or the acting user a `formula` field.
+- 505a239: fix(metadata-protocol): a package publish judges each draft with the batch's own extension drafts folded onto their targets
+  
+  Clause-②: no — this removes a false refusal the published contract already denies: the `@objectstack/metadata-protocol` changelog entry 0c24898 states "a package publishes as a self-consistent unit — `publishPackageDrafts` judges each draft against the batch's own pending declarations", and the batch's `object_extension` drafts were the pending declarations left out. No exported type or signature changes.
+  Metadata-protocol: none — no key, value or metadata type changes; `os build` already accepts these packages, and the batch door now gives the same verdict.
+  
+  `publishPackageDrafts` (and the draft read's publish verdict, which uses the same collection) now carries the package's `object_extension` drafts in the batch's pending set, and the runtime authoring gate adds each draft's `fields` to its target in the object universe, the way the registry serves a published extension. Before, a draft whose formula or lookup hop read a field that a sibling extension draft adds (for example `{ extend: 'crm_region', fields: { tier__c } }` beside a formula `record.region.tier__c`) was refused with `INVALID_METADATA` (`unknown field tier__c on crm_region`), and the whole batch rolled back. The workaround was to publish the extension first through the per-item door; it is no longer needed.
+  
+  A hop into a field that neither the batch nor the live object has is still refused, and the batch still rolls back.
+- 47a3b95: fix(metadata-protocol)!: a seed load for one organization resolves people through membership in that organization, says when a reference lookup was refused, and gives hooks on seeded rows the organization the rows are stamped with
+  
+  Clause-②: yes (narrowing) — narrowed: under a walled tenancy posture (`isolated` or `group`), every read and by-id write a seed write performs or triggers (a hook's `ctx.api` read, the engine's own reads on that row such as reference checks and roll-ups, and the loader's own update of an existing row and its pass-2 back-fill) is scoped to the organization the row is written as, where it reached every organization's rows. Widened: on a load for one organization (the per-organization replay, a reseed, an install into an organization), a reference to a person (`owner_id`, a `sys_user` lookup) resolves to a person who is a member of that organization, where it never resolved; a reference to `sys_organization` resolves to the load's own organization; a reference to an object no organization walls (no `organization_id` column and no tenant field at all, e.g. `tenancy: { enabled: false }`) resolves across organizations; and a hook on a seeded row now sees the organization the row is stamped with as `ctx.session.organizationId`, on those loads and on every load that stamps the install's sole organization (the boot under `single`, a publish, a hot reload). Nothing that resolved before stops resolving, and no load that succeeded is refused.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored row changes shape: what moves is which rows a hook reads through its own api while a seed load for one organization writes, so there is nothing for a migration to rewrite and no tombstone -->
+  
+  **BREAKING** for an app hook that reads through `ctx.api` on a seeded row under a walled tenancy posture and relied on seeing other organizations' rows. A seed load for organization A now writes as organization A: the hook, and every engine read the write triggers, reads what it reads when a person of organization A creates the row through the API. A row that supplies its own `organization_id` is written as that organization instead. The fix: a hook that genuinely needs rows of every organization says so with `ctx.api.sudo()` and filters them itself, as it must on the API path already.
+  
+  What changes, by load:
+  
+  - **A reference to a person on an organization's own load.** `sys_user` carries no organization (identity lives above it), so the loader's reference lookup no longer filters it by `organization_id`, which the database refused. It reads the people the natural key names, in id order and page by page, and keeps the first one holding a `sys_member` row in the load's organization. A person who exists but is not a member is never used: the reference stays empty, and only once every person the key names has been asked about does its error say the person is not a member of that organization.
+  - **Every other reference target** is judged from its registered schema: one with an `organization_id` column is looked up inside the load's organization, as before; `sys_organization` answers only for the load's own organization; an author's object that resolves no tenant field at all has no organization filter. An object walled by another tenant column (`tenancy.tenantField`) and a platform-managed table with no organization column keep the old lookup, and its refusal is now reported.
+  - **A refused lookup** (an unknown column, an unregistered object, a driver fault) is no longer read as "no match". The load logs it once per target, field and code, keeps going, and the reference's error names the refusal's code instead of saying no such row exists. The load's outcome is unchanged: the reference was unresolved before and stays unresolved.
+  - **The write context.** Every seed write of a load carries `tenantId` set to the organization the row is written as: the one it supplies itself, else the one the load stamps it with (the one the caller pinned, or the install's sole organization). The shared `SEED_WRITE_EXECUTION_CONTEXT` is unchanged. A load with no organization, pinned or derived, writes with exactly the context it used before.
+  - **A pass-2 back-fill that lands on no row** (a data engine answering `null` for the by-id update) is reported as a failed back-fill, never counted as resolved.
+  - **A load with no organization** (the single-tenant boot, a publish, a hot reload) resolves references across the whole database, as before.
+- 8f9eb3d: feat(metadata-protocol, spec): a package publish whose runtime registry refused an object answers `published_unregistered` and names the object, instead of `published`
+  
+  Clause-②: yes (widening) — `PublishPackageDraftsResponseSchema.outcome` gains the value `published_unregistered`, and the response gains the optional member `unregistered[]`. Every other answer is byte-identical: a publish the registry takes whole still answers `published` with `success: true` and no `unregistered` key.
+  Metadata-protocol: semantic
+  
+  The authorable-surface shard gains `api/PublishPackageDraftsResponse:unregistered`, and the same server event answers `outcome` / `success` differently; ADR-0087 entry `18.publish-drafts-outcome-published-unregistered`.
+  
+  **What answers differently.** `POST /api/v1/packages/:id/publish-drafts` (and the protocol's `publishPackageDrafts`, and `client.packages.publishDrafts()`) used to answer `outcome: 'published'` and `success: true` when the runtime registry refused one of the objects it had just made live. The object carried the `object-registry-refused` warning on its `published[]` element, but a caller that read `success` or `outcome` saw a clean publish, and a seed load or data read right after it answered `OBJECT_NOT_FOUND`. The same publish now answers:
+  
+  - `outcome: 'published_unregistered'` and `success: false` (`success` is still exactly `outcome === 'published'`);
+  - `unregistered: [{ type: 'object', name, rule: 'object-registry-refused' }]`, one entry per refused object, in publish order;
+  - everything else as before: the drafts landed and stay live, so every object is still in `published[]` (the refused one still carries its warning), `failed[]` is empty, and the commit, seeds, probes and receipts are as they were.
+  
+  **What to do.** Handle the new value wherever you branch on the batch publish answer. Do not treat it as "nothing landed": the metadata is live. Do not seed or read an object `unregistered[]` names until it is registered: publish it again, which re-runs the registration, or restart, which registers every stored object.
+  
+  **The console.** Studio's publish, the package sheet, Home's *Publish all* and the AI chat card read `published_unregistered` as they read the `published` answer the server gave for this before: the refused object's warning reaches the author through the client, and none of them reports the publish as failed.
+  
+  **Unchanged on purpose.** The REST door's app visibility flip (ADR-0045 §3) still runs after this outcome, as it ran after the `published` answer this used to be. The single-item doors (`publishMetaItem`, a publish-mode save) still answer success with the warning on their `advisories`.
+- b95d915: fix(metadata-protocol)!: a seed load for one organization finds a person among that organization's members, by keyset, and judges a person named by an id-shaped value by the same membership rule
+  
+  Clause-②: no (narrowing) — narrowed: on a load for one organization (the per-organization replay, a reseed, an install into an organization), a person reference (`owner_id`, a `sys_user` lookup) whose value is UUID- or ObjectId-shaped is resolved only when it names a member of that organization, where it was written verbatim, so an id of a person outside the organization linked the row to them. A member's id still resolves to itself, and a load with no organization, a dry run and every other reference target keep an id-shaped value verbatim, as before. Unchanged: the lookup by name or email resolves the same member it did.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored row changes shape: what moves is which person an id-shaped seed reference resolves to on a load for one organization, so there is nothing for a migration to rewrite and no tombstone -->
+  
+  **BREAKING** for a seed that names a person by an id-shaped value (UUID or ObjectId) on a load for one organization, where that person is not a member of the organization. The row is still seeded; the reference stays empty and the load's error says the person is not a member of that organization, exactly as it does for the same person named by name or email. The fix: add the person to the organization, or name a member of it. The seed documentation already teaches a natural key (`name`, `email`) rather than an id, which differs between environments.
+  
+  What changes:
+  
+  - **The membership lookup is bounded by the organization.** It reads the load organization's `sys_member` rows in `user_id` order, a page at a time by keyset (`user_id` greater than the last one seen), and asks ONE `sys_user` read per page, constrained to that page's people and the natural key. It no longer reads every same-named person in the deployment, 50 at a time by offset, which cost two reads per 50 organizations per reference value on a hosted deployment where every organization holds the same seeded names, and which could skip the member under a concurrent delete and say "not a member" falsely. An organization smaller than one page (500 members) answers a resolved reference with one membership read and one person read. Whether someone outside the organization answers to the key is one bounded read (`limit: 1`), asked only on a miss, to word the error.
+  - **An id-shaped person value is judged by membership** on a load for one organization, as an id of any other shape already was.
+- c92ae14: fix(metadata-protocol): an organization-scoped seed load resolves a reference into an object walled by a declared `tenancy.tenantField` on that column
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A seed reference whose target declares `tenancy: { enabled: true, tenantField: 'workspace_id' }` with the injected `organization_id` column switched off was probed with `organization_id = <load organization>`, a column the target does not have. The driver refused the filter (`INVALID_FILTER`) and the reference was reported unresolved although a row of the load's organization existed. The probe now filters on the target's resolved tenant column (`resolveTenantFieldName`, falling back to `organization_id`), the same column the wall scopes the target by, so the reference resolves to the load organization's row and never to another organization's row of the same name.
+- b8f6237: fix(metadata-protocol, objectql): an operator upgrading an 18.3.0 database reads one answer per finding and the right count of activation ledger rows
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Four readings on the upgrade path of the activation ledger (`sys_metadata_activation`), each measured on a database `@objectstack/cli@18.3.0` wrote:
+  
+  - **The plan's row count.** Before any boot of this release, `os migrate plan` said `1 row(s) name no package` while four rows named none: the number was the rows the next served boot binds. The line now counts every row that names no package, says how many of them the next served boot binds, and gives the reason each other row stays as it is (an item the environment authored, a name nothing holds, a position, a name two packages hold, an item with two rows). Who sees it: an operator reading `os migrate plan` (or any one-shot command) before the first served boot of this release.
+  - **The conflict sentence.** On a database holding two package-less rows for one item, the boot's `error` line said the rows were "for one item the environment authored", also when a package holds the item. It now says they are rows that name no package, for an item the environment authored or a package's item whose rows predate the ledger's package key, and points to the backfill's line, which names the package.
+  - **No raw driver line before that sentence.** The boot printed the SQL driver's raw `DATABASE_ERROR … UNIQUE constraint failed` warning ahead of it. The migration now counts the colliding rows before it sends the build, so the refusal it expects is never provoked. A count that cannot be read builds as before, and any other refusal still reaches the operator with the driver's text.
+  - **No raw driver line on the pre-upgrade plan.** `os migrate plan` printed `DATABASE_ERROR … no such column: permission_set_package` (and `connector_package`) because it ran the package-less guards' listings on tables whose scope column a schema sync has not added yet. The pre-flight now asks the catalog for the column first and, when it is missing, answers `unreadable` with a sentence naming the column; the plan's line and `os migrate duplicates` say so in place of the dialect error. A dialect with no catalog arm runs the listing as before.
+  
+  No status, code or exported shape changes; no row is written differently.
+- 1e889b1: fix(metadata-protocol): a seed dataset of an object walled by a declared `tenancy.tenantField` replays per organization on that column
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A per-organization seed replay (AppPlugin's `seed-replayer` on a walled boot, or a `SeedLoaderService` load pinned to `config.organizationId`) matched the existing rows of every dataset on `organization_id`. A dataset of an object walled by a declared `tenancy.tenantField` with `systemFields.tenant: false` has no such column, so the replay threw the driver's `INVALID_FILTER` and seeded nothing for that organization.
+  
+  - The existing-row match now runs on the column the object is walled by: `resolveTenantFieldName` on its definition, `organization_id` when that resolves none. This is the reading the reference probe already scopes a target by.
+  - The seed stamp uses the same column. A row of such an object is stamped with the seeding organization's id in its declared tenant column, which the tenant wall reads as the organization, as `organization_id` is stamped on every other tenant-scoped object. A load with no organization, pinned or derivable, refuses such a row with the loader's named refusal on that column, where the engine's write refusal answered before. A record that supplies its own value in the column keeps it, and its writes carry that organization.
+  - An object that declares a `tenancy.tenantField` and also carries `organization_id` is stamped on the declared column, the one the engine and the driver wall it by. The loader no longer writes `organization_id` on such a row.
+- d7e1a5a: Clause-②: no
+  Metadata-protocol: none
+  
+  A per-organization seed replay no longer throws the driver's `INVALID_FILTER` on a dataset of a global object (one with no organization column and no tenant field, e.g. `tenancy: { enabled: false }`). The replay now matches such an object's existing rows unscoped, the same reading the seed loader's reference probe already uses for a global target, so every organization's replay upserts the one shared row instead of failing to land it.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [1cf2a5a]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [df67557]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [4e4b587]
+- Updated dependencies [548f8ff]
+- Updated dependencies [103eb7b]
+- Updated dependencies [dd966fc]
+- Updated dependencies [fc283d6]
+- Updated dependencies [0e9ff94]
+- Updated dependencies [16e3486]
+- Updated dependencies [46a2ecf]
+- Updated dependencies [8c88db6]
+- Updated dependencies [834d5f5]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a83c366]
+- Updated dependencies [5c005e0]
+- Updated dependencies [dd4ce50]
+- Updated dependencies [6e4a203]
+- Updated dependencies [796e9d4]
+- Updated dependencies [c09320d]
+- Updated dependencies [a1604ce]
+- Updated dependencies [b22be27]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [3825f57]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [6e28797]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [4c15268]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [8835532]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [9f736f2]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [a674877]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/metadata@18.5.0
+  - @objectstack/lint@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/formula@18.5.0
+  - @objectstack/sdui-parser@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes
