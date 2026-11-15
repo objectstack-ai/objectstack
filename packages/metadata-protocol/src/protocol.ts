@@ -615,7 +615,7 @@ import { ProtocolWriteGatesFacet } from './protocol-write-gates.js';
 // [#29985 codemod] The static tables of the facet above: the class's fields read them (#30147).
 import { ProtocolWriteGatesTables } from './protocol-write-gates-tables.js';
 // [#29985 codemod] Registry hydration, view expansion, write-through, object storage: the members below delegate to its facet, `ProtocolRegistryHydrationFacet`.
-import { ProtocolRegistryHydrationFacet, type ObjectRegistryRefusal } from './protocol-registry-hydration.js';
+import { ProtocolRegistryHydrationFacet, type ObjectRegistryRefusal, type RegistryHealStop, type RegistryWriteThroughRequest } from './protocol-registry-hydration.js';
 import type { HealPackageBinding } from './protocol-heal-binding.js';
 // [#29985 codemod] Save refusals, saveMetaItem, saveConflict, migrateStoredMetadata: the members below delegate to its facet, `ProtocolSaveFacet`.
 import { ProtocolSaveFacet } from './protocol-save.js';
@@ -8405,20 +8405,7 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /** Docblock and body: {@link ProtocolRegistryHydrationFacet.applyRegistryWriteThrough} in `protocol-registry-hydration.ts` [#29985 codemod]. */
-    private async applyRegistryWriteThrough(request: {
-        type: string;
-        name: string;
-        item?: any;
-        packageId?: string | null;
-        /** The row's org scope — `null` for an env-wide row. [#6602] */
-        organizationId: string | null;
-        /**
-         * [#23198] The binding the write moved the row from, when it moved it
-         * (an orphan adoption): `null` for the package-less row. See
-         * {@link HydrationOptions}.
-         */
-        reboundFrom?: { readonly packageId: string | null };
-    }): Promise<ObjectRegistryRefusal | undefined> {
+    private async applyRegistryWriteThrough(request: RegistryWriteThroughRequest): Promise<ObjectRegistryRefusal | undefined> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolRegistryHydrationFacet.applyRegistryWriteThrough(protocolHost(this), request);
     }
@@ -8440,7 +8427,7 @@ export class ObjectStackProtocolImplementation implements
          * No effect for a type with no members.
          */
         member?: string,
-    ): Promise<void> {
+    ): Promise<RegistryHealStop | undefined> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolRegistryHydrationFacet.restoreArtifactRegistryView(protocolHost(this), type, name, organizationId, packageId, member);
     }
@@ -10869,9 +10856,11 @@ export class ObjectStackProtocolImplementation implements
      * advisory stays on `advisories`), its mutation projector failed, or a
      * step after the row write threw. The entry names the row state (removed,
      * or restored to the body of version N) beside the step that failed, and
-     * the revert's own commit still records the row change. A write-through
-     * fault the registry helper only logs (every type but `object`) is not
-     * seen here.
+     * the revert's own commit still records the row change.
+     * [#33851] That holds for every type: a restored item whose registry
+     * write-through threw (not only an `object` the registry refused), and a
+     * removed item whose registry heal stopped, so the registry may still
+     * serve the removed row.
      *
      * [#33564, ADR-0067 D3] The revert's own commit records, per row it
      * changed, the version that row held before the revert (`prevVersion`),

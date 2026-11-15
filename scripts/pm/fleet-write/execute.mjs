@@ -191,7 +191,7 @@
  * full page read as unreadable) and reduced by the queue guard's
  * `authorizedApprovalVerdict`; an approval that is not on the head reads the
  * action's `approval_comment` by its own GET. Unread, unauthorised, elsewhere,
- * carried by nobody or by a comment opening with a seat signature
+ * carried by nobody or by a comment holding a seat signature on any line
  * (`readSignatureLine`, passed in), the line holds and the mutation is NOT SENT.
  *
  * ## The dequeue — `pr_dequeue`, fenced on the PULL, its QUEUE and its CAUSE, audited, and read back
@@ -249,12 +249,6 @@
  *
  * Its fences and its landing are listed once, in `ops.mjs`'s header ("The one
  * row that deletes a ref"); they are AUTHORITATIVE here, each that fails named.
- *
- * ## The mailbox conversation lock — `conversation_lock` / `conversation_unlock`
- *
- * Their fences and their landing are listed once, in `ops.mjs`'s header ("The
- * two rows that lock and unlock a conversation"); they are AUTHORITATIVE here
- * (`mailboxLockPreflight`, `confirmMailboxLock`), each that fails named.
  *
  * ## The advisory rows that write — fenced on the ADVISORY, printing none of its text
  *
@@ -1426,7 +1420,8 @@ export async function dequeuePreflight(req, payload, api, t) {
  * ONE dequeue (header: "The dequeue"): the fences, then the ONE audit comment (paced; a comment that does not answer
  * 201 with an id stops the action, the mutation NOT SENT), then the mutation behind the node id the preflight's own
  * pull read answered, then the queue read back until the entry is gone and the pull's own GET reads it open and
- * unmerged. Returns `{ ok, call, status, result | why }` for the row. Never throws on a status.
+ * unmerged TWICE, one `pollMs` apart — a second read that fails is no confirmation: the queue is read again and the
+ * pair starts over. Returns `{ ok, call, status, result | why }` for the row. Never throws on a status.
  */
 export async function dequeueAction(req, { payload, api, t, sleep, now, windowMs = DEQUEUE_WINDOW_MS, pollMs = DEQUEUE_POLL_MS }) {
   const { pull, reason, cause } = req.dequeue;
@@ -1585,43 +1580,6 @@ export async function confirmMailboxBranch(req, answer, payload, api, t) {
   const platform = `HTTP ${answer.status}${answer.detail ? ` — ${answer.detail}` : ''}`;
   if (back.status !== 404) return { ok: false, why: `${platform}, but ${back.call} answered HTTP ${back.status}: the branch ${back.status === 200 ? 'is still there' : 'could not be read back'} — read it before anything else` };
   return { ok: true, why: '', idempotent: !(answer.status >= 200 && answer.status < 300), result: `deleted ${branch} (read back absent)` };
-}
-
-/**
- * The mailbox lock's and unlock's fences on the pull's own answer (header): `[]` to send, else one sentence per
- * fence that fails — an unread pull is one, judged alone, and an issue's number answers 404 on the pulls path, so
- * it is refused as unread. `pull` is a `rest` answer. Pure.
- */
-export function mailboxLockFenceFailures({ pull }) {
-  if (pull?.status !== 200 || !pull.json || typeof pull.json !== 'object') return [`${pull?.call} -> HTTP ${pull?.status}: the pull could not be read — an issue's number is no pull`];
-  const pr = pull.json;
-  const out = [];
-  if (pr.state !== 'open') out.push(`the pull is ${pr.state}, not open`);
-  if (!labelNames(pr.labels).includes(MAILBOX_LABEL)) out.push(`the pull does not carry ${MAILBOX_LABEL} — the relay locks and unlocks mailboxes only`);
-  return out;
-}
-
-/** The fences, AUTHORITATIVE (header): the pull's own GET, then `{}` to send or `{ fail }`, the write NOT SENT. Never throws. */
-export async function mailboxLockPreflight(req, payload, api, t) {
-  const { pull, locked } = req.mailboxLock;
-  const pr = await rest(api, `/repos/${payload.repo}/pulls/${pull}`, {}, t);
-  const failures = mailboxLockFenceFailures({ pull: pr });
-  return failures.length ? { fail: `REFUSED at the relay's fence on #${pull}, nothing ${locked ? 'locked' : 'unlocked'} — ${failures.join('; ')}` } : {};
-}
-
-/**
- * Did the lock or unlock LAND? The issue read back with `locked` as asked (header); a write the platform refused
- * whose conversation already reads that way is idempotent, anything else FAILED. Never throws.
- */
-export async function confirmMailboxLock(req, answer, payload, api, t) {
-  const { pull, locked } = req.mailboxLock;
-  const back = await rest(api, `/repos/${payload.repo}/issues/${pull}`, {}, t);
-  const platform = `HTTP ${answer.status}${answer.detail ? ` — ${answer.detail}` : ''}`;
-  const sent = answer.status >= 200 && answer.status < 300;
-  if (back.status !== 200 || typeof back.json?.locked !== 'boolean') return { ok: false, why: `${platform}, but ${back.call} answered HTTP ${back.status}: #${pull}'s conversation could not be read back — read it before anything else` };
-  if (back.json.locked !== locked) return { ok: false, why: `${platform}, but #${pull}'s conversation reads back ${back.json.locked ? 'locked' : 'unlocked'}, not ${locked ? 'locked' : 'unlocked'}` };
-  const state = locked ? 'locked' : 'unlocked';
-  return { ok: true, why: '', idempotent: !sent, idempotentText: `already ${state} (idempotent)`, result: `#${pull}'s conversation ${state} (read back)` };
 }
 
 /**
@@ -2389,9 +2347,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
           ? await enqueueFrontPreflight(req, payload, api, t)
           : req.mailboxBranch
             ? await mailboxBranchPreflight(req, payload, api, t)
-            : req.mailboxLock
-              ? await mailboxLockPreflight(req, payload, api, t)
-              : null;
+            : null;
       if (pre?.fail) {
         const why = scrub(pre.fail, [token]);
         rows.push({ action: i + 1, op: action.op, call: `${req.verb} ${req.path}`, status: 'not sent', result: `FAILED: ${why}` });
@@ -2517,15 +2473,13 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
             ? await confirmEnqueueFront(req, r, pre, payload, api, t, ef)
             : req.mailboxBranch
               ? await confirmMailboxBranch(req, r, payload, api, t)
-              : req.mailboxLock
-                ? await confirmMailboxLock(req, r, payload, api, t)
-                : sub
+              : sub
                 ? await confirmSubIssue(req, r, sub, payload, api, t, si)
                 : adv || req.advisoryReport || req.advisoryCreate
                   ? confirmAdvisory(req, r, adv)
                   : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
-      rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? (landed.idempotentText ?? 'already absent (idempotent)') : scrub(landed.result ?? resultOf(req, r.json, r.status), [token])) : `FAILED: ${scrub(landed.why, [token])}` });
+      rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? 'already absent (idempotent)' : scrub(landed.result ?? resultOf(req, r.json, r.status), [token])) : `FAILED: ${scrub(landed.why, [token])}` });
       if (!landed.ok) {
         stoppedAt = { action: i + 1, op: action.op, why: scrub(landed.why, [token]) };
         log(`  ✗ action ${i + 1} ${action.op}: ${call} -> ${stoppedAt.why}`);
@@ -2602,16 +2556,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the pr_enqueue_front: the pull's own GET, its whole file list and its base's queue read immediately before ONE enqueuePullRequest mutation with jump true and the expected head — open, ready, its head, not Version Packages, no governed path, at most the human-merge line count, a queue read whole with no jumped entry; each fence refused with the mutation not sent; GraphQL errors FAILED naming the missing grant; the 200 confirmed only by reading the queue back with the pull jumped and nothing ahead; queued without the jump or behind another is FAILED, never re-sent; the queue read unpaced; no annotation": 20,
-  // 9 → 12 with a carrying comment that opens with a seat signature refused, its other way, and no reader carrying nothing.
-  "the pr_enqueue_front SIZE lift: a pull over the human-merge line is jumped only on an authorised APPROVED review on its current head, or an earlier one carried to the head by an authorised comment on the pull naming it — the reviews read only over the line, a full page or an unread list lifting nothing, a non-approver, an approval elsewhere, a comment naming another head or pull or opening with a seat signature refused with the mutation not sent": 12,
+  // 9 → 12 with a carrying comment that opens with a seat signature refused, its other way, and no reader carrying nothing;
+  // the other way flipped (still 12) when a signature on ANY line refused the carry, not only the first.
+  "the pr_enqueue_front SIZE lift: a pull over the human-merge line is jumped only on an authorised APPROVED review on its current head, or an earlier one carried to the head by an authorised comment on the pull naming it — the reviews read only over the line, a full page or an unread list lifting nothing, a non-approver, an approval elsewhere, a comment naming another head or pull or holding a seat signature on any line refused with the mutation not sent": 12,
   // 16 → 27 with seat-asks bound to the landing seat (another seat, the relay's own audit, no trailer, the pure match),
   // the pull read back open and unmerged (merged, closed, a late read, the pure reading) and the node id from the first read;
-  // 27 → 28 with the second pull read one interval later, a merge that shows only there refused.
-  "the pr_dequeue: the pull's own GET, its base's queue with each entry's merge-group rollup and, for seat-asks alone, its comments read before ONE audit comment and ONE dequeuePullRequest mutation — open, its head, not Version Packages, a queue read whole that lists it, and the cause holding on those reads (conflict: dirty; own-failure: UNMERGEABLE or a failing rollup, never an unread one; seat-asks: a relay comment signed by the landing seat its body's trailer names, under the dispatching session — another seat's comment refused); each fence refused with nothing written; no audit comment, no mutation; GraphQL errors FAILED naming the grant; the 200 confirmed only by reading the queue back without the pull and the pull still open and unmerged on two reads one interval apart, a merge or close inside the window FAILED, UNCONFIRMED after the window": 28,
+  // 27 → 28 with the second pull read one interval later, a merge that shows only there refused;
+  // 28 → 29 with a failed second pull read starting the pair over.
+  "the pr_dequeue: the pull's own GET, its base's queue with each entry's merge-group rollup and, for seat-asks alone, its comments read before ONE audit comment and ONE dequeuePullRequest mutation — open, its head, not Version Packages, a queue read whole that lists it, and the cause holding on those reads (conflict: dirty; own-failure: UNMERGEABLE or a failing rollup, never an unread one; seat-asks: a relay comment signed by the landing seat its body's trailer names, under the dispatching session — another seat's comment refused); each fence refused with nothing written; no audit comment, no mutation; GraphQL errors FAILED naming the grant; the 200 confirmed only by reading the queue back without the pull and the pull still open and unmerged on two reads one interval apart, a merge or close inside the window FAILED, UNCONFIRMED after the window": 29,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
   "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add, advisory_versions and advisory_state read the advisory first and send ONE PATCH — every existing login kept with the missing ones added, an all-present list a no-op, the versions entries alone, or the one state a legal transition reaches, the reopen and the publish among them — or nothing at all on a fence: an unread, other or wrong-state advisory, an illegal move, a list the versions may not replace or a publish whose versions are not set; each lands only when its answer shows the result, a publish only read back as published with the versions it was sent, and a landed publish alone is annotated with its id; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 41,
   "the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE": 7,
-  "the mailbox conversation lock: conversation_lock and conversation_unlock read the pull immediately before ONE write of its issue's lock — an issue's number, a closed or an unlabelled pull, or a read that does not answer is zero writes with every failing fence named; each lands only when the issue reads back locked as asked, a refused write already in that state an idempotent landing and any other read FAILED; and mailbox-open's lock, canary and unlock plans run through it": 8,
   "an issue_create's title and body on a private repository: they reach no log line, row, step summary or annotation when the stroke lands, when the platform refuses it with a message quoting either — the row keeps the status, withholds that message and prints one that quotes nothing —, when the transport fails, or when the payload is refused for an over-cap or ill-typed body — the refusal names the key and the byte count alone": 8,
   "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
   "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 22,
@@ -2621,8 +2576,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
 // branch delete's, 23 → 24 with the private-repository issue body's, 24 → 25 with advisory_list's, 25 → 26 with
 // pr_enqueue_front's, 26 → 27 with the cloud staging deploy's, 27 → 28 with advisory_note's: one battery, one row;
-// 28 → 30 with the jump's SIZE lift and pr_dequeue's; 30 → 31 with the mailbox conversation lock's.
-const SELF_TEST_BATTERY_FLOOR = 31;
+// 28 → 30 with the jump's SIZE lift and pr_dequeue's.
+const SELF_TEST_BATTERY_FLOOR = 30;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -3429,7 +3384,7 @@ export async function selfTest() {
     }
 
     // ── the jump's SIZE lift ────────────────────────────────────────────────
-    battery("the pr_enqueue_front SIZE lift: a pull over the human-merge line is jumped only on an authorised APPROVED review on its current head, or an earlier one carried to the head by an authorised comment on the pull naming it — the reviews read only over the line, a full page or an unread list lifting nothing, a non-approver, an approval elsewhere, a comment naming another head or pull or opening with a seat signature refused with the mutation not sent");
+    battery("the pr_enqueue_front SIZE lift: a pull over the human-merge line is jumped only on an authorised APPROVED review on its current head, or an earlier one carried to the head by an authorised comment on the pull naming it — the reviews read only over the line, a full page or an unread list lifting nothing, a non-approver, an approval elsewhere, a comment naming another head or pull or holding a seat signature on any line refused with the mutation not sent");
     {
       const PULL = 3227;
       const HEAD = '7a1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c';
@@ -3471,7 +3426,8 @@ export async function selfTest() {
       ], [refused, refused, refused, refused, refused]);
       const seatSigned = commentOf({ body: `triage#1 · ${APPROVER} · session_01ABCDEFGHJKMNPQRSTVWXYZ\n\nHead-sha: ${HEAD.slice(0, 9)}` });
       t('⛔ CARRIED, refused: the approver\'s comment naming the head but opening with a SEAT signature (an agent-operated account\'s knock or record) carries nothing, the reading naming the seat', [await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: seatSigned }, { approval_comment: 71 }), (await run(stroke({ approval_comment: 71 }), { ...happy, [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: seatSigned })).rows[0]?.result.includes('a seat\'s comment is no carried approval')], [refused, true]);
-      t('⭐ CARRIED, the other way: the same approver\'s comment with the signature line further down, not first, still carries it', [await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: commentOf({ body: `The approval carries to ${HEAD.slice(0, 9)}.\n\ntriage#1 · ${APPROVER} · session_01ABCDEFGHJKMNPQRSTVWXYZ` }) }, { approval_comment: 71 })], [landed]);
+      const signedLower = commentOf({ body: `The approval carries to ${HEAD.slice(0, 9)}.\n\ntriage#1 · ${APPROVER} · session_01ABCDEFGHJKMNPQRSTVWXYZ` });
+      t('⛔ CARRIED, refused on ANY line: the same approver\'s comment with the seat signature further down, not first, carries nothing either — the reading naming the seat', [await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: signedLower }, { approval_comment: 71 }), (await run(stroke({ approval_comment: 71 }), { ...happy, [REVIEWS]: reviewsOf(review(APPROVER, EARLIER)), [COMMENT]: signedLower })).rows[0]?.result.includes('holds the seat signature triage#1')], [refused, true]);
       const pastApproval = { state: 'approved', approvals: [{ login: APPROVER, commitId: EARLIER }] };
       t('enqueueFrontSizeLift with no signature reader carries nothing — the opening line unjudged is never a pass', [enqueueFrontSizeLift({ verdict: pastApproval, headSha: HEAD, comment: commentOf(), pull: PULL, approvers: GOVERNED_APPROVERS }).lifts, enqueueFrontSizeLift({ verdict: pastApproval, headSha: HEAD, comment: commentOf(), pull: PULL, approvers: GOVERNED_APPROVERS, signatureOf: () => null }).lifts], [false, true]);
       t('⛔ an approval by an account outside GOVERNED_APPROVERS, or one the approver later dismissed, lifts nothing even on the head', [await verdict({ [REVIEWS]: reviewsOf(review('os-support-ai', HEAD)) }), await verdict({ [REVIEWS]: reviewsOf(review(APPROVER, HEAD), review(APPROVER, HEAD, 'DISMISSED')) })], [refused, refused]);
@@ -3557,6 +3513,9 @@ export async function selfTest() {
       clock = 0;
       const pullLate = await run(stroke(), { ...happy, [PULL_GET]: [pullAt(), { status: 502, json: { message: 'Bad Gateway' } }, pullAt()] }, timing);
       t('a pull read that fails after the queue reads it gone is read again at the interval, and lands when it reads open and unmerged', [pullLate.exit, clock], [EXIT_OK, 2 * DEQUEUE_POLL_MS]);
+      clock = 0;
+      const secondFails = await run(stroke(), { ...happy, [PULL_GET]: [pullAt(), pullAt(), { status: 502, json: { message: 'Bad Gateway' } }, pullAt()] }, timing);
+      t('a SECOND pull read that fails (ok, 502) confirms nothing: the queue is read again at the interval and the pair starts over (ok, ok), landing at three polls', [secondFails.exit, clock, secondFails.seen.filter((x) => x.call === PULL_GET).length, secondFails.seen.filter((x) => x.call === GQL).length], [EXIT_OK, 3 * DEQUEUE_POLL_MS, 5, 4]);
       clock = 0;
       const mergedLate = await run(stroke(), { ...happy, [PULL_GET]: [pullAt(), pullAt(), pullAt({ state: 'closed', merged: true, merged_at: '2026-11-15T08:40:15Z' })] }, timing);
       const mergedLateClock = clock;
@@ -3954,45 +3913,6 @@ export async function selfTest() {
       t("⭐ after close, no branch: mailbox-open's close stroke sends the comment, the close and then the DELETE, reads the pull only after closing it, and ends on the ref read back absent — exit 0", [closed.exit, writes(closed.seen).map((s) => s.call), closed.seen.map((s) => s.call).indexOf(PULL) > closed.seen.map((s) => s.call).indexOf(`PATCH /repos/${REPO}/issues/${PR}`), closed.seen.at(-1).call, closed.rows.at(-1).result], [EXIT_OK, [`POST /repos/${REPO}/issues/${PR}/comments`, `PATCH /repos/${REPO}/issues/${PR}`, DEL], true, BACK, `deleted ${BR} (read back absent)`]);
       const other = await run(base(planClose({ repo: REPO, pull: PR, head: 'claude/project-thread-mvsts5' }).actions), closing);
       t('…while a head outside claude/mailbox-* — a thread branch the seat still works on — is closed and left: no DELETE, nothing under /git/', [other.exit, writes(other.seen).map((s) => s.call), other.seen.some((s) => s.call.includes('/git/'))], [EXIT_OK, [`POST /repos/${REPO}/issues/${PR}/comments`, `PATCH /repos/${REPO}/issues/${PR}`], false]);
-    }
-
-    // ── the mailbox conversation lock ───────────────────────────────────────
-    battery("the mailbox conversation lock: conversation_lock and conversation_unlock read the pull immediately before ONE write of its issue's lock — an issue's number, a closed or an unlabelled pull, or a read that does not answer is zero writes with every failing fence named; each lands only when the issue reads back locked as asked, a refused write already in that state an idempotent landing and any other read FAILED; and mailbox-open's lock, canary and unlock plans run through it");
-    {
-      const PR = 32588;
-      const PULL = `GET /repos/${REPO}/pulls/${PR}`;
-      const LOCK = `PUT /repos/${REPO}/issues/${PR}/lock`;
-      const UNLOCK = `DELETE /repos/${REPO}/issues/${PR}/lock`;
-      const BACK = `GET /repos/${REPO}/issues/${PR}`;
-      const box = (o = {}) => ({ number: PR, state: 'open', labels: [{ name: 'pm:mailbox' }, { name: 'pinned' }], ...o });
-      const read = (locked) => ({ status: 200, json: { number: PR, locked } });
-      const good = { ...allowed, [PULL]: { status: 200, json: box() }, [LOCK]: { status: 204, json: null }, [UNLOCK]: { status: 204, json: null }, [BACK]: read(true) };
-      const lock = base([{ op: 'conversation_lock', issue: PR }]);
-      const unlock = base([{ op: 'conversation_unlock', issue: PR }]);
-      const ok = await run(lock, good);
-      t("⭐ the lock: the pull's own GET, then ONE PUT of its issue's lock with the table's one reason under the App token, then the issue read back locked — exit 0, the row naming it", [ok.exit, ok.seen.slice(1).map((s) => s.call), writes(ok.seen).map((s) => [s.call, s.body, s.auth]), ok.rows[0].result], [EXIT_OK, [PULL, LOCK, BACK], [[LOCK, { lock_reason: 'resolved' }, `Bearer ${TOKEN}`]], `#${PR}'s conversation locked (read back)`]);
-      const un = await run(unlock, { ...good, [BACK]: read(false) });
-      t("⭐ the unlock: the same GET, then ONE DELETE of the lock, no body, then the issue read back unlocked — exit 0", [un.exit, un.seen.slice(1).map((s) => s.call), writes(un.seen).map((s) => [s.call, s.body]), un.rows[0].result], [EXIT_OK, [PULL, UNLOCK, BACK], [[UNLOCK, null]], `#${PR}'s conversation unlocked (read back)`]);
-      const fences = [
-        [{ [PULL]: { status: 404, json: { message: 'Not Found' } } }, "the pull could not be read — an issue's number is no pull"],
-        [{ [PULL]: { status: 200, json: box({ state: 'closed' }) } }, 'the pull is closed, not open'],
-        [{ [PULL]: { status: 200, json: box({ labels: [{ name: 'bug' }] }) } }, 'does not carry pm:mailbox — the relay locks and unlocks mailboxes only'],
-        [{ [PULL]: { status: 503, json: { message: 'down' } } }, 'the pull could not be read'],
-      ];
-      const fenced = async (payload) => Promise.all(fences.map(async ([over, phrase]) => { const r = await run(payload, { ...good, ...over }); return [r.exit, writes(r.seen).length, r.rows[0]?.status, r.rows[0]?.result.includes(phrase)]; }));
-      t("⛔ the lock's fences: an issue's number, a closed pull, an unlabelled pull and an unread pull are each refused with NOTHING sent, the fence named", await fenced(lock), fences.map(() => [EXIT_ACTION_FAILED, 0, 'not sent', true]));
-      t("⛔ the unlock's fences are the same four, nothing sent — a mistyped number unlocks no real PR's or card's conversation", await fenced(unlock), fences.map(() => [EXIT_ACTION_FAILED, 0, 'not sent', true]));
-      const stuck = await run(lock, { ...good, [BACK]: read(false) });
-      const unread = await run(lock, { ...good, [BACK]: { status: 503, json: { message: 'down' } } });
-      t('⛔ a 204 whose issue still reads back unlocked, or does not read back, is a FAILED action, never a landing', [stuck.exit, stuck.rows[0].result.includes('reads back unlocked, not locked'), unread.exit, unread.rows[0].result.includes('could not be read back')], [EXIT_ACTION_FAILED, true, EXIT_ACTION_FAILED, true]);
-      const already = await run(unlock, { ...good, [UNLOCK]: { status: 404, json: { message: 'Not Found' } }, [BACK]: read(false) });
-      const refused = await run(lock, { ...good, [LOCK]: { status: 403, json: { message: 'Resource not accessible by integration' } }, [BACK]: read(false) });
-      t('a refused write whose conversation already reads as asked is an idempotent landing; one that does not is FAILED', [already.exit, already.rows[0].result, refused.exit, refused.rows[0].result.startsWith('FAILED: HTTP 403')], [EXIT_OK, 'already unlocked (idempotent)', EXIT_ACTION_FAILED, true]);
-      const { planLock, planCanary, planUnlock } = await import('../mailbox-open.mjs');
-      const plans = await Promise.all([planLock, planUnlock].map(async (plan) => { const r = await run(base(plan({ repo: REPO, pull: PR }).actions), { ...good, [BACK]: read(plan === planLock) }); return [r.exit, writes(r.seen).map((s) => s.call)]; }));
-      t("⭐ mailbox-open's lock and unlock plans land through the executor's fence and read-back, one write each", plans, [[EXIT_OK, [LOCK]], [EXIT_OK, [UNLOCK]]]);
-      const canary = await run(base(planCanary({ repo: REPO, pull: PR }).actions), { ...allowed, [`POST /repos/${REPO}/issues/${PR}/comments`]: { status: 201, json: { id: 91, html_url: 'https://github.test/c/91' } } });
-      t("…and its canary is ONE relay comment on the mailbox, nothing else written", [canary.exit, writes(canary.seen).map((s) => s.call)], [EXIT_OK, [`POST /repos/${REPO}/issues/${PR}/comments`]]);
     }
 
     // ── the advisory rows that write ────────────────────────────────────────
