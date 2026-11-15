@@ -479,23 +479,32 @@
  * `--branch`, the CODEOWNERS mirror, the prose gate, the relay's review plan)
  * answers exactly as before, and the approvers are still summoned — and carry
  * `lowRisk`, scoped to objectstack. A READING of the pull request
- * (`lowRiskArmVerdict`: every changed path, the body, the label names) moves
- * them to Tier S only when ALL hold:
+ * (`lowRiskArmVerdict`: every changed path, the body, the label names, the
+ * timeline, the fork predicate and the changesets read at the head) moves them
+ * to Tier S only when ALL hold (the last five tightened by contract review
+ * 6886243839):
  *
  *   - every governed path lies under a catalog row — `.claude/**`, a workflow,
  *     `AGENTS.md`, an ADR or any other row beside it is H;
  *   - every changed path lies under a hit catalog row or matches
  *     `LOW_RISK_RIDER_PATTERNS` (a changeset, Markdown prose under the docs
  *     trees) — an ALLOWLIST, so `packages/**`, `ui/packages/**`, a gate script,
- *     a ratchet ceiling or a lockfile is H;
- *   - the body declares `Clause-②: no` with no arm (`readClause2Line`, the one
- *     reader) — `yes`, `(narrowing)`, malformed or absent is H;
- *   - the labels were read and none is `security`.
+ *     a ratchet ceiling or a lockfile is H — and under a catalog row only
+ *     Markdown and `evals/*.json` (`LOW_RISK_ARM_FILE_PATTERNS`);
+ *   - the body carries exactly ONE bare `Clause-②: no` and ONE bare
+ *     `Metadata-protocol: none` (`readBareDeclaration`, the fleet's readers run
+ *     per line): `yes`, an arm, trailing words, a second declaration, or the
+ *     line quoted or fenced is H;
+ *   - at least one changeset, each read at the head, releasing nothing but
+ *     `'@objectstack/skills': patch` and carrying the same two bare lines;
+ *   - the labels were read and none is `security`, and the timeline was read and
+ *     never removed one;
+ *   - the head lives in the base repository (`forkVerdict`).
  *
  * Then the landing is Tier S's: a `## Contract review` record for the current
  * head at `CONTRACT_REVIEW_TIER` (the record recognisers' `rules` face — no
- * lower tier stands on a governed path) and every check green; the owning seat
- * enqueues. ⛔ Fail closed: no reading or an unmeasured one is H. `--pr` reads
+ * lower tier stands on a governed path) that READS PASS — the queue guard reads
+ * the verdict for this arm — and every check green; the owning seat enqueues. ⛔ Fail closed: no reading or an unmeasured one is H. `--pr` reads
  * it off the same pull object and file walk; the queue guard's `merge_group` leg
  * off the pull it already reads, over every commit of the PR in the group.
  *
@@ -1081,7 +1090,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { historyHorizon } from './git-history.mjs';
-import { readClause2Line } from './clause2-line.mjs';
+import { quoteLine, readClause2Line, readMetadataProtocolLine } from './clause2-line.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, INSTALL_FIX, reportPrerequisiteNotMet } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
@@ -1138,7 +1147,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
   '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
-  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 24,
+  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 54,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2246,19 +2255,90 @@ function lowRiskArmIn(surface, repo) {
 }
 
 /**
+ * The file SHAPES a low-risk row may change (contract review 6886243839, S4): skill
+ * wording and its evals, nothing else. A script, a JSON or YAML outside an
+ * `evals/` folder, an image or any other file under `skills/**` keeps the PR H.
+ */
+export const LOW_RISK_ARM_FILE_PATTERNS = Object.freeze([/\.md$/, /(?:^|\/)evals\/[^/]+\.json$/]);
+
+/** A changeset path, as the rider allowlist spells it. */
+export const LOW_RISK_CHANGESET_PATH = /^\.changeset\/[^/]+\.md$/;
+
+/** The ONE frontmatter line a low-risk changeset may carry (none is allowed too): the catalog, at patch. */
+export const LOW_RISK_CHANGESET_RELEASE = /^(['"])@objectstack\/skills\1[ \t]*:[ \t]*patch[ \t]*$/;
+
+/**
+ * The ONE bare declaration of `key` in `text`, read with the fleet's reader LINE
+ * BY LINE (never a second parser), or the reason it is not there. Pure.
+ *
+ * Every line the reader reads as `declared` or `malformed` is a declaration
+ * line, fenced and quoted ones included. Exactly ONE must exist, outside any
+ * ``` or ~~~ fence and any `>` quote, and with its list bullet, bold and
+ * backticks stripped it must read EXACTLY `<key>: <value>`. So a second
+ * declaration (a quoted `no` before a real `yes`), trailing words (`no — but`)
+ * and an arm (`no (narrowing)`) are each a reason, and the arm reads them as H.
+ */
+export function readBareDeclaration(text, reader, key, value) {
+  const hits = [];
+  let fence = null;
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const read = reader(line);
+    if (read && (read.kind === 'declared' || read.kind === 'malformed')) hits.push({ line, fenced: fence !== null });
+    const marker = /^[ \t]*(?:>[ \t]*)*(`{3,}|~{3,})/.exec(line);
+    if (marker) fence = fence === null ? marker[1][0] : marker[1][0] === fence ? null : fence;
+  }
+  const want = `${key}: ${value}`;
+  if (hits.length === 0) return { ok: false, reason: `no \`${key}:\` line` };
+  if (hits.length > 1) return { ok: false, reason: `${hits.length} \`${key}:\` lines, where exactly one bare \`${want}\` is read` };
+  const [{ line, fenced }] = hits;
+  if (fenced) return { ok: false, reason: `its one \`${key}:\` line sits inside a code fence` };
+  if (/^[ \t]*>/.test(line)) return { ok: false, reason: `its one \`${key}:\` line is a quote (${quoteLine(line)})` };
+  const bare = line.replace(/^[ \t]*(?:[-*][ \t]+)?/, '').replace(/\*\*|`/g, '').replace(/[ \t]+/g, ' ').trim();
+  if (bare !== want) return { ok: false, reason: `its \`${key}:\` line reads ${quoteLine(line)}, not exactly \`${want}\`` };
+  return { ok: true, reason: null };
+}
+
+/**
+ * Why one changeset read at the head keeps the arm H, or [] (M1). Pure. Its
+ * frontmatter may release `'@objectstack/skills': patch` and nothing else, and
+ * its body carries one bare `Clause-②: no` and one bare `Metadata-protocol: none`.
+ */
+export function lowRiskChangesetReasons(file) {
+  const path = String(file?.path ?? '(unnamed)');
+  if (typeof file?.text !== 'string') return [`\`${path}\` was not read at the head`];
+  const lines = file.text.replace(/^\uFEFF/, '').split(/\r?\n/);
+  const close = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
+  if (lines[0]?.trim() !== '---' || close < 0) return [`\`${path}\` carries no frontmatter block`];
+  const reasons = [];
+  const releases = lines.slice(1, close).filter((l) => l.trim() !== '' && !LOW_RISK_CHANGESET_RELEASE.test(l.trim()));
+  if (releases.length > 0) reasons.push(`\`${path}\` releases ${releases.slice(0, 2).map((l) => quoteLine(l.trim(), 60)).join(', ')}; the arm allows only \`'@objectstack/skills': patch\``);
+  const body = lines.slice(close + 1).join('\n');
+  for (const [reader, key, value] of [[readClause2Line, 'Clause-②', 'no'], [readMetadataProtocolLine, 'Metadata-protocol', 'none']]) {
+    const read = readBareDeclaration(body, reader, key, value);
+    if (!read.ok) reasons.push(`\`${path}\`: ${read.reason}`);
+  }
+  return reasons;
+}
+
+/**
  * The arm's verdict over one matched slice, from a READING of the pull request:
- * `{ measured: true, paths, body, labels }` — every changed path (ungoverned
- * ones included), the PR body (where its `Clause-②:` line is written) and its
- * label names. Pure.
+ * `{ measured: true, paths, body, labels, timeline, fork, changesets }` — every
+ * changed path (ungoverned ones included), the PR body, its label names, its
+ * timeline events, `forkVerdict` of the pull object and the changesets read at
+ * the head (`{ measured, reason, files: [{ path, text }] }`). Pure.
  *
  * Tier S only when ALL of these hold, each a reason when it does not:
  *   - every governed row hit is a low-risk row (a `.claude/**`, workflow or
  *     any Tier H row beside it is H — the card's "no other governed path");
- *   - every changed path lies under a hit low-risk row or matches `LOW_RISK_RIDER_PATTERNS`;
+ *   - every changed path lies under a hit low-risk row or matches `LOW_RISK_RIDER_PATTERNS`,
+ *     and every path under a low-risk row matches `LOW_RISK_ARM_FILE_PATTERNS`;
  *   - the reading's path list holds every governed file of the slice;
- *   - the body declares `Clause-②: no` with NO arm (`readClause2Line`, the
- *     fleet's one reader; `no (narrowing)`, `yes`, malformed or absent is H);
- *   - the labels were read and none is `security`.
+ *   - the body carries one bare `Clause-②: no` and one bare `Metadata-protocol: none`
+ *     (`readBareDeclaration` over the fleet's readers);
+ *   - at least one changeset, every one read at the head and clean (`lowRiskChangesetReasons`);
+ *   - the labels were read and none is `security`, and the timeline was read and
+ *     never removed a `security` label;
+ *   - the head lives in the base repository (no fork).
  * ⛔ Fail closed: no reading, or one not measured, is Tier H with its reason.
  */
 export function lowRiskArmVerdict(matched, repo, reading = null) {
@@ -2272,6 +2352,7 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
     };
   }
   const reasons = [];
+  const more = (list, n) => `${list.slice(0, n).join(', ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
   const armRows = rows.filter((s) => lowRiskArmIn(s, repo));
   const outside = rows.filter((s) => !lowRiskArmIn(s, repo));
   if (armRows.length === 0) reasons.push('no low-risk row was hit');
@@ -2279,17 +2360,37 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
   const paths = (Array.isArray(reading.paths) ? reading.paths : []).filter((p) => typeof p === 'string' && p !== '');
   if (paths.length === 0) reasons.push('the reading carries no path list');
   const armPrefixes = armRows.map((s) => s.prefix).filter(Boolean);
-  const stray = paths.filter((p) => !armPrefixes.some((prefix) => p.startsWith(prefix)) && !LOW_RISK_RIDER_PATTERNS.some((re) => re.test(p)));
-  if (stray.length > 0) reasons.push(`a path outside skills wording and prose: ${stray.slice(0, 4).join(', ')}${stray.length > 4 ? ` (+${stray.length - 4} more)` : ''}`);
+  const underArm = (p) => armPrefixes.some((prefix) => p.startsWith(prefix));
+  const stray = paths.filter((p) => !underArm(p) && !LOW_RISK_RIDER_PATTERNS.some((re) => re.test(p)));
+  if (stray.length > 0) reasons.push(`a path outside skills wording and prose: ${more(stray, 4)}`);
+  const odd = paths.filter((p) => underArm(p) && !LOW_RISK_ARM_FILE_PATTERNS.some((re) => re.test(p)));
+  if (odd.length > 0) reasons.push(`a skills file that is neither Markdown nor an \`evals/*.json\`: ${more(odd, 4)}`);
   const listed = new Set(paths);
   const unlisted = rows.flatMap((s) => s.files ?? []).filter((f) => !listed.has(f));
   if (paths.length > 0 && unlisted.length > 0) reasons.push(`the reading's path list does not hold ${unlisted.slice(0, 2).join(', ')}`);
-  const clause2 = readClause2Line(reading.body);
-  if (clause2 === null) reasons.push('the PR body carries no `Clause-②:` line');
-  else if (clause2.kind !== 'declared') reasons.push(`the PR body's \`Clause-②:\` line does not read (${clause2.line})`);
-  else if (clause2.value !== 'no' || clause2.arm !== null) reasons.push(`the PR body declares \`Clause-②: ${clause2.value}${clause2.arm ? ` (${clause2.arm})` : ''}\`, which stays with the maintainer`);
+  for (const [reader, key, value] of [[readClause2Line, 'Clause-②', 'no'], [readMetadataProtocolLine, 'Metadata-protocol', 'none']]) {
+    const read = readBareDeclaration(reading.body, reader, key, value);
+    if (!read.ok) reasons.push(`the PR body: ${read.reason}`);
+  }
+  const changesetPaths = paths.filter((p) => LOW_RISK_CHANGESET_PATH.test(p));
+  const changesets = reading.changesets;
+  if (changesetPaths.length === 0) reasons.push('the PR carries no changeset');
+  else if (!changesets || changesets.measured !== true) reasons.push(`its changesets were not read at the head (${changesets?.reason ?? 'no reading'})`);
+  else {
+    const files = Array.isArray(changesets.files) ? changesets.files : [];
+    for (const path of changesetPaths) {
+      const read = files.filter((f) => f?.path === path);
+      for (const r of read.length > 0 ? read : [{ path, text: null }]) reasons.push(...lowRiskChangesetReasons(r));
+    }
+  }
   if (!Array.isArray(reading.labels)) reasons.push('the labels were not read');
   else if (reading.labels.some((l) => String(l ?? '').toLowerCase() === 'security')) reasons.push('the PR carries the `security` label');
+  const timeline = reading.timeline;
+  if (!timeline || timeline.measured !== true || !Array.isArray(timeline.events)) reasons.push(`its timeline was not read (${timeline?.reason ?? 'no reading'}), so a removed \`security\` label cannot be ruled out`);
+  else if (timeline.events.some((e) => e?.event === 'unlabeled' && String(e?.label?.name ?? '').toLowerCase() === 'security')) reasons.push('its timeline shows the `security` label removed');
+  const fork = reading.fork;
+  if (!fork || fork.measured !== true) reasons.push('its head repository was not read, so a fork cannot be ruled out');
+  else if (fork.isFork === true) reasons.push(`its head lives in a fork (${fork.headRepo ?? 'a deleted repository'})`);
   return { tier: reasons.length === 0 ? GOVERNED_TIER_S : GOVERNED_TIER_H, measured: true, reason: null, reasons };
 }
 
@@ -2314,11 +2415,11 @@ export function renderLowRiskLines(matched) {
   if (!v.measured) {
     return (
       `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): NOT MEASURED — ${v.reason}.\n` +
-      '         Tier H, fail closed. `--pr <n>` reads the body and the labels; the queue guard reads them on the queue leg.\n'
+      '         Tier H, fail closed. `--pr <n>` on a checkout holding the head reads the PR; the queue guard reads it on the queue leg.\n'
     );
   }
   if (v.tier === GOVERNED_TIER_S) {
-    return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — skills wording and prose only, \`Clause-②: no\`, no \`security\` label.\n`;
+    return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier S — skills wording and prose only, one bare \`Clause-②: no\` and \`Metadata-protocol: none\`, clean changesets, no \`security\` label ever, no fork.\n`;
   }
   return `      ⚖️ low-risk skills arm (${LOW_RISK_ARM_RULING}): Tier H —\n${v.reasons.map((r) => `        - ${r}\n`).join('')}`;
 }
@@ -4057,8 +4158,11 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
     size,
     fork,
     checks,
-    // The low-risk skills arm's reading (#33501), off the SAME pull object and file walk — no read of its own.
-    lowRisk: pullLowRiskReading(head, paths),
+    // The low-risk skills arm's reading (#33501), off the SAME pull object and file walk, plus the timeline
+    // over the same channel — read only when a path sits under an arm row, so no other `--pr` pays for it.
+    lowRisk: pullLowRiskReading(head, paths, {
+      timeline: lowRiskRowHit(paths) ? await fetchTimelineOver({ fetchImpl, url: `${apiUrl}/repos/${slug}/issues/${pull}/timeline`, channel: chosen, pageCap }) : null,
+    }),
     derivation: {
       kind: 'pull',
       slug,
@@ -4080,11 +4184,68 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
  * The low-risk skills arm's reading off a PR object and its WHOLE changed-path
  * list (`lowRiskArmVerdict`). Pure. Labels the object does not carry as a list
  * read `null`, which the arm reads as H; a body that is not a string reads as
- * an empty body, which declares nothing and is H too.
+ * an empty body, which declares nothing and is H too. The fork predicate is
+ * read off the same object; the timeline and the changesets arrive as their own
+ * readings, and one not handed in is NOT MEASURED, so H.
  */
-export function pullLowRiskReading(head, paths) {
+export function pullLowRiskReading(head, paths, { timeline = null, changesets = null } = {}) {
   const labels = Array.isArray(head?.labels) ? head.labels.map((l) => (typeof l === 'string' ? l : String(l?.name ?? ''))) : null;
-  return { measured: true, reason: null, paths: Array.isArray(paths) ? [...paths] : [], body: typeof head?.body === 'string' ? head.body : '', labels };
+  return {
+    measured: true,
+    reason: null,
+    paths: Array.isArray(paths) ? [...paths] : [],
+    body: typeof head?.body === 'string' ? head.body : '',
+    labels,
+    fork: forkVerdict(head),
+    timeline: timeline ?? { measured: false, reason: 'the timeline was not read', events: null },
+    changesets: changesets ?? { measured: false, reason: 'the changesets were not read at the head', files: [] },
+  };
+}
+
+/** Does any of these paths sit under a register row that carries the low-risk arm? Pure. */
+export function lowRiskRowHit(paths) {
+  const list = Array.isArray(paths) ? paths : [];
+  return GOVERNED_SURFACES.some((s) => s.lowRisk && list.some((p) => typeof p === 'string' && p.startsWith(s.prefix)));
+}
+
+/**
+ * The PR's issue timeline over the channel that read the PR, every page or NOT
+ * MEASURED: the event the arm looks for (a removed `security` label) can sit on
+ * any page, so a cut list is no reading.
+ */
+export async function fetchTimelineOver({ fetchImpl, url, channel, pageCap = PULL_FILES_PAGE_CAP }) {
+  const events = [];
+  let pages = 0;
+  let next = `${url}?per_page=100`;
+  while (next && pages < pageCap) {
+    const read = await fetchJsonOver(fetchImpl, next, channel);
+    if (!read.ok) return { measured: false, reason: `page ${pages + 1} of the timeline did not read — ${read.reason}`, events: null };
+    if (!Array.isArray(read.body)) return { measured: false, reason: `page ${pages + 1} of the timeline answered no list`, events: null };
+    events.push(...read.body);
+    pages += 1;
+    next = linkNext(read.link);
+  }
+  if (next) return { measured: false, reason: `the timeline runs past ${pageCap} page(s)`, events: null };
+  return { measured: true, reason: null, events };
+}
+
+/**
+ * `--pr`'s changeset reading for the arm: each `.changeset/*.md` the PR changes,
+ * read at the PR's own head from THIS checkout. Anything short of that is NOT
+ * MEASURED (Tier H) naming the fetch that cures it. A path that does not read at
+ * the head (a deleted changeset) is carried with no text, which the arm reads as H.
+ */
+export function pullChangesetReading({ derivation, paths, sameCheckout, run }) {
+  const unmeasured = (reason) => ({ measured: false, reason, files: [] });
+  const headSha = derivation?.headSha;
+  if (!sameCheckout) return unmeasured('the PR is not in the repository this checkout holds, so its head cannot be read here');
+  if (!isObjectId(headSha)) return unmeasured('the PR object named no head commit');
+  if (!run(['cat-file', '-e', `${headSha}^{commit}`]).ok) return unmeasured(`${headSha.slice(0, 10)} is not in this checkout — \`git fetch origin pull/${derivation.pull}/head\``);
+  const files = (Array.isArray(paths) ? paths : []).filter((p) => LOW_RISK_CHANGESET_PATH.test(p)).map((path) => {
+    const read = run(['show', `${headSha}:${path}`]);
+    return { path, text: read.ok ? read.out : null };
+  });
+  return { measured: true, reason: null, files };
 }
 
 /**
@@ -4686,7 +4847,11 @@ async function runPullMode(args) {
   const workflowDiff = derived.paths.some((p) => p.startsWith(WORKFLOWS_PREFIX))
     ? pullWorkflowDiff({ derivation: derived.derivation, paths: derived.paths, sameCheckout: target.slug === selfSlug, run: (argv) => tryGit(root, argv), git: (argv) => git(root, argv) })
     : null;
-  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, { fork: derived.fork, checks: derived.checks }, repo, workflowDiff, derived.lowRisk ?? null);
+  // The arm's changesets, read at the PR's head from this checkout, as the workflow split reads its trees.
+  const lowRisk = derived.lowRisk && lowRiskRowHit(derived.paths)
+    ? { ...derived.lowRisk, changesets: pullChangesetReading({ derivation: derived.derivation, paths: derived.paths, sameCheckout: target.slug === selfSlug, run: (argv) => tryGit(root, argv) }) }
+    : derived.lowRisk ?? null;
+  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, { fork: derived.fork, checks: derived.checks }, repo, workflowDiff, lowRisk);
 }
 
 /**
@@ -5560,7 +5725,15 @@ async function selfTest() {
     const SK = 'skills/objectstack-data/SKILL.md';
     const UISK = 'ui/skills/objectui-views/SKILL.md';
     const CS = '.changeset/33501-skills-wording.md';
-    const read = (paths, over = {}) => ({ measured: true, reason: null, paths, body: 'Fixes #1\n\nClause-②: no\nMetadata-protocol: none\n', labels: [], ...over });
+    const CS_TEXT = "---\n'@objectstack/skills': patch\n---\n\nskills: wording\n\nClause-②: no\nMetadata-protocol: none\n";
+    const csFiles = (paths, text = CS_TEXT) => paths.filter((p) => LOW_RISK_CHANGESET_PATH.test(p)).map((path) => ({ path, text }));
+    const read = (paths, over = {}) => ({
+      measured: true, reason: null, paths, body: 'Fixes #1\n\nClause-②: no\nMetadata-protocol: none\n', labels: [],
+      timeline: { measured: true, reason: null, events: [] },
+      fork: { measured: true, isFork: false, headRepo: 'o/r', baseRepo: 'o/r' },
+      changesets: { measured: true, reason: null, files: csFiles(paths) },
+      ...over,
+    });
     const tier = (paths, reading, repo = REPO) => governedTierFor(paths, repo, GOVERNED_SURFACES, null, reading);
     const reasons = (paths, reading) => lowRiskArmVerdict(governedPathsIn(paths, REPO), REPO, reading).reasons.join(' | ');
 
@@ -5576,10 +5749,10 @@ async function selfTest() {
     assert('⛔ an-unmeasured-reading-is-Tier-H-with-its-own-reason', tier([SK], { measured: false, reason: 'the pull could not be read' }) === GOVERNED_TIER_H && /the pull could not be read/.test(renderTestVerdict(testVerdict([SK], { repo: REPO, lowRisk: { measured: false, reason: 'the pull could not be read' } }))));
 
     // ⭐ The arm: pure skills wording, with its changeset and prose riders, on `Clause-②: no` and no security label.
-    assert('⭐ a-pure-skills-diff-on-Clause-2-no-is-Tier-S', tier([SK], read([SK])) === GOVERNED_TIER_S && testVerdict([SK], { repo: REPO, lowRisk: read([SK]) }).tier === GOVERNED_TIER_S);
+    assert('⭐ a-pure-skills-diff-with-its-changeset-on-Clause-2-no-is-Tier-S', tier([SK, CS], read([SK, CS])) === GOVERNED_TIER_S && testVerdict([SK, CS], { repo: REPO, lowRisk: read([SK, CS]) }).tier === GOVERNED_TIER_S, reasons([SK, CS], read([SK, CS])));
     assert('⭐ with-its-changeset-and-docs-prose-riders-it-stays-Tier-S', tier([SK, CS, 'content/docs/guides/x.mdx', 'docs/agents/x.md'], read([SK, CS, 'content/docs/guides/x.mdx', 'docs/agents/x.md'])) === GOVERNED_TIER_S);
-    assert('a-ui-skills-diff-and-both-catalogs-together-are-Tier-S', tier([UISK], read([UISK])) === GOVERNED_TIER_S && tier([SK, UISK, CS], read([SK, UISK, CS])) === GOVERNED_TIER_S);
-    assert('the-words-name-the-arm-and-the-Tier-S-landing', (() => { const t = renderTestVerdict(testVerdict([SK], { repo: REPO, lowRisk: read([SK]) })); return /Tier S\(席内达档复核落地\)/.test(t) && /low-risk skills arm .*Tier S/.test(t) && t.includes(LOW_RISK_ARM_RULING); })());
+    assert('a-ui-skills-diff-and-both-catalogs-together-are-Tier-S', tier([UISK, CS], read([UISK, CS])) === GOVERNED_TIER_S && tier([SK, UISK, CS], read([SK, UISK, CS])) === GOVERNED_TIER_S);
+    assert('the-words-name-the-arm-and-the-Tier-S-landing', (() => { const t = renderTestVerdict(testVerdict([SK, CS], { repo: REPO, lowRisk: read([SK, CS]) })); return /Tier S\(席内达档复核落地\)/.test(t) && /low-risk skills arm .*Tier S/.test(t) && t.includes(LOW_RISK_ARM_RULING); })());
 
     // ⛔ Published source or any path outside the allowlist: H.
     assert('⛔ skills-plus-packages-spec-stays-H', tier([SK, 'packages/spec/src/data/field.zod.ts'], read([SK, 'packages/spec/src/data/field.zod.ts'])) === GOVERNED_TIER_H && /outside skills wording and prose: packages\/spec/.test(reasons([SK, 'packages/spec/src/data/field.zod.ts'], read([SK, 'packages/spec/src/data/field.zod.ts']))));
@@ -5592,31 +5765,99 @@ async function selfTest() {
     assert('⛔ skills-beside-a-Tier-S-claude-path-is-H-too', tier([SK, '.claude/agents/os-dev.md'], read([SK, '.claude/agents/os-dev.md'])) === GOVERNED_TIER_H && /outside the arm: `\.claude\/\*\*`/.test(reasons([SK, '.claude/agents/os-dev.md'], read([SK, '.claude/agents/os-dev.md']))));
 
     // ⛔ The declaration: only a bare `Clause-②: no` lands on the seat.
-    const body = (line) => read([SK], { body: `Fixes #1\n\n${line}\n` });
-    assert('⛔ Clause-2-yes-or-no-narrowing-or-yes-widening-is-H', ['Clause-②: yes', 'Clause-②: no (narrowing)', 'Clause-②: yes (widening)', 'Clause-②: yes (narrowing)'].every((l) => tier([SK], body(l)) === GOVERNED_TIER_H));
-    assert('⛔ a-malformed-absent-or-near-miss-Clause-2-line-is-H', ['Clause-②: maybe', 'no declaration here', 'Clause 2: no', '`Clause-②:` no', ''].every((l) => tier([SK], body(l)) === GOVERNED_TIER_H) && tier([SK], read([SK], { body: null })) === GOVERNED_TIER_H);
-    assert('a-decorated-Clause-2-no-line-reads-as-the-one-reader-reads-it', tier([SK], body('- `Clause-②`: no')) === GOVERNED_TIER_S && tier([SK], body('- **Clause-②:** no')) === GOVERNED_TIER_S);
+    const body = (line) => read([SK, CS], { body: `Fixes #1\n\n${line}\nMetadata-protocol: none\n` });
+    assert('⛔ Clause-2-yes-or-no-narrowing-or-yes-widening-is-H', ['Clause-②: yes', 'Clause-②: no (narrowing)', 'Clause-②: yes (widening)', 'Clause-②: yes (narrowing)'].every((l) => tier([SK, CS], body(l)) === GOVERNED_TIER_H));
+    assert('⛔ a-malformed-absent-or-near-miss-Clause-2-line-is-H', ['Clause-②: maybe', 'no declaration here', 'Clause 2: no', '`Clause-②:` no', ''].every((l) => tier([SK, CS], body(l)) === GOVERNED_TIER_H) && tier([SK, CS], read([SK, CS], { body: null })) === GOVERNED_TIER_H);
+    assert('a-decorated-Clause-2-no-line-reads-as-the-one-reader-reads-it', tier([SK, CS], body('- `Clause-②`: no')) === GOVERNED_TIER_S && tier([SK, CS], body('- **Clause-②:** no')) === GOVERNED_TIER_S && tier([SK, CS], body('Clause-②: no')) === GOVERNED_TIER_S);
 
     // ⛔ Security: the label keeps it with the maintainer; labels not read is H.
-    assert('⛔ a-security-label-in-any-case-is-H', tier([SK], read([SK], { labels: ['security'] })) === GOVERNED_TIER_H && tier([SK], read([SK], { labels: ['docs', 'Security'] })) === GOVERNED_TIER_H);
-    assert('⛔ labels-not-read-is-H', tier([SK], read([SK], { labels: null })) === GOVERNED_TIER_H && tier([SK], read([SK], { labels: undefined })) === GOVERNED_TIER_H);
+    assert('⛔ a-security-label-in-any-case-is-H', tier([SK, CS], read([SK, CS], { labels: ['security'] })) === GOVERNED_TIER_H && tier([SK, CS], read([SK, CS], { labels: ['docs', 'Security'] })) === GOVERNED_TIER_H);
+    assert('⛔ labels-not-read-is-H', tier([SK, CS], read([SK, CS], { labels: null })) === GOVERNED_TIER_H && tier([SK, CS], read([SK, CS], { labels: undefined })) === GOVERNED_TIER_H);
 
     // The scope: the arm moves nothing outside objectstack, and nothing without a catalog hit.
-    assert('the-same-S-reading-moves-nothing-in-objectui-cloud-or-hotcrm', ['objectui', 'cloud', 'hotcrm'].every((r) => tier([SK], read([SK]), r) === GOVERNED_TIER_H));
+    assert('the-same-S-reading-moves-nothing-in-objectui-cloud-or-hotcrm', tier([SK, CS], read([SK, CS])) === GOVERNED_TIER_S && ['objectui', 'cloud', 'hotcrm'].every((r) => tier([SK, CS], read([SK, CS]), r) === GOVERNED_TIER_H));
     assert('a-slice-with-no-catalog-row-is-returned-as-is-byte-identical', (() => { const m = governedPathsIn(['AGENTS.md', '.claude/x.md'], REPO); return applyLowRiskArm(m, REPO, read(['AGENTS.md', '.claude/x.md'])) === m && renderLowRiskLines(m) === ''; })() && tier(['.claude/agents/os-dev.md'], read(['.claude/agents/os-dev.md'])) === GOVERNED_TIER_S);
 
     // The H words name every reason; `--pr` reads the arm off the SAME pull object and file walk.
     assert('the-H-words-list-each-reason', (() => { const t = renderTestVerdict(testVerdict([SK, 'packages/core/src/x.ts'], { repo: REPO, lowRisk: read([SK, 'packages/core/src/x.ts'], { labels: ['security'] }) })); return /low-risk skills arm .*Tier H/.test(t) && /packages\/core/.test(t) && /`security` label/.test(t) && /landing tier: H/.test(t); })());
-    const fromPull = pullLowRiskReading({ body: 'Clause-②: no', labels: [{ name: 'skip-changeset' }, { name: 'security' }] }, [SK]);
-    assert('pullLowRiskReading-takes-body-label-names-and-the-whole-path-list', fromPull.measured === true && fromPull.body === 'Clause-②: no' && fromPull.labels.join() === 'skip-changeset,security' && fromPull.paths.join() === SK && pullLowRiskReading({}, [SK]).labels === null && pullLowRiskReading({ body: 7, labels: [] }, [SK]).body === '', JSON.stringify(fromPull));
+    const SAME = { head: { repo: { full_name: 'o/r' } }, base: { repo: { full_name: 'o/r' } } };
+    const fromPull = pullLowRiskReading({ ...SAME, body: 'Clause-②: no', labels: [{ name: 'skip-changeset' }, { name: 'security' }] }, [SK]);
+    assert('pullLowRiskReading-takes-body-label-names-the-whole-path-list-and-the-fork-predicate', fromPull.measured === true && fromPull.body === 'Clause-②: no' && fromPull.labels.join() === 'skip-changeset,security' && fromPull.paths.join() === SK && fromPull.fork.measured === true && fromPull.fork.isFork === false && pullLowRiskReading({}, [SK]).labels === null && pullLowRiskReading({ body: 7, labels: [] }, [SK]).body === '', JSON.stringify(fromPull));
+    assert('⛔ pullLowRiskReading-without-a-timeline-or-changesets-handed-in-reads-both-NOT-MEASURED-so-H', fromPull.timeline.measured === false && fromPull.changesets.measured === false && tier([SK, CS], pullLowRiskReading({ ...SAME, body: 'Clause-②: no\nMetadata-protocol: none', labels: [] }, [SK, CS])) === GOVERNED_TIER_H);
     {
       const respond = (b) => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => b });
-      const walked = await fetchPullFiles({
+      const urls = [];
+      const walk = (paths, timeline) => fetchPullFiles({
         apiUrl: 'https://api', slug: 'o/r', pull: 2, channels: [{ id: 'fixture', name: 'fixture channel', headers: {} }],
-        fetchImpl: async (url) => (/\/files/.test(url) ? respond([{ filename: SK }, { filename: CS }]) : respond({ changed_files: 2, additions: 3, deletions: 1, body: 'Clause-②: no', labels: [{ name: 'docs' }] })),
+        fetchImpl: async (url) => {
+          urls.push(url);
+          if (/\/files/.test(url)) return respond(paths.map((filename) => ({ filename })));
+          if (/\/timeline/.test(url)) return timeline === 'fail' ? { ok: false, status: 403, headers: { get: () => null }, json: async () => ({}) } : respond(timeline);
+          return respond({ ...SAME, changed_files: paths.length, additions: 3, deletions: 1, body: 'Clause-②: no\nMetadata-protocol: none', labels: [{ name: 'docs' }] });
+        },
       });
-      assert('⭐ --pr-carries-the-arm-reading-off-the-same-GET-and-file-walk-and-it-answers-Tier-S', walked.ok === true && walked.lowRisk?.measured === true && walked.lowRisk.paths.join() === `${SK},${CS}` && tier(walked.paths, walked.lowRisk) === GOVERNED_TIER_S, JSON.stringify(walked.lowRisk ?? walked.reason));
+      const walked = await walk([SK, CS], []);
+      const withCs = (r) => ({ ...r, changesets: { measured: true, reason: null, files: csFiles([SK, CS]) } });
+      assert('⭐ --pr-carries-the-arm-reading-off-the-same-GET-file-walk-and-timeline-and-with-its-changesets-read-it-answers-Tier-S', walked.ok === true && walked.lowRisk?.measured === true && walked.lowRisk.paths.join() === `${SK},${CS}` && walked.lowRisk.timeline.measured === true && urls.some((u) => /\/issues\/2\/timeline\?per_page=100$/.test(u)) && tier(walked.paths, withCs(walked.lowRisk)) === GOVERNED_TIER_S, JSON.stringify(walked.lowRisk ?? walked.reason));
+      const removed = await walk([SK, CS], [{ event: 'labeled', label: { name: 'security' } }, { event: 'unlabeled', label: { name: 'security' } }]);
+      assert('⛔ S1-a-security-label-REMOVED-in-the-timeline-the-pull-object-no-longer-shows-is-H', tier(removed.paths, withCs(removed.lowRisk)) === GOVERNED_TIER_H && /`security` label removed/.test(lowRiskArmVerdict(governedPathsIn(removed.paths, REPO), REPO, withCs(removed.lowRisk)).reasons.join()));
+      const blind = await walk([SK, CS], 'fail');
+      assert('⛔ S1-a-timeline-that-does-not-read-is-NOT-MEASURED-so-H', blind.ok === true && blind.lowRisk.timeline.measured === false && tier(blind.paths, withCs(blind.lowRisk)) === GOVERNED_TIER_H);
+      urls.length = 0;
+      await walk(['packages/core/src/x.ts'], []);
+      assert('a-PR-with-no-arm-row-hit-spends-no-timeline-read', urls.length > 0 && !urls.some((u) => /\/timeline/.test(u)), urls.join());
     }
+
+    // ⛔ M1: the changesets, read at the head — the catalog at patch only, each with a bare `Clause-②: no` and `Metadata-protocol: none`.
+    const cs = (text, paths = [SK, CS]) => read(paths, { changesets: { measured: true, reason: null, files: csFiles(paths, text) } });
+    const CS_BODY = '\n\nskills: wording\n\nClause-②: no\nMetadata-protocol: none\n';
+    assert('⛔ M1-a-PR-with-no-changeset-is-H', tier([SK], read([SK])) === GOVERNED_TIER_H && /no changeset/.test(reasons([SK], read([SK]))));
+    assert('⛔ M1-changesets-not-read-at-the-head-are-H-with-their-reason', tier([SK, CS], read([SK, CS], { changesets: { measured: false, reason: 'not in this checkout', files: [] } })) === GOVERNED_TIER_H && /not in this checkout/.test(reasons([SK, CS], read([SK, CS], { changesets: { measured: false, reason: 'not in this checkout', files: [] } }))) && tier([SK, CS], read([SK, CS], { changesets: undefined })) === GOVERNED_TIER_H);
+    assert('⛔ M1-a-changeset-releasing-any-other-package-or-the-catalog-above-patch-is-H',
+      [`---\n'@objectstack/spec': patch\n---${CS_BODY}`, `---\n'@objectstack/skills': minor\n---${CS_BODY}`, `---\n'@objectstack/skills': patch\n'@objectstack/core': patch\n---${CS_BODY}`, `---\n'@objectstack/skills': major\n---${CS_BODY}`].every((t) => tier([SK, CS], cs(t)) === GOVERNED_TIER_H) && /releases/.test(reasons([SK, CS], cs(`---\n'@objectstack/spec': patch\n---${CS_BODY}`))));
+    assert('M1-the-catalog-at-patch-in-either-quote-or-an-empty-frontmatter-is-S', [`---\n"@objectstack/skills": patch\n---${CS_BODY}`, `---\n---${CS_BODY}`, `---\n'@objectstack/skills':  patch \n---${CS_BODY}`].every((t) => tier([SK, CS], cs(t)) === GOVERNED_TIER_S));
+    assert('⛔ M1-a-changeset-without-a-bare-Clause-2-no-or-Metadata-protocol-none-is-H',
+      [`---\n'@objectstack/skills': patch\n---\n\nx\n\nMetadata-protocol: none\n`, `---\n'@objectstack/skills': patch\n---\n\nx\n\nClause-②: no\n`, `---\n'@objectstack/skills': patch\n---\n\nClause-②: no\nMetadata-protocol: added\n`, `---\n'@objectstack/skills': patch\n---\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n`, `---\n'@objectstack/skills': patch\n---\n\nClause-②: no, wording\nMetadata-protocol: none\n`].every((t) => tier([SK, CS], cs(t)) === GOVERNED_TIER_H));
+    assert('⛔ M1-a-changeset-with-no-frontmatter-or-that-did-not-read-at-the-head-is-H', tier([SK, CS], cs(`'@objectstack/skills': patch${CS_BODY}`)) === GOVERNED_TIER_H && tier([SK, CS], cs(null)) === GOVERNED_TIER_H && /was not read at the head/.test(reasons([SK, CS], cs(null))));
+    assert('⛔ M1-a-changed-changeset-the-reading-holds-no-file-for-is-H', tier([SK, CS, '.changeset/other.md'], read([SK, CS, '.changeset/other.md'], { changesets: { measured: true, reason: null, files: csFiles([SK, CS]) } })) === GOVERNED_TIER_H);
+    assert('⛔ M1-the-PR-body-needs-a-bare-Metadata-protocol-none-too', ['Clause-②: no\n', 'Clause-②: no\nMetadata-protocol: semantic\n', 'Clause-②: no\nMetadata-protocol: none (wording)\n'].every((b) => tier([SK, CS], read([SK, CS], { body: b })) === GOVERNED_TIER_H) && /Metadata-protocol/.test(reasons([SK, CS], read([SK, CS], { body: 'Clause-②: no\n' }))));
+    assert('lowRiskChangesetReasons-is-empty-for-the-clean-changeset-and-names-the-file-otherwise', lowRiskChangesetReasons({ path: CS, text: CS_TEXT }).length === 0 && lowRiskChangesetReasons({ path: CS, text: `---\n---\n` }).every((r) => r.includes(CS)) && lowRiskChangesetReasons({ path: CS, text: `---\n---\n` }).length === 2);
+
+    // ⛔ S2: exactly ONE bare `Clause-②: no` — trailing words, a second declaration, a quoted or fenced `no` are each H.
+    const bodyOf = (text) => read([SK, CS], { body: `${text}\nMetadata-protocol: none\n` });
+    assert('⛔ S2-trailing-text-after-no-is-H', ['Clause-②: no — wording only', 'Clause-②: no, see below', 'Clause-②: no.'].every((l) => tier([SK, CS], bodyOf(l)) === GOVERNED_TIER_H));
+    assert('⛔ S2-two-declarations-are-H-even-two-of-no', tier([SK, CS], bodyOf('Clause-②: no\nClause-②: no')) === GOVERNED_TIER_H && /2 `Clause-②:` lines/.test(reasons([SK, CS], bodyOf('Clause-②: no\nClause-②: no'))));
+    assert('⛔ S2-a-QUOTED-no-before-a-real-yes-is-H', tier([SK, CS], bodyOf('> Clause-②: no\n\nClause-②: yes')) === GOVERNED_TIER_H);
+    assert('⛔ S2-a-FENCED-no-before-a-real-yes-is-H-backtick-and-tilde', tier([SK, CS], bodyOf('```\nClause-②: no\n```\nClause-②: yes')) === GOVERNED_TIER_H && tier([SK, CS], bodyOf('~~~md\nClause-②: no\n~~~\nClause-②: yes (widening)')) === GOVERNED_TIER_H);
+    assert('⛔ S2-a-lone-fenced-or-quoted-no-is-H', tier([SK, CS], bodyOf('```\nClause-②: no\n```')) === GOVERNED_TIER_H && tier([SK, CS], bodyOf('> Clause-②: no')) === GOVERNED_TIER_H && /code fence/.test(reasons([SK, CS], bodyOf('```\nClause-②: no\n```'))) && /a quote/.test(reasons([SK, CS], bodyOf('> Clause-②: no'))));
+    assert('S2-a-fence-that-closed-before-the-real-line-leaves-it-bare', tier([SK, CS], bodyOf('```js\nconst x = 1;\n```\nClause-②: no')) === GOVERNED_TIER_S);
+    assert('readBareDeclaration-runs-the-one-reader-per-line', readBareDeclaration('a\nClause-②: no\nb', readClause2Line, 'Clause-②', 'no').ok === true && readBareDeclaration('Metadata-protocol: none', readMetadataProtocolLine, 'Metadata-protocol', 'none').ok === true && readBareDeclaration('Clause-②: maybe', readClause2Line, 'Clause-②', 'no').ok === false);
+
+    // ⛔ S1: a `security` label removed before the queue read; the timeline unread.
+    const tl = (events) => read([SK, CS], { timeline: { measured: true, reason: null, events } });
+    assert('⛔ S1-any-unlabeled-security-event-is-H-in-any-case', tier([SK, CS], tl([{ event: 'unlabeled', label: { name: 'security' } }])) === GOVERNED_TIER_H && tier([SK, CS], tl([{ event: 'unlabeled', label: { name: 'Security' } }])) === GOVERNED_TIER_H);
+    assert('S1-another-label-removed-or-security-on-another-event-stays-S', tier([SK, CS], tl([{ event: 'unlabeled', label: { name: 'docs' } }, { event: 'commented', label: { name: 'security' } }])) === GOVERNED_TIER_S);
+    assert('⛔ S1-a-timeline-not-read-or-not-a-list-is-H', tier([SK, CS], read([SK, CS], { timeline: { measured: false, reason: 'HTTP 403', events: null } })) === GOVERNED_TIER_H && tier([SK, CS], read([SK, CS], { timeline: { measured: true, reason: null, events: null } })) === GOVERNED_TIER_H && tier([SK, CS], read([SK, CS], { timeline: undefined })) === GOVERNED_TIER_H);
+
+    // ⛔ S3: a fork head, or a head repository not read.
+    assert('⛔ S3-a-fork-PR-is-H', tier([SK, CS], read([SK, CS], { fork: { measured: true, isFork: true, headRepo: 'someone/fork', baseRepo: 'o/r' } })) === GOVERNED_TIER_H && /fork \(someone\/fork\)/.test(reasons([SK, CS], read([SK, CS], { fork: { measured: true, isFork: true, headRepo: 'someone/fork', baseRepo: 'o/r' } }))));
+    assert('⛔ S3-a-deleted-head-repo-or-an-unread-fork-predicate-is-H', tier([SK, CS], read([SK, CS], { fork: forkVerdict({ head: { repo: null }, base: { repo: { full_name: 'o/r' } } }) })) === GOVERNED_TIER_H && tier([SK, CS], read([SK, CS], { fork: forkVerdict({}) })) === GOVERNED_TIER_H && tier([SK, CS], read([SK, CS], { fork: undefined })) === GOVERNED_TIER_H);
+
+    // ⛔ S4: under the catalog rows only Markdown and `evals/*.json`.
+    assert('S4-skill-Markdown-and-an-evals-json-are-S', tier([SK, 'skills/objectstack-data/evals/evals.json', CS], read([SK, 'skills/objectstack-data/evals/evals.json', CS])) === GOVERNED_TIER_S && tier(['ui/skills/x/evals/a.json', CS], read(['ui/skills/x/evals/a.json', CS])) === GOVERNED_TIER_S);
+    assert('⛔ S4-any-other-file-under-the-catalog-is-H', ['skills/objectstack-data/hook.js', 'skills/objectstack-data/data.json', 'skills/objectstack-data/evals/sub/a.json', 'skills/objectstack-data/evals/a.yaml', 'skills/objectstack-data/logo.png', 'ui/skills/x/run.sh'].every((p) => tier([p, CS], read([p, CS])) === GOVERNED_TIER_H) && /neither Markdown nor/.test(reasons(['skills/x/hook.js', CS], read(['skills/x/hook.js', CS]))));
+    assert('LOW_RISK_ARM_FILE_PATTERNS-are-frozen-and-two', Object.isFrozen(LOW_RISK_ARM_FILE_PATTERNS) && LOW_RISK_ARM_FILE_PATTERNS.length === 2);
+    assert('pullChangesetReading-reads-each-changeset-at-the-head-or-is-NOT-MEASURED', (() => {
+      const H = 'a'.repeat(40);
+      const run = (argv) => (argv[0] === 'cat-file' ? { ok: true, out: '' } : argv[1] === `${H}:${CS}` ? { ok: true, out: CS_TEXT } : { ok: false, out: '' });
+      const ok = pullChangesetReading({ derivation: { headSha: H, pull: 2 }, paths: [SK, CS, '.changeset/gone.md'], sameCheckout: true, run });
+      const away = pullChangesetReading({ derivation: { headSha: H, pull: 2 }, paths: [CS], sameCheckout: true, run: () => ({ ok: false, out: '' }) });
+      return ok.measured === true && ok.files.length === 2 && ok.files[0].text === CS_TEXT && ok.files[1].text === null &&
+        away.measured === false && /git fetch origin pull\/2\/head/.test(away.reason) &&
+        pullChangesetReading({ derivation: { headSha: H, pull: 2 }, paths: [CS], sameCheckout: false, run }).measured === false &&
+        pullChangesetReading({ derivation: { headSha: null, pull: 2 }, paths: [CS], sameCheckout: true, run }).measured === false;
+    })());
+    assert('lowRiskRowHit-reads-the-arm-rows-only', lowRiskRowHit([SK]) && lowRiskRowHit(['x', UISK]) && !lowRiskRowHit(['.claude/x.md', 'packages/a.ts', 'docs/adr/1.md']) && !lowRiskRowHit(null));
   }
 
   battery('the nested `ui/` workspace rows, on the register (#25712)');

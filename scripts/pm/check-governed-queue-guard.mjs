@@ -346,9 +346,13 @@
  * `decomposeGovernedWork` keeps every path of every attributed commit
  * (`allPaths`, ungoverned commits of the same PR included) and reads the arm
  * NOT MEASURED, so the `pull_request` leg says Tier H; the `merge_group` leg's
- * `readLowRiskTier` re-reads the tier with the body and label names of the pull
- * object it already fetched for the head — no read of its own — through the
- * register's `governedTierFor`. An unread pull stays Tier H.
+ * `readLowRiskTier` re-reads the tier with the body, label names and fork
+ * predicate of the pull object it already fetched for the head, the timeline the
+ * enqueue leg already read, and each changeset at the commit that touched it
+ * (`git show`) — through the register's `governedTierFor`. An unread pull,
+ * timeline or changeset stays Tier H. An entry the arm puts at Tier S clears on
+ * a same-head record that READS PASS (`lowRiskRecordVerdict`, the fleet's
+ * `contractReviewVerdictOf`); the other Tier S legs still read no verdict.
  *
  * ⭐ THE TWO CARRIERS ARE ONE DELIVERY, and the location is the governed text's
  * to decide rather than this file's — quoted, untranslated, because it IS the
@@ -587,6 +591,7 @@ import {
   GOVERNED_TIER_S,
   HUMAN_MERGE_LINE_THRESHOLD,
   LOW_RISK_ARM_RULING,
+  LOW_RISK_CHANGESET_PATH,
   SELF_REPO_ID,
   WORKFLOWS_PREFIX,
   applyGeneratedExceptions,
@@ -601,6 +606,7 @@ import {
   landsByHumanMerge,
   mergeWorkflowReadings,
   pullNumberFromSubject,
+  forkVerdict,
   pullSizeFrom,
   recomputeProvenanceFor,
   readWorkflowDiff,
@@ -659,7 +665,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the 2026-10-26 ENQUEUE leg: an authorized enqueuer is the human review': 28,
   '⭐ the cheap early-warning leg: commits and trees, toolchain on demand': 20,
   '⭐ the workflows split at the queue (ruling record 6722205630)': 30,
-  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 16,
+  '⚖️ the low-risk skills arm at the queue: body, labels and every path, read off the pull this leg holds (#33501)': 38,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -922,6 +928,8 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
       reviewFace: tier?.reviewFace,
       threads: tier?.REVIEW_OF_RECORD_THREADS,
       location: tier?.REVIEW_OF_RECORD_LOCATION,
+      // Read by the low-risk skills arm alone (#33501); absent, that arm refuses and nothing else changes.
+      verdictOf: tier?.contractReviewVerdictOf,
     };
     const missing = [
       ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace'].filter((key) => typeof found[key] !== 'function'),
@@ -1164,11 +1172,20 @@ export function decomposeGovernedWork(rows, repo) {
   // governed filter below drops a row, so an ungoverned commit of the same PR
   // (a `packages/**` edit in a commit of its own) still counts against the arm.
   const allByPull = new Map();
+  // ⭐ And every changeset each commit of the PR touches, with the commit it is read at (contract review
+  // 6886243839, M1): the arm reads each one's committed text, so a changeset in an ungoverned commit counts too.
+  const changesetsByPull = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
     if (typeof row?.pr !== 'number' || !Number.isInteger(row.pr) || row.pr <= 0) continue;
     const all = allByPull.get(row.pr) ?? new Set();
-    for (const p of Array.isArray(row.paths) ? row.paths : []) if (typeof p === 'string' && p !== '') all.add(p);
+    const refs = changesetsByPull.get(row.pr) ?? [];
+    for (const p of Array.isArray(row.paths) ? row.paths : []) {
+      if (typeof p !== 'string' || p === '') continue;
+      all.add(p);
+      if (LOW_RISK_CHANGESET_PATH.test(p)) refs.push({ sha: row.sha ?? null, path: p });
+    }
     allByPull.set(row.pr, all);
+    changesetsByPull.set(row.pr, refs);
   }
   for (const row of Array.isArray(rows) ? rows : []) {
     const surfaces = governedPathsIn(row?.paths ?? [], repo);
@@ -1204,6 +1221,7 @@ export function decomposeGovernedWork(rows, repo) {
         shas: entry.shas,
         paths,
         allPaths: [...(allByPull.get(entry.pr) ?? entry.paths)],
+        changesetRefs: changesetsByPull.get(entry.pr) ?? [],
         workflowDiff,
         surfaces: applyLowRiskArm(applyWorkflowSplit(governedPathsIn(paths, repo), repo, workflowDiff), repo, null),
         tier: governedTierFor(paths, repo, GOVERNED_SURFACES, workflowDiff, null),
@@ -1623,8 +1641,12 @@ export function renderGuardVerdict(verdict) {
               '           ⛔ never on the `Regen-provenance:` line being present (maintainer 2026-09-20; prose arm: 6159870311).',
             ]
           : []),
-        '           ⚠️ EXISTENCE and PROVENANCE, never the verdict: whether that record reads PASS is precondition ①',
-        '           of the landing check and stays human. This leg measures what produced it, not what it concluded.',
+        ...(entry.record.verdict === 'PASS'
+          ? ['           ⚖️ the low-risk skills arm lands on a record that READS PASS, and this one does (#33501).']
+          : [
+              '           ⚠️ EXISTENCE and PROVENANCE, never the verdict: whether that record reads PASS is precondition ①',
+              '           of the landing check and stays human. This leg measures what produced it, not what it concluded.',
+            ]),
       );
     } else if (entry.approval.state === 'unreadable') {
       lines.push(`        ⛔ the review list could NOT be read — ${entry.approval.reason}`);
@@ -1660,6 +1682,12 @@ export function renderGuardVerdict(verdict) {
             ]
           : entry.record.state === 'unreadable'
             ? [`        ⛔ the review of record could NOT be read — ${entry.record.reason}`]
+            : entry.record.state === 'not-pass'
+              ? [
+                  `        ⛔ the \`## Contract review\` comment on this head (comment ${entry.record.id ?? '(no readable id)'}, ` +
+                    `${entry.record.at ?? 'undated'}) does not read PASS: ${entry.record.verdictReason}.`,
+                  '           The low-risk skills arm lands on a PASS record only (#33501); a FAIL owes a patch and a new review.',
+                ]
             : entry.record.state === 'unsigned'
               ? [
                   `        ⛔ a \`## Contract review\` comment names this head (comment ${entry.record.id ?? '(no readable id)'}, ` +
@@ -1887,21 +1915,73 @@ export function renderGuardVerdict(verdict) {
 
 /**
  * Re-read one governed entry's tier with the low-risk skills arm's reading
- * (#33501): `paths` = every path of the PR's commits (`allPaths`), the body and
- * labels off the pull object the queue leg read. An entry with no catalog row
- * is left untouched; `pull` null (its read failed) is an UNMEASURED reading, so
- * the entry stays Tier H with the reason printed. ⛔ The tier comes from the
- * register's own `governedTierFor` and `applyLowRiskArm` — no second predicate
- * here. Mutates `entry` (its `surfaces` and `tier`); returns it.
+ * (#33501): `paths` = every path of the PR's commits (`allPaths`); the body,
+ * labels and fork predicate off the pull object the queue leg read; the timeline
+ * the enqueue leg read (`timeline`: `{ measured, reason, events }`); and each
+ * changeset at the commit that touched it, read with `runGit` (contract review
+ * 6886243839). An entry with no catalog row is left untouched; `pull` null (its
+ * read failed) is an UNMEASURED reading, so the entry stays Tier H with the
+ * reason printed, and so is a missing timeline, fork reading or git reader.
+ * ⛔ The tier comes from the register's own `governedTierFor` and
+ * `applyLowRiskArm` — no second predicate here. Mutates `entry` (its `surfaces`
+ * and `tier`); returns it.
  */
-export function readLowRiskTier(entry, repo, pull) {
+export function readLowRiskTier(entry, repo, pull, { timeline = null, runGit = null } = {}) {
   if (!entry || !(entry.surfaces ?? []).some((s) => s?.lowRiskVerdict)) return entry;
+  const refs = Array.isArray(entry.changesetRefs) ? entry.changesetRefs : [];
+  const changesets = typeof runGit !== 'function'
+    ? { measured: false, reason: 'no git reader was handed to the queue leg', files: [] }
+    : {
+        measured: true,
+        reason: null,
+        files: refs.map(({ sha, path }) => {
+          if (!sha) return { path, text: null };
+          try {
+            return { path, text: String(runGit(['show', `${sha}:${path}`])) };
+          } catch {
+            return { path, text: null };
+          }
+        }),
+      };
   const reading = pull
-    ? { measured: true, reason: null, paths: entry.allPaths ?? entry.paths, body: String(pull.body ?? ''), labels: Array.isArray(pull.labels) ? pull.labels : null }
+    ? {
+        measured: true,
+        reason: null,
+        paths: entry.allPaths ?? entry.paths,
+        body: String(pull.body ?? ''),
+        labels: Array.isArray(pull.labels) ? pull.labels : null,
+        fork: pull.fork ?? null,
+        timeline: timeline ?? { measured: false, reason: 'the timeline was not read', events: null },
+        changesets,
+      }
     : { measured: false, reason: 'its pull request could not be read, so its body and labels are unknown' };
   entry.surfaces = applyLowRiskArm(applyWorkflowSplit(governedPathsIn(entry.paths, repo), repo, entry.workflowDiff ?? null), repo, reading);
   entry.tier = governedTierFor(entry.paths, repo, GOVERNED_SURFACES, entry.workflowDiff ?? null, reading);
   return entry;
+}
+
+/** Did the low-risk skills arm put this entry at Tier S? */
+export function landsOnLowRiskArm(entry) {
+  return entry?.tier === TIER_S && (entry.surfaces ?? []).some((s) => s?.lowRiskVerdict?.tier === TIER_S);
+}
+
+/**
+ * The record leg's verdict for an entry the low-risk arm put at Tier S: a
+ * record that STANDS must also READ PASS (contract review 6886243839), read off
+ * the same comment the locator chose, with the fleet's verdict reader
+ * (`contractReviewVerdictOf`, re-exported by the recognisers). Anything else —
+ * FAIL, no verdict word, the comment not among the rows, no reader loaded — is
+ * `not-pass`, a refusal. Every other entry's record is returned as it was (the
+ * other Tier S legs read no verdict; card #33541). Pure.
+ */
+export function lowRiskRecordVerdict(record, pair, recognisers) {
+  if (record?.state !== 'stands') return record;
+  if (typeof recognisers?.verdictOf !== 'function') return { ...record, state: 'not-pass', verdict: null, verdictReason: 'the contract-review verdict reader was not loaded' };
+  const rows = (recognisers.threads ?? []).flatMap((thread) => (Array.isArray(pair?.[thread.rows]) ? pair[thread.rows] : []));
+  const comment = record.id === null || record.id === undefined ? null : rows.find((r) => r?.id === record.id) ?? null;
+  if (comment === null) return { ...record, state: 'not-pass', verdict: null, verdictReason: 'the record comment was not among the rows read, so its verdict is unknown' };
+  const verdict = recognisers.verdictOf(comment.body);
+  return verdict === 'PASS' ? { ...record, verdict } : { ...record, state: 'not-pass', verdict, verdictReason: verdict === null ? 'it states no verdict' : `it reads ${verdict}` };
 }
 
 /**
@@ -1928,6 +2008,7 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
   const records = new Map();
   const heads = new Map();
   const pulls = new Map();
+  const timelines = new Map();
   const headNotes = [];
   let apiCalls = 0;
   for (const entry of governed) {
@@ -1948,7 +2029,7 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
           // head read was not already making.
           const pull = await fetchPull(entry.pr);
           headSha = pull?.sha ?? null;
-          pulls.set(entry.pr, { number: entry.pr, body: pull?.body ?? '', labels: Array.isArray(pull?.labels) ? pull.labels : null, head: { ref: pull?.headRef ?? '' } });
+          pulls.set(entry.pr, { number: entry.pr, body: pull?.body ?? '', labels: Array.isArray(pull?.labels) ? pull.labels : null, fork: pull?.fork ?? null, head: { ref: pull?.headRef ?? '' } });
         } catch (error) {
           headNotes.push(
             `  ℹ️  #${entry.pr}: the PR head could not be read (${String(error?.message ?? error).split('\n')[0]}) — ` +
@@ -1978,12 +2059,18 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
     if (event === EVENT_MERGE_GROUP && approvals.get(entry.pr)?.state !== 'approved') {
       if (typeof fetchTimeline !== 'function') {
         enqueues.set(entry.pr, undeterminedEnqueue('no timeline reader was supplied to the queue leg'));
+        timelines.set(entry.pr, { measured: false, reason: 'no timeline reader was supplied to the queue leg', events: null });
       } else {
         try {
           apiCalls += 1;
-          enqueues.set(entry.pr, authorizedEnqueueVerdict(enqueuerFromTimeline(await fetchTimeline(entry.pr))));
+          const events = await fetchTimeline(entry.pr);
+          // ⭐ Kept for the low-risk skills arm (S1): a removed `security` label is on this same timeline.
+          timelines.set(entry.pr, Array.isArray(events) ? { measured: true, reason: null, events } : { measured: false, reason: 'the timeline answered no list', events: null });
+          enqueues.set(entry.pr, authorizedEnqueueVerdict(enqueuerFromTimeline(events)));
         } catch (error) {
-          enqueues.set(entry.pr, undeterminedEnqueue(`the timeline could not be read (${String(error?.message ?? error).split('\n')[0]})`));
+          const why = `the timeline could not be read (${String(error?.message ?? error).split('\n')[0]})`;
+          timelines.set(entry.pr, { measured: false, reason: why, events: null });
+          enqueues.set(entry.pr, undeterminedEnqueue(why));
         }
       }
     }
@@ -1997,9 +2084,10 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
   // it — no thread is read, and the recognisers are not even loaded.
   if (event === EVENT_MERGE_GROUP) {
     // ⭐ The low-risk skills arm (#33501) FIRST: a catalog entry's tier is read
-    // off the pull object this leg already holds — body, labels — and the whole
+    // off the pull object this leg already holds — body, labels, fork — the
+    // timeline the enqueue leg read, the changesets at their commits and the whole
     // path list of its commits. An unread pull is NOT MEASURED: Tier H.
-    for (const entry of governed) readLowRiskTier(entry, repo, pulls.get(entry.pr) ?? null);
+    for (const entry of governed) readLowRiskTier(entry, repo, pulls.get(entry.pr) ?? null, { timeline: timelines.get(entry.pr) ?? null, runGit });
     let recognisers = null;
     for (const entry of governed) {
       if (entry.tier !== TIER_S) continue;
@@ -2061,7 +2149,9 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
         records.set(entry.pr, { state: 'unreadable', reason: unreadable, cardNote });
         continue;
       }
-      records.set(entry.pr, recordVerdict({ pair, recognisers, cardNote }));
+      const record = recordVerdict({ pair, recognisers, cardNote });
+      // ⭐ The low-risk arm lands on a record that READS PASS, never on one that merely exists.
+      records.set(entry.pr, landsOnLowRiskArm(entry) ? lowRiskRecordVerdict(record, pair, recognisers) : record);
     }
   }
   return guardVerdict({ event, repo, governed, unattributed, approvals, enqueues, records, apiCalls, headNotes, lifted });
@@ -2777,6 +2867,8 @@ export function makePullReader({ apiUrl, slug, token, fetchImpl = fetch }) {
       body: String(row?.body ?? ''),
       // The label NAMES (#33501): the low-risk skills arm reads `security` off them. Not a list ⇒ null ⇒ Tier H.
       labels: Array.isArray(row?.labels) ? row.labels.map((l) => String(l?.name ?? '')) : null,
+      // The FORK predicate off the same object (#33501, S3): a fork head keeps a skills PR Tier H.
+      fork: forkVerdict(row),
       headRef: String(row?.head?.ref ?? ''),
       size: pair === null ? null : { ...pair, source: `GET /repos/${slug}/pulls/${pull}` },
     };
@@ -3123,7 +3215,8 @@ export async function selfTest() {
   // SIZE leg judges (#19036) — `null` unless a fixture hands one in, exactly
   // as the reader answers a pull object without the pair. Spelled once, so a
   // fixture can never disagree with `makePullReader` about what a pull row is.
-  const pull = (sha = HEAD, { body = '', headRef = '', size = null, labels = [] } = {}) => ({ sha, body, headRef, size, labels });
+  const SAME_REPO = Object.freeze({ measured: true, isFork: false, headRepo: 'o/r', baseRepo: 'o/r' });
+  const pull = (sha = HEAD, { body = '', headRef = '', size = null, labels = [], fork = SAME_REPO } = {}) => ({ sha, body, headRef, size, labels, fork });
   const authorizedPass = (login = GOVERNED_APPROVERS[0]) => authorizedApprovalVerdict([approvedAt(login, HEAD)], HEAD);
   // The same authorized approval, on a commit that is no longer the head. Under
   // the retired sha pin this exact fixture was the REFUSAL case.
@@ -4829,6 +4922,8 @@ export async function selfTest() {
     workflowDiff = null,
     labels = [],
     extraRows = [],
+    timeline = null,
+    fork = SAME_REPO,
   } = {}) => {
     tierApiCalls = 0;
     tierThreadsRead = [];
@@ -4837,7 +4932,8 @@ export async function selfTest() {
       event,
       rows: [{ ...row(pr, files, 'c'.repeat(40), `x (#${pr})`), ...(workflowDiff ? { workflowDiff } : {}) }, ...extraRows],
       fetchReviews: async () => { tierApiCalls += 1; return reviews; },
-      fetchPull: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return pull(head, { body: prBody, headRef: branch, labels }); },
+      fetchPull: async () => { tierApiCalls += 1; if (headThrows) throw new Error('head unreadable'); return pull(head, { body: prBody, headRef: branch, labels, fork }); },
+      ...(timeline === null ? {} : { fetchTimeline: async () => { if (timeline === 'throw') throw new Error('HTTP 403'); return timeline; } }),
       fetchComments: async (n) => {
         tierApiCalls += 1;
         tierThreadsRead.push(n);
@@ -5612,38 +5708,92 @@ export async function selfTest() {
     const SK = 'skills/objectstack-data/SKILL.md';
     const CS = '.changeset/33501-skills-wording.md';
     const LOW = `Fixes #${REF_CARD}\n\nClause-②: no\nMetadata-protocol: none\n`;
+    const CS_TEXT = "---\n'@objectstack/skills': patch\n---\n\nskills: wording\n\nClause-②: no\nMetadata-protocol: none\n";
+    // The committed changeset text, by `git show <sha>:<path>`; any other read throws, as git does.
+    const csGit = (text = CS_TEXT) => (args) => {
+      if (args[0] === 'show' && /^[0-9a-f]{40}:\.changeset\//.test(args[1]) && text !== null) return text;
+      throw new Error(`fatal: path not in tree (${args.join(' ')})`);
+    };
+    const arm = { files: [SK, CS], prBody: LOW, comments: [recordComment()], timeline: [], runGit: csGit() };
     // The decomposition: a catalog entry is NOT MEASURED there (no row carries a body), and it keeps EVERY path of the PR.
     const split = decomposeGovernedWork([row(33501, [SK, CS, 'packages/spec/src/a.zod.ts'])], REPO).governed[0];
     assert('the-decomposition-reads-a-catalog-entry-Tier-H-NOT-MEASURED-and-keeps-every-path', split.tier === TIER_H && split.surfaces[0].lowRiskVerdict?.measured === false && split.allPaths.join() === `${SK},${CS},packages/spec/src/a.zod.ts` && split.paths.join() === SK, JSON.stringify(split));
+    assert('M1-the-decomposition-keeps-each-changeset-with-the-commit-it-is-read-at-ungoverned-commits-included', (() => { const e = decomposeGovernedWork([row(9, [SK], '1'.repeat(40)), row(9, [CS, 'docs/x.md'], '2'.repeat(40))], REPO).governed[0]; return e.changesetRefs.length === 1 && e.changesetRefs[0].sha === '2'.repeat(40) && e.changesetRefs[0].path === CS; })());
     const twoCommits = decomposeGovernedWork([row(9, [SK], '1'.repeat(40)), row(9, ['packages/core/src/x.ts'], '2'.repeat(40))], REPO).governed[0];
-    assert('⛔ an-ungoverned-commit-of-the-same-PR-still-counts-its-published-path-is-in-allPaths', twoCommits.allPaths.includes('packages/core/src/x.ts') && readLowRiskTier(twoCommits, REPO, { body: LOW, labels: [] }).tier === TIER_H, JSON.stringify(twoCommits.allPaths));
+    assert('⛔ an-ungoverned-commit-of-the-same-PR-still-counts-its-published-path-is-in-allPaths', twoCommits.allPaths.includes('packages/core/src/x.ts') && readLowRiskTier(twoCommits, REPO, { body: LOW, labels: [], fork: SAME_REPO }, { timeline: { measured: true, reason: null, events: [] }, runGit: csGit() }).tier === TIER_H, JSON.stringify(twoCommits.allPaths));
     const untouched = decomposeGovernedWork([row(9, ['AGENTS.md'])], REPO).governed[0];
     assert('readLowRiskTier-leaves-an-entry-with-no-catalog-row-as-it-was', readLowRiskTier(untouched, REPO, null) === untouched && untouched.tier === TIER_H && !untouched.surfaces.some((s) => s.lowRiskVerdict));
 
-    // ⭐ End to end on the queue leg: pure skills wording + changeset, `Clause-②: no`, a same-head record ⇒ the seat's enqueue clears.
-    const pass = await tierRun({ files: [SK, CS], prBody: LOW, comments: [recordComment()] });
-    assert('⭐ a-pure-skills-PR-on-Clause-2-no-with-a-same-head-record-CLEARS-with-zero-approvals', pass.exitCode === EXIT_CLEAR && pass.conclusion === 'cleared' && pass.entries[0].tier === TIER_S && pass.entries[0].record.state === 'stands', JSON.stringify(pass.entries[0]));
-    assert('and-the-words-name-the-arm-and-its-ruling', /low-risk skills arm .*Tier S/.test(renderGuardVerdict(pass)) && renderGuardVerdict(pass).includes(LOW_RISK_ARM_RULING), renderGuardVerdict(pass));
-    const noRecord = await tierRun({ files: [SK], prBody: LOW, comments: [] });
+    // ⭐ End to end on the queue leg: pure skills wording + clean changeset, one bare `Clause-②: no`, a same-head PASS record ⇒ the seat's enqueue clears.
+    const pass = await tierRun(arm);
+    assert('⭐ a-pure-skills-PR-on-Clause-2-no-with-a-same-head-PASS-record-CLEARS-with-zero-approvals', pass.exitCode === EXIT_CLEAR && pass.conclusion === 'cleared' && pass.entries[0].tier === TIER_S && pass.entries[0].record.state === 'stands' && pass.entries[0].record.verdict === 'PASS', JSON.stringify(pass.entries[0]));
+    assert('and-the-words-name-the-arm-its-ruling-and-the-PASS-it-read', /low-risk skills arm .*Tier S/.test(renderGuardVerdict(pass)) && renderGuardVerdict(pass).includes(LOW_RISK_ARM_RULING) && /READS PASS, and this one does/.test(renderGuardVerdict(pass)), renderGuardVerdict(pass));
+    const noRecord = await tierRun({ ...arm, comments: [] });
     assert('⛔ CONTROL: the-same-skills-PR-with-NO-record-is-REFUSED-Tier-S-without-its-record', noRecord.exitCode === EXIT_REFUSED_UNAPPROVED && noRecord.entries[0].tier === TIER_S && noRecord.entries[0].record.state === 'absent');
-    const old = await tierRun({ files: [SK], prBody: LOW, comments: [recordComment({ sha: REF_OLD.slice(0, 12) })] });
+    const old = await tierRun({ ...arm, comments: [recordComment({ sha: REF_OLD.slice(0, 12) })] });
     assert('⛔ a-record-on-an-OLDER-head-is-REFUSED', old.exitCode === EXIT_REFUSED_UNAPPROVED && old.entries[0].record.state === 'absent');
 
-    // ⛔ Each H case, each WITH a valid record: the record leg is never consulted, the entry needs the maintainer.
-    const hCase = async (over) => { const v = await tierRun({ files: [SK], prBody: LOW, comments: [recordComment()], ...over }); return [v.exitCode, v.entries[0].tier, v.entries[0].record === undefined]; };
-    const H = [EXIT_REFUSED_UNAPPROVED, TIER_H, true];
-    assert('⛔ skills-plus-packages-spec-stays-H', JSON.stringify(await hCase({ files: [SK, 'packages/spec/src/data/field.zod.ts'] })) === JSON.stringify(H));
-    assert('⛔ skills-with-Clause-2-yes-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nClause-②: yes\n` })) === JSON.stringify(H));
-    assert('⛔ skills-with-Clause-2-no-narrowing-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nClause-②: no (narrowing)\n` })) === JSON.stringify(H));
-    assert('⛔ skills-with-NO-Clause-2-line-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}` })) === JSON.stringify(H));
-    assert('⛔ skills-with-the-security-label-stays-H', JSON.stringify(await hCase({ labels: ['security'] })) === JSON.stringify(H));
-    assert('⛔ skills-beside-AGENTS-md-stays-H', JSON.stringify(await hCase({ files: [SK, 'AGENTS.md'] })) === JSON.stringify(H));
-    assert('⛔ a-pull-the-leg-could-not-read-is-NOT-MEASURED-and-H', await (async () => { const v = await tierRun({ files: [SK], prBody: LOW, comments: [recordComment()], headThrows: true }); return v.exitCode === EXIT_REFUSED_UNAPPROVED && v.entries[0].tier === TIER_H && v.entries[0].surfaces[0].lowRiskVerdict?.measured === false; })());
-    assert('⛔ a-published-path-in-ANOTHER-commit-of-the-same-PR-in-the-group-stays-H', JSON.stringify(await hCase({ extraRows: [row(70, ['ui/packages/react/src/x.tsx'], 'd'.repeat(40), 'y (#70)')] })) === JSON.stringify(H));
+    // ⛔ The verdict: the arm lands on a record that READS PASS, never on one that merely exists.
+    const failRecord = await tierRun({ ...arm, comments: [recordComment({ verdictWord: '**VERDICT: FAIL**' })] });
+    assert('⛔ a-same-head-FAIL-record-is-REFUSED-on-the-arm', failRecord.exitCode === EXIT_REFUSED_UNAPPROVED && failRecord.entries[0].tier === TIER_S && failRecord.entries[0].record.state === 'not-pass' && failRecord.entries[0].record.verdict === 'FAIL' && /does not read PASS: it reads FAIL/.test(renderGuardVerdict(failRecord)), renderGuardVerdict(failRecord));
+    const wordless = await tierRun({ ...arm, comments: [recordComment({ verdictWord: 'pending' })] });
+    assert('⛔ a-same-head-record-with-NO-verdict-word-is-REFUSED-on-the-arm', wordless.exitCode === EXIT_REFUSED_UNAPPROVED && wordless.entries[0].record.state === 'not-pass' && /states no verdict/.test(renderGuardVerdict(wordless)));
+    const explicitPass = await tierRun({ ...arm, comments: [recordComment({ verdictWord: '**VERDICT: PASS**' })] });
+    assert('the-template-VERDICT-PASS-line-clears-the-arm', explicitPass.exitCode === EXIT_CLEAR && explicitPass.entries[0].record.verdict === 'PASS');
+    const newestFail = await tierRun({ ...arm, comments: [recordComment({ id: 901, at: '2026-09-13T12:00:00Z' }), recordComment({ id: 902, at: '2026-09-13T14:00:00Z', verdictWord: '**VERDICT: FAIL**' })] });
+    assert('⛔ the-NEWEST-same-head-record-is-the-one-whose-verdict-is-read-an-older-PASS-does-not-clear-a-newer-FAIL', newestFail.exitCode === EXIT_REFUSED_UNAPPROVED && newestFail.entries[0].record.id === 902 && newestFail.entries[0].record.state === 'not-pass');
+    const noReader = await tierRun({ ...arm, recognisers: { ...live, verdictOf: undefined } });
+    assert('⛔ a-recogniser-set-without-the-verdict-reader-REFUSES-the-arm-fail-closed', noReader.exitCode === EXIT_REFUSED_UNAPPROVED && noReader.entries[0].record.state === 'not-pass' && /verdict reader was not loaded/.test(renderGuardVerdict(noReader)));
+    assert('the-live-loader-reaches-the-fleet-verdict-reader', typeof live.verdictOf === 'function' && live.verdictOf('## Contract review\n\n**VERDICT: FAIL**') === 'FAIL');
+    assert('lowRiskRecordVerdict-passes-a-non-standing-record-through-and-reads-the-chosen-comment', (() => {
+      const absent = { state: 'absent' };
+      const pair = { prComments: [{ id: 5, body: '## Contract review\n\n**VERDICT: PASS**' }], cardComments: [] };
+      return lowRiskRecordVerdict(absent, pair, live) === absent && lowRiskRecordVerdict({ state: 'stands', id: 5 }, pair, live).verdict === 'PASS' && lowRiskRecordVerdict({ state: 'stands', id: 6 }, pair, live).state === 'not-pass' && lowRiskRecordVerdict({ state: 'stands', id: null }, pair, live).state === 'not-pass';
+    })());
+    const nonArmFail = await tierRun({ comments: [recordComment({ verdictWord: '**VERDICT: FAIL**' })] });
+    assert('the-other-Tier-S-legs-are-unchanged-here-a-FAIL-record-still-stands-for-them-follow-up-33541', nonArmFail.entries[0].record.state === 'stands' && nonArmFail.entries[0].record.verdict === undefined);
+
+    // ⛔ Each H case, each WITH a valid PASS record: the record leg is never consulted, the entry needs the maintainer.
+    const hCase = async (over) => { const v = await tierRun({ ...arm, ...over }); return [v.exitCode, v.entries[0].tier, v.entries[0].record === undefined]; };
+    const H = JSON.stringify([EXIT_REFUSED_UNAPPROVED, TIER_H, true]);
+    assert('⛔ skills-plus-packages-spec-stays-H', JSON.stringify(await hCase({ files: [SK, CS, 'packages/spec/src/data/field.zod.ts'] })) === H);
+    assert('⛔ skills-with-Clause-2-yes-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nClause-②: yes\nMetadata-protocol: none\n` })) === H);
+    assert('⛔ skills-with-Clause-2-no-narrowing-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n` })) === H);
+    assert('⛔ skills-with-NO-Clause-2-line-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nMetadata-protocol: none\n` })) === H);
+    assert('⛔ skills-with-the-security-label-stays-H', JSON.stringify(await hCase({ labels: ['security'] })) === H);
+    assert('⛔ skills-beside-AGENTS-md-stays-H', JSON.stringify(await hCase({ files: [SK, CS, 'AGENTS.md'] })) === H);
+    assert('⛔ a-pull-the-leg-could-not-read-is-NOT-MEASURED-and-H', await (async () => { const v = await tierRun({ ...arm, headThrows: true }); return v.exitCode === EXIT_REFUSED_UNAPPROVED && v.entries[0].tier === TIER_H && v.entries[0].surfaces[0].lowRiskVerdict?.measured === false; })());
+    assert('⛔ a-published-path-in-ANOTHER-commit-of-the-same-PR-in-the-group-stays-H', JSON.stringify(await hCase({ extraRows: [row(70, ['ui/packages/react/src/x.tsx'], 'd'.repeat(40), 'y (#70)')] })) === H);
+
+    // ⛔ M1 at the queue: the changesets read at their commits, and the body's `Metadata-protocol: none`.
+    assert('⛔ M1-no-changeset-stays-H', JSON.stringify(await hCase({ files: [SK] })) === H);
+    assert('⛔ M1-a-changeset-releasing-another-package-stays-H', JSON.stringify(await hCase({ runGit: csGit("---\n'@objectstack/skills': patch\n'@objectstack/spec': minor\n---\n\nClause-②: no\nMetadata-protocol: none\n") })) === H);
+    assert('⛔ M1-a-changeset-without-its-declarations-stays-H', JSON.stringify(await hCase({ runGit: csGit("---\n'@objectstack/skills': patch\n---\n\nwording\n") })) === H);
+    assert('⛔ M1-a-changeset-git-cannot-show-at-its-commit-stays-H', JSON.stringify(await hCase({ runGit: csGit(null) })) === H);
+    assert('⛔ M1-no-git-reader-on-the-leg-stays-H', JSON.stringify(await hCase({ runGit: null })) === H);
+    assert('⛔ M1-a-changeset-in-ANOTHER-commit-of-the-PR-is-read-too', JSON.stringify(await hCase({ files: [SK, CS], extraRows: [row(70, ['.changeset/second.md'], 'e'.repeat(40), 'y (#70)')], runGit: (args) => (args[1].endsWith('second.md') ? "---\n'@objectstack/core': patch\n---\n\nClause-②: no\nMetadata-protocol: none\n" : CS_TEXT) })) === H);
+    assert('⛔ M1-a-body-without-Metadata-protocol-none-stays-H', JSON.stringify(await hCase({ prBody: `Fixes #${REF_CARD}\n\nClause-②: no\n` })) === H);
+
+    // ⛔ S1: a removed `security` label on the timeline the enqueue leg read; an unread timeline.
+    assert('⛔ S1-a-security-label-removed-on-the-timeline-stays-H', JSON.stringify(await hCase({ timeline: [{ event: 'labeled', label: { name: 'security' } }, { event: 'unlabeled', label: { name: 'security' } }] })) === H);
+    assert('⛔ S1-a-timeline-that-threw-or-was-never-read-stays-H', JSON.stringify(await hCase({ timeline: 'throw' })) === H && JSON.stringify(await hCase({ timeline: null })) === H);
+    // ⛔ S2: exactly one bare `Clause-②: no`.
+    assert('⛔ S2-trailing-text-two-lines-or-a-quoted-no-before-a-real-yes-stays-H', JSON.stringify(await hCase({ prBody: `Clause-②: no — wording\nMetadata-protocol: none\n` })) === H && JSON.stringify(await hCase({ prBody: `Clause-②: no\nClause-②: no\nMetadata-protocol: none\n` })) === H && JSON.stringify(await hCase({ prBody: `> Clause-②: no\n\nClause-②: yes\nMetadata-protocol: none\n` })) === H && JSON.stringify(await hCase({ prBody: '```\nClause-②: no\n```\nClause-②: yes\nMetadata-protocol: none\n' })) === H);
+    // ⛔ S3: a fork head.
+    assert('⛔ S3-a-fork-head-or-an-unread-fork-predicate-stays-H', JSON.stringify(await hCase({ fork: { measured: true, isFork: true, headRepo: 'x/fork', baseRepo: 'o/r' } })) === H && JSON.stringify(await hCase({ fork: null })) === H);
+    assert('S3-makePullReader-carries-the-fork-predicate-off-the-same-GET', await (async () => {
+      const respond = (b) => async () => ({ ok: true, status: 200, json: async () => b });
+      const args = { apiUrl: 'https://api', slug: 'o/r', token: 't' };
+      const same = await makePullReader({ ...args, fetchImpl: respond({ head: { sha: HEAD, repo: { full_name: 'o/r' } }, base: { repo: { full_name: 'o/r' } } }) })(7);
+      const forked = await makePullReader({ ...args, fetchImpl: respond({ head: { sha: HEAD, repo: null }, base: { repo: { full_name: 'o/r' } } }) })(7);
+      return same.fork.measured === true && same.fork.isFork === false && forked.fork.isFork === true;
+    })());
+    // ⛔ S4: under the catalog only Markdown and `evals/*.json`.
+    assert('⛔ S4-a-script-under-skills-stays-H-an-evals-json-does-not', JSON.stringify(await hCase({ files: [SK, CS, 'skills/objectstack-data/hook.mjs'] })) === H && (await tierRun({ ...arm, files: [SK, CS, 'skills/objectstack-data/evals/evals.json'] })).exitCode === EXIT_CLEAR);
 
     // The pull_request leg reads no body: the early warning says Tier H, NOT MEASURED, and that the queue leg reads it.
-    const early = await tierRun({ files: [SK], prBody: LOW, event: EVENT_PULL_REQUEST });
-    assert('the-pull_request-leg-names-the-arm-NOT-MEASURED-and-never-reddens', early.entries[0].tier === TIER_H && /low-risk skills arm .*NOT MEASURED/.test(renderGuardVerdict(early)) && /queue guard reads them on the queue leg/.test(renderGuardVerdict(early)), renderGuardVerdict(early));
+    const early = await tierRun({ ...arm, event: EVENT_PULL_REQUEST });
+    assert('the-pull_request-leg-names-the-arm-NOT-MEASURED-and-never-reddens', early.entries[0].tier === TIER_H && /low-risk skills arm .*NOT MEASURED/.test(renderGuardVerdict(early)) && /queue guard reads it on the queue leg/.test(renderGuardVerdict(early)), renderGuardVerdict(early));
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────

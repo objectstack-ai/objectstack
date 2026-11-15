@@ -87,6 +87,7 @@ import {
   branchNameTarget,
   closingKeywordTargets,
   contractReviewHeadMatch,
+  contractReviewVerdictOf,
   deliveryEvidence,
   deliveryEvidenceNote,
   latestMarkedComment,
@@ -95,6 +96,9 @@ import {
   SEAT_SIGNATURE_SESSION_SOURCE,
   stripSignatureLine,
 } from './check-half-states.mjs';
+// The fleet's one verdict reader, re-exported so the queue guard's lazy loader reaches it (the
+// low-risk skills arm lands on a record that reads PASS, #33501). ⛔ Never a second parser.
+export { contractReviewVerdictOf };
 // The tier `isModelIdentifierToken` refuses by VALUE. IMPORTED, never restated:
 // `dispatch-gates.mjs` is the one line in `scripts/pm/**` where the model id is
 // spelled as a value, and a second value site here is the drift that let a
