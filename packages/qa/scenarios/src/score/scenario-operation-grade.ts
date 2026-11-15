@@ -547,7 +547,7 @@ export function askNamesTarget(card: Pick<ScenarioCard, 'run'>, operationId: str
  * confirmation gate, on an ask that names the target, and wrote exactly the
  * declared write. Every check must pass; an unobserved fact fails.
  */
-export function agentConfirmationChecks(rule: AgentConfirmationRule, obs: OperationObservation, asOf?: string): CheckResult[] {
+function agentConfirmationChecks(rule: AgentConfirmationRule, obs: OperationObservation, asOf?: string): CheckResult[] {
   const at = 'confirmed-by-agent';
   const ask = check(`${at}:explicit-ask`, rule.ask.names, rule.ask.detail);
   const seen = obs.agentConfirmed;

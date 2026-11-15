@@ -125,7 +125,7 @@ export function fingerprint(row: Row): string {
 }
 
 /** The ids of the rows added, removed or changed between two reads of one object, keyed by `id`. */
-export function changedIds(before: readonly Row[], after: readonly Row[]): string[] {
+function changedIds(before: readonly Row[], after: readonly Row[]): string[] {
   const index = (rows: readonly Row[]) => new Map(rows.map((r) => [String(r.id), fingerprint(r)]));
   const b = index(before);
   const a = index(after);
@@ -335,7 +335,7 @@ export function agentSetOf(op: CardOperation, turn: Pick<ParsedTurn, 'toolCalls'
  * the ids of the rows the turn changed, and the target row after the turn.
  * An applied `run_action` whose answer names another object is not counted.
  */
-export function agentConfirmedOf(
+function agentConfirmedOf(
   op: CardOperation,
   turn: Pick<ParsedTurn, 'toolCalls'>,
   before: readonly Row[],

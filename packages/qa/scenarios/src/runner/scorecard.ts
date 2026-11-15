@@ -356,7 +356,7 @@ export function cardScorecard(run: CardRun, packages?: PackageSource): CardScore
 const cell = (t: (Tally & { notMeasured?: number; platformNotMeasured?: number }) | undefined) =>
   t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}${t.platformNotMeasured ? ` · ${t.platformNotMeasured} platform half not measured` : ''}` : '—';
 /** `1 asked first · 1 confirmed by the agent`: how the passing irreversible operations were met. */
-export const confirmationText = (c: ConfirmationTally): string => `${c.askedFirst} asked first · ${c.confirmedByAgent} confirmed by the agent`;
+const confirmationText = (c: ConfirmationTally): string => `${c.askedFirst} asked first · ${c.confirmedByAgent} confirmed by the agent`;
 const opsCell = (h: HalfScores | undefined) => `${cell(h?.operations)}${h?.confirmation ? ` (irreversible: ${confirmationText(h.confirmation)})` : ''}`;
 const seedCell = (s: HalfScores['seed']) => (s ? `${s.inserted}/${s.total}${s.refused ? ` ⚠ seed: ${s.refused} refused` : ''}` : '—');
 
