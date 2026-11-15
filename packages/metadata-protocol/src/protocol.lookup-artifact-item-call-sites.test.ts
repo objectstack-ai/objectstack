@@ -130,14 +130,14 @@ type Disposition = 'definition' | 'served-package envelope' | 'exact-address env
  * envelope never reaches an answer whose body came from another package.
  */
 const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly disposition: Disposition; readonly why: string }> = [
-    { member: 'lookupArtifactItem', args: 'type: string, name: string, currentPackageId?: string, member?: string', noPackage: false, disposition: 'definition',
-        why: 'the definition itself: the class member\'s declared signature (its body delegates to the seam function below)' },
-    { file: SEAM_FILE, member: 'lookupArtifactItem', args: 'this: Pick<ArtifactLookupHost, \'engine\'>, type: string, name: string, currentPackageId?: string, member?: string', noPackage: false, disposition: 'definition',
-        why: '[#25467 cut 15] the definition\'s body, the function the class member delegates to' },
-    { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item)', noPackage: true, disposition: 'served-package envelope',
-        why: 'the by-name read\'s envelope: naming no package, the package of the item it serves (the list\'s rule); [#23074] at the served item\'s own bundle member' },
-    { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, packageId, bundleMemberOf(request.type, item)', noPackage: false, disposition: 'exact-address envelope',
-        why: '[#32501] the by-name read\'s envelope at an admitted exact address: the package the address reads, its own artifact only (`exactAddressArtifact` drops another package\'s), never the pair id\'s first-registered fallback' },
+    { member: 'lookupArtifactItem', args: 'type: string, name: string, currentPackageId?: string, member?: string, owner?: ArtifactOwnerKey', noPackage: false, disposition: 'definition',
+        why: 'the definition itself: the class member\'s declared signature (its body delegates to the seam function below); [#33456] `owner`, an action\'s owner key' },
+    { file: SEAM_FILE, member: 'lookupArtifactItem', args: 'this: Pick<ArtifactLookupHost, \'engine\'>, type: string, name: string, currentPackageId?: string, member?: string, owner?: ArtifactOwnerKey', noPackage: false, disposition: 'definition',
+        why: '[#25467 cut 15] the definition\'s body, the function the class member delegates to; [#33456] an action\'s artifact only at `owner`\'s object, and naming no package, the one package bound there' },
+    { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item), artifactOwner', noPackage: true, disposition: 'served-package envelope',
+        why: 'the by-name read\'s envelope: naming no package, the package of the item it serves (the list\'s rule); [#23074] at the served item\'s own bundle member; [#33456] for an action, at its own owner key (ADR-0150 D4)' },
+    { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, packageId, bundleMemberOf(request.type, item), artifactOwner', noPackage: false, disposition: 'exact-address envelope',
+        why: '[#32501] the by-name read\'s envelope at an admitted exact address: the package the address reads, its own artifact only (`exactAddressArtifact` drops another package\'s), never the pair id\'s first-registered fallback; [#33456] for an action, at its own owner key' },
     { file: LIST_READS_FILE, member: 'readFlattenedMetaItems', args: 'request.type, itemName, itemPackageId, bundleMemberOf(request.type, it)', noPackage: true, disposition: 'served-package envelope',
         why: 'the list\'s envelope: each item\'s own package, the rule the by-name read shares; [#23074] at each item\'s own bundle member' },
     { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',

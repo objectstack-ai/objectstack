@@ -41,6 +41,21 @@
  *     the card. It is stated only when EVERY authoring turn that ran reported
  *     one; otherwise it is `not reported` — a turn that reported none is never
  *     read as zero, and a partial sum is never shown as the channel's cost.
+ *   - Ask cost: the same sum over the persona turns — every question and
+ *     operation turn that ran, in the Run half and the iterate's — per served
+ *     model (`TurnSummary.model`), per mode and for the card, under the same
+ *     rule: a model's cost is stated only when every one of its turns
+ *     reported one.
+ *   - Time: each turn's wall-clock time by the runner's own clock
+ *     (`TurnSummary.elapsedMs`: the driver's process, spawn to exit; a replay
+ *     re-reads the recorded run's). `Author time` sums the authoring turns,
+ *     `Ask time` the persona turns per served model, per mode and for the
+ *     card. A sum is stated only when every counted turn was timed; otherwise
+ *     the cell says how many turns were not timed (`2 of 28 ask turns not
+ *     timed`) — an untimed turn is never read as zero, and a smaller sum is
+ *     never shown. The CLI's own reading of a turn's duration
+ *     (`reportedDurationMs`, `reportedApiDurationMs`) stays on the turn in the
+ *     record, beside the runner's clock, and is not summed.
  *   - Run-operations: one per operation; it passes when its grade passes. An
  *     operation whose grade measured nothing (`OperationGrade.notMeasured`:
  *     the build denies the acting persona the write the card gives it, and
@@ -50,6 +65,11 @@
  *     denial — is a Build finding naming persona, object and verb
  *     ({@link buildDenialFindings}).
  *   - A turn that errored counts in the total and not in passed.
+ *   - Guardrails: each Run half's guardrail checks as the run graded them
+ *     (`RunHalf.guardrails`, today `guardrail:injection_as_data`), one row per
+ *     half: `pass`, `fail`, or `not measured: <reason>` — never a pass when
+ *     nothing was measured. A record from before the half was graded carries
+ *     none, and its row shows nothing (`—`; no row at all when no half has any).
  *   - Seed: rows loaded of rows sent. A refused row is shown as
  *     `⚠ seed: N refused`, and every question turn and operation that depends
  *     on it (`seedDependence` in `orchestrate.ts`) is NOT MEASURED: it counts in
@@ -91,6 +111,18 @@ export interface HalfScores {
   confirmation?: ConfirmationTally;
   /** The models the half's question and operation turns were served ({@link modelTally}). */
   models?: ModelTally;
+  /** The half's guardrail checks ({@link guardrailTally}); absent when its Run half carries none (a record from before they were graded). */
+  guardrails?: GuardrailVerdict[];
+}
+
+/** A Run half's guardrail check as the scorecard states it ({@link guardrailTally}). */
+export interface GuardrailVerdict {
+  /** The check, `guardrail:injection_as_data`. */
+  check: string;
+  /** `not measured` when the check measured nothing (`CheckResult.notMeasured`): never a pass. */
+  verdict: 'pass' | 'fail' | 'not measured';
+  /** Why it measured nothing; only on `not measured`. */
+  reason?: string;
 }
 
 /** The models a half's persona turns — every question and operation turn that ran — were served. */
@@ -119,15 +151,42 @@ export interface ConfirmationTally {
   confirmedByAgent: number;
 }
 
-/** What the authoring turns cost, as their driver reported it ({@link authorCost}). */
-export interface AuthorCost {
-  /** The authoring turns that ran: each build and iterate turn with a `TurnSummary`. */
+/** What a set of turns cost, as their driver reported it ({@link turnCost}). */
+export interface TurnCost {
+  /** The turns that ran: each turn with a `TurnSummary`. */
   turns: number;
   /** Of those, the turns that reported a cost (`TurnSummary.reportedCostUsd`). */
   reported: number;
   /** Their sum, USD — only when every one of `turns` reported a cost (and there was one): a turn that reported none is never read as zero. */
   usd?: number;
 }
+
+/** What the authoring turns — each build and iterate turn that ran — cost ({@link authorCost}). */
+export type AuthorCost = TurnCost;
+
+/** How long a set of turns took, by the runner's own clock ({@link turnTime}). */
+export interface TurnTime {
+  /** The turns that ran: each turn with a `TurnSummary`. */
+  turns: number;
+  /** Of those, the turns the runner timed (`TurnSummary.elapsedMs`). */
+  timed: number;
+  /** Their summed wall-clock time, ms — only when every one of `turns` was timed (and there was one): an untimed turn is never read as zero. */
+  ms?: number;
+}
+
+/** What one served model's persona turns cost and how long they took. */
+export interface ModelSpend {
+  cost: TurnCost;
+  time: TurnTime;
+}
+
+/**
+ * The persona turns — every question and operation turn that ran, in the Run
+ * half and the iterate's — per the model each was served (`TurnSummary.model`;
+ * {@link MODEL_NOT_REPORTED} when its stream named none) ({@link askSpend}).
+ * Empty ⇒ no persona turn ran.
+ */
+export type AskSpend = Record<string, ModelSpend>;
 
 export interface ModeScorecard {
   mode: 'scratch' | 'template';
@@ -136,6 +195,10 @@ export interface ModeScorecard {
   iterate?: HalfScores & { changeSize?: number };
   /** The mode's authoring turns, build and iterate; absent on a record written before the scorecard carried it. */
   authorCost?: AuthorCost;
+  /** How long the mode's authoring turns took; absent on a record written before the scorecard carried it. */
+  authorTime?: TurnTime;
+  /** The mode's persona turns per served model; absent on a record written before the scorecard carried it. */
+  askSpend?: AskSpend;
   tags: Array<{ tag: string; status: string }>;
   findings: string[];
 }
@@ -147,6 +210,10 @@ export interface CardScorecard {
   counts: CardRun['counts'];
   /** Every authoring turn of the card, across its modes: the channel's cost on this card. Absent on a record written before the scorecard carried it. */
   authorCost?: AuthorCost;
+  /** How long every authoring turn of the card took, across its modes. Absent on a record written before the scorecard carried it. */
+  authorTime?: TurnTime;
+  /** Every persona turn of the card, across its modes, per served model. Absent on a record written before the scorecard carried it. */
+  askSpend?: AskSpend;
   /** {@link ConfirmationTally} summed over every mode and half; absent ⇒ none passed. */
   confirmation?: ConfirmationTally;
   modes: ModeScorecard[];
@@ -239,6 +306,14 @@ export function buildDenialFindings(r: RunHalf | undefined, half: string): strin
   );
 }
 
+/** Each guardrail check the Run half graded (`RunHalf.guardrails`), as pass, fail or not measured; `undefined` when it carries none. */
+export function guardrailTally(r: RunHalf | undefined): GuardrailVerdict[] | undefined {
+  if (!r?.guardrails) return undefined;
+  return r.guardrails.map((c) =>
+    c.notMeasured !== undefined ? { check: c.check, verdict: 'not measured' as const, reason: c.notMeasured } : { check: c.check, verdict: c.pass ? ('pass' as const) : ('fail' as const) },
+  );
+}
+
 export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
   const turns = [...(r?.questions ?? []), ...(r?.operations ?? [])].flatMap((x) => (x.turn ? [x.turn] : []));
   if (turns.length === 0) return undefined;
@@ -253,22 +328,64 @@ export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
 const sumUsd = (xs: readonly number[]): number => Math.round(xs.reduce((a, x) => a + x, 0) * 1e6) / 1e6;
 
 /**
- * What these authoring turns cost: the sum of their reported costs, stated
- * only when every turn reported one. A turn that reported none (a driver that
- * does not report cost, a command that left the field out, a turn that failed
- * before it answered) leaves the whole figure unstated — never a zero, never
- * a partial sum read as the channel's cost.
+ * What these turns cost: the sum of their reported costs, stated only when
+ * every turn reported one. A turn that reported none (a driver that does not
+ * report cost, a command that left the field out, a turn that failed before
+ * it answered) leaves the whole figure unstated — never a zero, never a
+ * partial sum read as the channel's cost.
  */
-export function authorCost(turns: ReadonlyArray<{ reportedCostUsd?: number }>): AuthorCost {
+export function turnCost(turns: ReadonlyArray<{ reportedCostUsd?: number }>): TurnCost {
   const costs = turns.flatMap((t) => (t.reportedCostUsd !== undefined ? [t.reportedCostUsd] : []));
   return { turns: turns.length, reported: costs.length, ...(turns.length > 0 && costs.length === turns.length ? { usd: sumUsd(costs) } : {}) };
+}
+
+/** What these authoring turns cost: {@link turnCost} over them. */
+export function authorCost(turns: ReadonlyArray<{ reportedCostUsd?: number }>): AuthorCost {
+  return turnCost(turns);
+}
+
+/**
+ * How long these turns took: the sum of their wall-clock times by the
+ * runner's clock (`elapsedMs`), stated only when every turn was timed. A turn
+ * with no process on its record (a replay of a recording made before the
+ * runner kept one) leaves the whole figure unstated — never a zero, never a
+ * smaller sum.
+ */
+export function turnTime(turns: ReadonlyArray<{ elapsedMs?: number }>): TurnTime {
+  const times = turns.flatMap((t) => (t.elapsedMs !== undefined ? [t.elapsedMs] : []));
+  return { turns: turns.length, timed: times.length, ...(turns.length > 0 && times.length === turns.length ? { ms: times.reduce((a, x) => a + x, 0) } : {}) };
+}
+
+/** {@link TurnCost} and {@link TurnTime} of persona turns, per the model each was served. */
+export function askSpend(turns: readonly TurnSummary[]): AskSpend {
+  const byModel = new Map<string, TurnSummary[]>();
+  for (const t of turns) {
+    const model = t.model ?? MODEL_NOT_REPORTED;
+    byModel.set(model, [...(byModel.get(model) ?? []), t]);
+  }
+  return Object.fromEntries([...byModel].map(([model, ts]) => [model, { cost: turnCost(ts), time: turnTime(ts) }]));
 }
 
 /** A mode's authoring turns that ran, build and iterate, in that order. */
 const authorTurnsOf = (m: ModeRun): TurnSummary[] => [m.build?.author, m.iterate?.build.author].filter((t): t is TurnSummary => t !== undefined);
 
+/** A mode's persona turns that ran: every question and operation turn of the Run half, then of the iterate's. */
+const askTurnsOf = (m: ModeRun): TurnSummary[] =>
+  [m.run, m.iterate?.run].flatMap((r) => [...(r?.questions ?? []), ...(r?.operations ?? [])].flatMap((x) => (x.turn ? [x.turn] : [])));
+
 /** `$0.42`; `$0.0031` under a cent; `$0`. */
 export const usdText = (usd: number): string => (usd === 0 ? '$0' : usd < 0.01 ? `$${Number(usd.toPrecision(2))}` : `$${usd.toFixed(2)}`);
+
+/** `3 author turns`, `1 ask turn`. */
+const turnsOf = (n: number, kind: 'author' | 'ask'): string => `${n} ${kind} turn${n === 1 ? '' : 's'}`;
+
+/** `$0.84 over 3 author turns`; `not reported (2 of 3 author turns reported a cost)`; `not reported`. */
+const costText = (c: TurnCost, kind: 'author' | 'ask'): string =>
+  c.usd !== undefined ? `${usdText(c.usd)} over ${turnsOf(c.turns, kind)}` : c.reported > 0 ? `not reported (${c.reported} of ${turnsOf(c.turns, kind)} reported a cost)` : 'not reported';
+
+/** `25m 10s over 3 author turns`; `2 of 28 ask turns not timed`. */
+const timeText = (t: TurnTime, kind: 'author' | 'ask'): string =>
+  t.ms !== undefined ? `${elapsedText(t.ms)} over ${turnsOf(t.turns, kind)}` : `${t.turns - t.timed} of ${turnsOf(t.turns, kind)} not timed`;
 
 /**
  * `$0.84 over 3 author turns`; `not reported (2 of 3 author turns reported a
@@ -276,9 +393,41 @@ export const usdText = (usd: number): string => (usd === 0 ? '$0' : usd < 0.01 ?
  * cost has no {@link AuthorCost}, and reads as not reported.
  */
 export function authorCostText(c: AuthorCost | undefined): string {
-  if (c?.usd !== undefined) return `${usdText(c.usd)} over ${c.turns} author turn${c.turns === 1 ? '' : 's'}`;
-  if (c && c.reported > 0) return `not reported (${c.reported} of ${c.turns} author turns reported a cost)`;
-  return 'not reported';
+  return c ? costText(c, 'author') : 'not reported';
+}
+
+/** `25m 10s over 3 author turns`; `1 of 3 author turns not timed`; `not recorded` on a record written before the scorecard carried it. */
+export function authorTimeText(t: TurnTime | undefined): string {
+  return t ? timeText(t, 'author') : 'not recorded';
+}
+
+/** The served models of an {@link AskSpend}, most turns first; the model is named unless no turn's stream named one. */
+function perModel(s: AskSpend, text: (m: ModelSpend) => string): string {
+  const models = Object.entries(s).sort(([an, a], [bn, b]) => b.cost.turns - a.cost.turns || an.localeCompare(bn));
+  if (models.length === 1 && models[0]![0] === MODEL_NOT_REPORTED) return text(models[0]![1]);
+  return models.map(([name, m]) => `${name === MODEL_NOT_REPORTED ? 'model not reported' : name}: ${text(m)}`).join('; ');
+}
+
+/**
+ * Per served model: `claude-haiku-5-5: $0.31 over 28 ask turns`;
+ * `claude-haiku-5-5: not reported (27 of 28 ask turns reported a cost)`;
+ * models joined by `; `. `—` when no persona turn ran; `not recorded` on a
+ * record written before the scorecard carried it.
+ */
+export function askCostText(s: AskSpend | undefined): string {
+  if (!s) return 'not recorded';
+  return Object.keys(s).length ? perModel(s, (m) => costText(m.cost, 'ask')) : '—';
+}
+
+/**
+ * Per served model: `claude-haiku-5-5: 6m 12s over 28 ask turns`;
+ * `claude-haiku-5-5: 2 of 28 ask turns not timed`; models joined by `; `.
+ * `—` when no persona turn ran; `not recorded` on a record written before the
+ * scorecard carried it.
+ */
+export function askTimeText(s: AskSpend | undefined): string {
+  if (!s) return 'not recorded';
+  return Object.keys(s).length ? perModel(s, (m) => timeText(m.time, 'ask')) : '—';
 }
 
 /** An artifact-less build scores 0 of 1 — a degraded build is never "nothing to score". */
@@ -310,10 +459,14 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   if (mt) first.models = mt;
   const cf = confirmationTally(m.run);
   if (cf) first.confirmation = cf;
+  const gr = guardrailTally(m.run);
+  if (gr) first.guardrails = gr;
   const out: ModeScorecard = {
     mode: m.mode,
     first,
     authorCost: authorCost(authorTurnsOf(m)),
+    authorTime: turnTime(authorTurnsOf(m)),
+    askSpend: askSpend(askTurnsOf(m)),
     tags: (m.build?.score ?? m.iterate?.build.score)?.tags.map((t) => ({ tag: t.tag, status: t.status })) ?? [],
     findings: [
       ...m.findings,
@@ -342,6 +495,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     if (imt) it.models = imt;
     const icf = confirmationTally(m.iterate.run);
     if (icf) it.confirmation = icf;
+    const igr = guardrailTally(m.iterate.run);
+    if (igr) it.guardrails = igr;
     if (m.iterate.changeSize) it.changeSize = m.iterate.changeSize.total;
     out.iterate = it;
   }
@@ -358,6 +513,8 @@ export function cardScorecard(run: CardRun, packages?: PackageSource): CardScore
     ...(packages ? { packages } : {}),
     counts: run.counts,
     authorCost: authorCost(run.modes.flatMap(authorTurnsOf)),
+    authorTime: turnTime(run.modes.flatMap(authorTurnsOf)),
+    askSpend: askSpend(run.modes.flatMap(askTurnsOf)),
     ...(asked + confirmed > 0 ? { confirmation: { askedFirst: asked, confirmedByAgent: confirmed } } : {}),
     modes,
   };
@@ -415,6 +572,10 @@ const modelCell = (t: ModelTally | undefined): string => {
   return `${served.map(([name, n]) => `${name} ×${n}`).join(', ')}${t.mismatched ? ` ⚠ ${t.mismatched} not ${t.requested.join(' / ')}` : ''}${effort ? ` · ${effort}` : ''}`;
 };
 
+/** `guardrail:injection_as_data pass`; `guardrail:injection_as_data not measured: no turn read …`; checks joined by ` · `; `—` when the half carries none. */
+const guardrailCell = (g: readonly GuardrailVerdict[] | undefined): string =>
+  g?.length ? g.map((v) => `${v.check} ${v.verdict}${v.reason !== undefined ? `: ${v.reason}` : ''}`).join(' · ') : '—';
+
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
 export function renderScorecard(sc: CardScorecard): string {
   const lines = [
@@ -422,6 +583,9 @@ export function renderScorecard(sc: CardScorecard): string {
     '',
     ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
     `author cost: ${authorCostText(sc.authorCost)}`,
+    `author time: ${authorTimeText(sc.authorTime)}`,
+    `ask cost: ${askCostText(sc.askSpend)}`,
+    `ask time: ${askTimeText(sc.askSpend)}`,
     '',
     ...(sc.confirmation ? [`irreversible operations: ${confirmationText(sc.confirmation)} (accepted until real human confirmation lands)`, ''] : []),
     `| Half | ${sc.modes.map((m) => m.mode).join(' | ')} |`,
@@ -434,14 +598,19 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Run-问数', (m) => (m.first.ask ? `${cell(m.first.ask)}${m.first.ask.leaks ? ` ⚠ ${m.first.ask.leaks} leaking` : ''}` : '—'));
   row('Run-operations', (m) => opsCell(m.first));
   row('Run · model', (m) => modelCell(m.first.models));
+  if (sc.modes.some((m) => !m.skipped && m.first.guardrails)) row('Run · guardrails', (m) => guardrailCell(m.first.guardrails));
   row('Iterate · Build', (m) => buildCell(m.iterate?.build));
   row('Iterate · author', (m) => authorCell(m.iterate?.build));
   row('Iterate · Seed', (m) => seedCell(m.iterate?.seed));
   row('Iterate · Run-问数', (m) => (m.iterate?.ask ? `${cell(m.iterate.ask)}${m.iterate.ask.leaks ? ` ⚠ ${m.iterate.ask.leaks} leaking` : ''}` : '—'));
   row('Iterate · Run-operations', (m) => opsCell(m.iterate));
   row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
+  if (sc.modes.some((m) => !m.skipped && m.iterate?.guardrails)) row('Iterate · Run · guardrails', (m) => guardrailCell(m.iterate?.guardrails));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
   row('Author cost', (m) => (m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
+  row('Author time', (m) => (m.authorTime === undefined || m.authorTime.turns > 0 ? authorTimeText(m.authorTime) : '—'));
+  row('Ask cost', (m) => askCostText(m.askSpend));
+  row('Ask time', (m) => askTimeText(m.askSpend));
   const tags = sc.modes.find((m) => m.tags.length)?.tags ?? [];
   if (tags.length) {
     lines.push('', '| Tag | ' + sc.modes.map((m) => m.mode).join(' | ') + ' |', '|:---|' + sc.modes.map(() => ':---').join('|') + '|');
