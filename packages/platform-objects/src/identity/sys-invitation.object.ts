@@ -160,6 +160,11 @@ export const SysInvitation = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       bodyExtra: { resend: true },
+      // Hidden while cloud-managed, as the four invite mirrors and
+      // `copy_invitation_link` are: a resend IS a call to invite-member,
+      // which a managed environment refuses outright (409, resends
+      // included — plugin-auth's `auth-manager-before-hook.ts`).
+      visible: 'features.cloudManaged != true',
       requiresFeature: 'organization',
       // A resend IS a call to invite-member, so it is reached by the grades
       // that reach that endpoint — delegated_admin included.

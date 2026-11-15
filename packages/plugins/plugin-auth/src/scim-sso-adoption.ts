@@ -121,6 +121,24 @@ const organizationKey = (value: unknown): string => (typeof value === 'string' ?
 /** sqlite answers a boolean as 0/1; anything but true is not verified. */
 const isTrue = (value: unknown): boolean => value === true || value === 1;
 
+/**
+ * Is this account held by a SCIM directory? It is when a `sys_scim_subject`
+ * row names it: the vendor writes one for every user a SCIM connection
+ * provisions or links, and never deletes it. Condition 2 of the rule above,
+ * and the one definition of "held by a SCIM directory" in this package —
+ * `admin-set-user-manager.ts` imports it for its directory refusal. Reads as
+ * the system; a read failure propagates to the caller.
+ */
+export async function isHeldByScimDirectory(engine: ScimSsoAdoptionEngine, userId: string): Promise<boolean> {
+  const subjects = await engine.find('sys_scim_subject', {
+    where: { user_id: userId },
+    fields: ['id'],
+    limit: 1,
+    context: SYSTEM_CTX,
+  });
+  return subjects.length > 0;
+}
+
 // [#32975] The address's domain and a provider's domain list are read through
 // the ONE parse every rule that judges an address against that list shares
 // (`sso-account-at-proven-domain.ts`): an entry names the same domain here as
@@ -164,13 +182,7 @@ export async function judgeScimSsoAdoption(
   if (linkedProviderIds.includes(LOCAL_PASSWORD_PROVIDER)) return { adopt: false, reason: 'holds_local_password' };
 
   // 2. Not held by a SCIM directory.
-  const subjects = await engine.find('sys_scim_subject', {
-    where: { user_id: userId },
-    fields: ['id'],
-    limit: 1,
-    context: SYSTEM_CTX,
-  });
-  if (subjects.length > 0) return { adopt: false, reason: 'held_by_scim' };
+  if (await isHeldByScimDirectory(engine, userId)) return { adopt: false, reason: 'held_by_scim' };
 
   // 3. Linked to an SSO provider of the connection's organization.
   const federated = linkedProviderIds.filter((id) => id !== LOCAL_PASSWORD_PROVIDER);
