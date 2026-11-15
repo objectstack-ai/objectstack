@@ -859,7 +859,7 @@ export class CascadePlanningFacet {
    * a `restrict` and a `set_null` consider only rows OUTSIDE it, and a row the
    * walk has already entered is not cascaded into again.
    */
-  static async walkReferencingRelations(this: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'cascadeRelationBehavior' | 'delete' | 'deleteRestrictedError' | 'fileReferenceCheckElevation' | 'getDriver' | 'isTenantColumnSetNull' | 'logger' | 'probeReferencingRowsOfSet' | 'referenceProbeFilter' | 'refuseOrganizationDeleteWhileOwned' | 'update'>, object: string, ids: ReadonlyArray<string | number>, context: ExecutionContext | undefined, objects: ServiceObject[], cascadeSet: CascadeDeleteSet): Promise<void> {
+  static async walkReferencingRelations(this: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'cascadeRelationBehavior' | 'delete' | 'deleteRestrictedError' | 'fileReferenceCheckElevation' | 'find' | 'getDriver' | 'isTenantColumnSetNull' | 'logger' | 'probeReferencingRowsOfSet' | 'referenceProbeFilter' | 'refuseOrganizationDeleteWhileOwned' | 'update'>, object: string, ids: ReadonlyArray<string | number>, context: ExecutionContext | undefined, objects: ServiceObject[], cascadeSet: CascadeDeleteSet): Promise<void> {
     // Entered before the first nested `delete()` can come back here: every
     // record of the set, so one member's cascade never deletes another.
     for (const id of ids) cascadeSetAdd(cascadeSet.entered, object, id);
@@ -1441,7 +1441,7 @@ export class CascadePlanningFacet {
  * whole cascade back (ruling 6893104201 point 2). So one cascade can show
  * both shapes.
  */
-async function deleteCascadedChildren(host: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'delete' | 'find' | 'getDriver'>, childName: string, dependents: ReadonlyArray<string | number>, context: ExecutionContext | undefined, cascadeSet: CascadeDeleteSet): Promise<void> {
+async function deleteCascadedChildren(host: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'delete' | 'find' | 'getDriver' | 'logger'>, childName: string, dependents: ReadonlyArray<string | number>, context: ExecutionContext | undefined, cascadeSet: CascadeDeleteSet): Promise<void> {
   const driver = host.getDriver(childName) as { deleteMany?: unknown };
   const batchable = typeof driver?.deleteMany === 'function' && !isExternalDriverFloor(driver as any) &&
     childName !== ORGANIZATION_OBJECT;
@@ -1494,13 +1494,19 @@ async function deleteCascadedChildren(host: Pick<CascadePlanningHost, 'cascadeIs
  * for the same reason: the by-id path asks its own question and answers it.
  * A store fault propagates as raised: an outage is not a hidden row.
  */
-async function readDoorReturnsChunk(host: Pick<CascadePlanningHost, 'find'>, childName: string, chunk: ReadonlyArray<string | number>, context: ExecutionContext | undefined): Promise<boolean> {
+async function readDoorReturnsChunk(host: Pick<CascadePlanningHost, 'find' | 'logger'>, childName: string, chunk: ReadonlyArray<string | number>, context: ExecutionContext | undefined): Promise<boolean> {
   let rows: unknown;
   try {
     rows = await host.find(childName, { where: { id: { $in: [...chunk] } }, fields: ['id'], context });
   } catch (e) {
     const status = declaredHttpStatus(e);
     if (status === undefined || status >= 500) throw e;
+    // Not a hidden answer: the refusal routes the chunk to the by-id path,
+    // which asks the read door again per child and answers the caller.
+    host.logger.debug(
+      `[cascade] the read door refused the caller on '${childName}'; deleting this chunk of the cascade by id`,
+      { object: childName, status, error: (e as Error)?.message ?? String(e) },
+    );
     return false;
   }
   const found = new Set((Array.isArray(rows) ? rows : []).map((row: any) => String(row?.id)));
