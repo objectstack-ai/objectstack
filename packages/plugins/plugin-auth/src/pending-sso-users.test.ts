@@ -238,10 +238,12 @@ beforeAll(async () => {
  * staging gave, so no case sees another's writes. The tests switch the mode
  * on afterwards: every door under test reads the accessor per request.
  */
-async function stage(opts: { adminPlugin?: boolean; host?: EnvironmentUserHost | 'none'; tables?: Map<string, any[]> } = {}) {
+async function stage(
+  opts: { adminPlugin?: boolean; host?: EnvironmentUserHost | 'none'; tables?: Map<string, any[]>; config?: Record<string, unknown> } = {},
+) {
   const engine = createMemoryEngine();
   for (const [name, rows] of structuredClone(opts.tables ?? staged.tables)) engine.tables.set(name, rows);
-  const manager = makeManager(engine, opts.adminPlugin ?? false);
+  const manager = makeManager(engine, opts.adminPlugin ?? false, opts.config);
   const told: Array<{ kind: string; event: EnvironmentUserEvent }> = [];
   const recordingHost: EnvironmentUserHost = {
     userAdded: (event) => void told.push({ kind: 'added', event }),
@@ -1080,6 +1082,43 @@ describe('[#33186] the Setup → Users add actions reach the pending-person door
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: the console's offer of a DECLARED action, and what it posts
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Shared by the two describes below; the first one's header says how they judge.
+
+/** The session payload's principal for the staged admin: the platform-admin rung the doors' gate judges. */
+const ADMIN_PRINCIPAL = { id: 'staged-admin', email: EMAILS.admin, positions: [] as string[], isPlatformAdmin: true };
+
+function declaredAction(name: string) {
+  const action = (SysUser.actions ?? []).find((a) => a.name === name);
+  if (!action) throw new Error(`sys_user declares no action named "${name}"`);
+  return action;
+}
+
+/** The console's verdict on the declared action for this row, under the features this kernel serves. */
+function offeredOn(s: Awaited<ReturnType<typeof stage>>, name: string, row: Record<string, unknown>): boolean | string {
+  const raw = declaredAction(name).visible as unknown;
+  const source = typeof raw === 'string' ? raw : (raw as { source?: unknown } | undefined)?.source;
+  if (typeof source !== 'string') return `NO CEL SOURCE on ${name}`;
+  const features = (s.manager.getPublicConfig() as any).features;
+  const user = { ...ADMIN_PRINCIPAL, id: s.ids.admin };
+  const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row, extra: { current_user: user, user, ctx: { user }, features } });
+  if (!r.ok) return `FAULT ${r.error.message.split('\n')[0]!.trim()}`;
+  return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
+}
+
+/** What the action posts for this row: the record id under `recordIdParam`, then the collected params. */
+function actionCall(name: string, userId: string, collected: Record<string, unknown> = {}) {
+  const action = declaredAction(name);
+  const target = String(action.target);
+  expect(target.startsWith(BASE), `${name} targets the auth mount`).toBe(true);
+  const declaredNames = (action.params ?? []).map((p) => p.name ?? p.field);
+  for (const key of Object.keys(collected)) expect(declaredNames, `${name} declares the ${key} param`).toContain(key);
+  return { path: target.slice(BASE.length), body: { [String(action.recordIdParam)]: userId, ...collected } };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Setup → Users: Deactivate / Reactivate are offered without the admin plugin
 // ─────────────────────────────────────────────────────────────────────────────
 //
@@ -1093,37 +1132,6 @@ describe('[#33186] the Setup → Users add actions reach the pending-person door
 // `target`. CONTROL: an action whose door needs the plugin stays hidden there.
 
 describe('[#33759] Ban / Unban are offered and work without the admin plugin', () => {
-  /** The session payload's principal for the staged admin: the platform-admin rung the doors' gate judges. */
-  const ADMIN_PRINCIPAL = { id: 'staged-admin', email: EMAILS.admin, positions: [] as string[], isPlatformAdmin: true };
-
-  function declaredAction(name: string) {
-    const action = (SysUser.actions ?? []).find((a) => a.name === name);
-    if (!action) throw new Error(`sys_user declares no action named "${name}"`);
-    return action;
-  }
-
-  /** The console's verdict on the declared action for this row, under the features this kernel serves. */
-  function offeredOn(s: Awaited<ReturnType<typeof stage>>, name: string, row: Record<string, unknown>): boolean | string {
-    const raw = declaredAction(name).visible as unknown;
-    const source = typeof raw === 'string' ? raw : (raw as { source?: unknown } | undefined)?.source;
-    if (typeof source !== 'string') return `NO CEL SOURCE on ${name}`;
-    const features = (s.manager.getPublicConfig() as any).features;
-    const user = { ...ADMIN_PRINCIPAL, id: s.ids.admin };
-    const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row, extra: { current_user: user, user, ctx: { user }, features } });
-    if (!r.ok) return `FAULT ${r.error.message.split('\n')[0]!.trim()}`;
-    return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
-  }
-
-  /** What the action posts for this row: the record id under `recordIdParam`, then the collected params. */
-  function actionCall(name: string, userId: string, collected: Record<string, unknown> = {}) {
-    const action = declaredAction(name);
-    const target = String(action.target);
-    expect(target.startsWith(BASE), `${name} targets the auth mount`).toBe(true);
-    const declaredNames = (action.params ?? []).map((p) => p.name ?? p.field);
-    for (const key of Object.keys(collected)) expect(declaredNames, `${name} declares the ${key} param`).toContain(key);
-    return { path: target.slice(BASE.length), body: { [String(action.recordIdParam)]: userId, ...collected } };
-  }
-
   it.each([
     ['unmanaged', false],
     ['managed', true],
@@ -1158,5 +1166,73 @@ describe('[#33759] Ban / Unban are offered and work without the admin plugin', (
     const on = await stage({ adminPlugin: true });
     expect((on.manager.getPublicConfig() as any).features.admin).toBe(true);
     expect(offeredOn(on, 'impersonate_user', on.row(EMAILS.member)!)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: Unlock is offered and works without the admin plugin
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `sys_user.unlock_user` posts to `admin/unlock-user`, an ObjectStack mount
+// (ADR-0069 D2) whose handler clears the lockout through the data engine; the
+// lockout itself (`sys_user.locked_until` / `failed_login_count`) is stamped by
+// this plugin's own sign-in path, with no better-auth admin plugin involved.
+// Each case locks the member the way the lockout locks anyone, by
+// `lockoutThreshold` wrong passwords through the real sign-in, shows the right
+// password refused while the lock holds, then judges and drives the DECLARED
+// action against the door and signs in again.
+
+describe('[#34010] Unlock is offered and works without the admin plugin', () => {
+  const LOCKOUT = { lockoutThreshold: 3, lockoutDurationMinutes: 15 };
+  const WRONG_PASSWORD = 'Wr0ng!Guess-34010';
+
+  /** Lock the member through the sign-in lockout itself, and show the lock holding against the right password. */
+  async function lockMember(s: Awaited<ReturnType<typeof stage>>): Promise<void> {
+    for (let i = 0; i < LOCKOUT.lockoutThreshold; i++) {
+      expect((await s.signIn(EMAILS.member, WRONG_PASSWORD)).status, `wrong password ${i + 1}`).toBe(401);
+    }
+    const lockedUntil = new Date(s.row(EMAILS.member)!.locked_until).getTime();
+    expect(lockedUntil, 'the lockout stamped a lock in the future').toBeGreaterThan(Date.now());
+    const sessions = s.rowsOf('sys_session', s.ids.member).length;
+    const held = await verdict(await s.signIn(EMAILS.member));
+    expect(held.status, held.text).toBe(401);
+    expect(s.rowsOf('sys_session', s.ids.member), 'the locked account got no session').toHaveLength(sessions);
+  }
+
+  it.each([
+    ['unmanaged', false],
+    ['managed', true],
+  ] as const)('%s kernel: a locked account is offered Unlock, the door releases it, and the next sign-in succeeds', async (_kind, managed) => {
+    const s = managed ? await managedStage({ config: LOCKOUT }) : await stage({ config: LOCKOUT });
+    expect((s.manager.getPublicConfig() as any).features.admin, 'this kernel serves features.admin off').toBe(false);
+    await lockMember(s);
+
+    expect(offeredOn(s, 'unlock_user', s.row(EMAILS.member)!)).toBe(true);
+    const unlock = actionCall('unlock_user', s.ids.member);
+    // The door's platform-admin gate holds without the plugin: a caller without
+    // the standing is refused and the lock stays.
+    const denied = await verdict(await s.fire(unlock.path, unlock.body, s.bearers.idp));
+    expect(denied.status, denied.text).toBe(403);
+    expect(denied.code).toBe('PERMISSION_DENIED');
+    expect(s.row(EMAILS.member)!.locked_until).toBeTruthy();
+
+    const res = await s.fire(unlock.path, unlock.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(s.row(EMAILS.member)!.locked_until ?? null).toBeNull();
+    expect(Number(s.row(EMAILS.member)!.failed_login_count)).toBe(0);
+    expect((await s.signIn(EMAILS.member)).status).toBe(200);
+  });
+
+  it('CONTROL: with the plugin on, Unlock is offered and releases the account as before', async () => {
+    const s = await stage({ adminPlugin: true, config: LOCKOUT });
+    expect((s.manager.getPublicConfig() as any).features.admin).toBe(true);
+    await lockMember(s);
+
+    expect(offeredOn(s, 'unlock_user', s.row(EMAILS.member)!)).toBe(true);
+    const unlock = actionCall('unlock_user', s.ids.member);
+    const res = await s.fire(unlock.path, unlock.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(s.row(EMAILS.member)!.locked_until ?? null).toBeNull();
+    expect((await s.signIn(EMAILS.member)).status).toBe(200);
   });
 });
