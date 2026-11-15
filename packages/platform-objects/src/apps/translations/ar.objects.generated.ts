@@ -401,7 +401,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
   sys_session: {
     label: "الجلسة",
     pluralLabel: "الجلسات",
-    description: "جلسات المستخدمين النشطة",
+    description: "جلسات المستخدمين",
     fields: {
       user_id: {
         label: "المستخدم"

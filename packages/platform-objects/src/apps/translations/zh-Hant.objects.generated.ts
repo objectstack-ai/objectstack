@@ -401,7 +401,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
   sys_session: {
     label: "工作階段",
     pluralLabel: "工作階段",
-    description: "活躍的使用者工作階段",
+    description: "使用者工作階段",
     fields: {
       user_id: {
         label: "使用者"

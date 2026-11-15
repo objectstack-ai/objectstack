@@ -401,7 +401,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_session: {
     label: "セッション",
     pluralLabel: "セッション",
-    description: "アクティブなユーザーセッション",
+    description: "ユーザーセッション",
     fields: {
       user_id: {
         label: "ユーザー"

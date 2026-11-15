@@ -401,7 +401,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
   sys_session: {
     label: "Sessão",
     pluralLabel: "Sessões",
-    description: "Sessões de usuário ativas",
+    description: "Sessões de usuário",
     fields: {
       user_id: {
         label: "Usuário"

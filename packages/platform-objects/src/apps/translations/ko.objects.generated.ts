@@ -401,7 +401,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
   sys_session: {
     label: "세션",
     pluralLabel: "세션",
-    description: "활성 사용자 세션",
+    description: "사용자 세션",
     fields: {
       user_id: {
         label: "사용자"
