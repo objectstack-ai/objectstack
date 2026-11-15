@@ -48,9 +48,11 @@
  * run their callback in — gives the unit a {@link UnitCommitQueue} and settles
  * it after its commit or rollback ({@link settleUnitCommitQueue}). A nested
  * `transaction()` joins the outer unit (ADR-0067 D2) and opens no queue, so
- * its return is no commit: the outer unit's outcome decides. Outside any unit,
- * or in a unit no queue was opened for (the `beginTransaction` trio, a driver
- * without transactions), the run starts at dispatch, as before.
+ * its return is no commit: the outer unit's outcome decides. The
+ * `beginTransaction` / `commitTransaction` / `rollbackTransaction` trio — the
+ * sandbox runner's `ctx.api.transaction(fn)` — opens one per handle it owns
+ * ({@link openTrioCommitQueue}). Outside any unit, or where no unit opened
+ * (a driver without transactions), the run starts at dispatch, as before.
  */
 
 import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
@@ -115,13 +117,36 @@ export function settleUnitCommitQueue(queue: UnitCommitQueue | undefined, commit
   }
 }
 
+/**
+ * The queues of the units the `beginTransaction` trio opened, by handle. The
+ * trio never publishes its unit (no closure spans begin to commit), so its
+ * queue cannot ride a store entry; its own `commitTransaction` /
+ * `rollbackTransaction` settle it ({@link settleTrioCommitQueue}). Weak, so a
+ * handle nobody commits or rolls back takes its waiting runs with it, exactly
+ * as it takes its uncommitted writes.
+ */
+const trioQueues = new WeakMap<object, UnitCommitQueue>();
+
+/** The trio opened a unit on `handle`: runs dispatched in it wait for its commit. */
+export function openTrioCommitQueue(handle: unknown): void {
+  if (handle !== null && (typeof handle === 'object' || typeof handle === 'function')) trioQueues.set(handle, newUnitCommitQueue());
+}
+
+/** The trio committed (`committed`) or rolled back the unit on `handle`. */
+export function settleTrioCommitQueue(handle: unknown, committed: boolean): void {
+  if (handle === null || (typeof handle !== 'object' && typeof handle !== 'function')) return;
+  const queue = trioQueues.get(handle);
+  trioQueues.delete(handle);
+  settleUnitCommitQueue(queue, committed);
+}
+
 /** A unit entry as the engine's ambient store and its `openedUnits` map hold it. */
 interface QueuedUnitEntry { transaction?: unknown; commitQueue?: UnitCommitQueue }
 
 /**
  * The queue of the unit a run dispatched now is inside, while that unit has
  * not settled: the ambient entry's, else the one of the unit whose handle the
- * api carries. A handle the current run was detached from is no unit to wait
+ * api carries (published, or the trio's). A handle the current run was detached from is no unit to wait
  * for: the run is already past that unit's commit.
  */
 function unsettledUnitQueue(
@@ -133,8 +158,8 @@ function unsettledUnitQueue(
   if (ambient?.commitQueue?.pending) return ambient.commitQueue;
   if (threaded === null || (typeof threaded !== 'object' && typeof threaded !== 'function')) return undefined;
   if (isDetachedUnitHandle(threaded)) return undefined;
-  const entry = openedUnits?.get(threaded);
-  return entry?.commitQueue?.pending ? entry.commitQueue : undefined;
+  const queue = openedUnits?.get(threaded)?.commitQueue ?? trioQueues.get(threaded);
+  return queue?.pending ? queue : undefined;
 }
 
 /**

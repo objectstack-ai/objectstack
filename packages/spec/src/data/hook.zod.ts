@@ -510,9 +510,12 @@ export type HookRefusal = z.input<typeof HookRefusalSchema>;
  *     around the write itself.
  *
  * What that means for a handler:
- *   - **Effects through the same engine are safe.** `ctx.api` / `ctx.ql` writes
- *     join the same transaction and roll back with everything else — which is
- *     exactly what makes an in-engine audit hook correct.
+ *   - **Effects through the same engine are safe — in a blocking hook.** A
+ *     blocking (not `async`) hook's `ctx.api` / `ctx.ql` writes join the same
+ *     transaction and roll back with everything else — which is exactly what
+ *     makes an in-engine audit hook correct. An `async: true` hook is the
+ *     exception: it runs after the unit commits and not at all if it rolls
+ *     back (see `async` below), so its writes are never part of the unit.
  *   - **Effects OUTSIDE the engine are the hook's own responsibility to make
  *     rollback-tolerant** — webhooks, notifications, external index updates,
  *     file deletion, email. On a rollback the row survives and the
@@ -719,6 +722,13 @@ export const HookSchema = lazySchema(() => strictObject(
    * If true, the hook runs in the background and does not block the transaction.
    * Only applicable for 'after*' events.
    * Default: false (Blocking)
+   *
+   * Fired inside a unit of work (see {@link HookEvent}), an async hook starts
+   * once the outermost unit commits, and is dropped without running when that
+   * unit rolls back; its `ctx.api` reads then see the committed write, and its
+   * writes run outside the unit, on their own connection. Outside any unit it
+   * starts at once, after the write. Nothing waits for it, and its errors
+   * never reach the caller.
    */
   async: z.boolean().default(false).describe('Run specifically as fire-and-forget'),
 

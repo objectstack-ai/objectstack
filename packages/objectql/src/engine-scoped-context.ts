@@ -46,7 +46,7 @@ import { rolledBackRefusal } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import { UnscopedHookApi } from './hook-run-as.js';
-import { newUnitCommitQueue, runOutsideOpenUnitsOnCommit, settleUnitCommitQueue, type UNIT_ROLLED_BACK } from './unit-detach.js';
+import { newUnitCommitQueue, openTrioCommitQueue, runOutsideOpenUnitsOnCommit, settleTrioCommitQueue, settleUnitCommitQueue, type UNIT_ROLLED_BACK } from './unit-detach.js';
 import { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 import type { HookRunAs, HookRunAsRef } from './hook-run-as.js';
 import { scopedContextHost } from './engine-scoped-hosts.js';
@@ -328,6 +328,9 @@ export class ScopedContextFacet {
     const driver = this.txDriver();
     if (!driver) return null;
     const trx = await driver.beginTransaction();
+    // [#33760] The `async` after-hooks dispatched in this unit wait for the
+    // trio's own commit, or are dropped by its rollback (`unit-detach.ts`).
+    openTrioCommitQueue(trx);
     const ctx = this.derive({ ...this.executionContext, transaction: trx });
     return { ctx, handle: trx, owned: true };
   }
@@ -339,11 +342,13 @@ export class ScopedContextFacet {
     if (!driver) return;
     if (driver.commit) await driver.commit(handle);
     else if (driver.commitTransaction) await driver.commitTransaction(handle);
+    settleTrioCommitQueue(handle, true);
   }
 
   /** The body of `ScopedContext#rollbackTransaction`; the method's docblock there is its contract. */
   static async rollbackTransaction(this: Pick<ScopedContextHost, 'releaseJoinedHandle' | 'txDriver'>, handle: unknown): Promise<void> {
     if (this.releaseJoinedHandle(handle)) return;
+    settleTrioCommitQueue(handle, false);
     const driver = this.txDriver();
     if (!driver) return;
     if (driver.rollback) await driver.rollback(handle);

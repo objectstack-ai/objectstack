@@ -402,7 +402,7 @@ async function makeCommitEngine() {
       if (String(ctx.input.name).startsWith('veto')) throw new Error('refused by the gate');
     },
   } as unknown as Hook;
-  const bind = (withGate: boolean) => bindHooksToEngine(engine, withGate ? [asyncNote, gate] : [asyncNote], { packageId: 'app:t' });
+  const bind = (withGate: boolean) => bindHooksToEngine(engine, withGate ? [asyncNote, gate] : [asyncNote], { packageId: 'app:t', logger: logger as any });
   const api = new ScopedContext({ isSystem: true } as any, engine as any);
   const droppedRun = () => new Promise<string>((r) => { dropped = r; });
   const notes = () => driver.rowsOf('note').map((r: any) => r.name);
@@ -505,6 +505,30 @@ describe('#33760 — an async after-hook fired inside a unit runs on its commit,
     expect(await drop).toBe('async_note');
     expect(events).toEqual(['gate:veto', 'rollback']);
     expect([driver.rowsOf('rec'), notes()]).toEqual([[], []]);
+  });
+
+  it('the beginTransaction trio (the sandbox runner\'s ctx.api.transaction): the hook waits for its commitTransaction', async () => {
+    const { api, events, bind, runOf } = await makeCommitEngine();
+    bind(false);
+    const unit = (await api.beginTransaction())!;
+    expect(unit.owned).toBe(true);
+    await unit.ctx.object('rec').insert({ name: 'r1' });
+    events.push('body done');
+    await api.commitTransaction(unit.handle);
+    expect(await runOf('r1')).toBe(1);
+    expect(events).toEqual(['body done', 'commit', 'async started:r1']);
+  });
+
+  it('the beginTransaction trio rolls back: the hook never starts', async () => {
+    const { api, events, bind, droppedRun, notes } = await makeCommitEngine();
+    bind(false);
+    const drop = droppedRun();
+    const unit = (await api.beginTransaction())!;
+    await unit.ctx.object('rec').insert({ name: 'r1' });
+    await api.rollbackTransaction(unit.handle);
+    expect(await drop).toBe('async_note');
+    expect(events).toEqual(['rollback']);
+    expect(notes()).toEqual([]);
   });
 
   it('CONTROL outside any unit: the hook starts at dispatch, before the write returns, unchanged', async () => {
