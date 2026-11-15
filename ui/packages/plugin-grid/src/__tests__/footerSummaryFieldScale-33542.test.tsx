@@ -138,7 +138,8 @@ describe('a summary column footer total is formatted as its cell (objectstack#33
 
   it('CONTROL: a summary with no scale and no currency keeps the plain total', async () => {
     renderGrid('en');
-    await waitFor(async () => expect(await footerOf('paid_amount')).toContain('230,000.00'));
+    // The catalogue has landed once the plain currency column draws money.
+    await waitFor(async () => expect(await footerOf('billed_cny')).toMatch(/230,000\.00/));
     expect(await footerOf('payment_count')).toContain('Sum: 7');
     expect(await footerOf('payment_count')).not.toContain('7.0');
   });
