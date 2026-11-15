@@ -173,6 +173,10 @@ Out of the Company Sign-In Too** (`signOutOfIdp`) on (the discovery document
 that check reads is fetched under the configured trusted origins only). It
 never becomes an accepted `Origin` for the request itself, whose origin check
 reads the deployment's configured trusted origins alone, as on any other POST.
+So turning **Sign Out of the Company Sign-In Too** on for an OpenID Connect
+identity provider on an internal or private network is refused **400
+`VALIDATION_FAILED`** on `signOutOfIdp` until the provider's origin is listed in
+`OS_TRUSTED_ORIGINS`.
 
 Google is one such provider: its discovery document names the token endpoint,
 the key set and the userinfo endpoint each on a host of its own, so a Google
