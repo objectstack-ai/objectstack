@@ -25,6 +25,12 @@
  *  - a completed password reset clears the counter and the lock
  *    ({@link clearSignInLockout}).
  *
+ * The gate and the counter hold every password door — `/sign-in/email` and
+ * `/sign-in/phone-number` ({@link passwordSignInDoorOf}), each naming the
+ * account its own credential check names — and a locked account is refused on
+ * every other door that ends in a session for it, at session creation
+ * ({@link refuseLockedAccountSession}).
+ *
  * ## How the moved bodies reach the class
  *
  * The shape #23050 set for `rest-server.ts` (its `data-action-routes.ts`
@@ -96,6 +102,67 @@ const LOCKOUT_SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
  * attempt is refused as a locked one is (`admitSignInAttempt`).
  */
 const RESERVATION_ROUNDS = 32;
+
+/**
+ * A password door the lock gate and the counter hold: `/sign-in/email`, whose
+ * identifier is the address, and `/sign-in/phone-number`, whose identifier is
+ * the phone number. Every password door counts its refused attempts toward
+ * the one lock and checks that lock before its credential (ADR-0069 D2).
+ */
+export type PasswordSignInDoor = 'email' | 'phone';
+
+/** better-auth's phone-number password door. */
+export const SIGN_IN_PHONE_NUMBER_PATH = '/sign-in/phone-number';
+
+/** Each password door's path, as its account events record it. */
+const PASSWORD_DOOR_PATHS: Readonly<Record<PasswordSignInDoor, string>> = Object.freeze({
+  email: SIGN_IN_EMAIL_PATH,
+  phone: SIGN_IN_PHONE_NUMBER_PATH,
+});
+
+/**
+ * The password door this request is, with the identifier its body carries
+ * (`''` when it carries none), or `undefined` for any other path.
+ */
+export function passwordSignInDoorOf(ctx: any): { door: PasswordSignInDoor; identifier: string } | undefined {
+  if (ctx?.path === SIGN_IN_EMAIL_PATH) {
+    return { door: 'email', identifier: typeof ctx?.body?.email === 'string' ? ctx.body.email : '' };
+  }
+  if (ctx?.path === SIGN_IN_PHONE_NUMBER_PATH) {
+    return { door: 'phone', identifier: typeof ctx?.body?.phoneNumber === 'string' ? ctx.body.phoneNumber : '' };
+  }
+  return undefined;
+}
+
+/**
+ * The account `/sign-in/phone-number`'s credential check names: the
+ * `sys_user` row whose `phone_number` equals the number exactly, as better-auth
+ * looks it up (1.7.12 `plugins/phone-number/routes.mjs`, an equality match on
+ * the number the body carries), with `fields` (plus `id`).
+ */
+export async function findPhoneSignInAccount(
+  engine: IDataEngine,
+  phoneNumber: string,
+  fields: readonly string[],
+): Promise<({ id: string } & Record<string, unknown>) | undefined> {
+  const query: EngineQueryOptions = {
+    where: { phone_number: phoneNumber },
+    fields: ['id', ...fields],
+    context: { isSystem: true, positions: [], permissions: [] },
+  };
+  const row = await engine.findOne('sys_user', query);
+  return row && typeof row.id === 'string' && row.id
+    ? (row as { id: string } & Record<string, unknown>)
+    : undefined;
+}
+
+/** The account question of `door`: the manager's own for the address, the phone number's for the phone door. */
+function accountFinderFor(
+  host: Pick<SignInLockoutHost, 'findSignInAccount'>,
+  door: PasswordSignInDoor,
+): SignInLockoutHost['findSignInAccount'] {
+  return door === 'phone' ? findPhoneSignInAccount : host.findSignInAccount;
+}
 
 /** Whether a stored `locked_until` is still in the future at `now` (epoch ms). */
 function lockHolds(lockedUntil: unknown, now: number): boolean {
@@ -219,6 +286,7 @@ export async function admitSignInAttempt(
   this: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'>,
   email: string,
   ctx?: any,
+  door: PasswordSignInDoor = 'email',
 ): Promise<void> {
   const threshold = Number(this.config.lockoutThreshold) || 0;
   const engine = threshold > 0 ? this.getDataEngine() : undefined;
@@ -231,7 +299,7 @@ export async function admitSignInAttempt(
   try {
     attempt = await reserveSignInAttempt(
       engine,
-      this.findSignInAccount,
+      accountFinderFor(this, door),
       email,
       threshold,
       Number(this.config.lockoutDurationMinutes) || 15,
@@ -264,7 +332,7 @@ export async function admitSignInAttempt(
     await emitAuthSessionAuditEvent(
       this.config.getAuditSink?.(),
       signInFailureEventFor(attempt.userId, {
-        path: SIGN_IN_EMAIL_PATH,
+        path: PASSWORD_DOOR_PATHS[door],
         reason: 'ACCOUNT_LOCKED',
         fingerprint: signInClientFingerprint(ctx, await readRequestClientAddress()),
       }),
@@ -320,6 +388,7 @@ export async function settleSignInAttempt(
   this: Pick<SignInLockoutHost, 'config' | 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'>,
   email: string,
   outcome: SignInOutcome,
+  door: PasswordSignInDoor = 'email',
 ): Promise<SignInSettlement> {
   const recorded = await readSignInAttempt();
   // A verdict recorded for another identifier belongs to another call.
@@ -338,7 +407,7 @@ export async function settleSignInAttempt(
 
   if (outcome === 'succeeded') {
     try {
-      const u = await this.findSignInAccount(engine, email, ['failed_login_count', 'locked_until']);
+      const u = await accountFinderFor(this, door)(engine, email, ['failed_login_count', 'locked_until']);
       if (u && ((Number(u.failed_login_count) || 0) !== 0 || u.locked_until)) await writeLockoutCleared(engine, u.id);
     } catch (e) {
       this.logDurabilityDegradation(
@@ -433,17 +502,18 @@ export async function auditRefusedSignIn(
   ctx: any,
   email: string,
   settlement: SignInSettlement,
+  door: PasswordSignInDoor = 'email',
 ): Promise<void> {
   const sink = this.config.getAuditSink?.();
   if (!sink) return;
   const lockStamped = settlement.lockStamped;
-  const userId = lockStamped?.userId ?? settlement.userId ?? (await this.resolveSignInAccountId(email));
+  const userId = lockStamped?.userId ?? settlement.userId ?? (await this.resolveSignInAccountId(email, door));
   if (!userId) return;
   const fingerprint = signInClientFingerprint(ctx, await readRequestClientAddress());
   await emitAuthSessionAuditEvent(
     sink,
     signInFailureEventFor(userId, {
-      path: SIGN_IN_EMAIL_PATH,
+      path: PASSWORD_DOOR_PATHS[door],
       reason: refusalCodeOf(ctx?.context?.returned),
       fingerprint,
     }),
@@ -452,7 +522,7 @@ export async function auditRefusedSignIn(
     await emitAuthSessionAuditEvent(
       sink,
       accountLockedEventFor(lockStamped.userId, {
-        path: SIGN_IN_EMAIL_PATH,
+        path: PASSWORD_DOOR_PATHS[door],
         lockedUntil: lockStamped.lockedUntil,
         threshold: lockStamped.threshold,
         fingerprint,
@@ -462,11 +532,15 @@ export async function auditRefusedSignIn(
 }
 
 /** The body of `AuthManager#resolveSignInAccountId`; the method's docblock there is its contract. */
-export async function resolveSignInAccountId(this: Pick<SignInLockoutHost, 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'>, email: string): Promise<string | undefined> {
+export async function resolveSignInAccountId(
+  this: Pick<SignInLockoutHost, 'findSignInAccount' | 'getDataEngine' | 'logDurabilityDegradation'>,
+  email: string,
+  door: PasswordSignInDoor = 'email',
+): Promise<string | undefined> {
   const engine = this.getDataEngine();
   if (!engine) return undefined;
   try {
-    return (await this.findSignInAccount(engine, email, []))?.id;
+    return (await accountFinderFor(this, door)(engine, email, []))?.id;
   } catch (e) {
     // The refusal stands either way; what is lost is its ledger row.
     this.logDurabilityDegradation(
@@ -532,9 +606,11 @@ function isSignInSession(session: any, ctx: any): boolean {
  * The lock is the one password sign-in reads: `locked_until` still in the
  * future while `lockoutThreshold` is on. An expired lock admits, and with the
  * threshold off no lock is read, as at `/sign-in/email`. Only a sign-in is
- * refused ({@link isSignInSession}). `/sign-in/email` is refused by its own
- * gate before its credential is checked ({@link admitSignInAttempt}), which
- * also settles its counter and writes its row, so it is left to that gate.
+ * refused ({@link isSignInSession}). A password door
+ * ({@link passwordSignInDoorOf}) is refused by its own gate before its
+ * credential is checked ({@link admitSignInAttempt}), with that door's own
+ * wrong-password answer under `'uniform'`, and the gate also settles its
+ * counter and writes its row, so it is left to that gate.
  *
  * A refused sign-in writes the account's `login_failed` row with the lock as
  * its reason, as password sign-in's does. The counter is not moved.
@@ -552,7 +628,7 @@ export async function refuseLockedAccountSession(
   if (threshold <= 0 || !row || !lockHolds(row.locked_until, Date.now())) return;
   const userId = session?.userId;
   if (typeof userId !== 'string' || userId === '') return;
-  if (ctx?.path === SIGN_IN_EMAIL_PATH || !isSignInSession(session, ctx)) return;
+  if (passwordSignInDoorOf(ctx) || !isSignInSession(session, ctx)) return;
   await emitAuthSessionAuditEvent(
     this.config.getAuditSink?.(),
     signInFailureEventFor(userId, {

@@ -20,8 +20,8 @@
  * the same cloud-as-IdP authorization gate, the same break-glass
  * last-local-credential refusal, the same audience posture and uniqueness
  * refusal on password sign-up, the same cloud-managed invite-member refusal,
- * the same account lockout gate, and the same first-user `disableSignUp` flip
- * — in the same order.
+ * the same account lockout gate (on every password door), and the same
+ * first-user `disableSignUp` flip — in the same order.
  *
  * ## How the moved body reaches the class
  *
@@ -62,7 +62,7 @@ import { isCloudManaged } from '@objectstack/core';
 import { VENDOR_ROLE_SCALAR_ADMIN_PATHS } from './admin-impersonate-endpoint.js';
 import { setAuthActorResolver } from './auth-actor-attribution.js';
 import { AuthManager } from './auth-manager.js';
-import { SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
+import { passwordSignInDoorOf } from './auth-manager-sign-in-lockout.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import {
   isLastLocalCredentialHolder,
@@ -856,17 +856,18 @@ export async function globalBeforeHook(
   });
 
   // ── ADR-0069 D2: account lockout (gate) ─────────────────────
+  // On every password door (`/sign-in/email`, `/sign-in/phone-number`),
   // BEFORE better-auth checks the password: the attempt is stamped as a
   // failure (settled by the after-hook once the check answers), and a
   // locked identity is refused — a lock must hold even against the
-  // correct password. The refusal is the one a wrong password gets, made
-  // by better-auth's own credential check (`sign-in-lockout-refusal.ts`),
-  // unless the deployment opted into `403 ACCOUNT_LOCKED`. It is a
-  // refused sign-in, so it writes its `login_failed` row
-  // (`auth-session-audit.ts`, account events).
-  if (ctx?.path === SIGN_IN_EMAIL_PATH) {
-    const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
-    if (email) await this.admitSignInAttempt(email, ctx);
+  // correct password. The refusal is the one a wrong password gets at that
+  // door, made by better-auth's own credential check
+  // (`sign-in-lockout-refusal.ts`), unless the deployment opted into `403
+  // ACCOUNT_LOCKED`. It is a refused sign-in, so it writes its
+  // `login_failed` row (`auth-session-audit.ts`, account events).
+  const passwordDoor = passwordSignInDoorOf(ctx);
+  if (passwordDoor) {
+    if (passwordDoor.identifier) await this.admitSignInAttempt(passwordDoor.identifier, ctx, passwordDoor.door);
     return;
   }
 
