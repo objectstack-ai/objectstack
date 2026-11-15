@@ -1376,34 +1376,34 @@ export const CEILINGS = new Map([
   // `ownership transferred` when done. Measured delta +1; landed count, headroom 0.
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 100],
   // Area-lease mode (any lane): dynamic partitioning at seating and at every hand-over
-  // or shift, startup with the maintainer's authorising line per thread, the in-area
-  // rules as pointers to their owning references, the cross-account hand-over on
-  // GitHub and the ownership split. Ordered by the same ruling of record as the two
-  // raises above. A NEW file, so this is an added row and no other row moves for it;
-  // set at the landed line count, headroom 0, same convention as every entry above.
-  // Raised 60 → 68 by the area-mode rules (an ORDINARY ruled raise; ruling of record:
-  // the maintainer, 2026-11-15, verbatim: 「写仓库」, approving the coordinator's proposal to
-  // write the day's area-mode rules into the repo; quoted in the body of card #33907
-  // (filing gate ③), claim comment 6895484790): the pre-claim three checks recorded in
-  // the claim, the declaration self-check, p3 fill behind p1/p2, analysed cross-lane cards
-  // staying in lane, four devs per area with re-splitting, contract-tier review of batched
-  // Chinese decisions, landing within ten minutes. The dated eight-area example was
-  // deleted to pay part of it. Measured delta +8; landed count, headroom 0.
-  // Raised 68 → 69 by the area self-review rule (an ORDINARY ruled raise; ruling of record:
-  // the maintainer, 2026-11-15T16:06Z, verbatim: 「50 行内由区自审」, in the scope of card
-  // #34007, claim comment 6897299724): a PR of at most 50 changed lines that edits only text
-  // or tests and declares `Clause-②: no` with no other contract face is self-reviewed by the
-  // area against review-checklist.md and lands; every other PR goes to the seat's review
-  // thread. Measured delta +1; landed count, headroom 0.
-  // Raised 69 → 71 by the area throughput and cost rules (an ORDINARY ruled raise; ruling of
-  // record: the maintainer, 2026-11-15T16:09Z, verbatim: 「同意他的建议：每区先开 2 个开发代理，
-  // 上一个 PR 进了合并队列再领下一张卡；不单独做 p3；只复审已经变绿、不再改的提交；线程 effort
-  // 用 high。」, adopting server seat 6's proposals on #28677 (comments 6897257549 and
-  // 6897338574), built in the scope of card #34007): the review-discipline line (final green
-  // head only, delta after fixes, a same patch-id main merge keeps the PASS) and the cost line
-  // (touched packages only before push, pointer-only cross-thread messages, effort high); the
-  // 2-dev, merge-queue gate and p3 ride-along lines replace the old ones in place. Measured
-  // delta +2; landed count, headroom 0.
+  // or shift, startup with the maintainer's authorising line per seat thread (an area
+  // thread carries none), the in-area rules as pointers to their owning references, the
+  // cross-account hand-over on GitHub and the ownership split. Ordered by the same ruling
+  // of record as the two raises above. A NEW file, so this is an added row and no other
+  // row moves for it; set at the landed line count, headroom 0, same convention as every
+  // entry above. Lowered 60 → 59 when the area-thread authorising line was removed
+  // (lowering is always legitimate); landed count, headroom 0.
+  // Raised 59 → 71 on top of that baseline by three ORDINARY ruled raises, measured
+  // against the 59-line file on main: +12 in all, landed count, headroom 0.
+  // (a) +8, the area-mode rules; ruling of record: the maintainer, 2026-11-15, verbatim:
+  // 「写仓库」, approving the coordinator's proposal to write the day's area-mode rules into
+  // the repo; quoted in the body of card #33907 (filing gate ③), claim comment 6895484790:
+  // the pre-claim three checks recorded in the claim, the declaration self-check, analysed
+  // cross-lane cards staying in lane, re-splitting a backed-up area, contract-tier review
+  // of batched Chinese decisions, landing within ten minutes. The dated eight-area example
+  // was deleted to pay part of it.
+  // (b) +1, the area self-review rule; ruling of record: the maintainer, 2026-11-15T16:06Z,
+  // decision card, verbatim: 「50 行内由区自审」, recorded in comment 6897821873 on card
+  // #34007: a PR of at most 50 changed lines that edits only text or tests and declares
+  // `Clause-②: no` with no other contract face is self-reviewed by its area against
+  // review-checklist.md; every other PR goes to the seat's review thread.
+  // (c) +3, the area throughput and cost rules; ruling of record: the maintainer,
+  // 2026-11-15T16:08Z, verbatim: 「同意他的建议：每区先开 2 个开发代理，上一个 PR 进了合并队列
+  // 再领下一张卡；不单独做 p3；只复审已经变绿、不再改的提交；线程 effort 用 high。」, recorded in
+  // the same comment 6897821873: the final-green-head review line, the contract-record line
+  // (contract-review.md's head-move exception; a same patch-id main merge keeps only the
+  // thread's ACCEPT) and the cost line; the 2-dev merge-queue gate and the p3 ride-along
+  // replace the old lines in place.
   ['.claude/skills/pm-dispatch/references/area-lease.md', 71],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
