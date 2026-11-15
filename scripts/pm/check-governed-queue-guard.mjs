@@ -5669,8 +5669,11 @@ export async function selfTest() {
     // ⛔ S1 of review 6892305129: the state word must END the finding — a title that opens with `closed` or `none` names an OPEN finding.
     const titledOpen = await Promise.all(['S1 (should-fix): closed in part, still open for X', '- **S1 (should-fix) — closed in part; the table cell still clears.**', '**S2 (should-fix) — Closed PRs are still read as merged by the audit.**', '- **S2 (should-fix) — none of the three ablations ran on the committed head.**', 'S1 (should-fix) — closed on the prior head, reopened by this delta', '- should-fix: none of S1, S2 is fixed'].map((line) => graded([line])));
     assert('⛔ #33604-r3-a-finding-whose-TITLE-opens-with-closed-or-none-stays-OPEN-and-REFUSES', titledOpen.every((r) => r.exitCode === EXIT_REFUSED_UNAPPROVED && /names 1 open must-fix\/should-fix finding/.test(renderGuardVerdict(r))), titledOpen.map((r) => r.entries[0].record.verdictReason ?? 'CLEARED').join(' | '));
-    const stateEnds = await Promise.all(['S1 (should-fix): closed here.', '- **S1 (should-fix): closed.** Every knock names a key.', 'S1 (should-fix): closed;'].map((line) => graded([line])));
-    assert('#33604-r3-CONTROL-closed-that-ends-the-finding-or-the-bold-title-CLEARS', stateEnds.every((r) => r.exitCode === EXIT_CLEAR), stateEnds.map((r) => r.entries[0].record.verdictReason).join(' | '));
+    const stateEnds = await Promise.all(['S1 (should-fix): closed here.', 'S1 (should-fix): closed;'].map((line) => graded([line])));
+    assert('#33604-r3-CONTROL-closed-that-ends-the-finding-CLEARS', stateEnds.every((r) => r.exitCode === EXIT_CLEAR), stateEnds.map((r) => r.entries[0].record.verdictReason).join(' | '));
+    // ⛔ #33770 N1: a closed bold title with a sentence after it stays OPEN — the reader cannot weigh a body against its title.
+    const titleThenBody = await Promise.all(['- **S1 (should-fix): closed.** Every knock names a key.', '- **S1 (should-fix): closed.** Reopened by this delta.'].map((line) => graded([line])));
+    assert('⛔ #33770-N1-a-closed-bold-title-with-a-body-after-it-stays-OPEN-and-REFUSES', titleThenBody.every((r) => r.exitCode === EXIT_REFUSED_UNAPPROVED && /names 1 open must-fix\/should-fix finding/.test(renderGuardVerdict(r))), titleThenBody.map((r) => r.entries[0].record.verdictReason ?? 'CLEARED').join(' | '));
     const r3Fails = await Promise.all(['Verdict: FAILED', 'Verdict is FAIL', 'Verdict (delta): FAIL', '| FAIL | Verdict |', 'FAIL!', '## Contract review — PASS withdrawn, FAIL'].map((line) => graded([line])));
     assert('⛔ #33604-r3-N2-FAILED-is-a-parenthetical-a-reversed-table-row-FAIL-bang-and-a-late-FAIL-in-a-heading-tail-REFUSE', r3Fails.every((r) => r.exitCode === EXIT_REFUSED_UNAPPROVED && /yet it also reads FAIL/.test(renderGuardVerdict(r))), r3Fails.map((r) => r.entries[0].record.verdictReason ?? 'CLEARED').join(' | '));
     // ⛔ S2 of review 6891926185: every verdict-bearing FAIL form refuses, and an ambiguous negation fails closed.
@@ -5777,7 +5780,7 @@ export async function selfTest() {
     if (args[0] === 'merge-base') return `mb-${args[2]}\n`;
     if (args[0] === 'check-attr') return spec.attrs;
     if (args[0] === 'rev-parse') return `${REF_OLD}\n`;
-    const [, , , a, b] = args; // diff -z --name-only A B
+    const [a, b] = args.slice(-2); // diff -z --name-only --no-renames A B: the two revs are the TAIL
     return a === REF_OLD && b === REF_HEAD ? spec.moved : (spec.own?.[b] ?? '');
   };
   const qRegen = { moved: 'packages/spec/api-surface/ui.txt\0', attrs: 'packages/spec/api-surface/ui.txt\0merge\0os-regen\0' };

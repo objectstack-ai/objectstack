@@ -301,3 +301,69 @@ describe('POST /api/settings/:namespace/:actionId — the action verdict', () =>
     expect(await runSettingsAction('email', 'send_test')).toEqual({ ok: false, message: 'Gateway Timeout' });
   });
 });
+
+describe('every /api/settings call carries the session language as Accept-Language', () => {
+  // The server composes the copy these calls return (the currency-lock banner,
+  // write refusals, action verdicts) in the request's top `Accept-Language`
+  // tag. `<html lang>` is the session's UI language, the same source the
+  // console's authenticated fetch stamps on the metadata and data calls.
+  let langBefore: string;
+  beforeEach(() => {
+    langBefore = document.documentElement.lang;
+  });
+  afterEach(() => {
+    document.documentElement.lang = langBefore;
+  });
+
+  /** The four calls, each answered with a body its own reader accepts. */
+  const CALLS: Array<[string, () => Promise<unknown>, unknown]> = [
+    ['GET /api/settings', () => listSettingsManifests(), { success: true, data: { manifests: MANIFESTS } }],
+    ['GET /api/settings/:namespace', () => getSettingsNamespace('localization'), { success: true, data: NAMESPACE_PAYLOAD }],
+    [
+      'PUT /api/settings/:namespace',
+      () => saveSettingsNamespace('localization', { timezone: 'UTC' }),
+      { success: true, data: { values: NAMESPACE_PAYLOAD.values } },
+    ],
+    [
+      'POST /api/settings/:namespace/:actionId',
+      () => runSettingsAction('email', 'send_test'),
+      { success: true, data: { ok: true, message: 'Sent.' } },
+    ],
+  ];
+
+  /** The headers the client handed to `fetch` on its only call. */
+  function sentHeaders(): Headers {
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    return new Headers((fetchMock.mock.calls[0][1] as RequestInit | undefined)?.headers);
+  }
+
+  it.each(CALLS)('%s sends the session language', async (_name, call, body) => {
+    document.documentElement.lang = 'zh-Hans';
+    fetchMock.mockResolvedValue(jsonResponse(body));
+    await call();
+    const headers = sentHeaders();
+    expect(headers.get('Accept-Language')).toBe('zh-Hans');
+    // The JSON headers the routes read are kept alongside it.
+    expect(headers.get('Accept')).toBe('application/json');
+    expect(headers.get('Content-Type')).toBe('application/json');
+  });
+
+  it.each(CALLS)('%s with no session language leaves the header to the browser', async (_name, call, body) => {
+    document.documentElement.lang = '';
+    fetchMock.mockResolvedValue(jsonResponse(body));
+    await call();
+    expect(sentHeaders().has('Accept-Language')).toBe(false);
+  });
+
+  it('a language switch reaches the next call, not only the first one', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ success: true, data: NAMESPACE_PAYLOAD }));
+    document.documentElement.lang = 'en';
+    await getSettingsNamespace('localization');
+    document.documentElement.lang = 'zh-Hans';
+    await getSettingsNamespace('localization');
+    const sent = fetchMock.mock.calls.map(
+      ([, init]) => new Headers((init as RequestInit | undefined)?.headers).get('Accept-Language'),
+    );
+    expect(sent).toEqual(['en', 'zh-Hans']);
+  });
+});

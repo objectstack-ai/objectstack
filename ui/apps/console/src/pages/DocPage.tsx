@@ -7,8 +7,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, useHref, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { AlertCircle, ChevronDown, FileQuestion, Loader2, Menu } from 'lucide-react';
+import { Link, Navigate, useHref, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { AlertCircle, ChevronDown, FileQuestion, Layers, Loader2, Menu } from 'lucide-react';
 import { useAdapter } from '@object-ui/app-shell';
 import { MarkdownRenderer, extractToc } from '@object-ui/plugin-markdown';
 import { useObjectTranslation } from '@object-ui/i18n';
@@ -17,7 +17,7 @@ import { DocShell } from './DocShell';
 import { BookSidebar } from './BookSidebar';
 import { DocRefusal } from './BookPage';
 import { useBookData } from './use-book-data';
-import { resolveBookTree, bookSlug, bookNamedBy, labelUncategorized, type ResolvedBook } from './book-nav';
+import { resolveBookTree, bookSlug, bookNamedBy, homeBook, labelUncategorized, type ResolvedBook } from './book-nav';
 
 interface DocItem {
   name: string;
@@ -30,6 +30,24 @@ function scrollHeadingIntoView(id: string): boolean {
   const target = document.getElementById(id);
   target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   return target !== null;
+}
+
+/**
+ * The packages a `409 RESOURCE_CONFLICT` doc read names as holders of the
+ * name: `@objectstack/client` carries the refusal's `details.candidates` on the
+ * rejection (`{ kind: 'package', packageId }` per package). Null for any other
+ * failure, and for a refusal that names no package, so those keep their state.
+ */
+function conflictCandidates(err: unknown): string[] | null {
+  const e = err as { httpStatus?: unknown; code?: unknown; details?: { candidates?: unknown } } | null;
+  if (e?.httpStatus !== 409 || e.code !== 'RESOURCE_CONFLICT') return null;
+  const candidates = e.details?.candidates;
+  if (!Array.isArray(candidates)) return null;
+  const packageIds = candidates
+    .filter((c): c is { kind: 'package'; packageId: string } =>
+      c?.kind === 'package' && typeof c.packageId === 'string' && c.packageId !== '')
+    .map((c) => c.packageId);
+  return packageIds.length > 0 ? packageIds : null;
 }
 
 /**
@@ -48,6 +66,12 @@ function scrollHeadingIntoView(id: string): boolean {
  * A doc the member may not read is a different answer: the server refuses it
  * with 401 / 403 (ADR-0046 §6.7), and the page shows that refusal, with the
  * server's reason, rather than "not found" or a load failure (objectui#10188).
+ *
+ * A name two or more enabled packages ship is refused by a read that names no
+ * package, `409 RESOURCE_CONFLICT` with the holders as candidates (ADR-0150
+ * D3). Nothing picks one: the page lists the candidates, each opening that
+ * package's copy at its package address `/apps/<packageId>/docs/<name>`, where
+ * the read names the package.
  */
 export default function DocPage() {
   // Route is `/docs/:slug/:name` (`:slug` = book, `:name` = doc). `appName` is
@@ -72,8 +96,9 @@ export default function DocPage() {
   const adapter = useAdapter();
   const { t } = useObjectTranslation();
   const [doc, setDoc] = useState<DocItem | null>(null);
-  const [state, setState] = useState<'loading' | 'ready' | 'missing' | 'refused' | 'error'>('loading');
+  const [state, setState] = useState<'loading' | 'ready' | 'missing' | 'refused' | 'conflict' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [candidates, setCandidates] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +127,14 @@ export default function DocPage() {
         if (status === 401 || status === 403) {
           setErrorMessage(err?.message ?? '');
           setState('refused');
+          return;
+        }
+        // Two or more packages ship this name and the read named none of
+        // them: the server names the holders, and the reader picks one.
+        const holders = conflictCandidates(err);
+        if (holders) {
+          setCandidates(holders);
+          setState('conflict');
           return;
         }
         // The metadata API answers 404 for unknown names — that is the
@@ -247,6 +280,47 @@ export default function DocPage() {
 
   if (state === 'refused') {
     return <DocRefusal name={name} message={errorMessage} />;
+  }
+
+  if (state === 'conflict') {
+    return (
+      <DocShell breadcrumb={name}>
+        <div className="mx-auto flex max-w-3xl flex-col items-center gap-3 p-10 text-center">
+          <Layers className="h-10 w-10 text-muted-foreground" />
+          <h1 className="text-lg font-semibold">
+            {t('help.docConflictTitle', { defaultValue: 'Choose a package' })}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {t('help.docConflictDescription', {
+              defaultValue: 'More than one installed package provides a document named {{name}}. Open the one you want to read.',
+              name,
+            })}
+          </p>
+          <ul
+            aria-label={t('help.docConflictCandidates', { defaultValue: 'Packages that provide this document' })}
+            className="mt-2 flex w-full max-w-md flex-col gap-2 text-left"
+          >
+            {candidates.map((packageId) => {
+              // The package as the portal names it: its home book for this doc.
+              const label = (name ? homeBook(name, books, allDocs, packageId)?.label : undefined) ?? packageId;
+              return (
+                <li key={packageId}>
+                  <Link
+                    to={{ pathname: `/apps/${packageId}/docs/${name}`, hash }}
+                    className="flex flex-col rounded-md border px-4 py-3 hover:bg-muted/50"
+                  >
+                    <span className="text-sm font-medium">{label}</span>
+                    {label !== packageId ? (
+                      <span className="text-xs text-muted-foreground">{packageId}</span>
+                    ) : null}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </DocShell>
+    );
   }
 
   if (state === 'error') {
