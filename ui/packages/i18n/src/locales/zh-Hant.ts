@@ -4250,7 +4250,7 @@ const zhHant = {
     tool: {
       aggregate_data: '彙總相關資料',
       get_record: '讀取這條記錄',
-      list_datasets: '查看指標',
+      list_datasets: '檢視指標',
       query_data: '查詢所需資料',
       query_dataset: '按指標查詢',
       query_records: '查詢相關記錄',
