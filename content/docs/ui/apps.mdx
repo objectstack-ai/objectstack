@@ -294,7 +294,7 @@ rejected — a divider has nothing to label, gate, or badge.)
 | `id` | `string` | Unique identifier (`snake_case`, required) |
 | `label` | `string` | Display label |
 | `icon` | `string` | Icon name (Lucide) |
-| `order` | `number` | Sort order within the same level (lower = first) |
+| `order` | `number` | Sort order within the same level (lower = first); entries [contributed by another package](#contributing-navigation-to-another-app) sort in the same level |
 | `badge` | `string \| number` | Badge text or count displayed on the item |
 | `visible` | `Expression` | Visibility predicate (CEL expression) |
 | `requiredPermissions` | `string[]` | Permissions required to see/access this item |
@@ -844,7 +844,7 @@ navigationContributions: [
     group: 'group_integrations',
     priority: 100,
     items: [
-      { id: 'nav_webhooks', type: 'object', label: 'Webhooks', objectName: 'sys_webhook', requiresObject: 'sys_webhook' },
+      { id: 'nav_webhooks', type: 'object', label: 'Webhooks', objectName: 'sys_webhook', requiresObject: 'sys_webhook', order: 30 },
     ],
   },
 ]
@@ -859,6 +859,17 @@ navigationContributions: [
 
 The runtime merges every contribution into the target app's `navigation` by group
 id and priority when the app is read, so registration order does not matter.
+
+**A contributed entry's own `order` places it among the target app's entries.**
+The merge appends each contribution's items to the end of their group (or of the
+top level) and keeps every item as written, `order` included. The console then
+sorts each level by `order`, as it does for any app: the top level, each group's
+children, and the mobile tab bar. So an item with `order: 25` is drawn between the
+app's own `order: 20` and `order: 30` entries. An entry with no `order` sorts as
+`0`, and entries with equal `order` keep their merged sequence, so `priority`
+decides only between contributions whose items have the same `order`. This needs
+the target app to number its own entries: when it numbers none, every entry sorts
+as `0` and a contribution stays after the app's own entries.
 
 **A group id the target app does not declare is not refused.** The items are
 appended at the app's top level and a `nav_contribution_group_missing` diagnostic

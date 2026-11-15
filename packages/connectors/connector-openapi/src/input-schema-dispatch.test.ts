@@ -44,13 +44,13 @@ const document = {
     },
 };
 
-type Sent = { url: string; headers: Record<string, string> };
+type Sent = { url: string; headers: Record<string, string>; body?: string };
 
-/** Boot a kernel with one hand-wired OpenAPI connector `pets` over {@link document}, recording every request. */
-async function boot(auth: RestAuth): Promise<{ engine: AutomationEngine; sent: Sent[]; kernel: LiteKernel }> {
+/** Boot a kernel with one hand-wired OpenAPI connector `pets` over `doc` ({@link document} by default), recording every request. */
+async function boot(auth: RestAuth, doc: object = document): Promise<{ engine: AutomationEngine; sent: Sent[]; kernel: LiteKernel }> {
     const sent: Sent[] = [];
-    const fetchImpl = (async (url: string, init: { headers?: Record<string, string> }) => {
-        sent.push({ url, headers: { ...init?.headers } });
+    const fetchImpl = (async (url: string, init: { headers?: Record<string, string>; body?: string }) => {
+        sent.push({ url, headers: { ...init?.headers }, body: init?.body });
         return { status: 200, ok: true, headers: { get: () => 'application/json' }, json: async () => ({}), text: async () => '{}' };
     }) as unknown as typeof fetch;
     const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
@@ -65,17 +65,17 @@ async function boot(auth: RestAuth): Promise<{ engine: AutomationEngine; sent: S
         },
         async start() {},
     } as never);
-    kernel.use(new ConnectorOpenApiPlugin({ document, name: 'pets', auth, fetchImpl } as never));
+    kernel.use(new ConnectorOpenApiPlugin({ document: doc, name: 'pets', auth, fetchImpl } as never));
     await kernel.bootstrap();
     return { engine: kernel.getService<AutomationEngine>('automation'), sent, kernel };
 }
 
-async function callGetPet(engine: AutomationEngine, name: string, input: Record<string, unknown>) {
+async function callGetPet(engine: AutomationEngine, name: string, input: Record<string, unknown>, actionId = 'getPet') {
     engine.registerFlow(name, {
         name, label: name, type: 'autolaunched',
         nodes: [
             { id: 'start', type: 'start', label: 'Start' },
-            { id: 'call', type: 'connector_action', label: 'Call', connectorConfig: { connectorId: 'pets', actionId: 'getPet', input } },
+            { id: 'call', type: 'connector_action', label: 'Call', connectorConfig: { connectorId: 'pets', actionId, input } },
             { id: 'end', type: 'end', label: 'End' },
         ],
         edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
@@ -131,6 +131,100 @@ describe('connector-openapi inputSchema at the connector_action door (#27995)', 
             const result = await callGetPet(engine, 'auth_query', { path: { petId: 7 }, header: { 'X-Api-Key': 'h' } });
             expect(result.success, result.error).toBe(true);
             expect(new URL(sent[0].url).searchParams.get('api_key')).toBe('k-456');
+        } finally {
+            await kernel.shutdown().catch(() => {});
+        }
+    });
+});
+
+/**
+ * #33553 — the executor refuses a key an object schema does not declare, so
+ * what the generator skips on a document nobody de-referenced must read as
+ * open: an unresolved `$ref` parameter opens every location the handler
+ * sends, and an unresolved `$ref` or schemaless request body is `body: {}`.
+ * On `main` before the refusal these calls dispatched and worked; they still do.
+ */
+describe('connector-openapi skipped $ref inputs still dispatch under the undeclared-key refusal (#33553)', () => {
+    const refDocument = {
+        openapi: '3.0.3',
+        info: { title: 'Petstore', version: '1.0.0' },
+        servers: [{ url: 'https://petstore.example.com' }],
+        components: {
+            parameters: {
+                PetId: { name: 'petId', in: 'path', required: true, schema: { type: 'integer' } },
+                Tag: { name: 'tag', in: 'query', schema: { type: 'string' } },
+            },
+            requestBodies: { Pet: { content: { 'application/json': { schema: { type: 'object' } } } } },
+        },
+        paths: {
+            '/pets/{petId}': {
+                put: {
+                    operationId: 'putPet',
+                    parameters: [
+                        { $ref: '#/components/parameters/PetId' },
+                        { $ref: '#/components/parameters/Tag' },
+                        { name: 'limit', in: 'query', schema: { type: 'integer' } },
+                    ],
+                    requestBody: { $ref: '#/components/requestBodies/Pet' },
+                    responses: { '200': { description: 'ok' } },
+                },
+                post: {
+                    operationId: 'postPetRaw',
+                    parameters: [{ name: 'petId', in: 'path', required: true, schema: { type: 'integer' } }],
+                    requestBody: { required: true, content: { 'application/octet-stream': {} } },
+                    responses: { '200': { description: 'ok' } },
+                },
+            },
+        },
+    };
+    const none: RestAuth = { type: 'none' };
+
+    it('1. an unresolved $ref parameter opens path, query and header; the declared query parameter stays typed', async () => {
+        const { engine, sent, kernel } = await boot(none, refDocument);
+        try {
+            const schema = engine.getConnectorDescriptors().find((d) => d.name === 'pets')?.actions
+                .find((a) => a.key === 'putPet')?.inputSchema as any;
+            expect(schema.properties.path).toEqual({ type: 'object', additionalProperties: true });
+            expect(schema.properties.header).toEqual({ type: 'object', additionalProperties: true });
+            expect(schema.properties.query).toEqual({
+                type: 'object', properties: { limit: { type: 'integer' } }, additionalProperties: true,
+            });
+            expect(schema.properties.body).toEqual({});
+            expect(schema.required).toBeUndefined();
+
+            const result = await callGetPet(engine, 'ref_params', {
+                path: { petId: 7 }, query: { tag: 'dog', limit: 2 }, body: { name: 'Rex' },
+            }, 'putPet');
+            expect(result.success, result.error).toBe(true);
+            expect(sent).toHaveLength(1);
+            const url = new URL(sent[0].url);
+            expect(url.pathname).toBe('/pets/7');
+            expect(url.searchParams.get('tag')).toBe('dog');
+            expect(sent[0].body).toBe(JSON.stringify({ name: 'Rex' }));
+
+            const wrongType = await callGetPet(engine, 'ref_params_typed', {
+                path: { petId: 7 }, query: { limit: 'two' },
+            }, 'putPet');
+            expect(wrongType.success).toBe(false);
+            expect(sent).toHaveLength(1);
+        } finally {
+            await kernel.shutdown().catch(() => {});
+        }
+    });
+
+    it('2. a request body whose content carries no schema is declared as body: {} and dispatches', async () => {
+        const { engine, sent, kernel } = await boot(none, refDocument);
+        try {
+            const schema = engine.getConnectorDescriptors().find((d) => d.name === 'pets')?.actions
+                .find((a) => a.key === 'postPetRaw')?.inputSchema as any;
+            expect(schema.properties.body).toEqual({});
+            expect(schema.required).toEqual(['path', 'body']);
+            expect(schema.properties.path.additionalProperties).toBeUndefined();
+
+            const result = await callGetPet(engine, 'raw_body', { path: { petId: 3 }, body: 'raw' }, 'postPetRaw');
+            expect(result.success, result.error).toBe(true);
+            expect(sent).toHaveLength(1);
+            expect(new URL(sent[0].url).pathname).toBe('/pets/3');
         } finally {
             await kernel.shutdown().catch(() => {});
         }
