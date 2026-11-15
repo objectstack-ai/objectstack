@@ -87,6 +87,7 @@ import {
   branchNameTarget,
   closingKeywordTargets,
   contractReviewHeadMatch,
+  contractReviewRecordReading,
   contractReviewVerdictLines,
   deliveryEvidence,
   deliveryEvidenceNote,
@@ -98,8 +99,9 @@ import {
 } from './check-half-states.mjs';
 // The fleet's one verdict reader, in its counting form, re-exported so the queue guard's lazy loader
 // reaches it: every Tier S entry lands on a record with exactly one `VERDICT:` line reading PASS
-// (#33501 for the low-risk skills arm, #33541 for every other leg). ⛔ Never a second parser.
-export { contractReviewVerdictLines };
+// (#33501 for the low-risk skills arm, #33541 for every other leg), and, through the whole
+// reading, no FAIL spelled elsewhere and no open must-fix or should-fix (#33604). ⛔ Never a second parser.
+export { contractReviewRecordReading, contractReviewVerdictLines };
 // The tier `isModelIdentifierToken` refuses by VALUE. IMPORTED, never restated:
 // `dispatch-gates.mjs` is the one line in `scripts/pm/**` where the model id is
 // spelled as a value, and a second value site here is the drift that let a
@@ -2070,6 +2072,9 @@ function templateFace({ face: faceId, paths }) {
 const BRIEF_GRADE_LINES = Object.freeze([
   '     Grade each finding must-fix, should-fix or nit — a nit has no effect on correctness or the contract.',
   '     A must-fix is a FAIL; a must-fix or should-fix earns a delta review of its fix; nits alone end the round.',
+  '     Spell a must-fix or should-fix with its id and grade, `S1 (should-fix) — …`, and a clean round as',
+  '     `No must-fix, no should-fix.`: the queue guard reads a graded finding as OPEN on this head and',
+  '     refuses the record; the delta record names those it closes by id alone, `S1: closed`.',
   '     A nit is fixed only on the prose faces, or left as an accepted deviation or a follow-up card: a fix',
   '     anywhere else moves the head, and this record no longer covers it.',
   "     ⛔ Judge the tree, never the PR body's account of it.",
@@ -2288,8 +2293,8 @@ export function contractReviewBriefLines(values = {}) {
  *
  * ⛔ Not read: the verdict WORD (the file's boundary, and the corpus already
  * spells it two ways) and the ①②③ items (prose the seat reads). The queue guard
- * reads the word on the comment this function chose, with
- * `contractReviewVerdictLines` (re-exported above), and drops comments by
+ * reads the word and the grades on the comment this function chose, with
+ * `contractReviewRecordReading` (re-exported above), and drops comments by
  * untrusted authors from the threads before calling this (card #33541): both
  * are the guard's facts, so this locator's other callers keep their reading.
  *
@@ -3312,6 +3317,20 @@ export async function selfTest() {
   t('…and each run located the record on the thread it was posted to, not on the other one', pinRuns.every(([where, r]) => r.record?.where === where), JSON.stringify(pinRuns.map(([w, r]) => [w, r.record?.where])));
   t('…and the guard fetched exactly ONE thread per entry in the set, no more and no fewer', pinRuns.every(([, r]) => r.threadsRead.join() === `${PIN_PR},${PIN_CARD}`), JSON.stringify(pinRuns.map(([, r]) => r.threadsRead)));
   t('⭐ #33541: the record the template prints carries exactly ONE `VERDICT:` line, and it reads PASS, so the guard that cleared it read its verdict', contractReviewVerdictLines(PIN_RECORD.body).join() === 'PASS' && pinRuns.every(([, r]) => r.record?.verdict === 'PASS'), JSON.stringify(pinRuns.map(([, r]) => r.record?.verdict)));
+  t('⭐ #33604: the grade shapes the BRIEF prescribes are the ones the GUARD reads — `S1 (should-fix)` refuses the template record, `No must-fix, no should-fix.` clears it', await (async () => {
+    const saved = PIN_RECORD.body;
+    const withProse = (prose) => saved.replace('### ④ Design judgment\n', `### ④ Design judgment\n\n${prose}\n`);
+    try {
+      PIN_RECORD.body = withProse('**S1 (should-fix) — the knock has no key.**');
+      const open = await pinRun('PR');
+      PIN_RECORD.body = withProse('No must-fix, no should-fix.');
+      const clean = await pinRun('PR');
+      const briefSays = ['`S1 (should-fix) — …`', '`No must-fix, no should-fix.`', '`S1: closed`'].every((frag) => BRIEF_BODY.includes(frag));
+      return briefSays && saved.includes('### ④ Design judgment\n') && open.verdict.exitCode !== GUARD.EXIT_CLEAR && open.record?.state === 'not-pass' && /S1 \(should-fix\)/.test(open.record?.verdictReason ?? '') && clean.verdict.exitCode === GUARD.EXIT_CLEAR && clean.record?.verdict === 'PASS';
+    } finally {
+      PIN_RECORD.body = saved;
+    }
+  })());
   t('⛔ #33541: the same template record posted by an author outside the relay and GOVERNED_APPROVERS is not read -- refused as no record', await (async () => { const saved = PIN_RECORD.user; PIN_RECORD.user = { login: 'drive-by-commenter' }; try { const r = await pinRun('PR'); return r.verdict.exitCode !== GUARD.EXIT_CLEAR && r.record?.state === 'absent'; } finally { PIN_RECORD.user = saved; } })());
   t('⛔ CONTROL: with the record on NEITHER thread the same run is refused -- the pin can fail', await (async () => { const none = await pinRun('nowhere'); return none.verdict.exitCode !== GUARD.EXIT_CLEAR && none.record?.state === 'absent'; })());
   t('the guard prints the location in the WORDS this file owns, so a seat is told one thing', GUARD.REVIEW_OF_RECORD_LOCATION === REVIEW_OF_RECORD_LOCATION && TEMPLATE_TEXT.includes(`ONE comment on ${REVIEW_OF_RECORD_LOCATION}`));
