@@ -24,6 +24,11 @@
 //  - CONTROL: a name one package holds diffs bare as before, and so does a
 //    name first saved as the environment's own item and later taken over by a
 //    package (M1): the environment's versions are its sole slot's;
+//  - `?package=` naming a package that neither holds nor ships the name is
+//    refused `409` naming the holders, in the protocol's order with their
+//    `kind` at the wire; the environment's slot addressed through a package
+//    (the read falls back to the package-less row) compares that row's
+//    versions alone, its own active row the `to` side;
 //  - `?package=` on a type not stored per package is refused 400, never
 //    accepted and dropped.
 
@@ -47,6 +52,8 @@ const SOLO = 'qa_diff_solo_33308';
 const SHIPPED_ONE = 'qa_diff_shipped_one_33308';
 /** A runtime flow saved as the environment's own item, deleted, then saved in alpha's pair (M1). */
 const TAKEN_OVER = 'qa_diff_taken_over_33308';
+/** A runtime flow saved as the environment's own item, then saved in alpha's pair beside it: two row slots, one of them the environment's. */
+const ENV_BESIDE = 'qa_diff_env_beside_33308';
 
 const flowBody = (name: string, label: string) => ({
   name, label, type: 'autolaunched', status: 'active',
@@ -79,6 +86,9 @@ describe('the /meta diff door of a flow name two packages hold (ADR-0150 D3/D4, 
   };
   const candidatesOf = (json: any) =>
     (json?.details?.candidates ?? []).map((c: any) => c.packageId ?? c.kind).sort();
+  /** The holders as the wire lists them: order and `kind` kept. */
+  const holdersOf = (json: any) =>
+    (json?.details?.candidates ?? []).map((c: any) => (c.kind === 'package' ? { kind: c.kind, packageId: c.packageId } : { kind: c.kind }));
   const diffLabel = (json: any) => (json?.changed ?? []).find((e: any) => e.path === 'label');
   const ownVersions = async (name: string, pkg: string) =>
     versions((await call('GET', `/meta/flow/${name}/history?package=${pkg}`)).json);
@@ -106,6 +116,9 @@ describe('the /meta diff door of a flow name two packages hold (ADR-0150 D3/D4, 
     const dropped = await call('DELETE', `/meta/flow/${TAKEN_OVER}`);
     expect(dropped.status, JSON.stringify(dropped.json)).toBe(200);
     await save(TAKEN_OVER, ALPHA_PAIR, 'alpha took over');
+    await save(ENV_BESIDE, undefined, 'env beside r1');
+    await save(ENV_BESIDE, undefined, 'env beside r2');
+    await save(ENV_BESIDE, ALPHA_PAIR, 'alpha beside r1');
     // A version of SHARED recorded before the history row named its package
     // (a release before ADR-0150 D4's attribution): `package_id` left NULL.
     const ql: any = await stack.kernel.getServiceAsync('objectql');
@@ -134,7 +147,43 @@ describe('the /meta diff door of a flow name two packages hold (ADR-0150 D3/D4, 
       expect(res.status, `${path}: ${JSON.stringify(res.json)}`).toBe(409);
       expect(codeOf(res.json)).toBe('RESOURCE_CONFLICT');
       expect(candidatesOf(res.json)).toEqual([ALPHA_PAIR, BETA_PAIR].sort());
+      // At the wire: every bound package in the protocol's order, each with its `kind`.
+      expect(holdersOf(res.json), path).toEqual([
+        { kind: 'package', packageId: ALPHA_PAIR },
+        { kind: 'package', packageId: BETA_PAIR },
+      ]);
     }
+  });
+
+  it('a package that neither holds nor ships the name is refused 409 at the diff door, naming the holders, comparing nothing', async () => {
+    const res = await call('GET', `/meta/flow/${SHARED}/diff?package=${ALPHA}`);
+    expect(res.status, JSON.stringify(res.json)).toBe(409);
+    expect(codeOf(res.json)).toBe('RESOURCE_CONFLICT');
+    expect(holdersOf(res.json)).toEqual([
+      { kind: 'package', packageId: ALPHA_PAIR },
+      { kind: 'package', packageId: BETA_PAIR },
+    ]);
+    expect(res.json.fromVersion).toBeUndefined();
+    expect(res.json.changed).toBeUndefined();
+  });
+
+  it('the environment\'s slot addressed through a package: the package-less row\'s versions alone, its own active row the to side', async () => {
+    const bare = await call('GET', `/meta/flow/${ENV_BESIDE}/diff`);
+    expect(bare.status, JSON.stringify(bare.json)).toBe(409);
+    // The bound package first, then the environment's own row.
+    expect(holdersOf(bare.json)).toEqual([{ kind: 'package', packageId: ALPHA_PAIR }, { kind: 'environment' }]);
+    // A read naming beta's pair (no row of the name, nothing shipped) falls back to the package-less row.
+    const env = await ownVersions(ENV_BESIDE, BETA_PAIR);
+    expect(env).toHaveLength(2);
+    const res = await call('GET', `/meta/flow/${ENV_BESIDE}/diff?package=${BETA_PAIR}`);
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    expect([res.json.fromVersion, res.json.toVersion]).toEqual(env);
+    expect(diffLabel(res.json)).toEqual({ path: 'label', from: 'env beside r1', to: 'env beside r2' });
+    // Alpha's own slot beside it: its one version, no earlier one of its own.
+    const [alphaOnly] = await ownVersions(ENV_BESIDE, ALPHA_PAIR);
+    const alpha = await call('GET', `/meta/flow/${ENV_BESIDE}/diff?package=${ALPHA_PAIR}`);
+    expect(alpha.status, JSON.stringify(alpha.json)).toBe(200);
+    expect([alpha.json.fromVersion, alpha.json.toVersion]).toEqual([null, alphaOnly]);
   });
 
   it('a name two packages ship, one customized, is refused bare at the diff door as the bare plain read refuses it', async () => {
