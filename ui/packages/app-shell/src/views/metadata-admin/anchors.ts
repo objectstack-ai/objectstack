@@ -247,22 +247,18 @@ export function registerBuiltinAnchors(): void {
         // The running app's detail sections, from the one derivation it uses
         // (objectui#12442) — without them an object with no `fieldGroups`
         // seeded a bare `record:details`. Written in the persisted shape (field
-        // NAMES). "More details" is the English default, since a seed has no
-        // translator and the section's `name` keeps the per-object i18n anchor.
-        // The ungrouped bucket of a grouped object is headed by the inline
-        // locale map of `common.ungroupedSection`, so the saved heading stays
-        // translated.
+        // NAMES). A seed has no translator, so the derivation's own headings
+        // ("More details", and the ungrouped bucket of a grouped object) are
+        // the inline locale maps of their catalogue keys, and the saved
+        // headings stay translated; the "More details" section's `name` keeps
+        // the per-object i18n anchor, which still wins over its map.
         const {
           deriveStudioDetailSections,
           toAuthoredDetailSections,
-          loadPersistedUngroupedHeading,
-          MORE_DETAILS_DEFAULT_LABEL,
+          loadPersistedSectionLabels,
         } = await import('../recordDetailSections.js');
         const sections = toAuthoredDetailSections(
-          deriveStudioDetailSections(objectDef as any, {
-            moreDetails: MORE_DETAILS_DEFAULT_LABEL,
-            ungrouped: await loadPersistedUngroupedHeading(objectDef as any),
-          }),
+          deriveStudioDetailSections(objectDef as any, await loadPersistedSectionLabels(objectDef as any)),
         );
         const synth = buildDefaultPageSchema(objectDef as any, sections ? { sections: sections as any } : undefined) as Record<string, any>;
         if (!fullRecordPagePlacesComponent(object, synth?.regions)) return slotted;

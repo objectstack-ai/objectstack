@@ -269,3 +269,68 @@ describe('PagePreview — Convert to full page heads the ungrouped bucket, trans
     expect(blocks.refused).toEqual([]);
   });
 });
+
+/**
+ * objectstack#33471 — converting a slotted page of an object with no field
+ * groups writes the "More details" section under the translated heading: the
+ * inline locale map of `detail.sectionMoreDetails` (a saved page cannot call
+ * `t()`), never the plain English text, under the section's `details` name, and
+ * the written page still passes the save door's checks.
+ */
+describe('PagePreview — Convert to full page heads More details, translated (objectstack#33471)', () => {
+  const FLAT = {
+    name: OBJECT,
+    fields: { ...FIELDS, memo: { type: 'textarea', label: 'Memo' } },
+  };
+
+  function stubFlatFetch() {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+      json: async () => (url.startsWith('/api/v1/meta/object/') ? { item: FLAT } : { records: [] }),
+    }) as any));
+  }
+
+  /** The `record:details` sections of the written regions. */
+  function writtenSections(regions: unknown): Array<Record<string, any>> {
+    let found: Array<Record<string, any>> | undefined;
+    const walk = (n: unknown) => {
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (!n || typeof n !== 'object') return;
+      const rec = n as Record<string, any>;
+      if (rec.type === 'record:details' && Array.isArray(rec.properties?.sections)) found = rec.properties.sections;
+      Object.values(rec).forEach(walk);
+    };
+    walk(regions);
+    expect(found, 'the written page carries record:details sections').toBeDefined();
+    return found!;
+  }
+
+  it('writes the details section under the locale map of every shipped catalogue', async () => {
+    stubFlatFetch();
+    const onPatch = vi.fn();
+    designer(newRecordPage, onPatch);
+    const button = screen.getByTestId('page-convert-to-full') as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(false));
+    fireEvent.click(button);
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    const patch = onPatch.mock.calls[0][0] as Record<string, unknown>;
+
+    const sections = writtenSections(patch.regions);
+    // Firing control: the split yields the untitled primary section and "More details".
+    expect(sections.map((s) => s.fields)).toEqual([['name', 'status', 'total'], ['memo']]);
+    expect(sections[0].label).toBeUndefined();
+    const details = sections[1];
+    expect(details.name).toBe('details');
+    expect(typeof details.label).toBe('object');
+    for (const code of BUILT_IN_LANGUAGE_CODES) {
+      expect(details.label[code], code).toBe((builtInLocales as Record<string, any>)[code].detail.sectionMoreDetails);
+    }
+
+    const converted = { ...newRecordPage, ...patch };
+    delete (converted as Record<string, unknown>).slots;
+    const verdict = await validateMetadataDraft('page', converted, undefined, { mode: 'edit' });
+    expect(verdict.issues, JSON.stringify(verdict.issues.slice(0, 3))).toEqual([]);
+    const blocks = blockPropsVerdict(patch.regions);
+    expect(blocks.detailsJudged).toBeGreaterThan(0);
+    expect(blocks.refused).toEqual([]);
+  });
+});
