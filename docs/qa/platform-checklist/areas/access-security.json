@@ -3891,7 +3891,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -4021,7 +4021,7 @@
           "revision": 10,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -4115,7 +4115,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -4234,7 +4234,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -4350,7 +4350,7 @@
           "revision": 7,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -4477,7 +4477,7 @@
           "revision": 9,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -4599,7 +4599,7 @@
           "revision": 8,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -4688,7 +4688,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -4789,7 +4789,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -4877,7 +4877,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -5158,7 +5158,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "knownGaps[0] closed: since the permission-set narrowing (#31698, ADR-0150 D2/D9) two packages of two namespaces each install a set of one name (packages/core/src/permission-set-holders.ts#permissionSetHoldersMeet), so the two-holder case is driven live. qa_b now ships its own qa_a_reader, and the fixture's grant names its package. steps[1]'s stale column names a package id nothing installs; steps[2] meets the bare door's 409 first and switches com.qa.addr-a's own row by ?package=; steps[3]'s re-enable is refused 409 while the package-less row stands, and the row is deleted instead (acceptance[3] rewritten). New steps[4] with acceptance[6] drives a real second holder's row, until now scored from the pin only; new acceptance[5] scores both installs and the refused bare grant. negative[1] rewritten: the permission ledger is addressed by (package, name). Read at main 159757ab, and measured there: the four pins (permission-set-address 24 tests, grant-permission-set-package 25, permission-set-package-doors 40, protocol-permission-set-name-registry-reading 18, 0 failed) and a throwaway resolver probe (on a name two packages hold, a stale row naming an unknown package, or an installed package holding no set, switches the granted holder off; a real second holder's row does not). Seat scope addition 6897734692 on card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -5505,7 +5505,7 @@
           "revision": 1,
           "date": "2026-11-15",
           "change": "initial — new coverage for the #33250 opt-in (ledger 6896511848 of #33761, rows 11 and 16): no item drove writeRequiresMasterRead, and security-plugin-cbp-relation.ts had no exact citer, so `checklist-select file:` fell back to its directory. Steps and answers follow QA run #33785's live run at a557fa38 (comment 6893194178); sources re-read at main 159757ab. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -5595,7 +5595,7 @@
           "revision": 1,
           "date": "2026-11-15",
           "change": "initial — new coverage for the #33238 renamedFrom holder carry (ledger 6896511848 of #33761, row 12): no item covered it, at boot or hot. Steps and answers follow QA run #33785's live run at a557fa38 (comment 6893194178); its active-save finding is #33788 (knownGaps[0]). Sources re-read at main 159757ab. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     }

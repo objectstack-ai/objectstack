@@ -2622,7 +2622,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -2716,7 +2716,7 @@
           "ref": "#24824"
         },
         { "revision": 5, "date": "2026-10-31", "change": "acceptance[2] and steps[1] say the endpoint arm needs a tenant flow name. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): a PUT of the runAs:'system' body under a packaged flow's name answered 403 NOT_OVERRIDABLE before the door judged it, so the arm never reached its 422 until the endpoint named a flow no package ships. Re-read at base 488b3ed0: packages/metadata-protocol/src/protocol.ts (a package-shipped item answers NOT_OVERRIDABLE at the meta write door). The 422 assertion is unchanged", "ref": "#27409" },
-        { "revision": 6, "date": "2026-11-15", "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969", "ref": "#PENDING-33969" }
+        { "revision": 6, "date": "2026-11-15", "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969", "ref": "#34068" }
       ]
     },
     {
@@ -2815,7 +2815,7 @@
           "revision": 5,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -2893,7 +2893,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -2968,7 +2968,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },

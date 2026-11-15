@@ -1988,7 +1988,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "acceptance[5], steps[7], fixtures.requires[3], negative[2] and source[6] (new): the preference read follows the emitting organization (#33649, unreleased changeset at main 159757ab). No clause asked which organization's rows decide, so a row under another organization muting a recipient passed unseen. New coverage for ledger 6896511848 of #33761, rows 196 and 209. Read from source at main 159757ab. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -2551,7 +2551,7 @@
           "revision": 4,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -2652,7 +2652,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -2949,7 +2949,7 @@
           "revision": 2,
           "date": "2026-11-15",
           "change": "acceptance[3].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -3112,7 +3112,7 @@
           "revision": 2,
           "date": "2026-11-15",
           "change": "acceptance[3].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },

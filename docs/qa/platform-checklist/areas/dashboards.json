@@ -1375,7 +1375,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -1557,7 +1557,7 @@
           "revision": 1,
           "date": "2026-11-15",
           "change": "initial — new coverage for #33512's one-hop cross-object analytics where (ledger 6896511848 of #33761, row 15): no item cited cross-object-where.ts, objectql-strategy.ts or dashboards.mdx, and dashboards.cube-query scores the showcase_delivery cube's reconciliation, not this filter. Steps and answers follow QA run #33785's live run at a557fa38 (comment 6893199839); its native-path observation is #33792 (knownGaps[0]). Sources re-read at main 159757ab. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     }

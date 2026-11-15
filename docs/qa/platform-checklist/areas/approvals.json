@@ -1508,7 +1508,7 @@
         { "revision": 8, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" },
         { "revision": 9, "date": "2026-10-26", "change": "three checklist-accuracy findings of the 18.2.0 sweep's QA run #25815, Tier 1 set, at framework 6679644a (findings card #25838, wave anchor #25807): acceptance[0]'s FORBIDDEN arm is pinned with 'stranger', no approver at all, not a non-pending approver, and its live at-rest sys_notification read stays a run leg; acceptance[1]'s pins read status pending and no decisions, not the byte-identity of the actions timeline or the token's consumed_at; acceptance[3]'s 'a decide that fails still burns it' has no named pin. Each verify now names its unpinned half, and automated.ref and knownGaps[0] no longer call acceptance[0], [1] and [3] fully pinned. Pins re-read at base 9753d163. No clause changed", "ref": "#26116" },
         { "revision": 10, "date": "2026-10-31", "change": "steps[1] said notified counts pending SLOTS, a slot listed twice counting twice. QA run #27409 read notified:1 with the admin listed twice in pending_approvers. remind() now counts one reminder per distinct concrete address (approval-service.ts remind: a Set over pending_approvers, position:* literals not counted), pinned by remind-notified-per-person.integration.test.ts. The step now states that count, which is more precise than 'a positive count'. No clause changed: no clause asserts notified. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6488948228", "ref": "#27409" },
-        { "revision": 11, "date": "2026-11-15", "change": "steps[2] names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969", "ref": "#PENDING-33969" }
+        { "revision": 11, "date": "2026-11-15", "change": "steps[2] names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969", "ref": "#34068" }
       ]
     },
     {
@@ -1950,7 +1950,7 @@
           "revision": 9,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -2043,7 +2043,7 @@
           "revision": 6,
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     }

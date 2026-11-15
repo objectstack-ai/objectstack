@@ -987,7 +987,7 @@
         { "revision": 3, "date": "2026-10-26", "change": "automated.ref extended — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807). acceptance[1]: mcp-coded-refusal.test.ts asserts the clause at plugin-unit layer but was not in the ref. acceptance[2]: the record found no pin driving query_records on an apiEnabled false runtime object across a restart; re-read on main at b4199c96, packages/qa/dogfood/test/mcp-stdio-runtime-object-exposure.test.ts does, on the stdio door at engine layer, so it joins the ref and the ref now names each pin's layer. No clause changed, no status changed", "ref": "#25836" },
         { "revision": 4, "date": "2026-10-31", "change": "fixtures.requires[3] and steps[2] name acceptance[3]'s producer. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the fixtures named no recipe for the PERMISSION_DENIED arm, and the run staged it with a runtime declarative update action on showcase_task, ai-exposed, run as auditor.demo. Re-read at base 488b3ed0: packages/runtime/src/action-execution.ts (the declarative update writes as the caller), packages/spec/src/ui/action.zod.ts (ai.exposed requires a description). The clause is unchanged", "ref": "#27409" },
         { "revision": 5, "date": "2026-11-14", "change": "acceptance[1].verify names the door (stale spec, QA run #33025, comment 6844741021; ledger row 70 of #32908): the bare 'tool result body' named none, and the coded refusal holds on the HTTP /mcp face that mcp-coded-refusal.test.ts drives. The clause is unchanged. Read at base 82838e83", "ref": "#33328" },
-        { "revision": 6, "date": "2026-11-15", "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969", "ref": "#PENDING-33969" }
+        { "revision": 6, "date": "2026-11-15", "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969", "ref": "#34068" }
       ]
     },
     {
@@ -1240,7 +1240,7 @@
           "revision": 2,
           "date": "2026-11-15",
           "change": "acceptance[7].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -1345,7 +1345,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "acceptance[5].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
@@ -1452,7 +1452,7 @@
           "revision": 3,
           "date": "2026-11-15",
           "change": "acceptance[5].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
-          "ref": "#PENDING-33969"
+          "ref": "#34068"
         }
       ]
     },
