@@ -125,6 +125,10 @@ Three things are the maintainer's and are put, not decided:
   ([`6901557418`](https://github.com/objectstack-ai/objectstack/pull/34064#issuecomment-6901557418)) on `b29f2dd1`,
   and those added after its third delta review
   ([`6902450506`](https://github.com/objectstack-ai/objectstack/pull/34064#issuecomment-6902450506)) on `e9fb0987`.
+  The sentences changed after its fourth delta review
+  ([`6902721135`](https://github.com/objectstack-ai/objectstack/pull/34064#issuecomment-6902721135)) and its fifth
+  ([`6902940583`](https://github.com/objectstack-ai/objectstack/pull/34064#issuecomment-6902940583)) add no new code
+  reading.
 
 ## Context
 
@@ -250,8 +254,9 @@ Name the set once, so every later sentence can point at it:
 - **Above it the answer is the corrected one**: every member of G counts.
 - **Nothing else moves.** No row enters or leaves a scope through the owner match or its depth, the queue arm, the
   approval arm, the org-wide default, the external floor, the guest denial, the phantom-anchor narrowing, the
-  delegation intersection or the outer read's tenant wall. On a host with a registration that names no object, this
-  holds by telling the host, not by a check (D4's boundary; the price is among Q2's costs).
+  delegation intersection or the outer read's tenant wall. One exception: on a host with a registration that names no
+  object and changes a system read of `sys_record_share`, the share arm's rows can differ after the switch, and the
+  host is told (D4's boundary; the price is among Q2's costs).
 - **An outer key of another type answers the same rows.** Where an object's `id` column is not a string, the subquery
   answers the rows today's list answers (O2). A refusal there would narrow this invariant on that object, so it is no
   driver card's to choose: a card that cannot keep the same rows stops, and the case goes to the maintainer under ②.
@@ -438,10 +443,11 @@ After the switch the read scope is:
   rows before and after the switch on every host, or the host is told. The contract prose of plan step 1 and the
   switch card's changeset (plan step 6) tell it one thing: a narrowing of reads of `sys_record_share` registered for
   that table by name is never read around, and the host gets the answer ② rules for the second class; a narrowing
-  that names no object is not run on the share arm. That line has a price, stated among Q2's costs: on such a host
-  D-0's same rows rest on the telling alone. O8's census reads registrations that name no object as well, and records
-  any that changes a system read of the table; this record's own reading at `e9fb0987` (Provenance) found none in
-  this repository. The maintainer rules this boundary with Q2's host row.
+  that names no object is not run on the share arm. That line has a price, stated among Q2's costs: on a host whose
+  registration names no object and changes a system read of the table, D-0's same rows rest on the telling alone.
+  O8's census reads registrations that name no object as well, and records any that changes a system read of the
+  table; this record's own reading at `e9fb0987` (Provenance) found none in this repository. The maintainer rules
+  this boundary with Q2's host row.
 - **The refusal** is ADR-0139 D3's envelope wherever it occurs: status 500, `INTERNAL_ERROR`, a message naming the
   evaluator, the leaf and the remedy, logged at `error` once per evaluator
   (`packages/core/src/utils/readable-ids-driver-refusal.ts#refuseReadableIdsOnce` is the device). ⛔ It is not
@@ -621,11 +627,11 @@ recognises second. It is here because the same three answers apply to it.
   registration that declares it skips system reads. Such a host then starts and keeps its auditing, and the price is
   one more contract: a declaration on hook registration, which the engine enforces by not dispatching that hook on a
   system read, and which the seam and the boot check read. The maintainer rules which, with the host row.
-- **On a host with a registration that names no object, D-0's same rows rest on the telling alone.** Under the
-  recommended line nothing at run time refuses, reports or logs such a registration: the seam and the boot check read
-  a registration by the object it names, and this one names none. A host that does not act on what plan steps 1 and
-  6 tell it can get an answer that differs from today's. The other line refuses every such host at boot (the host
-  row). The maintainer rules which, with the host row.
+- **On a host with a registration that names no object and changes a system read of `sys_record_share`, D-0's same
+  rows rest on the telling alone.** Under the recommended line nothing at run time refuses, reports or logs such a
+  registration: the seam and the boot check read a registration by the object it names, and this one names none. A
+  host that does not act on what plan steps 1 and 6 tell it can get an answer that differs from today's. The other
+  line refuses at boot every host with a registration that names no object (the host row). The maintainer rules which, with the host row.
 - **It consults a driver declaration**, so ADR-0139 D3's "⛔ No `DriverCapabilities` bit returns" is revisited for
   this leaf as ADR-0147 D-d revisits it for its own, and ADR-0111 D7 gains an arm.
 - **A later compile lifts R2 for that evaluator** with no amendment here: a `$lookup` form on MongoDB (O9), or a
@@ -796,7 +802,8 @@ The card sizes the whole program L, about 2.5–4k lines over 5–7 PRs, and ②
    inner read's description; the conformance case-set; the `ISharingService` and `ISecurityService` prose. The
    `ISharingService` prose tells a host that a narrowing of reads of `sys_record_share` registered for that table by
    name is never read around and gets the second class's answer, as ② is ruled, and that a narrowing which names no
-   object is not run on the share arm (D4's boundary). The shared pieces take the two-leaf shape (D4).
+   object is not run on the share arm from the switch on (D4's boundary). The shared pieces take the two-leaf shape
+   (D4).
 2. **Engine: the seam.** Door admission, pass-through, the position rule, the verb rule (③ as ruled) and the
    recipient rule, the two recognised classes (② as ruled), the descent into composed scopes, the refusal, and the
    declaration's consult if ② rules one. The recipient rule is pinned on its four cases: the context's user, its
