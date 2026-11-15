@@ -32,7 +32,7 @@ import { describe, it, expect, vi } from 'vitest';
 import '@objectstack/metadata';
 
 import { HttpDispatcher } from './http-dispatcher.js';
-import { confirmationGatedStarterOf } from './flow-start-admission.js';
+import { confirmationGatedStarterOf, flowStartRefusal } from './flow-start-admission.js';
 
 const OBJECT = 'fcg_invoice';
 const FLOW = 'fcg_void_invoice';
@@ -67,26 +67,34 @@ const BODIES = {
 
 interface Answer { status: number; code?: string; details?: Record<string, unknown> }
 
-type Source = 'object' | 'standalone' | 'merged';
+type Source = 'object' | 'standalone' | 'merged' | 'registry';
 
 interface Harness {
     /** Whether the action that targets {@link FLOW} declares `ai.requiresConfirmation: true`. */
     gated?: boolean;
-    /** Where the action is declared: embedded on the object, a standalone item, or the protocol's merged listing. */
+    /**
+     * Where the action is declared: embedded on the object or a standalone item
+     * of the metadata service, the protocol's merged listing, or (`registry`) a
+     * host with neither listing, whose ObjectQL registry alone serves it.
+     */
     source?: Source;
     /** The gated action targets this flow instead of {@link FLOW}. */
     target?: string;
-    /** The listing read throws. */
-    listingFails?: boolean;
+    /** The listing read throws; `declared` throws an error that declares its own status and code. */
+    listingFails?: boolean | 'declared';
+    /** This service slot is wired and fails to resolve (its factory throws). */
+    resolveFails?: 'protocol' | 'metadata';
+    /** The automation service serves no `getFlow`. */
+    noGetFlow?: boolean;
 }
 
 /** One user-run screen flow, the action that targets it, and the trigger routes and action door over them. */
 function makeDoors(opts: Harness = {}) {
-    const { gated = true, source = 'object', target = FLOW, listingFails = false } = opts;
+    const { gated = true, source = 'object', target = FLOW, listingFails = false, resolveFails, noGetFlow = false } = opts;
     const execute = vi.fn(async (_name: string, _context?: unknown) => ({ success: true, output: {} }));
     const getFlow = vi.fn(async (name: string) =>
         name === FLOW || name === OTHER_FLOW ? { name, type: 'screen', runAs: 'user' } : null);
-    const automation: Record<string, unknown> = { execute, getFlow };
+    const automation: Record<string, unknown> = noGetFlow ? { execute } : { execute, getFlow };
 
     const action = {
         name: GATED_ACTION,
@@ -102,15 +110,22 @@ function makeDoors(opts: Harness = {}) {
     };
     const objectDef = { name: OBJECT, actions: source === 'object' ? [action] : [] };
     const standalone = source === 'standalone' ? [action] : [];
+    const registryItems = (type: string): unknown[] =>
+        type === 'object' ? [{ name: OBJECT, actions: [] }] : type === 'action' ? [action] : [];
     const schemaOf = (n: string) => (n === OBJECT ? objectDef : undefined);
     const ql: any = {
         executeAction: vi.fn(async () => ({ ran: 'script' })),
         getSchema: schemaOf,
-        registry: { getObject: schemaOf, getItem: () => undefined },
+        registry: {
+            getObject: schemaOf,
+            getItem: () => undefined,
+            ...(source === 'registry' ? { listItems: registryItems } : {}),
+        },
         find: vi.fn(async () => []),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
     };
     const listObjects = vi.fn(async () => {
+        if (listingFails === 'declared') throw Object.assign(new Error('not here'), { status: 404, code: 'RESOURCE_NOT_FOUND' });
         if (listingFails) throw new Error('metadata listing unavailable');
         return [objectDef];
     });
@@ -128,11 +143,15 @@ function makeDoors(opts: Harness = {}) {
     const protocol = source === 'merged' ? { getMetaItems } : null;
     const resolve = (n: string) =>
         n === 'objectql' || n === 'data' ? ql
-            : n === 'metadata' ? metadata
+            : n === 'metadata' ? (source === 'registry' ? null : metadata)
                 : n === 'automation' ? automation
                     : n === 'protocol' ? protocol
                         : null;
-    const kernel: any = { getService: resolve, getServiceAsync: async (n: string) => resolve(n), context: { getService: resolve } };
+    const resolveAsync = async (n: string) => {
+        if (n === resolveFails) throw new Error(`service '${n}' factory failed`);
+        return resolve(n);
+    };
+    const kernel: any = { getService: resolve, getServiceAsync: resolveAsync, context: { getService: resolve } };
     const dispatcher = new HttpDispatcher(kernel);
 
     const trigger = async (route: Route, ec: unknown, body: unknown = {}): Promise<Answer> => {
@@ -172,7 +191,7 @@ describe('an AI service account does not start, by name, a flow that a confirmat
             });
         }
 
-        for (const source of ['standalone', 'merged'] as const) {
+        for (const source of ['standalone', 'merged', 'registry'] as const) {
             it(`${route}: the gated action counts wherever it is declared (${source} listing)`, async () => {
                 const { trigger, execute } = makeDoors({ source });
 
@@ -189,6 +208,34 @@ describe('an AI service account does not start, by name, a flow that a confirmat
             expect(answer.code).toBe('SERVICE_UNAVAILABLE');
             expect(execute).not.toHaveBeenCalled();
         });
+
+        it(`${route}: the failed read is a flat 503 whatever the failure declares, and nothing runs`, async () => {
+            const { trigger, execute } = makeDoors({ listingFails: 'declared' });
+
+            const answer = await trigger(route, ACCOUNT_EC);
+
+            expect(answer.status).toBe(503);
+            expect(answer.code).toBe('SERVICE_UNAVAILABLE');
+            expect(execute).not.toHaveBeenCalled();
+        });
+
+        for (const slot of ['protocol', 'metadata'] as const) {
+            it(`${route}: a '${slot}' slot that fails to resolve refuses the account's start 503 (failure is not absence), and nothing runs`, async () => {
+                const { trigger, execute } = makeDoors({ resolveFails: slot });
+
+                const answer = await trigger(route, ACCOUNT_EC);
+
+                expect(answer.status).toBe(503);
+                expect(answer.code).toBe('SERVICE_UNAVAILABLE');
+                expect(execute).not.toHaveBeenCalled();
+            });
+        }
+
+        it(`${route}: the rule is asked without the flow-definition probe (a service with no getFlow)`, async () => {
+            const { trigger, execute } = makeDoors({ noGetFlow: true });
+
+            expectConfirmationRefusal(await trigger(route, ACCOUNT_EC, { confirm: true }), execute);
+        });
     }
 });
 
@@ -203,6 +250,15 @@ describe('CONTROLS — what the confirmation-gated start rule leaves exactly as 
             expect(execute).toHaveBeenCalledTimes(1);
             expect(execute.mock.calls[0]?.[0]).toBe(FLOW);
             expect(listObjects).not.toHaveBeenCalled();
+        });
+
+        it(`${route}: a person is unchanged on a service with no getFlow, and under a failing listing slot`, async () => {
+            for (const opts of [{ noGetFlow: true }, { resolveFails: 'metadata' as const }, { listingFails: true }]) {
+                const { trigger, execute } = makeDoors(opts);
+
+                expect((await trigger(route, PERSON_EC)).status, JSON.stringify(opts)).toBe(200);
+                expect(execute).toHaveBeenCalledTimes(1);
+            }
         });
 
         it(`${route}: an OAuth-delegated agent is unchanged — it starts the flow`, async () => {
@@ -259,5 +315,33 @@ describe('confirmationGatedStarterOf — which declaration gates a start', () =>
         const a = row('a_action', { type: 'flow', target: FLOW, ai: { requiresConfirmation: true } });
         expect(confirmationGatedStarterOf([b, a], FLOW)).toBe(a);
         expect(confirmationGatedStarterOf([a, b], FLOW)).toBe(a);
+    });
+});
+
+describe('flowStartRefusal — rule 2b reads the name and the declarations, never the definition', () => {
+    const gatedRows = async () => [{
+        action: { name: GATED_ACTION, type: 'flow', target: FLOW, ai: { requiresConfirmation: true } },
+        objectName: OBJECT,
+    }];
+    const door = { aiExposed: false, actionDeclarations: gatedRows };
+    const services = {
+        'a service with no getFlow': {},
+        'a definition the probe does not return': { getFlow: async () => null },
+    } as const;
+
+    for (const [label, automation] of Object.entries(services)) {
+        it(`${label}: the account is refused 428; a person and an ungated flow are admitted`, async () => {
+            const refused = await flowStartRefusal(automation, FLOW, ACCOUNT_EC, door);
+            expect(refused).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+            // Controls on the same service: nothing else is judged without the definition.
+            expect(await flowStartRefusal(automation, FLOW, PERSON_EC, door)).toBeNull();
+            expect(await flowStartRefusal(automation, OTHER_FLOW, ACCOUNT_EC, door)).toBeNull();
+        });
+    }
+
+    it('a failure of the flow read itself is not answered by the declaration-read 503: it travels as before', async () => {
+        const failing = { getFlow: async () => { throw new Error('flow read failed'); } };
+        await expect(flowStartRefusal(failing, FLOW, PERSON_EC, door)).rejects.toThrow('flow read failed');
+        await expect(flowStartRefusal(failing, FLOW, ACCOUNT_EC, door)).rejects.toThrow('flow read failed');
     });
 });

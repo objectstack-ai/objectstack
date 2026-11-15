@@ -3008,33 +3008,50 @@ async function unregisterAndDeleteFlow(
 
 /**
  * [ADR-0151 D3 rule 3] The action declarations the request's environment
- * serves, read the way the `/actions` door reads them
- * (`collectActionDeclarations` over the protocol's merged object and action
- * listings, else the metadata service's): what flow start admission's rule 2b
- * reads, for an AI service account only, to find an action that targets the
- * flow and declares `ai.requiresConfirmation: true`
- * (`../flow-start-admission.ts`). A host with neither listing serves no action
- * declaration, so none is found; a listing that throws travels to the caller,
- * which refuses the start rather than admitting it.
+ * serves: what flow start admission's rule 2b reads, for an AI service
+ * account only, to find an action that targets the flow and declares
+ * `ai.requiresConfirmation: true` (`../flow-start-admission.ts`). Every row is
+ * a `collectActionDeclarations` row, from these sources:
+ *
+ *  - where the `protocol` slot serves the merged listings (`getMetaItems`), its
+ *    merged object and action listings alone — the reading the addressed
+ *    `/actions` door, the bare door's holder rule and the MCP bridge make;
+ *  - otherwise every source the bare `/actions` door resolves a declaration
+ *    from on such a host: the ObjectQL registry's objects (their embedded
+ *    actions) and standalone `action` items, and the metadata service's
+ *    object and action listings.
+ *
+ * Absence and failure are told apart, as at every gate that reads an
+ * authorization fact (`resolveServiceOrLoud`): a slot nothing registered is
+ * absent and contributes nothing, while a slot that is wired and fails to
+ * resolve throws, as a listing that throws does, and the predicate refuses
+ * the start `503`. So a host that serves no declaration from any of these
+ * sources finds none, and a read that did not happen admits nothing.
  */
 async function servedActionDeclarations(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
 ): Promise<Array<{ action: unknown; objectName: string }>> {
-    const resolved = async (name: string): Promise<any> => {
-        try {
-            return await deps.resolveService(context, name, context?.environmentId);
-        } catch {
-            return undefined;
-        }
-    };
-    const protocol = await resolved('protocol');
+    const envId = context?.environmentId;
+    const protocol = await deps.resolveServiceOrLoud(context, 'protocol', envId);
     if (typeof protocol?.getMetaItems === 'function') {
         const objects = await readMergedItems(protocol, 'object');
         const actions = await readMergedItems(protocol, 'action');
         return collectActionDeclarations(deps, undefined, objects, actions);
     }
-    return collectActionDeclarations(deps, await resolved('metadata'));
+    const rows: Array<{ action: unknown; objectName: string }> = [];
+    const engine = (await deps.getObjectQL(context, envId)) as
+        | { registry?: { listItems?: (type: string) => unknown[] } }
+        | null;
+    const registry = engine?.registry;
+    if (typeof registry?.listItems === 'function') {
+        rows.push(...await collectActionDeclarations(deps, undefined, registry.listItems('object'), registry.listItems('action')));
+    }
+    const metadata = await deps.resolveServiceOrLoud(context, 'metadata', envId);
+    if (typeof metadata?.listObjects === 'function' || typeof metadata?.loadMany === 'function') {
+        rows.push(...await collectActionDeclarations(deps, metadata));
+    }
+    return rows;
 }
 
 /**
@@ -3172,21 +3189,14 @@ async function respondToFlowTrigger(
     //
     // [ADR-0151 D3 rule 3] And the confirmation an action declares travels
     // with what it starts: this door states the environment's action
-    // declarations, read as the `/actions` door reads them, so an account's
-    // start of a flow that a confirmation-gated action targets is refused with
-    // that door's own `428`, whatever the request carries.
-    //
-    // A declaration read that fails is the metadata plane failing to answer
-    // (ADR-0110 D3): `503`, and nothing runs — never an admitted start.
-    let startRefusal: Awaited<ReturnType<typeof flowStartRefusal>>;
-    try {
-        startRefusal = await flowStartRefusal(automationService, flowName, context?.executionContext, {
-            aiExposed: false,
-            actionDeclarations: () => servedActionDeclarations(deps, context),
-        });
-    } catch (err) {
-        return { handled: true, response: deps.errorFromThrown(err, 503) };
-    }
+    // declarations (`servedActionDeclarations`), so an account's start of a
+    // flow that a confirmation-gated action targets is refused with the action
+    // door's own `428`, whatever the request carries. A declaration read that
+    // fails is refused by the predicate itself, a flat `503`, and nothing runs.
+    const startRefusal = await flowStartRefusal(automationService, flowName, context?.executionContext, {
+        aiExposed: false,
+        actionDeclarations: () => servedActionDeclarations(deps, context),
+    });
     if (startRefusal) {
         const details = 'details' in startRefusal ? startRefusal.details : undefined;
         return {

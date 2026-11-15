@@ -46,15 +46,19 @@
  *     `ai.requiresConfirmation: true` whatever the request carries
  *     (`actionConfirmationRefusal`, `action-execution.ts`). A door that starts
  *     by NAME a flow such an action targets would start the same run with no
- *     confirmation asked, so at the doors that state the environment's action
- *     declarations ({@link FlowStartDoor.actionDeclarations}: the trigger
- *     routes) an account's start of that flow is refused with the action
- *     door's own refusal, `428 ACTION_CONFIRMATION_REQUIRED`, naming the
- *     action, whatever the request carries — no confirmation member is read
- *     for an account. A person, an OAuth-delegated agent and the system
- *     principal are not judged by it, and a flow no confirmation-gated action
- *     targets is admitted as before. No capability opens it, so it answers
- *     before rule 3.
+ *     confirmation asked, so at a door that states the environment's action
+ *     declarations ({@link FlowStartDoor.actionDeclarations}) an account's
+ *     start of that flow is refused with the action door's own refusal, `428
+ *     ACTION_CONFIRMATION_REQUIRED`, naming the action, whatever the request
+ *     carries — no confirmation member is read for an account — and a
+ *     declaration read that fails refuses it `503`. The rule is asked at the
+ *     two trigger routes; the declared-endpoint door is not judged by it yet,
+ *     and the action door keeps its own confirmation gate. It reads the flow's
+ *     name and the declarations only, never the definition, so a service
+ *     that cannot serve the definition is judged by it too. A person, an
+ *     OAuth-delegated agent and the system principal are not judged by it,
+ *     and a flow no confirmation-gated action targets is admitted as before.
+ *     No capability opens it, so it answers before rule 3.
  *  3. **The flow's own `requiredPermissions`** (ruling record 6377848497,
  *     letter A): `screen` and `api` flows stay the doors their author designed,
  *     elevated or not, and the flow says who may walk through them. A caller
@@ -235,8 +239,27 @@ export interface FlowStartPermissionRefusal {
  */
 export type FlowStartConfirmationRefusal = ActionConfirmationRefusal;
 
+/**
+ * The refusal rule 2b answers when the door's action declarations could not be
+ * read (ADR-0110 D3: the metadata plane failing to answer): a flat `503
+ * SERVICE_UNAVAILABLE`, whatever the failure declared, so a start an account
+ * could not be judged for is refused and never admitted. The standard-catalog
+ * code (ADR-0112); ⛔ no new code. The message names no flow, no action and
+ * nothing of the failure.
+ */
+export const DECLARATION_READ_FAILED_REFUSAL = Object.freeze({
+    code: 'SERVICE_UNAVAILABLE',
+    status: 503,
+    message:
+        'The action declarations this start is judged against could not be read — nothing was run. '
+        + 'Retry once the metadata service answers.',
+} as const);
+
+/** The ADR-0112 `503` rule 2b answers when it could not read the declarations it judges. */
+export type FlowStartUnavailableRefusal = typeof DECLARATION_READ_FAILED_REFUSAL;
+
 /** The ADR-0112 refusal a door answers for a start it does not admit. */
-export type FlowStartRefusal = FlowStartPermissionRefusal | FlowStartConfirmationRefusal;
+export type FlowStartRefusal = FlowStartPermissionRefusal | FlowStartConfirmationRefusal | FlowStartUnavailableRefusal;
 
 /**
  * One action declaration a door's environment serves, as the door reads it
@@ -333,17 +356,18 @@ export interface FlowStartDoor {
     aiExposed: boolean;
     /**
      * [ADR-0151 D3 rule 3] Rule 2b's input: the action declarations this
-     * door's environment serves, read the way the `/actions` door reads them,
-     * and read ONLY when the caller is an AI service account. Stated by the
-     * trigger routes, which start a flow by name with no action in hand. A
-     * read that throws refuses the start (the door answers the failure, and
-     * nothing runs), never admits it.
+     * door's environment serves, read ONLY when the caller is an AI service
+     * account. A door that states none is not judged by rule 2b. A read that
+     * throws (a listing, or the service it is read from failing to resolve)
+     * refuses the start with {@link DECLARATION_READ_FAILED_REFUSAL}, a flat
+     * `503`, and nothing runs; it never admits it.
      *
+     * Rule 2b is asked at the two trigger routes, which state the
+     * declarations (`servedActionDeclarations`, `domains/automation.ts`). The
+     * declared-endpoint door states none, so it is not judged by rule 2b yet.
      * The action door states none: the action it runs is asked its own
      * confirmation gate first (`actionConfirmationRefusal`), which this rule
-     * leaves exactly as it is. A declared endpoint states none either: it
-     * admits a session caller only (an API key is refused before its
-     * executor), and an AI service account authenticates by key.
+     * leaves exactly as it is.
      */
     actionDeclarations?: () => Promise<readonly FlowStartActionDeclaration[]>;
 }
@@ -659,9 +683,10 @@ async function declaredReadsOf(
  * Reads the flow through the automation service's own `getFlow` — the probe
  * `flowIsUnknown` (`flow-dispatch-status.ts`) uses, which serves the same
  * definition `execute` runs — so there is no second loader. `getFlow` is
- * optional on `IAutomationService`; an implementation that omits it cannot be
- * asked, and the door dispatches as before, exactly as the existence check
- * does.
+ * optional on `IAutomationService`; an implementation that omits it, or a
+ * definition the probe does not return, cannot be asked rules 1, 2 and 3, and
+ * the door dispatches as before, exactly as the existence check does. Rule 2b
+ * reads no definition and is asked either way.
  */
 export async function flowStartRefusal(
     automation: unknown,
@@ -674,26 +699,38 @@ export async function flowStartRefusal(
 ): Promise<FlowStartRefusal | null> {
     if (executionContext?.isSystem === true) return null;
     const svc = automation as { getFlow?: (name: string) => Promise<unknown> } | null | undefined;
-    if (typeof svc?.getFlow !== 'function') return null;
-    const flow = (await svc.getFlow(flowName)) as
-        | { type?: FlowParsed['type']; runAs?: unknown; requiredPermissions?: unknown }
-        | null
-        | undefined;
-    if (!flow) return null;
-    if (isElevatedSelfTriggered(flow)) return ELEVATED_START_REFUSAL;
+    // Rules 1, 2 and 3 read the definition; a service without `getFlow`, or a
+    // definition the probe does not return, cannot be asked them.
+    const flow = typeof svc?.getFlow === 'function'
+        ? (await svc.getFlow(flowName)) as
+            | { type?: FlowParsed['type']; runAs?: unknown; requiredPermissions?: unknown }
+            | null
+            | undefined
+        : undefined;
+    if (flow && isElevatedSelfTriggered(flow)) return ELEVATED_START_REFUSAL;
     // [ADR-0151 Non-goals; ruling record 6812617393, letter C] Rule 2: the
     // account starts an elevated flow only where the author's AI opt-in stands.
-    if (flow.runAs === 'system' && isAiServiceAccount(executionContext) && door.aiExposed !== true) {
+    if (flow && flow.runAs === 'system' && isAiServiceAccount(executionContext) && door.aiExposed !== true) {
         return AI_ACCOUNT_ELEVATED_START_REFUSAL;
     }
     // [ADR-0151 D3 rule 3] Rule 2b: the confirmation an action declares
-    // travels with what it starts. Asked of an account alone, so the
-    // declarations are read for no other caller; nothing the request carries
-    // is read here, so no confirmation member admits an account.
+    // travels with what it starts. It reads the flow's NAME and the door's
+    // declarations only, so it is asked whether or not the definition could
+    // be read. Asked of an account alone, so the declarations are read for no
+    // other caller; nothing the request carries is read here, so no
+    // confirmation member admits an account.
     if (isAiServiceAccount(executionContext) && door.actionDeclarations) {
-        const gated = confirmationGatedStarterOf(await door.actionDeclarations(), flowName);
+        let declarations: readonly FlowStartActionDeclaration[];
+        try {
+            declarations = await door.actionDeclarations();
+        } catch {
+            // The read did not happen: refused, never admitted on a guess.
+            return DECLARATION_READ_FAILED_REFUSAL;
+        }
+        const gated = confirmationGatedStarterOf(declarations, flowName);
         if (gated) return confirmationGatedStartRefusal(gated);
     }
+    if (!flow) return null;
     const missing = missingCapabilities(flow.requiredPermissions, executionContext);
     if (missing.length > 0) return requiredPermissionsRefusal(flow.requiredPermissions as string[], missing);
     return null;
