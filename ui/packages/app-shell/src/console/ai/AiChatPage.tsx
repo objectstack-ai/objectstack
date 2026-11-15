@@ -142,6 +142,7 @@ import {
   type HydratedUIMessagePart,
 } from '../../hooks/useChatConversation.js';
 import { useReconcileOnError } from '../../hooks/useReconcileOnError.js';
+import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { chatConversationScope, chatProductOfAgent } from '../../hooks/chatScope.js';
 import { ConversationsSidebar } from './ConversationsSidebar.js';
 import { LiveCanvas } from './LiveCanvas.js';
@@ -2246,6 +2247,15 @@ export function ChatPane({
   // pane mounts while the catalog is still loading, and a server without an
   // AI service answers that catalog empty and `/models` with a 501.
   const { models: aiModels, defaultModelId } = useAiModels({ apiBase, enabled: agents.length > 0 });
+  // objectstack#33660 — the allowance the picker sets each model's multiplier
+  // against. Asked only once some model carries a multiplier: without one the
+  // picker has nothing to say about the allowance.
+  const { usage: aiUsage } = useAiUsage({
+    apiBase,
+    enabled: aiModels.some((m) => m.costMultiplier !== undefined),
+  });
+  const allowanceUsedFraction =
+    aiUsage && !aiUsage.pool.unmetered && aiUsage.pool.fraction !== null ? aiUsage.pool.fraction : undefined;
   const selectedApp = activeAppPackageId || editPackageId || undefined;
   // The pick outlives this pane only when the host holds it (see the props).
   const [paneSelectedModelId, setPaneSelectedModelId] = useState<string | undefined>(undefined);
@@ -3171,6 +3181,7 @@ export function ChatPane({
         models={aiModels}
         selectedModelId={effectiveModelId}
         onModelChange={setSelectedModelId}
+        allowanceUsedFraction={allowanceUsedFraction}
         suggestions={suggestions}
         onSendMessage={handleSend}
         onClear={clear}

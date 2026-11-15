@@ -1,5 +1,374 @@
 # @objectstack/service-automation
 
+## 18.5.0
+
+### Minor Changes
+
+- 322ded7: feat(service-automation)!: two packages of two namespaces may each declare a connector of the same name, each is materialized, connected and dispatched as its own instance, and a flow, a pull and the connection door address one by package (ADR-0150 child B, connector, the narrowing)
+  
+  Clause-②: yes (narrowing) — ten answers move for a caller that worked before. (1) The install door, `registerItem` and the cold-boot seal admit a package declaring a connector name a package of another namespace holds, FROM `422 PLUGIN_REGISTER_FAILED` naming both (a sealed boot clash warned) TO admitted; `os migrate stored-references` lists no sealed clash for it. (2) The boot of two packages' provider-bound instances of one name (the sealed clash), FROM refused naming both (`connector instance 'NAME' is not materialized`, fatal for the host's boot) TO each materialized under its package, whatever their namespaces: a pair the install door still refuses (one namespace, or a package with no namespace), which a code boot only warns about, is materialized too, and is connectable only in process (`ConnectorConnectionRequest.package`), since the namespace door answers `409` for both. (3) The bare `GET /meta/connector/NAME` of a name two packages hold is refused `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming both), where it served the first registered package's declaration, and `MetadataManager` keeps a slot per `(package, name)` for a connector (`PACKAGE_SLOTTED_STORE_TYPES`), so its bare read of such a name is refused and its unscoped plural reads answer both, where the second package's item overwrote the first's. The history and rollback doors (#33193) read the same list (`PACKAGE_SLOTTED_METADATA_TYPES`, `@objectstack/spec`, which `connector` joins): a connector's `?package=` there, FROM refused `400`, TO the addressed holder's versions; a bare connector name two packages hold, or one package's row beside the environment's (the rule every per-package type keeps), FROM served, TO refused `409` naming both. (4) A bare connector read on a metadata engine that cannot read by package is refused `501` (the protocol's fail-closed read for a narrowed type), where it served the engine's `getItem`. (5) A `connector_action` in a flow with no package (an environment-authored flow) naming a connector two packages hold, FROM not dispatched as "not registered" (`none`), or, where each holder declares only a catalog entry beside a connector a plugin registers in code under the name, dispatched to the plugin's connector, TO refused naming both. (6) A flow whose connector name resolves to a package with no live instance of it (a catalog entry, or an instance the reconcile has not registered yet), FROM dispatched to the one instance of the name (3b's fallback arm) TO not dispatched, unless the one instance is a connector a plugin registers in code, which is served as before. (7) A name only disabled packages hold, whose instance is still registered, FROM dispatched to it TO not dispatched for a caller outside those packages (a flow of the disabled package itself still reads its own instance, as before). A disabled package's own entry is removed by the next reconcile; an entry with no package of its own over such a name stays that package's instance, and is not dispatched until the package is enabled again. (8) A connector pull resolves `connectorSource.connector` from the package that holds the mapping: a name that resolves to no single instance, FROM `400 connector_not_registered` (two instances) TO `409 connector_name_refused` naming every candidate; a name that resolves to a package with no instance, FROM pulled through the one instance of the name TO `400 connector_not_registered`. (9) A declared entry with no package of its own (unstamped, or the environment's stored row) under a name two packages hold, FROM the whole name refused TO this entry alone refused naming both, and each package's own instance materialized. (10) Two declared entries of one name in a composition with no package-scoped registry are refused with a sentence that says why (one instance per name where nothing can tell two packages apart), where the duplicate sentence named the package of one of them. Widened beside them: `ConnectorConnectionRequest.package` and `ConnectorDescriptor.packageId` (`@objectstack/spec`, both optional); the namespace connection door `/api/v1/automation/connectors/:ns/:name/connection`, which answered `409` naming both for a name two packages hold, connects, reads and revokes the instance of the addressed namespace's package; `GET /api/v1/automation/connectors` lists every instance, each with its `packageId`; the connector credential listing names each package's instance with its own state.
+  Metadata-protocol: added
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored metadata changes shape: two optional members are added to two TypeScript interfaces and `connector` joins one exported list of type names, and what moves is which second package an install admits and which instance a name addresses -->
+  
+  **BREAKING** for the callers in (3) to (8). A deployment that held one connector name under two packages (sealed at boot with a warning, its boot refused) now boots both: read each declaration by its package (`?package=ID`, or `/meta/connector/NS/NAME`), connect each at its namespace address, and have an environment-authored flow name a connector one package holds. A flow that dispatched through 3b's fallback arm (6) dispatches once its own package's instance is materialized. A pull whose mapping no package holds, naming a connector two packages hold, names a mapping in one of the packages. Nothing in the workspace dispatches through (6) or (7) in a supported state: the reconcile registers a package's instance under its package, and drops a disabled package's own entry on its next run. An entry with no package of its own over a name only a disabled package holds is not dispatched while that package is disabled (7).
+  
+  The bare-name one-holder rule (`bare-name-one-holder.ts`) has narrowed for `connector`, the last covered type, from one package holder per deployment to one per namespace (ADR-0150 D2, D9): `connector` joins `NAMESPACE_SCOPED_BARE_NAME_TYPES` (`@objectstack/core`), `PACKAGE_SCOPED_READ_TYPES` (`@objectstack/objectql`) and `PACKAGE_SLOTTED_STORE_TYPES` (`@objectstack/metadata`). Still refused, with the same envelope and sentence: a co-owner of the holder's namespace, a package that declares no namespace beside any other holder, and two packages of one shareable namespace.
+  
+  - **The reconcile** (`plugin.ts`): the one-holder backstop (`refusedDeclaredConnectorNames`, and `refusedConnectorNames` in `connector-package-scope.ts`) is gone. Each provider-bound entry is the instance of its own package; an entry with no package of its own is the instance of the package its name resolves to over every holder, a disabled one included (the durable judgment), and under two holders it is refused naming both, never registered as either. Its bookkeeping (desired, materialized, degraded, credential-refusal, retry, dematerialize) and the OAuth2 grant handles are keyed by instance (`connectorInstanceKey`: the name, or `PACKAGE/NAME`), so two packages' instances of one name are materialized, degraded, retried and connected each on its own. A name repeated within one package is refused as a duplicate, naming the package. A composition with no package-scoped registry keeps one instance per name (red line 1: nothing there can tell two packages apart). A reloaded artifact supersedes the registry's entries by `(package, name)` (an unstamped item is its manifest's), so a reload of one package leaves another package's instance of the name live (an artifact with no manifest id, or a composition with no package-scoped registry, still supersedes by name, as before); the inert-descriptor audit and the credential listing judge each entry by its own instance.
+  - **Dispatch** (`engine.ts`, `resolveConnectorInstanceFor`): every caller asks the resolver over the served holders, a caller with no package included. `refused` is said with the resolver's message; `resolved` addresses exactly the holder's instance, and with none registered under it, the connector a plugin registers in code under the name (ADR-0097 §4: a plugin's connector and a declarative instance never share a name), else nothing. A name only disabled packages hold answers the same way (#31699 notes 6816295828 and 6820178514: resolve and count over the served set; a disabled package's instance is never served). A name the registry holds nothing under, or a host with no resolver, is answered by the one instance of the name, as before.
+  - **The pull** (`connector-pull.ts`): the mapping's connector is resolved from the mapping's holder package (an environment mapping: as a caller with no package) through the registry's `resolveConnectorInstanceFor`, and its origin, degraded state, provider, action and `inputSchema` are read from that instance. A registry without the member is read by the bare name, as before. New refusal reason `connector_name_refused`.
+  - **The connection door**: `ConnectorConnectionRequest.package` names the instance; the runtime's namespace address admits a connector name two packages hold to the addressed holder (`admitAutomationAddress` answers a slot for a connector as it does for a flow) and passes the package. The bare door keeps its `409` naming both. A callback completes the package its begin recorded, as before.
+  - **Descriptors**: `ConnectorDescriptor.packageId` is set for an instance a package holds; the credential listing matches each declaring entry to its own instance.
+  - **#33218 review N6** (judged, pinned): a connection row a moved declaration left stamped with its old package, once that package declares the name again beside the new holder, is that package's own again and the new holder has none. The row is not restamped: its token was obtained for the old package's connect.
+  
+  One holder: every answer is as before except (6), (7), and an unstamped entry whose holder is replaced, which is not dispatched between the change and the next reconcile (FROM the instance registered under the replaced package).
+- 605d712: feat(automation): a run record says how much of its duration the run spent suspended, so a resumed screen flow no longer reads as an 18-second execution
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A run's `durationMs` is its total wall time, pauses included. A screen flow resumed after the user filled the screen in reported `durationMs: 18691`, almost all of it the user's wait, and nothing on the record told an admin that the run was waiting rather than slow.
+  
+  `ExecutionLogSchema` (`@objectstack/spec/automation`), the run record served by `GET /api/v1/automation/:name/runs/:runId` and the runs list, gains an optional `waitMs`: the total time the run spent suspended at a `screen`, `approval`, `wait` or other pausing node, summed over all its pauses. `durationMs` keeps its meaning, so the time a run spent executing is `durationMs - waitMs`. A run that never paused carries `waitMs: 0`, a measured zero; a `paused` entry carries the wait up to the moment it was written. Absent means not recorded (a `missed` entry, or a run paused before this release), which is not the same as zero.
+  
+  `@objectstack/service-automation` fills it on every run record: initial execution and its retries, resume (completed, refused, stranded, re-suspended), a paused run cancelled or failed where it waits, and the operator restore of a consumed suspension, which keeps the clock of the pause it re-arms. A suspension carries one number, `SuspendedRun.activeMs` (the time the run had executed when it paused), so the wait sums across any number of pauses and process restarts. `sys_automation_run` gains two nullable columns: `active_ms` on paused rows (and on a stranded row's consumed snapshot) and `wait_ms` on terminal rows.
+  
+  Nothing to migrate: rows written before this release keep both columns empty and read `waitMs` as not recorded. A client that validates the run record with `ExecutionLogSchema` from an older `@objectstack/spec` strips the new member and reads the record as before.
+- 7ffbb1a: feat(automation)!: a flow that runs after a record change is not armed while a subflow it calls retries an inline outbound call, and a durable `http` node with no outbox does not hold the save
+  
+  Clause-②: yes (narrowing) — a record-triggered flow the engine armed before is now registered but not armed when a `subflow` / `map` child retries an inline call; `@objectstack/spec/contracts` gains the `FLOW_UNBOUND_CAUSES` value `retried_callout_in_subflow`.
+  Metadata-protocol: semantic
+  Skills-docs: none — taught in content/docs/automation/flows.mdx (Try / catch / retry) and in `os explain flow-after-save-inline-retry`; no skill under `skills/**` teaches the subflow or the no-outbox case.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and every flow that registered before still registers. One flow is no longer armed, and one durable request on a host with no outbox is sent in the background; no rewrite of a stored flow keeps what its author meant, so the author chooses the fix. -->
+  
+  **BREAKING** for two shapes of a flow whose start node runs it after a record change (`record-after-create`, `-update`, `-delete`, `-insert`, `-write`). Ruling D on the after-save retry card: the record save never waits on an external system.
+  
+  - **A retried inline call in a subflow.** Before, the after-save rule (`flow-after-save-inline-retry`) judged only the flow's own nodes, so a flow whose `subflow` or `map` node called a child holding a retried `http` (without `durable: true`) or `connector_action` node armed, and while the outside system was down the save waited through every attempt and backoff delay. The retry counts wherever it sits on the call chain: the child's own `try_catch` retry or `errorHandling: { strategy: 'retry' }`, a deeper child's, or a retry around the call in the caller. Now the arming gate declines such a flow, after its disabled-subflow, save-notice and region halves: it still registers, is not armed, and warns once, naming the call node, the retried node, the flow that holds it and what retries it. `GET /automation/_status` reports it `bound: false` with that reason and the new `unboundCause` value `retried_callout_in_subflow`, and the Studio's run note says it in plain words. Whenever a flow is registered, every flow whose calls reach it is judged again, so the decline does not depend on load order, and a child republished with the call durable (or unretried) arms the caller again.
+  - **A durable `http` node on a host with no messaging HTTP outbox.** Before, such a node fell back to the inline call on every path, so on the save path a retry around it held the save through the whole ladder. Now, on the save path (an after-record-change run, or a `subflow` / `map` child of one), the request is sent once in the background and the run does not wait for it or see its outcome, as with the outbox: the node answers `{ enqueued: false, background: true }`, and a failed send is logged at `error` and is not retried. Off the save path the fallback is the inline call, as before.
+  - **Not changed.** Registration, the save door and `objectstack validate` accept the same flows as before. A flow that does not run after a record change, an inline call nothing retries, and a durable `http` node with an outbox wired behave as before.
+  
+  **What an author does.** For a declined flow: in the child the warning names, set `durable: true` on the `http` node, or remove the retry around it (a `connector_action` has no background path: remove the retry, or run that work on demand or on a schedule). For a host with no outbox: wire the messaging service with reliable delivery so a durable request is queued and retried, rather than sent once.
+- 8b53cc8: fix(service-automation): a run summary's node row carries the warnings its steps raised, so a notify whose channel was refused no longer reads as a clean success in the trigger response
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A `notify` step whose only channel was refused (for example `push` on a deployment with no push channel registered) already put a warning naming the channel on its step in the run history. Its row in the run summary's `nodes[]` did not: the trigger response (`POST /api/v1/automation/:name/trigger`), the `summary` a flow door's `400 FLOW_FAILED` details carry, and the persisted run row all said `status: 'success'`, `acted: 0` and nothing else, so a caller reading only the summary could not tell that nobody was notified.
+  
+  `FlowRunNodeSummarySchema` (`@objectstack/spec/automation`) gains an optional `warnings: string[]`, the same element shape as `ExecutionStepLog.warnings`, and `summarizeRun` fills it on every node row from that node's step warnings: distinct texts in first-seen order, absent when no execution raised one. Every node type's step warnings ride along, not only `notify`'s, so a `create_record` / `update_record` whose requested fields the data engine stripped says so on its row too. The list is bounded per node (five distinct texts); past that a final entry says how many distinct warnings were left out, and the run's step log keeps each execution's own. Node `status`, the counters and flow control are unchanged: a refused channel is still a successful step.
+  
+  Nothing to migrate: the member is optional and additive. A client that validates the summary with `FlowRunSummarySchema` from an older `@objectstack/spec` strips the new member and reads the row as before.
+- 89defde: fix(service-automation)!: a `connector_action` node refuses an input key its action does not declare, instead of sending it to the provider
+  
+  Clause-②: no (narrowing) — a flow whose `connector_action` node carries a key in `connectorConfig.input` that the chosen action's `inputSchema` does not declare used to run and send that key to the provider; its step now fails before dispatch. First-party flows affected: 0 (the shipped DocuSign, Stripe, GitHub and showcase flows send only declared keys).
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered connector-action-undeclared-input-key-refused -->
+  
+  **BREAKING** for a `connector_action` step whose input holds a key the action does not declare. The step now fails with `code: 'VALIDATION_ERROR'` before the handler is called, naming the node, each undeclared key by its dotted path, and the keys the action declares at that level; nothing is sent. The failure is a `runtime` one, so a `fault` edge on the node receives it, as for a missing required parameter or a value of the wrong type. A connector or action switch in the designer is the usual way such a key is left behind.
+  
+  Migration, FROM → TO: `connectorConfig: { connectorId: 'slack', actionId: 'chat.postMessage', input: { channel: 'C1', text: 'hi', stale_key: 'x' } }` → drop `stale_key` from `input`, or pick the action that declares it. A key is judged at every object level the walk reaches, array items included, against the schema of that level (`input.query.stale` against the `query` properties of an OpenAPI action), and a CEL envelope is judged on the map it evaluates to.
+  
+  An action whose schema lists only some of the parameters its handler forwards refuses the others now. The Slack connector's `chat.postMessage` and `chat.update` list `channel`, `text`, `blocks` and `thread_ts` / `ts` and forward the whole input to the Slack Web API, so any other Slack parameter (`unfurl_links`, `mrkdwn`, `reply_broadcast`, …) on those two actions is refused. Migration, FROM → TO: `{ actionId: 'chat.postMessage', input: { channel: 'C1', text: 'hi', unfurl_links: false } }` → `{ actionId: 'call', input: { method: 'chat.postMessage', params: { channel: 'C1', text: 'hi', unfurl_links: false } } }`; the `call` action's `params` is an object with no `properties`, so it carries any Slack parameter.
+  
+  `@objectstack/connector-openapi`: what the generator cannot read without de-referencing the document is now declared open instead of left out, so a flow over an OpenAPI 3.x document nobody normalized keeps dispatching. An unresolved `$ref` parameter has no readable `in`, so it opens every location the handler sends: `path`, `query` and `header` are each emitted with `additionalProperties: true`, also when they declare no parameter of their own, and the parameters declared beside them are still judged. An unresolved `$ref` request body, or one whose content carries no `schema`, is declared as `body: {}` (any value). Running `normalize-openapi` over the document still gives each such parameter its own declaration and type check.
+  
+  Which schemas declare their keys: an object schema that lists `properties`, or says `additionalProperties: false`; the declared keys are the names in `properties` plus those in `required`. A schema that admits more keys declares open input and every key still dispatches: `additionalProperties` set to `true` or to a schema, `unevaluatedProperties` other than `false`, `patternProperties`, `$ref`, `$dynamicRef`, `$recursiveRef`, `allOf` / `anyOf` / `oneOf`, `if` / `then` / `else`, `dependentSchemas` or `dependencies`; so does a schema that lists no `properties`, and an action with no `inputSchema`. An undeclared key whose value is `undefined` is absent and not refused; any other value, `null` included, is.
+  
+  Judged at run time, against the schema of the instance the call dispatches to, and not when the flow registers: the boot flow pull registers every flow before a declarative connector materializes, and an instance's schema is re-read from its upstream on every re-materialization, so a registration-time verdict could be contradicted later in the same boot. The connector pull door (`connectorSource.input`) is unchanged.
+
+### Patch Changes
+
+- 0b89b33: feat(service-automation, metadata-protocol, driver-mongodb, cli): a connector connection is unique per organization and instance, the instance being its package and name, and the connections that name no package keep one per organization through a runtime guard (ADR-0150 D4, D8 row R11, #31699)
+  
+  Clause-②: yes (widening) — additive CLI and in-process surfaces: `os migrate plan` lists a second runtime-owned index (and `--json` `schemaSyncIndexes` an entry for it), `os migrate duplicates` probes it, `os migrate stored-references bind` answers the refusal `duplicate` where it threw, and the exports and types listed under In-process APIs grow. The connector doors (the connect door, the OAuth callback, revoke, the connection list) and every automation request answer as before: the store still reads and writes by organization and name, and the one-holder backstop keeps every connector name to one package until #31699's last PR, so no second package's connection is written yet.
+  Metadata-protocol: none
+  Skills-docs: `content/docs/automation/connectors.mdx` says a connection is one per organization and instance; `content/docs/deployment/cli.mdx` lists the guard among the runtime-owned indexes and the bind's `duplicate` refusal. `skills/**` teaches "connect once per organization", which still holds per instance.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. `sys_connector_connection` is a platform object and its `indexes[]` is not authored metadata; the key change is a schema face the drift plan applies, the guard is a runtime-managed physical index, and no stored row is rewritten, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  Part of #31699 (ADR-0150 child B, PR 3a: the storage half). The maintainer's ruling on #31699: a connection is unique by package and name. The store, the connect door and the OAuth callback carry the package in the next PR; this one widens the key, stands the guard that keeps the package-less rows to one, and teaches the two writers of the package column what the wider key can refuse.
+  
+  **The key: `sys_connector_connection`.**
+  
+  - FROM one connection per `(organization_id, connector_name)` (`uniq_sys_connector_connection_organization_id_connector_name`) TO one per `(organization_id, connector_package, connector_name)`. On SQL the drift plan replaces the old key with one `replace_unique_index`, categorized `safe`, create-before-drop, and only once the guard below stands; until then `driver-sql`'s widening arm keeps the old key, so the table is never without a unique rule over its rows. The guard is built at schema sync after the table's drift is read, so on an upgraded database the old key retires on the NEXT sync that runs safe drift (a dev `autoMigrate: 'safe'` boot, or `os migrate apply`, which lists it). Measured on SQLite and PostgreSQL 16: with the guard, the plan is that one safe op and a re-plan is empty; two packages' connections of one name in one organization are admitted, a second connection of one package's instance is refused, and a second package-less connection is refused. On MariaDB the retirement is read from `driver-sql`'s source, not measured: its carrier column is read as a partial unique on the two columns, and on an upgraded MySQL-family database `connector_package` is a TEXT column, so the wide key is built over the driver's hash shadow.
+  
+  **The guard: `uniq_sys_connector_connection_packageless`.**
+  
+  - `connector_package` is NULL on every connection of an instance the environment authored or a plugin registers in code, and of a name the boot backfill could not bind. A SQL UNIQUE treats NULLs as distinct, so for exactly those connections the wider key constrains nothing. The guard keeps them to one per `(organization_id, connector_name)`, as the old key did: two of them would keep two refresh tokens for one instance, and a revoke would leave the other stored.
+  - Built as the permission-set grant's guard is (#32164), at `objectql:schema-synced`, on every kernel that runs the table's DDL; a pass that holds its DDL back builds nothing, a standing guard costs one catalog read, a refusal is reported once per boot. SQLite and PostgreSQL: a partial unique index `WHERE connector_package IS NULL`. MySQL 8.0.13+: a functional key part over the hash-shadow digest. MariaDB 10.3+: a UNIQUE key over an INVISIBLE generated column `uniq_sys_connector_connection_packageless__hash`. MongoDB: `driver-mongodb` builds it at collection sync (`RUNTIME_OWNED_UNIQUES`, `connector_package: null`), keyed `(connector_name)`, because Mongo materialized the earlier declaration's one column, so the widening arm there retires the old index once the guard stands.
+  - Refuse, never keep-one: a database already holding two package-less connections of one key keeps both; the build fails and logs, at `error`, the keys, the consequence and the query that lists them. `os migrate duplicates` lists this index too. It admits nothing the old key refused.
+  
+  **The writers of the table.**
+  
+  - The connection store's first connect (`ConnectorConnectionStore#connect`): the old key refused a second row of one instance in one organization; the wide key admits one when the boot backfill stamped the first connect's row with its package between a second connect's read and its insert. A connect that counts a second row after its insert now deletes its own row and is refused ("its connection changed while this connect was completing … begin the connect again"), nothing kept, as the old key refused it; when both racing connects count two rows, both can be refused and no row stands. Where the engine answers no id for the inserted row, or the delete fails, the connect is refused saying the instance was connected twice and to revoke until it reads as not connected. A first connect with no race is unchanged.
+  - The boot backfill (`stored-reference-package-backfill.ts`, row R11) binds a package-less connection to the one package that holds its name. Under the wider key that row can be a second row of one key, when a connection bound to that package already stands for the same organization and name (a database where a guard build was refused, `driver-memory`, a server with no form, or a pair a racing first connect left when its process died before taking its row back). The wider key makes that unique violation possible, and it would end R11's pass; it is now reported per row: the row is left as it is and listed in the report's new `duplicated` list, once a read confirms the row of that key that already names the holder, named in one `warn` line per pass. A dry run lists the same rows, counting the keys it has already bound in the pass. Any other failed write, a violation no such row confirms, and any violation on R8 or R9 (whose keys do not carry the package) still end the pass.
+  - `os migrate stored-references bind`: FROM a unique violation thrown as an error TO the refusal `duplicate`, naming the row, the package and the key, nothing written.
+  
+  **Declared limits.**
+  
+  - MySQL 8, upgraded databases: `driver-sql` reads the guard's functional key part as the partial unique it is, so the old key retires there as it does on PostgreSQL, as one safe `replace_unique_index` on the next sync that runs safe drift. A database created fresh on MySQL 8 has the wide key and the guard and no old key. MySQL before 8.0.13 and MariaDB before 10.3 build no form, keep the old key (or build it under the driver's generated name where it is missing) and say so at `error` each boot.
+  - `driver-memory` builds no guard (no raw-SQL seam), as for the grant: a pin measures that its unique check treats a NULL package as distinct, so two package-less connections of one instance are admitted there.
+  - The MySQL, MariaDB and real-mongod pins run in suites that run on `main` only, so they first run after this lands.
+  
+  **In-process APIs.** `@objectstack/metadata-protocol` exports `ensureConnectorConnectionPackagelessIndex`, `createConnectorConnectionGuardAtSchemaSync`, `buildConnectorConnectionPackagelessIndexSql`, `buildConnectorConnectionPackagelessIndexPresenceSql`, `buildConnectorConnectionPackagelessDuplicateProbeSql`, `buildConnectorConnectionOldKeySql`, `resolveConnectorConnectionIndexSeam`, `CONNECTOR_CONNECTION_PACKAGELESS_INDEX_NAME`, `CONNECTOR_CONNECTION_PACKAGELESS_INDEX_COLUMNS`, `CONNECTOR_CONNECTION_OLD_KEY_INDEX_NAME` and the result, status and pass-outcome types. `@objectstack/service-automation`'s `StoredReferenceBackfillReport` gains `duplicated`. `@objectstack/cli`'s `BindRefusal` gains `'duplicate'`. All additive.
+- 199e362: feat(service-automation): the connector connection store, the connect door and the OAuth callback read and write one instance by its package and name (ADR-0150 D4, #31699)
+  
+  Clause-②: yes (widening) — the connect door (`getConnectorConnection`, `beginConnectorConnection`, `completeConnectorConnection`, `revokeConnectorConnection`) and a dispatch answer new refusals, each listed under "What answers differently"; a connection row now carries its instance's package. The one-holder backstop still keeps every connector name to one package at boot, and while a name has one holder every row of the name answers its one instance, as the read by name did, so on a database where each organization keeps one connection of an instance and the name has one holder, every answer is as before, a declaration that moved to another package or to the environment included.
+  Metadata-protocol: none
+  Skills-docs: `content/docs/automation/connectors.mdx` says a callback completes the instance its connect was begun for and the door refuses a name two packages hold. `skills/**` teaches "connect once per organization", which still holds per instance.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped: the store, the door and the pending authorization are runtime, and `connector_package` is the column PR 3a added. -->
+  
+  Part of #31699 (ADR-0150 child B, PR 3a-ii). PR 3a widened `sys_connector_connection`'s key to `(organization_id, connector_package, connector_name)`; this PR makes the store and its callers use it.
+  
+  **The store: `ConnectorConnectionStore`.**
+  
+  - `connect`, `read`, `readOrRefuse`, `revoke` and `listFor` take the instance's package (`string`: a package's instance; `null`: no package's). `revoke` and `listFor` require it; on `connect`, `read` and `readOrRefuse` an absent package still reads the bare name, for the callers that know no package. A connect writes `connector_package` on the row it inserts.
+  - While the name has one holder (its durable resolution, the question the boot backfill asks, disabled packages included, answers one), or no registry can judge it, every row of the name answers its instance, whatever package the row names: a row naming no package, and a row a moved declaration left under its old package, are the instance's connection, as the read by name answered. A connect adopts the row and stamps it with the instance's package in place (design M2; `null` for the environment's or the platform's instance): one row, never two. A revoke removes it. While two packages hold the name, each package reads its own row; a row naming no package, or naming a package that is not one of the holders, is no package's, and with no row of its own the package's read is refused `409` naming `os migrate stored-references bind --table sys_connector_connection`.
+  - Two rows answering one instance (a package's own row and another row of the name under one holder, or two rows a guard-less database admitted) are refused `409` by the door and `503` by a dispatch, with or without the run's organization, never one of them used; a revoke removes every row that answers. The connection list (`listFor`) still counts such an organization, carrying the refusal: a dispatch with no organization is refused `422` where another organization is connected too, as before, and the materializer does not count it as connected.
+  - The post-insert take-back that PR 3a added now counts by `(organization, package, name)`.
+  
+  **The door and the callback.**
+  
+  - The connect door resolves the name to one declared instance and its package: the resolved package's entry; with no registry to ask (a code-registered instance, a composition with no ObjectQL) or no holder, the one declared entry with the package it carries; two holders, or two declared entries with no registry, `409`.
+  - The begin records the package in the pending authorization (`packageId`, `null` for the environment's or the platform's instance). The callback completes exactly that package's entry, never the name resolved again; when that package no longer declares the instance, the callback is refused `404` before its code is exchanged. A pending record written before this change (no key, at most ten minutes old) resolves the name, as the begin did.
+  - An instance's package is its entry's stamp when that is a real package, none for the environment's stored entry, and, for an entry with no stamp or the compatibility API's default, the package the name's durable resolution holds it under (the package the boot backfill binds a package-less row of the name to, so a row the instance connected stays its own once bound), else none. The door, the dispatch handle, the materializer and the reconnect-required mark all read by that one rule. When the name resolves to a package no declared entry is the instance of, the door serves the one declared entry with its own package, as with no registry.
+  
+  **What answers differently.**
+  
+  - `409` at the door where a name has two holders, and where two declared entries share a name with no registry to resolve it; before, the first declared entry was served.
+  - `409` at the door, and `503` at a dispatch, where two rows answer one instance in one organization (above). Before, the old key kept one row per organization and name, so this needs a database where the guard was refused or a package's row beside an adopted package-less one; when the two rows are met only at the callback, the code has already been exchanged and the connect is refused after it.
+  - `409` on the read and the revoke of a row of a name two packages hold that names no package, or a package that is not one of the holders (a disabled holder counts: the question is the boot backfill's), where the read answered the row before. Bind it with `os migrate stored-references bind --table sys_connector_connection` and revoke it as its package's, or uninstall one of the holders, after which a revoke of the one remaining instance removes it.
+  - `404` at the callback when the package its connect recorded no longer declares the instance; before, any entry of the name completed it.
+  
+  **Declared deviations from the design review.**
+  
+  - M5: no `?package=` on the HTTP door and no spec change. The door addresses one instance by resolving its name; addressing a second holder's instance explicitly comes with the PR that narrows the one-holder backstop, which is the first PR under which two holders can boot, and no later. Until then a name with two holders (a package installed after boot) is refused at every leg of the door, revoke included: its connections stay stored and keep no dispatch, and the remedy is to uninstall one holder or bind the row.
+  - M6: where the name has no holder or no registry answers, the door serves the one declared entry with the package that entry carries, not `null`: the row a code-registered package instance connects is that package's, as the backfill would bind it. That stamp is durable while the judgment is not (a later registry may resolve the name elsewhere); it never loosens: while two packages hold the name, the stamped row answers only its own package.
+  - S3: under two holders a package's own row wins over a package-less row of the name, and the package-less row answers neither (ADR-0150 R9 refuses such a row; the store reads around it rather than refusing the package's own connection). The stray row keeps its encrypted refresh token until it is removed: the door is refused `409` at every leg while two packages hold the name (M5), so it is removed by uninstalling one of the holders, after which the name has one holder, every row of it answers that instance, and a revoke removes them all.
+  
+  **In-process APIs.** None public: the store, the pending authorization and the grant handle are internal modules of `@objectstack/service-automation`, none exported from its entry point.
+- 687e0a5: feat(service-automation): the automation engine holds a connector instance by its package and name, and a dispatch addresses the one instance its caller's name resolves to (ADR-0150 D4, #31699)
+  
+  Clause-②: yes (widening) — additive in-process surface only: `AutomationEngine` gains `resolveConnectorInstance`, `resolveConnectorInstanceFor` and `resolveConnectorActionInputSchema`; `registerConnector`, `registerDegradedConnector` and `unregisterConnector` take an optional instance (its package, and `soleOfName`); `resolveConnectorAction`, `resolveConnectorActionEffect`, `getConnectorOrigin`, `getConnectorDegradedReason` and `getConnectorDegradedHold` take an optional package; the barrel exports the types `ConnectorInstanceResolution` and `ConnectorInstanceOptions`. Dispatch answers change in one transitional state (an unstamped entry whose name gains a second holder after boot), as an intended tightening; the phase-1 one-holder refusal keeps a supported install out of that state, since it refuses a second holder at install and at package registration. Three smaller answers move too, each listed under "What answers differently" below: a dispatch that joins a refresh in flight for another connection row is refused 503 once, the store's two-holder refusal names a different remedy, and a re-registered instance moves to the end of the connector list. Every other dispatch, door and HTTP answer is as before: the declared-connector reconcile still keeps one instance per name (the one-holder backstop, its duplicate-name refusal, and `soleOfName` on every declarative registration), and a lookup by bare name answers that one instance.
+  Metadata-protocol: none
+  Skills-docs: none — nothing a skill or a docs page teaches changes while one instance per name is kept; the two-holder connector docs come with the PR that narrows the backstop.
+  
+  Part of #31699 (ADR-0150 child B, PR 3b). PR 3a-ii made the connection store, the connect door and the OAuth callback address an instance by package and name; this PR makes the engine hold and dispatch it so.
+  
+  **The engine's instances.**
+  
+  - The registered connectors are held by `(package, name)` (`ConnectorInstances`): a declarative instance by the package the connection door addresses it by (`connectorInstancePackage`: its real stamp; none for the environment's stored entry; the name's durable holder for an unstamped or compatibility-default entry), a plugin's connector by no package.
+  - A plugin's connector and a declarative instance still never share a name, whatever package the instance is of (ADR-0097 §4). With `soleOfName`, a declarative registration drops any other declarative instance of the name: the reconcile registers every instance so, and keeps one per name, until the backstop narrows.
+  - A read by bare name answers the one instance of the name, and none when there are two, never one of them. `getRegisteredConnectors` lists each name once; `getConnectorDescriptors` lists every instance.
+  
+  **Dispatch.**
+  
+  - `connector_action` resolves its `connectorId` for the calling flow's package (`resolveConnectorInstance`): a refused name is refused as before, naming every candidate; a resolved holder is dispatched to its own instance, and its action's `inputSchema` and `effect` are read from that instance. A caller with no package, a name no registry holds, or a resolved holder with no instance registered under it (a plugin's connector of a declared name) is answered by the one instance of the name, as the dispatch by name answered; two are not dispatched. `connectorNameRefusal` answers as before.
+  - The OAuth2 grant handle asks its instance's package on every read of the connection store, so an unstamped entry's connections are read under the package its name resolves to now, not when the handle was made. A cached access token is served only for the connection row it was obtained for (its row id, beside its revision): a read that now chooses another row (another package's connection of the organization) refreshes, never serves the other row's token.
+  
+  **The reconcile.**
+  
+  - The instance package is part of a provider-bound entry's desired signature, so an unstamped entry whose name's holder changes (installed, uninstalled, a second holder) is registered again under the package it resolves to now, on the next reconcile. The engine's instance and the connection the grant handle reads stay one package.
+  - An instance the reconcile drops (no longer declared, degraded and removed) is unregistered by name, every instance of it: the reconcile keeps one per name, whatever package it was registered under.
+  - Limit: the boot's second reconcile (packages registered during the boot) is skipped when the declared list's fingerprint is unchanged, and the fingerprint carries no package, so a holder that changes in that window without the declared list changing is followed on the next reload or restart.
+  
+  **What answers differently.**
+  
+  - An unstamped (or compatibility-default) declared entry whose name gains a second durable holder: its dispatch was answered with the connection of the package that held the name at boot (200) until a restart. It is now read under the package the name resolves to at that moment, which is no one package, so it is refused 503 (no connection of its own): under two holders a row is its own package's only (PR 3a-ii's store rule), as the connection door already refuses that name (409). It is recovered by stamping the entry or by uninstalling the second holder. A holder that is uninstalled or replaced, leaving one holder, changes no answer: every row of the name still answers the one instance, and the next reconcile registers the instance again under the package it resolves to now (any provider-bound instance is re-materialized on such a change). A re-materialized OAuth2 instance starts with a new grant handle whose access-token cache is empty, so a connection with no refresh token reads `reconnect_required` at its next dispatch, as after a restart.
+  - A dispatch that joins an access-token refresh already in flight for another connection row of the organization (the instance's package changed while the refresh was out) is refused 503, never served that row's token; the next dispatch refreshes its own row.
+  - The store's refusal of a row of a two-holder name that names none of the holders now names the remedy that works for it: `os migrate stored-references bind` for a row naming no package, and uninstalling one of the holders for a row already naming another package, which the bind refuses (PR 3a-ii contract review N4).
+  - On a change of holder, the instance is re-registered, so its name moves to the end of `getRegisteredConnectors()` and `GET /automation/connectors`.
+  
+  **Not in this PR (moved to the PR that narrows the backstop).**
+  
+  - The materializer's own bookkeeping (`desired`, the materialized, degraded and credential-refusal maps, `grantHandles`, retry and dematerialize) stays keyed by name: under the backstop the reconcile cannot hold two instances of one name, so re-keying it is observable only once the duplicate-name refusal is lifted, and lands with it and with a two-live-instance test. Its registrations and unregistrations already pass the instance package.
+  - The connector pull keeps reading its connector by bare name (the one instance): whether a mapping's connector is resolved for the job's package, and refused where that name is refused, changes an answer and is decided with the narrowing.
+  - The resolved-holder fallback above (a resolved holder with no registered instance answered by the one instance of the name) is right only while one instance per name is kept; with two instances alive the narrowing PR makes it `none`.
+  - `ConnectorDescriptor.packageId`, the addressed connection door (`?package=`), connector into the namespace-scoped type sets, and the backstop itself.
+  - `registerConnector(def, handlers, 'declarative', { packageId })` without `soleOfName` is public and keeps two instances of one name side by side (the engine tests use it). So does `registerConnector(def, handlers, 'declarative')` with no instance argument over a name the reconcile holds under a package: it is registered under no package beside that instance instead of replacing it, and a bare-name read answers neither until the next reconcile. Nothing in-tree registers either way outside the tests; the reconcile always passes the instance with `soleOfName`.
+  
+  **In-process APIs.** Listed under Clause-② above. All additive; every new parameter is optional and its absence answers as before, except the declarative registration with no instance argument named in the list above.
+- c312b26: feat(spec): a flow run's step log declares the `warnings` and `droppedFields` it already carried
+  
+  Clause-②: yes (widening) — `ExecutionStepLogSchema` (`@objectstack/spec/automation`) gains two optional members, `warnings` (strings) and `droppedFields` (an array of the data engine's own `DroppedFieldsEventSchema` event). Both reach every published schema that embeds a step log: `ExecutionLogSchema.steps`, and through it `GetRunResponseSchema` (`GET /api/v1/automation/:name/runs/:runId`) and `ListRunsResponseSchema` (the runs list). Nothing that parsed before is refused.
+  Metadata-protocol: added
+  
+  The engine has written both members onto a step that ran (`warnings` for a write whose requested fields the data engine legally stripped, `droppedFields` for the structured events behind those warnings), and the run-history routes serve the step as persisted. The published step-log schema named neither, so a reader that parsed a run through it stripped both and could not tell a step that partially did not land from a clean one. `droppedFields` reuses the data engine's event, so there is no second reason vocabulary.
+  
+  `@objectstack/service-automation`: the engine now copies the two members onto a step only in that declared shape. From a host-registered executor's result, a `droppedFields` element that is not a well-typed drop event is skipped (the same filter the run's terminal `droppedFields` answer already applied), and so is a warning that is not a string; a member with nothing well-typed left is omitted. Before, any value with a truthy `length` was persisted and served as it came. The in-tree write nodes produce well-typed values, so their steps are unchanged.
+- 6455104: fix(service-automation): a package installed through install-local keeps its flows registered after a restart, whatever the plugin order
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The engine bound a cold boot's flows once, in its own `kernel:ready` handler. The install-local rehydrate re-registers every installed package in its own `kernel:ready` handler, so the bind saw those packages only when the install-local plugin started first. A host that lists a plugin depending on the automation plugin (any connector plugin) before `MarketplaceInstallLocalPlugin` starts the automation plugin first: after a restart the package was listed and its objects served, but its flows answered 404 on the trigger door and read `registration.state: unregistered` until some later hot install re-synced the engine. The engine now reads the flow view again at `kernel:bootstrapped`, once every `kernel:ready` handler has settled and before the flow holders seal, and binds again when the view changed since the `kernel:ready` bind. A boot whose view did not change binds nothing more.
+- 06b5669: fix(runtime,service-automation)!: the flow doors and the connector address judge the served holders of a name two packages hold, so a disabled holder's slot answers no bare name (ADR-0150 D3, #33386)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are door and run reads under a reversible package state: no stored row, slot key, run key or dispatch key changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller of a flow or connector name that two packages hold while one of them is disabled. A disabled package holds no name (ADR-0150 D3). Until now the `/automation` by-name doors, the flow action and endpoint, the start admission's record-read walk and the engine's bare entries still counted a disabled holder for such a name. They now count only the packages that serve it. With no holder disabled, every answer is unchanged. Measured over a real `SchemaRegistry` (its `disablePackage`), in both registration orders. Packages CRM and HR each hold the flow `convert` and the connector `mail`, one engine slot or instance each, and CRM is disabled:
+  
+  - A bare name with no package (`POST /automation/convert/trigger`, `GET /automation/convert`, the run doors, `GET /automation/connectors/mail/connection`, the engine's `execute`, `getFlow` and `toggleFlow`) was refused 409 naming CRM and HR. It is now served from HR's slot or instance.
+  - A flow action, a subflow call or a walk read from a package whose closure holds both was refused 409 naming both. It now reaches HR's flow (widening).
+  - CRM's own flow action, or a subflow call from CRM's own flow, ran CRM's flow. It now gets no flow (not found), and never HR's.
+  - A package that reaches the name only through CRM ran CRM's flow. It is now refused 409 `outside-closure` naming HR. A package that reaches neither holder is refused naming HR only (before: both).
+  - An address naming CRM (`/automation/crm/convert/…`, `/automation/trigger/crm/convert`) ran CRM's slot. It is now refused 409 `not-held-by-qualifier` naming HR. `/automation/connectors/crm/mail/connection` reached the service, which answered 404; it is now refused 409 naming HR, and the service is not asked.
+  - `_env` or another namespace (`/automation/_env/convert/…`, `/automation/connectors/ops/mail/connection`) was refused 409 naming both. It is now refused naming HR only.
+  - The definition writes (`PUT`, `DELETE`, clone) at an address naming CRM, at `_env` or at a third namespace were refused 409 naming both. They are now refused 409 naming HR only. With both disabled, such a write at an address answers 404.
+  - With CRM and HR both disabled, no door and no run reaches a flow. An address answers 404. The bare name and `_env` answer as for a flow the engine does not hold.
+  
+  **Not moved.** HR's own address and HR's own callers answer as before. The durable coordinates stay judged over every holder, served or not: the engine's slot keys, a run's key, the schedule dispatch key (`flowDispatchHolder`), the credential channel's scoping, the subflow guards' arming verdicts, and which slot a run row is filed under. A disable is reversible, so it re-points no slot. A run filed under CRM's slot key is no served holder's: the run doors answer it as a run nobody holds, and it is never read or acted on as HR's. A definition write (`PUT`, `DELETE`, clone) at HR's own address keeps its 409 naming every holder; a bare definition write is refused by the metadata store over its stored rows, as before. A name only one package holds is judged as before.
+  
+  **Deferred:** amendment 3's trigger binding (a runtime-disabled holder's trigger still fires its slot, as on main) → #33748.
+  
+  **No migration.** No schema key, stored row, slot key, run key or dispatch key changes, so there is nothing to rewrite: the answers that move follow a reversible package state.
+  
+  The fix for a caller: re-enable the package, or address the served holder by its namespace.
+- b937b75: fix(service-automation): a durable `http` node with no `method` sends POST on the no-outbox fallback too, as it does through the outbox
+  
+  Clause-②: no — no accepted input, export or served shape is added; the no-outbox fallback now sends the verb the node's descriptor and the outbox already send.
+  Metadata-protocol: none
+  
+  A flow `http` node with `durable: true` and no `method` was enqueued as a POST when the messaging HTTP outbox was wired, but sent as a GET when it was not (the awaited fallback, and the one background send on a record save's path). The GET carried no body and was counted as a read, so the run reported it changed nothing. The verb is now resolved once — the authored `method`, else POST for a durable node and GET for a request/response one — and both paths send it, with the same body and signature the outbox would deliver. To keep the old behaviour, author `method: 'GET'` on the node.
+- Updated dependencies [f229dfd]
+- Updated dependencies [0b89b33]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [4aceae5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [7c36f52]
+- Updated dependencies [1cf2a5a]
+- Updated dependencies [3c44a97]
+- Updated dependencies [605d712]
+- Updated dependencies [3269cab]
+- Updated dependencies [02f55c5]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [128b657]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [d635599]
+- Updated dependencies [8403725]
+- Updated dependencies [6a36b79]
+- Updated dependencies [a1e0402]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [4bba8b8]
+- Updated dependencies [8c88db6]
+- Updated dependencies [834d5f5]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [9673030]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [5ea8ce5]
+- Updated dependencies [e0ce1b5]
+- Updated dependencies [4ace1fa]
+- Updated dependencies [61ed314]
+- Updated dependencies [3c42e63]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [9317833]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [b4c8461]
+- Updated dependencies [bd439f1]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [6e28797]
+- Updated dependencies [7adb1b5]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [d4cfbfb]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [26b5994]
+- Updated dependencies [505a239]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [cbb876c]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [7e2eadd]
+- Updated dependencies [47a3b95]
+- Updated dependencies [d4fbb4d]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [8a8c21e]
+- Updated dependencies [b194618]
+- Updated dependencies [0be91f0]
+- Updated dependencies [a2be78d]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [b95d915]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [03dc626]
+- Updated dependencies [babd5d4]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [a27d88d]
+- Updated dependencies [b392ff7]
+- Updated dependencies [6107290]
+- Updated dependencies [c92ae14]
+- Updated dependencies [3c231cd]
+- Updated dependencies [489ef5f]
+- Updated dependencies [480246b]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [ea67b26]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [481f642]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [1c32f6d]
+- Updated dependencies [b8f6237]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+- Updated dependencies [1e889b1]
+- Updated dependencies [d7e1a5a]
+- Updated dependencies [de5eb08]
+- Updated dependencies [0a6f193]
+  - @objectstack/spec@18.5.0
+  - @objectstack/objectql@18.5.0
+  - @objectstack/metadata-protocol@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/plugin-auth@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/formula@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes
