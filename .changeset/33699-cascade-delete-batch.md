@@ -12,7 +12,7 @@ Metadata-protocol: none
 
 **BREAKING** for a delete-side hook that runs on a cascaded child and reads `ctx.dispatch.mode`, `ctx.input.options`, or the rows of the child's siblings.
 
-Deleting a record now deletes the children each `cascade` relation reaches as ONE predicate delete per chunk of 500, `DELETE … WHERE id IN (…)`, through the predicate-delete arm a `multi: true` delete already takes. Before this, every child was its own by-id delete. Measured on the SQL-performance bench (one opportunity with 10 line items, the stock plugins loaded): 155 statements before, 57 after, on SQLite and on PostgreSQL alike.
+Deleting a record now deletes the children each `cascade` relation reaches as ONE predicate delete per chunk of 500, `DELETE … WHERE id IN (…)`, through the predicate-delete arm a `multi: true` delete already takes. Before this, every child was its own by-id delete. Measured on the SQL-performance bench (one opportunity with 10 line items, the stock plugins loaded): 155 statements before, 58 after, on SQLite and on PostgreSQL alike (one of the 58 is the read of each chunk's ids through the caller's read door).
 
 What a hook on a cascaded child sees:
 
