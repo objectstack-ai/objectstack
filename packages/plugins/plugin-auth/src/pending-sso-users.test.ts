@@ -525,16 +525,20 @@ describe('[#33181] a pending person gets no password and no session', () => {
     }
   });
 
-  it('set-initial-password refuses a pending caller who holds platform-admin standing, whom the managed arm admits', async () => {
-    const s = await stage();
-    setManaged(true);
-    process.env[OWNER_ENV] = EMAILS.idp;
-    s.users().find((r) => String(r.id) === s.ids.idp)!.email_verified = true;
-    s.users().find((r) => String(r.id) === s.ids.idp)!.source = PENDING_SSO_SOURCE;
-    const v = await verdict(await s.fire('/set-initial-password', { newPassword: NEW_PASSWORD }, s.bearers.idp));
-    expect(v.status, v.text).toBe(409);
-    expect(v.message).toBe(PENDING_SSO_MESSAGES.setInitialPassword);
-    expect(s.credentialOf(s.ids.idp)).toBeUndefined();
+  it('set-initial-password refuses a pending caller who holds platform-admin standing, managed or not', async () => {
+    for (const managed of [true, false]) {
+      const s = await stage();
+      setManaged(managed);
+      process.env[OWNER_ENV] = EMAILS.idp;
+      s.users().find((r) => String(r.id) === s.ids.idp)!.email_verified = true;
+      s.users().find((r) => String(r.id) === s.ids.idp)!.source = PENDING_SSO_SOURCE;
+      const v = await verdict(await s.fire('/set-initial-password', { newPassword: NEW_PASSWORD }, s.bearers.idp));
+      expect(v.status, `managed=${managed}: ${v.text}`).toBe(409);
+      // Managed, the cloud-managed arm refuses every signed-in caller first, a
+      // platform administrator included (#33203).
+      expect(v.message).toBe(managed ? CLOUD_MANAGED_REFUSAL_MESSAGES.setInitialPassword : PENDING_SSO_MESSAGES.setInitialPassword);
+      expect(s.credentialOf(s.ids.idp)).toBeUndefined();
+    }
   });
 
   it('CONTROL: off a managed environment an idp_provisioned caller sets their initial password as before', async () => {
@@ -544,8 +548,9 @@ describe('[#33181] a pending person gets no password and no session', () => {
     expect(s.credentialOf(s.ids.idp)).toBeDefined();
   });
 
-  it('CONTROL: set-user-password still answers 200 on an env_native target', async () => {
-    const s = await managedStage();
+  it('CONTROL: off a managed environment set-user-password still answers 200 on an env_native target', async () => {
+    // Managed, the door refuses every target (#33203, `cloud-managed.test.ts`).
+    const s = await stage();
     const v = await verdict(await s.fire('/admin/set-user-password', { userId: s.ids.member, newPassword: NEW_PASSWORD }, s.bearers.admin));
     expect(v.status, v.text).toBe(200);
   });
