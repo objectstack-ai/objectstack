@@ -44,7 +44,7 @@
 - 空槽可补 p3,新可认领 p1/p2 占下一空槽;p3 ⛔ 不改任一区 p1/p2 在改或将改的热文件。
 - 同函数互相牵连的卡合一 PR,准入照 `execution-duties.md` 折叠五门。
 - 留道:已分析、修法清楚的卡碰 `ui/**`、`packages/spec/**` 仍留本车道开发,送本席复核线程,档
-  照 `contract-review.md`;他道席在线只通知(「如果车道有人在线，只需要通知他就可以」)。
+  照 `contract-review.md`;他道席在线只通知(「如果车道有人在线，只需要通知他就可以。」)。
 - 仅两种交出:他道在线席已认领该段代码;规则要求(cloud 路由、`security-findings.md`、ADR)。
 - 送审:欠不欠、敲谁、档与 head 后移只照 `contract-review.md`。
 - 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 区照 `landing-operations.md` 自己落地。
