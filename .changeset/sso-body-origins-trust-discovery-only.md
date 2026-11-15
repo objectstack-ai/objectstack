@@ -2,7 +2,7 @@
 '@objectstack/plugin-auth': patch
 ---
 
-fix(auth)!: an origin an SSO register or update body names is trusted for that provider's discovery only, never as the request's `Origin`
+fix(plugin-auth)!: an origin an SSO register or update body names is trusted for that provider's discovery only, never as the request's `Origin`
 
 Clause-②: no (narrowing)
 Metadata-protocol: none
@@ -14,4 +14,4 @@ Skills-docs: none — no skill under `skills/**` teaches trusted origins or SSO 
 
 Who moves: only a client that registers or updates an SSO provider from a browser page served on an origin the deployment does not trust. Send the request from a configured origin (the Console, or a server-side call), or add that page's origin to the deployment's trusted origins (`trustedOrigins`, `OS_CORS_ORIGIN`).
 
-Unchanged: a registration from a configured origin still discovers and registers an identity provider whose issuer and named endpoints are on hosts the deployment does not list; Microsoft Entra ID's companion origin; the `discovery_untrusted_origin` refusal and its remedy; an update from a configured origin; and every other request.
+Unchanged, for a request from a configured origin: a registration still discovers and registers an identity provider whose issuer and named endpoints are on hosts the deployment does not list; a registration or an update that turns "sign out of the company sign-in too" on (`signOutOfIdp`) still reads the provider's logout endpoint from its discovery document with the origins that request names trusted; an update still validates and saves the endpoints it names. Also unchanged: Microsoft Entra ID's companion origin, the `discovery_untrusted_origin` refusal and its remedy, and every other request.

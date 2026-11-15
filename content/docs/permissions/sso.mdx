@@ -166,9 +166,12 @@ registration trusts it. **Setup → SSO Providers → Register SSO Provider** of
 each of them as a field: **Authorization URL** fills `authorizationEndpoint`,
 **Token URL** `tokenEndpoint`, **JWKS URL** `jwksEndpoint` and **Userinfo URL**
 `userInfoEndpoint`. An origin a registration or an update names, its issuer
-included, is trusted only for that provider's discovery and validation: it
-never becomes an accepted `Origin` for the request itself, whose origin check
-reads the deployment's configured trusted origins alone, as on any other POST.
+included, is trusted only for that provider's discovery and validation: a
+registration's discovery and endpoint checks read it, and so does the check of
+the provider's logout endpoint when a registration or an update turns **Sign
+Out of the Company Sign-In Too** (`signOutOfIdp`) on. It never becomes an
+accepted `Origin` for the request itself, whose origin check reads the
+deployment's configured trusted origins alone, as on any other POST.
 
 Google is one such provider: its discovery document names the token endpoint,
 the key set and the userinfo endpoint each on a host of its own, so a Google
