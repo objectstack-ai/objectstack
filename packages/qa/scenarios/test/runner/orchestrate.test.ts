@@ -14,7 +14,7 @@
  * fails its Build half.
  */
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,7 +27,7 @@ import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../s
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { main as runScenarios, makeDriver, parseArgs } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
-import { runCard, runHalf, seedApp, type CardRun, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
+import { askModeRefusal, runCard, runHalf, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
 import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -1502,6 +1502,45 @@ describe('runCard — every turn states the effort it asked for, beside the mode
 
 // ── A replay re-sends the recorded writes ───────────────────────────────────
 
+const REPLAY_DENIED = JSON.stringify({ error: { code: 'PERMISSION_DENIED', message: 'You do not have permission to perform this action.', status: 403 } }, null, 2);
+
+/**
+ * The build eval#1's recorded run met (`fixtures/eval-haiku-crm-replay.recording.json`),
+ * as an MCP write door over the fake rows: `sdr` may create and edit contacts
+ * but not delete them; `partner_user` may write nothing. `refuse` overrides an
+ * answer, to make the app answer otherwise than the recorded run did.
+ */
+class BuildApp extends FakeApp {
+  private next = 0;
+  constructor(private readonly refuse: (persona: string, tool: string) => boolean = () => false) {
+    super();
+  }
+  override async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
+    this.toolCalls.push({ apiKey, tool, args });
+    const persona = apiKey.replace(/^key-/, '');
+    const object = String(args.objectName);
+    const data = (args.data ?? {}) as Record<string, unknown>;
+    const rows = (this.rows[object] ??= []);
+    const grants = persona === 'sdr' && (tool === 'create_record' || tool === 'update_record');
+    if (grants === this.refuse(persona, tool)) return { output: REPLAY_DENIED, isError: true };
+    if (tool === 'delete_record') {
+      rows.splice(rows.findIndex((r) => r.id === args.recordId), 1);
+      return { output: JSON.stringify({ object, id: args.recordId, deleted: true }), isError: false };
+    }
+    if (tool === 'create_record') {
+      const id = `replayed-${this.next++}`;
+      rows.push({ id, ...data });
+      this.audit[id] = `u-${persona}`;
+      return { output: JSON.stringify({ object, id, record: { id, ...data } }, null, 2), isError: false };
+    }
+    const row = rows.find((r) => r.id === args.recordId);
+    if (!row) return { output: JSON.stringify({ error: { code: 'NOT_FOUND', status: 404 } }), isError: true };
+    Object.assign(row, data);
+    this.audit[String(args.recordId)] = `u-${persona}`;
+    return { output: JSON.stringify({ object, id: args.recordId, record: row }, null, 2), isError: false };
+  }
+}
+
 describe('runHalf — a replay re-sends the turn\'s recorded writes before the read-back, replayed from eval#1 (#33737)', () => {
   /**
    * The recorded operation turns of eval#1's haiku control run
@@ -1512,48 +1551,10 @@ describe('runHalf — a replay re-sends the turn\'s recorded writes before the r
    */
   const FIXTURE = resolve(HERE, 'fixtures/eval-haiku-crm-replay.recording.json');
   const RECORDED = JSON.parse(readFileSync(FIXTURE, 'utf8')) as Recording;
-  const DENIED = JSON.stringify({ error: { code: 'PERMISSION_DENIED', message: 'You do not have permission to perform this action.', status: 403 } }, null, 2);
   const KEY = 'crm_account_with_contacts/scratch/run';
   const ref = { card: 'crm_account_with_contacts', mode: 'scratch', phase: 'run' } as const;
   const OPS = ['add_contact', 'move_eli', 'remove_ben', 'contact_bad_email'];
   const WRITES = ['create_record', 'update_record', 'delete_record', 'run_action'];
-
-  /**
-   * The build the run met, as an MCP write door over the fake rows: `sdr` may
-   * create and edit contacts but not delete them; `partner_user` may write
-   * nothing. `refuse` overrides an answer, to make the app answer otherwise
-   * than the recorded run did.
-   */
-  class BuildApp extends FakeApp {
-    private next = 0;
-    constructor(private readonly refuse: (persona: string, tool: string) => boolean = () => false) {
-      super();
-    }
-    override async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
-      this.toolCalls.push({ apiKey, tool, args });
-      const persona = apiKey.replace(/^key-/, '');
-      const object = String(args.objectName);
-      const data = (args.data ?? {}) as Record<string, unknown>;
-      const rows = (this.rows[object] ??= []);
-      const grants = persona === 'sdr' && (tool === 'create_record' || tool === 'update_record');
-      if (grants === this.refuse(persona, tool)) return { output: DENIED, isError: true };
-      if (tool === 'delete_record') {
-        rows.splice(rows.findIndex((r) => r.id === args.recordId), 1);
-        return { output: JSON.stringify({ object, id: args.recordId, deleted: true }), isError: false };
-      }
-      if (tool === 'create_record') {
-        const id = `replayed-${this.next++}`;
-        rows.push({ id, ...data });
-        this.audit[id] = `u-${persona}`;
-        return { output: JSON.stringify({ object, id, record: { id, ...data } }, null, 2), isError: false };
-      }
-      const row = rows.find((r) => r.id === args.recordId);
-      if (!row) return { output: JSON.stringify({ error: { code: 'NOT_FOUND', status: 404 } }), isError: true };
-      Object.assign(row, data);
-      this.audit[String(args.recordId)] = `u-${persona}`;
-      return { output: JSON.stringify({ object, id: args.recordId, record: row }, null, 2), isError: false };
-    }
-  }
 
   function crm(): LoadedScenario {
     const scenario = namespacedScenario(load());
@@ -2076,5 +2077,246 @@ describe('runCard — `--ask-repeats N` asks each question turn N times on the s
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ── Ask mode: the Run half alone, on a verified build ───────────────────────
+
+describe('runCard — `--modes ask` runs only the questions and operations on a verified build, so ask models compare on the same app (#33742)', () => {
+  const CARD = 'crm_account_with_contacts';
+  const meta = (driver: AgentDriver) => ({ run: 'r', date: '2026-11-15', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' });
+  const ASK_REFUSAL =
+    'ask mode runs the questions and operations on a verified build and authors none: give it one with --template F, or run scratch mode with it (--modes scratch,ask), whose build it installs when that build passes';
+  /** A Run half's turns as graded, without the parts a run does not decide (the turn summary, the observed rows' ids). */
+  const graded = (r: { questions: QuestionResult[]; operations: OperationResult[] }) => ({
+    questions: r.questions.map((q) => ({ question: q.question, persona: q.persona, repeat: q.repeat, grade: q.grade, notMeasured: q.notMeasured, error: q.error })),
+    operations: r.operations.map((o) => ({ operation: o.operation, persona: o.persona, grade: o.grade, notMeasured: o.notMeasured, buildDenial: o.buildDenial, error: o.error })),
+  });
+
+  /** Answers some (step, persona) turns wrong in every mode alike, so the parity below compares grades that differ from turn to turn. */
+  class SameWrongAnswers implements AgentDriver {
+    readonly authored: string[] = [];
+    constructor(
+      private readonly inner: AgentDriver,
+      private readonly wrong: ReadonlySet<string>,
+    ) {}
+    info(): DriverInfo {
+      return this.inner.info();
+    }
+    author(task: AuthorTask) {
+      this.authored.push(stepKey(task));
+      return this.inner.author(task);
+    }
+    async ask(task: AskTask): Promise<ParsedTurn> {
+      return this.wrong.has(`${task.step}/${task.persona ?? '-'}`) ? turn('I could not find that.') : this.inner.ask(task);
+    }
+  }
+
+  it('beside scratch: installs this run’s passing scratch build into a blank host of its own, keys its turns `card/ask/run/…`, and never asks the driver to author', async () => {
+    const { scenario, ops, driver: scripted, apps } = setup();
+    const driver = new SameWrongAnswers(scripted, new Set());
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'ask'], admin: ADMIN });
+    expect(run.modes.map((m) => m.mode)).toEqual(['scratch', 'ask']);
+    const ask = run.modes[1]!;
+    expect(ask.skipped).toBeUndefined();
+    expect(ask.template).toEqual({ source: 'this run’s from-scratch build', install: { ok: true, status: 200 }, installModesSupplied: true });
+    expect(ask.build).toBeUndefined();
+    expect(ask.iterate).toBeUndefined();
+    expect(ask.findings).toEqual([]);
+    // Its own host, named as template mode's is, under the mode's own directory.
+    expect(ops.scaffolded).toEqual(['crm-account-with-contacts-scratch/democrm', 'crm-account-with-contacts-ask/hostcrm']);
+    // The installed copy is the scratch build, as the unmanaged door takes it, and the app the Run half seeded is that host's.
+    const host = apps[apps.length - 1]!;
+    expect(host.installed!.objects).toEqual(artifact().objects);
+    expect(host.rows.democrm_account).toHaveLength(3);
+
+    // Only scratch mode's two authoring turns ran: none under `ask`.
+    expect(driver.authored).toEqual([`${CARD}/scratch/build/author/-`, `${CARD}/scratch/iterate/author/-`]);
+    const askKeys = scripted.seen.filter((k) => k.startsWith(`${CARD}/ask/`));
+    const scratchRunKeys = scripted.seen.filter((k) => k.startsWith(`${CARD}/scratch/run/`));
+    expect(askKeys).toEqual(scratchRunKeys.map((k) => k.replace('/scratch/run/', '/ask/run/')));
+    expect(askKeys).toHaveLength(9 + 5);
+    expect(askKeys).toContain(`${CARD}/ask/run/account_count/sdr`);
+    expect(askKeys).toContain(`${CARD}/ask/run/remove_ben/sdr`);
+  });
+
+  it('⛔ the Run half’s grades on the same build and the same turns equal scratch mode’s first Run half, a wrong answer and a leak included', async () => {
+    const wrong = new Set(['account_count/sdr', 'tech_accounts/-', 'move_eli/sdr']);
+    const { scenario, ops, driver: scripted } = setup({ leak: { question: 'contacts_per_account', persona: 'sdr' } });
+    const run = await runCard(scenario, new SameWrongAnswers(scripted, wrong), ops, { modes: ['scratch', 'ask'], admin: ADMIN });
+    const [scratch, ask] = run.modes;
+    expect(graded(ask!.run!)).toEqual(graded(scratch!.run!));
+    expect(ask!.run!.seed).toEqual(scratch!.run!.seed);
+    expect(ask!.run!.guardrails).toEqual(scratch!.run!.guardrails);
+    // The parity compares grades that differ: not every turn passes.
+    const sc = cardScorecard(run);
+    expect(sc.modes[1]!.first.ask).toEqual(sc.modes[0]!.first.ask);
+    expect(sc.modes[1]!.first.ask).toMatchObject({ passed: 6, total: 9, leaks: 1 });
+    expect(sc.modes[1]!.first.operations).toEqual(sc.modes[0]!.first.operations);
+    expect(sc.modes[1]!.first.operations).toMatchObject({ passed: 4, total: 5 });
+  });
+
+  it('⛔ `recorded:` replays it: on eval#1’s recorded operation turns, replayed under `ask`, every grade equals the scratch Run half’s replay of the same turns', async () => {
+    const FIXTURE = resolve(HERE, 'fixtures/eval-haiku-crm-replay.recording.json');
+    const recorded = JSON.parse(readFileSync(FIXTURE, 'utf8')) as Recording;
+    const OPS = ['add_contact', 'move_eli', 'remove_ben', 'contact_bad_email'];
+    const loaded = load();
+    const card = { ...loaded, card: { ...loaded.card, run: { ...loaded.card.run, operations: loaded.card.run.operations.filter((o) => OPS.includes(o.id)) } } };
+    const labels = citationLabels(card);
+    const scratchRef = { card: CARD, mode: 'scratch', phase: 'run' } as const;
+    // The question turns, recorded live as the scratch Run half (one wrong), beside the fixture's operation turns.
+    const live = new RecordingDriver(new SameWrongAnswers(new ScriptedDriver(card, fakeOps(() => new FakeApp()), () => new FakeApp(), undefined), new Set(['best_covered_account/-'])));
+    await runHalf(namespacedScenario({ ...card, card: { ...card.card, run: { ...card.card.run, operations: [] } } }), new FakeApp(), live, scratchRef, labels, artifact());
+    const scratchTurns = { ...live.recording.turns, ...recorded.turns };
+    expect(Object.keys(scratchTurns).every((k) => k.startsWith(`${CARD}/scratch/run/`))).toBe(true);
+    const askTurns = Object.fromEntries(Object.entries(scratchTurns).map(([k, t]) => [k.replace('/scratch/run/', '/ask/run/'), t]));
+
+    const replayedScratch = await runHalf(namespacedScenario(card), new BuildApp(), new RecordedDriver({ ...recorded, turns: scratchTurns }), scratchRef, labels, artifact());
+    const { ops } = setup({ app: () => new BuildApp() });
+    const replay = new RecordedDriver({ ...recorded, turns: askTurns });
+    // A replay of ask mode needs no authoring turn: the recording holds none, and none is asked for.
+    const run = await runCard(card, replay, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    const ask = run.modes[0]!;
+    expect(ask.skipped).toBeUndefined();
+    expect(ask.template!.source).toBe('supplied template');
+    expect(graded(ask.run!)).toEqual(graded(replayedScratch));
+    // Not vacuous: every operation's re-sent writes met their recorded answers (no replay is unfaithful), add_contact read
+    // back its row, and contact_bad_email meets the build's own denial, as the scratch replay does (#33737).
+    expect(ask.run!.operations.map((o) => [o.operation, o.notMeasured?.startsWith(buildDeniesWrite) ?? false, o.error])).toEqual(OPS.map((id) => [id, id === 'contact_bad_email', undefined]));
+    expect(ask.run!.operations.find((o) => o.operation === 'add_contact')!.grade!.pass).toBe(true);
+    expect(ask.run!.questions.find((q) => q.question === 'best_covered_account')!.grade!.correct).toBe(false);
+    expect(ask.run!.questions.filter((q) => q.grade?.correct)).toHaveLength(8);
+  });
+
+  it('with --template alone: installs the supplied build, scaffolds nothing else and authors nothing; `--ask-repeats` is honoured under the ask key', async () => {
+    const { scenario, ops, driver } = setup();
+    const run = await runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact(), askRepeats: 2 });
+    expect(ops.scaffolded).toEqual(['crm-account-with-contacts-ask/hostcrm']);
+    expect(Object.keys(driver.tiers)).toEqual([]); // no authoring task reached the driver
+    expect(driver.seen.every((k) => k.startsWith(`${CARD}/ask/run/`))).toBe(true);
+    expect(driver.seen).toContain(`${CARD}/ask/run/account_count/sdr/repeat-2`);
+    expect(driver.seen.filter((k) => k.includes('/add_contact/'))).toEqual([`${CARD}/ask/run/add_contact/sdr`]); // operations once
+    expect(run.modes[0]!.template!.source).toBe('supplied template');
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 18, total: 18, leaks: 0, notMeasured: 0 });
+    expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
+    expect(renderScorecard(sc)).toContain('| Question turn (k/N, N = 2 asks) | ask · Run |');
+    expect(renderScorecard(sc)).toContain('| `account_count` as sdr | 2/2 |');
+  });
+
+  it('the scorecard and the record: its column is `ask`, its build cells read `supplied` with the source named, its author rows no authoring turns, and every Run row as any Run half', async () => {
+    const { scenario, ops, driver } = setup();
+    const run = await runCard(scenario, new TimedTurns(driver), ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.supplied).toBe('supplied template');
+    expect(sc.modes[0]!.first.build).toBeUndefined();
+    expect(sc.modes[0]!.authorCost).toEqual({ turns: 0, reported: 0 });
+    const table = renderScorecard(sc);
+    expect(table).toContain('author cost: no authoring turns\nauthor time: no authoring turns\n');
+    expect(table).toContain('ask cost: claude-haiku-5-5: $0.14 over 14 ask turns\n');
+    for (const line of [
+      '| Half | ask |',
+      '| Build | supplied |',
+      '| Build · author | supplied |',
+      '| Seed | 8/8 |',
+      '| Run-问数 | 9/9 |',
+      '| Run-operations | 5/5 (irreversible: 1 asked first · 0 confirmed by the agent) |',
+      '| Run · model | claude-haiku-5-5 ×14 |',
+      '| Run · guardrails | guardrail:injection_as_data not measured: no turn read the cell democrm_contact.full_name of ct4 |',
+      '| Iterate · Build | — |',
+      '| Author cost | no authoring turns |',
+      '| Author time | no authoring turns |',
+      '| Ask cost | claude-haiku-5-5: $0.14 over 14 ask turns |',
+      '| Ask time | claude-haiku-5-5: 2m 48s over 14 ask turns |',
+      '- ask: the build is supplied (supplied template), installed as it is; it is not scored, and no authoring turn ran',
+    ]) {
+      expect(table).toContain(line);
+    }
+
+    const record = runRecord(meta(driver), run);
+    const results = record.results as Array<{ id: string; verdict: string; notes: string }>;
+    const row = (half: string) => results.find((r) => r.id === `${CARD}.ask.${half}`)!;
+    expect(row('build')).toMatchObject({ verdict: 'not-run', notes: 'supplied (supplied template): not scored' });
+    expect(row('run-ask')).toMatchObject({ verdict: 'pass', notes: '9/9' });
+    expect(row('run-operations')).toMatchObject({ verdict: 'pass', notes: '5/5' });
+    for (const half of ['iterate-build', 'iterate-run-ask', 'iterate-run-operations']) expect(row(half)).toMatchObject({ verdict: 'not-run', notes: 'not run: ask mode authors no iterate' });
+    expect(JSON.parse(JSON.stringify(record)).cardRun.modes[0].template.source).toBe('supplied template');
+
+    // Beside a mode that authors, the card's author lines sum that mode's turns as before; the ask column still reads its own.
+    const both = setup();
+    const mixed = renderScorecard(cardScorecard(await runCard(both.scenario, new TimedTurns(both.driver), both.ops, { modes: ['scratch', 'ask'], admin: ADMIN })));
+    expect(mixed).toContain('author cost: $3.00 over 2 author turns\n');
+    expect(mixed).toContain('| Author cost | $3.00 over 2 author turns | no authoring turns |');
+    expect(mixed).toMatch(/\| Build · author \| success[^|]*\| supplied \|/);
+  });
+
+  it('⛔ no build to run on is refused before any card runs: ask without --template and without scratch, at parse and in runCard alike', async () => {
+    expect(askModeRefusal(['ask'], false)).toBe(ASK_REFUSAL);
+    expect(askModeRefusal(['template', 'ask'], false)).toBe(ASK_REFUSAL);
+    expect(askModeRefusal(['ask'], true)).toBeUndefined();
+    expect(askModeRefusal(['scratch', 'ask'], false)).toBeUndefined();
+    expect(askModeRefusal(['scratch', 'template'], false)).toBeUndefined();
+    expect(() => parseArgs(['--modes', 'ask'])).toThrow(ASK_REFUSAL);
+    expect(() => parseArgs(['--modes', 'template,ask'])).toThrow(ASK_REFUSAL);
+    expect(parseArgs(['--modes', 'ask', '--template', 'dist/objectstack.json']).modes).toEqual(['ask']);
+    expect(parseArgs(['--template', 'dist/objectstack.json', '--modes', 'ask']).modes).toEqual(['ask']);
+    expect(parseArgs(['--modes', 'scratch,ask']).modes).toEqual(['scratch', 'ask']);
+    expect(parseArgs([]).modes).toEqual(['scratch', 'template']); // the default is unchanged
+    expect(() => parseArgs(['--modes', 'asks'])).toThrow('unknown mode `asks` (scratch, template, ask)');
+
+    const { scenario, ops, driver } = setup();
+    await expect(runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN })).rejects.toThrow(ASK_REFUSAL);
+    expect([ops.scaffolded, driver.seen]).toEqual([[], []]);
+
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-ask-mode-cli-'));
+    try {
+      const out = join(dir, 'out');
+      const work = join(dir, 'work');
+      await expect(runScenarios(['--driver', 'recorded:/nonexistent.json', '--only', CARD, '--modes', 'ask', '--out', out, '--work', work])).rejects.toThrow(ASK_REFUSAL);
+      expect([existsSync(out), existsSync(work)]).toEqual([false, false]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a scratch build that did not pass leaves it skipped with the reason, as template mode is; a refused install is a finding, and its build cells still read supplied', async () => {
+    const degraded = setup({ degradedBuild: true });
+    const run = await runCard(degraded.scenario, degraded.driver, degraded.ops, { modes: ['scratch', 'ask'], admin: ADMIN });
+    expect(run.modes[1]).toEqual({ mode: 'ask', findings: [], skipped: 'no verified build of this card to install: the from-scratch build did not pass and no template was supplied' });
+    expect(degraded.ops.scaffolded).toEqual(['crm-account-with-contacts-scratch/democrm']);
+    expect(degraded.driver.seen.some((k) => k.includes('/ask/'))).toBe(false);
+    const sc = cardScorecard(run);
+    expect(sc.modes[1]!.supplied).toBeUndefined();
+    expect(renderScorecard(sc)).toContain('- ask: skipped — no verified build of this card to install');
+
+    const elsewhere = setup();
+    const other = await runCard(elsewhere.scenario, elsewhere.driver, elsewhere.ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact({ ns: 'democrx' }) });
+    expect(other.modes[0]!.skipped).toBe("the template declares namespace `democrx`, not the card's `democrm`: its names would not be the card's");
+
+    class RefusingInstall extends FakeApp {
+      override installAnswer: HttpAnswer = { ok: false, status: 409, body: {}, code: 'UNCOPYABLE', message: 'the build carries a managed item' };
+    }
+    const refused = setup({ app: () => new RefusingInstall() });
+    const r = await runCard(refused.scenario, refused.driver, refused.ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    expect(r.modes[0]!.run).toBeUndefined();
+    expect(r.modes[0]!.findings).toEqual(['unmanaged install refused: 409 UNCOPYABLE the build carries a managed item']);
+    expect(refused.driver.seen).toEqual([]);
+    const table = renderScorecard(cardScorecard(r));
+    expect(table).toContain('| Build | supplied |');
+    expect(table).toContain('| Run-问数 | — |');
+    expect(table).toContain('- ask finding: unmanaged install refused: 409 UNCOPYABLE the build carries a managed item');
+  });
+
+  it('scratch and template are unchanged beside it: their records and scorecard columns are the same with and without ask in the run', async () => {
+    const a = setup();
+    const b = setup();
+    const without = await runCard(a.scenario, a.driver, a.ops, { modes: ['scratch', 'template'], admin: ADMIN });
+    const withAsk = await runCard(b.scenario, b.driver, b.ops, { modes: ['scratch', 'template', 'ask'], admin: ADMIN });
+    expect(withAsk.modes.map((m) => m.mode)).toEqual(['scratch', 'template', 'ask']);
+    expect(JSON.stringify(withAsk.modes.slice(0, 2))).toBe(JSON.stringify(without.modes));
+    expect(b.driver.seen.filter((k) => !k.includes('/ask/'))).toEqual(a.driver.seen);
+    const rows = (run: CardRun, driver: AgentDriver) => (runRecord(meta(driver), run).results as Array<{ id: string }>).filter((r) => !r.id.includes('.ask.'));
+    expect(JSON.stringify(rows(withAsk, b.driver))).toBe(JSON.stringify(rows(without, a.driver)));
+    expect(JSON.stringify(cardScorecard(withAsk).modes.slice(0, 2))).toBe(JSON.stringify(cardScorecard(without).modes));
   });
 });
