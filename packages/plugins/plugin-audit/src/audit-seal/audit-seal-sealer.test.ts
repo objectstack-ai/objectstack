@@ -2,9 +2,9 @@
 
 import type { IAuditCheckpointSigner, IClusterService, LockHandle } from '@objectstack/spec/contracts';
 import { describe, expect, it } from 'vitest';
-import { checkpointBodyFromRow, checkpointDigest, signedBodyBytes, verifyAuditLedger } from './index.js';
+import { checkpointBodyFromRow, checkpointDigest, signedBodyBytes, verifyAuditLedger, type CheckpointSignedBody } from './index.js';
 import { bindingCrypto, memoryEngine, recordingLogger } from './seal-store.testkit.js';
-import { AUDIT_SEALER_LOCK, AuditSealer } from './sealer.js';
+import { AUDIT_SEAL_MAX_IDLE_WINDOWS_PER_PASS, AUDIT_SEAL_MAX_LEAVES, AUDIT_SEALER_LOCK, AuditSealer } from './sealer.js';
 import { LocalCheckpointSigner } from './signer.js';
 
 /**
@@ -25,7 +25,7 @@ const LEDGER = {
 
 const row = (id: string, created: string, tenant: string | null = 'org_a') => ({ id, created_at: created, action: 'update', tenant_id: tenant, payload: `{"v":"${id}"}` });
 
-function setup(options: { objects?: unknown[]; crypto?: boolean; signer?: IAuditCheckpointSigner; cluster?: IClusterService } = {}) {
+function setup(options: { objects?: unknown[]; crypto?: boolean; signer?: IAuditCheckpointSigner; cluster?: IClusterService; maxLeaves?: number } = {}) {
   const store = memoryEngine((options.objects ?? [LEDGER]) as never);
   const crypto = bindingCrypto();
   const logger = recordingLogger();
@@ -38,6 +38,7 @@ function setup(options: { objects?: unknown[]; crypto?: boolean; signer?: IAudit
     cluster: () => options.cluster,
     logger,
     now: () => clock.now,
+    ...(options.maxLeaves === undefined ? {} : { maxLeaves: options.maxLeaves }),
   });
   const checkpoints = () => store.hot.table('sys_audit_checkpoint').map((r) => checkpointBodyFromRow(r));
   return { ...store, crypto, logger, signer, clock, sealer, checkpoints };
@@ -47,6 +48,26 @@ function setup(options: { objects?: unknown[]; crypto?: boolean; signer?: IAudit
 function grantingCluster() {
   const cluster = { renews: 0, lock: { acquire: async () => ({ key: AUDIT_SEALER_LOCK, fencingToken: 1n, renew: async () => void (cluster.renews += 1), release: async () => {}, isHeld: () => true }) } };
   return cluster as unknown as IClusterService & { renews: number };
+}
+
+/** Runs `change` once, right after the first page read of a window's rows: between the sealer's two reads of it (S7). */
+function betweenReads(s: ReturnType<typeof setup>, change: () => void) {
+  const find = s.hot.find.bind(s.hot);
+  let changed = false;
+  s.hot.find = async (object, query) => {
+    const page = await find(object, query);
+    if (!changed && object === 'ledger_probe' && query.limit === 500) {
+      changed = true;
+      change();
+    }
+    return page;
+  };
+}
+
+/** Deletes a row of the sealed object from the hot store. */
+function drop(s: ReturnType<typeof setup>, id: string) {
+  const table = s.hot.table('ledger_probe');
+  table.splice(table.findIndex((r) => r.id === id), 1);
 }
 
 describe('windows: the backlog oldest first, one checkpoint per chain per window (D3, D5)', () => {
@@ -303,6 +324,296 @@ describe('per-chain isolation: only a chain-local fault skips a chain, and only 
     expect(report.totals).toMatchObject({ unmodified: 2, late: 2, unsealed: 2 });
     expect(report.chains.find((c) => c.chain === 'org:org_b')?.counts).toMatchObject({ late: 2, unsealed: 2 });
   });
+});
+
+describe('bounded checkpoints: a window seals into consecutive parts of at most N leaves (S7, ADR-0154 D4 amended)', () => {
+  const parts = (s: ReturnType<typeof setup>) =>
+    s.checkpoints().map((c) => [c.tenant_id, c.kind, c.window_start, c.sequence, c.part_index, c.final_part, c.row_ids]);
+
+  it('fixes N at 10,000 leaves', () => {
+    expect(AUDIT_SEAL_MAX_LEAVES).toBe(10_000);
+  });
+
+  it('cuts a window into consecutive parts in D1 order (created_at, id), the last one final, each chained after the one before', async () => {
+    const s = setup({ maxLeaves: 2 });
+    // Pushed out of order, with a created_at tie broken by id.
+    s.hot.table('ledger_probe').push(row('r5', at(8, 50)), row('r2', at(8, 20)), row('r3b', at(8, 30)), row('r1', at(8, 10)), row('r3a', at(8, 30)));
+    expect(await s.sealer.runPass()).toBe(3);
+    expect(parts(s)).toEqual([
+      ['org_a', 'window', at(8, 0), 0, 0, false, ['r1', 'r2']],
+      ['org_a', 'window', at(8, 0), 1, 1, false, ['r3a', 'r3b']],
+      ['org_a', 'window', at(8, 0), 2, 2, true, ['r5']],
+    ]);
+    const [p0, p1, p2] = s.checkpoints();
+    expect([p1.previous_digest, p2.previous_digest]).toEqual([checkpointDigest(p0), checkpointDigest(p1)]);
+    expect(new Set(s.checkpoints().map((c) => c.seed_handle)).size).toBe(3); // one seed per checkpoint (D2)
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    expect(report.ok).toBe(true);
+    expect(report.totals).toMatchObject({ unmodified: 5, unsealed: 0 });
+    expect(await s.sealer.runPass()).toBe(0);
+  });
+
+  it('seals a window of at most N rows as one part, index 0 and final: the single-part checkpoint, which still verifies', async () => {
+    const s = setup({ maxLeaves: 2 });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)), row('r2', at(8, 20)), row('r3', at(9, 10)));
+    expect(await s.sealer.runPass()).toBe(2);
+    expect(parts(s)).toEqual([
+      ['org_a', 'window', at(8, 0), 0, 0, true, ['r1', 'r2']],
+      ['org_a', 'window', at(9, 0), 1, 0, true, ['r3']],
+    ]);
+    expect((await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now })).ok).toBe(true);
+  });
+
+  it('reads a checkpoint written before the amendment (no part index, no final flag) as one final part: it verifies, and its chain goes on', async () => {
+    const s = setup();
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
+    await s.sealer.runPass();
+    const stored = s.hot.table('sys_audit_checkpoint')[0];
+    const { part_index: _part, final_part: _final, ...legacy } = checkpointBodyFromRow(stored);
+    const { signature } = await s.signer.sign(signedBodyBytes(legacy as CheckpointSignedBody));
+    Object.assign(stored, { part_index: null, final_part: null, signature });
+    expect(Object.keys(checkpointBodyFromRow(stored))).not.toContain('part_index');
+    s.hot.table('ledger_probe').push(row('r2', at(9, 10)));
+    expect(await s.sealer.runPass()).toBe(1);
+    expect(parts(s)).toEqual([
+      ['org_a', 'window', at(8, 0), 0, undefined, undefined, ['r1']],
+      ['org_a', 'window', at(9, 0), 1, 0, true, ['r2']],
+    ]);
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    expect(report.ok).toBe(true);
+    expect(report.totals).toMatchObject({ unmodified: 2 });
+  });
+
+  it('resumes a window a stopped pass left mid-way as further window parts, never late ones', async () => {
+    const s = setup({ maxLeaves: 2 });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)), row('r2', at(8, 20)), row('r3', at(8, 30)), row('r4', at(8, 40)), row('r5', at(8, 50)), row('n1', at(9, 10)));
+    const insert = s.engine.insert.bind(s.engine);
+    let inserts = 0;
+    s.engine.insert = async (object, r, o) => {
+      if (object === 'sys_audit_checkpoint' && ++inserts === 2) throw new Error('connection reset');
+      return insert(object, r, o);
+    };
+    expect(await s.sealer.runPass()).toBe(1); // part 0 stored; the pass stops at part 1
+    expect(await s.sealer.runPass()).toBe(3);
+    expect(parts(s)).toEqual([
+      ['org_a', 'window', at(8, 0), 0, 0, false, ['r1', 'r2']],
+      ['org_a', 'window', at(8, 0), 1, 1, false, ['r3', 'r4']],
+      ['org_a', 'window', at(8, 0), 2, 2, true, ['r5']],
+      ['org_a', 'window', at(9, 0), 3, 0, true, ['n1']],
+    ]);
+    expect((await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now })).ok).toBe(true);
+    expect(await s.sealer.runPass()).toBe(0);
+  });
+
+  it('caps late checkpoints the same way: late rows of a window seal into late parts of at most N', async () => {
+    const s = setup({ maxLeaves: 2 });
+    s.hot.table('ledger_probe').push(row('r1', at(10, 5)));
+    expect(await s.sealer.runPass()).toBe(1);
+    s.hot.table('ledger_probe').push(row('l3', at(10, 40)), row('l1', at(10, 20)), row('l2', at(10, 30)));
+    expect(await s.sealer.runPass()).toBe(2);
+    expect(parts(s).slice(1)).toEqual([
+      ['org_a', 'late', at(10, 0), 1, 0, false, ['l1', 'l2']],
+      ['org_a', 'late', at(10, 0), 2, 1, true, ['l3']],
+    ]);
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    expect(report.totals).toMatchObject({ unmodified: 1, late: 3, unsealed: 0 });
+  });
+
+  it('refuses a window part the chain, re-read under the lease, already holds at that index or past it (S1, relaxed for parts)', async () => {
+    const cluster = grantingCluster();
+    const s = setup({ cluster, maxLeaves: 2 });
+    const other = new AuditSealer({ engine: s.engine, crypto: s.crypto, signer: () => s.signer, cluster: () => cluster, logger: s.logger, now: () => s.clock.now, maxLeaves: 2 });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)), row('r2', at(8, 20)), row('r3', at(8, 30)));
+    const sign = s.signer.sign.bind(s.signer);
+    let raced = false;
+    s.signer.sign = async (bytes) => {
+      const signed = await sign(bytes);
+      if (!raced) {
+        raced = true;
+        await other.runPass(); // seals both parts of the window while this pass signs its part 0
+      }
+      return signed;
+    };
+    await s.sealer.runPass();
+    expect(parts(s)).toEqual([
+      ['org_a', 'window', at(8, 0), 0, 0, false, ['r1', 'r2']],
+      ['org_a', 'window', at(8, 0), 1, 1, true, ['r3']],
+    ]);
+    expect(s.logger.lines.filter((l) => l.level === 'error').map((l) => l.message)).toEqual([expect.stringMatching(/not sealed twice/)]);
+  });
+
+  it('refuses a window part when the chain, re-read under the lease, holds a checkpoint of that window written before the amendment: on SQL a NULL part index is not at or past part 0 (S1, N2)', async () => {
+    const cluster = grantingCluster();
+    const s = setup({ cluster });
+    // A sealer of the release before the amendment, running beside this one in a rolling upgrade.
+    const older = new AuditSealer({ engine: s.engine, crypto: s.crypto, signer: () => s.signer, cluster: () => cluster, logger: s.logger, now: () => s.clock.now });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)));
+    const find = s.hot.find.bind(s.hot);
+    let raced = false;
+    s.hot.find = async (object, query) => {
+      const page = await find(object, query);
+      if (object === 'ledger_probe' && query.limit === 500 && !raced) {
+        raced = true;
+        await older.runPass(); // seals the window this pass has just read, before this pass reads the chain head
+        const stored = s.hot.table('sys_audit_checkpoint')[0];
+        const { part_index: _part, final_part: _final, ...legacy } = checkpointBodyFromRow(stored);
+        const { signature } = await s.signer.sign(signedBodyBytes(legacy as CheckpointSignedBody));
+        Object.assign(stored, { part_index: null, final_part: null, signature }); // what that release stores
+      }
+      return page;
+    };
+    expect(await s.sealer.runPass()).toBe(0);
+    expect(parts(s)).toEqual([['org_a', 'window', at(8, 0), 0, undefined, undefined, ['r1']]]);
+    expect(s.logger.lines.filter((l) => l.level === 'error').map((l) => l.message)).toEqual([expect.stringMatching(/at or after part 0 .*not sealed twice/)]);
+    expect((await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now })).ok).toBe(true);
+  });
+
+  it('cuts the same way whatever order the rows were written in, when a created_at tie straddles a part boundary: the id decides the side', async () => {
+    const tie = [row('r1', at(8, 10)), row('t-b', at(8, 20)), row('t-a', at(8, 20)), row('r4', at(8, 30))];
+    for (const written of [tie, [...tie].reverse()]) {
+      const s = setup({ maxLeaves: 2 });
+      s.hot.table('ledger_probe').push(...written.map((r) => ({ ...r })));
+      expect(await s.sealer.runPass()).toBe(2);
+      expect(parts(s)).toEqual([
+        ['org_a', 'window', at(8, 0), 0, 0, false, ['r1', 't-a']],
+        ['org_a', 'window', at(8, 0), 1, 1, true, ['t-b', 'r4']],
+      ]);
+      expect((await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now })).ok).toBe(true);
+    }
+  });
+
+  it('leaves out of its part a row deleted, or moved to another window, between the two reads; the moved row seals in its new window', async () => {
+    const s = setup({ maxLeaves: 2 });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)), row('r2', at(8, 20)), row('r3', at(8, 30)), row('r4', at(8, 40)));
+    betweenReads(s, () => {
+      drop(s, 'r2');
+      s.hot.table('ledger_probe').find((r) => r.id === 'r3')!.created_at = at(9, 15);
+    });
+    expect(await s.sealer.runPass()).toBe(3);
+    expect(parts(s)).toEqual([
+      ['org_a', 'window', at(8, 0), 0, 0, false, ['r1']],
+      ['org_a', 'window', at(8, 0), 1, 1, true, ['r4']],
+      ['org_a', 'window', at(9, 0), 2, 0, true, ['r3']],
+    ]);
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    expect(report.ok).toBe(true);
+    expect(report.totals).toMatchObject({ unmodified: 3, unsealed: 0 });
+    expect(await s.sealer.runPass()).toBe(0);
+  });
+
+  it('skips a middle part whose rows all went between the two reads without taking its index: part_index may jump, and the window verifies', async () => {
+    const s = setup({ maxLeaves: 2 });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)), row('r2', at(8, 20)), row('r3', at(8, 30)), row('r4', at(8, 40)), row('r5', at(8, 50)));
+    betweenReads(s, () => (drop(s, 'r3'), drop(s, 'r4')));
+    expect(await s.sealer.runPass()).toBe(2);
+    expect(parts(s)).toEqual([
+      ['org_a', 'window', at(8, 0), 0, 0, false, ['r1', 'r2']],
+      ['org_a', 'window', at(8, 0), 1, 2, true, ['r5']],
+    ]);
+    expect((await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now })).ok).toBe(true);
+  });
+
+  it('leaves the window with no final part when its last part empties between the two reads; the next pass resumes it, so a row that arrives then is a window part, never a late one', async () => {
+    const s = setup({ maxLeaves: 2 });
+    s.hot.table('ledger_probe').push(row('r1', at(8, 10)), row('r2', at(8, 20)), row('r3', at(8, 30)));
+    betweenReads(s, () => drop(s, 'r3'));
+    expect(await s.sealer.runPass()).toBe(1);
+    expect(parts(s)).toEqual([['org_a', 'window', at(8, 0), 0, 0, false, ['r1', 'r2']]]);
+    expect((await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now })).ok).toBe(true);
+    expect(await s.sealer.runPass()).toBe(0); // the resume finds every row listed
+    s.hot.table('ledger_probe').push(row('r6', at(8, 55)));
+    expect(await s.sealer.runPass()).toBe(1);
+    expect(parts(s).slice(1)).toEqual([['org_a', 'window', at(8, 0), 1, 1, true, ['r6']]]);
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    expect(report.ok).toBe(true);
+    expect(report.totals).toMatchObject({ unmodified: 3, late: 0, unsealed: 0 });
+  });
+
+  it('shows a removed interior part through the links (a gap); a removed newest part is not seen by the links, and its rows read unsealed (M2)', async () => {
+    const without = async (sequence: number) => {
+      const s = setup({ maxLeaves: 2 });
+      s.hot.table('ledger_probe').push(row('r1', at(8, 10)), row('r2', at(8, 20)), row('r3', at(8, 30)), row('r4', at(8, 40)), row('r5', at(8, 50)));
+      expect(await s.sealer.runPass()).toBe(3);
+      const table = s.hot.table('sys_audit_checkpoint');
+      table.splice(table.findIndex((r) => Number(r.sequence) === sequence), 1);
+      return verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    };
+    const interior = await without(1);
+    expect(interior.ok).toBe(false);
+    expect(interior.faults.map((f) => [f.kind, f.sequence])).toEqual([['gap', 1]]);
+    expect(interior.rows.map((r) => [r.row, r.verdict, r.sealed])).toEqual([['r3', 'late', false], ['r4', 'late', false]]);
+    const newest = await without(2);
+    expect(newest.ok).toBe(false);
+    expect(newest.faults).toEqual([]);
+    expect(newest.rows.map((r) => [r.row, r.verdict, r.sealed])).toEqual([['r5', 'late', false]]);
+  });
+});
+
+describe('the uncounted re-walk is bounded while a chain stays skipped (review#3 S1)', () => {
+  const HOURS = 200;
+  /**
+   * Each of these tests first drives `stalled()`: some 200 windows sealed and
+   * signed over a dozen passes. That costs 2-5 s on a quiet CI shard and more
+   * on a loaded one, against vitest's 5 s default, so the budget is stated.
+   */
+  const STALLED_TIMEOUT_MS = 30_000;
+  /**
+   * org_s skipped at 00:00 by a row its canonical rule refuses, while org_a
+   * writes every hour: org_a catches up 24 windows a pass while org_s holds
+   * the floor at 00:00, until the cap stops the walk.
+   */
+  async function stalled() {
+    const s = setup();
+    s.clock.now = DAY0 + (HOURS + 1) * H; // windows up to HOURS:00 are due
+    s.hot.table('ledger_probe').push({ ...row('stuck', at(0, 20), 'org_s'), payload: 42 });
+    for (let h = 0; h <= HOURS - 1; h++) s.hot.table('ledger_probe').push(row(`a${h}`, at(h, 10)));
+    for (let pass = 0; pass < 12 && (await s.sealer.runPass()) > 0; pass++);
+    return s;
+  }
+  const catchUp = async (s: ReturnType<typeof setup>) => {
+    for (let pass = 0; pass < 6 && (await s.sealer.runPass()) > 0; pass++);
+  };
+  const sealedOnce = (s: ReturnType<typeof setup>) => {
+    const listed = s.checkpoints().flatMap((c) => c.row_ids).sort();
+    return { listed, rows: s.hot.table('ledger_probe').map((r) => String(r.id)).sort(), late: s.checkpoints().filter((c) => c.kind === 'late') };
+  };
+
+  it('walks at most MAX_IDLE_WINDOWS_PER_PASS windows that seal nothing, and says so at error', async () => {
+    const s = await stalled();
+    const windowsRead = new Set<string>();
+    const find = s.hot.find.bind(s.hot);
+    s.hot.find = async (object, query) => {
+      if (object === 'ledger_probe' && query.limit === 500) windowsRead.add(JSON.stringify((query.where as Record<string, unknown>).created_at ?? (query.where as { $and: Array<Record<string, unknown>> }).$and[0].created_at));
+      return find(object, query);
+    };
+    expect(await s.sealer.runPass()).toBe(0);
+    expect(windowsRead.size).toBe(1 + AUDIT_SEAL_MAX_IDLE_WINDOWS_PER_PASS); // the floor window, then the cap
+    expect(s.logger.lines.filter((l) => l.level === 'error').map((l) => l.message))
+      .toContainEqual(expect.stringMatching(/'ledger_probe'.*walked .* windows that seal nothing.*chain\(s\) 'org:org_s'/));
+  }, STALLED_TIMEOUT_MS);
+
+  it('seals the whole object again once the skipped chain is fixed: its window and the windows past the cap seal as window checkpoints, none late', async () => {
+    const s = await stalled();
+    expect(sealedOnce(s).listed.length).toBeLessThan(HOURS); // org_a up to the cap; org_s and the rest wait
+    s.hot.table('ledger_probe').find((r) => r.id === 'stuck')!.payload = '{"v":"stuck"}';
+    await catchUp(s);
+    const { listed, rows, late } = sealedOnce(s);
+    expect(listed).toEqual(rows);
+    expect(late).toEqual([]);
+    expect(s.checkpoints().filter((c) => c.tenant_id === 'org_s').map((c) => [c.kind, c.window_start, c.row_ids])).toEqual([['window', at(0, 0), ['stuck']]]);
+  }, STALLED_TIMEOUT_MS);
+
+  it('seals the whole object again once the skipped chain has nothing left to seal (its refused row gone): no chain is skipped, so the walk past the cap is not cut', async () => {
+    const s = await stalled();
+    drop(s, 'stuck');
+    await catchUp(s);
+    const { listed, rows, late } = sealedOnce(s);
+    expect(listed).toEqual(rows);
+    expect(late).toEqual([]);
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    expect(report.ok).toBe(true);
+    expect(report.totals).toMatchObject({ unmodified: HOURS, unsealed: 0 });
+  }, STALLED_TIMEOUT_MS);
 });
 
 describe('the lock: audit.sealer, its fencing token on each checkpoint (D3, Q2 (a))', () => {

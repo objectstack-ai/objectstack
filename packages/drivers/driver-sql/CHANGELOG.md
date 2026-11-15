@@ -1,5 +1,129 @@
 # @objectstack/driver-sql
 
+## 18.5.0
+
+### Patch Changes
+
+- 01d206d: docs(driver-sql): how an operator finds and corrects the Postgres `date` values that releases before 18.4.0 stored one day early after a `datetime` → `date` publish; the platform does not repair them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Not repaired automatically.** Affected: Postgres, a database server whose time zone is ahead of UTC (for example `Asia/Shanghai`), a field published from `datetime` to `date`, and a day written into it after that publish by a release before 18.4.0. Such a day was stored as midnight in the server's zone (`2026-11-12` as `2026-11-11T16:00:00Z` at `+08:00`), so it reads, filters and buckets as the previous day. 18.4.0 writes new days correctly and reads every door the same way, but it cannot tell those rows from a value written while the field was a `datetime` at the same instant, so it changes no stored value.
+  
+  To find candidates, run against the object's table, with ZONE the server's zone (`SHOW TimeZone`) and FIELD the field:
+  
+  ```sql
+  SELECT id, FIELD FROM TABLE
+  WHERE (FIELD AT TIME ZONE 'ZONE')::time = '00:00'
+    AND (FIELD AT TIME ZONE 'UTC')::time != '00:00';
+  ```
+  
+  Check each row against what was entered (a value that really was entered as a date-time at local midnight is also listed), then correct the ones that are early days:
+  
+  ```sql
+  UPDATE TABLE
+  SET FIELD = ((FIELD AT TIME ZONE 'ZONE')::date)::timestamp AT TIME ZONE 'UTC'
+  WHERE id IN (...);
+  ```
+  
+  After the update the row reads, filters and buckets as the day that was entered.
+- 01d206d: fix(driver-sql): on SQLite and MySQL, a `date` field whose column a `datetime` → `date` publish left as a date-time column now filters as its calendar day, so a row written while the field was a `datetime` is matched by a filter on the day it reads as
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  After a field is published from `datetime` to `date`, the column keeps its date-time type (SQLite `datetime`, MySQL `DATETIME`), and rows written before the publish still hold a time of day. They already read back as their day (`2026-11-12`), but an equality filter on that day (`where: { due: '2026-11-12' }`) compared the bare day against the whole stored instant and missed them, while `$gt` on that day matched them. The schema sync now records such a column on SQLite and MySQL as it already did for a Postgres `timestamptz` column, and every filter door (the query builder and the analytics native-SQL door) reads it as its calendar day: SQLite by the first ten characters of its canonical UTC text, MySQL by `date()` under its UTC session. Writes, reads and the day bucket are unchanged. As with Postgres, an index on such a column no longer serves a filter on the field; only columns a `datetime` → `date` publish left behind are affected.
+- 67725f1: fix(driver-sql, runtime): a boot the organization-ownership guard refuses no longer drops a telemetry shard, and the refusal names a complete apply command
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **A refused boot drops no rotation shard.** The organization-ownership guard judges the database after the engine's schema sync has run. That sync also ran the Rotator for every object that declares `lifecycle.storage: { strategy: 'rotation' }` (`sys_activity` among them), and it DROPPED each shard older than the `shards × unit` window. So a database restored from a dump more than one window old lost those shards and their rows on the boot that then refused to serve it, before the ceremony that boot asked for had run. The same drop ran on every one-shot CLI boot, which arms no lifecycle sweep.
+  
+  - FROM: `SqlDriver#initObjects` (schema sync) created the current shard, dropped the expired ones and rebuilt the read view over the rest.
+  - TO: schema sync creates the current shard and drops none. An expired shard stays in the read view, its columns synced with the rest. `SqlDriver#rotateShards`, the entry point the lifecycle sweep calls, is the only caller that drops expired shards. On a served boot the first sweep drops them, as before (`DEFAULT_LIFECYCLE_INITIAL_DELAY_MS` after start, or one sweep interval later when the store was swept within the interval). So a shard outlives its window by at most one sweep interval, the tolerance the sweep's own schedule already has.
+  - What to know: with lifecycle enforcement switched off (`OS_LIFECYCLE_DISABLED=1`, or `lifecycle: { enabled: false }` on the ObjectQL plugin) no sweep runs, so expired shards are no longer dropped at boot either and stay readable. Switch enforcement back on, or call the `lifecycle` service's `sweep()`, to drop them.
+  
+  **The refusal's apply command is complete.** Every organization-ownership refusal now names the apply as `os migrate organization-ownership --apply --plan-file PLAN --backup-taken --out REPORT`, the same prefix as before (`--dev`, `--database-url`, the exported auth secret, the driver and token variables). Run without `--out`, the apply wrote its report into the directory it was run from.
+- c94a4da: fix(driver-sql): on an upgraded MySQL 8 database the widening arm reads the package-less guard's functional key part as the partial unique it is, so the old, narrower unique key retires as it does on PostgreSQL
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `metadata-protocol` builds each package-less guard on MySQL 8.0.13+ as a UNIQUE index over one functional key part, `(CASE WHEN <package column> IS NULL THEN <the driver's hash-shadow digest of the key columns> END)`. `os migrate plan` and the dev `autoMigrate: 'safe'` sync read that key part as an unknown expression, never as the guard the widening arm waits for, so on a database upgraded from a release that had the narrower key they kept that key and offered nothing.
+  
+  - FROM kept TO retired, on an upgraded MySQL 8 database, once the guard stands: `sys_user_permission_set`'s `(user_id, permission_set, organization_id)`, `sys_connector_connection`'s `(organization_id, connector_name)` and `sys_metadata_activation`'s `(metadata_type, name)` are each one `replace_unique_index`, categorized `safe`, created before it is dropped, applied by the next sync that runs safe drift or by `os migrate apply` with no `--allow-destructive`. Who sees it: a user can hold two packages' permission sets of one name in one organization, and an organization can connect two packages' connector instances of one name, where the old key refused the second. A second row naming no package is still refused, by the guard. Measured on MySQL 8.0.46 for all three tables.
+  - The guard is recognised strictly: the whole expression must be that `CASE WHEN <column> IS NULL THEN … END` over exactly the driver's own digest (`UNHEX(SHA2(CONCAT(<key columns> joined by 0x1f), 256))`, plain columns) of the narrower key's columns in key order, scoped by the one nullable column the wider key gained. Any other functional index (another function, hash, separator or scope, a NULL-safe part, an `ELSE`) is not a guard, and the narrower key stays kept beside it.
+  - Unchanged: MariaDB (its guard is a row-scoped generated column, already read as a guard), SQLite and PostgreSQL; a narrower key carried by a #11627 hash shadow is still kept whatever the guard; MySQL before 8.0.13 builds no guard and keeps the old key.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [834d5f5]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/observability@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

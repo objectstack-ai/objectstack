@@ -1,5 +1,98 @@
 # @object-ui/plugin-detail
 
+## 18.5.0
+
+### Patch Changes
+
+- 159dbe3: fix(console, plugin-detail, app-shell): a connector action switch resets its inputs, a multi-field save conflict lists each field, the share page lists fields by the record page's rule, the Studio error box wraps
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-detail` exports the new `ConcurrentUpdateFieldConflict` type, and `ConcurrentUpdateConflict` gains the optional `fields` list. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  - **Flow designer (Studio).** Changing a `connector_action` node's connector or action keeps the inputs the new action declares, with their values or bindings, and drops the rest. When the new action's inputs are not known (no connector catalog, or an action name still being typed), the Input map is empty. Before, every previous input key stayed in the map: undeclared ones showed as extra Input rows, were saved with the flow, and were handed to the new action at run time. Inputs set aside by a switch come back if you return to the same connector and action while the inspector is open; they are never saved meanwhile.
+  - **Inline edit conflict.** When a save that changed several fields meets a newer version (409 `CONCURRENT_UPDATE`), the dialog lists each field with its label, your edit and the current value, instead of printing both as raw JSON. A one-field conflict looks as before.
+  - **Share-link page.** The landing page lists the record's fields the way the record page does: the framework's system columns and the audit columns (`created_at`, `created_by`, `updated_at`, `updated_by`) are not listed, and only fields the object declares are shown when the server sends the field labels.
+  - **Studio editor error box.** A refusal that is one unbroken token (a field-type enum list such as `"text"|"textarea"|…`) now wraps inside the box instead of running past the right edge of the window, so the whole message stays readable.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [f530d25]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [f5121e8]
+- Updated dependencies [b462444]
+- Updated dependencies [82838e8]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [ba32e79]
+- Updated dependencies [9317833]
+- Updated dependencies [8ed2b89]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [a9da547]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [4c32b96]
+- Updated dependencies [12d090d]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [d574341]
+- Updated dependencies [bc50d11]
+- Updated dependencies [de476f1]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [020ce3d]
+- Updated dependencies [ee627c6]
+- Updated dependencies [6446935]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [f06f064]
+- Updated dependencies [06e53a7]
+- Updated dependencies [5604aeb]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @object-ui/i18n@18.5.0
+  - @object-ui/fields@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes
