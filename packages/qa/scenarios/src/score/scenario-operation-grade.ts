@@ -526,7 +526,7 @@ export function askNamesTarget(card: Pick<ScenarioCard, 'run'>, operationId: str
         const ref = others.find((r) => String(r.id) === value);
         const said = ref && Object.entries(ref).find(([k, v]) => k !== 'id' && typeof v === 'string' && v !== '' && mentions(text, v));
         if (said) {
-          by = `${object} ${JSON.stringify(said[1])}`;
+          by = `(the ${object} ${JSON.stringify(said[1])})`;
           break;
         }
       }

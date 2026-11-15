@@ -80,7 +80,9 @@ export interface HalfScores {
    * agent half alone, the reason in the mode's findings
    * ({@link platformNotMeasuredFindings}). Absent ⇒ none.
    */
-  operations?: Tally & { notMeasured: number; platformNotMeasured?: number; confirmation?: ConfirmationTally };
+  operations?: Tally & { notMeasured: number; platformNotMeasured?: number };
+  /** How the half's passing `pending_confirmation` operations were met ({@link confirmationTally}); absent ⇒ none passed. */
+  confirmation?: ConfirmationTally;
   /** The models the half's question and operation turns were served ({@link modelTally}). */
   models?: ModelTally;
 }
@@ -186,18 +188,17 @@ export function opsTally(r: RunHalf | undefined): HalfScores['operations'] | und
   if (!r) return undefined;
   const measured = r.operations.filter((o) => !o.notMeasured);
   const platformNotMeasured = measured.filter((o) => platformNotMeasuredReason(o) !== undefined).length;
-  const confirmation = confirmationTally(measured.map((o) => o.grade?.confirmation));
   return {
     passed: measured.filter((o) => o.grade?.pass).length,
     total: measured.length,
     notMeasured: r.operations.length - measured.length,
     ...(platformNotMeasured ? { platformNotMeasured } : {}),
-    ...(confirmation ? { confirmation } : {}),
   };
 }
 
-/** Count each way a passing `pending_confirmation` operation was met; `undefined` when none was. */
-function confirmationTally(ways: ReadonlyArray<string | undefined>): ConfirmationTally | undefined {
+/** Each way a half's passing `pending_confirmation` operations were met (`OperationGrade.confirmation`); `undefined` when none was. */
+export function confirmationTally(r: RunHalf | undefined): ConfirmationTally | undefined {
+  const ways = (r?.operations ?? []).filter((o) => !o.notMeasured).map((o) => o.grade?.confirmation);
   const asked = ways.filter((w) => w === askedFirst).length;
   const confirmed = ways.filter((w) => w === confirmedByAgent).length;
   return asked + confirmed > 0 ? { askedFirst: asked, confirmedByAgent: confirmed } : undefined;
@@ -297,6 +298,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   if (o) first.operations = o;
   const mt = modelTally(m.run);
   if (mt) first.models = mt;
+  const cf = confirmationTally(m.run);
+  if (cf) first.confirmation = cf;
   const out: ModeScorecard = {
     mode: m.mode,
     first,
@@ -327,6 +330,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     if (io) it.operations = io;
     const imt = modelTally(m.iterate.run);
     if (imt) it.models = imt;
+    const icf = confirmationTally(m.iterate.run);
+    if (icf) it.confirmation = icf;
     if (m.iterate.changeSize) it.changeSize = m.iterate.changeSize.total;
     out.iterate = it;
   }
@@ -335,7 +340,7 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
 
 export function cardScorecard(run: CardRun, packages?: PackageSource): CardScorecard {
   const modes = run.modes.map((m) => modeScorecard(m));
-  const halves = modes.flatMap((m) => [m.first.operations?.confirmation, m.iterate?.operations?.confirmation]);
+  const halves = modes.flatMap((m) => [m.first.confirmation, m.iterate?.confirmation]);
   const asked = halves.reduce((n, c) => n + (c?.askedFirst ?? 0), 0);
   const confirmed = halves.reduce((n, c) => n + (c?.confirmedByAgent ?? 0), 0);
   return {
@@ -352,7 +357,7 @@ const cell = (t: (Tally & { notMeasured?: number; platformNotMeasured?: number }
   t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}${t.platformNotMeasured ? ` · ${t.platformNotMeasured} platform half not measured` : ''}` : '—';
 /** `1 asked first · 1 confirmed by the agent`: how the passing irreversible operations were met. */
 export const confirmationText = (c: ConfirmationTally): string => `${c.askedFirst} asked first · ${c.confirmedByAgent} confirmed by the agent`;
-const opsCell = (t: HalfScores['operations']) => `${cell(t)}${t?.confirmation ? ` (irreversible: ${confirmationText(t.confirmation)})` : ''}`;
+const opsCell = (h: HalfScores | undefined) => `${cell(h?.operations)}${h?.confirmation ? ` (irreversible: ${confirmationText(h.confirmation)})` : ''}`;
 const seedCell = (s: HalfScores['seed']) => (s ? `${s.inserted}/${s.total}${s.refused ? ` ⚠ seed: ${s.refused} refused` : ''}` : '—');
 
 /** `42s`, `15m 00s`. */
@@ -404,13 +409,13 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Build · author', (m) => authorCell(m.first.build));
   row('Seed', (m) => seedCell(m.first.seed));
   row('Run-问数', (m) => (m.first.ask ? `${cell(m.first.ask)}${m.first.ask.leaks ? ` ⚠ ${m.first.ask.leaks} leaking` : ''}` : '—'));
-  row('Run-operations', (m) => opsCell(m.first.operations));
+  row('Run-operations', (m) => opsCell(m.first));
   row('Run · model', (m) => modelCell(m.first.models));
   row('Iterate · Build', (m) => buildCell(m.iterate?.build));
   row('Iterate · author', (m) => authorCell(m.iterate?.build));
   row('Iterate · Seed', (m) => seedCell(m.iterate?.seed));
   row('Iterate · Run-问数', (m) => (m.iterate?.ask ? `${cell(m.iterate.ask)}${m.iterate.ask.leaks ? ` ⚠ ${m.iterate.ask.leaks} leaking` : ''}` : '—'));
-  row('Iterate · Run-operations', (m) => opsCell(m.iterate?.operations));
+  row('Iterate · Run-operations', (m) => opsCell(m.iterate));
   row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
   row('Author cost', (m) => (m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
