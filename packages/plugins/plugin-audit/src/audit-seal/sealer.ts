@@ -12,6 +12,7 @@ import type {
 import { isMissingTableError } from '@objectstack/types';
 import {
   AUDIT_SEAL_CANON_VERSION,
+  CanonicalFormError,
   canonicalDatetime,
   leafHash,
   leafInput,
@@ -35,6 +36,7 @@ import {
   checkpointDigest,
   checkpointRow,
   signedBodyBytes,
+  SignedBodyError,
   type AuditCheckpointKind,
   type CheckpointSignedBody,
 } from './signed-body.js';
@@ -60,6 +62,15 @@ import { dropAuditSealSecret, writeAuditSealSecret, type SealStorageDriver, type
  *
  * Each checkpoint carries the sealed-through watermark: the end of the last
  * window the sealer had completed for every chain when it wrote it.
+ *
+ * S4 (seat ruling 6884540128 item 2): a fault is isolated to the smallest
+ * thing it belongs to. A chain-local fault — a row a canonical rule refuses,
+ * or a malformed checkpoint of the chain (its head among them) — skips that
+ * chain for the rest of the pass; the other chains are sealed, and each chain
+ * resumes from its own oldest unsealed window, since every chain carries its
+ * own cursor. The watermark never advances past a window a skipped chain
+ * leaves unsealed. Every other fault — the lock, the signer, the crypto
+ * provider, the storage — stops the whole object's pass.
  *
  * Nothing here writes the sealed object, and every secret row is written
  * below the hooks, so the sealer never seals its own writes.
@@ -133,6 +144,19 @@ interface ChainLeaves {
 }
 
 const iso = (ms: number): string => new Date(ms).toISOString();
+
+/**
+ * S4: a fault that belongs to one chain — a row of it a canonical rule
+ * refuses, or a malformed checkpoint of it. It skips that chain only.
+ */
+class ChainFault extends Error {
+  constructor(readonly chainKey: string, readonly fault: unknown) {
+    super(faultOf(fault));
+  }
+}
+
+/** Whether `err` is chain-local when it is thrown reading one chain's row or checkpoint (S4). */
+const isChainLocal = (err: unknown): boolean => err instanceof CanonicalFormError || err instanceof SignedBodyError;
 
 /**
  * A fault as a report line may quote it: its code and the driver's own reason,
@@ -214,6 +238,23 @@ export class AuditSealer {
     if (last !== undefined && this.now() - last < REPORT_REPEAT_MS) return;
     this.reported.set(cause, this.now());
     this.options.logger.error(message());
+  }
+
+  /**
+   * S4: each chain a chain-local fault skipped, at `error`, once per cause per
+   * {@link REPORT_REPEAT_MS} while it lasts; a chain sealed again is forgotten.
+   */
+  private reportSkipped(object: string, skipped: ReadonlyMap<string, { fault: string; from: number }>): void {
+    for (const cause of this.reported.keys()) {
+      if (!cause.startsWith(`chain:${object}:`)) continue;
+      if (![...skipped.keys()].some((key) => cause.startsWith(`chain:${object}:${key}:`))) this.reported.delete(cause);
+    }
+    for (const [key, { fault, from }] of skipped) {
+      this.report(`chain:${object}:${key}:${fault}`, () =>
+        `AuditSealer: '${object}' chain '${key}' is skipped (${fault}) — its rows from the window of ${iso(from)} on are ` +
+        'NOT being sealed, and no checkpoint\'s sealed_through passes that window; every other chain is sealed. ' +
+        'Each pass retries the chain from that window. Fix the fault named here.');
+    }
   }
 
   /** The sealed objects the registry holds that can be sealed; each that cannot is reported. */
@@ -301,6 +342,7 @@ export class AuditSealer {
             'sealed until a pass gets past it; each pass retries. Fix the fault named here.');
         } finally {
           written += pass?.written ?? 0;
+          if (pass) this.reportSkipped(plan.name, pass.skipped);
         }
       }
       return written;
@@ -317,6 +359,12 @@ class ObjectPass {
   private readonly archive: SealStorageDriver | undefined;
   private readonly checkpoints: SealStorageDriver;
   private watermark: number | null = null;
+  /** The stored watermark when the pass began: every chain is complete before it. */
+  private floor: number | null = null;
+  /** S4: each chain's own cursor, the start of the window after its last `window` checkpoint. */
+  private readonly cursors = new Map<string, number>();
+  /** S4: the chains a chain-local fault put out for the rest of this pass, and the window each stays unsealed from. */
+  readonly skipped = new Map<string, { fault: string; from: number }>();
   /** Checkpoints this pass wrote, counted as each lands. */
   written = 0;
   /** The key id the last checkpoint of this pass was signed under: the next body's expectation. */
@@ -351,43 +399,81 @@ class ObjectPass {
       limit: 1,
     });
     this.watermark = top ? Date.parse(canonicalDatetime(top.sealed_through, 'sealed_through')) : null;
-    const [last] = await this.checkpoints.find(AUDIT_CHECKPOINT_OBJECT, {
-      where: { sealed_object: this.plan.name, kind: 'window' },
-      orderBy: [{ field: 'window_start', order: 'desc' }],
-      limit: 1,
-    });
-    const lastWindow = last ? Date.parse(canonicalDatetime(last.window_start, 'window_start')) : null;
+    this.floor = this.watermark;
+    // S4: each chain's cursor, from its `window` checkpoints at or past the floor. A chain the floor passed with
+    // none there has the floor as its cursor; the latest `window` checkpoint is never below the floor.
+    let lastWindow: number | null = null;
+    if (this.floor !== null) {
+      const recent = await this.checkpoints.find(AUDIT_CHECKPOINT_OBJECT, {
+        where: { sealed_object: this.plan.name, kind: 'window', window_start: { $gte: iso(this.floor) } },
+      });
+      for (const row of recent) {
+        const key = String(row.chain_key);
+        let start: number;
+        try {
+          start = Date.parse(canonicalDatetime(row.window_start, 'window_start'));
+        } catch (err) {
+          this.skip(key, err, this.floor);
+          continue;
+        }
+        this.cursors.set(key, Math.max(this.cursors.get(key) ?? start + AUDIT_SEAL_WINDOW_MS, start + AUDIT_SEAL_WINDOW_MS));
+        lastWindow = Math.max(lastWindow ?? start, start);
+      }
+    }
     const due = windowOf(this.now - AUDIT_SEAL_SETTLE_MS);
 
-    let resumed: Set<string> | null = null;
-    if (lastWindow !== null) resumed = await this.sealLate(lastWindow);
+    if (lastWindow !== null) await this.sealLate(lastWindow);
 
-    let cursor: number | null = lastWindow;
+    let cursor: number | null = this.floor;
     if (cursor === null) {
       const oldest = await this.firstRowAt(null, due);
       if (oldest === null) return this.written;
       cursor = windowOf(oldest);
     }
-    for (let n = 0; n < MAX_WINDOWS_PER_PASS; n++) {
+    // Windows oldest first from the floor; each chain is sealed from its own cursor. A window that only re-reads
+    // chains already sealed (or skipped) past it does not count toward the pass's windows.
+    for (let n = 0; n < MAX_WINDOWS_PER_PASS;) {
       const next = await this.firstRowAt(cursor, due);
       if (next === null) break;
       const start = windowOf(next);
-      const done = start === lastWindow ? resumed : null;
-      const chains = await this.readWindow(start, (row) => !done?.has(chainKeyOf(tenantOf(row))));
-      await this.writeChains(chains, start, 'window', Math.max(this.watermark ?? start, start));
+      const chains = await this.readWindow(start, (row) => start >= this.cursorOf(chainKeyOf(tenantOf(row))));
+      if (chains.size > 0) n += 1;
+      await this.writeChains(chains, start, 'window', Math.max(this.watermark ?? Number.NEGATIVE_INFINITY, Math.min(start, this.stuckFrom())));
       cursor = start + AUDIT_SEAL_WINDOW_MS;
     }
     return this.written;
   }
 
+  /** S4: the first window of chain `key` this pass may seal as a `window`; a row of it before is `late`. */
+  private cursorOf(key: string): number {
+    return Math.max(this.floor ?? Number.NEGATIVE_INFINITY, this.cursors.get(key) ?? Number.NEGATIVE_INFINITY);
+  }
+
+  /** S4: the earliest window a skipped chain leaves unsealed; no watermark passes it. */
+  private stuckFrom(): number {
+    let from = Number.POSITIVE_INFINITY;
+    for (const skip of this.skipped.values()) from = Math.min(from, skip.from);
+    return from;
+  }
+
+  /**
+   * S4: put chain `key` out for the rest of the pass over a chain-local fault
+   * met at window `at`. It stays unsealed from its own oldest unsealed window:
+   * its cursor, or `at` when the fault was met past it.
+   */
+  private skip(key: string, fault: unknown, at: number): void {
+    if (this.skipped.has(key)) return;
+    this.skipped.set(key, { fault: faultOf(fault instanceof ChainFault ? fault.fault : fault), from: Math.max(this.cursorOf(key), at) });
+  }
+
   /**
    * Late rows (D3): each sealed window of the horizon whose stored count
    * differs from what its checkpoints list is read, and each unlisted row is
-   * sealed into a `late` checkpoint of its chain. In the last sealed window a
-   * chain with no `window` checkpoint yet is left to the window pass, which
-   * resumes it. Resolves to the chains that window already holds.
+   * sealed into a `late` checkpoint of its chain. A row is late only before its
+   * chain's own cursor; at or past it, the window pass seals it (S4), which is
+   * how a chain a stopped pass (or a skip) left behind resumes as `window`.
    */
-  private async sealLate(lastWindow: number): Promise<Set<string>> {
+  private async sealLate(lastWindow: number): Promise<void> {
     const from = windowOf(this.now - AUDIT_SEAL_LATE_HORIZON_MS);
     const to = lastWindow + AUDIT_SEAL_WINDOW_MS;
     const listed = await this.checkpoints.find(AUDIT_CHECKPOINT_OBJECT, {
@@ -395,22 +481,34 @@ class ObjectPass {
     });
     const byWindow = new Map<number, Row[]>();
     for (const row of listed) {
-      const start = Date.parse(canonicalDatetime(row.window_start, 'window_start'));
+      let start: number;
+      try {
+        start = Date.parse(canonicalDatetime(row.window_start, 'window_start'));
+      } catch (err) {
+        this.skip(String(row.chain_key), err, this.floor ?? from);
+        continue;
+      }
       byWindow.set(start, [...(byWindow.get(start) ?? []), row]);
     }
-    const resumed = new Set((byWindow.get(lastWindow) ?? []).filter((r) => r.kind === 'window').map((r) => String(r.chain_key)));
     const listedCount = (rows: readonly Row[]) => rows.reduce((sum, r) => sum + Number(r.leaf_count), 0);
     for (let start = from; start < to; start += AUDIT_SEAL_WINDOW_MS) {
       // S6: each window re-counted on its own, so a delete in one cannot hide a late row in another.
       await this.lock.renew(LOCK_TTL_MS);
       const holders = byWindow.get(start) ?? [];
       if ((await this.countRows(start, start + AUDIT_SEAL_WINDOW_MS)) === listedCount(holders)) continue;
-      const ids = new Set(holders.flatMap((r) => checkpointBodyFromRow(r).row_ids));
+      const ids = new Set<string>();
+      for (const holder of holders) {
+        try {
+          for (const id of checkpointBodyFromRow(holder).row_ids) ids.add(id);
+        } catch (err) {
+          if (!isChainLocal(err)) throw err;
+          this.skip(String(holder.chain_key), err, start); // S4: a malformed checkpoint of its chain
+        }
+      }
       const chains = await this.readWindow(start, (row) =>
-        !ids.has(rowIdOf(row)) && (start !== lastWindow || resumed.has(chainKeyOf(tenantOf(row)))));
+        !ids.has(rowIdOf(row)) && start < this.cursorOf(chainKeyOf(tenantOf(row))));
       await this.writeChains(chains, start, 'late', this.watermark ?? start);
     }
-    return resumed;
   }
 
   /** The stores a pass reads: the hot store, then the archive. */
@@ -484,19 +582,27 @@ class ObjectPass {
           limit: PAGE_SIZE,
         });
         for (const row of rows) {
-          const id = rowIdOf(row);
-          const at = canonicalDatetime(row.created_at, `${id}.created_at`);
-          if (seen.has(id) || windowOf(Date.parse(at)) !== start || !accept(row)) continue;
-          seen.add(id);
           const tenantId = tenantOf(row);
           const key = chainKeyOf(tenantId);
-          let chain = chains.get(key);
-          if (!chain) {
-            chain = { tenantId, seed: generateCheckpointSeed(), leaves: [] };
-            chains.set(key, chain);
+          if (this.skipped.has(key)) continue; // S4: out for the rest of the pass
+          try {
+            const id = rowIdOf(row);
+            const at = canonicalDatetime(row.created_at, `${id}.created_at`);
+            if (seen.has(id) || windowOf(Date.parse(at)) !== start || !accept(row)) continue;
+            seen.add(id);
+            let chain = chains.get(key);
+            if (!chain) {
+              chain = { tenantId, seed: generateCheckpointSeed(), leaves: [] };
+              chains.set(key, chain);
+            }
+            const leaf = leafInput(row, this.plan.columns, this.plan.fields, columnSaltsOf(chain.seed, this.plan.name));
+            chain.leaves.push({ id, at, hash: leafHash(leaf) });
+          } catch (err) {
+            // S4: a row a canonical rule refuses skips its chain, and only its chain.
+            if (!(err instanceof CanonicalFormError)) throw err;
+            this.skip(key, err, start);
+            chains.delete(key);
           }
-          const leaf = leafInput(row, this.plan.columns, this.plan.fields, columnSaltsOf(chain.seed, this.plan.name));
-          chain.leaves.push({ id, at, hash: leafHash(leaf) });
         }
         if (rows.length < PAGE_SIZE) break;
         after = rows[rows.length - 1];
@@ -512,17 +618,35 @@ class ObjectPass {
       orderBy: [{ field: 'sequence', order: 'desc' }],
       limit: 1,
     });
-    const head = row ? (() => {
-      const body = checkpointBodyFromRow(row);
-      return { sequence: body.sequence, digest: checkpointDigest(body) };
-    })() : null;
+    let head: ChainHead | null = null;
+    if (row) {
+      let body: CheckpointSignedBody;
+      try {
+        body = checkpointBodyFromRow(row);
+      } catch (err) {
+        if (!isChainLocal(err)) throw err;
+        throw new ChainFault(chainKey, err); // S4: a malformed chain head skips its chain
+      }
+      head = { sequence: body.sequence, digest: checkpointDigest(body) };
+    }
     this.heads.set(chainKey, head);
     return head;
   }
 
   private async writeChains(chains: Map<string, ChainLeaves>, start: number, kind: AuditCheckpointKind, watermark: number): Promise<void> {
     // `readWindow` makes a chain only with its first leaf, so no checkpoint is empty (D3).
-    for (const key of [...chains.keys()].sort()) await this.writeCheckpoint(key, chains.get(key)!, start, kind, watermark);
+    for (const key of [...chains.keys()].sort()) {
+      if (this.skipped.has(key)) continue;
+      try {
+        await this.writeCheckpoint(key, chains.get(key)!, start, kind, watermark);
+      } catch (err) {
+        // S4: only a chain-local fault of this chain skips it; every other fault stops the object's pass.
+        if (!(err instanceof ChainFault) || err.chainKey !== key) throw err;
+        this.skip(key, err, start);
+        continue;
+      }
+      if (kind === 'window') this.cursors.set(key, start + AUDIT_SEAL_WINDOW_MS);
+    }
     if (kind === 'window') this.watermark = Math.max(this.watermark ?? watermark, watermark);
   }
 
@@ -554,7 +678,7 @@ class ObjectPass {
       // N1: the window's checkpoints, re-read once this chain's head is known: a row another sealer listed
       // since this pass read the window's lists is not sealed twice. One stored after the head was known
       // takes a sequence at or past this one, so the unique index refuses whichever insert comes second.
-      const listed = await this.listedIn(start);
+      const listed = await this.listedIn(start, chainKey);
       leaves = leaves.filter((leaf) => !listed.has(leaf.id));
       if (leaves.length === 0) return;
     }
@@ -625,12 +749,26 @@ class ObjectPass {
     await this.deliver(body, keyId, signature);
   }
 
-  /** The row ids the stored checkpoints of window `start` list, every chain's, as read now. */
-  private async listedIn(start: number): Promise<Set<string>> {
+  /**
+   * The row ids the stored checkpoints of window `start` list, every chain's,
+   * as read now. A malformed one skips its chain (S4): this chain's, with a
+   * {@link ChainFault}; another's, for the rest of the pass.
+   */
+  private async listedIn(start: number, chainKey: string): Promise<Set<string>> {
     const rows = await this.checkpoints.find(AUDIT_CHECKPOINT_OBJECT, {
       where: { sealed_object: this.plan.name, window_start: { $gte: iso(start), $lt: iso(start + AUDIT_SEAL_WINDOW_MS) } },
     });
-    return new Set(rows.flatMap((r) => checkpointBodyFromRow(r).row_ids));
+    const ids = new Set<string>();
+    for (const row of rows) {
+      try {
+        for (const id of checkpointBodyFromRow(row).row_ids) ids.add(id);
+      } catch (err) {
+        if (!isChainLocal(err)) throw err;
+        if (String(row.chain_key) === chainKey) throw new ChainFault(chainKey, err);
+        this.skip(String(row.chain_key), err, start);
+      }
+    }
+    return ids;
   }
 
   /** This chain's stored checkpoint matching `where`, if any. */
