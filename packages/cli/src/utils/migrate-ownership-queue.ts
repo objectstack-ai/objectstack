@@ -31,8 +31,9 @@ import { composeProviderForDeclarations } from './schema-migration-plugins.js';
  *
  * `null` when the composition already holds the provider (judged by
  * `providesCapability`'s exact identity match, on the plugin list, before the
- * boot starts), so `plan` / `apply` — whose served-platform composition
- * mounts it — and a host config that brings its own register it once.
+ * boot starts). The kernel keeps the LAST plugin of a name, so a second one
+ * here would displace the instance `plan` / `apply` compose, or the one a host
+ * config brings with its own options.
  */
 export async function composeOwnershipQueueProvider(composed: readonly unknown[]): Promise<object | null> {
   const { CAPABILITY_PROVIDERS, providesCapability } = await import('@objectstack/core');

@@ -25,14 +25,17 @@
  *  1. `os migrate summary-nulls` — dry run, then `--apply` — runs on that
  *     stack: the dry run counts the `NULL` values and writes none, the apply
  *     fills each with its real aggregate, a re-run reads zero.
- *  2. Each composition a migrate subcommand boots with gets the provider
- *     once: the plain data stack (`account-issuer`, `duplicates`,
+ *  2. Each composition a migrate subcommand boots with registers the
+ *     service: the plain data stack (`account-issuer`, `duplicates`,
  *     `multi-value-columns`), a data-migration plugin set
  *     (`buildDataMigrationPlugins`, the rest of the data family), the host
  *     composition (`packageless-overlays`, `security-catalog-overlays`) and
  *     the served-platform composition (`plan`, `apply`, `unmapped-columns`,
- *     `organization-ownership`), which already mounts the provider and so is
- *     not given a second one.
+ *     `organization-ownership`), which already mounts the provider. That the
+ *     helper adds none to a composition holding one is pinned beside it
+ *     (`../../utils/migrate-ownership-queue.test.ts`): the kernel keeps the
+ *     LAST plugin of a name, so a second one would displace a host's own
+ *     configured instance while the boot still registers the service.
  *  3. No sharing runtime is armed: no `sharing` service (registered only by
  *     the provider's `start()`), while the `ownership-queue` service is.
  */
@@ -222,7 +225,7 @@ describe('os migrate summary-nulls on a stack declaring queues and assignmentRul
   }, CASE_TIMEOUT_MS);
 });
 
-describe('every composition an os migrate subcommand boots with registers the ownership-queue service once', () => {
+describe('every composition an os migrate subcommand boots with registers the ownership-queue service', () => {
   const COMPOSITIONS: Array<{ label: string; options: () => Promise<Record<string, unknown>> }> = [
     { label: 'the plain data stack (account-issuer, duplicates, multi-value-columns)', options: async () => ({}) },
     {
