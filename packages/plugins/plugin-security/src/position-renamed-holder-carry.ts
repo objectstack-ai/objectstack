@@ -687,7 +687,7 @@ const listIds = (ids: readonly string[]): string =>
 
 const REFUSAL_SENTENCE: Record<PositionRenameRefusal, string> = {
   'claimed-twice': 'two positions claim it, so whose holders they are is not decidable',
-  'claimant-disabled': 'the renamed position\'s package is disabled; the first boot after it is enabled carries them',
+  'claimant-disabled': 'the renamed position\'s package is disabled; enabling it through `PATCH /packages/:id/enable` carries them, and so does the first boot after it is enabled',
   'still-declared': 'it is still a position of the same holder, so nothing was renamed away from it',
   'held-by-other': 'it is a position another holder declares, and a package never claims another holder\'s people',
   'owned-by-other': 'it was another package\'s position, and a package never claims another holder\'s people',
