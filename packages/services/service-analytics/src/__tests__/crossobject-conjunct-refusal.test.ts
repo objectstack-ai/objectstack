@@ -95,7 +95,9 @@
  * accepting neighbours are pinned in the same file, one character away from the
  * refused ones:
  *
- *   ① a cross-object member nested in `$or` / `$not` is REFUSED on both doors
+ *   ① a cross-object member nested in `$or` / `$not` is judged by one view on
+ *      both doors — [#33335] SERVED as the engine's nested-relation condition
+ *      at the top level and inside `$or`, REFUSED under `$not`
  *   ② a combinator with NO cross-object member still passes both doors, and
  *      still reaches `engine.aggregate` carrying its disjunction
  *   ③ the `generateSql()` door is UNCHANGED — it was already right, and the
@@ -124,7 +126,10 @@ import { describe, it, expect } from 'vitest';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
 import { DatasetSchema, type Dataset } from '@objectstack/spec/ui';
+import type { Cube } from '@objectstack/spec/data';
 import { AnalyticsService } from '../analytics-service.js';
+import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
+import type { StrategyContext } from '../strategies/types.js';
 
 const ctxA = { tenantId: 'org_A', userId: 'u_a' } as ExecutionContext;
 
@@ -265,7 +270,6 @@ async function bothDoors(cube: string, query: Omit<AnalyticsQuery, 'cube'>, defs
   };
 }
 
-const CROSS_OBJECT_MESSAGE = /cannot evaluate a cross-object filter \("account\.region"\)/;
 /**
  * [#10861] A DISTINCT message, deliberately: the four refusals that predate
  * this card keep their wording (#5923's tests read it), and this one has to say
@@ -288,67 +292,97 @@ const MEASURE_FILTER_MESSAGE =
   /cannot evaluate the cross-object filter \("account\.region"\) that dataset "[^"]+" declares on its measure "west_revenue"/;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ① the refusal that was missing on the execution door
+// ① a cross-object member nested in a combinator: SERVED where the engine's
+//   nested-relation condition answers it exactly, REFUSED under `$not`
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Each entry nests the SAME cross-object member one level down, in a different
- * combinator, so the pin is on "structure hides the member" rather than on the
- * `$or` spelling alone.
+ * [#33335] Since #33335 a one-hop cross-object `where` leaf is no longer
+ * refused on this path: `servedWhere` respells it beneath its relation field
+ * (`{ account: { region: 'West' } }`) and the engine reads the related object
+ * as the caller and matches the relation against the ids it returns
+ * (`cross-object-where.ts`). What #10759 restored — one member view for both
+ * doors, so structure cannot hide a member — is unchanged: the view now sees
+ * the RELATION FIELD for a served leaf, and still sees the dotted member for a
+ * leaf this path refuses, at any depth.
+ *
+ * Inside `$or` the respelled leaf keeps its place in the disjunction, so it is
+ * served. Under `$not` it is refused: the negated existential test would
+ * admit every row whose related record the caller cannot read.
  */
-const NESTED: Array<{ name: string; where: Record<string, unknown> }> = [
+const NESTED_SERVED: Array<{ name: string; where: Record<string, unknown> }> = [
   { name: '$or', where: { $or: [{ 'account.region': 'West' }, { stage: 'won' }] } },
-  { name: '$not', where: { $not: { 'account.region': 'West' } } },
   { name: '$or nested two deep', where: { $or: [{ $and: [{ 'account.region': 'West' }, { stage: 'won' }] }, { stage: 'lost' }] } },
 ];
+const NESTED_REFUSED: Array<{ name: string; where: Record<string, unknown> }> = [
+  { name: '$not', where: { $not: { 'account.region': 'West' } } },
+  { name: '$not inside $or', where: { $or: [{ $not: { 'account.region': 'West' } }, { stage: 'won' }] } },
+];
 
-describe('[#10759] a cross-object member nested in a combinator is refused on BOTH doors', () => {
-  for (const c of NESTED) {
-    it(`${c.name}: execute() refuses with the ADR-0112 envelope`, async () => {
+/** The respelled leaf, as the engine receives it. */
+const RELATION_FORM = JSON.stringify({ account: { region: 'West' } });
+
+describe('[#10759, #33335] a cross-object member nested in a combinator is judged by one view on BOTH doors', () => {
+  for (const c of NESTED_REFUSED) {
+    it(`${c.name}: execute() refuses with the ADR-0112 envelope, before the engine`, async () => {
       const { execute, calls } = await bothDoors('sales_by_account', {
         dimensions: ['stage'], measures: ['revenue'], where: c.where,
       }, [SALES_BY_ACCOUNT]);
 
-      expect(execute, 'accepted — the member was invisible to the envelope check').toBeInstanceOf(Error);
-      expect(String(execute?.message)).toMatch(CROSS_OBJECT_MESSAGE);
+      expect(execute, 'accepted — a negated cross-object leaf reached the engine').toBeInstanceOf(Error);
       // Read exactly as `rest-server.ts`'s catch reads them: a 4xx status AND a
-      // code, or the route falls through to 500 ANALYTICS_QUERY_FAILED. Asserting
-      // only that it throws would pass on a bare `Error` and report the platform
-      // broken for a caller mistake.
+      // code, or the route falls through to 500 ANALYTICS_QUERY_FAILED.
       expect(execute?.code, 'no `code` ⇒ 500 ANALYTICS_QUERY_FAILED').toBe('INVALID_FIELD');
       expect(execute?.status, 'no `status` ⇒ 500 ANALYTICS_QUERY_FAILED').toBe(400);
-      // The member is named as the REQUEST spelled it, and `where` is the key to
-      // go fix — the refusal is actionable without reading this file.
       expect(execute?.member).toBe('account.region');
       expect(execute?.param).toBe('where');
-      // Refused BEFORE the engine was asked, not after it mis-bucketed.
-      expect(calls, 'engine.aggregate was reached — it cannot join').toEqual([]);
+      expect(calls, 'engine.aggregate was reached with a negated relation match').toEqual([]);
     });
 
     it(`${c.name}: both doors agree`, async () => {
       const { execute, generateSql } = await bothDoors('sales_by_account', {
         dimensions: ['stage'], measures: ['revenue'], where: c.where,
       }, [SALES_BY_ACCOUNT]);
-      // The invariant `planCrossObject` states for itself, asserted as one fact
-      // about one query rather than as two independent expectations.
       expect(
         [execute === undefined, generateSql === undefined],
         'the preview and the execution door accept/reject the same set',
       ).toEqual([false, false]);
-      expect(String(generateSql?.message)).toMatch(CROSS_OBJECT_MESSAGE);
+      expect({ code: generateSql?.code, member: generateSql?.member })
+        .toEqual({ code: 'INVALID_FIELD', member: 'account.region' });
     });
   }
 
-  it('the KNOWN-PRESENT control: the same member at the top level was always refused', async () => {
-    // The counter-check for every "refused" above. This shape predates #10759 and
-    // is refused on both doors before AND after it — so it proves the fixture,
-    // the cube and the detection path work, and cannot be read as evidence for
-    // the change. The nested rows above are what moved.
-    const { execute, generateSql } = await bothDoors('sales_by_account', {
+  for (const c of NESTED_SERVED) {
+    it(`${c.name}: execute() hands the engine the relation condition in the leaf's place`, async () => {
+      const { execute, calls } = await bothDoors('sales_by_account', {
+        dimensions: ['stage'], measures: ['revenue'], where: c.where,
+      }, [SALES_BY_ACCOUNT]);
+      expect(execute, `refused: ${execute?.message}`).toBeUndefined();
+      expect(calls).toHaveLength(1);
+      const sent = JSON.stringify(calls[0].filter);
+      expect(sent).toContain(RELATION_FORM);
+      expect(sent, 'the dotted member reached the engine, which cannot join it').not.toContain('account.region');
+      // The disjunction survived: the other branch is still there beside it.
+      expect(sent).toContain('$or');
+      expect(sent).toContain('"stage"');
+    });
+
+    it(`${c.name}: the SQL echo refuses in the where-door envelope, as it does for the authored nested-relation form`, async () => {
+      const { generateSql } = await bothDoors('sales_by_account', {
+        dimensions: ['stage'], measures: ['revenue'], where: c.where,
+      }, [SALES_BY_ACCOUNT]);
+      expect({ code: generateSql?.code, status: generateSql?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+      expect(String(generateSql?.message)).toContain('"account.region"');
+    });
+  }
+
+  it('the top-level member, once the KNOWN-PRESENT refusal, is served the same way', async () => {
+    const { execute, generateSql, calls } = await bothDoors('sales_by_account', {
       dimensions: ['stage'], measures: ['revenue'], where: { 'account.region': 'West' },
     }, [SALES_BY_ACCOUNT]);
-    expect(String(execute?.message)).toMatch(CROSS_OBJECT_MESSAGE);
-    expect(String(generateSql?.message)).toMatch(CROSS_OBJECT_MESSAGE);
+    expect(execute, `refused: ${execute?.message}`).toBeUndefined();
+    expect(JSON.stringify(calls[0]?.filter)).toContain(RELATION_FORM);
+    expect(generateSql?.code).toBe('INVALID_FILTER');
   });
 });
 
@@ -407,14 +441,28 @@ describe('[#10759] the #10413-phase-1 dataset filter conjunct is not misread', (
     expect(JSON.stringify(calls[0]?.filter)).toContain('is_deleted');
   });
 
-  it('a dataset scope does not shield a cross-object member in the caller’s own $or', async () => {
+  it('a dataset scope does not shield a refused cross-object member in the caller’s own $or', async () => {
+    // [#33335] The member sits under a `$not` — the shape this path still
+    // refuses — so the pin keeps reading "the scope's `$and` conjunct does not
+    // hide a member the view must see".
     const { execute, generateSql, calls } = await bothDoors('scoped_sales', {
+      dimensions: ['stage'], measures: ['revenue'],
+      where: { $or: [{ $not: { 'account.region': 'West' } }, { stage: 'won' }] },
+    }, [SCOPED_SALES]);
+    expect({ code: execute?.code, member: execute?.member }).toEqual({ code: 'INVALID_FIELD', member: 'account.region' });
+    expect({ code: generateSql?.code, member: generateSql?.member }).toEqual({ code: 'INVALID_FIELD', member: 'account.region' });
+    expect(calls).toEqual([]);
+  });
+
+  it('a dataset scope travels beside a SERVED cross-object member in the caller’s own $or', async () => {
+    const { execute, calls } = await bothDoors('scoped_sales', {
       dimensions: ['stage'], measures: ['revenue'],
       where: { $or: [{ 'account.region': 'West' }, { stage: 'won' }] },
     }, [SCOPED_SALES]);
-    expect(String(execute?.message)).toMatch(CROSS_OBJECT_MESSAGE);
-    expect(String(generateSql?.message)).toMatch(CROSS_OBJECT_MESSAGE);
-    expect(calls).toEqual([]);
+    expect(execute, `refused: ${execute?.message}`).toBeUndefined();
+    const sent = JSON.stringify(calls[0]?.filter);
+    expect(sent).toContain('is_deleted');
+    expect(sent).toContain(RELATION_FORM);
   });
 
 });
@@ -550,16 +598,16 @@ describe('[#10861] a CROSS-OBJECT definition-level filter is refused on BOTH doo
 
   it('the KNOWN-PRESENT control: a cross-object member in the CALLER\u2019s where keeps its own diagnostic', async () => {
     // The counter-check for every "refused" above, and the pin that #10861 did
-    // not repaint the refusal #10759 restored. This shape was refused before
-    // this card and is refused after it, with the OTHER message and with
-    // `param: 'where'` — which is exactly what makes the absent `param` above a
-    // deliberate distinction rather than a field this file forgot to set.
+    // not repaint the refusal #10759 restored: refused with `param: 'where'` —
+    // which is exactly what makes the absent `param` above a deliberate
+    // distinction rather than a field this file forgot to set. [#33335] Under a
+    // `$not`, the caller's shape this path still refuses (a top-level one is
+    // served now).
     const { execute, generateSql } = await bothDoors('sales_by_account', {
-      dimensions: ['stage'], measures: ['revenue'], where: { 'account.region': 'West' },
+      dimensions: ['stage'], measures: ['revenue'], where: { $not: { 'account.region': 'West' } },
     }, [SALES_BY_ACCOUNT]);
-    expect(String(execute?.message)).toMatch(CROSS_OBJECT_MESSAGE);
-    expect(String(generateSql?.message)).toMatch(CROSS_OBJECT_MESSAGE);
-    expect(execute?.param).toBe('where');
+    expect({ code: execute?.code, param: execute?.param }).toEqual({ code: 'INVALID_FIELD', param: 'where' });
+    expect({ code: generateSql?.code, param: generateSql?.param }).toEqual({ code: 'INVALID_FIELD', param: 'where' });
   });
 });
 
@@ -685,14 +733,13 @@ describe('[#11461] a CROSS-OBJECT per-measure filter is refused on BOTH doors', 
     // The counter-check for every "refused" above, on the SAME cube — so the
     // refusal ⑦ adds cannot be mistaken for the fixture simply being unable to
     // serve anything, and commit 399ecad58 is shown not to have repainted the refusal
-    // #10759 restored. Refused before this card and after it, with the OTHER
-    // message and with `param: 'where'`.
+    // #10759 restored. Refused with `param: 'where'`; [#33335] under a `$not`,
+    // the caller's shape this path still refuses.
     const { execute, generateSql, calls } = await bothDoors('measure_filter_sales', {
-      dimensions: ['stage'], measures: ['revenue'], where: { 'account.region': 'West' },
+      dimensions: ['stage'], measures: ['revenue'], where: { $not: { 'account.region': 'West' } },
     }, [MEASURE_FILTER_SALES]);
-    expect(String(execute?.message)).toMatch(CROSS_OBJECT_MESSAGE);
-    expect(String(generateSql?.message)).toMatch(CROSS_OBJECT_MESSAGE);
-    expect(execute?.param).toBe('where');
+    expect({ code: execute?.code, param: execute?.param }).toEqual({ code: 'INVALID_FIELD', param: 'where' });
+    expect({ code: generateSql?.code, param: generateSql?.param }).toEqual({ code: 'INVALID_FIELD', param: 'where' });
     expect(calls).toEqual([]);
   });
 
@@ -703,9 +750,140 @@ describe('[#11461] a CROSS-OBJECT per-measure filter is refused on BOTH doors', 
     // refused before commit 399ecad58 keeps the exact message it had.
     const { execute } = await bothDoors('measure_filter_sales', {
       dimensions: ['stage'], measures: ['revenue', 'west_revenue'],
+      where: { $not: { 'account.region': 'West' } },
+    }, [MEASURE_FILTER_SALES]);
+    expect({ code: execute?.code, param: execute?.param }).toEqual({ code: 'INVALID_FIELD', param: 'where' });
+  });
+
+  it('[#33335] a caller’s SERVED where does not lift the measure filter’s refusal', async () => {
+    // The caller's top-level leaf is respelled beneath `account` and leaves the
+    // view; the measure's own leaf lands at an aggregation's `filter`, where the
+    // engine refuses the nested-relation form, so it stays refused here.
+    const { execute, calls } = await bothDoors('measure_filter_sales', {
+      dimensions: ['stage'], measures: ['revenue', 'west_revenue'],
       where: { 'account.region': 'West' },
     }, [MEASURE_FILTER_SALES]);
-    expect(String(execute?.message)).toMatch(CROSS_OBJECT_MESSAGE);
-    expect(execute?.param).toBe('where');
+    expect(String(execute?.message)).toMatch(MEASURE_FILTER_MESSAGE);
+    expect({ code: execute?.code, param: execute?.param, cube: execute?.cube })
+      .toEqual({ code: 'INVALID_FIELD', param: undefined, cube: 'measure_filter_sales' });
+    expect(calls).toEqual([]);
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ⑨ [#33335] what a served cross-object `where` leaf hands the engine, and the
+//   shapes this path still refuses — read at the strategy itself
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Detail rows over a parent: plan → order, the card's shape. `cb_order` is a
+ * lookup the cube joins onto the object it declares; `plant` is joined onto a
+ * DIFFERENT object than the field declares, the `join-target` refusal's input.
+ * What the engine then does with the condition — the related read as the
+ * caller, the cap, the empty set — is the engine's, pinned with the real
+ * security layer in `@objectstack/rest`'s `analytics-nested-relation-filter.test.ts`.
+ */
+const PLAN_CUBE = {
+  name: 'plan_metrics',
+  sql: 'cb_plan',
+  measures: {
+    row_count: { label: 'Rows', type: 'count', sql: '*' },
+    order_total: { label: 'Order total', type: 'sum', sql: 'cb_order.total' },
+  },
+  dimensions: {
+    kind: { label: 'Kind', type: 'string', sql: 'plan_kind' },
+    order_status: { label: 'Order status', type: 'string', sql: 'cb_order.status' },
+  },
+  joins: {
+    cb_order: { name: 'cb_order', relationship: 'many_to_one', sql: 'cb_order' },
+    plant: { name: 'mfg_site', relationship: 'many_to_one', sql: 'plant' },
+  },
+  public: true,
+} as unknown as Cube;
+
+const DECLARED_REFERENCES: Record<string, string> = { 'cb_plan.cb_order': 'cb_order', 'cb_plan.plant': 'cb_plant' };
+
+function planCtx(calls: AggCall[]): StrategyContext {
+  return {
+    getCube: (name: string) => (name === PLAN_CUBE.name ? PLAN_CUBE : undefined),
+    queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+    executeAggregate: async (object: string, options: { filter?: unknown }) => {
+      calls.push({ object, filter: options.filter });
+      return [];
+    },
+    relationshipReference: (object: string, field: string) => DECLARED_REFERENCES[`${object}.${field}`],
+  } as unknown as StrategyContext;
+}
+
+const planQuery = (where: Record<string, unknown>, extra: Partial<AnalyticsQuery> = {}) =>
+  ({ cube: PLAN_CUBE.name, measures: ['row_count'], dimensions: ['kind'], where, ...extra }) as AnalyticsQuery;
+
+async function planRun(query: AnalyticsQuery) {
+  const calls: AggCall[] = [];
+  const strategy = new ObjectQLStrategy();
+  const execute = await strategy.execute(query, planCtx(calls)).then(() => undefined, (e: Refusal) => e);
+  const echo = await strategy.generateSql(query, planCtx([])).then(() => undefined, (e: Refusal) => e);
+  return { execute, echo, calls };
+}
+
+describe('[#33335] a one-hop cross-object where leaf reaches the engine as its nested-relation condition', () => {
+  it('the card\'s filter: the base leaf stays a column, the parent leaf goes beneath its relation field with its operator as written', async () => {
+    const { execute, calls } = await planRun(planQuery({ kind: 'recommended', 'cb_order.status': { $ne: 'cancelled' } }));
+    expect(execute, String(execute?.message)).toBeUndefined();
+    expect(calls).toEqual([
+      { object: 'cb_plan', filter: { plan_kind: 'recommended', $and: [{ cb_order: { status: { $ne: 'cancelled' } } }] } },
+    ]);
+  });
+
+  it('a cube member that resolves across the relation is respelled the same way', async () => {
+    const { calls } = await planRun(planQuery({ order_status: 'open' }));
+    expect(calls[0]?.filter).toEqual({ $and: [{ cb_order: { status: 'open' } }] });
+  });
+
+  it('leaves on one relation in one conjunction are one condition; the same parent field twice is two', async () => {
+    const one = await planRun(planQuery({ 'cb_order.status': 'open', 'cb_order.region': 'EU' }));
+    expect(one.calls[0]?.filter).toEqual({ $and: [{ cb_order: { status: 'open', region: 'EU' } }] });
+    const two = await planRun(planQuery({ order_status: 'open', 'cb_order.status': { $ne: 'held' } }));
+    expect(two.calls[0]?.filter).toEqual({
+      $and: [{ cb_order: { status: 'open' } }, { cb_order: { status: { $ne: 'held' } } }],
+    });
+  });
+
+  it('a cross-object dimension\'s FK-expand carries the condition on its base aggregate', async () => {
+    const { execute, calls } = await planRun(planQuery({ 'cb_order.region': 'EU' }, { dimensions: ['order_status'] }));
+    expect(execute, String(execute?.message)).toBeUndefined();
+    expect(calls[0]).toMatchObject({ object: 'cb_plan', filter: { $and: [{ cb_order: { region: 'EU' } }] } });
+  });
+
+  it('the SQL echo refuses a served leaf in the where-door envelope; a base-only query still renders', async () => {
+    const served = await planRun(planQuery({ 'cb_order.status': 'open' }));
+    expect({ code: served.echo?.code, status: served.echo?.status }).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    expect(String(served.echo?.message)).toContain('"cb_order.status"');
+    const control = await planRun(planQuery({ kind: 'recommended' }));
+    expect(control.echo).toBeUndefined();
+    expect(control.calls[0]?.filter).toEqual({ plan_kind: 'recommended' });
+  });
+
+  const REFUSED: Array<{ name: string; query: AnalyticsQuery; member: string; param: string; echoCode?: string }> = [
+    { name: 'two relationships deep', query: planQuery({ 'cb_order.customer.tier': 'gold' }), member: 'cb_order.customer.tier', param: 'where' },
+    { name: 'under $not', query: planQuery({ $not: { 'cb_order.status': 'cancelled' } }), member: 'cb_order.status', param: 'where' },
+    // The echo declines every `{ $field }` comparand first, in its own
+    // envelope (#7598); the execution face is this card's refusal.
+    { name: 'a { $field } comparand', query: planQuery({ 'cb_order.status': { $eq: { $field: 'plan_kind' } } }), member: 'cb_order.status', param: 'where', echoCode: 'INVALID_FILTER' },
+    { name: 'a join onto another object than the field declares', query: planQuery({ 'plant.region': 'EU' }), member: 'plant.region', param: 'where' },
+    { name: 'a cross-object MEASURE', query: planQuery({}, { measures: ['order_total'] }), member: 'order_total', param: 'measures' },
+  ];
+  for (const c of REFUSED) {
+    it(`still refused, on both faces and before the engine: ${c.name}`, async () => {
+      const { execute, echo, calls } = await planRun(c.query);
+      expect({ code: execute?.code, status: execute?.status, member: execute?.member, param: execute?.param })
+        .toEqual({ code: 'INVALID_FIELD', status: 400, member: c.member, param: c.param });
+      if (c.echoCode) expect({ code: echo?.code, status: echo?.status }).toEqual({ code: c.echoCode, status: 400 });
+      else {
+        expect({ code: echo?.code, status: echo?.status, member: echo?.member, param: echo?.param })
+          .toEqual({ code: 'INVALID_FIELD', status: 400, member: c.member, param: c.param });
+      }
+      expect(calls).toEqual([]);
+    });
+  }
 });
