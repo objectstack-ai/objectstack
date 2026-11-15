@@ -3839,6 +3839,20 @@ function isPackagelessActionSlotKey(key: string): boolean {
 }
 
 /**
+ * [ADR-0150 D4] Is a package-less action registration a stored row — the
+ * environment's `sys_metadata` hydration or write-through — rather than code
+ * the host or a plugin registered with no package? A stored row is
+ * tenant-authored (ADR-0010 `_provenance: 'org'`), or wears the envelope of
+ * the package whose action it customizes (`_packageId`, which code registering
+ * with no package never carries).
+ */
+function isStoredActionRow(item: unknown): boolean {
+  if (isTenantAuthored(item)) return true;
+  const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+  return typeof stamped === 'string' && stamped !== '';
+}
+
+/**
  * [#32408, contract review F2, delta review N1] What a door's registration
  * brings to a bundled name: the package and the members it adds to its
  * composite slot.
@@ -8974,23 +8988,30 @@ export class SchemaRegistry {
 
   /**
    * [ADR-0150 D4] Before a package-less action `incoming` takes the bare slot
-   * of `name`: the package-less action of the same owner key it replaces
-   * leaves its owner-key slot (one key, one item: the later registration
-   * stays, as in the bare slot), and the bare slot's present item, when its
-   * owner key is another, moves to that key's own slot
-   * ({@link packagelessActionSlotKey}). So the platform's action bound to
-   * `lead` and the environment's object-less action of the name are both
-   * kept, in either registration order, and each is read on its own key.
+   * of `name`, the name's package-less actions it does not replace keep their
+   * own owner keys: the bare slot's present item, when its owner key is
+   * another, moves to that key's own slot ({@link packagelessActionSlotKey}).
+   * So the platform's action bound to `lead` and the environment's object-less
+   * action of the name are both kept, in either registration order, and each
+   * is read on its own key.
+   *
+   * What `incoming` replaces: the item of its own owner key (one key, one
+   * item; the later registration stays, as in the bare slot), and, when it is
+   * a stored row ({@link isStoredActionRow}), the name's stored row on any key
+   * — the environment's store holds one row of a name, so a row saved again
+   * bound to another object is that row, never a second item.
    */
   private keepPackagelessActionOwnerKeys(collection: Map<string, any>, name: string, incoming: unknown): void {
     const ownerKey = packagelessActionOwnerKey(incoming);
-    const sameKey = packagelessActionSlotKey(ownerKey, name);
-    if (collection.has(sameKey)) {
-      this.noteItem('action', sameKey);
-      collection.delete(sameKey);
+    const replaces = (item: unknown): boolean =>
+      packagelessActionOwnerKey(item) === ownerKey || (isStoredActionRow(incoming) && isStoredActionRow(item));
+    for (const { key, item } of packagelessActionSlotEntriesOf(collection, name)) {
+      if (!replaces(item)) continue;
+      this.noteItem('action', key);
+      collection.delete(key);
     }
     const occupant = collection.get(name);
-    if (occupant === undefined || packagelessActionOwnerKey(occupant) === ownerKey) return;
+    if (occupant === undefined || replaces(occupant)) return;
     const aside = packagelessActionSlotKey(packagelessActionOwnerKey(occupant), name);
     this.noteItem('action', aside);
     collection.set(aside, occupant);
@@ -9000,15 +9021,15 @@ export class SchemaRegistry {
   /**
    * [ADR-0150 D4] The slot a removal of the package-less action `name`'s own
    * entry retires ({@link removeRuntimeShadow}, {@link removeOverlayEntry}):
-   * the bare slot, unless another owner key's slot holds the one
-   * tenant-authored item of the name (ADR-0010 `_provenance: 'org'`, the
-   * stored row the removal heals) while the bare slot holds code's.
+   * the bare slot, unless another owner key's slot holds the name's one stored
+   * row ({@link isStoredActionRow}, the row the removal heals) while the bare
+   * slot holds code's.
    */
   private packagelessActionEntryToRetire(collection: Map<string, any>, name: string): string {
     const aside = packagelessActionSlotEntriesOf(collection, name);
-    if (aside.length === 0 || isTenantAuthored(collection.get(name))) return name;
-    const tenant = aside.filter(({ item }) => isTenantAuthored(item));
-    return tenant.length === 1 ? tenant[0].key : name;
+    if (aside.length === 0 || isStoredActionRow(collection.get(name))) return name;
+    const rows = aside.filter(({ item }) => isStoredActionRow(item));
+    return rows.length === 1 ? rows[0].key : name;
   }
 
   /**
