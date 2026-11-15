@@ -245,7 +245,10 @@ npx @objectstack/scenarios help                                      # the comma
   authoring timeout and the turn caps. Every turn records its process: elapsed time, the turn cap it ran under
   (`--max-turns`), and for a turn that did not finish its exit code or signal, whether the runner's timeout killed it,
   and the end of its stderr. `RecordedDriver` replays a recording, and refuses the live-driver limits and models below;
-  its record keeps the driver of the recording (`replayOf`). For Codex and any other agent tool, see
+  its record keeps the driver of the recording (`replayOf`). It re-sends each turn's recorded writes to the booted app,
+  in recorded order, as the turn's persona, before the read-back (reads are never re-sent; a refused write must be
+  refused again; a row the run created is named by its new id); a turn the app answers otherwise, or one whose write
+  has no recorded answer, is not measured with the call named, never a fail. For Codex and any other agent tool, see
   [Other agent tools](#other-agent-tools--codex-and-the-external-driver-contract).
 - **Model** (`driver.ts`): `--model M` passes `claude --model M` on every turn, an alias (`sonnet`) or a name
   (`claude-sonnet-4-5`); `--author-model` sets the authoring turns (build and iterate) and `--ask-model` the question
