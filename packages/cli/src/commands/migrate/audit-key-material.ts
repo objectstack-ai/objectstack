@@ -234,7 +234,7 @@ export default class MigrateAuditKeyMaterial extends Command {
       // lock, a run on a sealed object needs --sealer-stopped (seat ruling 6885005594, E + B).
       const { result: { report, archive }, lostLock } = await underAuditSealLock(
         engine,
-        { apply, sealerStopped: flags['sealer-stopped'], objects: KEY_MATERIAL_COPY_TABLES, warn: logger.warn },
+        { apply, sealerStopped: flags['sealer-stopped'], objects: KEY_MATERIAL_COPY_TABLES, warn: (line) => logger.warn(line) },
         async () => {
           const report = await migrateKeyMaterialCopies(readView, logger, { apply, seal });
           // Each copy table's declared archive target, then the same rewrite

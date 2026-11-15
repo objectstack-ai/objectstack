@@ -215,7 +215,7 @@ export default class MigrateAuditMetadataBodies extends Command {
       // lock, a run on a sealed object needs --sealer-stopped (seat ruling 6885005594, E + B).
       const { result: report, lostLock } = await underAuditSealLock(
         engine,
-        { apply, sealerStopped: flags['sealer-stopped'], objects: STORED_METADATA_BODY_REWRITTEN_OBJECTS, warn: logger.warn },
+        { apply, sealerStopped: flags['sealer-stopped'], objects: STORED_METADATA_BODY_REWRITTEN_OBJECTS, warn: (line) => logger.warn(line) },
         () => migrateStoredMetadataBodyCopies(readView, logger, { apply, seal }),
       );
 

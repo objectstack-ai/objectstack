@@ -242,7 +242,7 @@ export default class MigrateAuditMailBodies extends Command {
       // lock, a run on a sealed object needs --sealer-stopped (seat ruling 6885005594, E + B).
       const { result: { report, archive }, lostLock } = await underAuditSealLock(
         engine,
-        { apply, sealerStopped: flags['sealer-stopped'], objects: MAIL_LOG_BODY_COPY_OBJECTS, warn: logger.warn },
+        { apply, sealerStopped: flags['sealer-stopped'], objects: MAIL_LOG_BODY_COPY_OBJECTS, warn: (line) => logger.warn(line) },
         async () => {
           const report = await migrateMailLogBodyCopies(readView, logger, { apply, seal });
           // [#24899] Each copy table's declared archive target, then the same

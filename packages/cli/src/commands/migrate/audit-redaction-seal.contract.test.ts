@@ -84,7 +84,8 @@ describe('os migrate audit-* amend a sealed row first (ADR-0154 D7)', () => {
       const holds = calls(source, 'underAuditSealLock');
       expect(holds).toHaveLength(1);
       const [hold] = holds;
-      expect(hold).toMatch(/\{ apply, sealerStopped: flags\['sealer-stopped'\], objects: (\w+), warn: logger\.warn \}/);
+      // The warn channel is called through its receiver (`check:logger-receiver-detach`), never handed on bare.
+      expect(hold).toMatch(/\{ apply, sealerStopped: flags\['sealer-stopped'\], objects: (\w+), warn: \(line\) => logger\.warn\(line\) \}/);
       expect(/objects: (\w+)/.exec(hold)?.[1]).toBe(REWRITTEN[file]);
       for (const run of runs) expect(calls(hold, run), run).toHaveLength(1);
     });
