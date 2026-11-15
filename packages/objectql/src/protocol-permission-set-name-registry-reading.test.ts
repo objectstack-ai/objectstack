@@ -36,6 +36,7 @@ import {
     resolveUserAuthzGrants,
 } from '@objectstack/core';
 import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
+import { isTenantAuthored } from '@objectstack/metadata-core';
 import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
@@ -295,20 +296,20 @@ describe('[#31698] a permission set is one name per namespace: one predicate, th
         expect(await doors('crm', 'hr', 'qa_reader')).toEqual({ installGate: 'admitted', itemSeam: 'admitted', saveDoor: 'admitted' });
     });
 
-    it('⛔ crm + hr where crm STORES its set (no shipped one): the save door still refuses hr\'s, and crm\'s set stays served at its package', async () => {
+    it('crm + hr where crm STORES its set (no shipped one): the save door admits hr\'s, and each set is served at its own package (FROM refused, #32780)', async () => {
+        // FROM (main at the change): `422 NAMESPACE_CONFLICT` naming crm, "a
+        // set another package stores holds its name": the registry kept one
+        // bare entry per stored set of a name, so hr's would take crm's place.
         const { engine, protocol } = await bootBare();
         engine.registry.installPackage(manifest(HOLDING, 'crm'), 'authored');
         engine.registry.installPackage(manifest(INCOMING, 'hr'), 'authored');
-        await protocol.saveMetaItem({ type: 'permission', name: 'qa_reader', item: permissionSet('qa_reader'), packageId: HOLDING });
+        await protocol.saveMetaItem({ type: 'permission', name: 'qa_reader', item: { ...permissionSet('qa_reader'), label: 'crm' }, packageId: HOLDING });
         expect(engine.registry.packageScopedHoldersOf('permission', 'qa_reader', null)).toEqual([HOLDING]);
-        const error = await protocol.saveMetaItem({ type: 'permission', name: 'qa_reader', item: permissionSet('qa_reader'), packageId: INCOMING })
-            .then(() => undefined, (e: any) => e);
-        expect([error?.code, error?.status]).toEqual(['NAMESPACE_CONFLICT', 422]);
-        expect(String(error?.message)).toContain(`package "${HOLDING}"`);
-        expect(String(error?.message)).toContain('a set another package stores holds its name');
-        // Nothing moved: crm's stored set is the one the registry serves at crm.
-        expect(engine.registry.packageScopedHoldersOf('permission', 'qa_reader', null)).toEqual([HOLDING]);
-        expect(engine.registry.getPackageScopedItem('permission', 'qa_reader', HOLDING)).toBeDefined();
+        const saved = await protocol.saveMetaItem({ type: 'permission', name: 'qa_reader', item: { ...permissionSet('qa_reader'), label: 'hr' }, packageId: INCOMING });
+        expect(saved.success).toBe(true);
+        expect([...engine.registry.packageScopedHoldersOf('permission', 'qa_reader', null)].sort()).toEqual([HOLDING, INCOMING]);
+        const label = (id: string) => (engine.registry.getPackageScopedItem('permission', 'qa_reader', id) as { label?: string } | undefined)?.label;
+        expect([label(HOLDING), label(INCOMING)]).toEqual(['crm', 'hr']);
     });
 
     it.each([
@@ -424,5 +425,198 @@ describe('[#31698] a permission set is one name per namespace: one predicate, th
         // main's answer at the merge: the column-less grant stays refused, and the
         // disabled holder's grant is never re-targeted to the enabled holder's set.
         expect(await read()).toEqual({ columnLess: [], crm: ['cap_crm'], hr: [] });
+    });
+});
+
+/**
+ * [ADR-0150 D2/D3 "security catalog: permission sets by (package, name)",
+ * #32780] Two packages of two namespaces each STORE a permission set of one
+ * name (a runtime package duplicated into another namespace). The host kernel
+ * keeps each stored set in its package's own registry slot — the hydrator's
+ * package overlay slot, at the write-through and at the boot hydration alike —
+ * so each package's grants confer its own set, across a restart, in either
+ * order the store reads the rows; a delete of either set leaves the other
+ * served; and each set stays tenant-authored (the lock's provenance input,
+ * `_provenance: 'org'`, bound to its own package), never a shipped one.
+ *
+ * FROM (main at the change): the save door refused the second namespace's
+ * stored set (`422 NAMESPACE_CONFLICT`, "a set another package stores holds its
+ * name"), and a set stored beside a set another namespace SHIPS took the
+ * shipper's envelope into the name's one bare slot: the shipper's grants
+ * conferred the stored body, the stored package's conferred nothing, and the
+ * restart's environment-catalog check refused the boot.
+ *
+ * The restart is a second kernel over the same driver stores, the packages
+ * installed before its boot hydration (`ObjectQLPlugin.start`), as a cold boot
+ * registers them in its first phase.
+ */
+describe('[#32780] two namespaces\' stored permission sets of one name: each served at its own package', () => {
+    const live: ObjectKernel[] = [];
+    afterEach(async () => {
+        while (live.length) {
+            const kernel = live.pop()!;
+            if (kernel.getState() === 'running') await kernel.shutdown();
+        }
+    });
+
+    const CRM = 'com.qa.crm';
+    const HR = 'com.qa.hr';
+    const FIN = 'com.qa.fin';
+    /** A second package of the `crm` namespace: its co-owner (CONTROL). */
+    const CRM_TWO = 'com.qa.crm_two';
+    const NS: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr', [FIN]: 'fin', [CRM_TWO]: 'crm' };
+    const N = 'qa_shared_reader';
+    const setOf = (cap: string) => ({ ...permissionSet(N), label: cap, systemPermissions: [cap] });
+    const manifestOf = (id: string, sets: string[] = []) =>
+        ({ id, name: id, version: '1.0.0', namespace: NS[id], ...(sets.length ? { permissions: sets.map(permissionSet) } : {}) }) as any;
+
+    /** Boot over `stores`, with `installs` installed before the boot hydration reads the stored rows. */
+    async function boot(stores: Stores, installs: readonly string[]): Promise<{ engine: ObjectQL; protocol: any }> {
+        const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+        live.push(kernel);
+        const engine = new ObjectQL();
+        engine.registry.logLevel = 'silent';
+        engine.registerDriver(makeMemoryDriver(stores), true);
+        for (const id of installs) engine.registry.installPackage(manifestOf(id), 'authored');
+        await kernel.use(new ObjectQLPlugin({ ql: engine }));
+        await kernel.bootstrap();
+        engine.registry.logLevel = 'silent';
+        return { engine, protocol: (kernel as any).getService('protocol') };
+    }
+
+    /** `stores` with its stored rows in reverse order, so the next boot hydration reads them the other way round. */
+    function reversedRows(stores: Stores): Stores {
+        const out: Stores = new Map(stores);
+        out.set('sys_metadata', new Map([...(stores.get('sys_metadata') ?? new Map())].reverse()));
+        return out;
+    }
+
+    /** What one grant of {@link N} with this package column confers, read by the authorization resolver. */
+    async function confers(engine: ObjectQL, column: string | null): Promise<unknown> {
+        const catalog = createSecurityCatalogReader({ registry: engine.registry as any, metadata: { get: () => undefined, list: () => [] } as any });
+        const rows: Record<string, unknown[]> = {
+            sys_user: [{ id: 'u1', email: 'u1@example.com' }],
+            sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'member' }],
+            sys_user_permission_set: [{ user_id: 'u1', permission_set: N, permission_set_package: column, organization_id: 'org_a' }],
+        };
+        const ql = { registry: engine.registry, find: async (object: string) => rows[object] ?? [], findOne: async (object: string, query?: any) => { assertEngineFindOnePredicate(object, query); return rows[object]?.[0]; }, count: async () => 0 };
+        bindSecurityCatalogReader(ql, catalog);
+        return (await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'org_a' })).systemPermissions;
+    }
+
+    /** Each package's grant, by its package column. */
+    const grants = async (engine: ObjectQL, ids: readonly string[]) =>
+        Object.fromEntries(await Promise.all(ids.map(async (id) => [id, await confers(engine, id)] as const)));
+
+    /**
+     * The lock's provenance input for every registry item of {@link N}: the
+     * classifier reads a set as shipped only from an item that is not
+     * tenant-authored and carries a package (`packaged-permission-set-lock.ts`).
+     */
+    const provenance = (engine: ObjectQL) => (engine.registry.listItems('permission') as any[])
+        .filter((item) => item?.name === N)
+        .map((item) => ({ packageId: item._packageId, tenantAuthored: isTenantAuthored(item) }))
+        .sort((a, b) => String(a.packageId).localeCompare(String(b.packageId)));
+
+    const save = (protocol: any, id: string, cap: string) =>
+        protocol.saveMetaItem({ type: 'permission', name: N, item: setOf(cap), packageId: id });
+
+    async function refusal(run: () => Promise<unknown>): Promise<any> {
+        try { await run(); } catch (error) { return error; }
+        return undefined;
+    }
+
+    for (const order of [[CRM, HR], [HR, CRM]] as const) {
+        const tag = `${NS[order[0]]} saves first`;
+
+        it(`${tag}: both stored sets land, each package's grant confers its own set, neither is locked, and so after a restart in either read order`, async () => {
+            const stores: Stores = new Map();
+            const first = await boot(stores, [CRM, HR]);
+            for (const id of order) expect((await save(first.protocol, id, `cap_${NS[id]}`)).success, `${id}'s save`).toBe(true);
+            const served = { [CRM]: ['cap_crm'], [HR]: ['cap_hr'] };
+            expect(await grants(first.engine, [CRM, HR]), 'the running kernel').toEqual(served);
+            // A grant naming no package of a name two packages hold confers nothing (ADR-0150 D3).
+            expect(await confers(first.engine, null)).toEqual([]);
+            const tenantSets = [{ packageId: CRM, tenantAuthored: true }, { packageId: HR, tenantAuthored: true }];
+            expect(provenance(first.engine), 'neither set reads as shipped').toEqual(tenantSets);
+
+            for (const [reading, rows] of [['store order', stores], ['reversed', reversedRows(stores)]] as const) {
+                for (const installs of [[CRM, HR], [HR, CRM]] as const) {
+                    const restarted = await boot(rows, installs);
+                    const at = `restart (${reading}, ${NS[installs[0]]} installed first)`;
+                    expect(await grants(restarted.engine, [CRM, HR]), at).toEqual(served);
+                    expect(provenance(restarted.engine), at).toEqual(tenantSets);
+                }
+            }
+        });
+
+        for (const deleted of [CRM, HR] as const) {
+            const kept = deleted === CRM ? HR : CRM;
+            it(`${tag}: a delete of ${NS[deleted]}'s set retires its slot alone, and ${NS[kept]}'s stays served, also after a restart`, async () => {
+                const stores: Stores = new Map();
+                const { engine, protocol } = await boot(stores, [CRM, HR]);
+                for (const id of order) await save(protocol, id, `cap_${NS[id]}`);
+                await protocol.deleteMetaItem({ type: 'permission', name: N, packageId: deleted });
+                const after = { [deleted]: [], [kept]: [`cap_${NS[kept]}`] };
+                expect(await grants(engine, [CRM, HR]), 'the running kernel').toEqual(after);
+                expect(engine.registry.packageScopedHoldersOf('permission', N, null)).toEqual([kept]);
+                // One holder left: a grant naming no package confers its set.
+                expect(await confers(engine, null)).toEqual([`cap_${NS[kept]}`]);
+                const restarted = await boot(stores, [CRM, HR]);
+                expect(await grants(restarted.engine, [CRM, HR]), 'after a restart').toEqual(after);
+            });
+        }
+    }
+
+    it('crm ships a set, hr saves one of the name, then crm saves its own and a third namespace saves one: each lands and each is served at its own package, also after a restart (FROM: crm\'s and fin\'s saves refused naming hr)', async () => {
+        const stores: Stores = new Map();
+        const { engine, protocol } = await boot(stores, [CRM, HR, FIN]);
+        const ship = (target: ObjectQL) => target.registry.registerItem('permission', setOf('cap_crm_shipped') as any, 'name', CRM);
+        ship(engine);
+        expect(await grants(engine, [CRM]), 'the shipped set').toEqual({ [CRM]: ['cap_crm_shipped'] });
+        expect((await save(protocol, HR, 'cap_hr')).success).toBe(true);
+        // hr's stored set never takes crm's place: crm's grant still confers the shipped set.
+        expect(await grants(engine, [CRM, HR]), 'hr beside the shipped set').toEqual({ [CRM]: ['cap_crm_shipped'], [HR]: ['cap_hr'] });
+        expect((await save(protocol, CRM, 'cap_crm_stored')).success, 'crm\'s own save').toBe(true);
+        expect((await save(protocol, FIN, 'cap_fin')).success, 'a third namespace\'s save').toBe(true);
+        const served = { [CRM]: ['cap_crm_stored'], [HR]: ['cap_hr'], [FIN]: ['cap_fin'] };
+        expect(await grants(engine, [CRM, HR, FIN]), 'the running kernel').toEqual(served);
+        // Only crm's own set wears crm's envelope; hr's and fin's are their own packages' tenant sets.
+        expect(provenance(engine).filter((p) => p.packageId !== CRM)).toEqual([
+            { packageId: FIN, tenantAuthored: true }, { packageId: HR, tenantAuthored: true },
+        ]);
+        for (const rows of [stores, reversedRows(stores)]) {
+            const restarted = await boot(rows, [CRM, HR, FIN]);
+            ship(restarted.engine);
+            expect(await grants(restarted.engine, [CRM, HR, FIN]), 'after a restart').toEqual(served);
+        }
+    });
+
+    it('CONTROL — a second package of the SAME namespace is still refused beside a stored set; the remedy names steps the writer can take, never an edit inside the other package', async () => {
+        const stores: Stores = new Map();
+        const { engine, protocol } = await boot(stores, [CRM, CRM_TWO]);
+        await save(protocol, CRM, 'cap_crm');
+        const error = await refusal(() => save(protocol, CRM_TWO, 'cap_crm_two'));
+        expect([error?.code, error?.status]).toEqual(['NAMESPACE_CONFLICT', 422]);
+        const message = String(error?.message);
+        expect(message).toContain(`package "${CRM}"`);
+        expect(message).toContain(`delete the set package "${CRM}" stores`);
+        expect(message).not.toContain('rename it in package');
+        // Nothing of crm_two's was written; crm's set is still the one served.
+        expect(Array.from(stores.get('sys_metadata')?.values() ?? []).filter((r) => r.type === 'permission').map((r) => r.package_id)).toEqual([CRM]);
+        expect(await grants(engine, [CRM, CRM_TWO])).toEqual({ [CRM]: ['cap_crm'], [CRM_TWO]: [] });
+    });
+
+    it('CONTROL — an install-declared name of the same namespace is still refused, and the remedy offers only the writer\'s own rename', async () => {
+        const kernel = await boot(new Map(), []);
+        kernel.engine.registry.installPackage(manifestOf(CRM, [N]), 'authored');
+        kernel.engine.registry.installPackage(manifestOf(CRM_TWO), 'authored');
+        const error = await refusal(() => save(kernel.protocol, CRM_TWO, 'cap_crm_two'));
+        expect([error?.code, error?.status]).toEqual(['NAMESPACE_CONFLICT', 422]);
+        const message = String(error?.message);
+        expect(message).toContain(`package "${CRM}"`);
+        expect(message).toContain('Rename this set to a name no other holder holds');
+        expect(message).not.toContain('rename it in package');
+        expect(message).not.toContain('delete the set');
     });
 });
