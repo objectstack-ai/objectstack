@@ -182,7 +182,7 @@ pre-fills from the selected row in `list_item` contexts.
 
 **An action that adds a child line sets its price.** `lookupAutofill` fills only
 the form and the grid, and a stored `expression` reads only its own row, so a
-body inserting `invoice`, `product` and `quantity` alone stores `amount` 0. Read
+body inserting `invoice`, `product` and `quantity` alone stores no `amount`. Read
 the price from the source the build declares, or take it as a `required` param
 where the persona sets prices:
 

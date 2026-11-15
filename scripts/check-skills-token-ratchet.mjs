@@ -1122,7 +1122,7 @@ export const CEILINGS = new Map([
   // bytes of headroom absorbed, ceiling +194, pinned AT the measurement. Same ruling as the lines
   // above (2026-10-27, tap A): 「A:先削重复,余额按实测提高」.
   // 2453 -> 2777: an action that adds a child line sets the line's price — why a
-  // body inserting the parent, the product and the quantity alone stores `amount` 0
+  // body inserting the parent, the product and the quantity alone stores no `amount`
   // (`lookupAutofill` fills only the form and the grid, a stored `expression` reads only
   // its own row), one type-checked example whose body reads the product's price, the
   // `required` param where the persona sets prices, and the `beforeInsert` hook for lines
@@ -1132,10 +1132,10 @@ export const CEILINGS = new Map([
   // `opensInNewTab` H3's tail "— async / computed redirect" (its paragraph opens "A redirect
   // URL computed after a fetch"); ", holes in either" on the `helpText` bullet (the bullet
   // above it lists `description` and a param's `helpText` among the `{{ }}` copy holes).
-  // The file is 9807 -> 11105 bytes -> 2777 tokens, the row's 1 token of headroom absorbed,
+  // The file is 9807 -> 11106 bytes -> 2777 tokens, the row's 1 token of headroom absorbed,
   // ceiling +324, pinned AT the measurement. Same ruling as the lines above (2026-10-27,
   // tap A): 「A:先削重复,余额按实测提高」.
-  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11105 / 4)
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11106 / 4)
   ['skills/objectstack-ui/rules/actions.md', 2777],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
