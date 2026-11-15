@@ -174,8 +174,12 @@ whichever route serves them. These responses are never encoded:
 - **Responses marked `Cache-Control: no-transform`.**
 
 Every response the server could encode carries `Vary: Accept-Encoding`, whatever the
-client sent. So do the `HEAD`, `206` and `304` answers for such a response, although
-they are never encoded themselves. The `ETag` is passed through unchanged. Saves send it back as `If-Match`
+client sent. So do the `HEAD` and `206` answers for such a response, although they are
+never encoded themselves. A `304 Not Modified` is never encoded either, and it carries
+`Vary: Accept-Encoding` only when it carries a compressible `Content-Type` of its own:
+the server judges the answer it sends, not the `200` the `304` stands for. A bare `304`
+(the Console's static files answer one) has no `Vary`; a cache refreshing its stored
+copy from it keeps the stored `Vary`. The `ETag` is passed through unchanged. Saves send it back as `If-Match`
 and the server compares it strongly, so a weakened `W/` tag would fail those saves.
 
 A reverse proxy or CDN in front of the server sees `Content-Encoding` and does not

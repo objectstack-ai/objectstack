@@ -539,6 +539,14 @@ export interface IMetadataService {
 
     /**
      * Unregister all metadata items from a specific package
+     *
+     * [#32985] This contract has no `force` and answers nothing: an
+     * implementation may keep some of the package's items and still resolve
+     * (`MetadataManager` keeps an item whose stored row names the package by
+     * the `_packageId` stamp alone). An uninstall UI must not report success
+     * from this call. It calls `MetadataManager.unregisterPackageWithReport`
+     * (`@objectstack/metadata`) and shows each `kept` item, or the uninstall
+     * looks complete while those items stay live.
      * @param packageName - The package name whose items should be removed
      */
     unregisterPackage?(packageName: string): Promise<void>;

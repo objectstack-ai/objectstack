@@ -3176,12 +3176,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // path, and every uncertain answer takes the records path. `null` until the
   // registry has answered, and the feed read waits for it: comments and their
   // reactions are read as one answer.
-  const reactionPresence = useObjectPresence(COMMENT_REACTION_OBJECT);
-  const reactionStore: 'records' | 'column' | null = !reactionPresence.settled
-    ? null
-    : reactionPresence.presence === 'absent'
-      ? 'column'
-      : 'records';
+  //
+  // A caller whose loaded grants hold no read on the object is not asked about
+  // it: the metadata door serves an object's definition only to a caller its
+  // read check admits (ADR-0106 as amended by ruling record 6787890900), and
+  // the object declares no `schemaReadDelegate`, so that read could only
+  // answer absent (a 404 on every record page). It takes the path that answer
+  // takes. With no permission provider every grant reads open, as before.
+  const reactionReadRefused = perms.isLoaded && !perms.can(COMMENT_REACTION_OBJECT, 'read');
+  const reactionPresence = useObjectPresence(reactionReadRefused ? '' : COMMENT_REACTION_OBJECT);
+  const reactionStore: 'records' | 'column' | null = reactionReadRefused
+    ? 'column'
+    : !reactionPresence.settled
+      ? null
+      : reactionPresence.presence === 'absent'
+        ? 'column'
+        : 'records';
   /**
    * The signed-in user's own reaction rows, per comment (`[thread, comment]`)
    * and emoji: the row id a click that takes the reaction back deletes. Filled

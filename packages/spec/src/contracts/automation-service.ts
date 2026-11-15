@@ -1381,6 +1381,16 @@ export interface ConnectorConnectionState {
 export interface ConnectorConnectionRequest {
     /** The declarative connector instance, by name. */
     connector: string;
+    /**
+     * ADR-0150 D9 (#31699) — the package whose instance of `connector` is
+     * meant, when two packages of different namespaces each declare one of the
+     * name. The namespace-addressed connection door
+     * (`/automation/connectors/:ns/:name/connection`) fills it from the address;
+     * left out, the bare name must resolve to one instance or the call is
+     * refused `409` (ambiguity is reported, never guessed). A connect that
+     * already recorded a connection keeps that connection's package.
+     */
+    package?: string;
     /** The caller — its organization selects the connection, its user stamps the row. */
     context?: ExecutionContext;
     /**

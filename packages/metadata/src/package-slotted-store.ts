@@ -139,7 +139,8 @@ import { PACKAGE_SLOTTED_METADATA_TYPES } from '@objectstack/spec/api';
  * picklist family's `picklist`, `mapping` and `dataset` (#31700); then
  * `webhook` (#31699 PR 2), so a host with no registry lists each package's
  * declaration of one name; then `tool` (#31985, ADR-0150 child B), likewise
- * in the change that narrows it. The list itself is `@objectstack/spec`'s
+ * in the change that narrows it; and last `connector` (#31699 PR 3), in the
+ * change that narrows it. The list itself is `@objectstack/spec`'s
  * `PACKAGE_SLOTTED_METADATA_TYPES` (#32905), so a client that names a package
  * on the history and rollback doors reads the same one; a type joins there.
  */

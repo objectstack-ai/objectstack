@@ -11,12 +11,11 @@ A position that declares `renamedFrom` moves the holders of each old name (`sys_
 
 Carried at once, without a restart:
 
-- a hot install through the marketplace install-local door (`/marketplace/install-local`), for the positions of the package it names (`app/ID`), when the old name is no position the running kernel still serves (for example, an install after the earlier version was uninstalled);
+- a hot install or upgrade through the marketplace install-local door (`/marketplace/install-local`), for the positions of the package it names (`app/ID`). An upgrade over a version the running kernel still serves is carried too: re-registering the package withdraws the position its new version no longer ships (`@objectstack/objectql`, #33050), so the old name is no position the kernel serves when the announcement is heard;
 - a per-item publish of a position, and a package publish of drafts, for each position they publish (`position/NAME`).
 
 Still carried at the next restart, by the boot run:
 
-- a hot upgrade over a version the running kernel still serves: its old position keeps serving until the restart, so its holders keep it until then;
 - the runtime's package install and enable routes, which do not announce `metadata:reloaded`;
 - an artifact reload, which announces a file path and names no package or position.
 

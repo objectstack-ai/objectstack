@@ -241,6 +241,22 @@ those responses are **per-caller**, and the rules below are what keep that safe.
   set, every caller is served every object, including objects they may not
   read, which the mask otherwise answers as objects that do not exist.
 
+## Response compression on each door
+
+Who compresses a response depends on the door that serves it:
+
+| Door | Who compresses |
+| :--- | :--- |
+| Self-hosted server: `@objectstack/plugin-hono-server`, what `os dev` and `os start` run | **The server**, by default: brotli or gzip for compressible responses of 1 KB or more. See [Response Compression](/docs/protocol/kernel/http-protocol#response-compression). |
+| Hosted door: `createHonoApp` from `@objectstack/hono` on Cloudflare Workers, Deno Deploy, Bun or Vercel Edge | **The platform or CDN in front of it.** The application does not compress there: it sends no `Content-Encoding` and no `Vary: Accept-Encoding`. |
+
+On the hosted door, check that the platform compresses JSON, JavaScript and CSS
+responses, and turn it on there if it does not (a runtime you serve yourself
+may not compress at all: put a proxy or CDN in front of it), rather than adding
+compression to the app. Either way, keep the `ETag` unchanged when a layer
+compresses: saves send it back as `If-Match` and the server compares it
+strongly, so a layer that weakens it to `W/` makes those saves fail.
+
 ## What's NOT in the runtime (yet)
 
 - **OTel context propagation.** We export `parseTraceparent` /

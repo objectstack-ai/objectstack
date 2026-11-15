@@ -2709,6 +2709,11 @@ export class MetadataManager implements IMetadataService {
    * result {@link unregisterPackageWithReport} answers; `force` removes them
    * too. Every row is checked before anything is removed, so a failed check
    * removes nothing.
+   *
+   * This method answers `void`, as the spec's `IMetadataService.unregisterPackage`
+   * does, so a caller cannot see what was kept. An uninstall UI calls
+   * {@link unregisterPackageWithReport} and shows each `kept` item instead,
+   * or the uninstall looks complete while those items stay live.
    */
   async unregisterPackage(packageName: string, options?: MetadataUnregisterPackageOptions): Promise<void> {
     await this.unregisterPackageWithReport(packageName, options);
