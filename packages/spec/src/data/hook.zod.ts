@@ -1359,7 +1359,12 @@ export const HookContextSchema = lazySchema(() => z.object({
    *
    *  - `mode` — `'record'` when this call is the caller's whole write (a
    *    single-id update/delete, a non-batch insert); `'per-row'` when it is
-   *    one of N dispatches for one caller write.
+   *    one of N dispatches for one caller write. A cascade delete removes a
+   *    relation's children as one predicate delete per chunk (ruling
+   *    6893661036), so a cascaded child is `'per-row'` with
+   *    `input.options.multi` set, and every child's `beforeDelete` runs before
+   *    any of them is gone; a chunk the caller's scope narrows is deleted by
+   *    id instead and keeps `'record'`, so one cascade can show both.
    *  - `index` — 0-based position within that fan-out; always 0 when
    *    `mode` is `'record'`. `index === 0` is how a handler does batch-scoped
    *    work exactly once instead of N times.
@@ -1765,8 +1770,8 @@ export const HookContextSchema = lazySchema(() => z.object({
    * Unlike `referentialFieldClear`, this fact has no `__`-prefixed twin on the
    * ExecutionContext, and nothing on that envelope is the contract. The engine
    * recognises the delete it issued through an engine-private ambient record
-   * keyed on the exact object and id its cascade is deleting, claimed by that
-   * one delete. Two consequences follow, and both are part of the contract:
+   * keyed on the exact object and id (or, for a batch of children, the exact
+   * id set) its cascade is deleting, claimed by that one delete. Two consequences follow, and both are part of the contract:
    *
    *  - it does not ride the envelope, so a write a hook issues through
    *    `ctx.api` during a cascade dispatch is NOT marked, a delete included:
