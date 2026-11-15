@@ -375,12 +375,18 @@ describe('unset-manager dead-end (#16748)', () => {
     // ⛔ And they must not be deleted: a deployment running a real directory
     // sync may well populate the column, and the defect was presenting all
     // three as equally available, never naming them at all. They now also take
-    // PRECEDENCE — the endpoint refuses an `idp_provisioned` identity, and so
-    // does the import's `manager_id` column, which runs the same derivation —
+    // PRECEDENCE — the endpoint refuses an identity a SCIM directory holds, and
+    // so does the import's `manager_id` column, which runs the same derivation —
     // so the hint must not read as "use the endpoint instead of your directory".
     expect(remedy).toContain('SCIM provisioning and directory sync can populate it');
-    expect(remedy).toContain("source 'idp_provisioned' the admin operation refuses");
+    expect(remedy).toContain('where a SCIM directory holds an identity the admin operation refuses');
     expect(remedy).toContain("the import's manager_id column included");
+    // ⛔ But only where a directory exists: the `idp_provisioned` mark alone
+    // also covers a person who only signs in through SSO, whose manager the
+    // endpoint sets (maintainer ruling record 6895645364). A remedy that sent
+    // that admin to a directory they do not have cannot be carried out.
+    expect(remedy).not.toContain("source 'idp_provisioned' the admin operation refuses");
+    expect(remedy).toContain('only signs in through SSO');
   });
 
   it('the one-line `fix:` names the first route and the escape, and never the Console form', () => {

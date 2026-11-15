@@ -361,3 +361,103 @@ describe('page:header — fail-closed stays fail-closed, and says so once (#3521
     }
   });
 });
+
+describe('page:header — a record still loading is its own state, not an empty record (objectstack#33987)', () => {
+  // The record page binds its record id at once and hands `data: null` until
+  // the read answers. Evaluating then meant evaluating against an empty
+  // record: every `record.<field>` predicate faulted with "No such key", and
+  // the warn-once report told the author to check the field names of a field
+  // the object HAS — on every load, before the record arrived.
+  const faultsFor = (warn: ReturnType<typeof vi.spyOn>, name: string) =>
+    warn.mock.calls.filter(
+      (c: unknown[]) => String(c[0]).includes('failed to evaluate') && String(c[0]).includes(`"${name}"`),
+    );
+
+  function headerTree(action: Record<string, unknown>, recordId: string | null, data: any) {
+    return (
+      <PredicateScopeProvider scope={SCOPE}>
+        <ActionProvider>
+          <RecordContextProvider
+            objectName="showcase_field_zoo"
+            recordId={recordId}
+            data={data}
+            objectSchema={OBJECT_SCHEMA}
+          >
+            <PageHeader
+              schema={{
+                type: 'page:header',
+                title: 'Specimen',
+                actions: [{ locations: ['record_header'], label: 'Zoo Action', type: 'api', ...action }],
+              }}
+            />
+          </RecordContextProvider>
+        </ActionProvider>
+      </PredicateScopeProvider>
+    );
+  }
+
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    return () => warn.mockRestore();
+  });
+
+  it('pending: no fault report; once the record arrives the predicate is honoured, still with no report', () => {
+    const action = { name: 'zoo_pending_visible_33987', visible: 'record.f_status == "open"' };
+    const { rerender } = render(headerTree(action, 'r1', null));
+    // Pending answers the key's own fallback (hidden), and says nothing.
+    expect(shown()).toBe(false);
+    expect(faultsFor(warn, 'zoo_pending_visible_33987')).toHaveLength(0);
+
+    rerender(headerTree(action, 'r1', RECORD));
+    expect(shown()).toBe(true);
+    expect(faultsFor(warn, 'zoo_pending_visible_33987')).toHaveLength(0);
+  });
+
+  it('the loaded verdict is the predicate’s own in the negative direction too', () => {
+    const action = { name: 'zoo_pending_negative_33987', visible: 'record.f_status == "open"' };
+    const { rerender } = render(headerTree(action, 'r1', undefined));
+    rerender(headerTree(action, 'r1', { ...RECORD, f_status: 'closed' }));
+    expect(shown()).toBe(false);
+    expect(faultsFor(warn, 'zoo_pending_negative_33987')).toHaveLength(0);
+  });
+
+  it('pending: `hidden`, `disabled` and `pressed` report nothing either, and `disabled` claims no reason about the record', () => {
+    const action = {
+      name: 'zoo_pending_legs_33987',
+      hidden: 'record.f_status == "closed"',
+      disabled: 'record.f_status == "closed"',
+      pressed: 'record.f_status == "open"',
+    };
+    const { rerender } = render(headerTree(action, 'r1', null));
+    // Each leg answers its own fallback: rendered, disabled, not pressed.
+    expect(shown()).toBe(true);
+    expect(button()).toBeDisabled();
+    expect(button()).toHaveAttribute('aria-pressed', 'false');
+    expect(button()).not.toHaveAttribute('aria-describedby');
+    expect(faultsFor(warn, 'zoo_pending_legs_33987')).toHaveLength(0);
+
+    rerender(headerTree(action, 'r1', RECORD));
+    expect(shown()).toBe(true);
+    expect(button()).not.toBeDisabled();
+    expect(button()).toHaveAttribute('aria-pressed', 'true');
+    expect(faultsFor(warn, 'zoo_pending_legs_33987')).toHaveLength(0);
+  });
+
+  it('CONTROL: a LOADED record really missing the key still faults, fails closed and says so once', () => {
+    const { f_status: _omitted, ...withoutStatus } = RECORD;
+    const action = { name: 'zoo_loaded_missing_33987', visible: 'record.f_status == "open"' };
+    render(headerTree(action, 'r1', withoutStatus));
+    expect(shown()).toBe(false);
+    const faults = faultsFor(warn, 'zoo_loaded_missing_33987');
+    expect(faults).toHaveLength(1);
+    expect(String(faults[0][0])).toContain('f_status');
+  });
+
+  it('CONTROL: a header with no record bound (no id) still evaluates, so a `record.*` predicate there faults and says so', () => {
+    const action = { name: 'zoo_unbound_33987', visible: 'record.f_status == "open"' };
+    render(headerTree(action, null, undefined));
+    expect(shown()).toBe(false);
+    expect(faultsFor(warn, 'zoo_unbound_33987')).toHaveLength(1);
+  });
+});

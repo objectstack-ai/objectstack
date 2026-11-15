@@ -353,6 +353,14 @@ contradicts it, and correct it here when it does.
   the `OS_PORT` it exported, and that port answers whatever holds it. **So:** read the
   port from the boot log's `server bound to port` line, or confirm no shift was printed,
   before the first request.
+  ⚠️ **A restart issued while the old server still listens is a second server, not a
+  restart.** The shift does not refuse a boot whose `-d` names the file DB the holder
+  serves: measured at `895783a1`, a second `os dev -p 41900 -d file:RUN/data.db` beside a
+  live boot on 41900 with the same DB printed both shift lines, served 41901, and read
+  the SSO provider the first boot had registered, so two servers wrote one database. Only
+  the log says so; the runner who did not read it drives the old one on the old port.
+  **So:** stop the old group and confirm `lsof -ti tcp:PORT` prints nothing (the
+  container has `lsof`, not `ss`: the `ss` entry below) before the next boot on that port.
 
   **Check:** before scoring any connector clause, prove where the live dispatch lands:
   create a `showcase_task`, read the `showcase_declarative_connector_ping` run it fires
@@ -414,6 +422,21 @@ contradicts it, and correct it here when it does.
   in the root `.gitignore`, so a clean status is no evidence either way. Items this applies to:
   `platform-core.marketplace-install-local-lifecycle` and
   `platform-core.marketplace-console-honesty`.
+
+  **An installed-local package leaves through its own door, not `/packages`.**
+  `DELETE /api/v1/packages/<id>` treats it as read-only, shipped by the deployment, and
+  answers **422 `WRITABLE_PACKAGE_REQUIRED`** with nothing removed;
+  `DELETE /api/v1/marketplace/install-local/<manifestId>` removes the cached manifest and
+  withdraws the package from the running kernel at once (header of
+  `packages/cloud-connection/src/marketplace-install-local-plugin.ts`). Measured at
+  `895783a1` on one scratch package installed through `POST /api/v1/marketplace/install-local`:
+  the `/packages` delete answered 422, the install-local delete answered 200 with its
+  `cleanups`, `GET /api/v1/packages/<id>` then answered 404 and the ledger directory was
+  empty, with no restart. That door refuses with **409 `RESOURCE_CONFLICT`**, removing
+  nothing, while the package's paired `<id>.custom` is installed or another package extends
+  an object it owns (read from the same header, not driven): remove the pair or the
+  extending package first. ⛔ Do not restart with the cached manifest moved aside to drop a
+  package: that edits the ledger behind the runtime, and the door does it.
 
 - **A per-boot `-d file:…` database does NOT isolate the showcase's upload root or its
   external datasource either — the same class as the install-local entry above.** Two
@@ -801,6 +824,27 @@ contradicts it, and correct it here when it does.
   QA run #32135 listed the walled boot among the recurring fixture debt). The items that
   carry a walled leg reach the command through this entry, which they already cite.
 
+- **An SSO item brings its own OIDC identity provider, and one command serves it.** No stock
+  boot ships one, so a clause that needs a registered OIDC provider (the
+  `identity-auth.sso-*` family) needs a local one. `@better-auth/sso` reads only a discovery
+  document (`issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`) and the JWKS to
+  register a provider. `node scripts/qa/qa-fixture.mjs oidc-stub` serves both on `localhost`
+  from a detached process, with a per-run RSA key, and prints the register body; with
+  `--register` (and `--base-url`) it registers the stub as the admin through
+  `POST /api/v1/auth/admin/sso/register` and reads it back through
+  `POST /api/v1/auth/admin/sso/get-groups-claim` (`--groups-claim CLAIM` sets the claim);
+  `teardown --dir DIR` stops it. The boot needs `OS_SSO_ENABLED=true` exported: without it
+  the register door answers **404 `SSO_REGISTER_FAILED`**. An `os dev` boot trusts
+  `http://localhost:*` already (the `isDev` default in `packages/cli/src/commands/serve.ts`),
+  so the stub's origin needs no `OS_TRUSTED_ORIGINS` there; a `serve` or `start` boot does
+  need it, or the vendor refuses the loopback discovery URL (`discovery_private_host`, 400
+  `SSO_REGISTER_FAILED` "not publicly routable"; read from source, not booted). Measured at
+  `895783a1`: `--register` answered 200 and read the provider back on an `os dev` boot with
+  `OS_TRUSTED_ORIGINS` naming another port and on one with none, and a boot without
+  `OS_SSO_ENABLED` answered the register 404. ⚠️ The stub serves no sign-in: its authorize,
+  token and userinfo endpoints answer 501, so a clause that needs a federated sign-in is
+  still not driven by it, and its record says so.
+
 - **A stock `single` boot holds exactly one organization, and no door mints a second; a
   walled boot mints them through the auth API.**
   `POST /api/v1/auth/organization/create` answers **`403 ORGANIZATION_CREATION_DISABLED`**
@@ -870,6 +914,63 @@ contradicts it, and correct it here when it does.
   `OS_TEST_TIERS=nightly`, and every other cli pin without it. ⛔ A named file that collects
   no test is not a pass, and here it is not a stale ref either — re-run it under the other
   setting before fixing the item.
+
+- **A pin run from a shell prints no line per file — a clause that asks for "the summary
+  line per pin file" needs `--reporter=tree`.** A runner's shell is not a TTY, and there
+  vitest's default reporter prints only the run's totals. Measured at `895783a1` (vitest
+  4.1.12) on two `packages/types` pins, `env.test.ts` and `actions-door-answer.test.ts`,
+  with stdin from `/dev/null`: the default run printed `Test Files  2 passed (2)` and
+  `Tests  73 passed (73)` and no file line; `--reporter=verbose` printed one line per TEST
+  (`✓ |local| src/env.test.ts > readEnvWithDeprecation > …`) and still no file line;
+  `--reporter=tree` printed one per FILE, `✓ |local| src/env.test.ts (63 tests) 24ms` and
+  `✓ |local| src/actions-door-answer.test.ts (10 tests) 9ms`, with its tests under each.
+  **So:** add `--reporter=tree` to a pin run whose clause is scored per file, and quote
+  those lines. A clause scored from the totals alone records that it was (all files
+  passed, 0 failed), never a per-file reading it does not have.
+
+- **`pnpm --dir APP exec CMD` runs CMD in APP, so a relative path you hand it resolves
+  there, not in your shell's directory.** `os test`'s glob resolves against the process's
+  working directory (`resolveGlob()` in `packages/cli/src/commands/test.ts`), so a
+  scratch suite staged in `SCRATCH/qa/` and run as
+  `pnpm --dir examples/app-showcase exec objectstack test 'qa/*.test.json'` from SCRATCH
+  runs the showcase's own `qa/platform-smoke.test.json` instead. Measured at `895783a1`:
+  that line printed `Running suite: Showcase platform smoke (Quality Protocol)`, while the
+  app's binary by full path from SCRATCH,
+  `<abs>/examples/app-showcase/node_modules/.bin/objectstack test 'qa/*.test.json'`, and
+  the pnpm line with an absolute glob, `'SCRATCH/qa/*.test.json'`, both ran the scratch
+  suite. **So:** run a staged suite with either of the last two, and read the
+  `Running suite:` line before scoring. ⛔ A green run of the repo's suite is not a reading
+  of the staged one.
+
+- **A pre-release localhost npm registry (the `cli.scaffold-*` pre-release variant): three
+  facts the recipe meets.** Measured at `895783a1` with verdaccio 6.11.2 installed into a
+  scratch directory with `npm install verdaccio@6`:
+  1. **Its npmjs uplink trusts this container's egress proxy only through the
+     environment the shell already has.** The shell exports `NODE_OPTIONS` carrying
+     `--use-openssl-ca` and `SSL_CERT_FILE`, which together make Node trust the proxy's
+     certificate; a verdaccio started from that shell with only `NODE_EXTRA_CA_CERTS`
+     removed proxied `GET /is-number` 200. Started with all three removed, the
+     same request answered **404 `{"error": "no such package available"}`** and logged
+     nothing at the default `warn` level: a failed uplink reads as a package that does not
+     exist. **So:** start it from the shell as it is, never from a launcher that clears
+     the environment.
+  2. **A user comes from the registry's own door, and its token is the publish
+     credential.** With the `htpasswd` auth plugin configured,
+     `PUT /-/user/org.couchdb.user:NAME` with `{"name": NAME, "password": …}` answered
+     `{"ok": "user 'NAME' created", "token": …}`; an `.npmrc` holding
+     `//localhost:PORT/:_authToken=TOKEN` beside `registry=http://localhost:PORT/` then
+     publishes. Pass it with `npm publish … --userconfig FILE`.
+  3. **The default request-body limit refuses the large tarballs.** A 12 MB tarball
+     answered **`E413 Payload Too Large`** at the default `max_body_size`, and published
+     once `max_body_size: 100mb` was in the config. `cli.scaffold-first-run`
+     fixtures.requires[1] records the `@objectstack/spec` and `@objectstack/console`
+     tarballs answering 413 at the default.
+
+  ⚠️ **And `npm publish` reads a bare relative tarball path as a GitHub shorthand.**
+  `npm publish tarballs/x.tgz` (npm 10.9.9) ran
+  `git ls-remote ssh://git@github.com/tarballs/x.tgz.git` and failed with exit 128;
+  `npm publish ./tarballs/x.tgz` published (both measured with `--dry-run`). **So:** give
+  every tarball path a leading `./`, or an absolute one.
 
 - **`scripts/qa/qa-rollup.mjs` has a blind spot a runner meets at close-out.** Only a
   BARE area name classifies as an area: `classifySelector('platform-core')` answers `area`,
