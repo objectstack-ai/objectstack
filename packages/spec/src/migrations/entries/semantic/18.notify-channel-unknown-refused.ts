@@ -15,13 +15,11 @@ export const entry: SemanticMigration = {
     'A channel is code a plugin registers with the messaging service, so a name nothing registers is a typo or a '
     + 'missing plugin. The automation write doors saved such a flow with 200; every delivery on that channel then '
     + 'failed at run time with "channel NAME not registered" and a step warning. The doors now refuse it 400 '
-    + 'VALIDATION_FAILED, naming the node and the channel at its path (nodes.N.config.channels, '
-    + 'nodes.N.config.channels.M for a list member, a longer path inside a region body) with a did-you-mean and '
-    + 'listing the registered channels. A channel whose transport is not configured yet (email with no email '
-    + 'service) is known and still accepted. Not judged: a deployment with no messaging service, one whose channel '
-    + 'reader throws, answers no list or answers a list with a member that is not a channel, a save before '
-    + 'kernel:ready has settled, a flow a package ships, a flow stored through the metadata door, and a stored row '
-    + 're-registered at boot. There is no mechanical rewrite: only the author knows which channel was meant.',
+    + 'VALIDATION_FAILED at nodes.N.config.channels, naming the node and the channel with a did-you-mean and listing '
+    + 'the registered channels. A channel whose transport is not configured yet (email with no email service) is '
+    + 'known and still accepted. Not judged: a deployment with no messaging service, a flow a package ships, a flow '
+    + 'stored through the metadata door, and a stored row re-registered at boot. There is no mechanical rewrite: '
+    + 'only the author knows which channel was meant.',
   acceptanceCriteria:
     'POST /api/v1/automation with the flow, every notify node naming registered channels, answers 200, and '
     + 'GET /api/v1/automation/NAME serves it.',

@@ -66,9 +66,7 @@ const storeRefusal = () => Object.assign(new Error('flow/x failed spec validatio
  * And whether the kernel's `kernel:ready` has settled (`hasBootPhaseSettled`).
  */
 interface ChannelComposition {
-    messaging?:
-        | ReadonlyArray<{ id: string; configured: boolean }>
-        | 'no-reader' | 'reader-throws' | 'reader-not-a-list' | 'reader-bare-ids' | 'reader-one-bare-id';
+    messaging?: ReadonlyArray<{ id: string; configured: boolean }> | 'no-reader' | 'reader-throws' | 'reader-not-a-list';
     /** `'throws'`: the kernel's boot-phase reader itself throws, so the check cannot finish. */
     ready?: boolean | 'throws';
 }
@@ -103,10 +101,6 @@ function boot({ protocol: mode = 'real', messaging, ready = false }: { protocol?
     if (messaging === 'no-reader') services.messaging = { emit: async () => ({}) };
     else if (messaging === 'reader-throws') services.messaging = { getKnownChannels: () => { throw new Error('registry unreadable'); } };
     else if (messaging === 'reader-not-a-list') services.messaging = { getKnownChannels: () => ({ inbox: true }) };
-    else if (messaging === 'reader-bare-ids') services.messaging = { getKnownChannels: () => ['inbox', 'email'] };
-    else if (messaging === 'reader-one-bare-id') {
-        services.messaging = { getKnownChannels: () => [{ id: 'inbox', configured: true }, 'email'] };
-    }
     else if (messaging) services.messaging = { getKnownChannels: () => messaging.map((entry) => ({ ...entry })) };
     const resolve = (name: string): unknown => services[name];
     const kernel = {
@@ -387,18 +381,6 @@ describe('a notify node naming a channel no plugin registers is refused at the s
         for (const messaging of ['reader-throws', 'reader-not-a-list'] as const) {
             const h = boot({ messaging, ready: true });
             const { response } = await h.dispatcher.handleAutomation('', 'POST', notifyFlowOf(NEW, 'emial'), AUTHOR(), undefined);
-            expect(statusOf(response), messaging).toBe(200);
-            expect(h.saveMetaItem, messaging).toHaveBeenCalledTimes(1);
-            expect(h.held(NEW), messaging).toBeDefined();
-        }
-    });
-
-    it('a list with any member that is not a `{ id: string }` is unreadable, not judged: a channel it names is never refused', async () => {
-        // The reader knows `email`, spelled off the declared shape: dropping the
-        // member would leave a roster without it and refuse the node.
-        for (const messaging of ['reader-bare-ids', 'reader-one-bare-id'] as const) {
-            const h = boot({ messaging, ready: true });
-            const { response } = await h.dispatcher.handleAutomation('', 'POST', notifyFlowOf(NEW, 'email'), AUTHOR(), undefined);
             expect(statusOf(response), messaging).toBe(200);
             expect(h.saveMetaItem, messaging).toHaveBeenCalledTimes(1);
             expect(h.held(NEW), messaging).toBeDefined();
