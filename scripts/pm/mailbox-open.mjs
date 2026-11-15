@@ -96,6 +96,23 @@
  *   ④ READ the new pull's number back off its head and print it — the number
  *      `subscribe_pr_activity` takes.
  *
+ * ## Never locked — measured
+ *
+ * The repository is public, so any GitHub account can comment on a mailbox,
+ * and the comment reaches the subscribed seat's session as a PR-activity
+ * event. Locking the conversation does NOT close that door for the fleet: it
+ * shuts the relay out too. Measured 2026-11-15 on mailbox #33915 (the canary
+ * run recorded on the card, comment 6897369511): the lock landed and read back
+ * `locked: true`, then the relay App's comment on it answered HTTP 403 "Unable
+ * to create comment because issue is locked", though the App holds write
+ * access; the lock was taken back. A locked mailbox therefore hears no knock,
+ * so this file opens mailboxes unlocked and the relay has no lock row
+ * (`fleet-write/ops.mjs`). ⛔ Do not add a lock back without a new
+ * measurement of the relay commenting on a locked conversation. The defence
+ * against an outsider's comment is the reader's: a knock counts only from the
+ * relay or a maintainer, and any other author's comment is ignored with its
+ * body never read (`record-recognisers.mjs` `readMailboxComment`).
+ *
  * `--close <n>` reads the pull first and REFUSES (exit 4) unless it is open
  * and carries `pm:mailbox`, so a mistyped number can never close a real PR;
  * then one stroke: the closing `comment`, `issue_patch state: closed` and,
@@ -148,7 +165,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { MAILBOX_BRANCH_SHAPE, MAILBOX_LABEL } from './fleet-write/ops.mjs';
+import { MAILBOX_BRANCH_SHAPE, MAILBOX_LABEL, OPS } from './fleet-write/ops.mjs';
 import { validateStroke } from './fleet-write/validate.mjs';
 import { ghApi, PER_PAGE, readAllPages } from './gh-pages.mjs';
 
@@ -527,7 +544,7 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: the two modes and every refusal': 14,
   'the seat: canonical key, ref slug, and the per-seat branch': 11,
-  'the open plan: branch, labels, body, and the relay validator': 12,
+  'the open plan: branch, labels, body, and the relay validator': 13,
   'the close plan: comment then close, then the delete of a claude/mailbox-* head, judged by the validator': 7,
   'whose mailbox a pull is: the seat on the body line or the head, a legacy login, neither': 8,
   "finding a seat's open mailbox: by seat, never by login": 10,
@@ -604,6 +621,7 @@ async function selfTest() {
   t('the body tells a sender to open with To: <seat>', p.actions[0].body.includes('the line `To: domain:ui#4`, then ONE line'), true);
   t('the body states the CI posture, the never-merged rule and the closed vocabulary', [/RED BY DESIGN/.test(p.actions[0].body), /Never merged/.test(p.actions[0].body), /one of the doorbell keys/.test(p.actions[0].body) && /--mailbox-keys/.test(p.actions[0].body) && /no acknowledgements/.test(p.actions[0].body)], [true, true, true]);
   t('the relay validator accepts the stroke', p.errors, []);
+  t('⛔ the open sends no lock (header 〈Never locked — measured〉): its one action is pr_create, the plan names no lock, and the relay table has no row that locks', [p.actions.map((a) => a.op), /lock/i.test(planText(p)), Object.keys(OPS).filter((op) => /lock/.test(op))], [['pr_create'], false, []]);
   const ph = planOpen({ repo: 'o/r', seat: 'triage', login: 'os-bill', head: 'claude/project-thread-x' });
   t('--head names the branch and skips the push; the body still names the seat', [ph.branch, ph.push, ph.actions[0].head, ph.actions[0].body.split('\n')[0]], ['claude/project-thread-x', false, 'claude/project-thread-x', 'Mailbox-of: triage#1 · os-bill']);
   t('no draft key is sent — the relay forces draft itself', 'draft' in p.actions[0], false);
