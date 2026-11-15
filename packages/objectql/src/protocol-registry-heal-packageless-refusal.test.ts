@@ -244,3 +244,94 @@ describe('[#32620, ruling 6818436831] a refused heal of a non-holder\'s row reti
         expect(lines[0]).toContain('retired from its own package\'s slot');
     });
 });
+
+/**
+ * [#33832, ADR-0150 D3, epic ruling 6818436831] A `dashboard` or `report` is
+ * addressed by `(package, name)` but stored in the metadata service by name
+ * alone, so the service keeps the item registered LAST and answers it to a read
+ * naming any package. The heal's tier 2 read it as the baseline after the
+ * delete of a non-holder's row and registered it in the bare slot: a pick
+ * between the two holders.
+ *
+ * The shape a real boot leaves (measured on a kernel booted from a compiled
+ * two-package artifact through the artifact door and `AppPlugin`, both kernel
+ * shapes, both orders): each holder in its composite slot, both in the
+ * service with the last-registered one kept, and the non-holder's stored row
+ * declined from the bare slot. There, at 45dee177, the delete left the
+ * last-registered holder's item in the bare slot: every bare registry lookup
+ * answered it and the registry listed it twice. The protocol's reads did not
+ * move, because the composite slots answer them. Bare slot: picked holder's
+ * item → empty.
+ */
+describe('[#33832, ruling 6818436831] the heal never registers a picked holder of a name the service stores by name alone', () => {
+    const O = 'com.acme.other';
+    const shippedItem = (type: string, id: string) => (type === 'report'
+        ? { name: NAME, label: `shipped:${id}`, type: 'summary', dataset: 'qa_metrics', values: ['total'], _packageId: id }
+        : { name: NAME, label: `shipped:${id}`, widgets: [], _packageId: id });
+
+    async function boot(type: string, order: readonly string[]) {
+        const registry = new SchemaRegistry({ multiTenant: false });
+        registry.logLevel = 'silent' as never;
+        for (const id of [O, ...order]) registry.installPackage(manifest(id), 'code');
+        // Each holder in its composite slot, as the package door registers it.
+        for (const id of order) registry.registerItem(type as never, shippedItem(type, id), 'name' as never, id);
+        // The service keeps one item per name for these types: the last one.
+        const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+        for (const id of order) manager.registerInMemory(type as never, NAME, shippedItem(type, id));
+        const rows: Array<Record<string, unknown>> = [{
+            id: 'row_other', type, name: NAME, organization_id: null, package_id: O, state: 'active', checksum: 'sha256:head',
+            metadata: JSON.stringify({ ...shippedItem(type, O), label: 'row:other', _packageId: undefined }),
+        }];
+        const engine = engineOver(registry, rows);
+        const protocol: any = new ObjectStackProtocolImplementation(engine as never, () => new Map<string, unknown>([['metadata', manager]]) as never, undefined);
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        await protocol.loadMetaFromDb();
+        const bareEntry = () => ((registry as any).metadata.get(type) as Map<string, { label?: string }> | undefined)?.get(NAME)?.label;
+        const listed = () => (registry.listItems(type as never) as Array<{ name?: string; label?: string }>)
+            .filter((item) => item?.name === NAME).map((item) => item.label).sort();
+        const read = async (packageId?: string) => {
+            try {
+                const res = await protocol.getMetaItem({ type, name: NAME, ...(packageId ? { packageId } : {}) });
+                return (res?.item as { label?: string } | undefined)?.label;
+            } catch (err) {
+                expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+                const refusal = err as PackageScopedNameRefusedError;
+                return [refusal.code, refusal.status, refusal.refusal.candidates];
+            }
+        };
+        return { protocol, rows, logged, bareEntry, listed, read };
+    }
+
+    for (const type of ['dashboard', 'report']) {
+        for (const order of [[A, B], [B, A]] as const) {
+            it(`${type} (${order[0] === A ? 'alpha' : 'beta'} first): the delete of a non-holder's row leaves the bare slot empty; the registry lists each holder once, and every read answers as before the delete`, async () => {
+                const h = await boot(type, order);
+                const holders = order.map((id) => ({ kind: 'package', packageId: id }));
+                // The real boot's shape: the non-holder's row is not in the bare slot.
+                expect(h.bareEntry()).toBeUndefined();
+
+                const result = await h.protocol.deleteMetaItem({ type, name: NAME, packageId: O });
+
+                expect(result.success).toBe(true);
+                expect(h.rows).toHaveLength(0);
+                // At 45dee177: `shipped:<the holder registered last>`, listed a second time.
+                expect(h.bareEntry()).toBeUndefined();
+                expect(h.listed()).toEqual([`shipped:${A}`, `shipped:${B}`]);
+                expect([await h.read(A), await h.read(B)]).toEqual([`shipped:${A}`, `shipped:${B}`]);
+                expect(await h.read()).toEqual(['RESOURCE_CONFLICT', 409, holders]);
+                expect(healLines(h.logged)).toEqual([]);
+            });
+        }
+    }
+
+    it('CONTROL — dashboard, a name ONE package holds: the delete of a non-holder\'s row still registers that holder\'s baseline, as before', async () => {
+        const h = await boot('dashboard', [A]);
+
+        await h.protocol.deleteMetaItem({ type: 'dashboard', name: NAME, packageId: O });
+
+        expect(h.bareEntry()).toBe(`shipped:${A}`);
+        expect(await h.read(A)).toBe(`shipped:${A}`);
+        expect(healLines(h.logged)).toEqual([]);
+    });
+});
