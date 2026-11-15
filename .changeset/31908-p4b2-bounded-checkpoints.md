@@ -6,6 +6,7 @@ fix(plugin-audit)!: the audit sealer seals a window into checkpoints of at most 
 
 Clause-②: yes (narrowing) — narrowed: `os audit verify` reports a row id that two checkpoints list as the new chain fault `listed_twice` and fails the run, where the 18.4.0 verifier accepted it, and the 18.4.0 sealer could write such a chain when two of its late sealings overlapped. Widened: the checkpoint's signed body gains two optional fields, `part_index` and `final_part`; `sys_audit_checkpoint` gains two nullable columns for them; and the exported `AuditChainFaultKind` union gains `listed_twice`.
 Metadata-protocol: none
+Skills-docs: none — no skill under `skills/**` teaches how a sealed hour is cut into checkpoints or what `os audit verify` faults (`skills/objectstack-data/rules/lifecycle.md` teaches authoring `lifecycle.seal`, which does not change); `content/docs/data-modeling/objects.mdx` and `content/docs/deployment/cli.mdx` gain the parts, the new fault and what a removed checkpoint shows in this change.
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed: the moved answer is a verify verdict over stored audit checkpoints, which no metadata author writes. Nothing stored is rewritten and no tolerance or repair is shipped, so a chain sealed by 18.4.0 with overlapping late sealers now reports listed_twice. -->
 
