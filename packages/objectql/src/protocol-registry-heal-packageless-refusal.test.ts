@@ -140,3 +140,127 @@ describe('[#32366, ruling 6812637203 Q2] a refused package-less heal retires the
         expect(after.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
     });
 });
+
+/**
+ * [#32620, epic ruling 6818436831, ADR-0150 D3/D5, ADR-0146] A row bound to a
+ * NON-HOLDER (an installed package holding no item of the name) on a name two
+ * packages hold, where the pair relation names no single base: the heal's
+ * baseline read is refused, and the removed row's bare-slot entry is retired
+ * as the package-less row's is (Q2 above). Entry kept → retired.
+ *
+ * Measured at a557fa38 over this harness (boot hydration of the stored row,
+ * then the delete door naming the row's package), every package-slotted type
+ * in both registration orders: `flow` and `permission`, the two whose bound
+ * row has no package overlay slot, kept the removed row's entry in the bare
+ * slot, so the non-holder's read served the deleted body and each holder's
+ * read was refused with the non-holder as its candidate. Every other
+ * package-slotted type already retires the row's own package slot (#33127);
+ * for those only the line moves (`action` below, the CONTROL).
+ *
+ * The holders here are served by the metadata service only (no composite slot
+ * in the registry), the shape Q2's first pin measures.
+ */
+describe('[#32620, ruling 6818436831] a refused heal of a non-holder\'s row retires its bare-slot entry', () => {
+    const O = 'com.acme.other';
+    const typed = (type: string, label: string, extra: Record<string, unknown> = {}) => ({ name: NAME, label, description: label, ...extra });
+
+    async function boot(type: string, order: readonly string[]) {
+        const registry = new SchemaRegistry({ multiTenant: false });
+        registry.logLevel = 'silent' as never;
+        for (const id of [O, ...order]) registry.installPackage(manifest(id), 'code');
+        const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+        for (const id of order) manager.registerInMemory(type as never, NAME, typed(type, `shipped:${id}`, { _packageId: id }));
+        const rows: Array<Record<string, unknown>> = [{
+            id: 'row_other', type, name: NAME, organization_id: null, package_id: O, state: 'active', checksum: 'sha256:head',
+            metadata: JSON.stringify(typed(type, 'row:other')),
+        }];
+        // Equality only; a filter object (an operator) matches every row.
+        const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined) =>
+            Object.entries(where ?? {}).every(([k, v]) => v === undefined || (v !== null && typeof v === 'object') || (row[k] ?? null) === v);
+        const pick = (table: string, opts?: { where?: Record<string, unknown>; limit?: number }) => {
+            if (table !== 'sys_metadata') return [];
+            const hits = rows.filter((r) => matches(r, opts?.where));
+            return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
+        };
+        const engine: Record<string, unknown> = {
+            registry,
+            async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) { return pick(table, opts); },
+            async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
+                assertEngineFindOnePredicate(table, opts as never);
+                return pick(table, opts)[0] ?? null;
+            },
+            async insert(_t: string, data: Record<string, unknown>) { return { id: 'inserted', ...data }; },
+            async update(_t: string, data: Record<string, unknown>, options?: Record<string, unknown>) { assertEngineUpdateDispatch(data, options); return { id: null }; },
+            async delete(_t: string, options?: Record<string, unknown>) {
+                assertEngineDeleteDispatch(options);
+                const at = rows.findIndex((r) => r.id === (options as any)?.where?.id);
+                if (at >= 0) rows.splice(at, 1);
+                return { deleted: at >= 0 ? 1 : 0 };
+            },
+            async count() { return 0; },
+            async transaction(fn: (ctx: unknown) => Promise<unknown>) { return fn(undefined); },
+            async execute() { return {}; },
+        };
+        const protocol: any = new ObjectStackProtocolImplementation(engine as never, () => new Map<string, unknown>([['metadata', manager]]) as never, undefined);
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        await protocol.loadMetaFromDb();
+        const bareEntry = () => ((registry as any).metadata.get(type) as Map<string, { label?: string }> | undefined)?.get(NAME)?.label;
+        /** The label a read naming `packageId` serves, or the refusal's code, status and candidates. */
+        const read = async (packageId?: string) => {
+            try {
+                const res = await protocol.getMetaItem({ type, name: NAME, ...(packageId ? { packageId } : {}) });
+                return (res?.item as { label?: string } | undefined)?.label;
+            } catch (err) {
+                expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+                const refusal = err as PackageScopedNameRefusedError;
+                return [refusal.code, refusal.status, refusal.refusal.candidates];
+            }
+        };
+        return { protocol, rows, logged, bareEntry, read };
+    }
+
+    const holders = (order: readonly string[]) => [...order].map((id) => ({ kind: 'package', packageId: id }));
+
+    for (const type of ['flow', 'permission']) {
+        for (const order of [[A, B], [B, A]] as const) {
+            it(`${type} (${order[0] === A ? 'alpha' : 'beta'} first): the non-holder's removed row leaves the bare slot; each holder's read answers its own item, the bare read is the 409 naming both holders, and the list shows the two holders only`, async () => {
+                const h = await boot(type, order);
+                // The row is in the bare slot, and a holder's read names it as a candidate.
+                expect(h.bareEntry()).toBe('row:other');
+                expect(await h.read(A)).toEqual(['RESOURCE_CONFLICT', 409, [{ kind: 'package', packageId: O }]]);
+
+                const result = await h.protocol.deleteMetaItem({ type, name: NAME, packageId: O });
+
+                expect(result.success).toBe(true);
+                expect(h.rows).toHaveLength(0);
+                // At a557fa38: 'row:other', still served to the non-holder's read.
+                expect(h.bareEntry()).toBeUndefined();
+                expect(await h.read(O)).toBeUndefined();
+                expect([await h.read(A), await h.read(B)]).toEqual([`shipped:${A}`, `shipped:${B}`]);
+                expect(await h.read()).toEqual(['RESOURCE_CONFLICT', 409, holders(order)]);
+                const listed: any = await h.protocol.getMetaItems({ type });
+                const items: Array<{ label?: string; _packageId?: string }> = listed.items ?? listed;
+                expect(items.map((item) => item.label).sort()).toEqual([`shipped:${A}`, `shipped:${B}`]);
+                const lines = healLines(h.logged);
+                expect(lines).toHaveLength(1);
+                expect(lines[0]).toContain('was retired from the bare slot');
+            });
+        }
+    }
+
+    it('CONTROL — action, whose bound row takes its package\'s own slot (#33127): the holders serve as before the move, and the line says that slot was retired', async () => {
+        const h = await boot('action', [A, B]);
+        expect(h.bareEntry()).toBeUndefined();
+
+        await h.protocol.deleteMetaItem({ type: 'action', name: NAME, packageId: O });
+
+        expect(h.bareEntry()).toBeUndefined();
+        expect([await h.read(A), await h.read(B), await h.read(O)]).toEqual([`shipped:${A}`, `shipped:${B}`, undefined]);
+        expect(await h.read()).toEqual(['RESOURCE_CONFLICT', 409, holders([A, B])]);
+        const lines = healLines(h.logged);
+        expect(lines).toHaveLength(1);
+        // At a557fa38: "left as it was and may serve the removed row".
+        expect(lines[0]).toContain('retired from its own package\'s slot');
+    });
+});
