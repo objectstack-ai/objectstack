@@ -22,7 +22,7 @@
  * - An installed app whose latest listed version is newer: the card carries
  *   the installed version AND the update badge naming the latest version.
  * - Control, an app not installed: the card carries neither.
- * - Control, an app installed at the latest version: installed, no update.
+ * - An app installed at the latest version: installed, no update.
  * - Control, a row the control plane lists as uninstalled (a soft disable,
  *   objectstack#28521): not installed, no update.
  *
@@ -180,7 +180,7 @@ describe.each([
     expect(within(card).queryByText(updateText('1.0.0'))).toBeNull();
   });
 
-  it('control: an app installed at the latest version carries "Installed vX" and no update', async () => {
+  it('an app installed at the latest version carries "Installed vX" and no update', async () => {
     await boot();
     renderPage(config);
 
