@@ -120,7 +120,9 @@ describe('the dataset_query writer over the real ledger', () => {
     writer.recordDatasetQuery(queryEvent({ datasetPackage: 'com.acme.crm', rowCount: 31 }));
     writer.recordDatasetQuery(queryEvent({ datasetPackage: 'com.acme.ops', preview: true, rowCount: 32 }));
     await writer.flush();
-    const rows = (await queryRows(engine)).map(metadataOf).filter((m) => m.row_count === 31 || m.row_count === 32);
+    const rows = (await queryRows(engine)).map(metadataOf).filter((m) => m.row_count === 31 || m.row_count === 32)
+      // One batch, one instant: ordered by what each query returned, not by insert order.
+      .sort((a, b) => a.row_count - b.row_count);
     expect(rows.map((m) => [m.dataset, m.dataset_package, m.preview])).toEqual([
       ['sales', 'com.acme.crm', undefined],
       ['sales', 'com.acme.ops', true],
