@@ -4264,13 +4264,19 @@ export class ObjectQL implements IObjectQLEngine {
       get _registry() { return readRegistry(); },
       get relatedSchemaOf() { return readRelatedSchemaOf(); },
       find: (...a) => this.find(...a),
-      relationSemiJoinServes: (o, t) => relationSemiJoinServes.call({
-        uncomposableReadableIdsParent: (x, y) => this.uncomposableReadableIdsParent(x, y),
-        hasHooksFor: (e, x) => this.hasHooksFor(e, x),
-        getDriver: (x) => this.getDriver(x),
-      }, o, t),
+      relationSemiJoinServes: (...a) => this.relationSemiJoinServes(...a),
     };
     return (lowerRelationConditions<W>).call(host, object, operation, where, execCtx);
+  }
+
+  /** Whether a read of `object` may plan its relation condition on `target` as a semi-join (`relation-semi-join.ts`). */
+  private relationSemiJoinServes(object: string, target: string): boolean {
+    const host: ThisParameterType<typeof relationSemiJoinServes> = {
+      uncomposableReadableIdsParent: (...a) => this.uncomposableReadableIdsParent(...a),
+      hasHooksFor: (...a) => this.hasHooksFor(...a),
+      getDriver: (...a) => this.getDriver(...a),
+    };
+    return relationSemiJoinServes.call(host, object, target);
   }
 
   private withResolvedWhere<T extends { where?: unknown; context?: ExecutionContext } | undefined>(
