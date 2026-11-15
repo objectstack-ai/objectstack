@@ -1,11 +1,12 @@
 ---
-'@objectstack/objectql': patch
+'@objectstack/objectql': minor
+'@objectstack/spec': patch
 ---
 
 fix(objectql): an `async: true` after-hook fired inside a unit of work runs once that unit commits, and not at all when it rolls back
 
-Clause-②: yes
-Metadata-protocol: none
+Clause-②: no
+Metadata-protocol: semantic
 
 An `async: true` after-hook fired inside a unit of work started at once, while the unit was still open. Two things followed. On a database with more than one connection (Postgres, MySQL, Mongo), its `ctx.api` reads and writes ran on their own connection before the triggering write was committed, so an async `afterUpdate` that re-read its record could read the old values, and an async `afterInsert` that updated the new row or inserted a child referencing it could find no row. And when the unit rolled back, the hook had already run: its writes landed, referencing a row that was never stored. Measured on Postgres 16 and on SQLite through knex, for a caller's `engine.transaction()`, a `ctx.api.transaction(fn)`, a nested unit, and the unit the write door opens for a blocking `after*` hook beside the async one.
 
@@ -17,3 +18,5 @@ This changes what the changelog entry for the previous fix (#33703) told hook au
 - Outside any unit an async hook starts at once, after the write, as before. Its writes still run outside every unit, on their own connection, and nothing waits for it.
 
 An async hook whose job was to react to a write that failed (to record a refused attempt, say) no longer runs for it. Use a blocking hook, or react to the caller's error, for that.
+
+The `async` key's documentation in `@objectstack/spec` (`HookSchema.async`, and the `HookEvent` note on `ctx.api` writes rolling back with the unit, which now names blocking hooks only) says the same.
