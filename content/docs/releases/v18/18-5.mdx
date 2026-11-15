@@ -1,0 +1,748 @@
+---
+title: 18.5.0
+description: "Release notes and upgrade checklist for 18.5.0, compiled from the 284 changesets on `main` that its Version Packages pull request consumes. A minor that carries breaking changes: a 10 MiB request-body limit, tighter SSO account linking, connectors and tools held per namespace, a disabled package that holds no name, localized save refusals, and a new os migrate audit-side-copies command."
+---
+
+<Callout type="info">
+**How this page was compiled.** From the `## 18.5.0` sections the Version
+Packages pull request #33097 writes into the CHANGELOGs at its head
+`25559f43`, backend and `ui/` alike, whose parent is `main` at `b76df9a6`.
+Its bullets were deduplicated on their full text, after dropping
+`Updated dependencies` bullets, which leaves 283 entries, one per changeset
+the pull request consumes. One changeset landed on `main` after that head, at
+`1e65a389`, and is read from its file the same way, which makes 284. Each entry is placed by `classifyReleaseBullet` in
+`scripts/release-github-releases.mjs`, the function that groups the GitHub
+Release body, so the five sections below use its five headings, in its order,
+and its counts: **45** need you to act, **22** carry a registered
+`os migrate meta` entry, **70** add capabilities, **1** declares a semantic
+change, and **146** are other fixes. The breaking entries are listed in full,
+each with what changes and what to do, read from its changeset; the
+CHANGELOG entry under that commit carries the whole before and after. The new
+capabilities are listed one line each, the changeset's own summary. The 146
+other fixes are counted by area, and the ones that bear on an upgrade are
+named. Areas are placed mechanically, from the words of each summary and the
+packages the entry touches, for finding your way. Two new-capability
+summaries are shortened or put in plain words; the breaking lines and the
+自动迁移 rows are written from their changesets. The
+[upgrade checklist](#upgrade-checklist) is compiled from the changesets and
+has not been walked.
+</Callout>
+
+> **Release status: 18.4.0 is released, and 18.5.0 is not yet.** This page
+> was written ahead of the 18.5.0 cut, from the Version Packages pull request
+> that will publish it. Until that pull request merges and the publish is
+> approved, npm's `latest` tag reads `18.4.0`. Changesets that land on `main`
+> before the cut join the release, and this page is refreshed to match.
+
+## Highlights — 18.5.0
+
+- ⚠️ **A minor that breaks.** 67 of the 284 entries are declared breaking:
+  24 graded `minor` because they narrow the metadata protocol, and 43 graded
+  `patch` under the level rule. 45 need you to act; 22 carry an
+  `os migrate meta` entry that lists what to check. Read
+  [the version number](#the-version-number-is-not-the-signal).
+- **The HTTP server holds a request-body limit.** A JSON, form or other body
+  over 10 MiB is answered `413 PAYLOAD_TOO_LARGE` and is not read past the
+  limit; `maxRequestBodyBytes` and `OS_HTTP_MAX_BODY_BYTES` raise it, and the
+  storage upload doors keep their own limit (`67274ac`, #33172). A request
+  path holding a backslash is answered `400` (`d4fbb4d`, #33225).
+- **Single sign-on links accounts only where the provider has proven the
+  domain.** With SSO domain verification on, a sign-in links to an existing
+  account, or changes its email address, only at a domain the provider lists
+  and has verified (`de5eb08`, #33307). A provider's domain list takes bare
+  host names (`3c42e63`, #33267), an SSO provider creates an account only for
+  an email address (`3c44a97`, #33418), and an Entra ID SAML provider keys its
+  accounts on the object id (`480246b`, #33490).
+- **Connectors and tools are held per namespace.** Two packages of two
+  namespaces may each declare a connector of the same name, each materialized,
+  connected and dispatched as its own instance (`322ded7`, #33431;
+  `199e362`, #33218; `687e0a5`, #33281), and each ship a tool of the same name
+  (`c747cf0`, #33124). A bare read of a name two packages hold is refused,
+  naming both.
+- **A disabled package holds no name.** The `/meta` reads and lists, the flow
+  and connector doors and the email template send judge only the packages that
+  serve a name (`02f55c5`, #33130; `3269cab`, #33405; `06b5669`, #33646;
+  `9951f46`, #33361).
+- **Refusals and advisories in the caller's language.** A metadata save's
+  advisories and refusals (`548f8ff`, #33276), the duplicate refusal
+  (`09da8c7`, #33348) and permission refusals (`a1e0402`, #33290) read in the
+  caller's language, falling back to the workspace default, and the Console
+  shows the server's sentence (`d95ddeb`, #33576).
+- **Authoring.** `i18n.sourceLocale` names the language inline metadata text
+  is written in (`0be91f0`, #33357); a hook written as a TypeScript `handler`
+  can declare `refusals`, and a refusal code can hold several sentences
+  (`53f5a4c`, #33641); a `controlled_by_parent` detail can ask read access on
+  its master for writes (`df9fe94`, #33369); and analytics filters on a
+  related record's field (`498c967`, #33512).
+- **A new `os migrate` command.** `os migrate audit-side-copies` rewrites the
+  audit copies written before the audit writer stopped copying another
+  record's field values (`4e1d327`, #33607).
+
+## Release facts, as measured
+
+Read on 2026-11-15, before the cut. The cut can add changesets; the refresh
+re-reads every row.
+
+| | Measured |
+| :--- | :--- |
+| Source | Version Packages pull request #33097 at head `25559f43`, one commit on `main` at `b76df9a6`, and the one changeset `main` gained after it, at `1e65a389`. 335 first-parent commits after 18.4.0's version commit `181ad7d445` |
+| Changesets consumed | 284, every changeset in `.changeset/` at `1e65a389`. The 283 at `b76df9a6` are entries in the 122 CHANGELOG sections the pull request writes: 110 `## 18.5.0` sections, and 12 of private packages at their own versions |
+| Levels | 39 entries graded `minor`, 245 `patch`, none `major` |
+| Declared breaking | 67: 24 `minor`, 43 `patch`. 45 under 需手动处理 and 22 under 自动迁移. Every one of the 62 commits since 18.4.0 whose subject carries a `!` has its changeset among them |
+| Packages | 110 publish at 18.5.0: 75 `@objectstack/*`, `create-objectstack` and 34 `@object-ui/*`, the same set as 18.4.0. `@object-ui/app-shell` takes `18.4.1` and stays private |
+| npm, before the cut | `@objectstack/spec` `latest` is `18.4.0`; `next` is the snapshot `0.0.0-next-20261115100430` of `main` |
+| Console | 53 of the 284 entries touch an `@object-ui/*` package or `@objectstack/console`. See [Console (Studio)](#console) |
+
+No tag, npm version, Docker image or GitHub Release for 18.5.0 exists yet.
+The 18.5.0 sweep (#33761) was still running, and none of its results are on
+this page.
+
+---
+
+## What's new in 18.5.0
+
+### The version number is not the signal
+
+Every package still versions in lockstep. The level of a release says whether
+**the metadata protocol** moved, and nothing else:
+
+| Kind of change | Level |
+| :--- | :--- |
+| Added to the metadata protocol: a new authorable key, accepted value or metadata type | `minor` |
+| Narrowed or retired: a key removed or tombstoned, a value refused, a requirement tightened | `minor` |
+| Semantic: the meaning or default of an authorable key changes | `minor` |
+| Everything else: REST, drivers, services, the CLI, the Console, `feat:` and `fix!:` alike | `patch` |
+
+So 18.5.0 carries 43 entries graded `patch` that say **BREAKING**, beside 24
+graded `minor`. Pin exact versions of both scopes, and read the release notes
+for every version you cross.
+
+### 需手动处理 — breaking changes you must act on [#action-required]
+
+The 45 entries that are breaking and carry no registered ADR-0087 entry. Each
+line says what now answers differently and what to do, from the changeset
+under its commit; the CHANGELOG entry gives the full before and after. The
+[upgrade checklist](#upgrade-checklist) puts the ones an app is most likely to
+meet in order.
+
+#### The HTTP server and API clients
+
+3 entries.
+
+- **A request body over 10 MiB is answered `413 PAYLOAD_TOO_LARGE`** on the
+  data, API and auth routes of both HTTP doors, the self-hosted server and
+  `createHonoApp`, and is not read past the limit. To keep larger bodies,
+  raise the limit: `maxRequestBodyBytes` on `HonoServerPlugin` or
+  `createHonoApp`, `HonoHttpServer.setMaxRequestBodyBytes()`, or
+  `OS_HTTP_MAX_BODY_BYTES`. Or send the content as a file through a storage
+  upload door, which keeps its own `max_upload_mb` limit (`67274ac`, #33172).
+- **A request path holding a backslash is answered `400 Bad Request`** by the
+  Node server, before any route runs, where `GET /api/v1/data\account` used to
+  reach `/api/v1/data/account`. Browsers and `fetch` already send `/`; a client
+  such as `curl` sends what you write. Send the path with `/`. The same
+  upgrade, `hono` ^4.13.16 and `@hono/node-server` ^2.1.6, clears seven public
+  advisories, and a streamed response whose stream fails in its first two
+  reads is now a `500` instead of a truncated `200` (`d4fbb4d`, #33225).
+- **`POST /api/v1/messaging/in-app-messages` no longer answers `200` when
+  nobody received the message.** `recipients` counts only the people a
+  delivery was accepted for; a send that reached nobody is `503
+  SERVICE_UNAVAILABLE` when every delivery failed. Read a `200` as "at least
+  one person", and handle the refusal (`118d37a`, #33347).
+
+#### Security, identity, sign-in and approvals
+
+12 entries.
+
+- **SSO account linking needs a proven domain.** With SSO domain verification
+  on, an SSO sign-in links to an existing account, or changes its stored email
+  address, only at a domain the provider lists and has verified, matched
+  exactly; a subdomain that is not itself listed is refused
+  `EMAIL_DOMAIN_NOT_ALLOWED`. Before people at a subdomain first sign in
+  through the provider, list that subdomain on the provider and verify it
+  (`de5eb08`, #33307).
+- **An SSO provider's domain list takes bare host names only.** Registering or
+  editing a provider with `https://acme.com` or `acme.com:443` is refused `400
+  VALIDATION_FAILED`, naming the entry. Write `acme.com`; for a provider
+  already holding such an entry, send the bare names as `domain` to `POST
+  /api/v1/auth/sso/update-provider` and verify the domain again (`3c42e63`,
+  #33267). The boot warns about each stored provider with such an entry
+  (`03dc626`, #33477).
+- **The domain-verification request uses the provider's registered domain.**
+  `POST /api/v1/auth/admin/sso/request-domain-verification` ignores a `domain`
+  in the body; a provider whose domain list names no host is answered `400
+  DOMAIN_VERIFICATION_FAILED`. A script reads the answer's `domain` and
+  `dnsRecords` instead (`7e2eadd`, #33314).
+- **An SSO provider creates an account only for an email address.** A SAML or
+  OIDC sign-in that resolves a person to an opaque NameID or a user name no
+  longer creates an account; an unmapped SAML sign-in reads the standard
+  email and name claims before the NameID. Existing accounts still sign in.
+  For a provider whose users are created this way, map an email attribute
+  (`3c44a97`, #33418).
+- **An Entra ID SAML provider keys its accounts on the object id.** Accounts
+  made before keep their NameID key, and a sign-in now reaches them only
+  through the account's email. For a provider that is not Entra ID and whose
+  NameID differs between the sign-in page and the portal, name a stable
+  attribute in `mapAccountKey` (`480246b`, #33490).
+- **With SSO-only mode on, an IdP-provisioned user is given no local
+  password.** `POST /set-initial-password`, the administrator's Set Password
+  action and both reset doors answer `409 RESOURCE_CONFLICT` and write
+  nothing; a platform administrator may still set their own (`30e364e`,
+  #33177).
+- **Under direct sign-in with the local path `off`, the last identity provider
+  cannot be deleted** (`409 DELETE_RESTRICTED`) unless another way in remains.
+  Register another provider first, or set
+  `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden` with email and password sign-in
+  on (`a27d88d`, #33623).
+- **The last platform administrator cannot switch `admin_full_access` off**
+  when nobody could switch it back on. To switch it off, first declare a
+  platform owner in `OS_PLATFORM_OWNER_EMAIL` (`d4cfbfb`, #33424).
+- **Ban works without the better-auth admin plugin.** On a deployment with the
+  admin plugin off, a row whose `sys_user.banned` is true is now refused a
+  session with `403 BANNED_USER`. Before upgrading such a deployment, list the
+  banned users, platform administrators first, and unban each one who should
+  keep signing in: turn the admin plugin on, call `POST /admin/unban-user`,
+  and turn it off again. The same change lets a managed environment add
+  pending, SSO-only people with their positions, permission sets and manager
+  (`cbb876c`, #33227).
+- **The Setup › Diagnostics › Audit Log entry follows `view_all_audit_log`.**
+  A custom permission set that grants `manage_platform_settings` without
+  `view_all_audit_log` no longer shows the entry; grant it, or open the page by
+  URL. A package entry contributed into `group_diagnostics` without its own
+  `requiredPermissions` is now shown to every member who can open Setup:
+  declare `requiredPermissions` on it (`8a8c21e`, #33349).
+- **An out-of-office delegation with an inverted window, or with the
+  delegator as their own delegate, is refused** `400 VALIDATION_FAILED` on
+  `valid_until` or `delegate_id`; both shapes were stored and never rerouted an
+  approval (`0bd902c`, #33284).
+- **An approval request whose flow package was uninstalled is refused** `409
+  RESOURCE_CONFLICT` when another package ships a flow of the same name,
+  instead of being answered from that other flow. Install the request's
+  package again to act on it (`b96dd30`, #33297).
+
+#### Namespaces, packages and metadata reads
+
+17 entries. A name two packages hold is read by its package (`?package=`, the
+namespace address, or `/meta/:type/:ns/:name`); a bare read of it is refused
+`409 RESOURCE_CONFLICT`, naming each holder.
+
+- **A connector name two packages hold is refused at a bare read** (`GET
+  /meta/connector/NAME`, `MetadataManager`, the history and rollback doors);
+  an environment-authored flow's `connector_action` naming such a connector is
+  refused naming both; a flow whose connector resolves to a package with no
+  live instance is not dispatched; and a connector pull of a name with two
+  instances answers `409 connector_name_refused`. Address the connector by its
+  package. Ten moved answers are listed in the entry (`322ded7`, #33431).
+- **A disabled package holds no name at the flow and connector doors.** A bare
+  `/automation` name, the flow action and endpoint, and the connector address
+  now count only the packages that serve a name. Re-enable the package, or
+  address the serving holder by its namespace (`06b5669`, #33646).
+- **A disabled package holds no name at the email template send.** A send of
+  a name a disabled package holds resolves over the serving holders, and a
+  caller whose own holding is the disabled one finds no template. Enable the
+  package (`9951f46`, #33361).
+- **A disabled package's customization pair and a dependent's added locale
+  are left out of the metadata lists** (`GET /meta/email_template` and the
+  execution list) while the package is disabled. Re-enable it to list them; a
+  dependent's addition stays readable at the dependent's own address
+  (`3269cab`, #33405).
+- **A name a disabled package holds through a stored row is judged over the
+  serving holders**: two enabled packages' rows of it answer `409` naming both,
+  where save order decided, and an address naming a disabled customization
+  pair answers `404`. Read each by its package (`02f55c5`, #33130).
+- **Two packages' declared overrides of one flow or action name** each serve
+  in their own package's slot, and the env-wide flow and action lists no
+  longer carry an entry stamped with one package that holds the other's
+  override. Read each override from its own entry, or by `?package=`
+  (`8403725`, #33126).
+- **The history and rollback doors refuse a bare two-holder name.** `GET
+  /meta/TYPE/NAME/history` and `POST /meta/TYPE/NAME/rollback` of a name two
+  holders hold answer `409`; add `?package=PKG`, once per holder the refusal
+  names, and roll back to one of that holder's versions (`b462444`, #33193).
+- **A function name the platform and a package both register is refused at a
+  bare read**, naming both, and a name only a disabled package registers
+  resolves to nothing. Address it by package (`resolvePackageScopedFunction`,
+  or a packaged flow), rename one of the two, or enable the package
+  (`5ea8ce5`, #33439).
+- **The action activation door answers a two-holder name with `409`**, naming
+  both, instead of `404` "has no declaration". Read the `409` as two holders;
+  the door switches the name once one package holds it (`d3ceb1d`, #33399).
+- **The action route answers by who holds the name on the routed object.** An
+  action name held by a disabled package on the route, the environment on that
+  object and one package elsewhere now answers "no declaration" there. Enable
+  the package, remove its action, or address the environment's action at
+  `/api/v1/actions/_env/OBJECT/NAME` (`0c2aeb9`, #33274).
+- **An action authored in the environment on a packaged object is the
+  environment's.** MCP `run_action` and `POST /actions/NAMESPACE/OBJECT/NAME`
+  with the object's package namespace answer `404` for it. Call it by the face
+  `list_actions` lists (`OBJECT-NAME`), its bare name, or
+  `POST /actions/_env/OBJECT/NAME`; bind a flow action meant for a package's
+  flow with `?package=` (`a752057`, #33071).
+- **An install-local uninstall withdraws the package's action handlers and
+  body hooks at once.** A call naming no package on a key another owner still
+  holds now runs that owner's handler, and that owner's gates (`403`, `409
+  ACTION_DISABLED`, `503`) can answer, as a restart already did. Nothing
+  persisted changes (`ea67b26`, #33622).
+- **`unregisterPackage` keeps the stored rows that name the package by the
+  `_packageId` stamp alone.** Over a `DatabaseLoader`, the package's `object`,
+  `view`, `app` and `page` items among them are now kept and reported. Run
+  `detectStampOnlyRows`, then `unregisterPackage(P, { force: true })` or
+  `unregisterPackageWithReport` to remove the package's own items. Rows that
+  `@objectstack/metadata` 17.0.0–18.3.0 stamped with the host's package are
+  the environment's: the entry says how to find them (`3825f57`, #33416).
+- **On a host that wires a `DatabaseLoader`, an action is held per
+  `(object, name)`.** A package-less save on an object no package binds the
+  name to is the environment's own row, and a read naming a package reaches
+  only that package's own binding: save the row as the package's
+  (`_packageId`) if it is the package's (`fc283d6`, #33318; `0e9ff94`,
+  #33422).
+- **A boot no longer turns a name two packages' rows hold into one body.** On
+  a host that wires a `DatabaseLoader`, a bare read of such a name after the
+  boot answers `409` naming both. Name the package, or rename one of the two
+  (`dd966fc`, #33299).
+- **Addressed history and rollback on a name one row slot holds.** A direct
+  `DatabaseLoader.registerRollback` call that addresses a package and restores
+  a version recorded with no attribution, on a name several row slots hold, is
+  refused naming every holder. Save the body into the package's row instead
+  (`8c88db6`, #33464).
+
+#### Flows and automation
+
+1 entry.
+
+- **A record-triggered flow is not armed while a subflow it calls retries an
+  inline outbound call.** It still registers, warns once naming the call and
+  the retried node, and `GET /automation/_status` reports it `bound: false`
+  with `unboundCause: 'retried_callout_in_subflow'`. In the child the warning
+  names, set `durable: true` on the `http` node, or remove the retry. A
+  durable `http` node on a host with no messaging outbox is sent once in the
+  background on the save path, not retried: wire the messaging service with
+  reliable delivery to keep retries (`7ffbb1a`, #33265).
+
+#### Metadata the build, lint and publish doors judge
+
+3 entries.
+
+- **The `object_extension` publish door folds the written entry among other
+  packages' extensions by priority**, so it judges the definition `os build`
+  judges: a formula cycle closed through a higher-priority package's field is
+  refused, and a tie or an outranked entry `os build` accepts now publishes.
+  Break the cycle, or rename the entry's field (`ee627c6`, #33702).
+- **MCP `validate_expression` gives the publish gate's verdict** at a
+  `validation` or `formula` site (`b22be27`, #33134) and at a `flow_condition`
+  (`8835532`, #33168), so it answers `ok: false` for an expression the gate
+  already refuses. Nothing the gate accepts moves; fix the expression the tool
+  now names.
+
+#### The data engine, seeds and import
+
+3 entries.
+
+- **A seed load for one organization writes as that organization.** Under a
+  walled tenancy posture, a hook on a seeded row, and every engine read the
+  write triggers, sees what a person of that organization sees. A hook that
+  needs every organization's rows uses `ctx.api.sudo()` and filters them
+  itself. A reference to a person resolves only to a member of that
+  organization (`47a3b95`, #33222).
+- **A seed that names a person by an id-shaped value is judged by
+  membership.** If the person is not a member of the load's organization, the
+  row is seeded with the reference empty and the load's error says so. Add the
+  person to the organization, or name a member (`b95d915`, #33611).
+- **A data import resolves a lookup cell within the row's own master.** A row
+  that names a master and a detail only another master carries is refused
+  `reference_not_found`, where it was linked across masters; and a caller who
+  cannot read the target's master field is refused `reference_not_found` for a
+  scoped cell. Fix the row's master, or grant read on that field. Rows that
+  were refused `reference_ambiguous` now resolve (`b070e1c`, #33613).
+
+#### Analytics and datasets
+
+1 entry.
+
+- **`query_dataset` refuses a selection with no measure**, `400
+  VALIDATION_FAILED`, as `POST /api/v1/analytics/dataset/query` does, where
+  the SQL driver answered `500`. Name at least one measure, as `list_datasets`
+  lists them (`bf02d33`, #33141).
+
+#### Files and storage
+
+2 entries.
+
+- **An upload link onto a file field whose `readonlyWhen` holds is refused at
+  issue**, `403 FIELD_NOT_ACCESSIBLE`, and no link is written. Mint the link
+  once the record's state unlocks the field, or use the record's attachments
+  (`5430b4a`, #33079).
+- **A completed chunked upload takes no more chunks** (`409
+  RESOURCE_CONFLICT`), and a completion retried after it succeeded answers the
+  same `200` instead of `500` (`fd7b378`, #33249).
+
+#### TypeScript exports
+
+3 entries. Nothing to do unless your code imports these.
+
+- `describeManagedApiMethodConflicts` is retired from `@objectstack/spec/data`;
+  word the message from `checkManagedApiMethodAffordances`, which stays
+  (`53b3544`, #33583).
+- `clearSharedDiscoveryCache` is retired from `@object-ui/data-objectstack`;
+  a test that needs a fresh discovery read gives each case its own `baseUrl`
+  (`854d383`, #33666).
+- `judgesPackageLessRows` returns a plain `boolean`, not a type predicate; to
+  narrow a `string` to `PackageScopedType`, call `isPackageScopedType` from
+  `@objectstack/core` (`4bba8b8`, #33483).
+
+### 自动迁移 — listed for you by `os migrate meta` [#migrated-for-you]
+
+22 breaking entries carry a registered ADR-0087 entry on the protocol-18
+step, 23 registry ids between them. All 23 are semantic entries, not
+conversions: `os migrate meta` rewrites nothing for them. It prints each under
+"manual change(s) require your judgment", with the surface it applies to, the
+replacement and how to tell it is done, so the list below is a checklist the
+command repeats. Eleven of them judge your metadata at `os validate`,
+`os build`, `defineStack` or a publish door, one refuses a flow step at run
+time, nine move what a `/meta` read or a registry read answers when two
+packages hold one name, and one announces a change no door makes yet. `os migrate meta --from 17` lists every entry of the
+protocol-18 step, the ones earlier 18.x releases added included; the ids in
+the last column are this release's.
+
+| Change | What to do | ADR-0087 id |
+| :--- | :--- | :--- |
+| A `connector_action` step whose input holds a key its action does not declare fails with `VALIDATION_ERROR` before the handler is called, naming the key and the declared ones; nothing is sent (`89defde`, #33614) | Drop the key from `connectorConfig.input`, or pick the action that declares it; for a provider parameter the action does not list, use the connector's pass-through action | `connector-action-undeclared-input-key-refused` |
+| An object that shows two visible fields under one label is refused (`field-label-duplicate`), the platform's injected columns such as `owner_id` included (`3cbf1f2`, #33639) | Relabel or hide one of the two; use the injected `owner_id` for the record owner instead of a second field | `object-field-label-duplicate-refused` |
+| A `nameField`, `displayNameField` or `activityMilestones[].field` that names no field of the object is refused at `os build`, `os validate`, `os lint` and the object publish door (`6222ecb`, #33370) | Point it at a field the object declares | `object-field-pointer-unknown-refused` |
+| A formula that reads another formula reads its computed value, and a cycle of formulas is refused where it is authored (`6482c08`, #33108) | Break the cycle | `formula-cycle-refused` |
+| `os validate`, `os build` and `os lint` refuse a dashboard widget in a package of a multi-package artifact whose `dataset` only a package outside its declared dependency closure holds, or two packages inside it hold; the runtime refused both reads already (`40c73a8`, #33121) | Declare the dependency on the dataset's package, or bind the widget to one holder's dataset | `dashboard-dataset-outside-reader-closure-refused` |
+| The `object_extension` publish door judges a computed field an extension adds by the build's field-formula pass, against the extended object as served (`3e19223`, #33119) | Fix the expression the door names | `object-extension-door-computed-field-expression-judged` |
+| `os build` and the `object_extension` publish door refuse a formula an extension adds that reads its own value, directly or through another formula (`0ba30eb`, #33442) | Break the cycle | `object-extension-formula-cycle-refused` |
+| Each validation rule an object extension adds is judged by the object's own rule pass, against the extended object as served (`27d042f`, #33205) | Fix the rule the build names: a misspelt field, an unregistered function or an unguarded nullable operand | `object-extension-validation-rule-expression-judged` |
+| The one-hop leaf read through a lookup an extension adds, and the regex and JSON-schema checks of each validation rule an extension adds, are judged as an object's own (`bc50d11`, #33398) | Fix the leaf name or the pattern the build names | `object-extension-added-lookup-hop-leaf-judged`, `object-extension-validation-rule-artifacts-judged` |
+| A record-mode amount an object extension adds is judged against its object as served, so a parent field that holds no ISO 4217 code, does not exist, or is reached through the extension's own new master-detail is refused (`06e53a7`, #33621) | Point `currencyField` at a parent code field the object serves | `record-currency-follow-extension-judged-as-served` |
+| Strict `defineStack` judges a stack that carries `packages[]` per package body, and counts against its manifest id only the top-level apps no body declares (`2c98485`, #33074) | Move a second app into its own package body | `define-stack-packages-residual-second-app-refused` |
+| Strict `defineStack` judges a `packages[]` stack's namespace prefixes per package body, and its top level by the same residual rule (`5b2ec82`, #33122) | Prefix each body's objects with that body's own namespace | `define-stack-packages-body-namespace-prefix-refused` |
+| Two packages of two namespaces may each ship a tool of the same name; an in-process `get`, `unregister`, rollback or delete of a two-holder tool name that names no package is refused (`c747cf0`, #33124) | Pass the package: `get('tool', NAME, PKG)`, `unregister('tool', NAME, { packageId })` | `tool-names-per-namespace` |
+| A name two enabled packages hold only as stored rows, which no package ships, is refused `409` by the plain read and `/published`, where save order decided (`d635599`, #33182) | Read each by `?package=` | `two-row-holders-bare-read-refused` |
+| A stored row bound to a package lives in that package's own registry slot, so a bare read of an action two packages hold only as rows is refused before and after a restart (`728be58`, #33513) | Read each package's action by `?package=` | `stored-row-own-package-slot` |
+| When two packages ship one name and one declares its `.custom` override, each package's address, list entry and registry slot serve that package's own item (`26b5994`, #33189) | Read each override from its own package's entry | `two-shipper-declared-override-own-slot` |
+| A stored row bound to a package that holds no item of its name is no longer laid into the first holder's registry slot when two packages hold the name (`16e3486`, #33166) | Read the holder's own item by its package | `stored-row-of-a-non-holder-under-two-holders` |
+| Enabling a second holder of an overlay name takes back the package-less row the read-side hydrator laid into the first holder's slot while the second was disabled (`84c66d3`, #33149) | Address the row with no package, or save it as one holder's | `package-less-overlay-row-holder-slot-on-reenable` |
+| The exact read (`?package=X`) no longer serves an undeclared App-pair row that the registry binds to no package (`89d7bef`, #33148) | Save the row with `overrides.package` naming the package whose locale it customizes | `pair-row-exact-read-no-owner` |
+| The bare read withholds a customization pair's row of a name every holder of which is disabled, answering `404` (`9673030`, #33383) | Enable a holder, or read the pair's own address (`?package=PACKAGE.custom`) | `disabled-holder-pair-row-bare-read-withheld` |
+| An App pair row declared for a package that still ships the name is never served at a bundle addition's address as that addition's own item (`51ceb43`, #33251) | Read the row at the package it declares | `declared-row-not-moved-to-addition` |
+| **Announced, not yet at any door.** An action declaring `ai.requiresConfirmation: true` will be confirmed by a person, elicited in the MCP client or handed off to the app, and a caller's own `confirm: true` will stop counting on `run_action` and `resume_run`. In 18.5.0 every door still runs such an action on `confirm: true`; what ships is the contract in `@objectstack/spec/contracts` (`AI_ACTION_CONFIRMATION_CAPABILITY`, `IActionConfirmationService`) (`1e65a38`, #33725) | Keep sending `confirm: true` until a release says the doors confirm by elicitation. Then advertise `elicitation` (form mode) at `initialize`, or relay the pending answer to the person; an action that is safe unattended declares `ai.requiresConfirmation: false` | `action-requires-confirmation-elicited` |
+
+### 新增能力 — new capabilities [#new-capabilities]
+
+The 70 entries that add to the metadata protocol (`Metadata-protocol: added`) or widen what is accepted (`Clause-②: yes`) without breaking anything. Each line is the changeset's own summary.
+
+#### Console and the `@object-ui/*` packages
+
+16 entries.
+
+- A refused SSO sign-in names a domain or email refusal instead of an expired link (`f530d25`, #33525)
+- A metadata save's advisories and refusals show the server's sentence in the user's language (`d95ddeb`, #33576)
+- A report drill that rebuilds its filter reads the dataset as the report's reader (ADR-0150 D3) (`9499dcc`, #33366)
+- An `access_denied` sign-in return says the account has no access to this environment, with switch account and back to console (`8ed2b89`, #33436)
+- A signed-in person whose account link is refused because the emails differ is told why on the page they land on (`a9da547`, #33496)
+- The default app's Set-default star on Setup → Apps says why it is disabled (`12d090d`, #33485)
+- A list row whose click opens nothing no longer looks clickable (`beff1fb`, #33544)
+- A connector action switch resets its inputs, a multi-field save conflict lists each field, the share page lists fields by the record page's rule, the Studio error box wraps (`159dbe3`, #33547)
+- A signed-in person whose account link is refused as already linked to another user, or as unable to link, is told why on the page they land on (`6446935`, #33585)
+- Cards whose click opens nothing no longer look clickable, and a view authored `navigation: { mode: 'none' }` opens no record on a Cmd/Ctrl or middle click (`bea3328`, #33671)
+- A failed AI chat conversation create gives back every message sent while it waited, not only the last one (`030ce02`, #33673)
+- The AI build chat says what really happened — the plan card follows the build, a message typed during a reply waits instead of being lost, the draft preview of an unpublished object is an empty list, build issues read in plain words, and the change card names objects and fields by label (`ba32e79`, #33333)
+- The fields no declared field group claims render under their own "Other" heading after the declared groups, on the record page, the record drawer and the form arms (#33229) (`de476f1`, #33372)
+- A row action's declared `disabled` predicate greys its inline row button, and every row surface gives its `disabledReason` (`d574341`, #33354)
+- A multi-field row conflict lists each field, and a summary column's footer total is formatted as its cells (`f06f064`, #33728)
+- The AI build chat's plan card says what its 「· 补充」 (`· suggested`) field mark means (`020ce3d`, #33538)
+
+#### Security, identity, sign-in and approvals
+
+11 entries.
+
+- The audit sealer skips only the chain a chain-local fault belongs to; `os serve` hands its crypto provider to an AuditPlugin the app composed with none (`4f0a5f3`, #33503)
+- `sharing.controlledByParent.writeRequiresMasterRead` lets a `controlled_by_parent` detail ask read access on its master, not edit, for every write (ADR-0055 §3 as amended) (`df9fe94`, #33369)
+- An SSO provider can sign the person out of the company sign-in too, per provider and off by default (`68cb68e`, #33170)
+- The Register SSO Provider form names the token, authorization and JWKS endpoints (`3c231cd`, #33417)
+- A query of an opted-in saved dataset writes one `dataset_query` row in `sys_audit_log` (#31797) (`2399e39`, #33559)
+- With single sign-on configured, a signed-out visit can go straight to the identity provider and come back to the page it asked for (`4dbcbdd`, #33221)
+- `organizationDeleteGate`, a host check asked by the organization delete admission (`e0ce1b5`, #33326)
+- The organization's pending-invitation limit is a host setting, `OS_ORG_INVITATION_LIMIT`, that can be turned off (`633d8c4`, #33208)
+- The declared-webhook activation door switches one of two holders the namespace address cannot tell apart, and the upgrade report names every withheld holder (`1f8ce6e`, #33204)
+- A host can keep a platform baseline contribution at read, or decline it, through `platformBaselineOverrides` (`28c9b42`, #33444)
+- `member_default` grants read and create on `sys_comment_reaction`, so a stock member can react to the comments they can read (`1c25b50`, #33617)
+
+#### Flows, connectors, mail and messaging
+
+7 entries.
+
+- A connector connection is unique per organization and instance, the instance being its package and name, and the connections that name no package keep one per organization through a runtime guard (ADR-0150 D4, D8 row R11, #31699) (`0b89b33`, #33199)
+- An activation row a departed package left switches no remaining webhook holder, and the 18.x ownership ceremony writes a two-holder copy's switch as a row naming no package instead of picking one holder (ADR-0150 D8) (`71ade1a`, #33253)
+- A run record says how much of its duration the run spent suspended, so a resumed screen flow no longer reads as an 18-second execution (`605d712`, #33511)
+- A run summary's node row carries the warnings its steps raised, so a notify whose channel was refused no longer reads as a clean success in the trigger response (`8b53cc8`, #33438)
+- The connector connection store, the connect door and the OAuth callback read and write one instance by its package and name (ADR-0150 D4, #31699) (`199e362`, #33218)
+- The automation engine holds a connector instance by its package and name, and a dispatch addresses the one instance its caller's name resolves to (ADR-0150 D4, #31699) (`687e0a5`, #33281)
+- A flow run's step log declares the `warnings` and `droppedFields` it already carried (`c312b26`, #33368)
+
+#### Metadata the build, lint and publish doors judge
+
+5 entries.
+
+- A hook written as a TypeScript `handler` can declare `refusals`, and a refusal code can hold several declared sentences with parameters (`53f5a4c`, #33641)
+- The flow and hook publish doors accept an unguarded ordering comparison over `created_at` / `updated_at`, the two system columns the platform stamps on every stored row, as `os build` does (`a674877`, #33434)
+- A flow `update_record` with `multi: true` whose `fields` set an input of a stored computed field on its target object is warned at authoring (`flow-multi-update-moves-stored-input`) (`df67557`, #33336)
+- Advise a template `default` argument that reads like a variable path, and a `notify` node that sends an email template without a variable the template declares `required` (`103eb7b`, #33321)
+- `validate_expression` takes the flow's declared `variables` at a `flow_condition`, so a bare name binds as the flow binds it and the shadowed-read warning comes back (`9f736f2`, #33255)
+
+#### Namespaces, packages and metadata reads
+
+4 entries.
+
+- A package publish whose runtime registry refused an object answers `published_unregistered` and names the object, instead of `published` (`8f9eb3d`, #33528)
+- A metadata write's advisories and refusals come back in the caller's language (`548f8ff`, #33276)
+- A customization pair's row of a name two namespaces hold is judged against its own base, whichever package registered first — its removal, its commit revert and the boot census (ADR-0150 D4) (`128b657`, #33129)
+- Deleting an object extension that re-declared a stored computed field fills the object's existing rows with the expression it hands back, as the save door does, and says so per field (`61ed314`, #33350)
+
+#### The data engine, formulas, seeds and import
+
+7 entries.
+
+- The security catalog's list keeps every holder of a permission set name the metadata service holds, so a grant naming a package is judged by (package, name) whatever order the stored rows are listed in (ADR-0150 D4) (`a1604ce`, #33252)
+- `validate_expression` no longer lists the hidden `__search` search companion in `inScope.fields`, and a read of it is refused as `os validate` refuses it (`615c67f`, #33451)
+- A number or boolean comparand on a text- or option-family field compares as its string, the form the write door stores (#29486) (`f229dfd`, #33518)
+- A restore refused `RESTORE_UNIQUE_VALUE_TAKEN` by the store names an organization-scoped unique field, and the refusal names the field by its label (`4ace1fa`, #33375)
+- The authored-action resync judges "artifact-shipped" by each holder's owner key, so an environment script action on an object no package's action of that name owns gets its handler (#32990) (`5e29b7e`, #33271)
+- The duplicate refusal (`409 UNIQUE_VIOLATION`) now reads in the writer's language and names the fields of a composite unique index (`09da8c7`, #33348)
+- A roll-up of a stored home amount declares `currencyMode: 'dynamic'` and is drawn in the organization's home currency (`f64c0f9`, #33710)
+
+#### REST, MCP and the HTTP server
+
+3 entries.
+
+- `describe_object` serves `readonly: true` where a write never sets the value (`28a2f0f`, #33150)
+- A member's agent finds a colleague by name or email over MCP, to fill a person field (`6a36b79`, #33180)
+- MCP `list_actions` marks a confirmation-gated action `unavailable` for an AI service account (`1bed853`, #33144)
+
+#### Analytics and datasets
+
+3 entries.
+
+- The dataset query door judges a holder whose own address a stored row of two holders contends on that holder's own dataset, naming it in the `409` instead of leaving it undetermined (ADR-0150 D4) (`534e115`, #33491)
+- A dataset over a field named after a SQL keyword answers rows instead of 500 (`24f2f40`, #33266)
+- The engine-aggregate path filters on a related record's field — a one-hop dotted `where` leaf (`'order.status'`) is served as the engine's nested-relation condition instead of refused (#33335) (`498c967`, #33512)
+
+#### Files and storage
+
+5 entries.
+
+- An upload link for a file field of a record not yet created, so an agent can create a record whose file field is required (`6718884`, #33123)
+- One upload link takes several files on a multi-file field (`5e250a6`, #33151)
+- Every byte-reading upload door holds a body with no declared length to its own bound, exactly as it holds a declared one (`dd291b8`, #33323)
+- The upload-link page names the record and the field for the link's own user, and shows the expiry in the reader's time zone (`de31809`, #33185)
+- The uploader removes an attachment they uploaded, through an own-row door, with no delete bit on the member grant (`ba35dfd`, #33322)
+
+#### The CLI, deployment and audit
+
+4 entries.
+
+- A deployed runtime tells search engines not to index its API and Console (`e540baf`, #33236)
+- `i18n.sourceLocale` names the language the inline metadata text is written in, apart from the users' `defaultLocale`; `os lint`, `os i18n check` and `os i18n extract` read it as the source language (`0be91f0`, #33357)
+- `os migrate audit-side-copies` runs the at-rest side-copy rewrite on the live audit tables and the archive (`4e1d327`, #33607)
+- `os serve` hands the data engine its crypto provider at `kernel:ready`, so a webhook that fires during boot is delivered signed instead of refused for boot order (`7f4627c`, #33481)
+
+#### Skills, spec docs and test tooling
+
+5 entries.
+
+- A write the card gives a persona that the build denies it is charged to the build, not the operation (`1e77fef`, #33625)
+- The Build half checks each persona's permission set for what the card has that persona read and write (`3693644`, #33630)
+- The run grader reads no figure out of a record identifier (`INV-003`, `i3`) (`3c0033f`, #33629)
+- An irreversible operation the agent applied through its declared confirmation gate, on an explicit instruction, meets `pending_confirmation` (temporary) (`83cf892`, #33706)
+- A recorded replay re-sends each turn's recorded writes, so an applied operation reads back what the run wrote (`b76df9a`, #33764)
+
+
+### 语义变化 — semantic changes [#semantic-changes]
+
+The 1 entry that declares `Metadata-protocol: semantic` and breaks nothing.
+
+- A package that holds a bundle's name only through its own stored row lists the App pair's added member its exact read already serves (ADR-0150 D4) (`1fd5d8a`, #33220)
+
+### 其他修复 — other fixes [#other-fixes]
+
+The 146 entries that the classifier reads no breaking change and no protocol
+kind in. They are not listed here: read them in the CHANGELOG of the package
+they touch, or in that package's GitHub Release under 其他修复. By area:
+
+| Area | Entries |
+| :--- | ---: |
+| Console and the `@object-ui/*` packages | 28 |
+| Security, identity, sign-in and approvals | 18 |
+| Flows, connectors, mail and messaging | 4 |
+| Metadata the build, lint and publish doors judge | 8 |
+| Namespaces, packages and metadata reads | 11 |
+| The data engine, formulas, seeds and import | 9 |
+| REST, MCP and the HTTP server | 8 |
+| Analytics and datasets | 2 |
+| Files and storage | 2 |
+| The CLI, deployment and audit | 2 |
+| Skills, spec docs and test tooling | 54 |
+
+Among them, grouped by what they fix:
+
+- **Dates stored before 18.4.0 on PostgreSQL.** A `date` field that a
+  `datetime` → `date` publish converted on a release before 18.4.0 can hold
+  values one day early on PostgreSQL; the platform does not repair them, and
+  the `@objectstack/driver-sql` CHANGELOG entry says how an operator finds and
+  corrects them. On SQLite and MySQL, such a field whose column stayed a
+  date-time column now filters by its calendar day (`01d206d`, #33270).
+- **Installs, upgrades and package state take effect without a restart.** An
+  upgrade or re-install withdraws the items the new version no longer ships
+  (`7adb1b5`, #33304); the install and enable routes re-read the metadata they
+  bring into service (`e3f0cfd`, #33448); disabling or uninstalling a package
+  withdraws its flows at once (`c43bffd`, #33546); and an install-local
+  package keeps its flows after a restart (`6455104`, #33095). After a
+  restart the package registry serves the manifest written last (`9562643`,
+  #33295) and the stored install dates (`426bb46`, #33610).
+- **Access is judged per object and per operation.** Each data operation reads
+  at its own object's access depth when sibling operations share a request
+  (`86c18df`, #33303); operations running at once on one request wait for the
+  row-level membership resolver instead of compiling against an empty set
+  (`d01f514`, #33474); a declared position rename carries its holders after a
+  hot install too (`4a0c480`, #33245); and a directory deactivation suspends
+  the AI service accounts the person is accountable for (`7c36f52`, #33109).
+- **Refusals and advisories in every platform locale.** Permission refusals
+  speak the caller's language (`a1e0402`, #33290), and the save door's
+  dashboard, data-model, form-layout, flow, approval, connector,
+  permission-set and security-posture advisories carry a sentence in every
+  platform locale (`5c005e0`, `dd4ce50`, `6e4a203`, `a83c366`, `796e9d4`,
+  `c09320d`).
+- **Boot and readiness.** `GET /api/v1/ready` reports whether the boot seed
+  has landed, and `os serve` prints the seed result (`218b012`, #33337); a
+  boot the organization-ownership guard refuses names a complete apply
+  command (`67725f1`, #33408); on an upgraded MySQL 8 database the old,
+  narrower connector-connection key retires as on PostgreSQL (`c94a4da`,
+  #33514).
+- **Files.** A file uploaded through an upload link that named no record, and
+  that no record took, is reclaimed (`a3a3cea`, #33209).
+- **Two widenings the classifier files here.** Two changesets open with their
+  `Clause-②: yes (widening)` line instead of a summary, so the classifier
+  reads no declaration in them: the MCP read tools admit a system object whose
+  author declared `enable.aiReadable: true` (`3eac63a`, #33117), and
+  organization invitation refusals read in the Console's language (`5604aeb`,
+  #33679). No narrowing opens that way in this release.
+
+### Console (Studio) [#console]
+
+18.5.0 ships the Console and the `@object-ui/*` packages from this repository,
+at the commit it releases. Every Console change is listed once, in its section
+above: 53 of the 284 entries touch an `@object-ui/*` package or
+`@objectstack/console`, 4 under [需手动处理](#action-required), 21 under
+[新增能力](#new-capabilities) and 28 under [其他修复](#other-fixes). What a
+Console user notices first:
+
+- **Sign-in says why.** A refused SSO sign-in names a domain or email refusal
+  instead of an expired link (`f530d25`); an `access_denied` return says the
+  account has no access to this environment (`8ed2b89`); and a refused account
+  link says why on the page the person lands on (`a9da547`, `6446935`). With
+  single sign-on configured, a signed-out visit can go straight to the
+  identity provider and come back to the page it asked for (`4dbcbdd`).
+- **Saves speak the user's language.** A metadata save's advisories and
+  refusals show the server's sentence in the user's language (`d95ddeb`).
+- **Lists and records.** A row or card whose click opens nothing no longer
+  looks clickable (`beff1fb`, `bea3328`); a row action's `disabled` predicate
+  greys its inline button and gives its reason (`d574341`); a multi-field save
+  conflict lists each field (`159dbe3`, `f06f064`); and fields no field group
+  claims render under their own "Other" heading (`de476f1`).
+- **The AI chats.** The AI build chat's plan card follows the build, and a
+  message typed during a reply waits instead of being lost (`ba32e79`); a
+  failed conversation create gives back every message sent while it waited
+  (`030ce02`, `b654135`, `baf9f3b`).
+- **A lighter first load.** The first load no longer downloads the Setup
+  pages, the package form, the view config panel, the object list, the record
+  and list views or the Studio designer strings (`2a86e51`, `68cee82`,
+  `6603978`).
+- **For a host that imports it.** `clearSharedDiscoveryCache` leaves the
+  `@object-ui/data-objectstack` entry (`854d383`).
+
+---
+
+## Upgrade checklist
+
+⚠️ For an 18.4.0 app. From 18.3.0, walk the
+[18.4.0 checklist](/docs/releases/v18/18-4#upgrade-checklist) first, and so
+on back to the [18.0.0 checklist](/docs/releases/v18/18-0#upgrade-checklist)
+from 17.x.
+
+### 18.5.0
+
+<Callout type="warn">
+**This list has not been walked.** It is compiled from the changesets, ahead
+of the cut; each step names the entry it comes from.
+</Callout>
+
+#### 1. Move the pins
+
+- **Move every `@objectstack/*` dependency, and every `@object-ui/*` one, to
+  `18.5.0` together**, with `@objectstack/skills` and `create-objectstack`
+  where you use them. Pin the exact version: a caret range takes every later
+  18.x by itself, and a patch can break a non-protocol surface. No package
+  joins or leaves npm in this release.
+
+#### 2. Run the build, and fix what it refuses
+
+```bash
+os validate
+os build
+os migrate meta --from 17     # the protocol-18 step, with this release's entries
+```
+
+Fix each refusal with its line in [需手动处理](#action-required) or
+[自动迁移](#migrated-for-you). The ones an app is most likely to meet:
+
+- an object that shows two visible fields under one label, a field of your
+  own labelled like the injected `owner_id` the common case (`3cbf1f2`);
+- a `nameField`, `displayNameField` or `activityMilestones[].field` naming no
+  field of the object (`6222ecb`);
+- a cycle of formulas, on the object or through an object extension
+  (`6482c08`, `0ba30eb`), and an extension's computed field, validation rule,
+  lookup leaf or record-mode amount that the object's own passes refuse
+  (`3e19223`, `27d042f`, `bc50d11`, `06e53a7`);
+- a `connector_action` whose input holds a key its action does not declare
+  (`89defde`), which fails at run time, not at the build;
+- a `packages[]` stack whose second app, or whose body objects' namespace
+  prefixes, strict `defineStack` now judges per body (`2c98485`, `5b2ec82`),
+  and a dashboard widget whose dataset sits outside the reader's declared
+  dependencies (`40c73a8`).
+
+#### 3. Before the first boot
+
+- **Raise the request-body limit if your clients send bodies over 10 MiB**:
+  `maxRequestBodyBytes`, or `OS_HTTP_MAX_BODY_BYTES` (`67274ac`).
+- **Without the better-auth admin plugin, unban who should keep signing in.**
+  Ban is enforced there from this release; list the users whose
+  `sys_user.banned` is true, platform administrators first, and unban each one
+  through the admin plugin before upgrading (`cbb876c`).
+- **With SSO domain verification on, list and verify every subdomain** your
+  people's existing accounts use before they next sign in through the
+  provider, and rewrite a stored provider's domain entries as bare host names
+  (`de5eb08`, `3c42e63`).
+- **Declare `OS_PLATFORM_OWNER_EMAIL`** if you may need to switch
+  `admin_full_access` off on a deployment whose platform administrators all
+  hold it through the Default Organization (`d4cfbfb`).
+
+#### 4. After the boot
+
+- **Run `os migrate audit-side-copies`, a dry run first, then `--apply`.** It
+  removes the side-copy columns that audit and activity copies written before
+  this release still carry, on the live tables and the archive. Until it runs,
+  the read-time redaction drops them, so it is cleanup, not a gate
+  (`4e1d327`).
+- **Update API clients for the doors that answer differently**: a bare read of
+  a connector, tool, function or stored-row name two packages hold answers
+  `409` naming each holder (`322ded7`, `c747cf0`, `5ea8ce5`, `d635599`); the
+  history and rollback doors take `?package=` (`b462444`); a path with a
+  backslash is `400` (`d4fbb4d`); an in-app message that reached nobody is
+  refused (`118d37a`); and `query_dataset` needs a measure (`bf02d33`).
+- **Check seed hooks under a walled posture**: a hook on a seeded row reads as
+  the load's organization, so a hook that needs every organization's rows says
+  so with `ctx.api.sudo()` (`47a3b95`).
+- **On PostgreSQL, check `date` fields converted from `datetime` on a release
+  before 18.4.0** for values stored one day early, as the `driver-sql`
+  CHANGELOG entry describes (`01d206d`).
