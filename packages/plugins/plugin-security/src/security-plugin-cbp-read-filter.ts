@@ -53,6 +53,16 @@
  * composes: `computeControlledByParentFilter` takes the caller's resolved
  * permission sets (for View All on the detail) and the host hands it
  * `permissionEvaluator`. A required master's leaf is unchanged.
+ *
+ * [#33696 · ruling record 6893097935, option A] The leaf of a REQUIRED master
+ * is still written for every caller; the ENGINE drops it when it composes the
+ * read and finds the master's scope unrestricted at every hop
+ * (`composeReadableIdsChain` step 5, `@objectstack/objectql`), so such a reader
+ * runs no parent-chain subquery and also sees the detail rows whose master is
+ * missing or empty. The decision is the engine's because only it holds the
+ * per-hop answer; ⛔ never this module's View All on the detail
+ * (`hasSuperuserReadBypass`), which does not open the master arm. Pinned in
+ * `security-plugin-cbp-read-filter.test.ts`.
  */
 
 import type { SecurityPlugin } from './security-plugin.js';
