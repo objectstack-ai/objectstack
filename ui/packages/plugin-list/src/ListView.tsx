@@ -26,6 +26,17 @@ import {
 } from './components/ViewSettingsPopover';
 import { UserFilters, type UserFiltersHandle } from './UserFilters';
 import {
+  TOOLBAR_ROW,
+  TOOLBAR_ROW_LEADING_PHONE,
+  TOOLBAR_LEFT_GROUP,
+  TOOLBAR_LEFT_GROUP_LEADING,
+  TOOLBAR_LEADING,
+  TOOLBAR_USER_FILTERS,
+  TOOLBAR_USER_FILTERS_LEADING_PHONE,
+  TOOLBAR_CLUSTER,
+  TOOLBAR_CLUSTER_LEADING_PHONE,
+} from './listToolbarRow';
+import {
   calendarWindowCovers,
   calendarWindowFilter,
   calendarWindowFor,
@@ -6492,12 +6503,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           Not in the compact posture (objectui#12703), nor in the capped one
           (objectstack#26613). */}
       {listChromeShown && (
-      <div className="border-b px-2 sm:px-4 py-1.5 flex items-center justify-between gap-1 sm:gap-2 bg-background">
+      <div className={cn(TOOLBAR_ROW, hasToolbarLeading && TOOLBAR_ROW_LEADING_PHONE)}>
         {/* With a host's leading node the left group grows (`flex-1`) so that
             node's `flex-1` wrapper has the width the tool cluster leaves —
             a width-fitted tab strip folds whatever does not fit
-            (objectui#12440). Without one, the group is unchanged. */}
-        <div className={hasToolbarLeading ? 'flex flex-1 items-center gap-2 overflow-x-auto min-w-0' : 'flex items-center gap-2 overflow-x-auto min-w-0'}>
+            (objectui#12440). Without one, the group is unchanged. Below
+            `sm` the row wraps around that node instead (objectstack#33833,
+            `./listToolbarRow.ts`). */}
+        <div className={hasToolbarLeading ? TOOLBAR_LEFT_GROUP_LEADING : TOOLBAR_LEFT_GROUP}>
           {showDescriptionInfo && (
             <span
               role="img"
@@ -6511,7 +6524,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             </span>
           )}
           {hasToolbarLeading && (
-            <div className="flex min-w-0 flex-1 items-center" data-testid="list-toolbar-leading">
+            <div className={TOOLBAR_LEADING} data-testid="list-toolbar-leading">
               {toolbarLeading}
             </div>
           )}
@@ -6522,7 +6535,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               Interface pattern. Withheld on a dataset-bound chart, which they
               cannot reach (`datasetChartOnScreen`, objectui#10327). */}
           {filterElements && userFilterBarShown && (
-              <div className="shrink-0 min-w-0 overflow-x-auto" data-testid="user-filters">
+              <div className={cn(TOOLBAR_USER_FILTERS, hasToolbarLeading && TOOLBAR_USER_FILTERS_LEADING_PHONE)} data-testid="user-filters">
                 <UserFilters
                   ref={userFiltersRef}
                   config={filterElements}
@@ -6566,7 +6579,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             distinguishable from a content div's. The left half of the toolbar
             (view tabs + active filter chips) deliberately still prints: it
             says WHICH slice of the data is on the page. */}
-        <div className="flex items-center gap-0 shrink-0 rounded-lg border border-border bg-muted/40 p-0.5 shadow-sm" data-print-hide>
+        <div className={cn(TOOLBAR_CLUSTER, hasToolbarLeading && TOOLBAR_CLUSTER_LEADING_PHONE)} data-print-hide>
           {/* Visualization switcher — compact dropdown (Airtable-style
               "List ▾"), first slot of the right tool cluster so the whole
               toolbar stays a single row. The Display form carries it as its

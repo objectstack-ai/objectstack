@@ -396,7 +396,7 @@
       "title": "Data-API query contract: every filter operator gives known answers; $-params, select, sort, expand honored; malformed input 400s with the exact code",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -473,7 +473,7 @@
         {
           "clause": "every variant below carries a recorded verdict; operators not runnable against seeded types (none expected — the account/task fields cover text/number/date/select/null) are recorded skipped-with-reason, never silently omitted",
           "oracle": "api",
-          "verify": "run record has one row per variant",
+          "verify": "run record has one row per variant: 30 rows, the 22 operator variants (op:*, each driven in both spellings, steps[1]) and the 8 params (param:*), as `variants` lists them. A record with fewer rows has omitted a variant",
           "evidence": "run record"
         }
       ],
@@ -581,7 +581,8 @@
           "ref": "#25807"
         },
         { "revision": 8, "date": "2026-10-31", "change": "steps[1] names the prefix-form compound AST and steps[2] the case contract of the substring operators. Checklist-accuracy findings of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the infix compound [cond, 'and', cond] answered 400 while the step showed only the single-condition form, and the substring operators matched case-exactly on the SQL driver while the step gave no case note. Re-read at base 488b3ed0: packages/spec/src/data/filter.zod.ts lowerFilterAST and the CONTAINS / NOT_CONTAINS / STARTS_WITH / ENDS_WITH / ICONTAINS descriptions. No clause changed", "ref": "#27409" },
-        { "revision": 9, "date": "2026-11-01", "change": "QA run #28545 (W3-C1R) finding: the #26644 contract (an empty projection or an unrecognised $count answers 400) had no acceptance or negative row, so its recheck rested on a dispatcher note. negative[1] adds it, spelled from source: protocol.ts projectionFieldsValue / countFlagValue (400 VALIDATION_ERROR naming the spelling) and the body schema's 400 VALIDATION_FAILED, with the probe set of data-empty-projection-count-door.test.ts. #28545 observed the #26644 fix holding. A negative is added; nothing is removed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054", "ref": "#28545" }
+        { "revision": 9, "date": "2026-11-01", "change": "QA run #28545 (W3-C1R) finding: the #26644 contract (an empty projection or an unrecognised $count answers 400) had no acceptance or negative row, so its recheck rested on a dispatcher note. negative[1] adds it, spelled from source: protocol.ts projectionFieldsValue / countFlagValue (400 VALIDATION_ERROR naming the spelling) and the body schema's 400 VALIDATION_FAILED, with the probe set of data-empty-projection-count-door.test.ts. #28545 observed the #26644 fix holding. A negative is added; nothing is removed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054", "ref": "#28545" },
+        { "revision": 10, "date": "2026-11-15", "change": "acceptance[8].verify states the variant count. The clause said only \"every variant below\"; `variants` lists 22 operators and 8 params, 30 rows (QA runs #33784 and #33909, comments 6893243542 and 6895587997; ledger 6896511848 of #33761 rows 2 and 184, one edit). The clause is unchanged. Read at base bc6b7ffd", "ref": "#34016" }
       ]
     },
     {
@@ -852,10 +853,10 @@
     },
     {
       "id": "api-backend.route-ledger-live-parity",
-      "title": "Every route family across all SIXTEEN route ledgers — REST, dispatcher, auth, personal views, storage/i18n/settings/datasource/messaging/print services, sharing, comment reactions, metadata HMR, trigger-api, cloud-connection, console static — is actually mounted on the live server — no route that exists only in unit tests",
+      "title": "Every route family across all SEVENTEEN route ledgers — REST, dispatcher, auth, personal views, storage/i18n/settings/datasource/messaging/print services, sharing, comment reactions, attachment removal, metadata HMR, trigger-api, cloud-connection, console static — is actually mounted on the live server — no route that exists only in unit tests",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -865,14 +866,14 @@
         "app": "showcase",
         "requires": [
           "packages/rest/src/rest-route-ledger.ts — the audited route inventory (route-manager + direct-mount rows, full wire paths at /api/v1)",
-          "the other fifteen ledgers named in the steps — the ledger universe is SIXTEEN files at 87330e89 (the five added since this item was written: packages/plugins/plugin-audit/src/comment-reaction-route-ledger.ts, packages/plugins/plugin-auth/src/personal-view-route-ledger.ts, packages/plugins/plugin-sharing/src/sharing-route-ledger.ts, packages/services/service-messaging/src/messaging-route-ledger.ts, packages/services/service-print/src/print-route-ledger.ts) (grep the repo for '*route-ledger.ts' at run time rather than trusting this list to stay complete: a seventeenth ledger landing is exactly the drift this item exists to catch)"
+          "the other sixteen ledgers named in the steps — the ledger universe is SEVENTEEN files at bc6b7ffd (the six added since this item was written: packages/plugins/plugin-audit/src/comment-reaction-route-ledger.ts, packages/plugins/plugin-auth/src/personal-view-route-ledger.ts, packages/plugins/plugin-sharing/src/sharing-route-ledger.ts, packages/services/service-messaging/src/messaging-route-ledger.ts, packages/services/service-print/src/print-route-ledger.ts, packages/services/service-storage/src/attachment-removal-route-ledger.ts) (grep the repo for '*route-ledger.ts' at run time rather than trusting this list to stay complete: an eighteenth ledger landing is exactly the drift this item exists to catch)"
         ]
       },
       "steps": [
         "boot the real HTTP stack (os dev); read REST_ROUTE_LEDGER and pick at least one representative route per family (the 20 families at 87330e89: discovery, openapi, metadata, ui, crud, batch, data-actions, forms, search, security, security-explain, record-shares, sharing-rules, approvals, email, analytics, packages, external-datasource, recycle-bin, user-work — read the family set from the ledger, it grows). Sample ledger ROWS only: POST /api/v1/data/:object/actions/:name is no ledger row and answers the routing 404 by design, so it is not a data-actions sample",
         "fire each sampled route as admin with a minimal-valid shape (GETs verbatim; parameterized routes filled with real seeded names, e.g. GET /api/v1/data/showcase_task, GET /api/v1/meta/object/showcase_task, GET /api/v1/security/explain)",
         "capture status + code per route",
-        "read the OTHER ledgers and fire one representative route each: the dispatcher ledger (packages/runtime/src/route-ledger.ts) families share-links/keys/notifications/suggested-bindings/i18n/analytics (e.g. GET /api/v1/share-links, POST /api/v1/keys, GET /api/v1/notifications, GET /api/v1/security/suggested-bindings, GET /api/v1/i18n/locales, POST /api/v1/analytics/query), AUTH_ROUTE_LEDGER (GET /api/v1/auth/get-session), the storage + i18n service ledgers, and the five ledgers added since this item was written, one representative row each (e.g. GET /api/v1/sharing/shareable-objects, GET /api/v1/messaging/preference-options, POST /api/v1/print/records, and the personal-view and comment-reaction doors under /api/v1/personal-views and /api/v1/comments/reactions)",
+        "read the OTHER ledgers and fire one representative route each: the dispatcher ledger (packages/runtime/src/route-ledger.ts) families share-links/keys/notifications/suggested-bindings/i18n/analytics (e.g. GET /api/v1/share-links, POST /api/v1/keys, GET /api/v1/notifications, GET /api/v1/security/suggested-bindings, GET /api/v1/i18n/locales, POST /api/v1/analytics/query), AUTH_ROUTE_LEDGER (GET /api/v1/auth/get-session), the storage + i18n service ledgers, and the six ledgers added since this item was written, one representative row each (e.g. GET /api/v1/sharing/shareable-objects, GET /api/v1/messaging/preference-options, POST /api/v1/print/records, the personal-view and comment-reaction doors under /api/v1/personal-views and /api/v1/comments/reactions, and the attachment-removal door DELETE /api/v1/attachments/:id with an id no row carries, which answers the door's own 404 RECORD_NOT_FOUND, never the routing 404, and removes nothing; never a real attachment id)",
         "fire the two service families that were UNLEDGERED when this item was first written and are ledgered at head — the run must NOT file the old unledgered finding: as admin GET /api/settings (settings-route-ledger.ts, #7526 — note the /api/settings base, NOT /api/v1) and GET /api/v1/datasources (datasource-route-ledger.ts, #7744). For the datasource family probe BOTH sides of the #9391/#9593 floor: anonymous GET /api/v1/datasources/drivers → 401 UNAUTHENTICATED (the 401 proves the route is mounted AND the floor holds — it is NOT the routing 404, and NOT the pre-#9391 'always-available static catalog'), then the same GET as admin (manage_platform_settings via admin_full_access) → 200 driver catalog; GET /api/v1/datasources as admin → 200 (or 503 naming the unwired service, which still proves the mount)",
         "fire the RAW-APP-mounted families — these registrars mount via getRawApp() and are structurally invisible to IHttpServer.getMountedRoutes(), so the #7526 parity dogfood gate CANNOT observe them and this item's live probes are their only live-HTTP observation (each ledger header says so): metadata HMR GET /api/v1/dev/metadata-events (metadata-route-ledger.ts — an SSE stream: read only the status line + headers with a short timeout, never wait for the stream to end; mounted ONLY under a literal NODE_ENV=development, which os dev sets — #12140/#5673) and POST /api/v1/dev/metadata-events; trigger-api POST /api/v1/automation/hooks/no_such_flow/bogus (trigger-api-route-ledger.ts — the handler answers a structured JSON refusal, distinguishable from the routing 404); cloud-connection GET /api/v1/runtime/config (anonymous 200 by design) and GET /api/v1/cloud-connection/status (cloud-connection-route-ledger.ts — 16 rows across four registrar families; sample only for MOUNT parity here, platform-core owns the marketplace lifecycle depth); console static GET /_console (console-route-ledger.ts — disposition static-asset)",
         "fire the dispatcher meta state route: GET /api/v1/meta/object/showcase_task/state/status?from=in_review, the same with ?from omitted, and GET /api/v1/meta/object/not_a_real_object/state/status as the 404 control",
@@ -1038,6 +1039,12 @@
           "date": "2026-11-14",
           "change": "title, fixtures.requires[1], steps[0], steps[3] and acceptance[3].clause re-pointed (stale spec, card #33332; QA runs #33058 comment 6846283471, #33081 comment 6850173588, #33092 comment 6850793622). The tree holds SIXTEEN *route-ledger.ts files at 87330e89, not eleven: comment-reaction (plugin-audit), personal-view (plugin-auth), sharing (plugin-sharing), messaging (service-messaging) and print (service-print) were added, and each answered live; steps[3] now samples them. REST_ROUTE_LEDGER has 20 families (recycle-bin and user-work added), and steps[0] warns that POST /data/:object/actions/:name is no ledger row and answers a routing 404 by design. acceptance[3]'s 'a bit true ⇒ the family answers' now admits a permission refusal (the run's admin met 403 EXPORT_NOT_PERMITTED with the export bit true, coherent with the admin-export-wildcard removal). The parity rule itself is unchanged. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "title, fixtures.requires[1] and steps[3] re-counted: the tree holds SEVENTEEN *route-ledger.ts files at bc6b7ffd, not sixteen; the seventeenth is packages/services/service-storage/src/attachment-removal-route-ledger.ts (one row, DELETE /api/v1/attachments/:id, #33322). steps[3] samples it with an unknown id, which the own-row delete door answers 404 RECORD_NOT_FOUND (packages/core/src/security/own-row-delete-routes.ts) (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 45). No clause changed. Read at base bc6b7ffd",
+          "ref": "#34016"
         }
       ]
     },
@@ -1911,7 +1918,7 @@
       "title": "POST /actions/_activation/:object/:action — the activation door's ordered arms: authority before body and lookup, the exact 400 shapes, 404 undeclared, 409 ambiguity, 501/503 honesty, and the reserved segment surviving the real mount",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1999,7 +2006,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/runtime/src/domains/action-activation-posture-gate.test.ts (the door's own contract: both authority tiers across all three postures, unknown-key/non-boolean 400s by status and code VALIDATION_FAILED only, never fields[0] or the non-object-body arm, empty-body-enables, undeclared 404 + no row, ambiguity 409 + no write with one owner (the twin 'crm_account') asserted in the message, 501 no-projection, 503 non-durable) + packages/qa/dogfood/test/action-params-contract.dogfood.test.ts ('[#12160] the reserved `_activation` segment survives the real mount' — the 2-segment 400 and undeclared 404 measured through the live dispatcher reconstruction) + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (the live happy path: 200 flip, then 'writes ONE deployment-level row, and the TABLE has no tenant column at all' — a key-set reading off the driver's own SELECT, not a value read, on the row rows.find returns, so 'exactly one row' is not asserted — and re-enable updates; the flip is asserted by status, not by its {name, objectName, enabled} body) + packages/qa/dogfood/test/action-activation-door-live.dogfood.test.ts (#26572 — the door over HTTP on its own showcase boot: acceptance[0] a signed-up member's mis-bodied undeclared probe → 403 PERMISSION_DENIED with the manage_metadata sentence and no clone wording, never the 400 or the 404, and the anonymous twin → 401 UNAUTHENTICATED; acceptance[1] the 2-segment shape sentence and the 4-segment 404 byte-identical to an unmounted path; acceptance[2] fields[0] {enable, unknown_field} with the did-you-mean, {enabled, invalid_type} and {(body), invalid_type}; acceptance[4] the undeclared 404 sentence and ZERO ledger rows after every refusal; acceptance[3] {} → 200 data {name, objectName, enabled: true}; acceptance[5] the flip body, exactly ONE row for the name with no organization_id key, the same row id after flipping back. acceptance[6] live on the scratch fixtures/activation-ambiguity-fixture.ts: both owners' flips → 409 RESOURCE_CONFLICT naming both objects, zero rows, the action still dispatching)"
+        "ref": "packages/runtime/src/domains/action-activation-posture-gate.test.ts (the door's own contract: both authority tiers across all three postures, unknown-key/non-boolean 400s by status and code VALIDATION_FAILED only, never fields[0] or the non-object-body arm, empty-body-enables, undeclared 404 + no row, ambiguity 409 + no write with one owner (the twin 'crm_account') asserted in the message, 501 no-projection, 503 non-durable) + packages/qa/dogfood/test/action-params-contract.dogfood.test.ts ('[#12160] the reserved `_activation` segment survives the real mount' — the 2-segment 400 and undeclared 404 measured through the live dispatcher reconstruction) + packages/qa/dogfood/test/packaged-activation-ledger-reach.dogfood.test.ts (the live happy path: 200 flip, then 'writes ONE deployment-level row, and the TABLE has no tenant column at all' — a key-set reading off the driver's own SELECT, not a value read, on the row rows.find returns, so 'exactly one row' is not asserted — and re-enable updates; the flip is asserted by status, not by its {name, objectName, enabled} body) + packages/qa/dogfood/test/action-activation-door-live.dogfood.test.ts (#26572 — the door over HTTP on its own showcase boot: acceptance[0] a signed-up member's mis-bodied undeclared probe → 403 PERMISSION_DENIED with the manage_metadata sentence and no clone wording, never the 400 or the 404, and the anonymous twin → 401 UNAUTHENTICATED; acceptance[1] the 2-segment shape sentence and the 4-segment path's 404 with code ROUTE_NOT_FOUND, the dispatcher's no-route answer (not byte-identical to an unmounted path, which answers the transport's 404 ENDPOINT_NOT_FOUND); acceptance[2] fields[0] {enable, unknown_field} with the did-you-mean, {enabled, invalid_type} and {(body), invalid_type}; acceptance[4] the undeclared 404 sentence and ZERO ledger rows after every refusal; acceptance[3] {} → 200 data {name, objectName, enabled: true}; acceptance[5] the flip body, exactly ONE row for the name with no organization_id key, the same row id after flipping back. acceptance[6] live on the scratch fixtures/activation-ambiguity-fixture.ts: both owners' flips → 409 RESOURCE_CONFLICT naming both objects, zero rows, the action still dispatching)"
       },
       "traps": [
         "dispatcher-vs-hono-route",
@@ -2065,6 +2072,12 @@
           "date": "2026-11-14",
           "change": "acceptance[1] (clause, verify) re-pointed (stale spec, card #33332; QA run #33081 comment 6850173588, repeating the prior round's note). The clause said the 4-segment path 404s at the router because no /actions mount matches four segments. Since ADR-0150 D5 the dispatcher mounts the addressed /actions/:ns/:object/:action/:recordId pattern (dispatcher-plugin.ts), so the path reaches the activation door, which declines a path longer than three segments after its two gates (domains/actions.ts), and the dispatcher answers 404 ROUTE_NOT_FOUND. The 2-segment shape 400 is unchanged. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-15",
+          "change": "automated.ref re-pointed: it said the dogfood pin reads the 4-segment 404 as byte-identical to an unmounted path, but the pin (action-activation-door-live.dogfood.test.ts, the acceptance[1] case) asserts code ROUTE_NOT_FOUND, the dispatcher's no-route answer, while an unmounted path answers ENDPOINT_NOT_FOUND (plugin-hono-server adapter.ts). acceptance[1] already said so (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 19). The same stale words in that test file's header comment are code and stay out of this edit. No clause changed. Read at base bc6b7ffd",
+          "ref": "#34016"
         }
       ]
     },
@@ -3488,14 +3501,14 @@
       "title": "An action call names its holder: POST /api/v1/actions/:ns/:object/:action[/:recordId], /actions/:ns/global/:action and the _env forms run that namespace's (or the environment's) declaration, an action another package binds to an object is reachable by its namespace, and the bare call is refused 409 naming both when two packages hold the action on one object",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin (the seeded admin): every call"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket with an embedded server action escalate and an object-less action qa_a_ping; qa_b declares a standalone action escalate bound to objectName qa_a_ticket. Each action's handler answers a result naming its package, so the runner can tell which ran",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. qa_a declares the object qa_a_ticket with an embedded server action escalate and an object-less action qa_a_ping; qa_b declares a standalone action escalate bound to objectName qa_a_ticket, so qa_b's stack is `defineStack({ … }, { strict: false })`: the default strict parse refuses a standalone action whose objectName is no object of its own stack (\"Action 'escalate' references object 'qa_a_ticket' which is not defined in objects.\", packages/spec/src/stack.zod.ts), since it cannot tell another package's object from a typo. Each action's handler answers a result naming its package, so the runner can tell which ran",
           "one qa_a_ticket record (its id is RID), and an environment object-less action qa_env_ping saved with PUT /api/v1/meta/action/qa_env_ping and no ?package="
         ]
       },
@@ -3541,7 +3554,7 @@
       "negative": [
         "the bare call running either package's escalate is a FAIL while both hold it on qa_a_ticket: the bare door refuses two package holders of one object-bound key, it never picks one by package or by listing order (ruling record 6729825528, letter A)",
         "an addressed call that runs another namespace's declaration when its own has none is a FAIL: a miss is 404, never a fallback",
-        "the bare call answering 200 with qa_a's result while qa_b binds escalate to qa_a_ticket is a FAIL: that was the answer before #31697. With qa_b's escalate removed, one holder is left and the same bare call answers 200 with qa_a's result"
+        "the bare call answering 200 with qa_a's result while qa_b binds escalate to qa_a_ticket is a FAIL: that was the answer before #31697. With qa_b's escalate removed, one holder is left and the same bare call answers 200 with qa_a's result. Remove qa_b through the install-local door that installed it, DELETE /api/v1/marketplace/install-local/com.qa.addr-b (packages/cloud-connection/src/marketplace-install-local-plugin.ts); DELETE /api/v1/packages/com.qa.addr-b answers 422 WRITABLE_PACKAGE_REQUIRED for an install-local package"
       ],
       "traps": ["dispatcher-vs-hono-route"],
       "automated": {
@@ -3573,6 +3586,12 @@
           "date": "2026-11-13",
           "change": "stale-spec re-point of acceptance[0] and negative[2] (and the title, steps[0] and negative[0] that described the same answer). #31697 landed: a bare POST /actions/OBJECT/ACTION/ID while two packages hold the action on one object is refused 409 RESOURCE_CONFLICT naming both (ruling record 6729825528, letter A; packages/runtime/src/action-execution.ts#pickActionHolder), so the clause no longer expects the embedding package's result and the negative no longer calls the refusal unlanded. Found by the 18.4.0 acceptance run #32940 (F-9, R4 F4; wave anchor #32908): 409 naming com.qa.addr-a and com.qa.addr-b, 2 reproductions, and 200 with qa_a's result once qa_b's escalate was removed. Re-read at main 25ee5076. Card #32946",
           "ref": "#32946"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[0] says qa_b's stack is defineStack(…, { strict: false }): its standalone escalate binds qa_a's object, which the default strict parse refuses as an undefined object (stack.zod.ts) (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 21). negative[2] names the door that removes qa_b, DELETE /api/v1/marketplace/install-local/com.qa.addr-b, since DELETE /api/v1/packages/ID answers 422 WRITABLE_PACKAGE_REQUIRED for an install-local package (found while doing #33967, from the #33968 report 6897030673). No clause changed. Read at base bc6b7ffd",
+          "ref": "#34016"
         }
       ]
     },
@@ -3684,7 +3703,7 @@
       "title": "The automation, legacy trigger, connector connection and inbound hook doors take the namespace and _env segments: /automation/:ns/:name[/trigger|/toggle|/clone|/runs…], /automation/trigger/:ns/:name, /automation/connectors/:ns/:name/connection and /automation/hooks/:ns/:flowName/:hookId serve the name's one holder exactly as the bare path does, and refuse any other qualifier with 404, 409 RESOURCE_CONFLICT or, for the hook, the door's own 401",
       "since": "v18.4",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3700,7 +3719,7 @@
           "an environment flow qa_env_flow, created as admin with POST /api/v1/automation and a minimal autolaunched body (a start node and an end node joined by one edge), so no package holds it"
         ],
         "knownGaps": [
-          "a name two packages hold is not reachable here: phase 1's one-holder rule covers flow and connector (packages/core/src/package-scoped-resolution.ts#BARE_NAME_ONE_HOLDER_TYPES), so install refuses the second holder (422 PLUGIN_REGISTER_FAILED at install-local). The bare 409 and its address's 409 for such a name are held by domains/automation-addressed-route.test.ts, not driven live"
+          "a name two packages hold IS stageable now, though this item's fixture does not stage it: flow and connector moved from one package holder per deployment to one per namespace (packages/core/src/package-scoped-resolution.ts#NAMESPACE_SCOPED_BARE_NAME_TYPES, #31696), so a scratch package of another namespace holding a flow showcase_batch_reminders installs. With it installed, showcase/… and that namespace's address each serve their own holder (200), while the bare path, _env and a third namespace answer 409 RESOURCE_CONFLICT naming both holders (QA run #33910). The disabled-holder cases (#33646) are not staged over HTTP: an installed package refuses disable and DELETE /api/v1/packages/ID with 422 WRITABLE_PACKAGE_REQUIRED, and a writable twin answers 403 NOT_OVERRIDABLE (install-local packages are removed, not disabled, by DELETE /api/v1/marketplace/install-local/MANIFEST_ID, packages/cloud-connection/src/marketplace-install-local-plugin.ts). Those cases rest on packages/runtime/src/flow-caller-package.test.ts, domains/automation-run-doors-per-slot.test.ts and domains/automation-addressed-route.test.ts"
         ]
       },
       "steps": [
@@ -3773,7 +3792,7 @@
         "a qualified path serving a flow or connector its namespace does not hold is a FAIL: a miss is 404 or 409, never a fallback to the bare item",
         "an unadmitted hook address answering anything other than the bad-signature bytes (a 404, a 409, a body or header naming the namespace) is a FAIL: the refusal must not tell one installed namespace from another",
         "reading the member's 403 for an installed namespace against a 404 for qa_nowhere as a leak is wrong: whether a namespace is installed is read before the gates by design, and the seat accepted it (#32001, open question N1); who holds the name is judged only after the gates",
-        "reading the 409 on the address of a name two packages hold as a defect is wrong: the engine arms one flow per bare name, so neither address is served until one holder is renamed or removed (#32001 BREAKING 1)"
+        "reading the 409 for a name two packages hold as a defect is wrong: the bare path, _env and a namespace holding neither name no holder, so they refuse naming both (#32001). Each holder's own namespaced address serves that holder (200) since flow is one holder per namespace (#31696; knownGaps[0])"
       ],
       "variants": [
         "a sub-resource literal in the name position keeps its bare route after a namespace: GET /automation/showcase/runs is the run list of a flow named showcase (packages/runtime/src/domains/automation-address.ts#AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS: clone, runs, toggle, trigger)",
@@ -3821,6 +3840,12 @@
           "date": "2026-11-14",
           "change": "steps[2] and acceptance[4] and [8] (verify) re-pointed (card #33332; QA runs #32940 checklist-accuracy notes and #33081 comment 6850173588; ledger row 85's api-backend half, routed from batch E #33331). steps[2] triggered showcase_batch_reminders with {}, which answers 400 FLOW_FAILED 'Unknown variable: tasks' because the flow declares and loops over the input tasks (flows/index.ts), so the body is now {\"params\": {\"tasks\": []}}. acceptance[8]'s Allow was GET; the adapter adds HEAD beside GET (plugin-hono-server adapter.ts), so the wire reads 'GET, HEAD'. No clause changed. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "fixtures.knownGaps[0] and negative[3] re-pointed (stale spec, QA runs #33829 and #33910, comment 6895587997; ledger 6896511848 of #33761 rows 58 and 193, one edit). Since #31696 flow (and connector) is one holder per namespace (NAMESPACE_SCOPED_BARE_NAME_TYPES), so install admits a second namespace's holder: the gap no longer says install refuses it, and negative[3] no longer says neither address is served; QA read showcase/… and the second namespace's address each serving their own flow (200) and the bare path, _env and a third namespace answering 409 naming both. The gap names the install-local removal door (found while doing #33967, from the #33968 report 6897030673). The clauses are unchanged. Read at base bc6b7ffd",
+          "ref": "#34016"
         }
       ]
     },
@@ -3829,7 +3854,7 @@
       "title": "The client SDK names an item's package: automation.*, actions.invoke / invokeGlobal and meta.getItem take an optional namespace, send the qualified path the server reads, send the bare path unchanged without one, refuse before sending any path the router would read as another request, and hand a 409's candidates to the caller",
       "since": "v18.4",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3844,7 +3869,7 @@
           "a scratch Node script (an .mjs file outside the repo) that imports ObjectStackClient from the worktree's packages/client/dist/index.mjs and constructs it with baseUrl BASE and a `fetch` (ClientConfig.fetch) that records each request's method and path, then calls the global fetch. It signs in with client.auth.login, and for each call keeps the requests that call sent and either the resolved value or the rejection's code, httpStatus, message and details.candidates"
         ],
         "knownGaps": [
-          "the /actions 409 with candidates (a namespace two packages co-own, both declaring the name) is not reachable with this fixture. packages/client/src/package-addressing.test.ts §4b holds it through the real dispatcher; invoke reads the candidates with the same addressCandidatesOf the /meta and /automation legs drive here",
+          "the /actions 409 with candidates is not staged by this item's fixture: qa_a and qa_b here declare no action. It is reachable live with the family's two-package action fixture, api-backend.actions-namespace-address fixtures.requires[0] (qa_a's embedded escalate and qa_b's standalone escalate on qa_a_ticket, whose bare call answers 409 RESOURCE_CONFLICT naming both; QA run #33829 reached it there), so a run that installs that fixture beside this one can read invoke's candidates on that call. packages/client/src/package-addressing.test.ts §4b holds it through the real dispatcher; invoke reads the candidates with the same addressCandidatesOf the /meta and /automation legs drive here",
           "this item drives get, execute, trigger, runs.list and runs.get on automation. update, delete, toggle, clone, resume and getScreen, and the scoped twins on client.environment(id), build their paths with the same qualifier helpers and are held by package-addressing.test.ts §1 and §2 (24 calls, bare and qualified, each matched to a route ledger row)"
         ]
       },
@@ -3948,6 +3973,12 @@
           "date": "2026-11-14",
           "change": "automated.ref re-pointed (card #33332; QA run #32940 checklist-accuracy notes): it pinned the file at 79 tests and the run read 83. A count written into the item goes stale with every added case, so the ref now names the vitest summary as the count and records 83 at 5fb79bc0 as the last reading. The pin and the clauses are unchanged. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "fixtures.knownGaps[0] re-pointed: it said the /actions 409 with candidates is not reachable, and QA reached it live with the family's two-package action fixture (api-backend.actions-namespace-address). The gap now says this item's own fixture does not stage it and names the fixture that does (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 20). No clause changed. Read at base bc6b7ffd",
+          "ref": "#34016"
         }
       ]
     },
