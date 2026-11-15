@@ -789,10 +789,19 @@ export function codeownersPatternFor(surface) {
 }
 
 /**
- * The verdict: `{ ok, problems, tierHPatterns }`. `ok` holds only when
- *   - every Tier H row of the register that governs `repo` has a CODEOWNERS
- *     line at exactly its pattern, naming exactly `@` + every account in
- *     `approvers` (order-free; nobody else, nobody fewer);
+ * The verdict: `{ ok, problems, tierHPatterns, armPatterns }`. `ok` holds
+ * only when
+ *   - every Tier H row of the register that governs `repo` and carries no
+ *     per-pull arm there has a CODEOWNERS line at exactly its pattern, naming
+ *     exactly `@` + every account in `approvers` (order-free; nobody else,
+ *     nobody fewer) — those patterns are `tierHPatterns`;
+ *   - no line routes a Tier H row that carries the low-risk arm in `repo`
+ *     (`armPatterns`, read off the row's own `lowRisk.repos`, never a list
+ *     kept here): who is asked to review such a pull is the relay's per-pull
+ *     plan, which reads the arm, and a static line would summon both
+ *     approvers on every catalog pull, the low-risk ones included (ruling
+ *     record 6891850019). The arm is per repository, so a sibling copy the
+ *     arm does not reach still owes the line;
  *   - every other line — the enforcement chain's rows — names exactly that
  *     same owner set, so an enforcer cannot be routed to a subset;
  *   - no line routes a Tier S row's pattern: Tier S lands on a seat's review of
@@ -811,8 +820,11 @@ export function codeownersMirrorVerdict({ text, approvers = GOVERNED_APPROVERS, 
   // The rows that govern THIS repository, read from the register (ruling B2: the question has a repository in it).
   // `register` is the register's own seam (`governedSurfacesFor`): the self-test hands in rows not on it yet.
   const governing = governedSurfacesFor(repo, register);
-  const tierH = governing.filter((s) => s.tier === GOVERNED_TIER_H);
+  const armedIn = (s) => Boolean(s.lowRisk) && Array.isArray(s.lowRisk.repos) && s.lowRisk.repos.includes(repo);
+  const tierH = governing.filter((s) => s.tier === GOVERNED_TIER_H && !armedIn(s));
+  const armed = governing.filter((s) => s.tier === GOVERNED_TIER_H && armedIn(s));
   const tierHPatterns = tierH.map(codeownersPatternFor);
+  const armPatterns = armed.map(codeownersPatternFor);
   for (const surface of tierH) {
     const pattern = codeownersPatternFor(surface);
     const row = rows.find((r) => r.pattern === pattern);
@@ -824,12 +836,17 @@ export function codeownersMirrorVerdict({ text, approvers = GOVERNED_APPROVERS, 
   }
   for (const row of rows) {
     if (tierHPatterns.includes(row.pattern)) continue;
+    const arm = armed.find((s) => codeownersPatternFor(s) === row.pattern);
+    if (arm) {
+      problems.push(`CODEOWNERS line ${row.line} routes \`${row.pattern}\`, a Tier H row (\`${arm.id}\`) carrying the low-risk arm in this repository — the relay's per-pull plan decides who is asked there, and a static line summons both approvers on every pull, the low-risk ones too`);
+      continue;
+    }
     const tierS = governing.find((s) => s.tier === GOVERNED_TIER_S && codeownersPatternFor(s) === row.pattern);
     if (tierS) problems.push(`CODEOWNERS line ${row.line} routes \`${row.pattern}\`, a Tier S row (\`${tierS.id}\`) that lands on a seat's review of record — a code-owner request there asks the maintainer for a landing that is not his`);
     else if (!sameOwners(row.owners)) problems.push(`CODEOWNERS line ${row.line} \`${row.pattern}\` (an enforcement-chain row) names ${row.owners.join(' ') || 'nobody'}, not every GOVERNED_APPROVERS account (${wanted.join(' ')})`);
   }
   if (!/GOVERNED_APPROVERS/.test(String(text ?? ''))) problems.push('the file never names `GOVERNED_APPROVERS` — its header must say which constant the owner list mirrors');
-  return { ok: problems.length === 0, problems, tierHPatterns, rows };
+  return { ok: problems.length === 0, problems, tierHPatterns, armPatterns, rows };
 }
 
 // ── the landing TIER: Tier S lands on a review of record, Tier H on an approval ─
@@ -5894,8 +5911,10 @@ export async function selfTest() {
     const onDisk = readFileSync(join(repoRoot, '.github', 'CODEOWNERS'), 'utf8');
     const live = codeownersMirrorVerdict({ text: onDisk });
     assert('⭐ the-file-on-disk-mirrors-the-register-and-the-approver-list', live.ok, live.problems.join(' | '));
-    assert('every-Tier-H-row-that-governs-this-repository-is-a-pattern-the-file-carries', live.tierHPatterns.length === governedSurfacesFor(REPO).filter((s) => s.tier === GOVERNED_TIER_H).length && live.tierHPatterns.every((p) => live.rows.some((r) => r.pattern === p)), JSON.stringify(live.tierHPatterns));
-    assert('the-patterns-are-the-register-rows-root-anchored-prefix-or-exact', live.tierHPatterns.join() === '/docs/adr/,/skills/,/AGENTS.md,/CLAUDE.md,/docs/NORTH-STAR.md,/.github/workflows/,/ui/docs/adr/,/ui/.claude/,/ui/skills/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/', live.tierHPatterns.join());
+    assert('every-Tier-H-row-that-governs-this-repository-is-a-pattern-the-file-carries-or-an-arm-row-it-leaves-out', live.tierHPatterns.length + live.armPatterns.length === governedSurfacesFor(REPO).filter((s) => s.tier === GOVERNED_TIER_H).length && live.tierHPatterns.every((p) => live.rows.some((r) => r.pattern === p)) && live.armPatterns.every((p) => !live.rows.some((r) => r.pattern === p)), JSON.stringify([live.tierHPatterns, live.armPatterns]));
+    assert('the-patterns-are-the-register-rows-root-anchored-prefix-or-exact', live.tierHPatterns.join() === '/docs/adr/,/AGENTS.md,/CLAUDE.md,/docs/NORTH-STAR.md,/.github/workflows/,/ui/docs/adr/,/ui/.claude/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/', live.tierHPatterns.join());
+    // Ruling record 6891850019: the rows carrying the low-risk arm leave the file — read off the register's `lowRisk`, never a list here.
+    assert('⭐ the-arm-patterns-are-the-register-rows-carrying-the-low-risk-arm-here', live.armPatterns.join() === '/skills/,/ui/skills/' && live.armPatterns.join() === governedSurfacesFor(REPO).filter((s) => s.tier === GOVERNED_TIER_H && s.lowRisk?.repos?.includes(REPO)).map((s) => `/${s.prefix ?? s.exact}`).join(), live.armPatterns.join());
     assert('every-line-on-disk-names-every-approver-spelled-as-a-login', live.rows.every((r) => GOVERNED_APPROVERS.every((a) => r.owners.includes(`@${a}`))) && live.rows.length >= live.tierHPatterns.length, JSON.stringify(live.rows));
     assert('the-parser-strips-comments-and-blank-lines-and-splits-owners', JSON.stringify(codeownersRows('# c\n\n/docs/adr/ @a @b # trailing\n  /x.md   @c\n')) === JSON.stringify([{ pattern: '/docs/adr/', owners: ['@a', '@b'], line: 3 }, { pattern: '/x.md', owners: ['@c'], line: 4 }]));
     const owners = GOVERNED_APPROVERS.map((a) => `@${a}`).join(' ');
@@ -5903,8 +5922,13 @@ export async function selfTest() {
     assert('a-fixture-carrying-exactly-the-Tier-H-rows-with-every-owner-passes', codeownersMirrorVerdict({ text: full() }).ok);
     const one = codeownersMirrorVerdict({ text: full().replace(`/docs/adr/ ${owners}`, `/docs/adr/ @${GOVERNED_APPROVERS[1]}`) });
     assert('⛔ one-approver-on-the-adr-row-is-a-problem-naming-the-row-and-the-missing-account', !one.ok && one.problems.length === 1 && one.problems[0].includes('`/docs/adr/`') && one.problems[0].includes(`@${GOVERNED_APPROVERS[0]}`), one.problems.join(' | '));
-    const missing = codeownersMirrorVerdict({ text: full().split('\n').filter((l) => !l.startsWith('/skills/')).join('\n') });
-    assert('⛔ a-Tier-H-row-with-no-line-is-a-problem-naming-the-row', !missing.ok && missing.problems.length === 1 && missing.problems[0].includes('`skills-catalog`'), missing.problems.join(' | '));
+    const missing = codeownersMirrorVerdict({ text: full().split('\n').filter((l) => !l.startsWith('/AGENTS.md')).join('\n') });
+    assert('⛔ a-Tier-H-row-with-no-arm-and-no-line-is-a-problem-naming-the-row', !missing.ok && missing.problems.length === 1 && missing.problems[0].includes('`agents-md`'), missing.problems.join(' | '));
+    assert('⭐ a-per-pull-arm-row-with-no-line-passes', !/^\/(ui\/)?skills\//m.test(full()) && codeownersMirrorVerdict({ text: full() }).ok);
+    const armLine = codeownersMirrorVerdict({ text: full(`/skills/ ${owners}\n`) });
+    assert('⛔ a-line-routing-an-arm-row-is-a-problem-naming-the-row-even-with-every-owner', !armLine.ok && armLine.problems.length === 1 && armLine.problems[0].includes('`skills-catalog`') && armLine.problems[0].includes('low-risk arm'), armLine.problems.join(' | '));
+    const sibling = codeownersMirrorVerdict({ text: full(), repo: 'objectui' });
+    assert('⛔ the-arm-is-per-repository-a-sibling-copy-it-does-not-reach-still-owes-the-skills-line', sibling.tierHPatterns.includes('/skills/') && sibling.armPatterns.length === 0 && !sibling.ok && sibling.problems.some((p) => p.includes('`skills-catalog`')), sibling.problems.join(' | '));
     const tierS = codeownersMirrorVerdict({ text: full(`/.claude/ ${owners}\n`) });
     assert('⛔ routing-the-Tier-S-row-is-a-problem-a-seat-record-landing-summons-nobody', !tierS.ok && tierS.problems.length === 1 && tierS.problems[0].includes('`claude-tree`'), tierS.problems.join(' | '));
     const enforcer = codeownersMirrorVerdict({ text: full(`/.github/CODEOWNERS @${GOVERNED_APPROVERS[1]}\n`) });
@@ -5917,9 +5941,10 @@ export async function selfTest() {
     // root-anchored `/ui/…` line on disk, and a file without those lines is short exactly one per row.
     const uiRows = governedSurfacesFor(REPO).filter((s) => s.id.startsWith('ui-'));
     const withoutUi = GOVERNED_SURFACES.filter((s) => !s.id.startsWith('ui-'));
-    assert('the-ui-patterns-are-root-anchored-under-ui-the-ui-claude-tree-included', uiRows.length === 6 && live.tierHPatterns.filter((p) => p.startsWith('/ui/')).join() === '/ui/docs/adr/,/ui/.claude/,/ui/skills/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/', live.tierHPatterns.join());
+    const uiRouted = uiRows.filter((s) => !s.lowRisk?.repos?.includes(REPO));
+    assert('the-ui-patterns-are-root-anchored-under-ui-the-ui-claude-tree-included', uiRows.length === 6 && uiRouted.length === 5 && live.tierHPatterns.filter((p) => p.startsWith('/ui/')).join() === '/ui/docs/adr/,/ui/.claude/,/ui/AGENTS.md,/ui/CLAUDE.md,/ui/.github/workflows/', live.tierHPatterns.join());
     const noUiLines = codeownersMirrorVerdict({ text: onDisk.split('\n').filter((l) => !l.startsWith('/ui/')).join('\n') });
-    assert('⛔ without-its-ui-lines-the-file-on-disk-is-short-one-line-per-ui-row', !noUiLines.ok && noUiLines.problems.length === uiRows.length && uiRows.every((r) => noUiLines.problems.some((p) => p.includes(`\`${r.id}\``) && p.includes(`\`/${r.prefix ?? r.exact}\``))), noUiLines.problems.join(' | '));
+    assert('⛔ without-its-ui-lines-the-file-on-disk-is-short-one-line-per-ui-row-without-an-arm', !noUiLines.ok && noUiLines.problems.length === uiRouted.length && uiRouted.every((r) => noUiLines.problems.some((p) => p.includes(`\`${r.id}\``) && p.includes(`\`/${r.prefix ?? r.exact}\``))) && !noUiLines.problems.some((p) => p.includes('`ui-skills-catalog`')), noUiLines.problems.join(' | '));
     const priorRegister = codeownersMirrorVerdict({ text: onDisk.split('\n').filter((l) => !l.startsWith('/ui/')).join('\n'), register: withoutUi });
     assert('the-register-seam-still-reads-a-register-handed-in-the-one-without-the-ui-rows-passes-the-file-without-their-lines', priorRegister.ok && priorRegister.tierHPatterns.every((p) => !p.startsWith('/ui/')), priorRegister.problems.join(' | '));
     assert('the-ui-rows-govern-objectstack-alone-so-a-sibling-copy-needs-no-ui-line', codeownersMirrorVerdict({ text: full(), repo: 'objectui' }).tierHPatterns.every((p) => !p.startsWith('/ui/')));
