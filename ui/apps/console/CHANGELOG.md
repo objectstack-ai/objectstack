@@ -1,5 +1,293 @@
 # @object-ui/console
 
+## 18.5.0
+
+### Minor Changes
+
+- 4dbcbdd: feat(plugin-auth): with single sign-on configured, a signed-out visit can go straight to the identity provider and come back to the page it asked for
+  
+  Clause-②: yes (widening) — `/auth/config` serves a new `features.directSignIn` flag (always, `false` unless the setting is on) and, while it is on, a `localSignIn` value (`hidden` | `off`); `PUBLIC_AUTH_FEATURES` gains `directSignIn`, so `requiresFeature` accepts the new value `'directSignIn'`; `GET /api/v1/auth/sign-in/direct` answers while the setting is on. With the setting off (every existing deployment) the door is not mounted and every other answer is unchanged.
+  Metadata-protocol: added
+  
+  A deployment that signs people in through one identity provider can now skip the sign-in page. Turn it on with the auth plugin's `directSignIn` option, or with the environment:
+  
+  - `OS_AUTH_DIRECT_SIGN_IN_ENABLED` — `true` or `false` (also `1`/`0`, `on`/`off`, `yes`/`no`); wins over the option.
+  - `OS_AUTH_DIRECT_SIGN_IN_PROVIDER` — the provider to use: an `oidcProviders` entry's `providerId` or an SSO provider's `providerId`. Unnamed, the one configured provider is used; with none or several, the sign-in page is shown as before.
+  - `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH` — `hidden` (default: the password form stays reachable at `/login?local=1`) or `off` (the sign-in form offers no local way in, in any of its states: no email or phone form, no sign-up link and no break-glass link, also on an OAuth client's hand-off and when no provider can start). An unknown value refuses to boot. `off` is the page's choice only: the server's `/sign-in/email` still accepts a password.
+  
+  While it is on, a signed-out visitor to the Console sign-in page is sent through `GET /api/v1/auth/sign-in/direct?callbackURL=…` to the identity provider and comes back to the same sign-in URL, where the usual post-sign-in steps run (organization pick, OAuth and mobile hand-offs, the safe `?redirect=`). The door keeps only a same-origin path as the return address; an absolute URL, `//host`, a backslash, a control character or any of these behind percent-encoding is dropped, and the sign-in returns to the Console root. It mints nothing: it starts the identity provider's own sign-in and passes its state cookie through.
+  
+  The page never loops: an identity-provider error, a return without a session (a blocked cookie), a door that could not start, or an explicit sign-out in that tab, also one that went through the identity provider's logout and came back (the maintainer's ruling, comment 6879236460 on #33183: only a fresh signed-out visit starts on its own; `@object-ui/auth` keeps a short note in the tab's `sessionStorage` for that round trip and reads it once) shows the page with a **Continue with single sign-on** button (and the reason, where there is one) instead of starting again. A start the identity provider's sign-in rate limit refused says so (`error=direct_sign_in_rate_limited`: wait a few seconds and try again) rather than pointing at the configuration. With the setting on and its door mounted by the same reading, `/auth/config` never advertises a door that is not there. An OAuth client's hand-off (`client_id` / `redirect_uri` on the URL) keeps today's page. `/auth/config` serves `directSignIn: true` only while a provider can be started, so the page does not navigate to a door that would turn it back. API keys, bearer tokens, `/api/*` and `/mcp` are never redirected.
+
+### Patch Changes
+
+- f530d25: fix(console): a refused SSO sign-in names a domain or email refusal instead of an expired link
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` locale packs gain two keys under `auth.login.errors` (`ssoEmailDomainNotAllowed`, `ssoEmailNotAnAddress`) in all eleven shipped locales; no key is renamed or removed.
+  Metadata-protocol: none
+  
+  When single sign-on refuses to create an account, the browser lands on the Console sign-in page with the refusal code. Two codes had no sentence of their own and read as "the sign-in link expired or was already used. Please try again.", which sent people to retry a sign-in that fails the same way every time:
+  
+  - `EMAIL_DOMAIN_NOT_ALLOWED` now says no account was created because the email address is not at a domain this system accepts new accounts from, and asks the person to use their organization email or ask their administrator. Two refusals send this code to the sign-in page, and the sentence is true of both: SSO domain verification on with the email not at a domain the identity provider has proven, and the `email_domain` audience posture refusing a self-serve creation (a social sign-up included) whose email is not on the approved-domain list.
+  - `INVALID_EMAIL` (the identity provider's sign-in resolved to a value that is not an email address) now says no account was created because the sign-in service did not send a usable email address, and asks the same of the administrator.
+  
+  The `@object-ui/i18n` locale packs gain two keys under `auth.login.errors` (`ssoEmailDomainNotAllowed`, `ssoEmailNotAnAddress`) in all eleven shipped locales; no key is renamed or removed. The technical code and description stay behind the details toggle, and every other refusal code keeps its sentence.
+- 66919b6: fix(runtime): MCP `list_actions` marks an organization action the caller's membership role does not reach `unavailable`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A plain organization member's agent was listed identity actions such as inviting a user, removing a member, editing the organization or managing its teams, and `run_action` then answered `403 PERMISSION_DENIED` from the organization endpoint each time. The actions stay listed, and for a caller whose membership role in the organization does not reach the endpoint the row now carries `unavailable: { code: 'PERMISSION_DENIED', reason }`, where the reason names the roles that do reach it (for example "needs an organization owner, admin or delegated admin"). The reach is read from the action's `target` against the `MEMBERSHIP_REACH` table in `@objectstack/spec/identity`. Owners, admins and (for invitations) delegated admins see the rows unmarked. Nothing is hidden and neither run door reads the mark, so who can run each action is unchanged. Actions judged on record ownership or on the deployment's tenancy posture (deleting an SSO provider or an OAuth application, creating an organization) are not marked. The `list_actions` tool description, the `McpActionSummary.unavailable` documentation and the served skill (with its Console mirror) now say a listed action can carry `unavailable` for the caller's role, not only for its credential.
+- 6a36b79: feat(platform-objects,mcp): a member's agent finds a colleague by name or email over MCP, to fill a person field
+  
+  Clause-②: yes (widening) — the MCP read tools (`list_objects`, `describe_object`, `query_records`, `get_record`, `aggregate_records`) now admit one more system object, `sys_user`, which they refused before with `Object "sys_user" is a system object and is not exposed via MCP`. No write tool opens it.
+  Metadata-protocol: none
+  
+  - **`sys_user` declares `enable.aiReadable: true`.** An agent reads users with the existing record tools, under every gate a console read runs, and is served exactly what the caller's console person picker is served: their own row and the members of their active organization (the `sys_user_self` and `sys_user_org_members` row scopes of `member_default`), never another organization's users; and every field except the `Admin` group (sign-in trail, lockout, ban reason and expiry, sign-in phone, legacy role, AI seat), which the non-admin permission sets withhold on results and refuse on filters. For a plain member that is: `id`, `name`, `email`, `email_verified`, `two_factor_enabled`, `banned`, `image`, `locale`, `manager_id`, `primary_business_unit_id`, `principal_kind`, `accountable_user_id`, `source`, `created_at`, `updated_at`. An administrator's agent reads what the administrator reads.
+  - **Read only.** `create_record`, `update_record`, `delete_record` and `delete_records` keep refusing every `sys_*` object, so the self-service profile edit stays a console and data-API affordance; account changes an agent may make go through actions that declare their own `ai.exposed`.
+  - **What an agent is told.** `query_records`' description and the served `SKILL.md` (and its Console "Download skill" copy) say how to find a colleague's id for a person field: `where: { "email": "..." }` for exactly one person, or `{ "name": { "$contains": "..." } }`; names repeat, so people who share a name are told apart by email. The `list_objects` line no longer says every system object is hidden.
+- d95ddeb: fix(console): a metadata save's advisories and refusals show the server's sentence in the user's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Advisory toast.** After a save or publish, each advisory finding that carries a `userMessage` (the sentence the server composes for the person who saved, in the request's language, else the workspace default, else English) shows that sentence after its rule id and location, in place of the developer-facing English `message` and `hint`. A finding the server wrote no sentence for keeps the `message` and `hint`.
+  
+  **Refused save.** The issues of a `422` refusal from the runtime authoring gate carry the same `userMessage`. `formatMetadataIssue` (and so `formatMetadataError` and the Studio publish-failure list) shows it after the issue's path in place of the English `message`, and Studio's refusal sentence carries it verbatim instead of reading the English `message` through the console's own validation-message table. A spec-validation issue carries no `userMessage` and is shown as before.
+  
+  **Type.** `MetadataValidationIssue` on `@object-ui/data-objectstack` gains the optional `userMessage`, typed from `RuntimeAuthoringIssue['userMessage']` in `@objectstack/spec/api`.
+- 9499dcc: fix(console, data-objectstack): a report drill that rebuilds its filter reads the dataset as the report's reader (ADR-0150 D3)
+  
+  Clause-②: yes (widening) — `MetadataGetOptions` (`@object-ui/data-objectstack`) gains an optional `callerPackage`, which `MetadataClient.get` sends as `?callerPackage=`; omitted, every read is sent exactly as before.
+  Metadata-protocol: none
+  
+  **The drill.** A report row drills straight to its records when the dataset answer carries the drill metadata. When it does not, the Console reads the dataset definition to rebuild the filter from the clicked group. That is not only an older server's answer: the server names the dataset's object on every answer but sends no drill metadata for a `type: 'date'` dimension with no `dateGranularity`, so a click on a report grouped by one takes this read. The read named no package, so for a report shipped in a package it read the bare name: another package's dataset of that name, or a `409` when two packages hold the name, where the report's own queries read the dataset its package resolves. The read now names the report's package as the reader (`?callerPackage=`), the dataset the report's queries resolve. A report authored in the environment reads the name bare, as before. A refusal opens no drill and is not retried with the bare name.
+  
+  **The client.** `MetadataClient.get(type, name, { callerPackage })` reads an item as the package that reads it: that package's own item, else the one holder among its declared dependencies plus `sys`, else `409 RESOURCE_CONFLICT` naming the candidates. It is distinct from `packageId` (`?package=`), which names the holder exactly. The server serves the caller arm on the `dataset` read only, and refuses it beside `packageId`.
+- 2797f81: fix(app-shell): Assigned users shows the position note beside a direct grant read with no id
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **A direct grant with no id, beside a position.** A person who holds a permission set through a position, and also has a direct grant read with no `id` (a field-trimmed read, a host's fake), was listed with neither a Remove nor the "Held via a position" note. The row now shows the note whenever a position holds the set and the row has no removable grant, whatever the direct grant's shape. FROM: no Remove, no note. TO: no Remove, the note. A position-only row, an id-less direct-only row, and a removable direct grant are unchanged.
+  
+  **The environment's button on the Add pick.** No change in behaviour; the section's documentation now says what the server answers on each catalog path. Where the registry serves the name, the environment's own set answers the name alone and the re-sent grant is stored. Where the registry holds the name nowhere and the catalog falls back to the metadata service, a name two packages hold is refused by the name alone even beside the environment's own row, naming the packages only, and that refusal is shown as the next pick with the users still to grant. Both paths are pinned.
+- b22be27: fix(mcp): `validate_expression` gives the publish gate's own verdict at a `validation` or `formula` site, every pass the gate runs there included
+  
+  Clause-②: no (narrowing) — the MCP `validate_expression` tool now answers `ok: false` (or a warning) for a validation rule or formula field the publish gate already refuses (or warns on). The gate's acceptance set does not change, and no existing exported type or signature changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is in an advisory tool's verdict, never in what an author may write: every expression it now refuses, the publish gate already refused, so no stored metadata and no consumer code has anything to rewrite -->
+  
+  **BREAKING** verdict narrowing of the MCP `validate_expression` tool (`@objectstack/mcp`), at `site: 'validation'` and `site: 'formula'`.
+  
+  The tool promises the verdict the publish gate gives the rule, but it ran the shared expression validator and nothing else, so it answered `ok: true` for rules the gate then refused at publish, and the refusal first met a person there. It now also runs the gate's own passes at those two sites, through `judgeAuthoredSiteExpression` (`@objectstack/lint`), which runs the gate's walk itself over the object definitions the caller is served:
+  
+  - at both sites: a read through a reference to a field the target object does not declare (`record.balance.nope`), and a read through a reference into a stored-metadata table;
+  - at a `validation` site: a nullable field used without a null guard (`record.days > 3` with `days` neither required nor defaulted), and a read of `parent`, which a `validations[]` rule never binds;
+  - a warning at both sites: a read of an injected system column an external object has no storage behind (`record.owner_id` on an ADR-0015 `external` object).
+  
+  Each finding is the gate's sentence, at the gate's severity. A rule the gate accepts answers exactly as before. A hop target follows the same system-object fence as `describe_object`. A `flow_condition` and a `template` are not judged by this change: the tool's verdict there is unchanged. A sentence that names the rule names it `this rule`, since the tool is handed the condition and not the rule it will sit on.
+  
+  - `@objectstack/mcp`: `McpDataBridge` gains the optional `servedObjectDefinitionOf(name)`, the object definition as the caller is served it (the read `describeObject` projects), handed to the gate and rendered to nobody. A bridge without it answers the shared validator's verdict alone, as before. The served `SKILL.md` line and the tool description name what the tool now refuses. `@objectstack/lint` moves from a development dependency to a dependency, loaded on the first call that judges a rule or formula field, never at module load.
+  - `@objectstack/lint`: exports `judgeAuthoredSiteExpression` and `authoredExpressionHopTargets`. The gate's verdicts are unchanged: its walk gains one internal option, off its package entries, that only this entry passes.
+  - `@objectstack/runtime`: the HTTP MCP bridge serves `servedObjectDefinitionOf`, the same caller's object `describeObject` reads (ADR-0106 D1).
+  - `@object-ui/console`: the downloadable `SKILL.md` mirror carries the same line.
+- 8ed2b89: fix(console): an `access_denied` sign-in return says the account has no access to this environment, with switch account and back to console
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` locale packs gain four keys under `auth.login.errors` (`ssoAccessDenied`, `ssoSwitchAccount`, `ssoBackToConsole`, `ssoSwitchAccountHint`) in all eleven shipped locales; no key is renamed or removed.
+  Metadata-protocol: none
+  
+  When the control plane's identity provider refuses an account that is not a member of the environment's organization, it sends the browser back to the environment with `error=access_denied`, and the callback lands it on the Console sign-in page. That page had no sentence for the code and said the sign-in link had expired. It now says the account you signed in with does not have access to this environment, the same refusal the provider's own page states. On an environment the control plane runs (`features.cloudManaged` with the runtime config's `cloudUrl`), it also offers that page's two actions: **Switch account**, which opens the provider's end-session door (`/api/v1/auth/oauth2/end-session` on the control plane) in a new tab so the refused account is signed out there, and **Back to console**, the control plane's console. Elsewhere it shows the sentence alone, since the code may come from a provider the page cannot address. The technical code and description stay behind the details toggle, and every other refusal code keeps its sentence.
+- 2bfb1bb: fix(console): a docs cross-link to a section keeps its `#section` through the flat-permalink redirect, and the page scrolls to it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A cross-reference written against a doc's flat permalink (`/_console/docs/NAME#section`) was redirected to the canonical in-book URL (`/_console/docs/BOOK/NAME`) without its fragment, so the doc opened at its top. The redirect now keeps the fragment, as do the name-prefix fallback redirect and the redirect from a book's name to its slug. The doc page scrolls the named heading into view once the doc has rendered, the same scroll an in-page anchor click gives, whether the URL arrived through a redirect, a cross-reference or the address bar. A URL with no fragment still opens at the top.
+- 760b338: fix(app-shell): a ⌘K built-in command is found by the words of its own label
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **The palette's built-in commands.** "Open Full Search Page" and the three theme commands were matched on hidden English values (`search all results full page`, `theme light`, …), so the full-search row was not found by `open` or `full search`, and under a non-English locale no command was found by any word of its label ("浅色主题" answered `light`, never `浅色`). Each command is now also matched by the label it shows, in the member's language. FROM: value words only. TO: the label's words or the value's words. The words that found a command before still find it.
+- a9da547: fix(console): a signed-in person whose account link is refused because the emails differ is told why on the page they land on
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` locale packs gain one key, `auth.login.errors.linkEmailMismatch`, in all eleven shipped locales; no key is renamed or removed.
+  Metadata-protocol: none
+  
+  Linking another sign-in to your account (`POST /api/v1/auth/link-social`, then the provider's round trip) is refused when the provider account's email differs from yours, and the callback redirects to the Console sign-in page with `error=email_does_not_match`. You are still signed in there, so the page sent you straight on to the console and the reason was lost: the account was simply not linked, with no word why. The sign-in page now keeps that code for the page you land on, which shows an error toast saying the account was not linked because its email address doesn't match the one on the account you're signed in with, in your language. The toast stays until you close it and is shown once. Only codes the Console has a sentence for are kept, and only as a code; nothing from the URL is shown as it came. The refusal itself is unchanged, and a signed-out visitor still reads the sign-in page's own sentence for the code they came back with.
+- 4c32b96: fix(console): Studio's home currency amount editor holds a partial pick instead of autosaving it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A record-mode currency field's home currency amount (`currencyConfig.homeAmount`) names three fields together or none: the home amount field, the document date and the rate field. The Studio field editor committed each pick on its own, so the autosave sent the field with one, then two, of the three, the server refused both (`422 INVALID_METADATA`) and "Changes not saved" showed twice before the third pick saved. Clearing the three showed the same twice. A pick that leaves one or two of the three set now stays in the editor and is not saved, with one line under the pickers naming the fields still to pick; the field saves once, when all three are set or all three are cleared. Editing a complete home amount to another complete one saves at once, as before. The rate field picker is judged against the document date on screen, picked or not yet saved. Nothing the server accepts changed.
+- 12d090d: fix(console, i18n): the default app's Set-default star on Setup → Apps says why it is disabled
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` packs gain the key `appManagement.alreadyDefault` in all eleven shipped locales. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  The star on the current default app was disabled with nothing on hover, on focus or in its accessible description. It now uses the console's disabled-reason pattern: a focusable wrapper opens "Already the default app" as a tooltip on hover and on keyboard focus, and the same sentence is the accessible description of the star. A non-default app's star is unchanged, and a write in flight still disables every star without a reason.
+- 70fa329: fix(console): the Studio All-metadata object-reference picker offers objects by label
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On an All-metadata form, the object-reference select (for example Page → Object on Create new) listed every object by its bare machine name. Each option now shows the object's label first, with the machine name after it in small monospace text, the way the flow trigger Object picker and the Lookup Related object picker already show an object. An object that declares no label is shown by its name, once. The labels come from the object list the form already reads, so no extra request is made, and the value saved is still the machine name.
+- 8835532: fix(mcp): `validate_expression` gives the runtime publish gate's verdict at a `flow_condition`, and judges a formula-site expression as the field it is authored on
+  
+  Clause-②: yes (narrowing) — the MCP `validate_expression` tool now answers `ok: false` (or a warning) at a `flow_condition`, and for a named stored or formula field at a `formula` site, where the publish gate already refuses (or warns); and it accepts two new optional inputs, `startCondition` and `field`. The gate's acceptance set does not change.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is in an advisory tool's verdict, never in what an author may write: every expression it now refuses, the publish gate already refused, so no stored metadata and no consumer code has anything to rewrite; the two inputs are optional and an existing call answers as before wherever the gate accepts -->
+  
+  **BREAKING** verdict narrowing of the MCP `validate_expression` tool (`@objectstack/mcp`), at `site: 'flow_condition'` and, given the new `field`, at `site: 'formula'`.
+  
+  At a flow condition the tool ran the shared expression validator and nothing else, so it answered `ok: true` for conditions the publish gate then refused when the flow was saved. It now also runs the gate's own passes there, through `judgeAuthoredSiteExpression` (`@objectstack/lint`), as the runtime publish gate judges a flow write, the door a flow saved through MCP or Studio meets:
+  
+  - an error on a record-triggered flow: a nullable field read as `record.FIELD` or `previous.FIELD` without a null guard (`record.days > 3` with `days` neither required nor defaulted), the run failing at the condition;
+  - a warning on any flow bound to an object: a read of an injected system column an external object has no storage behind (`record.owner_id` on an ADR-0015 `external` object).
+  
+  At a flow condition the verdict is that door's, not `os validate`'s: `os validate` also judges a bare name's null guard (`days > 3`) and a root the run does not bind, over the whole flow's variables, node ids and entrances, which the tool is not handed. The door itself also warns when a field is read bare under a name a flow variable shares; the tool is never handed the flow's variables, so it cannot give that warning. Write `record.FIELD` to be judged here.
+  
+  Two new optional inputs:
+  
+  - `startCondition` (`site: 'flow_condition'` only): the flow's start condition, for an edge or `decision` branch condition after it. What it proves non-null holds downstream, as at the gate, so `record.days > 3` after a start condition `record.days != null` is accepted. Omitted, the condition is judged as the start condition itself.
+  - `field` (`site: 'formula'` only, a snake_case field name): the field the expression is authored on. A field the caller is served keeps its definition with the expression in place: a stored field (any type but `formula`) gets the gate's stored-expression warnings (a read of another record, the clock, the acting user or a permission), and a formula field is refused when it would close a formula cycle. Any other name, a field masked from the caller included, is judged as a new formula field, so the answer never says whether a hidden field exists. A stored field that is not declared yet gets its stored-expression warnings once it is declared.
+  
+  Each finding is the gate's sentence, at the gate's severity. An expression the gate accepts answers exactly as before. A sentence that names the condition names it `flow 'this flow' · edge 'this condition' (start→end) condition`, since the tool is handed the condition and not the flow it will sit in.
+  
+  - `@objectstack/mcp`: the two inputs, the flow-condition judgment (it reads the subject's served definition alone there; nothing hydrates a hop at a flow condition), the tool description and the served `SKILL.md` line.
+  - `@objectstack/lint`: `judgeAuthoredSiteExpression` takes `site: 'flow_condition'` with `triggerKind`, `sweepObject` and `startCondition`, and `field` at `site: 'formula'`; exports `AUTHORED_FLOW_NAME`, `AUTHORED_CONDITION_ID` and the `AuthoredFlowTrigger` type. The gate's verdicts are unchanged.
+  - `@object-ui/console`: the downloadable `SKILL.md` mirror carries the same line.
+- 9ec528c: fix(app-shell): a list-only object's rows no longer open a record page that always fails
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Objects whose data API serves no single-record read.** An object can declare `enable.apiMethods` without `get`, such as `['list']` for the SCIM connection credentials in Setup. The Console still opened a record drawer or page when one of its rows was clicked. That page reads the record with `get`, so it always showed "This record could not be loaded" (`OBJECT_API_METHOD_NOT_ALLOWED`), with a Retry that could never succeed. The Console now reads the object's served operations from `/me/permissions` (`apiOperations`, the set the server already hands down) and opens no record surface for an object whose set leaves `get` out. A row click and a Cmd/Ctrl-click open nothing, the name cell carries no record URL and draws no "Open as full page" arrow, and a `?recordId=` link opens no drawer. This holds on the object list, the object data page and interface list pages. A related-list row of such an object opens nothing, and a lookup value or a record link that points at one renders as plain text. The row menu is unchanged, so its `list_item` actions, such as Revoke on a SCIM credential, stay where they were. An object that serves `get`, or whose served set the Console does not have, opens its records as before.
+- 9ba2d4c: fix(console): a user with no personal language gets the app's declared default language, not the browser's
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console's language for a signed-in user is now their own `sys_user.locale`, else the app's declared `i18n.defaultLocale` (served as discovery `locale.default`), else the browser language, else `en`. Before, a user with no personal language got the browser's language even when the app declared another default, while the server already wrote to that user in the app's default. `<html lang>` follows the resolved language.
+  
+  Discovery always serves a default: an app with no `i18n` block is served `en`. So a user with no personal language in such an app now gets English whatever the browser says, the language the server already writes to them in; picking a language from the language menu sets `sys_user.locale` and outranks it. The browser language decides only when discovery serves no default.
+  
+  A device that already has a cached language from an earlier visit shows it for one more page load, then follows the app's default; the switch is never made mid-session. A language picked on the device or set on the user's profile is unchanged. No server change.
+- 2a86e51: perf(console): the first load no longer downloads the Setup pages, the package form and the view config panel
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every Console route, a dashboard included, used to download the Packages page with its package form dialog, the permission-set editor, the Setup pages for packaged actions, connector credentials, connector connections, position holders, permission-set assignment and the recycle bin, and the list view's config panel with the Studio form widgets it draws, before the app asked for any data. These now load the first time they are drawn: a Setup page when its entry is opened, the view config panel as a list mounts. The Console's eager closure (`dist/eager-closure.json`) goes from 2,293,387 to 2,163,688 bytes gzipped (−129,699), measured on two builds of the same tree. What each route draws is unchanged; a Setup page shows a one-line loading notice while its code arrives.
+- beff1fb: fix(plugin-grid, plugin-list, app-shell): a list row whose click opens nothing no longer looks clickable
+  
+  Clause-②: yes (widening) — `ObjectGridComponentProps` (published by `@object-ui/plugin-grid`) and `ListViewProps` (published by `@object-ui/plugin-list`) each gain one optional prop, `rowOpensRecord?: boolean`. Absent, every row renders as before. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  **Rows that open nothing.** A list row opens nothing when its view is authored `navigation: { mode: 'none' }`, or when its object's data API serves no single-record read (a list-only object, such as the SCIM connection credentials in Setup). The grid still drew such a row's first column as a link, and its right-click menu still offered Open and Open in new tab, so a click that did nothing looked like a broken page. The Console's object list, object data page and interface list pages now tell the grid that these rows open nothing (`rowOpensRecord={false}`, handed through `ListView`): the first column, and any column authored `link: true`, show the value as plain text, and the right-click menu offers no Open items. The row's actions (`list_item`) stay in the row menu and the right-click menu. The row click itself still reaches the host, so a Cmd/Ctrl-click on a row of a view authored `none` still opens the record in a new tab, as before. Rows that open a drawer or a page are unchanged.
+- 159dbe3: fix(console, plugin-detail, app-shell): a connector action switch resets its inputs, a multi-field save conflict lists each field, the share page lists fields by the record page's rule, the Studio error box wraps
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-detail` exports the new `ConcurrentUpdateFieldConflict` type, and `ConcurrentUpdateConflict` gains the optional `fields` list. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  - **Flow designer (Studio).** Changing a `connector_action` node's connector or action keeps the inputs the new action declares, with their values or bindings, and drops the rest. When the new action's inputs are not known (no connector catalog, or an action name still being typed), the Input map is empty. Before, every previous input key stayed in the map: undeclared ones showed as extra Input rows, were saved with the flow, and were handed to the new action at run time. Inputs set aside by a switch come back if you return to the same connector and action while the inspector is open; they are never saved meanwhile.
+  - **Inline edit conflict.** When a save that changed several fields meets a newer version (409 `CONCURRENT_UPDATE`), the dialog lists each field with its label, your edit and the current value, instead of printing both as raw JSON. A one-field conflict looks as before.
+  - **Share-link page.** The landing page lists the record's fields the way the record page does: the framework's system columns and the audit columns (`created_at`, `created_by`, `updated_at`, `updated_by`) are not listed, and only fields the object declares are shown when the server sends the field labels.
+  - **Studio editor error box.** A refusal that is one unbroken token (a field-type enum list such as `"text"|"textarea"|…`) now wraps inside the box instead of running past the right edge of the window, so the whole message stays readable.
+- b3a8fc0: fix(studio): a full record page Studio seeds for an object with field groups heads its ungrouped fields with the translated "Other" heading, in the saved page and in the preview
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **The ungrouped bucket on a Studio-seeded page.** Since the running record page draws the fields no declared field group claims under their own translated "Other" heading, a page Studio seeded for a grouped object still wrote that bucket as an untitled section, so after saving it the fields read as members of the group above them again. FROM: the seeded and converted page (Create page with kind full, and Convert to full page) wrote `{ columns, fields }` with no heading, and the slotted page preview drew it the same way. TO: the bucket is written `{ label, columns, fields }`, where `label` is the inline locale map of `common.ungroupedSection` from every catalogue `@object-ui/i18n` ships (`en` "Other", `zh-Hans` 「其他」, and so on). `record:details` resolves that map for each viewer's language, so the saved page stays translated; the slotted preview heads the bucket with the translated text the running page draws. The group references (`{ group, columns }`) are unchanged.
+  
+  **Unchanged:** an object with no field groups (the seed's primary section stays flat, with no heading); the running record page; `@object-ui/plugin-detail`'s `buildDefaultPageSchema`, which still writes the bucket untitled for a caller with no heading to give. No spec change: the inline locale map is a form `record:details` `sections[].label` already accepts. Pages saved before this change are not migrated and keep their untitled bucket; an author can add a heading to that section in the page designer.
+- b654135: fix(console): the first message of a new AI chat conversation shows at once, and a failed conversation create gives the text back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Drawn at once.** On a new conversation the first send is what creates the conversation, and the message waits in the browser until `POST /conversations` answers. The thread used to stay empty for that whole wait. The message now shows straight away as the user's bubble, with the assistant's thinking dots under it, and is drawn exactly once when the conversation opens and the message goes out. A second message sent during the wait joins the first one (as before) and shows with it. This holds on the full-page AI chat, in the console's chat dock and in the Studio copilot.
+  - **A failed create gives the text back.** When `POST /conversations` fails, the waiting message is taken off the thread, its text goes back in the message box and the "Couldn't send your message" notice shows, the same way a chat send that never left the browser is handled. The message is no longer kept out of sight to be sent with the next one. Sending again retries the create.
+- df70524: fix(studio): a full record page Studio seeds for an object with no field groups heads its "More details" section with the translated heading, not the English text
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **The "More details" section on a Studio-seeded page.** The running record page draws an object's long-text fields under a collapsible "More details" section whose heading it translates (`detail.sectionMoreDetails`). A page Studio seeded for the same object wrote that heading as the plain English string, so every viewer of the saved page read "More details" unless the object's own bundle carried `_sections.details.label`. FROM: the seeded and converted page (Create page with kind full, and Convert to full page) wrote `{ name: 'details', label: 'More details', … }`. TO: `label` is the inline locale map of `detail.sectionMoreDetails` from every catalogue `@object-ui/i18n` ships (`en` "More details", `zh-Hans` 「更多详情」, and so on). `record:details` resolves that map for each viewer's language, and the section keeps its `name: 'details'`, so the object's own `objects.OBJECT._sections.details.label` still wins over the map, as it does on the running page.
+  
+  **Unchanged:** the running record page and the slotted page preview (both draw the translated text already); objects with field groups; `@object-ui/plugin-detail`. No spec change: the inline locale map is a form `record:details` `sections[].label` already accepts. Pages saved before this change are not migrated: they keep the English string, which the object's `_sections.details.label` still overrides, and an author can change the heading in the page designer.
+- 6446935: fix(console): a signed-in person whose account link is refused as already linked to another user, or as unable to link, is told why on the page they land on
+  
+  Clause-②: yes (widening) — the `@object-ui/i18n` locale packs gain two keys, `auth.login.errors.linkAlreadyLinkedToOtherUser` and `auth.login.errors.linkUnableToLink`, in all eleven shipped locales; no key is renamed or removed.
+  Metadata-protocol: none
+  
+  Linking another sign-in to your account can be refused by the server for two more reasons besides a different email: the provider account is already linked to a different user here (`account_already_linked_to_different_user`), or it could not be linked at all (`unable_to_link_account`, chiefly when the sign-in service did not confirm the account's email as verified). Both send you back to the Console sign-in page, which, because you are still signed in, sent you straight on to the console with no word. Each now travels the same way as the email mismatch: the page you land on shows an error toast with its own sentence, in your language, until you close it. The sentence names no other user or email, and nothing from the URL is shown as it came. The refusals themselves are unchanged.
+- bea3328: fix(plugin-grid, plugin-list, plugin-kanban, app-shell): cards whose click opens nothing no longer look clickable, and a view authored `navigation: { mode: 'none' }` opens no record on a Cmd/Ctrl or middle click
+  
+  Clause-②: yes (widening) — `ObjectGalleryProps` (published by `@object-ui/plugin-list`) and `ObjectKanbanComponentProps` (published by `@object-ui/plugin-kanban`) each gain one optional prop, `rowOpensRecord?: boolean`, the name `ObjectGridComponentProps` and `ListViewProps` already carry. Absent, every card renders as before. Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  **Cards that open nothing.** A list's rows open nothing when its view is authored `navigation: { mode: 'none' }`, or when its object's data API serves no single-record read (a list-only object). The grid already drew such rows plain on a desktop; its phone cards, the gallery's cards and the board's cards still drew a pointer and a hover lift, so a tap that did nothing looked like a broken page. `ListView` now hands its `rowOpensRecord` to the gallery and the board as well as the grid, and none of these faces draws a pointer or a hover lift for a card that opens nothing. A board card the reader may not drag is no control at all: no `button` role, no tab stop, no Enter/Space activation and no title hover. A board card the reader may drag keeps its grab cursor and its drag semantics. Card actions (the phone card's "⋮") stay, and the click still reaches the host.
+  
+  **No new tab on an authored `none`.** On the Console's object list a Cmd/Ctrl-click or a middle click on a row of a view authored `navigation: { mode: 'none' }` opened the record in a new tab, though the view declares no navigation. It now opens nothing, like a plain click. This supersedes the sentence in the `33317-row-opens-nothing-plain` note that says such a click "still opens the record in a new tab, as before". Rows that open a drawer or a page still open a new tab on a Cmd/Ctrl or middle click.
+- 030ce02: fix(plugin-chatbot, console): a failed AI chat conversation create gives back every message sent while it waited, not only the last one
+  
+  Clause-②: yes (widening) — `ChatbotEnhanced` (`@object-ui/plugin-chatbot`) takes a new optional prop, `unsentText`: the text a not-sent `error` gives back to the composer when the host holds what was not sent. Nothing is removed or narrowed; a host that passes nothing keeps today's restore.
+  Metadata-protocol: none
+  
+  - **Two messages, then a failed create.** On a new AI chat conversation the first message waits for `POST /conversations`, and a second message sent during that wait joins it. When the create then failed, the message box got back only the second message, and the first was lost. The box now gets both, first part first, with the "Couldn't send your message" notice as before, and sending again sends the joined text once. This holds on the full-page AI chat, in the console's chat dock and in the Studio copilot.
+  - **`ChatbotEnhanced`.** The not-sent restore puts the host's `unsentText` back in an empty box when the host passes one, and the text the composer last submitted when it does not (unchanged).
+- 68cee82: perf(console): the first load no longer downloads the object list, the record view and the list view package
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every Console route, a dashboard included, used to download the object list (the default list and a saved list view), the record view its drawer draws, and `@object-ui/plugin-list` (the list view and the gallery) before the app asked for any data. The object list now loads like the other route pages, its download starting as soon as the route is known; the record view loads the first time a record opens in the drawer; and the `list-view`, `view:list` and `object-gallery` registrations are lazy stubs that load the package the first time a schema names one of them. The Console's eager closure (`dist/eager-closure.json`) goes from 2,165,721 to 2,060,434 bytes gzipped (−105,287). What each route draws is unchanged; a record opened in the drawer shows the detail skeleton while its code arrives.
+- 6603978: perf(console): the first load no longer downloads the Studio designer strings and the metadata form strings
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every Console route, a dashboard included, used to download the Studio designer's English strings (64 KB gzipped) and the metadata form strings before the app asked for any data, though only Studio and Setup screens draw them. They were held there by five components the Console registers or mounts at load: the Studio canvas's default object grid, the Setup datasources page, the position list's holder and permission-set cells, a list's "Create view" dialog and the preview bar's "Pending changes" sheet. Each now loads the first time it is drawn, and the Studio strings' loader gets its own chunk. English stays the strings' synchronous fallback once a Studio or Setup screen has loaded. The Console's eager closure (`dist/eager-closure.json`) goes from 2,165,707 to 2,058,468 bytes gzipped (−107,239), measured on two builds of the same tree. What each screen draws is unchanged; the datasources page shows a one-line loading notice while its code arrives.
+- 5604aeb: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Organization invitation refusals now read in the console's language. Opening an
+  invitation link that is unknown, already used, expired or revoked shows the
+  console's own sentence instead of better-auth's "Invitation not found!" (the
+  lookup's not-found answer carries no code, so it is read by its route, its 400
+  status and the missing code, never by its English text), and that sentence now
+  says the invitation may already have been used and where an accepted
+  invitation's organization is. Inviting someone who is already a member shows a
+  translated sentence instead of "User is already a member of this organization".
+  Errors thrown by `@object-ui/auth` now also carry the HTTP `status`.
+  
+  Widening, nothing removed or narrowed: `@object-ui/i18n` gains the key
+  `organization.errors.alreadyMember` in all eleven locale packs (and rewords
+  `organization.errors.invitationNotFound`), and errors thrown by
+  `@object-ui/auth` gain a numeric `status` property beside the existing
+  `message` and `code`.
+- baf9f3b: fix(console): text typed into the AI chat box is no longer lost when the chat learns its conversation
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **A draft survives the conversation loading or being created.** In the AI chat (the full-page chat, the console's chat dock and the Studio copilot), text typed into the message box but not yet sent was wiped when the conversation became known: on a link to an existing conversation, text typed while it was still loading; on a new conversation, a second message typed while the first one was creating the conversation. The box now keeps that text, with the cursor at its end and the focus where it was. Nothing is sent until you send it, and a message you already sent is still sent exactly once.
+  - **Opening another conversation does not carry a draft across.** Text typed in one conversation, or in a new chat, stays behind when you open a different conversation, as before.
+- baf9f3b: fix(console): a message sent while a linked AI chat conversation loads is given back when the load fails
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **No more endless thinking dots.** In the AI chat (the full-page chat, the console's chat dock and the Studio copilot), a message sent while the conversation was still loading waited for it. When loading then failed (a server error or no network), the message stayed on screen with the thinking dots forever: nothing was sent, nothing was shown and the message box was empty. Now the message is taken back into the box with the "Couldn't send your message" notice, two messages sent during the wait included (first part first), and nothing is sent. Sending again loads the conversation again and sends the message once into it.
+  - **Unchanged:** a load that answers sends the waiting message once into the conversation, and a conversation that no longer exists (404) still starts a new one for it.
+- @objectstack/sdui-parser@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes
