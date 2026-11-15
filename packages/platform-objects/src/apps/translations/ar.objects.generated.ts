@@ -120,7 +120,8 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         help: "طريقة إنشاء هذه الهوية — idp_provisioned (توفير فوري عبر SSO الموحَّد) أو env_native (تسجيل محلي / مستخدم نهائي للتطبيق). يديره النظام؛ لا تعدّله.",
         options: {
           idp_provisioned: "مُوفَّر من مزوّد الهوية",
-          env_native: "حساب محلي"
+          env_native: "حساب محلي",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {

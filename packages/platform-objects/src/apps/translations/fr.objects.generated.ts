@@ -120,7 +120,8 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         help: "Comment cette identité a été créée — idp_provisioned (JIT par SSO fédéré) ou env_native (inscription locale / utilisateur final de l’application). Géré par le système ; ne pas modifier.",
         options: {
           idp_provisioned: "Provisionné par l’IdP",
-          env_native: "Compte local"
+          env_native: "Compte local",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {

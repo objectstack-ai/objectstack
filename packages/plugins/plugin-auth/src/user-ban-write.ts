@@ -77,3 +77,39 @@ export async function applyUserUnban(writer: UserBanWriter, userId: string): Pro
     updatedAt: new Date(),
   });
 }
+
+/** The engine surface `engineUserBanWriter` writes through. */
+export interface UserBanEngine {
+  update(object: string, data: Record<string, unknown>, options?: unknown): Promise<unknown>;
+}
+
+/** The better-auth field names of the ban write, as `sys_user` columns. */
+const BAN_COLUMN: Record<string, string> = {
+  banned: 'banned',
+  banReason: 'ban_reason',
+  banExpires: 'ban_expires',
+  updatedAt: 'updated_at',
+};
+
+/**
+ * [#33181] The ban write on a kernel WITHOUT the vendor admin plugin. There
+ * `banReason` / `banExpires` are not fields of better-auth's user model, so
+ * `internalAdapter.updateUser` would not land them; this writer lands the
+ * same columns through the data engine, as the system. The break-glass
+ * last-administrator guard judges engine writes in every context, `isSystem`
+ * included, so it holds here too. A field the ban write does not know is
+ * refused rather than written under a guessed column.
+ */
+export function engineUserBanWriter(engine: UserBanEngine): UserBanWriter {
+  return {
+    async updateUser(id, data) {
+      const patch: Record<string, unknown> = { id };
+      for (const [field, value] of Object.entries(data)) {
+        const column = BAN_COLUMN[field];
+        if (!column) throw new Error(`engineUserBanWriter: "${field}" is not a ban field`);
+        patch[column] = value;
+      }
+      return engine.update('sys_user', patch, { context: { isSystem: true, positions: [], permissions: [] } });
+    },
+  };
+}
