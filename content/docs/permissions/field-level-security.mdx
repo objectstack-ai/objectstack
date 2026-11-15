@@ -124,6 +124,13 @@ request arrived (REST, SDK, raw ObjectQL call).
 **On read** — `find` / `findOne` results have non-readable fields
 stripped from every record before the response leaves the engine.
 
+**Computed fields follow their inputs** — a caller who cannot read a
+field cannot read any computed field (a `formula`, or a stored field
+with an `expression`) whose expression reads it, directly or through
+another computed field: it is stripped and refused as a filter or
+aggregate input exactly as the field it reads is, and where that field is
+served partially masked the computed field is stripped whole.
+
 **On write** — `insert` / `update` requests are checked **before** the
 operation reaches the driver. If the payload contains any field the
 caller is not permitted to edit, the engine throws
