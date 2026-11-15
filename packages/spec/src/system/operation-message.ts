@@ -15,7 +15,8 @@
  * conversion is #12260's half) and plugin-approvals' non-submitter recall
  * refusal (`approval_recall_not_submitter`; emitter conversion is #11993's
  * half) — and the unique-constraint refusal (`409 UNIQUE_VIOLATION` on the
- * wire, the engine's `DuplicateRecordError`). The catalog is the seat for the rest of the family as they are
+ * wire, the engine's `DuplicateRecordError`) — and the `userMessage` of the
+ * master-detail write gate's `403 PERMISSION_DENIED` (ADR-0055 §3). The catalog is the seat for the rest of the family as they are
  * localized — a second mechanism for the second producer is exactly what this
  * module exists to prevent.
  *
@@ -37,6 +38,7 @@
  * | `record_owner_remove_denied` | they tried to leave this record with no owner | ask an administrator |
  * | `record_queue_change_denied` | they tried to change which queue an existing record is in (put it in one, take it out, or move it to another) without the right to | ask an administrator |
  * | `record_queue_assign_denied` | they tried to create a record in a queue they do not belong to | leave the queue blank or choose one they belong to, or ask an administrator |
+ * | `master_record_edit_denied` / `master_record_read_denied` (and their `_opaque` forms) | they wrote a `controlled_by_parent` record (a detail) without the edit access (or, where the detail asks it, the read access) its master record requires | ask the master record's owner, or an administrator |
  * | `field_edit_denied` / `field_edit_denied_opaque` | they changed a field their permissions do not let them edit | undo that change, or ask an administrator |
  *
  * `record_write_denied` (commit aa5994e17) is NOT `record_access_denied` restated: the
@@ -54,6 +56,16 @@
  * submitter (a privileged administrator may also recall to release a stuck
  * record — the #3424 override), so the sentence sends the user to the
  * submitter or an administrator instead of dead-ending them.
+ *
+ * `master_record_edit_denied` / `master_record_read_denied` are the
+ * master-detail write gate's refusals (ADR-0055 §3, plugin-security): the
+ * record the user is saving takes its access from a master record, and the
+ * access they lack is on THAT record, so the sentence names the master's
+ * object LABEL (`{{master}}`) and sends them to its owner. The `_opaque` forms
+ * name no master: the gate uses them for a writer who cannot read the
+ * master reference (the refusal's diagnostic names no master to them either)
+ * and for a master object with no label, since an API name never reaches a
+ * user. Which check refused, and which master row, stay on the diagnostic.
  *
  * The distinction the copy does NOT make is the internal one: a caller blocked
  * by a missing CRUD bit and a caller blocked by a missing `requiredPermissions`
@@ -282,6 +294,14 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'You do not have permission to change which queue this record is in. Contact your administrator if it needs to be moved.',
     record_queue_assign_denied:
       'You do not have permission to create a record in that queue. Leave the queue blank or choose a queue you belong to, or contact your administrator.',
+    master_record_edit_denied:
+      'You need edit access to the {{master}} this record belongs to. Contact the person who owns that {{master}}, or your administrator, if you need access.',
+    master_record_edit_denied_opaque:
+      'You need edit access to the parent record this record belongs to. Contact your administrator if you need access.',
+    master_record_read_denied:
+      'You need read access to the {{master}} this record belongs to. Contact the person who owns that {{master}}, or your administrator, if you need access.',
+    master_record_read_denied_opaque:
+      'You need read access to the parent record this record belongs to. Contact your administrator if you need access.',
     field_edit_denied:
       'You do not have permission to edit {{fields}}. Undo those changes and try again, or contact your administrator if you need access.',
     field_edit_denied_opaque:
@@ -311,6 +331,10 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     record_owner_remove_denied: '您无权清除这条记录的负责人，如需更换负责人请联系管理员。',
     record_queue_change_denied: '您无权更改这条记录所在的队列，如需调整请联系管理员。',
     record_queue_assign_denied: '您无权在该队列中创建记录，请将队列留空或选择您所属的队列，或联系管理员。',
+    master_record_edit_denied: '您需要拥有这条记录所属{{master}}的编辑权限，如需访问请联系该{{master}}的负责人或管理员。',
+    master_record_edit_denied_opaque: '您需要拥有这条记录所属上级记录的编辑权限，如需访问请联系管理员。',
+    master_record_read_denied: '您需要拥有这条记录所属{{master}}的查看权限，如需访问请联系该{{master}}的负责人或管理员。',
+    master_record_read_denied_opaque: '您需要拥有这条记录所属上级记录的查看权限，如需访问请联系管理员。',
     field_edit_denied: '您无权编辑{{fields}}，请撤销这些修改后重试，或联系管理员。',
     field_edit_denied_opaque: '您无权编辑所修改的部分字段，请撤销这些修改后重试，或联系管理员。',
     field_label_quoted: '「{{label}}」',
@@ -347,6 +371,14 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'このレコードのキューを変更する権限がありません。移動が必要な場合は管理者にお問い合わせください。',
     record_queue_assign_denied:
       '指定したキューにレコードを作成する権限がありません。キューを空欄にするか自分が所属するキューを選択するか、管理者にお問い合わせください。',
+    master_record_edit_denied:
+      'このレコードが属する{{master}}の編集権限が必要です。アクセスが必要な場合は、その{{master}}の担当者または管理者にお問い合わせください。',
+    master_record_edit_denied_opaque:
+      'このレコードが属する親レコードの編集権限が必要です。アクセスが必要な場合は管理者にお問い合わせください。',
+    master_record_read_denied:
+      'このレコードが属する{{master}}の参照権限が必要です。アクセスが必要な場合は、その{{master}}の担当者または管理者にお問い合わせください。',
+    master_record_read_denied_opaque:
+      'このレコードが属する親レコードの参照権限が必要です。アクセスが必要な場合は管理者にお問い合わせください。',
     field_edit_denied:
       '{{fields}}を編集する権限がありません。その変更を取り消して再試行するか、管理者にお問い合わせください。',
     field_edit_denied_opaque:
@@ -386,6 +418,14 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'No tiene permiso para cambiar la cola en la que está este registro. Póngase en contacto con su administrador si es necesario moverlo.',
     record_queue_assign_denied:
       'No tiene permiso para crear un registro en esa cola. Deje la cola vacía o elija una cola a la que pertenezca, o póngase en contacto con su administrador.',
+    master_record_edit_denied:
+      'Necesita acceso de edición al registro de {{master}} al que pertenece este registro. Póngase en contacto con la persona responsable de ese registro de {{master}} o con su administrador si necesita acceso.',
+    master_record_edit_denied_opaque:
+      'Necesita acceso de edición al registro principal al que pertenece este registro. Póngase en contacto con su administrador si necesita acceso.',
+    master_record_read_denied:
+      'Necesita acceso de lectura al registro de {{master}} al que pertenece este registro. Póngase en contacto con la persona responsable de ese registro de {{master}} o con su administrador si necesita acceso.',
+    master_record_read_denied_opaque:
+      'Necesita acceso de lectura al registro principal al que pertenece este registro. Póngase en contacto con su administrador si necesita acceso.',
     field_edit_denied:
       'No tiene permiso para editar {{fields}}. Deshaga esos cambios e inténtelo de nuevo, o póngase en contacto con su administrador si necesita acceso.',
     field_edit_denied_opaque:

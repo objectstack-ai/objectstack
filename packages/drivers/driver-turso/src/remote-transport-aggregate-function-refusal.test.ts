@@ -111,6 +111,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { RemoteTransport } from './remote-transport.js';
+import { TursoDriver } from './turso-driver.js';
 import { AggregationFunction } from '@objectstack/spec/data';
 import type { AggregationNode, QueryAST } from '@objectstack/spec/data';
 
@@ -540,14 +541,19 @@ describe('[#5907] RemoteTransport refuses an aggregate function it cannot compil
 
 /**
  * [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`, the
- * contract half of #10413) — a key BOTH faces of this driver decline to
- * compile, so both must refuse it identically rather than silently aggregating
- * the unfiltered rows (the #10413 defect at the driver seam). The engine never
- * pushes a filtered aggregation down (it lowers in memory); these pins are the
- * direct-caller guard, and the parity pin keeps #6203's lesson: one driver,
- * two faces, one answer.
+ * contract half of #10413). The remote transport compiles no conditional
+ * aggregate, so it refuses the key rather than silently aggregating the
+ * unfiltered rows (the #10413 defect at the driver seam).
+ *
+ * [#33698] The two faces no longer answer alike, and the capability bit is
+ * what keeps #6203's lesson ("one driver, two faces, one answer") at the
+ * engine: the LOCAL face inherits SqlDriver's compile and
+ * `supports.aggregationFilter: true`; the REMOTE face reports
+ * `aggregationFilter: false`, so `engine.aggregate` never sends it a filtered
+ * measure — it reads the rows and aggregates in memory. The remote refusal
+ * stays the direct-caller guard.
  */
-describe('[#10576] per-aggregation filter is refused identically by both faces', () => {
+describe('[#10576] per-aggregation filter: refused by the remote face, compiled by the local one', () => {
   const filteredAst = (): QueryAST => ({
     object: 'deal',
     aggregations: [{ function: 'count', alias: 'won_count', filter: { stage: 'closed_won' } }],
@@ -563,17 +569,24 @@ describe('[#10576] per-aggregation filter is refused identically by both faces',
     expect(err.message).toContain('`engine.aggregate` lowers filtered aggregations in memory');
   });
 
-  it('LOCAL (SqlDriver face) refuses the same class with the same first-sentence shape', async () => {
-    const remote = await refusalOfAst('count(filter)', filteredAst());
-    const local = await localRefusalOf('count(filter)', filteredAst());
-    expect(local.code).toBe('NOT_IMPLEMENTED');
-    expect(local.status).toBe(501);
-    expect(local.message).toContain(
-      'Per-aggregation `filter` on "won_count" is not supported by this backend (driver-sql).',
-    );
-    // First sentence for first sentence: the two faces differ only in the
-    // backend name they print.
-    expect(remote.message.replace('(Turso remote transport)', '(driver-sql)')).toBe(local.message);
+  it('[#33698] LOCAL (SqlDriver face) compiles the filter, and each face declares what it does', async () => {
+    const d = new SqlDriver({
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      useNullAsDefault: true,
+    });
+    await d.initObjects([
+      { name: 'deal', fields: { id: { type: 'text', name: 'id' }, stage: { type: 'text', name: 'stage' } } } as any,
+    ]);
+    await d.create('deal', { id: 'd1', stage: 'closed_won' });
+    await d.create('deal', { id: 'd2', stage: 'open' });
+    await expect(d.aggregate('deal', filteredAst())).resolves.toEqual([{ won_count: 1 }]);
+    expect(d.supports.aggregationFilter).toBe(true);
+
+    // The remote face refuses (above) and says so in its capabilities, so the
+    // engine keeps filtered measures off it.
+    const remote = new TursoDriver({ url: 'libsql://test-db.turso.io', authToken: 'test-token' });
+    expect(remote.supports.aggregationFilter).toBe(false);
   });
 
   it('control: an EMPTY filter object is vacuous and still compiles on the remote face', async () => {

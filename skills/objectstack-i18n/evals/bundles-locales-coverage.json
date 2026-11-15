@@ -100,6 +100,16 @@
         "must_contain": ["_actions", "crm_renew", "preflight", "fields", "verdict.summary"],
         "must_not_contain": ["title:", "verdict: {"]
       }
+    },
+    {
+      "id": 11,
+      "prompt": "Our app's metadata is authored in English — every inline `label:` is English — but it is sold to Chinese users, who should get Chinese without choosing a language. How do we declare the stack's `i18n` config?",
+      "expected_output": "Declare `sourceLocale: 'en'` beside `defaultLocale: 'zh-CN'` in the stack's `i18n` block, with `zh-CN` in `supportedLocales`: `defaultLocale` is the locale a user who has not chosen one gets, `sourceLocale` the language the inline labels are written in. `os lint`, `os i18n check` and `os i18n extract` then treat `en` as the source — extract fills the `en` bundle from the inline text, and the rows the tooling asks for are the zh-CN ones. Also declare `fallbackLocale: 'en'`: label serving still reads inline text as `defaultLocale` text, so without it an `en` request reaches the zh-CN bundle before the English inline label.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["sourceLocale", "defaultLocale: 'zh-CN'", "fallbackLocale: 'en'", "supportedLocales"],
+        "must_not_contain": ["defaultLocale: 'en'", "sourceLocale: 'zh-CN'"]
+      }
     }
   ]
 }

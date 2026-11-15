@@ -1086,6 +1086,36 @@ const NO_VALUE_ANSWERED_BY_OPERATOR: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * [#33698] The ordering operators — the ones a SQL NULL column fails, exactly as
+ * a column the row does not carry fails them.
+ *
+ * {@link NO_VALUE_ANSWERED_BY_OPERATOR}'s early exit read `value === undefined`
+ * only, so a column holding SQL NULL — which is how a row from `driver.find()`
+ * carries it, and how an empty group's `avg` / `min` / `max` arrives at
+ * `having` — fell through to the JS comparison, where `null` coerces to `0`
+ * (`null <= 0`, `null >= 0`, `null > -5` are all `true`) and `$between` fails
+ * neither bound test for any comparand type (`null < 'A'` and `null > 'z'` are
+ * both `false`). So `count where amount <= 0` counted every row with no amount.
+ * The spec says null is not ordered (the comparison-operator comparand text in
+ * `filter.zod.ts`), and `driver-sql`'s where compiler answers that: measured
+ * against it on SQLite and PostgreSQL 16, these five operators were the only
+ * ones where the two disagreed on a NULL column.
+ *
+ * Narrow on purpose: the equality family and `$in` / `$nin` already answer a
+ * NULL column correctly (strict equality), the operators in
+ * {@link NO_VALUE_ANSWERED_BY_OPERATOR} keep their own answers, and a NULL
+ * COMPARAND (`{ $gte: null }`, or a `$between` bound that is null) answers as
+ * before — it is the column's value, not the comparand, that is not ordered.
+ */
+const NULL_IS_NOT_ORDERED_OPERATORS: ReadonlySet<string> = new Set(['$gt', '$gte', '$lt', '$lte', '$between']);
+
+/** [#33698] Does the comparand of an ordering operator itself hold a null (its answer is left as it was)? */
+function orderingComparandHoldsNull(op: string, target: unknown): boolean {
+  if (op !== '$between') return target === null || target === undefined;
+  return !Array.isArray(target) || target.some((bound) => bound === null || bound === undefined);
+}
+
+/**
  * [#20099] The aggregated row's column set — the namespace `having` filters and
  * a `{ $field }` reference in it resolves against — read off the QUERY, so it
  * is known before any row exists: every groupBy projection (the field name, or
@@ -2433,6 +2463,8 @@ function checkCondition(
       throw invalidFilterError(jsonColumnOperatorRefusalText(field, op, false).message);
     }
     if (value === undefined && !NO_VALUE_ANSWERED_BY_OPERATOR.has(op)) return false;
+    // [#33698] …and a SQL NULL column fails an ordering operator the same way.
+    if (value === null && NULL_IS_NOT_ORDERED_OPERATORS.has(op) && !orderingComparandHoldsNull(op, target)) return false;
     // [#20099] A `{ $field }` reference as the whole comparand of a scalar
     // comparison is RESOLVED against this row. The arms below would compare the
     // reference OBJECT itself — `500 > { $field: 'cap' }` is false, and `$ne`
