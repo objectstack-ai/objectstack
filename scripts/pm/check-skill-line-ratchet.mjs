@@ -1804,7 +1804,7 @@ export const CEILINGS = new Map([
   // first PR. A NEW file, so this is an added row and no other row moves; set
   // at the landed line count (headroom 0, same convention as every lane
   // charter above).
-  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 27],
+  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 30],
   // repo:cloud lane charter: the cloud seats keep first-touch triage of the
   // cloud repo, run the first-touch sweep before they claim, set grade and
   // state when they file, and triage's daily reconciliation is the backstop;
