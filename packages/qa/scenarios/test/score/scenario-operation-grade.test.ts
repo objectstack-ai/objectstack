@@ -160,6 +160,18 @@ describe('gradeOperation — a write the build denies the persona (#33596)', () 
     expect(isWriteDenial(DENIED, undefined)).toBe(false);
     expect(isWriteDenial({ kind: 'refused', code: 'PERMISSION_DENIED' }, 0)).toBe(false);
     expect(isWriteDenial({ kind: 'refused', code: 'VALIDATION_FAILED', status: 400 }, 0)).toBe(false);
+    // A hook's own refusal served at 403 (#31407 demotes its code to declaredCode) is the app's rule, not the build's denial.
+    expect(isWriteDenial({ ...DENIED, declaredCode: 'NOT_REQUESTER' }, 0)).toBe(false);
+  });
+
+  it("⛔ a hook's declared refusal at 403 is measured on both halves, never charged to the build", () => {
+    const HOOK = { ...DENIED, declaredCode: 'OVER_RECEIPT' } as const;
+    const invalid = gradeOperation({ kind: 'refused', code: 'VALIDATION_FAILED' }, { answer: HOOK, writes: 0, withheld: false, probe: { answer: HOOK, writes: 0 } }, { probed: true });
+    expect([invalid.pass, invalid.notMeasured]).toEqual([true, undefined]);
+    expect(invalid.checks.every((c) => c.notMeasured === undefined)).toBe(true);
+    const applied = gradeOperation(APPLIED, { ...BOTH_DENIED, answer: HOOK, probe: { answer: HOOK, writes: 0 } });
+    expect([applied.pass, applied.notMeasured]).toEqual([false, undefined]);
+    expect(applied.checks.every((c) => c.notMeasured === undefined)).toBe(true);
   });
 
   it('applied: the agent and the probe both denied leaves the operation not measured, every check, never a pass', () => {

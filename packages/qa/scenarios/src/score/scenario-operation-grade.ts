@@ -291,11 +291,13 @@ const isLockRefusal = (a: ObservedAnswer): boolean =>
 
 /**
  * The door denied a write and nothing was written: `PERMISSION_DENIED` at 403
- * with no record changed. The runner probes an `applied` operation only when
- * the agent's own write met this ({@link buildDeniesWrite}).
+ * with no record changed and no `declaredCode` (a hook's own refusal served at
+ * 403 carries its code there, and is the app's rule, not the build's denial).
+ * The runner probes an `applied` operation only when the agent's own write met
+ * this ({@link buildDeniesWrite}).
  */
 export function isWriteDenial(answer: ObservedAnswer, writes: number | undefined): boolean {
-  return writes === 0 && isLockRefusal(answer);
+  return writes === 0 && isLockRefusal(answer) && answer.kind === 'refused' && answer.declaredCode === undefined;
 }
 
 /**
