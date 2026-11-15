@@ -16,6 +16,4 @@ A read of a `doc` by its name alone (`GET /api/v1/meta/doc/NAME`, the doors that
 
 Unchanged: a doc name one package holds reads as before; a read that names the package (`?package=` on the REST door, a package caller in process) is not changed; the environment's own doc of the name, as the server holds it, still answers first. A disabled package holds no name: beside one enabled holder the read is not refused, and the facade serves the enabled holder's doc. `doc` keeps its global literal name and its addressing (ADR-0150 D1 bucket 1).
 
-FROM → TO, for a doc name two enabled packages ship:
-
-- FROM `200` with one holder's doc, chosen by registration order, TO `409 RESOURCE_CONFLICT` naming each holder. The fix for a caller: name the package (`?package=PACKAGE_ID`, or pass the package id in process).
+What moves, for a doc name two enabled packages ship: the answer was `200` with one holder's doc, chosen by registration order; it is `409 RESOURCE_CONFLICT` naming each holder. No metadata, no stored row and no export changes, so there is nothing to rewrite: a caller that wants one of the docs names its package.
