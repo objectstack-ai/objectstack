@@ -38,7 +38,7 @@ import {
 import { useSafeTranslate } from "@object-ui/i18n";
 import { Streamdown } from "streamdown";
 import { ListLinkContext, RecordLinkContext, withRecordLinks } from "../recordLink";
-import { CHAT_MARKDOWN_PLUGINS } from "./markdown-plugins";
+import { CHAT_MARKDOWN_PLUGINS } from "../chatMarkdownPlugins";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
