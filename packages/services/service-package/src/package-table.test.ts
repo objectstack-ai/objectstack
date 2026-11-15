@@ -33,6 +33,7 @@ import {
   PACKAGE_TABLE_STATEMENTS,
   nextPackageWriteInstant,
   packageRowStamp,
+  packageStampToIso,
   packageWriteStamp,
   resolvePackageTableDialect,
 } from './package-table.js';
@@ -367,6 +368,15 @@ describe('[#31530] publish answers the row\'s version and created_at, from the w
     const stamp = packageWriteStamp(new Date('2026-11-08T14:40:07.000Z'));
     expect(stamp).toBe('2026-11-08 14:40:07.000');
     expect('2026-11-08 14:40:07' < stamp).toBe(true);
+  });
+
+  it('packageStampToIso reads both stored forms back as the UTC instant, and nothing else', () => {
+    const at = new Date('2026-11-08T14:40:07.912Z');
+    expect(packageStampToIso(packageRowStamp(at))).toBe('2026-11-08T14:40:07.000Z');
+    expect(packageStampToIso(packageWriteStamp(at))).toBe('2026-11-08T14:40:07.912Z');
+    expect([undefined, null, '', 'yesterday', 1762612807000].map(packageStampToIso)).toEqual(
+      [undefined, undefined, undefined, undefined, undefined],
+    );
   });
 
   it('nextPackageWriteInstant never hands out the same instant twice, nor an earlier one', () => {
