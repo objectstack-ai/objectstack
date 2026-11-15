@@ -1,5 +1,126 @@
 # @object-ui/fields
 
+## 18.5.0
+
+### Patch Changes
+
+- 82838e8: fix(fields): a read-only record-mode amount that declares `homeAmount` shows the live home-amount preview in an editable form
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `record`-mode amount that declares `homeAmount` (ADR-0144 D5) draws the "≈ AMOUNT at RATE on DATE" line under it while the record is edited. The line was mounted on the widget's editable face only, so an amount the form draws read-only lost it. The showcase invoice's `amount` is computed by an `expression`, and the form draws such a field read-only, so its edit form had no preview at all, whatever the currency or document date.
+  
+  `CurrencyField`'s read-only face now mounts the same preview when the field is not `disabled`, so it follows a changed currency or document date before save. A read-only form (`mode: 'view'` or `readOnly`) disables every field and shows no preview: it has no save, and its home field already says the rate and date the engine used. The record page draws the amount with the cell renderer, which is unchanged, so it still shows the stored conversion once, under the home field. No new prop, no new translation key: the preview and its `fields.currencyHome.*` strings are the ones the editable face already uses.
+- f06f064: fix(plugin-grid): a multi-field row conflict lists each field, and a summary column's footer total is formatted as its cells
+  
+  Clause-②: yes (widening) — `@object-ui/fields` gains the export `summaryDeclaresCurrency`; nothing is removed or narrowed, and the `@object-ui/plugin-grid` changes are internal.
+  Metadata-protocol: none
+  
+  **Row save conflicts in the grid.** A row save that changed several fields and met a newer version (409 `CONCURRENT_UPDATE`) opened the conflict dialog with your edit and the current value printed as two raw JSON objects. The dialog now lists each changed field on its own row, under its column header, with your edit and the current value. A one-field conflict looks as before.
+  
+  **The list footer total of a roll-up (`summary`) field.** The total ignored the field's `scale`, so a summary with `scale: 2` read "Paid 230,000" beside a currency column's "215,000.00". The footer now formats a summary's total the way the list cell draws the same field: as money when the summary declares its currency (`currencyConfig`), else as a number at its declared `scale`. A summary that declares neither keeps its plain total. Money follows the summary's own `currencyConfig`, not the type of the field it sums, as the spec states and as the cell already draws it.
+- f64c0f9: feat(spec, fields): a roll-up of a stored home amount declares `currencyMode: 'dynamic'` and is drawn in the organization's home currency
+  
+  Clause-②: yes (widening) — a `summary` with `function` `sum` / `min` / `max` / `avg` whose `summaryOperations.field` is a stored home amount (a child field some `homeAmount.field` on the child object names) is admitted with `currencyConfig: { currencyMode: 'dynamic' }` (or a config naming no `currencyMode`) and no `defaultCurrency`. Every summary refused before is still refused, except that one: a `dynamic` summary naming no child field or carrying a `defaultCurrency` is refused by the object, any other `dynamic` roll-up by `defineStack`, and a `count` in every mode as before.
+  Metadata-protocol: added
+  Skills-docs: follow-up #33714 — `skills/objectstack-data/rules/field-types.md` (its `homeAmount` paragraph teaches the stored home field but not that a `summary` over it declares `currencyMode: 'dynamic'`). `content/docs/data-modeling/currency.mdx` and `content/docs/data-modeling/field-types.mdx` are updated here.
+  
+  ADR-0144 D6 has consolidated totals read the stored home field, and D8 rule 5 makes that field a `dynamic`-mode currency field shown in the organization's home currency (`localization.currency`). A `summary` over it totalled correctly but was drawn as a bare number (`250.00`), because no summary declaration was both admitted and honest: `record` is the follow-the-parent roll-up only, `dynamic` was refused on every summary, and `fixed` would name the home currency in metadata. A dashboard metric over the same home field already showed the symbol.
+  
+  **Spec.** The roll-up of a home amount now declares `dynamic`, with no code:
+  
+  ```ts
+  actual_cost: {
+    type: 'summary',
+    summaryOperations: { object: 'expense', field: 'amount_home', function: 'sum', relationshipField: 'project' },
+    currencyConfig: { currencyMode: 'dynamic' },
+  },
+  ```
+  
+  The object door (`refuseUnadmittedSummaryCurrency`) lets a `dynamic` summary through only when it names a child object and field and carries no `defaultCurrency`; its refusal messages now name this third admitted case beside `fixed` and `record`. `defineStack`'s cross-reference pass (`collectRecordCurrencyPathErrors`, new case (d)) admits it only when the child field is a stored home amount, and refuses any other `dynamic` roll-up with the declaration the child field does support: the record-mode amount's own home field, the child's home amounts, or its `fixed` code. A child the stack does not declare is not judged, as for a `record` roll-up.
+  
+  **Console.** `summaryDeclaresCurrency` (`@object-ui/fields`) answers true for a `dynamic` summary, so the record page (`SummaryField`) and the list cell (`FormulaCellRenderer`) draw the total through `resolveFieldCurrency` in the tenant default currency: `$250.00` under a USD home currency, `CN¥1,800.00` under CNY, the same text a metric tile over the home field shows. With no home currency set it is a plain amount. A summary declaring no `currencyConfig` is unchanged.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [f530d25]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [f5121e8]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [1bbeb94]
+- Updated dependencies [ba32e79]
+- Updated dependencies [9317833]
+- Updated dependencies [8ed2b89]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [a9da547]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [4c32b96]
+- Updated dependencies [12d090d]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [d574341]
+- Updated dependencies [bc50d11]
+- Updated dependencies [de476f1]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [020ce3d]
+- Updated dependencies [ee627c6]
+- Updated dependencies [6446935]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [5604aeb]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @object-ui/i18n@18.5.0
+  - @objectstack/formula@18.5.0
+  - @object-ui/components@18.5.0
+  - @object-ui/react@18.5.0
+  - @object-ui/core@18.5.0
+  - @object-ui/mobile@18.5.0
+  - @object-ui/permissions@18.5.0
+  - @object-ui/types@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

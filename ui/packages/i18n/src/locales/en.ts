@@ -4939,7 +4939,9 @@ const en = {
     tool: {
       aggregate_data: 'Aggregate the data',
       get_record: 'Read the record',
+      list_datasets: 'Check the available metrics',
       query_data: 'Query the data',
+      query_dataset: 'Query by a metric',
       query_records: 'Look up the records',
       read_package_doc: 'Read the app guide',
       search_knowledge: 'Search the knowledge base',

@@ -475,8 +475,10 @@ describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFF
   // `evaluateAllRulesForObject` catches per RULE and logs). Loud beats a
   // wrong count, so the behaviour stands; these pins hold the measured shape
   // so the next reader does not inherit the note's reading. Reachable through
-  // a grant that names a record another organization's grant already holds
-  // (the upsert key excludes `source_id`). An organization-less record that two
+  // a grant that names a record another organization's grant OF THE SAME RULE
+  // already holds: the upsert key carries a rule grant's `source_id`, and a
+  // declared rule served under a wall is one projection per organization, all
+  // carrying the rule's name as that id. An organization-less record that two
   // organizations' rules both matched was the other road in; no walled sweep
   // reaches such a record any more, so each pass completes (pinned below).
 
@@ -489,19 +491,19 @@ describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFF
     const { driver, sharing } = await boot('isolated');
     await driver.create('sys_record_share', {
       id: 'shr_org_a', object_name: OBJECT, record_id: 'deal_p1', recipient_type: 'user', recipient_id: 'u_x',
-      access_level: 'read', source: 'rule', source_id: 'rule_org_a', organization_id: ORG_A, created_at: '2026-01-01T00:00:00Z',
+      access_level: 'read', source: 'rule', source_id: 'declared_rule', organization_id: ORG_A, created_at: '2026-01-01T00:00:00Z',
     } as never);
 
     await expect(
       sharing.grant(
-        { object: OBJECT, recordId: 'deal_p1', recipientId: 'u_x', accessLevel: 'edit', source: 'rule', sourceId: 'rule_org_b' },
+        { object: OBJECT, recordId: 'deal_p1', recipientId: 'u_x', accessLevel: 'edit', source: 'rule', sourceId: 'declared_rule' },
         { ...SYSTEM, tenantId: ORG_B } as never,
       ),
     ).rejects.toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404, object: 'sys_record_share' });
 
     const rows = await allShares(driver);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ id: 'shr_org_a', access_level: 'read', organization_id: ORG_A, source_id: 'rule_org_a' });
+    expect(rows[0]).toMatchObject({ id: 'shr_org_a', access_level: 'read', organization_id: ORG_A, source_id: 'declared_rule' });
   });
 
   it("reconcile: two organizations' rules no longer meet on an organization-less record — neither walled sweep reaches it, so the second pass completes", async () => {

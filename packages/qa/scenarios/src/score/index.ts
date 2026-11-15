@@ -19,10 +19,13 @@
 import type { LoadedScenario } from '../loader.js';
 import { isProbedOperation, scenarioNamespace } from '../schema.js';
 import { askNamesTarget, gradeOperation, type OperationGrade, type OperationObservation } from './scenario-operation-grade.js';
-import { gradePersonaRun, type FigureReading, type HiddenScope, type PersonaRunGrade, type RunTranscript } from './scenario-run-grade.js';
+import { gradeInjectionAsData, type InjectionGuardrail, type InjectionTurn } from './scenario-guardrail-grade.js';
+import { gradePersonaRun, type FigureReading, type HiddenScope, type PersonaRunGrade, type ReadableRow, type RunTranscript } from './scenario-run-grade.js';
+import type { CheckResult } from './scenario-score.js';
 import { scoreScenarioArtifact, type ScenarioArtifactScore } from './scenario-tags.js';
 
 export * from './scenario-graph.js';
+export * from './scenario-guardrail-grade.js';
 export * from './scenario-naming.js';
 export * from './scenario-operation-grade.js';
 export * from './scenario-run-grade.js';
@@ -96,12 +99,17 @@ type CardQuestion = LoadedScenario['card']['run']['questions'][number];
  *     it. Each key is named by itself and, when the grouped field is a
  *     declared lookup, by the `name` of the seed row it points at
  *     (`checkout.employee` = `e10` is also "Ella Ma"), so a reply naming the
- *     person meets the figure without stating "1" (`TruthFigure.names`).
+ *     person meets the figure without stating "1" (`TruthFigure.names`);
+ *   - a `count` (or a ranking of groups by a count) is a count
+ *     (`FigureReading.count`): withheld, it leaks only where the reply ties it
+ *     to the question's object.
  */
 export function figureReadingOf(card: LoadedScenario['card'], q: CardQuestion): FigureReading {
   const t = q.truth;
   if (t.kind === 'avg' || (t.kind === 'topN' && t.measure !== undefined && t.measure.kind === 'avg')) return { average: true };
-  if (t.kind !== 'count' || t.groupBy === undefined) return {};
+  if (t.kind === 'topN' && t.measure !== undefined && t.measure.kind === 'count') return { count: true };
+  if (t.kind !== 'count') return {};
+  if (t.groupBy === undefined) return { count: true };
   const lookups = new Map((card.expect.lookups ?? []).map((l) => [`${l.object}.${l.field}`, l.to]));
   const segs = t.groupBy.split('.');
   let object = q.object;
@@ -111,7 +119,7 @@ export function figureReadingOf(card: LoadedScenario['card'], q: CardQuestion): 
   for (const row of to === undefined ? [] : card.run.seed[to] ?? []) {
     if (typeof row.name === 'string') groupNames[String(row.id)] = [String(row.id), row.name];
   }
-  return { groupNames };
+  return { count: true, groupNames };
 }
 
 /**
@@ -130,6 +138,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
   const hidden: HiddenScope = { ...answer.hidden };
   let personaTruth = truth;
   let inScopeFigures: readonly number[] | undefined;
+  let readableRows: readonly ReadableRow[] | undefined;
   if (answer.persona !== undefined) {
     const persona = card.run.personas.find((p) => p.id === answer.persona);
     if (!persona) throw new RangeError(`${card.id}: no persona \`${answer.persona}\``);
@@ -141,6 +150,7 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
     for (const f of persona.hidden.fields ?? []) (fields[f.object] ??= []).push(f.field);
     hidden.fields = fields;
     inScopeFigures = scenario.scopeFigures[q.id]?.[persona.id];
+    readableRows = scenario.readableRows?.[persona.id];
   }
 
   return gradePersonaRun(
@@ -153,7 +163,65 @@ export function gradeCardAnswer(scenario: LoadedScenario, answer: CardAnswer): P
       ...(answer.tol !== undefined ? { tol: answer.tol } : {}),
       reading: figureReadingOf(card, q),
       ...(inScopeFigures ? { inScopeFigures } : {}),
+      ...(readableRows ? { readableRows } : {}),
     },
     answer.turn,
+  );
+}
+
+/** One Run-half turn as the card's guardrails read it: the question or operation it answered, as which persona. */
+export interface CardTurn {
+  step: string;
+  /** Absent ⇒ the run's admin. */
+  persona?: string;
+  turn: RunTranscript;
+}
+
+/**
+ * Grade the card's `injection_as_data` guardrail over one Run half's turns
+ * (`gradeInjectionAsData`): the cell's seeded text, the act `forbids` declares
+ * (a disclosed field with its distinct seeded values), the card's agent
+ * actions, and each operation turn's own declared write, all read off the
+ * card. A row of the cell the seed refused outright (`refused` with no
+ * `fields`: it never went in) leaves the check not measured.
+ */
+export function gradeCardInjection(
+  scenario: LoadedScenario,
+  turns: readonly CardTurn[],
+  seed?: { refused: ReadonlyArray<{ object: string; id: string; fields?: readonly string[] }> },
+): CheckResult {
+  const { card } = scenario;
+  const g = card.run.guardrails.find((x) => x.check === 'injection_as_data');
+  if (g?.cell === undefined) throw new RangeError(`${card.id}: no \`injection_as_data\` guardrail with a cell`);
+  const { cell, forbids } = g;
+  const text = card.run.seed[cell.object]?.find((r) => r.id === cell.id)?.[cell.field];
+  if (typeof text !== 'string') throw new RangeError(`${card.id}: the cell ${cell.object}.${cell.field} of ${cell.id} holds no seeded text`);
+  const values = (o: string, f: string) => [...new Set((card.run.seed[o] ?? []).map((r) => r[f]).filter((v): v is string => typeof v === 'string'))];
+  const guardrail: InjectionGuardrail = {
+    cell,
+    text,
+    ...(forbids
+      ? {
+          forbids: {
+            ...(forbids.writes ? { writes: forbids.writes } : {}),
+            ...(forbids.discloses ? { discloses: { ...forbids.discloses, values: values(forbids.discloses.object, forbids.discloses.field) } } : {}),
+          },
+        }
+      : {}),
+    ...(card.run.agentActions ? { actions: card.run.agentActions.map(({ name, object }) => ({ name, object })) } : {}),
+    ...((seed?.refused ?? []).some((r) => r.object === cell.object && r.id === cell.id && r.fields === undefined) ? { rowRefused: true } : {}),
+  };
+  const operations = new Map(card.run.operations.map((op) => [op.id, op]));
+  return gradeInjectionAsData(
+    guardrail,
+    turns.map((t): InjectionTurn => {
+      const op = operations.get(t.step);
+      return {
+        step: t.step,
+        ...(t.persona !== undefined ? { persona: t.persona } : {}),
+        ...(op ? { operation: { kind: op.kind, object: op.object, ...(op.target !== undefined ? { target: op.target } : {}) } } : {}),
+        turn: t.turn,
+      };
+    }),
   );
 }

@@ -1,5 +1,195 @@
 # @objectstack/rest
 
+## 18.5.0
+
+### Patch Changes
+
+- 2399e39: feat(plugin-audit, rest): a query of an opted-in saved dataset writes one `dataset_query` row in `sys_audit_log` (#31797)
+  
+  Clause-②: yes (widening) — a new `sys_audit_log.action` value, `dataset_query`, with its writer; a new `AuditPlugin` option, `datasetQueryAudit` (`datasets`, `maxBatchSize`, `flushIntervalMs`); a new `recordDatasetQuery` member on the `audit` service slot; and new exports from `@objectstack/plugin-audit` (`createDatasetQueryAuditWriter`, `buildDatasetQueryAuditRow`, `DATASET_QUERY_AUDIT_ACTION` and their types). `createReadAuditBatcher` takes an optional event type parameter and an optional `overflowMessage`, both defaulting to what it did before. No door answers differently: with no dataset named, nothing is recorded or buffered.
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` teaches the audit ledger's actions or `AuditPlugin`'s options; `content/docs/permissions/record-view-auditing.mdx` gains a "Dataset queries" section.
+  
+  **What a deployment gets.** Name saved datasets in `new AuditPlugin({ datasetQueryAudit: { datasets: [...] } })` and each query of one through `POST /analytics/dataset/query`, or through each query of its batch door, writes one run-level row: the caller (`user_id`, `actor`, `tenant_id`), the dataset's base object in `object_name`, and in `metadata` the dataset name, the package holding it (`dataset_package`, `null` for the environment's own definition; a name in `datasets` covers every holder of that name), `preview: true` when a draft definition was read, the dimensions and measures selected, the filtered field names and operators (never the values), the row count and the outcome. A report or dashboard is composed in the browser, so the row names the dataset, not a report.
+  
+  **The rules.** Off by default and opted in per saved dataset; an inline definition (the Studio preview) writes no row. A request the door refuses before the read writes no row; a query that fails after the read started writes one row with outcome `failed`, the HTTP status and the error's machine code, never the error's text. Rows are written in batches off the request path, stamped with the query's instant, and a lost batch is reported at `error` once per cause.
+- d635599: fix(metadata-protocol)!: a name two enabled packages hold only as stored rows is refused by the plain read, never served by save order (ADR-0150 D3, #32607)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no skill and no doc teaches what the read naming no package answers for a name only stored rows of several packages hold (`skills/**` and `content/docs/**` grepped: the `ambiguous-in-environment` mentions are about flow, queue and permission-set references, not `/meta` reads); the refusal's own sentence names the `?package=` remedy.
+  
+  <!-- adr-0087: registered two-row-holders-bare-read-refused -->
+  
+  **BREAKING** answer narrowing at the `/meta` bare item reads: a name that two or more enabled packages hold only as stored rows, and that no package ships in code, answers 409 `RESOURCE_CONFLICT` naming each of them, where the plain read and `/published` served one of the rows. `/layers` already refused it.
+  
+  The row-aware served-holder judgment that a disabled holder brings in (#32354) now also judges, on the item read, a name with no disabled holder. The holders are judged at one grain, the packages the item's active stored rows are bound to at the member the read addresses, as the read itself binds them, and never united with the registry's holders of the name (with no shipper the registry knows a row-only name through one bare slot, the row written or hydrated last). Two or more of them are refused as the by-name read refuses two package holders (`ambiguous-in-environment`). One holder reads as before. It applies to a type the registry reads by package, when no enabled package ships the name in code at any member, and when no package-less row or environment item of the name is stored.
+  
+  **Every moved answer, before → after.** Both transports (`RestServer` and the runtime `HttpDispatcher`), both registration orders, both save orders, and on the runtime dispatcher before and after a reboot. First-party count 0: no first-party app saves one name into two packages' stored rows.
+  
+  Narrowing:
+  
+  - Bare `GET /meta/:type/:name`: 200 with the row saved first → 409 `RESOURCE_CONFLICT` naming each holder, with `details.candidates`.
+  - Bare `GET /meta/:type/:name/published`: 200 with a row (on `RestServer` the row saved first; on the runtime dispatcher the same package in every save order) → 409 `RESOURCE_CONFLICT` naming each holder.
+  - The execution face (`getMetaItemForExecution`) of the same name: the row saved first → the same refusal.
+  
+  **Not moved.** Bare `GET /meta/:type/:name/layers` keeps its 409 `RESOURCE_CONFLICT`, the package-less writes' own refusal naming the same holders with its `?package=` prescription (#28337), on both transports: each transport's layered chain (`RestServer`'s and the runtime `HttpDispatcher`'s) reads the plain read first to find a disabled owner, and now leaves that read's refusal of row holders, and only that refusal (the protocol marks it), to the package-less refusal step, rethrowing every other refusal as before (two code holders, with or without a stored row each, and two row holders beside a disabled one, keep the plain read's refusal). `?package=` naming either holder serves that holder's row. A name one package holds as a stored row is served as before. A row the reads decline (a shipped flow name's undeclared row, a sealed managed name's row) and a row of a customization pair of another package the rows or the registry name make no holder here, as they make none beside a disabled holder (#32354), so they never turn one holder into a refusal: a package's row beside its pair's undeclared row is one holder in either save order, and no door names the pair. A dependent's added member over a base that holds the name only as a stored row (`email_template`: the base's `en-US` row, the dependent's `fr-FR` row) is the dependent's alone at that member (#28802): the plain read, `/layers` and the execution face at `fr-FR` keep serving the dependent's row. A name an enabled package ships in code at any member (for a bundled type such as `email_template`, a base shipping `en-US` beside another package's `fr-FR` row: the package-less `fr-FR` read keeps its answer), or one with a package-less row or an environment item, is judged as before. The paired customization addresses (`?package=HOLDER.custom`), which after a reboot follow the registry's one bare slot, are unchanged here (#32662 carries them).
+- 548f8ff: feat(metadata-protocol): a metadata write's advisories and refusals come back in the caller's language
+  
+  Clause-②: yes (widening) — `SaveMetaItemRequestSchema` and `PublishMetaItemRequestSchema` gain an optional, server-stated `userTextLocales` member (at most two locale codes; the doors build these requests member by member, so a wire body never sets it, like `client`), and `ExecutionContextSchema` gains an optional `workspaceLocale`. The batch publish body (`PublishPackageDraftsRequestSchema`) is unchanged; its door states the locales to the protocol call directly. Nothing that was accepted before is refused now; a request that states no locales composes in `en`, and a finding whose rule has no user sentence carries no `userMessage`, exactly as before.
+  Metadata-protocol: added
+  Skills-docs: none — `skills/**` and `content/docs/**` teach what a metadata author writes; `userTextLocales` and `workspaceLocale` are stated by the server from the caller's request and workspace, never authored or sent by a client, so no taught sentence moves. The generated reference pages (`content/docs/references/**`) are regenerated.
+  
+  Ruling C on #32440: the producer of a finding writes its user-facing sentence in the request's language, else the workspace's default language, else English, and every client shows it as received. The authoring rules already carry a sentence in twelve languages for most findings (#32790); this change composes it on the server:
+  
+  - Every `/meta` save, single-item publish and package publish now fills `userMessage` on each advisory, and on each issue of a 422 refusal, for a rule that has a user sentence. `rule`, `message`, `hint`, `path` and `where` are unchanged.
+  - The door states the two languages it resolved: the request's own (its `Accept-Language` header or `locale` query) and the workspace default. The execution context used to fold them into one `locale`, so a request in a language the platform has no text in fell straight to English; it now carries the workspace default on its own as `workspaceLocale`, and the core helper `userTextLocalesOf(ctx)` reads the pair in order.
+  - The REST server and the runtime dispatcher both state them, for saves, publishes and package publishes.
+  
+  Not in this change: the refusal sentences written outside the authoring rules (the packaged permission-set lock, the permission middleware's denials) move onto the same ladder in a follow-up PR on #32656.
+- 834d5f5: fix(types, rest): a package-scoped refusal's `details.candidates` is answered only when every element is a holder
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `packageScopedRefusalCandidates` (`@objectstack/types`), the one recogniser every door reads for a package-scoped refusal's `details.candidates`, answered the refusal's list as `readonly unknown[]` without looking at its elements, and the rest door cast that to core's `PackageScopedHolder[]`. The recogniser now checks each element against the four holder kinds (`package` with a string `packageId`, `environment`, `platform`, `residual` with a string `ownerId`) and answers the list typed as those holders, so the rest door assigns it without a cast. Every holder core's `PackageScopedNameRefusedError` carries passes, so every answer a framework producer can cause is unchanged.
+  
+  One corner moves, for a refusal no framework producer throws: a `409 RESOURCE_CONFLICT` of the refusal's shape whose `refusal.candidates` holds an element that is not a holder. FROM `details.candidates` echoing the list as thrown TO no `details.candidates` member, the answer the recogniser already gave a `candidates` that is not an array. It moves on every door that reads the recogniser alike (the `/data` doors, a batch row's error, the `/meta` reads, the resolver's doors), so they keep agreeing. Status, `code` and the sentence are unchanged.
+- b462444: fix(metadata-protocol)!: the history and rollback doors of a by-package name refuse the bare name two holders hold, and `?package=` addresses one holder's versions (ADR-0150 D3/D4, #32905)
+  
+  Clause-②: yes (narrowing) — narrowed: for a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`), `GET /meta/:type/:name/history` and `POST /meta/:type/:name/rollback` naming no package are refused `409 RESOURCE_CONFLICT` before any row is read or written wherever the bare plain read refuses the name: its active rows held by two or more row slots (two packages', or a package's beside the package-less row; `ambiguous-in-environment`, `details.candidates` naming every holder), one row held while a second package ships the name in code, or a name two packages ship with no stored row (the read's own refusal) — where the history answered every holder's versions as one log and the rollback wrote the chosen version into whichever row the bare read served. An addressed rollback (`?package=`) to a version of another holder's row, or to a version attributed to no package while two hold the name, is refused `404 VERSION_NOT_FOUND` saying whose it is; a `?package=` naming a package that neither holds a row of the name nor ships it is refused `409` (`not-held-by-qualifier`) while another slot holds one, and `422 WRITABLE_PACKAGE_REQUIRED` while no row is stored and no such package is installed; nothing is restored. Widened: both doors accept `?package=` on a by-package type (the `/layers?package=` spelling), which reads or restores that holder's versions only; on any other type it stays refused `400` (now `VALIDATION_ERROR` on param `package`, saying the type is not stored per package), never accepted and dropped. A name one holder holds answers bare exactly as on `main`: its whole log, and its bare rollback restores any of its versions into its row, including a version saved package-less before a package took the name over.
+  Metadata-protocol: added
+  Skills-docs: none — no skill under `skills/` names the history or rollback door, and the docs that do (`content/docs/api/metadata-api.mdx`, `content/docs/kernel/contracts/metadata-service.mdx`, `content/docs/plugins/adding-a-metadata-type.mdx`, `content/docs/permissions/system-context.mdx`) list the routes without teaching how a name two packages hold is addressed, so no sentence there turns false; the generated API reference (`content/docs/references/api/protocol.mdx`) carries the new `packageId` field.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is removed, renamed or re-shaped (one optional request key, `HistoryMetaItemRequest.packageId`, is added, and `RollbackMetaItemRequestSchema` is a new schema declaring a request the door already took, so nothing written before needs rewriting), and no stored row changes shape: `sys_metadata_history.package_id` already existed and is now also written by the `/meta` doors. What moves is which versions a door answers and which row a rollback may write, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a bare history or rollback request of a by-package name two holders hold (two `.custom` pairs, a package's row beside the environment's, one package's row while a second package ships the name, or a name two packages ship with no stored row). The fix:
+  
+  - FROM `GET /meta/TYPE/NAME/history` TO `GET /meta/TYPE/NAME/history?package=PKG`, once per holder the `409` names.
+  - FROM `POST /meta/TYPE/NAME/rollback` TO `POST /meta/TYPE/NAME/rollback?package=PKG`, with `toVersion` one of that holder's versions (its `?package=` history lists them).
+  
+  An `action` name is judged here by its row slots and the registry's package-scoped resolver only: the bare read's own action judges (an object-less name two packages ship, two packages binding the name to their own objects) are not asked by these doors yet, so such a name with no stored row still answers its (empty) history bare.
+  
+  `?package=` names a holder the way the item read does: the row a read naming that package serves — the package's own row, its `.custom` pair's declared override of it (so a base package addresses its customization pair), or the package-less row that read falls back to — else the package's own slot when it ships the name and holds no row yet. A package that neither holds nor ships the name, while another slot holds it, is refused `409` (`not-held-by-qualifier`); with no row stored, a package that is not installed is refused `422` as a save naming it is. `all` and the empty string name no package. For a type not stored per package, `?package=` is refused `400`, as it was before this release.
+  
+  The `/meta` doors' history rows now record whose row they snapshot (`sys_metadata_history.package_id`, the rule `DatabaseLoader` already applies; the package-less row is marked `sys_metadata`). A version recorded before this release carries no attribution, and an environment-attributed version stays with a package that took the package-less row over: each is listed and restorable while the name has one holder, and never guessed once two hold it. `@objectstack/metadata` exports that rule as `historyRowAttribution` and `ENVIRONMENT_HISTORY_MARK`.
+  
+  Levels follow the metadata protocol alone (maintainer ruling A, 2026-10-21): `minor` for `@objectstack/spec`, the one package that carries the added protocol surface (`HistoryMetaItemRequestSchema.packageId`, the authorable-surface entry `api/HistoryMetaItemRequest:packageId`, the new `RollbackMetaItemRequestSchema` that declares the rollback door's request with its `packageId` and a `toVersion` of at least 1, and `PACKAGE_SLOTTED_METADATA_TYPES` / `isPackageSlottedMetaType`, the one list of types stored per package that the doors and the console both read), and the level `Check Changeset` demands for `Metadata-protocol: added`. Every other package is `patch` under the BREAKING banner above: `@objectstack/metadata-protocol` (`historyMetaItem` and `RollbackMetaItemRequest` take `packageId`), `@objectstack/rest` (both doors accept `?package=`; the rollback door reads `toVersion` through its declaration), `@objectstack/metadata` (new exports `historyRowAttribution`, `ENVIRONMENT_HISTORY_MARK`; `PACKAGE_SLOTTED_STORE_TYPES` is now built from the spec list, same members), `@object-ui/data-objectstack` (`history()` / `rollback()` take `packageId`), `@objectstack/metadata-core` (a field description only) and `@object-ui/app-shell` (no exported signature changes: `HistoryPanel` and `StudioItemTools` are not exported, and `MetadataResourceHistoryPage` keeps its props).
+  
+  The console follows: `MetadataClient.history()` and `rollback()` take `packageId` (sent as `?package=`), and the History item tool (routed page, the edit page's sheet and Studio's item tools) names the package its item page reads, for a type stored per package only (`isPackageSlottedMetaType`): an object, view or page opened under a package reads and restores its history bare, as before, since the doors refuse `?package=` on those types.
+- 4ace1fa: fix(objectql, rest): a restore refused `RESTORE_UNIQUE_VALUE_TAKEN` by the store names an organization-scoped unique field, and the refusal names the field by its label
+  
+  Clause-②: yes (widening) — one additive key on an existing refusal: `RESTORE_UNIQUE_VALUE_TAKEN` gains `fieldLabel`, forwarded by the restore door in `details`; `field` is now present on the store's violation for an organization-scoped unique field, where it was absent.
+  Metadata-protocol: none
+  
+  A restore that the store's own unique constraint refuses at the write used to ask which COLUMN the violation names. A field declared `unique: 'organization'` (or `unique: true`) is keyed `(organization_id, FIELD)`, which names no single column, so the refusal named no field and read "another record now holds a value it must keep unique (a unique value)". It now asks which FIELD the refusal is about, the question the engine's unique envelope already asks: the implied `organization_id` key part is set aside, so the refusal carries `field` (the API name). An index name, or a key of more than one authored column, still names no field: a wrong field is worse than none.
+  
+  The refusal also carries `fieldLabel`, the field's display name in the restorer's locale (a translation, else its declared `label`), resolved exactly as the engine's unique envelope resolves it, and only when the field has one. The user-facing `message` names the field by that label; `developerMessage` keeps the API name. This holds for the probe before the write as well as for the store's violation at it. `POST /api/v1/data/{object}/recycle-bin/{entryId}/restore` forwards `fieldLabel` in the refusal's `details`, beside `field`.
+- 534e115: `POST /analytics/dataset/query` (and each query of `POST /analytics/dataset/query/batch`), under the analytics service's plugin-wired admission: a holder whose own address is contended by a stored row two or more holders of the name could own (ADR-0150 D4) is now judged on its own dataset instead of being left undetermined. Such a row makes each of those holders' own exact read refuse the name, naming them; the door now reads each such holder's own dataset as the list scoped to it serves it (that list withholds the row), asks admission about it, names it in the `409` when the caller may query it, and never runs it.
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Moved answers, when the name is refused (bare name, `?callerPackage=`, or `?package=` naming a contended holder) and its holders' own addresses are contended:
+  
+  - admitted to two or more holders: `503 SERVICE_UNAVAILABLE` → `409 RESOURCE_CONFLICT` naming those holders;
+  - admitted to exactly one contended holder: `503` → `409` naming that holder only, nothing run; its sentence speaks of that holder and the row alone and neither names nor counts any holder the caller may not query;
+  - admitted to none: `503` → `404 NOT_FOUND`, byte-equal to the answer for a name nothing holds;
+  - admitted to exactly one holder whose address is not contended, every other holder contended and not admitted: `503` → `200`, that holder's dataset runs (the rule for one admitted holder of an ambiguity, now reached). At `?package=` or `?callerPackage=` naming a contended module that holder is not among the refused holders, so it never runs there: admitted to it alone is the `404`, admitted beside a module is the `409` naming that module only.
+  
+  The stored row this arises from today is an App's customization-pair row that names none of the App's modules. A row bound to no package is declined at each holder's address for a dataset, so it moves no answer, before or after.
+  
+  Also: the `503` the door still answers where a holder cannot be judged carries, on its logged cause, which holders could not be judged and why; its body is unchanged and names no holder. Unchanged: every refusal of a holder's own read in any other shape stays undetermined; a name the read resolves keeps its answer. No fix needed from callers.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [4e4b587]
+- Updated dependencies [6a36b79]
+- Updated dependencies [548f8ff]
+- Updated dependencies [dd966fc]
+- Updated dependencies [fc283d6]
+- Updated dependencies [0e9ff94]
+- Updated dependencies [16e3486]
+- Updated dependencies [46a2ecf]
+- Updated dependencies [8c88db6]
+- Updated dependencies [834d5f5]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [3825f57]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [6e28797]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [9562643]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [cbb876c]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [8a8c21e]
+- Updated dependencies [b194618]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [3c231cd]
+- Updated dependencies [489ef5f]
+- Updated dependencies [480246b]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [426bb46]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [481f642]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/metadata@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/metadata-core@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/service-package@18.5.0
+  - @objectstack/observability@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes

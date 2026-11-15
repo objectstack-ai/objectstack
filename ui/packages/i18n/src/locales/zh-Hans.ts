@@ -4261,7 +4261,9 @@ const zh = {
     tool: {
       aggregate_data: '汇总相关数据',
       get_record: '读取这条记录',
+      list_datasets: '查看指标',
       query_data: '查询所需数据',
+      query_dataset: '按指标查询',
       query_records: '查找相关记录',
       read_package_doc: '阅读应用文档',
       search_knowledge: '在知识库中查找',

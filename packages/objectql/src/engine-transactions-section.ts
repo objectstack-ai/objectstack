@@ -34,6 +34,7 @@ import { redactPropagatedDriverFault } from '@objectstack/types';
 import type { EngineTransactionInfo, EngineTransactionOptions, IDataDriver } from '@objectstack/core';
 import { rollbackFailedRefusal, rolledBackRefusal } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
+import { isDetachedUnitHandle } from './unit-detach.js';
 import type { TransactionScope } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
@@ -162,8 +163,14 @@ export class TransactionsSectionFacet {
     return this.txStore.run(entry, body).finally(() => { entry.transaction = undefined; entry.scope = undefined; });
   }
 
-  /** [#22855] Is `handle` a unit {@link runOpenedUnit} published whose callback has since settled? */
+  /**
+   * [#22855] Is `handle` a unit {@link runOpenedUnit} published whose callback
+   * has since settled? [#33651] Or one the current run was detached from — an
+   * `async: true` hook's run, which starts outside every unit open at its
+   * dispatch (`unit-detach.ts`), primitive handles included.
+   */
   static isClosedUnitHandle(this: Pick<TransactionsSectionHost, 'openedUnits'>, handle: unknown): boolean {
+    if (isDetachedUnitHandle(handle)) return true;
     if (handle === null || (typeof handle !== 'object' && typeof handle !== 'function')) return false;
     const entry = this.openedUnits.get(handle);
     return entry !== undefined && entry.transaction === undefined;
