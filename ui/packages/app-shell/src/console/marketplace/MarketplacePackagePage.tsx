@@ -53,7 +53,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { ArrowLeft, ExternalLink, Download, AlertCircle, Package, Trash2, MoreHorizontal, CheckCircle2, ArrowUpCircle, Database, Loader2 } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Download, AlertCircle, Package, Trash2, MoreHorizontal, CheckCircle2, Database, Loader2 } from 'lucide-react';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useDisplayLocale } from '@object-ui/i18n';
@@ -69,6 +69,8 @@ import { MarketplaceDisabled } from './MarketplaceDisabled.js';
 import { MarketplaceNotLoadedReason } from './MarketplaceRowActions.js';
 import { localizePackage } from './usePackageL10n.js';
 import { isNewerVersion } from './versionPrecedence.js';
+import { updateTarget } from './installState.js';
+import { UpdateAvailableBadge } from './UpdateAvailableBadge.js';
 import {
   getMarketplacePackage,
   getServedPackageBody,
@@ -1483,9 +1485,7 @@ function MarketplacePackagePageBody() {
   // version than the latest approved one is not offered a "downgrade update".
   // The `'installed'` sentinel (version unknown) has no precedence, so it never
   // claims an update either.
-  const cloudUpdateAvailable = !!cloudInstalledVersion
-    && !!latestVersion
-    && isNewerVersion(latestVersion, cloudInstalledVersion);
+  const cloudUpdateAvailable = updateTarget(cloudInstalledVersion, latestVersion) !== null;
 
   // ADR-0131 D6 — where the package permits more than one mode, the install
   // waits for the operator's pick.
@@ -1703,12 +1703,7 @@ function MarketplacePackagePageBody() {
                 {t('marketplace.detail.installedV', { version: cloudInstalledVersion })}
               </Badge>
             )}
-            {cloudUpdateAvailable && (
-              <Badge variant="default" className="bg-amber-500 hover:bg-amber-500 gap-1">
-                <ArrowUpCircle className="h-3 w-3" aria-hidden="true" />
-                {t('marketplace.detail.updateAvailable', { defaultValue: 'Update available' })} → v{latestVersion}
-              </Badge>
-            )}
+            {cloudUpdateAvailable && latestVersion && <UpdateAvailableBadge version={latestVersion} />}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5" data-testid="marketplace-detail-taxonomy">
             {taxonomyGroups.map((group) => (
