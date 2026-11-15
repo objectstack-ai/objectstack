@@ -47,8 +47,8 @@
  *    are is not decidable, so neither carries (condition 3);
  *  - `claimant-disabled` — the one position claiming the old name belongs to a
  *    disabled package: nothing is carried onto a position that is switched
- *    off with its package; the next boot after the package is enabled
- *    carries;
+ *    off with its package; enabling it through `PATCH /packages/:id/enable`
+ *    carries, and so does the next boot after it is enabled;
  *  - `still-declared` — the old name is still a position of the same holder:
  *    the name is in use, so nothing was renamed away from it (condition 3;
  *    a cycle is this case, since every name in a cycle is a current one);
