@@ -281,9 +281,14 @@ export interface RouteErrorOptions {
  * does an error that crossed a second copy of `@objectstack/core` — the read
  * `resolveThrownHttpError`, the `/data` classification and the batch row error
  * make, so the doors cannot recognise two different sets.
+ *
+ * [#32744] The recogniser checks each element of the list against the four
+ * holder kinds and answers it typed as holders, so this door assigns it to
+ * core's `PackageScopedHolder` without a cast: the compiler checks that the
+ * recogniser's holder shape is assignable to core's.
  */
 function packageScopedRefusalCandidates(error: unknown): readonly PackageScopedHolder[] | undefined {
-    return sharedPackageScopedRefusalCandidates(error) as readonly PackageScopedHolder[] | undefined;
+    return sharedPackageScopedRefusalCandidates(error);
 }
 
 function resolveErrorResponse(error: any, object?: string, options?: RouteErrorOptions): { status: number; body: Record<string, unknown> } {

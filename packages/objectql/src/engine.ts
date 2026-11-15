@@ -1125,6 +1125,17 @@ export class ObjectQL implements IObjectQLEngine {
    * package's is replaced by that package's again, rather than leaving the
    * key empty; a package removed from beneath an override leaves the
    * override bound, with nothing beneath it to restore.
+   *
+   * [ADR-0150 D4/D5] A key whose unqualified handler was the removed
+   * package's while another owner still holds a handler under it in its own
+   * slot runs one remaining holder's handler for a call that names no
+   * package, rather than "not found", and stays in the unqualified
+   * {@link listRegisteredActions}; the bare-call ambiguity rule still
+   * refuses it while two or more packages hold the key. The holder is the
+   * last coordinate holding the key in slot-creation order, not the last
+   * registration of that key: with host code beside one package on an
+   * object-bound key it can be the package's where a restart runs host
+   * code's.
    */
   removeActionsByPackage(packageName: string): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
@@ -5308,8 +5319,14 @@ export class ObjectQL implements IObjectQLEngine {
    *   from a transport that inherited one it cannot honour (#18063) — the
    *   callback
    *   runs directly with the supplied base context (no rollback). This keeps
-   *   the API safe to call on drivers without ACID support (e.g. the
-   *   in-memory driver in tests). It is DECLARED behaviour (ADR-0119 D1), not
+   *   the API safe to call on drivers that cannot roll back (a test double
+   *   with no `beginTransaction`, remote Turso, OData). The in-memory driver
+   *   is not one: it implements `beginTransaction` / `rollback` over a
+   *   snapshot of its whole store, so the callback runs inside a
+   *   transaction there, with no isolation: its rollback restores the whole
+   *   store to its state at begin, discarding what other callers wrote since
+   *   then too (unsafe with concurrent writers). The
+   *   degrade is DECLARED behaviour (ADR-0119 D1), not
    *   a bug to be discovered — but since v17 it is no longer *silent*: the
    *   degrade warns once per driver (#4619, {@link warnTransactionUnsupported}),
    *   and a caller who cannot live with it says so with `opts.require: true`,

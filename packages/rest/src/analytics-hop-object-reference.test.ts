@@ -20,7 +20,7 @@
  * target — by the same caller, on the same strategy, in the same test: a
  * declared join was always resolved to its target. Each reference is also
  * checked absolutely, so an equality between two wrong answers cannot pass.
- * On the native strategy the dotted filter also answers what the engine's
+ * On both strategies the dotted filter also answers what the engine's
  * nested form `{ owner: { region: … } }` answers, the form the dotted
  * spelling maps onto. A lookup named after its target is the control.
  *
@@ -229,17 +229,13 @@ for (const strategy of ['native', 'objectql'] as const) {
       const reference = await answerOf(() => h.service.query({ cube: VIA_PERSON.name, measures: ['count'], where: { owner_region: 'NA' } } as never, MEMBER_CTX as never));
       const answer = await answerOf(() => h.service.query({ cube: LEDGER, measures: ['count'], where: { 'owner.region': 'NA' } } as never, MEMBER_CTX as never));
       expect(answer).toEqual(reference);
-      if (strategy === 'native') {
-        // Served: the two rows whose owner is in region NA — what the engine's
-        // nested form answers for the same condition.
-        expect(answer).toEqual({ answered: [JSON.stringify([2])] });
-        const nested = await answerOf(() => h.service.query({ cube: LEDGER, measures: ['count'], where: { owner: { region: 'NA' } } } as never, MEMBER_CTX as never));
-        expect(answer).toEqual(nested);
-      } else {
-        // The engine-aggregate strategy filters on no related value, through a
-        // declared join or not: its own capability refusal, never the door's.
-        expect(answer).toEqual({ refused: { code: 'INVALID_FIELD', status: 400, object: undefined } });
-      }
+      // Served on both strategies: the two rows whose owner is in region NA —
+      // what the engine's nested form answers for the same condition. On the
+      // engine-aggregate strategy the dotted leaf IS that nested form (#33335),
+      // read on the lookup's declared target, as the declared join reads it.
+      expect(answer).toEqual({ answered: [JSON.stringify([2])] });
+      const nested = await answerOf(() => h.service.query({ cube: LEDGER, measures: ['count'], where: { owner: { region: 'NA' } } } as never, MEMBER_CTX as never));
+      expect(answer).toEqual(nested);
     });
 
     it.each([

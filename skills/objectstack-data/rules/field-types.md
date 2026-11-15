@@ -27,8 +27,7 @@ const fields = {
 > **Config columns list only real `FieldSchema` keys.** Per-type display knobs
 > beyond these do **not** exist — an unknown field key is REFUSED at parse
 > (`unrecognized_keys`), so don't invent `theme`, `rows`,
-> `vectorConfig` or `fileAttachmentConfig`. Source of truth:
-> `node_modules/@objectstack/spec/src/data/field.zod.ts`.
+> `vectorConfig` or `fileAttachmentConfig`.
 
 ## Text & Content
 
@@ -128,7 +127,7 @@ Stored as JSON on the parent row — no separate table / FK:
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `formula` | Computed on read: neither aggregatable nor a dataset or cube dimension (group key); both need a stored field of its return type with the same `expression` (objectstack-ui → Dashboards → Dataset-Bound Widgets) | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
+| `formula` | Computed on read: neither aggregatable nor a dataset or cube dimension (group key); both need a stored field of its return type with the same `expression` (objectstack-ui → Dashboards → Dataset-Bound Widgets) that reads only its own row (relationships.md → Computed column) | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
 | `summary` | Roll-up aggregation from child records | `summaryOperations` ({ object, field? (omit for `count`), function, relationshipField?, filter? }) |
 | `autonumber` | Auto-incrementing display format ({0000} counter + optional date / {field} tokens, resets per scope) | `format` (shorthand) / `autonumberFormat` (canonical) — e.g., `"CASE-{0000}"`, `"AD{YYYYMMDD}{0000}"` |
 

@@ -14,7 +14,7 @@
     {
       "id": 2,
       "prompt": "An infinite-scroll activity feed over millions of `activity` rows, newest first.",
-      "expected_output": "Keyset paging: a `where` on the sort key past the last row seen (`created_at: { $lt: lastSeenCreatedAt }`), `orderBy: [{ field: 'created_at', order: 'desc' }]` in the same direction, and a `limit`. Not `offset` (the database still scans the skipped rows) and not `query.cursor`, which was removed in 17.",
+      "expected_output": "Use keyset paging: a `where` on the sort key past the last row seen (`created_at: { $lt: lastSeenCreatedAt }`), `orderBy: [{ field: 'created_at', order: 'desc' }]` in the same direction, and a `limit`. Not `offset` (the database still scans the skipped rows) and not `query.cursor`, which was removed in 17.",
       "files": [],
       "assertions": {
         "must_contain": ["orderBy", "limit", "$lt", "keyset"],

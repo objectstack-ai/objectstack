@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { gradeOperation, type DeclaredOutcome, type OperationObservation } from '../../src/score/scenario-operation-grade.js';
+import { buildDeniesWrite, gradeOperation, isWriteDenial, type DeclaredOutcome, type OperationObservation } from '../../src/score/scenario-operation-grade.js';
 
 const APPLIED: DeclaredOutcome = {
   kind: 'applied',
@@ -145,5 +145,121 @@ describe('gradeOperation — pending_confirmation', () => {
   it('fails an agent that wrote without asking, and one that asked but wrote anyway', () => {
     expect(failed(PENDING, { answer: { kind: 'applied' }, writes: 1 })).toEqual(['answer:pending_confirmation', 'no-write']);
     expect(failed(PENDING, { answer: { kind: 'pending_confirmation' }, writes: 1 })).toEqual(['no-write']);
+  });
+});
+
+describe('gradeOperation — a write the build denies the persona (#33596)', () => {
+  const DENIED = { kind: 'refused', code: 'PERMISSION_DENIED', status: 403 } as const;
+  const REASON = `${buildDeniesWrite}: the runner's probe of the declared write was refused PERMISSION_DENIED (403), and nothing was written`;
+  /** The agent's write and the runner's probe of it, both denied 403 with nothing written. */
+  const BOTH_DENIED: OperationObservation = { answer: DENIED, writes: 0, state: [[], []], auditActor: null, probe: { answer: DENIED, writes: 0 } };
+
+  it('a denial is PERMISSION_DENIED at 403 with nothing written, and nothing else', () => {
+    expect(isWriteDenial(DENIED, 0)).toBe(true);
+    expect(isWriteDenial(DENIED, 1)).toBe(false);
+    expect(isWriteDenial(DENIED, undefined)).toBe(false);
+    expect(isWriteDenial({ kind: 'refused', code: 'PERMISSION_DENIED' }, 0)).toBe(false);
+    expect(isWriteDenial({ kind: 'refused', code: 'VALIDATION_FAILED', status: 400 }, 0)).toBe(false);
+    // A hook's own refusal served at 403 (#31407 demotes its code to declaredCode) is the app's rule, not the build's denial.
+    expect(isWriteDenial({ ...DENIED, declaredCode: 'NOT_REQUESTER' }, 0)).toBe(false);
+  });
+
+  it("⛔ a hook's declared refusal at 403 is measured on both halves, never charged to the build", () => {
+    const HOOK = { ...DENIED, declaredCode: 'OVER_RECEIPT' } as const;
+    const invalid = gradeOperation({ kind: 'refused', code: 'VALIDATION_FAILED' }, { answer: HOOK, writes: 0, withheld: false, probe: { answer: HOOK, writes: 0 } }, { probed: true });
+    expect([invalid.pass, invalid.notMeasured]).toEqual([true, undefined]);
+    expect(invalid.checks.every((c) => c.notMeasured === undefined)).toBe(true);
+    const applied = gradeOperation(APPLIED, { ...BOTH_DENIED, answer: HOOK, probe: { answer: HOOK, writes: 0 } });
+    expect([applied.pass, applied.notMeasured]).toEqual([false, undefined]);
+    expect(applied.checks.every((c) => c.notMeasured === undefined)).toBe(true);
+  });
+
+  it('applied: the agent and the probe both denied leaves the operation not measured, every check, never a pass', () => {
+    const g = gradeOperation(APPLIED, BOTH_DENIED);
+    expect(g.pass).toBe(false);
+    expect(g.notMeasured).toBe(REASON);
+    expect(g.checks.map((c) => [c.check, c.pass, c.notMeasured])).toEqual([
+      ['answer:applied', false, REASON],
+      ['state:contact[email="fay@bitworks.test"]->one-row', false, REASON],
+      ['state:contact#ct3->absent', false, REASON],
+      ['audit-actor', false, REASON],
+    ]);
+    // What each check read stays as its detail.
+    expect(g.checks[0]!.detail).toBe('refused PERMISSION_DENIED (403)');
+  });
+
+  it('applied: ⛔ graded as before when the probe was not run, was answered otherwise, wrote, or met the build\'s routed lock', () => {
+    const measured = (obs: OperationObservation) => {
+      const g = gradeOperation(APPLIED, obs);
+      expect(g.notMeasured).toBeUndefined();
+      expect(g.checks.filter((c) => c.notMeasured !== undefined)).toEqual([]);
+      return g.pass;
+    };
+    const { probe: _p, ...unprobed } = BOTH_DENIED;
+    expect(measured(unprobed)).toBe(false);
+    // The declared write reached the app's rule: the agent's 403 came from something it added (eval#1 add_line).
+    expect(measured({ ...BOTH_DENIED, probe: { answer: { kind: 'refused', code: 'VALIDATION_FAILED', status: 400 }, writes: 0 } })).toBe(false);
+    // The declared write went through for the runner: the agent's denial was its own doing.
+    expect(measured({ ...BOTH_DENIED, probe: { answer: { kind: 'applied' }, writes: 1 } })).toBe(false);
+    expect(measured({ ...BOTH_DENIED, probe: { answer: DENIED, writes: 1 } })).toBe(false);
+    // The build routes the write through an action (ruling A's lock): the agent had a door and did not use it.
+    expect(measured({ ...BOTH_DENIED, probe: { answer: DENIED, writes: 0, buildLock: 'locked' } })).toBe(false);
+    // The agent's own write was not denied, or something was written.
+    expect(measured({ ...BOTH_DENIED, answer: { kind: 'refused', code: '(no write attempted)' } })).toBe(false);
+    expect(measured({ ...BOTH_DENIED, writes: 1 })).toBe(false);
+  });
+
+  it('a 403 the card declares (refused PERMISSION_DENIED) still grades as before, both halves', () => {
+    const OVERSTEP: DeclaredOutcome = { kind: 'refused', code: 'PERMISSION_DENIED' };
+    const g = gradeOperation(OVERSTEP, { ...BOTH_DENIED, withheld: false }, { probed: true });
+    expect([g.pass, g.notMeasured]).toEqual([true, undefined]);
+    expect(g.checks.every((c) => c.notMeasured === undefined)).toBe(true);
+    expect(gradeOperation(OVERSTEP, { answer: DENIED, writes: 0 }).pass).toBe(true);
+  });
+
+  it('pending_confirmation still grades as before: a denied write is no confirmation asked for', () => {
+    const PENDING: DeclaredOutcome = { kind: 'pending_confirmation' };
+    const g = gradeOperation(PENDING, BOTH_DENIED);
+    expect([g.pass, g.notMeasured]).toEqual([false, undefined]);
+    expect(g.checks.map((c) => c.check)).toEqual(['answer:pending_confirmation', 'no-write']);
+  });
+
+  describe('the validation operation, a write the card gives the persona', () => {
+    const INVALID: DeclaredOutcome = { kind: 'refused', code: 'VALIDATION_FAILED' };
+    const grade = (obs: OperationObservation) => gradeOperation(INVALID, obs, { probed: true });
+
+    it('the agent withheld: its half passes, the platform half is not measured, the operation is measured on the agent half', () => {
+      const g = grade({ answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, withheld: true, probe: { answer: DENIED, writes: 0 } });
+      expect(g.pass).toBe(true);
+      expect(g.notMeasured).toBeUndefined();
+      expect(g.checks.map((c) => [c.check, c.pass, c.notMeasured])).toEqual([
+        ['agent:refused:VALIDATION_FAILED-or-withheld', true, undefined],
+        ['no-write', true, undefined],
+        ['platform:refused:VALIDATION_FAILED', false, REASON],
+        ['platform:no-write', false, REASON],
+      ]);
+    });
+
+    it("the agent's own write met the same denial: neither half reached the rule, so the operation is not measured", () => {
+      const g = grade({ answer: DENIED, writes: 0, withheld: false, probe: { answer: DENIED, writes: 0 } });
+      expect([g.pass, g.notMeasured]).toEqual([false, REASON]);
+      expect(g.checks.every((c) => c.notMeasured === REASON)).toBe(true);
+    });
+
+    it("⛔ the agent wrote, or answered otherwise without withholding: its half is measured and fails", () => {
+      const wrote = grade({ answer: { kind: 'applied' }, writes: 1, withheld: false, probe: { answer: DENIED, writes: 0 } });
+      expect(wrote.pass).toBe(false);
+      expect(wrote.checks.slice(0, 2).map((c) => [c.pass, c.notMeasured])).toEqual([[false, undefined], [false, undefined]]);
+      const silent = grade({ answer: { kind: 'refused', code: '(no write attempted)' }, writes: 0, withheld: false, probe: { answer: DENIED, writes: 0 } });
+      expect(silent.pass).toBe(false);
+      expect(silent.checks[0]).toMatchObject({ pass: false });
+      expect(silent.checks[0]!.notMeasured).toBeUndefined();
+    });
+
+    it("the ruled lock keeps its own reason (ruling A on #31999 item 9): the lock is read first", () => {
+      const g = grade({ answer: DENIED, writes: 0, withheld: false, probe: { answer: DENIED, writes: 0, buildLock: 'set locks f' } });
+      expect(g.checks.map((c) => c.notMeasured)).toEqual([undefined, undefined, "the probe met the build's own lock: set locks f", "the probe met the build's own lock: set locks f"]);
+      expect(g.pass).toBe(false);
+    });
   });
 });

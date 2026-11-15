@@ -4,7 +4,9 @@
  * [#33302] The install door (`POST /packages`) and the enable door
  * (`PATCH /packages/:id/enable`) announce `metadata:reloaded` once they have
  * put a package into service, in the spelling the marketplace install-local
- * door announces a hot install with: `{ changed: ['app/ID'] }`.
+ * door announces a hot install with: `{ changed: ['app/ID'] }`. [#33527] The
+ * disable door and `DELETE /packages/:id` announce the withdrawal in the same
+ * spelling (the last describe below).
  *
  * ## The defect, measured on `origin/main` before the change
  *
@@ -91,10 +93,14 @@ const holder = (id: string, user: string, position: string, organization: string
     id, user_id: user, position, organization_id: organization,
 });
 
-/** Every announcement the kernel heard, with whether the registry held what it names at that moment. */
+/**
+ * Every announcement the kernel heard, with whether the registry held what it
+ * names at that moment and, for what it held, whether that package was disabled.
+ */
 interface Heard {
     readonly changed: unknown;
     readonly held: Record<string, boolean>;
+    readonly off: Record<string, boolean>;
 }
 
 const envSnapshot = { OS_HOME: process.env.OS_HOME };
@@ -134,12 +140,15 @@ beforeAll(async () => {
                 const changed = (payload as { changed?: unknown } | undefined)?.changed;
                 const registry = ctx.getService<ObjectQL>('objectql').registry;
                 const held: Record<string, boolean> = {};
+                const off: Record<string, boolean> = {};
                 if (Array.isArray(changed)) {
                     for (const entry of changed) {
-                        if (typeof entry === 'string' && entry.startsWith('app/')) held[entry] = registry.getPackage(entry.slice(4)) != null;
+                        if (typeof entry !== 'string' || !entry.startsWith('app/')) continue;
+                        held[entry] = registry.getPackage(entry.slice(4)) != null;
+                        if (held[entry]) off[entry] = registry.isPackageDisabled(entry.slice(4));
                     }
                 }
-                heard.push({ changed, held });
+                heard.push({ changed, held, off });
             });
         },
     } as Plugin);
@@ -190,7 +199,7 @@ describe('[#33302] the enable door announces a package it puts back into service
         expect(await positionsOf(['e1', 'e2'])).toEqual({ e1: 'crm_sales_rep', e2: 'crm_auditor' });
         // ⭐ The announcement, in the install-local door's spelling, with the
         // package already registered (and enabled) when the subscribers hear it.
-        expect(during).toEqual([{ changed: [`app/${CRM}`], held: { [`app/${CRM}`]: true } }]);
+        expect(during).toEqual([{ changed: [`app/${CRM}`], held: { [`app/${CRM}`]: true }, off: { [`app/${CRM}`]: false } }]);
     }, 60_000);
 
     it('an enable of a package that is already enabled changes nothing served, and announces nothing', async () => {
@@ -208,7 +217,7 @@ describe('[#33302] the install door announces the package it installs', () => {
             dispatcher.handlePackages('', 'POST', { manifest: freshManifest }, {}, PKG_ADMIN()));
 
         expect(result.response?.status).toBe(201);
-        expect(during).toEqual([{ changed: [`app/${FRESH}`], held: { [`app/${FRESH}`]: true } }]);
+        expect(during).toEqual([{ changed: [`app/${FRESH}`], held: { [`app/${FRESH}`]: true }, off: { [`app/${FRESH}`]: false } }]);
     }, 60_000);
 
     it('an overwrite install with `enableOnInstall: true` of a disabled package renaming a position: its holder holds the new name at once', async () => {
@@ -226,7 +235,7 @@ describe('[#33302] the install door announces the package it installs', () => {
         expect(result.response?.status).toBe(201);
         expect(result.response?.body?.data?.enabled).toBe(true);
         expect(await positionsOf(['i1'])).toEqual({ i1: 'authored_sales_rep' });
-        expect(during).toEqual([{ changed: [`app/${AUTHORED}`], held: { [`app/${AUTHORED}`]: true } }]);
+        expect(during).toEqual([{ changed: [`app/${AUTHORED}`], held: { [`app/${AUTHORED}`]: true }, off: { [`app/${AUTHORED}`]: false } }]);
     }, 60_000);
 });
 
@@ -247,5 +256,82 @@ describe('[#33302] a failed announce never fails the door', () => {
             trigger.mockRestore();
             warn.mockRestore();
         }
+    }, 60_000);
+});
+
+/**
+ * [#33527] The two doors that take a package OUT of service announce the
+ * withdrawal in the same spelling, so a subscriber that bound the package's
+ * items re-reads a registry that serves them no more. Measured before, on a
+ * kernel carrying the real automation engine and record-change trigger: a
+ * disabled package's record-triggered flow stayed bound and ran on every
+ * matching write until a restart, and an uninstalled one ran on the first
+ * write after the door answered (its withdrawal rode only on the asynchronous
+ * mutation sync of its deleted rows).
+ */
+describe('[#33527] the disable and uninstall doors announce the package they withdraw', () => {
+    const install = async (id: string) => {
+        const created = await dispatcher.handlePackages('', 'POST', { manifest: { id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() } }, {}, PKG_ADMIN());
+        expect(created.response?.status).toBe(201);
+    };
+
+    it('a disable of an enabled package announces `app/ID` once, after the registry switched it off', async () => {
+        const id = 'com.acme.withdrawdisable';
+        await install(id);
+        const { result, heard: during } = await heardDuring(() =>
+            dispatcher.handlePackages(`/${id}/disable`, 'PATCH', {}, {}, PKG_ADMIN()));
+
+        expect(result.response?.status).toBe(200);
+        // The subscribers hear it with the package still installed, and disabled.
+        expect(during).toEqual([{ changed: [`app/${id}`], held: { [`app/${id}`]: true }, off: { [`app/${id}`]: true } }]);
+    }, 60_000);
+
+    it('a disable of a package already disabled changes nothing served, and announces nothing', async () => {
+        const id = 'com.acme.withdrawdisable';
+        expect(registry().isPackageDisabled(id)).toBe(true);
+        const { result, heard: during } = await heardDuring(() =>
+            dispatcher.handlePackages(`/${id}/disable`, 'PATCH', {}, {}, PKG_ADMIN()));
+        expect(result.response?.status).toBe(200);
+        expect(during).toEqual([]);
+    }, 60_000);
+
+    it('an uninstall announces `app/ID` once, after the registry withdrew the package', async () => {
+        const id = 'com.acme.withdrawdelete';
+        await install(id);
+        const { result, heard: during } = await heardDuring(() =>
+            dispatcher.handlePackages(`/${id}`, 'DELETE', undefined, {}, PKG_ADMIN()));
+
+        expect(result.response?.status).toBe(200);
+        expect(during).toEqual([{ changed: [`app/${id}`], held: { [`app/${id}`]: false }, off: {} }]);
+    }, 60_000);
+
+    it('an uninstall of a package the registry does not hold withdraws nothing, and announces nothing', async () => {
+        const { result, heard: during } = await heardDuring(() =>
+            dispatcher.handlePackages('/com.acme.withdrawnever', 'DELETE', undefined, {}, PKG_ADMIN()));
+        expect(result.response?.status).toBe(404);
+        expect(during).toEqual([]);
+    }, 60_000);
+
+    it('a subscriber that throws: the disable and the uninstall still answer 200, and each failure is said once at warn', async () => {
+        for (const [id, door] of [['com.acme.withdrawthrowsoff', 'disable'], ['com.acme.withdrawthrowsdel', 'delete']] as const) {
+            await install(id);
+            const trigger = vi.spyOn((kernel as any).context, 'trigger').mockRejectedValueOnce(new Error('subscriber exploded'));
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+            try {
+                const result = door === 'disable'
+                    ? await dispatcher.handlePackages(`/${id}/disable`, 'PATCH', {}, {}, PKG_ADMIN())
+                    : await dispatcher.handlePackages(`/${id}`, 'DELETE', undefined, {}, PKG_ADMIN());
+                expect(result.response?.status, door).toBe(200);
+                expect(trigger, door).toHaveBeenCalledWith('metadata:reloaded', { changed: [`app/${id}`] });
+                const said = warn.mock.calls.map(([m]) => String(m)).filter((m) => m.includes('metadata:reloaded'));
+                expect(said, door).toHaveLength(1);
+                expect(said[0], door).toContain(`'${id}'`);
+            } finally {
+                trigger.mockRestore();
+                warn.mockRestore();
+            }
+        }
+        expect(registry().isPackageDisabled('com.acme.withdrawthrowsoff')).toBe(true);
+        expect(registry().getPackage('com.acme.withdrawthrowsdel')).toBeUndefined();
     }, 60_000);
 });

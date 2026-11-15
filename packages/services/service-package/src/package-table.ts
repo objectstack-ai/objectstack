@@ -248,6 +248,22 @@ export function packageWriteStamp(at: Date): string {
   return at.toISOString().slice(0, 23).replace('T', ' ');
 }
 
+/**
+ * A stored `created_at` / `updated_at` read back as the ISO-8601 instant the
+ * registry record carries (`InstalledPackageSchema`'s `installedAt` /
+ * `updatedAt`): the inverse of {@link packageRowStamp} and
+ * {@link packageWriteStamp}, both of which write UTC. `undefined` for a value
+ * that is not one of those two forms, so a row without a readable stamp keeps
+ * the stamp the registry gave it.
+ */
+export function packageStampToIso(stored: unknown): string | undefined {
+  if (typeof stored !== 'string') return undefined;
+  const parts = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)Z?$/.exec(stored.trim());
+  if (!parts) return undefined;
+  const at = new Date(`${parts[1]}T${parts[2]}Z`);
+  return Number.isNaN(at.getTime()) ? undefined : at.toISOString();
+}
+
 /** The last instant {@link nextPackageWriteInstant} handed out in this process, in epoch milliseconds. */
 let lastPackageWriteMs = Number.NEGATIVE_INFINITY;
 

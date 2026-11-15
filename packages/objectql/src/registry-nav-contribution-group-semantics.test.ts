@@ -493,3 +493,123 @@ describe('#14454 item 2 — `navigationContributions[].group` semantics across a
     expect(second.navigation).toEqual(first.navigation);
   });
 });
+
+/**
+ * A contributed entry's `order` is how a module places it among the target
+ * app's own entries, and the fold is what has to leave it alone.
+ *
+ * The console sorts each level of the served tree by `order` after the fold
+ * (`byNavOrder` in `ui/packages/layout/src/navOrder.ts`, pinned by that
+ * package's own tests), so a contributed `order: 25` is drawn between the
+ * host's `20` and `30`. That holds only while `applyNavContributions` hands the
+ * item on as authored: it appends, it does not sort the level, and it neither
+ * writes, rewrites nor drops `order`. These cases pin that half, in a group and
+ * at the top level. They do not re-test the console's comparator.
+ */
+describe('navigationContributions — the fold keeps a contributed entry\'s `order` as authored', () => {
+  type OrderedItem = NavItem & { order?: number };
+
+  /** A host that numbers its own entries, the precondition for interleaving. */
+  const numberedHost = () => ({
+    id: 'com.acme.crm',
+    name: 'acme_crm',
+    version: '1.0.0',
+    type: 'app',
+    namespace: 'crm',
+    objects: [
+      { name: 'crm_account', label: 'Account', fields: { name: { name: 'name', label: 'Name', type: 'text' } } },
+    ],
+    apps: [{
+      name: 'crm_app',
+      label: 'CRM',
+      navigation: [
+        { id: 'nav_home', type: 'object', objectName: 'crm_account', label: 'Home', order: 10 },
+        {
+          id: 'sales_group',
+          type: 'group',
+          label: 'Sales',
+          order: 20,
+          children: [
+            { id: 'nav_accounts', type: 'object', objectName: 'crm_account', label: 'Accounts', order: 10 },
+            { id: 'nav_contacts', type: 'object', objectName: 'crm_account', label: 'Contacts', order: 30 },
+          ],
+        },
+        { id: 'nav_reports', type: 'object', objectName: 'crm_account', label: 'Reports', order: 30 },
+      ],
+    }],
+  });
+
+  /** A module contributing one item, with or without its own `order`. */
+  const orderedContributor = (short: string, group: string | undefined, order: number | undefined) => ({
+    id: `com.acme.crm.${short}`,
+    name: `acme_crm_${short}`,
+    version: '1.0.0',
+    type: 'module',
+    namespace: 'crm',
+    objects: [
+      { name: `crm_${short}`, label: short, fields: { note: { name: 'note', label: 'Note', type: 'text' } } },
+    ],
+    navigationContributions: [{
+      app: 'crm_app',
+      ...(group === undefined ? {} : { group }),
+      items: [{
+        id: `nav_${short}`, type: 'object', objectName: `crm_${short}`, label: short,
+        ...(order === undefined ? {} : { order }),
+      }],
+    }],
+  });
+
+  const foldedNav = async (...contributors: unknown[]): Promise<OrderedItem[]> => {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.bootstrap();
+    kernels.push(kernel);
+    await (kernel.getService('manifest') as ManifestService).register(artifactOf(numberedHost(), ...contributors));
+    const app = engineOf(kernel).registry.getApp('crm_app') as { navigation?: OrderedItem[] };
+    return app.navigation ?? [];
+  };
+
+  /** `[id, order]` pairs in the fold's own sequence, so position and value are read together. */
+  const placed = (items: OrderedItem[] | undefined) =>
+    (items ?? []).map((i) => [i.id, i.order] as const);
+
+  it('in a group: the item lands after the group\'s own children with its `order` untouched', async () => {
+    const nav = await foldedNav(orderedContributor('cpq', 'sales_group', 20));
+
+    // Appended, not sorted in: 20 sits after 30. The console's sort is what
+    // draws it between `nav_accounts` (10) and `nav_contacts` (30).
+    expect(placed(groupOf(nav, 'sales_group')?.children)).toEqual([
+      ['nav_accounts', 10],
+      ['nav_contacts', 30],
+      ['nav_cpq', 20],
+    ]);
+  });
+
+  it('at the top level: the item lands after the app\'s own entries with its `order` untouched', async () => {
+    const nav = await foldedNav(orderedContributor('forecast', undefined, 25));
+
+    expect(placed(nav)).toEqual([
+      ['nav_home', 10],
+      ['sales_group', 20],
+      ['nav_reports', 30],
+      ['nav_forecast', 25],
+    ]);
+  });
+
+  it('an item with no `order` gets none from the fold, in a group or at the top level', async () => {
+    // The console reads a missing `order` as 0. If the fold wrote a number in,
+    // the item would move; if it wrote 0, a host that numbers nothing would be
+    // indistinguishable from one that does. Absent stays absent.
+    const nav = await foldedNav(
+      orderedContributor('cpq', 'sales_group', undefined),
+      orderedContributor('forecast', undefined, undefined),
+    );
+
+    const cpq = groupOf(nav, 'sales_group')?.children?.find((i) => i.id === 'nav_cpq');
+    const forecast = nav.find((i) => i.id === 'nav_forecast');
+    expect(cpq).toBeDefined();
+    expect(forecast).toBeDefined();
+    expect(Object.prototype.hasOwnProperty.call(cpq, 'order')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(forecast, 'order')).toBe(false);
+  });
+});
