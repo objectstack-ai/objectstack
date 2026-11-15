@@ -86,13 +86,22 @@
  *     halves are wanted: data drifts after a write, so the read-time screen
  *     stays the last line, and the write-time refusal is the only one an
  *     operator can act on at the moment they made the mistake.
- *  5. **Directory-owned identity** — refused when the target is
- *     `source: 'idp_provisioned'`. The ruling picked "directory wins, per
- *     identity", keyed on the `sys_user.source` column the platform already
- *     stamps and already uses to hide three self-service identity actions.
- *     The rejected alternative was last-writer-wins, which stores a value the
- *     next sync silently reverts — a write that reports success and does not
- *     persist, which is exactly what ADR-0049 exists to refuse.
+ *  5. **Directory-owned identity** — refused when a SCIM directory holds the
+ *     target: it reads `source: 'idp_provisioned'` AND owns a
+ *     `sys_scim_subject` row ({@link isHeldByScimDirectory}, the one
+ *     definition `scim-sso-adoption.ts` also judges adoption by). The ruling
+ *     picked "directory wins, per identity"; the rejected alternative was
+ *     last-writer-wins, which stores a value the next sync silently reverts —
+ *     a write that reports success and does not persist, which is exactly
+ *     what ADR-0049 exists to refuse. ⛔ The `source` mark ALONE is not a
+ *     directory: ADR-0135 D4 stamps `idp_provisioned` on every federated link
+ *     without a local password, so a person who only signs in through SSO
+ *     (the platform's own, or a social or enterprise OIDC provider) carries it
+ *     with no directory behind them, and their manager is set here like any
+ *     other user's (maintainer ruling record 6895645364, option A: "directory
+ *     wins" applies where a directory actually exists). The `source` term stays
+ *     a conjunct, so a SCIM-provisioned user holding a local password — which
+ *     D4 leaves `env_native` — keeps the answer it had.
  *
  * ## Why these `error.code` values and not dedicated ones
  *
@@ -114,7 +123,7 @@
  *   | cycle                     | RESOURCE_CONFLICT   | 409    | cycle                 |
  *   | depth cap                 | VALUE_OUT_OF_RANGE  | 400    | max_depth_exceeded    |
  *   | cross-organization        | INVALID_REFERENCE   | 400    | cross_organization    |
- *   | directory-owned identity  | PERMISSION_DENIED   | 403    | idp_provisioned       |
+ *   | SCIM-held identity        | PERMISSION_DENIED   | 403    | idp_provisioned       |
  *
  * Authorization is the caller's, not this module's: the mount runs the
  * ADR-0068 platform-admin gate (`judgePlatformAdmin`) and hands the actor in
@@ -128,6 +137,8 @@
 import { authSystemWriteContext } from './auth-actor-attribution.js';
 import type { AdminActor, EndpointResult } from './admin-user-endpoints.js';
 import { readJsonRequestBody } from './request-json-body.js';
+import { isHeldByScimDirectory } from './scim-sso-adoption.js';
+import { isMissingTableError } from '@objectstack/types';
 
 /**
  * Hard cap on the reporting chain this endpoint will create, counted in links
@@ -261,6 +272,23 @@ async function findUser(
   });
   const row = Array.isArray(rows) ? (rows[0] as UserRow | undefined) : undefined;
   return row && row.id ? row : null;
+}
+
+/**
+ * Is `userId` held by a SCIM directory? {@link isHeldByScimDirectory} answers,
+ * imported — ⛔ never a second copy of the predicate. A missing
+ * `sys_scim_subject` table means no SCIM directory has ever provisioned
+ * anyone here, so it answers "not held"; any other read failure propagates,
+ * and the mount answers it as a 500 that writes nothing — a directory that
+ * could not be asked is never read as absent.
+ */
+async function heldByScimDirectory(engine: SetUserManagerEngine, userId: string): Promise<boolean> {
+  try {
+    return await isHeldByScimDirectory(engine, userId);
+  } catch (e) {
+    if (isMissingTableError(e, 'sys_scim_subject')) return false;
+    throw e;
+  }
 }
 
 /**
@@ -509,16 +537,17 @@ export async function applyUserManagerLink(
     return deny(404, 'RESOURCE_NOT_FOUND', 'user_not_found', 'User not found');
   }
 
-  // Refusal 5 — the directory owns this identity. Applied to the CLEAR as
-  // well as the set: both are writes the next sync would overwrite.
-  if (String(user.source ?? '') === 'idp_provisioned') {
+  // Refusal 5 — a SCIM directory owns this identity. Applied to the CLEAR as
+  // well as the set: both are writes that directory owns. The `source` mark
+  // is read first and alone is NOT enough (see refusal 5 above): an identity
+  // that only signs in through SSO carries it too, with no directory behind it.
+  if (String(user.source ?? '') === 'idp_provisioned' && await heldByScimDirectory(engine, userId)) {
     return deny(
       403,
       'PERMISSION_DENIED',
       'idp_provisioned',
-      "This identity is provisioned by an external directory (sys_user.source is 'idp_provisioned'), "
-        + 'so its manager is maintained by that directory and a value written here would be '
-        + 'reverted on the next sync. Set the manager in the directory instead.',
+      'This identity is provisioned by a SCIM directory, so that directory owns its manager. '
+        + 'Change the manager in your directory instead.',
     );
   }
 

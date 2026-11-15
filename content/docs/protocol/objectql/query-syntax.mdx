@@ -90,7 +90,6 @@ on the `find()` path:
 
 | Member | Status |
 |:-------|:-------|
-| `aggregations[].filter` | `[EXPERIMENTAL — not enforced]` — a SQL `FILTER (WHERE …)` affordance neither the SQL builders nor the in-memory fallback applies |
 | `search.fuzzy` / `boost` / `operator` / `minScore` / `language` / `highlight` | `[EXPERIMENTAL — not enforced]` — only `query` and `fields` drive the expansion |
 
 `top` is the exception that *is* honored — the engine normalises it to `limit`.

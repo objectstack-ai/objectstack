@@ -1567,7 +1567,19 @@ export class ProtocolPackageCommitsFacet {
                     // `object` serves no field afterwards, so it changes none.
                     const removedCapture = captureStoredExpressionChange(host.engine, PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name);
                     if (removedCapture && !storedExpressions.has(removedCapture.object)) storedExpressions.set(removedCapture.object, removedCapture);
-                    await host.restoreArtifactRegistryView(it.type, it.name, null, commitPackageId, member);
+                    // [#33851] The heal's stop is this item's outcome too, the way
+                    // the restore limb reports the write-through's refusal: the
+                    // row is removed and the registry may still serve it. Only
+                    // where a row was removed; with none, the heal is a
+                    // self-heal of nothing this revert wrote, and stays logged.
+                    const healStop = await host.restoreArtifactRegistryView(it.type, it.name, null, commitPackageId, member);
+                    if (healStop && current) {
+                        notApplied.push(
+                            'the runtime registry was not healed after the removal, so it may still serve the removed row ('
+                            + `${clientFacingFailureText(healStop.error, 'the reason is in the server log')})`,
+                        );
+                        notAppliedCode = clientFacingFailureCode(healStop.error);
+                    }
                     // [#14179] …and announce it on the ONE choke point,
                     // {@link emitMetadataMutation}, exactly as the sibling
                     // delete caller {@link deleteMetaItem} does after its own
@@ -1744,6 +1756,10 @@ export class ProtocolPackageCommitsFacet {
                     // [#33563] The registry's refusal of the restored object is
                     // this item's outcome, not a line on stderr: the row holds
                     // the pre-commit body and the registry does not serve it.
+                    // [#33851] …and so is a fault of any other type's branch
+                    // (the overlay hydration, the `object_extension`
+                    // registration), which the write-through answers only to a
+                    // caller that asks (`answerFaults`).
                     const registryRefusal = await host.applyRegistryWriteThrough({
                         type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                         name: it.name,
@@ -1757,6 +1773,7 @@ export class ProtocolPackageCommitsFacet {
                         // said "the row's OWN scope" while passing the REQUEST's
                         // org; the resolution above is what makes the comment true.
                         organizationId: null,
+                        answerFaults: true,
                     });
                     if (registryRefusal) {
                         notApplied.push(

@@ -242,11 +242,12 @@ describe('provisioning — a failure after sign-up says the account exists', () 
  * the cross-organization screen stays out of these cases, as it does for any
  * identity without one.
  */
-function managerEngine(users: Array<Record<string, unknown>>) {
+function managerEngine(users: Array<Record<string, unknown>>, scimSubjects: Array<Record<string, unknown>> = []) {
   const updates: Array<Record<string, unknown>> = [];
   const engine: DemoStaffEngine = {
     async find(object, query) {
-      const matched = object === 'sys_user' ? selectRows(users, (query.where ?? {}) as Record<string, unknown>) : [];
+      const rows = object === 'sys_user' ? users : object === 'sys_scim_subject' ? scimSubjects : null;
+      const matched = rows ? selectRows(rows, (query.where ?? {}) as Record<string, unknown>) : [];
       return typeof query.limit === 'number' ? matched.slice(0, query.limit) : matched;
     },
     async update(object, data, options) {
@@ -392,13 +393,13 @@ describe('provisioning — each declared manager is linked once every entry has 
   });
 
   it('a link the set-manager write refuses is reported with its code and reason', async () => {
-    // A directory-owned identity: the set-manager write's refusal 5. The
-    // provisioning carries no copy of that rule; this is the shared one.
+    // An identity a SCIM directory holds: the set-manager write's refusal 5.
+    // The provisioning carries no copy of that rule; this is the shared one.
     const users: Array<Record<string, unknown>> = [
       { id: 'u_c1', email: 'counsel1@legal.example', manager_id: null, source: 'idp_provisioned' },
       { id: 'u_lead', email: 'lead@legal.example', manager_id: null },
     ];
-    const { engine, updates, signUp } = managerEngine(users);
+    const { engine, updates, signUp } = managerEngine(users, [{ id: 'sub_1', user_id: 'u_c1' }]);
 
     const outcome = await provisionDemoStaff(STAFF, deps(engine, signUp));
 
