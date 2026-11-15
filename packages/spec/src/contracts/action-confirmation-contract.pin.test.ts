@@ -46,9 +46,16 @@ import {
   ErrorCode,
   standardSynonymOf,
 } from '../api/error-code-ledger.zod';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import {
+  ACTION_CONFIRMATION_REFUSAL_REASONS,
+  AI_ACTION_CONFIRMATION_CAPABILITY,
   AI_ACTION_CONFIRMATION_MEMBER,
   type AIActionConfirmation,
+  type ActionConfirmationRefusalReason,
   type ActionConfirmationRequiredDetails,
 } from './ai-service';
 
@@ -135,5 +142,98 @@ describe('action-confirmation contract — an unconfirmed gated action is refuse
       confirm: 'true',
     });
     expect(String(stringy.confirm)).toBe('true');
+  });
+});
+
+/**
+ * The amended contract: a person confirms a declared-gated action through MCP
+ * elicitation, and the caller's own `confirm` never counts (ruling
+ * 「3826 照建议（征询版）」, objectstack-ai/cloud#3826 item 6).
+ *
+ * Pinned here: the capability's spelling, the CLOSED refusal-reason set, that
+ * `details.reason` is typed to it and stays optional while the member gates
+ * still answer without it, that the amendment adds no second refusal code,
+ * and that the contract's own text names every reason and every elicitation
+ * answer, so the tuple and the prose cannot drift apart. NOT pinned: any door
+ * behaviour, which the implementing change lands and pins.
+ */
+describe('action-confirmation contract, as amended: a person confirms through elicitation', () => {
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const CONTRACT_SOURCE = join(HERE, 'ai-service.ts');
+
+  /** The capability constant's docblock, comment gutters folded into spaces. */
+  function capabilityProse(): string {
+    const source = readFileSync(CONTRACT_SOURCE, 'utf8');
+    const at = source.indexOf('export const AI_ACTION_CONFIRMATION_CAPABILITY');
+    expect(at, '`AI_ACTION_CONFIRMATION_CAPABILITY` moved — re-anchor this pin').toBeGreaterThan(-1);
+    const open = source.lastIndexOf('/**', at);
+    return source.slice(open, at).replace(/\n\s*\*\s?/g, ' ').replace(/\s+/g, ' ');
+  }
+
+  it('the capability is MCP\'s own spelling, one exported constant', () => {
+    expect(AI_ACTION_CONFIRMATION_CAPABILITY).toBe('elicitation');
+    // Control: it is not the member; the two travel on different channels.
+    expect(AI_ACTION_CONFIRMATION_CAPABILITY).not.toBe(AI_ACTION_CONFIRMATION_MEMBER);
+  });
+
+  it('the refusal reasons are a CLOSED set of exactly five', () => {
+    expect([...ACTION_CONFIRMATION_REFUSAL_REASONS]).toEqual([
+      'elicitation_unsupported',
+      'declined',
+      'cancelled',
+      'timed_out',
+      'service_account',
+    ]);
+    // Control: an accepted elicitation is not a refusal, so it is no reason.
+    expect((ACTION_CONFIRMATION_REFUSAL_REASONS as readonly string[]).includes('accepted')).toBe(false);
+  });
+
+  it('`details.reason` is typed to the closed set, and optional', () => {
+    const declined = asDetails({
+      actionName: 'archive_account',
+      objectName: 'account',
+      confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+      reason: 'declined',
+    });
+    expect(declined.reason).toBe('declined');
+    // Optional: a member gate (the MCP delete tools, a door before the
+    // implementing change) still answers without it.
+    const memberGate = asDetails({ actionName: 'delete_record', confirmationMember: AI_ACTION_CONFIRMATION_MEMBER });
+    expect(memberGate.reason).toBeUndefined();
+
+    const nearMiss = asDetails({
+      actionName: 'archive_account',
+      confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+      // @ts-expect-error — not a reason the contract names; the set is closed.
+      reason: 'denied',
+    });
+    expect(String(nearMiss.reason)).toBe('denied');
+    const reason: ActionConfirmationRefusalReason = 'timed_out';
+    expect(ACTION_CONFIRMATION_REFUSAL_REASONS).toContain(reason);
+  });
+
+  it('the amendment keeps ONE refusal code: no second code is registered for it', () => {
+    const all = Object.values(ERROR_CODE_LEDGER).flat() as string[];
+    expect(all).toContain(CODE);
+    // Every reason rides `details.reason` under the one registered code.
+    expect(all.filter((code) => /ELICIT|CONFIRMATION_(DECLINED|CANCELLED|TIMED_OUT|UNSUPPORTED)/.test(code))).toEqual([]);
+  });
+
+  it('the contract text names every reason and every elicitation answer', () => {
+    const prose = capabilityProse();
+    expect(prose.length, 'the capability docblock read empty').toBeGreaterThan(3000);
+    for (const reason of ACTION_CONFIRMATION_REFUSAL_REASONS) {
+      expect(prose, `the contract no longer states the \`${reason}\` case`).toContain(`\`${reason}\``);
+    }
+    for (const answer of ['`accept`', '`decline`', '`cancel`', 'Timed out']) {
+      expect(prose, `the contract no longer says what ${answer} does`).toContain(answer);
+    }
+    expect(prose, 'the contract dropped "the caller\'s `confirm` never counts"').toMatch(/The caller's `confirm` never counts/);
+    expect(prose, 'the contract dropped the unchanged AI service account rule').toMatch(
+      /An AI service account: unchanged\*\* \(ADR-0151 D3 rule 3\)/,
+    );
+    expect(prose, 'the refusal for a client without elicitation no longer names the remedy').toMatch(
+      /use a client that supports confirmation, or to perform the action in the app/,
+    );
   });
 });

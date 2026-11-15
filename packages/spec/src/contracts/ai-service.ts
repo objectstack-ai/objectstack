@@ -238,6 +238,14 @@ export interface AIToolDefinition {
  *   — there is no header there for it to ride on. A free-form header would
  *   also be an OPEN channel, which is the one thing a safety member must not
  *   be.
+ *
+ * ## Amended: on a declared-gated action the member no longer confirms
+ *
+ * The confirmation of an action declaring `ai.requiresConfirmation: true` is
+ * now a person's answer to an MCP elicitation the server sends, and the
+ * member never counts on such a call (see
+ * {@link AI_ACTION_CONFIRMATION_CAPABILITY}, which also says when the doors
+ * switch). The MCP `delete_record` and `delete_records` gates still read it.
  */
 export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
 
@@ -245,6 +253,18 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  * The confirmation half of an AI-facing action request — a CLOSED boolean
  * member, declared once here and mixed into each door's own request shape
  * rather than restated by it.
+ *
+ * ## Amended: the member contract is the FROM half
+ *
+ * For an action declaring `ai.requiresConfirmation: true`, the contract is
+ * now confirmation by elicitation ({@link AI_ACTION_CONFIRMATION_CAPABILITY}):
+ * the server asks the person through the client, and the caller's own
+ * `confirm` never counts. What follows describes the member contract the
+ * doors enforce until the change that implements the amendment; the
+ * predicate section (the DECLARED flag, never the listing heuristic) and the
+ * AI service account rule carry over unchanged. The MCP `delete_record` and
+ * `delete_records` gates are outside the amendment and keep reading the
+ * member as described below.
  *
  * ## What the member means
  *
@@ -374,9 +394,151 @@ export interface ActionConfirmationRequiredDetails {
      * the refusal instead of restating it. An AI service account's refusal
      * carries it too, but no retry of that account's succeeds: a person runs
      * the action (ADR-0151 D3 rule 3).
+     *
+     * Under the elicitation contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY})
+     * no retry with the member runs a declared-gated action: the member
+     * confers nothing there, and `reason` says what the caller can do.
      */
     confirmationMember: typeof AI_ACTION_CONFIRMATION_MEMBER;
+    /**
+     * Which case of the elicitation contract refused the call; see
+     * {@link ActionConfirmationRefusalReason}. Every door implementing that
+     * contract sets it on a declared-gated refusal. A refusal without it comes
+     * from a member gate: a door before the implementing change, or the MCP
+     * `delete_record` / `delete_records` gate.
+     */
+    reason?: ActionConfirmationRefusalReason;
 }
+
+// ---------------------------------------------------------------------------
+// Action Confirmation by Elicitation — the amended contract
+// ---------------------------------------------------------------------------
+
+/**
+ * The MCP client capability a person's confirmation travels through:
+ * `elicitation`, which an MCP client advertises in the `capabilities` of its
+ * `initialize` request.
+ *
+ * ONE exported constant for the same reason {@link AI_ACTION_CONFIRMATION_MEMBER}
+ * is one: the door that reads the capability, the refusal that names it and
+ * the client that must advertise it have to agree on its spelling.
+ *
+ * ## Why the contract was amended
+ *
+ * Under the member contract ({@link AIActionConfirmation}) the confirmation of
+ * a declared-gated action is the caller's own `confirm: true`, an
+ * unverifiable claim: the gate made FORGETTING loud and did not prove a
+ * person. Measured on published 18.4.0, an agent sent `confirm: true` itself
+ * on an irreversible action in 2 of 6 runs, reading the person's instruction
+ * as consent. The account owner ruled the fix (「3826 照建议（征询版）」, on
+ * objectstack-ai/cloud#3826, phase 1, card 1 of its item-6 chain): the SERVER
+ * asks the person, through the client, and the caller's own answer never
+ * counts.
+ *
+ * ## The contract
+ *
+ * 1. **Which calls.** A call on an action whose author declared
+ *    `ai.requiresConfirmation: true` (the DECLARED flag, never the listing
+ *    heuristic; {@link AIActionConfirmation} keeps that predicate), through an
+ *    AI door: the MCP `run_action` tool, and the MCP `resume_run` tool for the
+ *    candidate action it would run. Every caller is covered, OAuth token or
+ *    API key, a person or an agent acting for one (`onBehalfOf`).
+ * 2. **Who confirms: a person, through elicitation.** After every other
+ *    admission gate has passed, so nobody is asked to confirm a call that is
+ *    refused anyway, and before anything dispatches, the server sends ONE
+ *    MCP `elicitation/create` request in form mode to the client the call
+ *    arrived on, for that call. Its message names the action and the object
+ *    and record it runs on. The person's answer is the result's `action`
+ *    alone; any `content` the client returns is not read.
+ * 3. **Which clients.** The door reads the `elicitation` capability the client
+ *    sent in its `initialize` request, for the session the call rides on. Form
+ *    mode is what is asked, and an empty `elicitation: {}` reads as form mode
+ *    (MCP 2025-11-25). A client that did not advertise it is REFUSED before
+ *    anything is asked or run, with
+ *    {@link ActionConfirmationRefusalReason} `elicitation_unsupported`; the
+ *    message tells the person to use a client that supports confirmation, or
+ *    to perform the action in the app. A door that cannot carry an elicitation
+ *    to the client refuses the same way. Neither ever falls back to the
+ *    member.
+ * 4. **What each answer does.** Only `accept` confirms.
+ *    - `accept`: the call dispatches as any admitted call does, exactly once,
+ *      under the caller's permissions. The confirmation covers that one call:
+ *      nothing is stored, and the next call is asked again.
+ *    - `decline`: the person said no. Refused, reason `declined`; nothing runs.
+ *      The caller does not retry unless the person asks again.
+ *    - `cancel`: the person dismissed the question without choosing. Refused,
+ *      reason `cancelled`; nothing runs. An error answer to the elicitation
+ *      request, or a connection that drops before an answer, is read the same
+ *      way.
+ *    - Timed out: no answer within the door's bound, which the implementing
+ *      door names. Refused, reason `timed_out`; nothing runs, and an answer
+ *      that arrives later runs nothing.
+ * 5. **The caller's `confirm` never counts.** On a declared-gated call the
+ *    member ({@link AI_ACTION_CONFIRMATION_MEMBER}) confers nothing: not with
+ *    an elicitation, not in place of one, and not for a client that cannot
+ *    elicit. An agent cannot answer for the person by sending it.
+ * 6. **An AI service account: unchanged** (ADR-0151 D3 rule 3). An agent
+ *    principal acting for itself, with no `onBehalfOf`, is refused whatever it
+ *    sends, reason `service_account`. No elicitation is sent to it: no person
+ *    stands behind the account, and its own client could answer one.
+ *
+ * Every refusal keeps the registered envelope: `428`,
+ * `ACTION_CONFIRMATION_REQUIRED`, and `error.details` shaped as
+ * {@link ActionConfirmationRequiredDetails}, whose `reason` says which of the
+ * cases above it is. Nothing is parked or queued, as before: a refused call
+ * did not run, and no record was read or written for it.
+ *
+ * ## Its bounds
+ *
+ * - The MCP `delete_record` and `delete_records` gates are not declared-gated
+ *   actions: they read the member, as {@link AIActionConfirmation} describes,
+ *   until a decision moves them.
+ * - REST `/actions` stays outside the gate for a person, as before.
+ *
+ * ## When it binds
+ *
+ * This text is the contract from the release that carries it. The doors
+ * implement it in the change that enforces it, which also moves the shipped
+ * prescriptions that describe the member. Until that change, the doors
+ * still gate on the member as {@link AIActionConfirmation} describes, and that
+ * reading is the FROM half of the breaking note.
+ *
+ * The door has to hold what the rules above need: the client's `initialize`
+ * capabilities for the session, and a way to send a request to the client
+ * while the call is open. The long-lived stdio server holds both. The
+ * stateless Streamable HTTP door (`handleHttpRequest` in
+ * `packages/mcp/src/mcp-server-runtime.ts`) builds a fresh server per request,
+ * issues no session id and answers in JSON, so as built it holds neither, and
+ * by rule 3 it refuses until the implementing change gives it both.
+ */
+export const AI_ACTION_CONFIRMATION_CAPABILITY = 'elicitation';
+
+/**
+ * Why a declared-gated call was refused under the elicitation contract
+ * ({@link AI_ACTION_CONFIRMATION_CAPABILITY}), carried as
+ * {@link ActionConfirmationRequiredDetails.reason}. A CLOSED set:
+ *
+ * - `elicitation_unsupported`: the client did not advertise `elicitation` at
+ *   `initialize`, or the door cannot carry one. Retrying from that client
+ *   cannot succeed: the person uses a client that supports confirmation, or
+ *   performs the action in the app.
+ * - `declined`: the person answered no.
+ * - `cancelled`: the person dismissed the question, the client answered the
+ *   elicitation request with an error, or the connection dropped first.
+ * - `timed_out`: no answer within the door's bound.
+ * - `service_account`: an AI service account, which never confirms an action
+ *   for itself (ADR-0151 D3 rule 3). A person runs the action.
+ */
+export const ACTION_CONFIRMATION_REFUSAL_REASONS = [
+    'elicitation_unsupported',
+    'declined',
+    'cancelled',
+    'timed_out',
+    'service_account',
+] as const;
+
+/** One member of {@link ACTION_CONFIRMATION_REFUSAL_REASONS}. */
+export type ActionConfirmationRefusalReason = (typeof ACTION_CONFIRMATION_REFUSAL_REASONS)[number];
 
 // ---------------------------------------------------------------------------
 // IAIService

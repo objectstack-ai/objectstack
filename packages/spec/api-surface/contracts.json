@@ -2,6 +2,7 @@
   "description": "Every exported `name (kind)` of one published entry point of @objectstack/spec — the breadth half of the ADR-0059 backward-compatibility gate. Sharded by entry point (#5837) so two PRs touching different entry points never share a file. Reads the BUILT dist/*.d.ts: regenerate with `pnpm --filter @objectstack/spec gen:api-surface` after a real build.",
   "entry": "./contracts",
   "exports": [
+    "ACTION_CONFIRMATION_REFUSAL_REASONS (const)",
     "AIActionConfirmation (interface)",
     "AIConversation (interface)",
     "AIMessage (type)",
@@ -14,6 +15,7 @@
     "AIToolCall (type)",
     "AIToolDefinition (interface)",
     "AIToolResult (type)",
+    "AI_ACTION_CONFIRMATION_CAPABILITY (const)",
     "AI_ACTION_CONFIRMATION_MEMBER (const)",
     "APPROVAL_ACTION_KINDS (const)",
     "APPROVAL_ACTION_KIND_LABELS (const)",
@@ -23,6 +25,7 @@
     "APPROVAL_STATUS_LABELS (const)",
     "AUDIT_CHECKPOINT_SIGNER_SERVICE (const)",
     "AUDIT_CHECKPOINT_SINK_SERVICE (const)",
+    "ActionConfirmationRefusalReason (type)",
     "ActionConfirmationRequiredDetails (interface)",
     "AdapterContext (interface)",
     "AdapterSearchOptions (interface)",
