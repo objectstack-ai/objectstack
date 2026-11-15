@@ -786,7 +786,7 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysMember', SysMember, 'transfer_ownership', `((has(record.role) && record.role != 'owner') && ${OWNER}) && ${ORG}`],
     ['SysInvitation', SysInvitation, 'invite_user', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     ['SysInvitation', SysInvitation, 'cancel_invitation', `${ADMINS} && ${ORG}`],
-    ['SysInvitation', SysInvitation, 'resend_invitation', `${INVITE} && ${ORG}`],
+    ['SysInvitation', SysInvitation, 'resend_invitation', `((${MANAGED}) && ${INVITE}) && ${ORG}`],
     ['SysTeam', SysTeam, 'create_team', `${ADMINS} && ${ORG}`],
     ['SysTeam', SysTeam, 'update_team', `${ADMINS} && ${ORG}`],
     ['SysTeam', SysTeam, 'remove_team', `${ADMINS} && ${ORG}`],

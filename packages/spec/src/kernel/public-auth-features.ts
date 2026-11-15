@@ -294,6 +294,8 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_member.actions.invite_user',
       'sys_invitation.actions.invite_user',
       'sys_organization.actions.invite_user',
+      // A resend is a call to invite-member, which refuses it here.
+      'sys_invitation.actions.resend_invitation',
       // [#27843] The invitation's accept link: no invitation is handed out here.
       'sys_invitation.actions.copy_invitation_link',
       'sys_user.actions.create_user',
