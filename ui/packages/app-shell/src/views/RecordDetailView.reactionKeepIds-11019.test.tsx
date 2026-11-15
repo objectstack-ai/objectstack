@@ -85,6 +85,16 @@ const OBJECTS = [
   },
 ];
 
+/**
+ * The object registry of a framework without `sys_comment_reaction`: its
+ * `sys_comment` still declares the `reactions` column the column store writes
+ * (objectstack#33521).
+ */
+const REGISTRY = [
+  ...OBJECTS,
+  { name: 'sys_comment', label: 'Comment', fields: { reactions: { type: 'textarea', label: 'Reactions' } } },
+];
+
 const PAGE = {
   name: 'customer_record_page',
   type: 'record',
@@ -131,8 +141,9 @@ async function mountAs(userId: string, dataSource: any) {
     getItem: async () => null,
     // The registry lists this deployment's objects, and `sys_comment_reaction`
     // is not one of them, so the page keeps reactions in the
-    // `sys_comment.reactions` column (objectui#12078).
-    getItemsByType: (type: string) => (type === 'page' ? pages : type === 'object' ? OBJECTS : []),
+    // `sys_comment.reactions` column (objectui#12078), which its `sys_comment`
+    // still declares (objectstack#33521).
+    getItemsByType: (type: string) => (type === 'page' ? pages : type === 'object' ? REGISTRY : []),
   } as any;
   render(
     <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
