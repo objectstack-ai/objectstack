@@ -625,6 +625,40 @@ export function resolveSourceLocale(i18n: unknown): string {
 }
 
 /**
+ * The users' default locale as a locale the tooling must GATE — the declared
+ * `i18n.defaultLocale`, but only on a stack that also declares
+ * `i18n.sourceLocale`; `undefined` otherwise.
+ *
+ * Without `sourceLocale` the users' default IS the source locale, and every
+ * reader already puts the source locale first, so there is nothing to add —
+ * which is what keeps a stack that declares no `sourceLocale` reading exactly
+ * as before. With it, the two differ, and the users' default is the language
+ * every user without a preference is served: it must stay gated (and, in
+ * `os i18n extract`, scaffolded) even when `supportedLocales` omits it or no
+ * bundle for it exists yet. Read through {@link withGatedDefaultLocale}.
+ */
+function resolveGatedDefaultLocale(i18n: unknown): string | undefined {
+  if (i18n === null || typeof i18n !== 'object') return undefined;
+  const block = i18n as { sourceLocale?: unknown; defaultLocale?: unknown };
+  if (typeof block.sourceLocale !== 'string' || block.sourceLocale.length === 0) return undefined;
+  return typeof block.defaultLocale === 'string' && block.defaultLocale.length > 0 ? block.defaultLocale : undefined;
+}
+
+/**
+ * `locales` with the stack's gated users' default appended when it is missing
+ * (see `resolveGatedDefaultLocale`): unchanged — the same array, `undefined`
+ * included — on a stack that declares no `sourceLocale`. The one rule
+ * {@link computeI18nCoverage} applies to the locales it gates and
+ * `os i18n extract` to the locales it scaffolds, when no `--locales` list is
+ * given; an explicit list is the caller's whole answer and never passes here.
+ */
+export function withGatedDefaultLocale<L extends string[] | undefined>(locales: L, i18n: unknown): L | string[] {
+  const gated = resolveGatedDefaultLocale(i18n);
+  if (gated === undefined || locales?.includes(gated)) return locales;
+  return [...(locales ?? []), gated];
+}
+
+/**
  * Compute a coverage report for a normalized stack config.
  */
 export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): CoverageReport {
@@ -650,15 +684,22 @@ export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): Co
   // already exists for. Declare neither — the monolingual case — and the only
   // active locale is the default one, which every inline label already satisfies,
   // so the gate reports nothing rather than inventing a translation debt.
+  //
+  // On a stack declaring `sourceLocale`, the users' `defaultLocale` is a
+  // second locale the project opted into by declaring it, so the three arms
+  // that read the config gate it too, whatever `supportedLocales` and the
+  // bundles say: it is what every user without a preference is served. An
+  // explicit `--locales` list is the caller's whole answer and is left alone.
+  const withGatedDefault = (locales: string[]): string[] => withGatedDefaultLocale(locales, declared);
   let activeLocales: string[];
   if (opts.locales && opts.locales.length > 0) {
     activeLocales = Array.from(new Set<string>([defaultLocale, ...opts.locales]));
   } else if (declaredLocales.length > 0) {
-    activeLocales = Array.from(new Set<string>([defaultLocale, ...declaredLocales, ...discovered]));
+    activeLocales = withGatedDefault(Array.from(new Set<string>([defaultLocale, ...declaredLocales, ...discovered])));
   } else if (discovered.length === 0) {
-    activeLocales = [defaultLocale];
+    activeLocales = withGatedDefault([defaultLocale]);
   } else {
-    activeLocales = discovered.includes(defaultLocale) ? discovered : [defaultLocale, ...discovered];
+    activeLocales = withGatedDefault(discovered.includes(defaultLocale) ? discovered : [defaultLocale, ...discovered]);
   }
 
   // A key is only worth translating if a source string is authored somewhere:

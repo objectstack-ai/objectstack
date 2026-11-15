@@ -450,3 +450,71 @@ describe('computeI18nCoverage — i18n.sourceLocale', () => {
     expect(withoutKey.issues.filter((i) => i.locale === 'en' && i.source !== 'metadataForm')).toHaveLength(3);
   });
 });
+
+// The users' `defaultLocale` stays gated once `sourceLocale` separates it from
+// the source: it is what every user without a preference is served, so a stack
+// that leaves it out of `supportedLocales`, or has no bundle for it yet, must
+// still hear about every missing row in it.
+describe('computeI18nCoverage — the users\' defaultLocale stays gated beside sourceLocale', () => {
+  const objects = [
+    {
+      name: 'crm_account',
+      label: 'Account',
+      description: 'A company you sell to',
+      fields: { name: { label: 'Account Name' } },
+    },
+  ];
+  const ES = {
+    'es-ES': {
+      objects: {
+        crm_account: {
+          label: 'Cuenta',
+          description: 'Una empresa a la que vendes',
+          fields: { name: { label: 'Nombre de la cuenta' } },
+        },
+      },
+    },
+  };
+  const ZH_GAPS = [
+    'objects.crm_account.description',
+    'objects.crm_account.fields.name.label',
+    'objects.crm_account.label',
+  ];
+  const zhGaps = (report: ReturnType<typeof computeI18nCoverage>) =>
+    report.issues.filter((i) => i.locale === 'zh-CN').map((i) => i.key).sort();
+  const run = (i18n: Record<string, unknown>, translations: unknown[], opts: Parameters<typeof computeI18nCoverage>[1] = {}) =>
+    computeI18nCoverage({ i18n, objects, translations }, { platformMetadataForms: 'exclude', ...opts });
+
+  it('gates zh-CN when supportedLocales omits it and no zh-CN bundle exists', () => {
+    const report = run({ defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['en', 'es-ES'] }, [ES]);
+    expect(report.locales).toContain('zh-CN');
+    expect(zhGaps(report)).toEqual(ZH_GAPS);
+    expect(report.issues.filter((i) => i.locale !== 'zh-CN')).toEqual([]);
+  });
+
+  it('gates zh-CN with supportedLocales: [] — through the bundles-only arm', () => {
+    const report = run({ defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: [] }, [ES]);
+    expect(report.locales).toEqual(['en', 'es-ES', 'zh-CN']);
+    expect(zhGaps(report)).toEqual(ZH_GAPS);
+  });
+
+  it('gates zh-CN with supportedLocales: [] and no bundle at all — the monolingual arm', () => {
+    const report = run({ defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: [] }, []);
+    expect(report.locales).toEqual(['en', 'zh-CN']);
+    expect(zhGaps(report)).toEqual(ZH_GAPS);
+  });
+
+  it('leaves an explicit --locales list as the whole set', () => {
+    const report = run({ defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['en', 'es-ES'] }, [ES], {
+      locales: ['es-ES'],
+    });
+    expect(report.locales).toEqual(['en', 'es-ES']);
+  });
+
+  it('adds nothing on a stack without sourceLocale, whose default is already the source', () => {
+    const undeclared = { defaultLocale: 'zh-CN', supportedLocales: [] };
+    const report = run(undeclared, [ES]);
+    expect(report.locales).toEqual(['zh-CN', 'es-ES']);
+    expect(report).toEqual(run(undeclared, [ES], { defaultLocale: 'zh-CN' }));
+  });
+});

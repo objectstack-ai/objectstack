@@ -17,9 +17,9 @@ An app authored in English that defaults its users to Chinese declares:
 i18n: { defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['en', 'zh-CN', 'es-ES'] }
 ```
 
-**`os lint` and `os i18n check`** count the inline text as the source locale's translation: they ask for no `en` bundle row that restates it, and they report each missing `zh-CN` and `es-ES` row. With `defaultLocale: 'zh-CN'` alone they read the English labels as Chinese: every key was reported missing in `en` (an error under `os lint --strict`) and no `zh-CN` gap was ever reported.
+**`os lint` and `os i18n check`** count the inline text as the source locale's translation: they ask for no `en` bundle row that restates it, and they report each missing `zh-CN` and `es-ES` row. With `defaultLocale: 'zh-CN'` alone they read the English labels as Chinese: every key was reported missing in `en` (an error under `os lint --strict`) and no `zh-CN` gap was ever reported. On a stack declaring `sourceLocale`, the users' `defaultLocale` is gated even when `supportedLocales` omits it or no bundle for it exists yet; an explicit `--locales` list is still the whole set. `--strict` / `--i18n-strict` help and the closing hint of `os i18n check` now say "non-source locales".
 
-**`os i18n extract`** fills the source locale's bundle from the inline text and rewrites it from the source on every merge; every other locale, `defaultLocale` included, keeps its hand translations.
+**`os i18n extract`** fills the source locale's bundle from the inline text and rewrites it from the source on every merge; every other locale, `defaultLocale` included, keeps its hand translations. On a stack declaring `sourceLocale` it also scaffolds `defaultLocale` when no `--locales` list is given.
 
 **`--default-locale`** on all three commands keeps working and still wins over the config for one run; its help text now says it overrides the source locale (`i18n.sourceLocale`, else `i18n.defaultLocale`, else `en`). The `defaultLocale` field of `os i18n check --json` keeps its name and carries the source locale that was used.
 

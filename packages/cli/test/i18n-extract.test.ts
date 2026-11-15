@@ -7,7 +7,7 @@ import {
   renderTranslationModule,
   stackAuthoredSubtree,
 } from '../src/utils/i18n-bundle-extract.js';
-import { resolveSourceLocale } from '../src/utils/i18n-coverage.js';
+import { resolveSourceLocale, withGatedDefaultLocale } from '../src/utils/i18n-coverage.js';
 
 const config: any = {
   objects: [
@@ -626,5 +626,39 @@ describe('resolveSourceLocale — the inline text\'s language', () => {
     // never overwritten with the English source.
     expect(bundles['zh-CN'].objects?.crm_account?.label).toBe('客户');
     expect(bundles['zh-CN'].objects?.crm_account?.fields?.name?.label).toBe('');
+  });
+});
+
+// The locale list `os i18n extract` scaffolds when no `--locales` is given:
+// `withGatedDefaultLocale(supportedLocales || undefined, config.i18n)` — the
+// same rule `os i18n check` gates by.
+describe('withGatedDefaultLocale — the users\' default is scaffolded beside sourceLocale', () => {
+  const declared = { defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['en', 'es-ES'] };
+
+  it('appends defaultLocale when sourceLocale is declared and the list omits it', () => {
+    expect(withGatedDefaultLocale(['en', 'es-ES'], declared)).toEqual(['en', 'es-ES', 'zh-CN']);
+    expect(withGatedDefaultLocale(undefined, { ...declared, supportedLocales: [] })).toEqual(['zh-CN']);
+  });
+
+  it('returns the list unchanged when it already carries it, or when no sourceLocale is declared', () => {
+    const list = ['en', 'zh-CN'];
+    expect(withGatedDefaultLocale(list, declared)).toBe(list);
+    const supported = ['en', 'es-ES'];
+    expect(withGatedDefaultLocale(supported, { defaultLocale: 'zh-CN', supportedLocales: supported })).toBe(supported);
+    expect(withGatedDefaultLocale(undefined, { defaultLocale: 'zh-CN' })).toBeUndefined();
+  });
+
+  it('scaffolds an empty zh-CN bundle for an English-authored stack that left zh-CN out of supportedLocales', () => {
+    const cfg: any = {
+      i18n: declared,
+      objects: [{ name: 'crm_account', label: 'Account', fields: {} }],
+    };
+    const { bundles } = extractTranslations(cfg, {
+      defaultLocale: resolveSourceLocale(cfg.i18n),
+      locales: withGatedDefaultLocale(cfg.i18n.supportedLocales, cfg.i18n),
+      mergeExisting: false,
+    });
+    expect(Object.keys(bundles).sort()).toEqual(['en', 'es-ES', 'zh-CN']);
+    expect(bundles['zh-CN'].objects?.crm_account?.label).toBe('');
   });
 });

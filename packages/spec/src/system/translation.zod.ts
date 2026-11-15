@@ -2658,9 +2658,10 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
    *
    * Read by the authoring tools: `os lint` and `os i18n check` count the
    * inline text as this locale's translation (so they never ask for a bundle
-   * row that restates it, and they do gate every other declared locale,
-   * `defaultLocale` included), and `os i18n extract` fills this locale's
-   * bundle from the inline text. Their `--default-locale` flag overrides it.
+   * row that restates it), and they gate every locale in `supportedLocales`
+   * plus `defaultLocale`, even when `supportedLocales` omits it; `os i18n
+   * extract` fills this locale's bundle from the inline text and scaffolds
+   * `defaultLocale`'s. Their `--default-locale` flag overrides it.
    * Like `defaultLocale`, it need not appear in `supportedLocales`.
    *
    * ⚠️ Not yet read by the serving layer: the runtime label resolvers still
@@ -2670,7 +2671,8 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
   sourceLocale: LocaleSchema.optional().describe(
     'Language the inline metadata text (a plain-string label) is written in, when it differs from defaultLocale '
     + '(e.g. "en" for an English-authored app whose users default to "zh-CN"). Absent, it is defaultLocale. '
-    + 'Read by os lint, os i18n check and os i18n extract as the source language; their --default-locale flag overrides it.',
+    + 'Read by os lint, os i18n check and os i18n extract as the source language; their --default-locale flag overrides it. '
+    + 'Not yet read by the serving layer: the runtime label resolvers still treat defaultLocale as the authored label\'s language.',
   ),
 }).describe('Internationalization configuration'));
 

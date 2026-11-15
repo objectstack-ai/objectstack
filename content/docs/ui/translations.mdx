@@ -394,7 +394,9 @@ i18n: {
 The tooling then counts the inline text as the `en` translation, asks for no
 `en` bundle, and reports every missing `zh-CN` and `es-ES` row; `os i18n
 extract` fills the `en` bundle from the inline text and leaves `zh-CN` rows to
-translators. Declare `defaultLocale: 'zh-CN'` alone instead and the tooling
+translators. With `sourceLocale` declared, `defaultLocale` is gated and
+scaffolded even when `supportedLocales` leaves it out, because it is the
+language every user without a preference is served. Declare `defaultLocale: 'zh-CN'` alone instead and the tooling
 reads your English labels as Chinese: it reports every key missing in `en` and
 never reports a `zh-CN` gap.
 

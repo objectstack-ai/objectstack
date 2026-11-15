@@ -31,7 +31,7 @@ import {
   type FillStrategy,
   type TranslationModuleKind,
 } from '../../utils/i18n-bundle-extract.js';
-import { resolveSourceLocale } from '../../utils/i18n-coverage.js';
+import { resolveSourceLocale, withGatedDefaultLocale } from '../../utils/i18n-coverage.js';
 import { authoringRuleUnionStack } from '../../utils/stack-collections.js';
 
 const FILL_STRATEGIES: FillStrategy[] = ['empty', 'default', 'todo'];
@@ -196,7 +196,7 @@ export default class I18nExtract extends Command {
     }),
     locales: Flags.string({
       description:
-        "Comma-separated list of locales to emit (always includes default-locale). Defaults to the config's i18n.supportedLocales.",
+        "Comma-separated list of locales to emit (always includes default-locale). Defaults to the config's i18n.supportedLocales, plus its i18n.defaultLocale when i18n.sourceLocale is declared.",
     }),
     fill: Flags.string({
       description: 'How non-default locales are filled: empty | default | todo',
@@ -262,11 +262,13 @@ export default class I18nExtract extends Command {
       const declaredLocales = Array.isArray(declared?.supportedLocales)
         ? declared.supportedLocales.filter((l): l is string => typeof l === 'string' && l.length > 0)
         : [];
+      // On a stack declaring `sourceLocale`, the users' `defaultLocale` is
+      // scaffolded too, as `os i18n check` gates it: it is what every user
+      // without a preference is served, declared or not in `supportedLocales`.
+      // An explicit `--locales` list is the caller's whole answer.
       const locales = flags.locales
         ? flags.locales.split(',').map((s) => s.trim()).filter(Boolean)
-        : declaredLocales.length > 0
-          ? declaredLocales
-          : undefined;
+        : withGatedDefaultLocale(declaredLocales.length > 0 ? declaredLocales : undefined, declared);
       // The locale the inline text IS — filled from it, and rewritten from it on
       // every merge. `i18n.sourceLocale` outranks the users' `defaultLocale`,
       // through the one reading `os lint` and `os i18n check` share.
