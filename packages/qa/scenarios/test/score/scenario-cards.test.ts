@@ -16,6 +16,13 @@
  *     `scoreScenarioArtifact`: shape, capability tags and agent actions. The
  *     readings are pinned, and one card is completed with what it asks of the
  *     build beyond shape, then degraded, to show the score separates the two.
+ *  3. TRACE. Every write a card has a persona make, or refuses it
+ *     (`personaGrantNeeds`: an `applied` or `pending_confirmation` operation,
+ *     one refused `PERMISSION_DENIED`), is a grant the Build checks judge, and
+ *     the build is judged only on what its prompt says. So each write need of
+ *     every card in the library is stated in that card's rendered build prompt
+ *     (`buildPrompt`), for that persona: through the persona's `role` (the
+ *     carrier the library's owner ruled), or through the card's prose.
  *
  * The cards are loaded through this package's loader; the corpus is the CLI's
  * (`packages/cli/src/lint/corpus.ts`, the `os lint --eval` golden set), read
@@ -32,9 +39,10 @@ import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/s
 
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../../../../cli/src/lint/corpus.js';
 import type { ScenarioExpect } from '../../src/schema.js';
-import { formatRefusal, loadScenarioFile, readCapabilityAreas } from '../../src/loader.js';
+import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas } from '../../src/loader.js';
+import { buildPrompt } from '../../src/runner/prompts.js';
 import type { ScenarioCard } from '../../src/schema.js';
-import { gradeCapabilityTags, readArtifactFacts, scoreScenarioArtifact } from '../../src/score/scenario-tags.js';
+import { gradeCapabilityTags, personaGrantNeeds, readArtifactFacts, scoreScenarioArtifact } from '../../src/score/scenario-tags.js';
 
 type Bag = Record<string, any>;
 
@@ -254,5 +262,120 @@ describe('control cards — scored end to end against their golden builds', () =
       ['row-scope:account->scoped', true],
       ['row-scope:contact->scoped', false],
     ]);
+  });
+});
+
+describe('every card — each write need is stated in its build prompt, for its persona', () => {
+  const loaded = loadScenarios(SCENARIOS_DIR, { areas: AREAS, library: 'open' });
+  if (loaded.refusals.length) throw new Error(loaded.refusals.map(formatRefusal).join('\n'));
+  const library: ScenarioCard[] = loaded.cards.map((c) => c.card);
+  const writeNeeds = (card: ScenarioCard) =>
+    personaGrantNeeds(card)
+      .flatMap((n) => (n.verb === 'read' ? [] : [{ ...n, verb: n.verb, key: `${card.id}:${n.persona}:${n.object}:${n.verb}`, refusedOnly: n.requiredBy.length === 0 }]));
+
+  /**
+   * The text rule for a need the persona's `role` carries: the role names the
+   * object (its machine name with `_` read as a space, a plural allowed) and a
+   * word for the verb; a write the card refuses also carries a negation
+   * ("may not", "but not", "cannot", "never"). Its limits, stated: the rule
+   * reads words, not grammar — it does not check that the verb word governs the
+   * object, nor which of two objects a negation applies to; a reviewer reads
+   * the role for that. The word lists are the verbs the library's roles use;
+   * a new role verb is added here, in the open.
+   */
+  const VERB_WORDS: Record<'create' | 'update' | 'delete', RegExp> = {
+    create: /\b(adds?|creates?|logs?|files?|raises?|registers?|records?|enters?|submits?)\b/i,
+    update: /\b(updates?|edits?|changes?|moves?|approves?|reassigns?|closes?|resolves?|cancels?|corrects?|pays?|sends?|extends?|disposes?)\b/i,
+    delete: /\b(deletes?|removes?)\b/i,
+  };
+  const NEGATION = /\b(may not|but not|cannot|never)\b/i;
+  const namesObject = (text: string, object: string) => new RegExp(`\\b${object.split('_').join('\\s+')}s?\\b`, 'i').test(text);
+  const roleStates = (role: string, n: { object: string; verb: 'create' | 'update' | 'delete'; refusedOnly: boolean }) =>
+    namesObject(role, n.object) && VERB_WORDS[n.verb].test(role) && (!n.refusedOnly || NEGATION.test(role));
+
+  /**
+   * Each write need of the library and where its build prompt states it:
+   * `ROLE` (the persona's role, judged by the text rule above), or the prose
+   * passages, quoted verbatim, that name the persona, the object and the act.
+   * A prose trace is a reviewer's reading, pinned so that it cannot silently
+   * stop being true: a quote edited out of the card's prose, or a new need with
+   * no entry, is a red.
+   */
+  const ROLE = 'role' as const;
+  const TRACES: Record<string, typeof ROLE | readonly string[]> = {
+    'asset_lifecycle:asset_admin:asset:create': ROLE,
+    'asset_lifecycle:asset_admin:checkout:update': ['The asset administrator checks assets out to employees', 'a checkout records the checkout date, a due date'],
+    'asset_lifecycle:dept_manager:disposal_request:update': ["the manager of the asset's department decides a scrap request", 'deciding it updates the request'],
+    'asset_lifecycle:asset_admin:disposal_request:update': ['once it is approved the asset administrator disposes of the asset'],
+    'asset_lifecycle:employee:disposal_request:update': ROLE,
+    'crm_account_with_contacts:sdr:contact:create': ROLE,
+    'crm_account_with_contacts:sdr:contact:update': ROLE,
+    'crm_account_with_contacts:sdr:contact:delete': ROLE,
+    'crm_account_with_contacts:partner_user:account:update': ROLE,
+    'invoice_with_line_items:sales_rep:invoice_line:create': ROLE,
+    'invoice_with_line_items:sales_rep:invoice:update': ROLE,
+    'invoice_with_line_items:sales_rep:invoice_line:delete': ROLE,
+    'invoice_with_line_items:warehouse_staff:invoice:update': ROLE,
+    'leave_balances:employee:leave_request:create': ['An employee files a leave request'],
+    'leave_balances:employee:leave_day:update': ['An employee files a leave request with one line per date', "The day lines are details of the request (master-detail), edited inline on the request's form"],
+    'leave_balances:dept_manager:approval_step:update': ['up to 3 days needs only the department manager', 'approving or rejecting a step updates that record'],
+    'leave_balances:hr_officer:leave_request:delete': ROLE,
+    'leave_balances:employee:leave_balance:update': ROLE,
+    'order_to_cash:sales_rep:sales_order:create': ['A rep enters sales orders for their own accounts'],
+    'order_to_cash:sales_rep:order_line:update': ['A rep enters sales orders', "The lines are details of the order (master-detail), edited inline on the order's form"],
+    'order_to_cash:sales_rep:sales_order:update': ['a rep cannot approve their own order'],
+    'order_to_cash:sales_manager:sales_order:update': ["goes to the rep's sales manager for approval", 'approving updates the order'],
+    'order_to_cash:ar_clerk:invoice:update': ['Only Finance may write off a balance as bad debt', 'Accounts receivable clerk, Finance, organization-wide'],
+    'project_with_tasks:contractor:task:create': ROLE,
+    'project_with_tasks:contractor:task:update': ROLE,
+    'project_with_tasks:contractor:task:delete': ROLE,
+    'project_with_tasks:client_viewer:task:update': ROLE,
+    'requisition_to_receipt:buyer:purchase_order:create': ['the buyer raises a purchase order to a supplier'],
+    'requisition_to_receipt:buyer:po_line:update': ['the buyer raises a purchase order to a supplier with several lines', "The lines are details of the order (master-detail), edited inline on the order's form"],
+    'requisition_to_receipt:dept_manager:approval_step:update': ['up to 5,000 the department manager alone', 'approving or rejecting a level updates that record'],
+    'requisition_to_receipt:buyer:purchase_order:update': ['the buyer raises a purchase order', 'Cancelling an order already sent to the supplier cannot be undone and is confirmed first'],
+    'service_desk:support_agent:ticket:create': ROLE,
+    'service_desk:team_lead:ticket:update': ROLE,
+    'service_desk:support_agent:ticket:update': ['once an agent takes it, it is open', 'resolving it sends the customer a satisfaction survey'],
+    'service_desk:support_agent:satisfaction_rating:update': ["no agent can change a customer's rating"],
+    'travel_expense:employee:expense_claim:create': ['Afterwards they file an expense claim with several lines'],
+    'travel_expense:employee:claim_line:update': ["The lines are details of the claim (master-detail), edited inline on the claim's form"],
+    'travel_expense:dept_manager:approval_step:update': ['the department manager first', 'approving or rejecting a step updates that record'],
+    'travel_expense:finance_officer:expense_claim:update': ['once Finance approves, Finance pays it', 'Finance officer, organization-wide'],
+    'travel_expense:employee:approval_step:update': ROLE,
+  };
+
+  it('reads every card of the library, and every write need has a trace (a need with none is a red)', () => {
+    expect(library.length).toBe(9);
+    expect(library.flatMap(writeNeeds).map((n) => n.key).sort()).toEqual(Object.keys(TRACES).sort());
+  });
+
+  for (const card of library) {
+    it(`${card.id}: each write need is stated, by its persona's role or by the quoted prose`, () => {
+      const prompt = buildPrompt(card).replace(/\s+/g, ' ');
+      for (const n of writeNeeds(card)) {
+        const trace = TRACES[n.key]!;
+        if (trace === ROLE) {
+          const role = card.run.personas.find((p) => p.id === n.persona)!.role;
+          expect([n.key, roleStates(role, n)]).toEqual([n.key, true]);
+          expect(prompt).toContain(`for \`${n.persona}\` (${role})`);
+        } else {
+          for (const quote of trace) expect([n.key, prompt.includes(quote)]).toEqual([n.key, true]);
+        }
+      }
+    });
+  }
+
+  it('the text rule goes red on the roles the library carried before the owner\'s ruling', () => {
+    const need = (object: string, verb: 'create' | 'update' | 'delete', refusedOnly = false) => ({ object, verb, refusedOnly });
+    expect(roleStates('External contractor', need('task', 'create'))).toBe(false);
+    expect(roleStates('Sales representative', need('invoice_line', 'delete'))).toBe(false);
+    expect(roleStates('Warehouse staff', need('invoice', 'update', true))).toBe(false);
+    // The object and a verb, but a different verb's word: still red.
+    expect(roleStates('External contractor who logs their own tasks', need('task', 'delete'))).toBe(false);
+    // A refusal stated without a negation is a grant, not a refusal: red.
+    expect(roleStates('Warehouse staff who change invoices', need('invoice', 'update', true))).toBe(false);
+    expect(roleStates('Warehouse staff who may read invoices but not change them', need('invoice', 'update', true))).toBe(true);
+    expect(roleStates('Sales representative who adds and removes invoice lines and sends invoices', need('invoice_line', 'create'))).toBe(true);
   });
 });
