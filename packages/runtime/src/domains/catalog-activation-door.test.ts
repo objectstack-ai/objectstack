@@ -1000,6 +1000,60 @@ describe('the catalog activation door — a declared webhook two packages declar
         expect(ledger(h)).toEqual([[null, false], [A, true]]);
     });
 
+    // [ADR-0150 D3, #33263] A name the reader refuses WHOLE: it serves no slot
+    // of the name, yet refuses the bare read naming its holders (plugin-webhooks'
+    // `wholeNameRefusal`: the metadata service lists the environment's
+    // declaration beside a package's; that reader's own pins are in
+    // `declared-webhooks.test.ts`). The double answers as it does. BASE: the
+    // bare address was 409 naming both, but the exact and the namespace address
+    // answered 404 "no enabled package declares the name" for a package that
+    // does. Every address now answers the refusal, naming both.
+    it('[FROM 404 TO 409] a name refused whole: the bare, the exact and the namespace address all answer 409 naming both holders, nothing written', async () => {
+        const whole = {
+            status: 'refused', reason: 'ambiguous-in-environment', type: 'webhook', name: HOOK, callerPackageId: null,
+            candidates: [{ kind: 'environment' }, { kind: 'package', packageId: A }],
+            message: `The webhook "${HOOK}" is refused whole.`,
+        };
+        const h = boot('single', {}, {
+            declaredWebhooks: {
+                async holdersOf(name: string) { return name === HOOK ? [null, A] : []; },
+                async list() { return []; },
+                async declaredWebhookNamed(name: string) {
+                    if (name !== HOOK) return null;
+                    throw Object.assign(new Error(whole.message), { code: 'RESOURCE_CONFLICT', status: 409, refusal: whole });
+                },
+            },
+        });
+        h.engine.registry.getNamespaceOwners = (ns: string) => OWNERS[ns] ?? [];
+        for (const [path, query] of [
+            [`/_activation/webhook/${HOOK}`, {}],
+            [`/_activation/webhook/${HOOK}`, { package: A }],
+            [`/_activation/webhook/alpha/${HOOK}`, {}],
+        ] as const) {
+            const res = await h.dispatcher.handleSecurity(path, 'POST', { enabled: false }, query, TENANT_ADMIN());
+            const candidates = (res?.response?.body?.error?.details?.candidates ?? res?.response?.body?.error?.candidates ?? []);
+            expect([statusOf(res), codeOf(res), candidates], `${path} ${JSON.stringify(query)}`)
+                .toEqual([409, 'RESOURCE_CONFLICT', whole.candidates]);
+            expect(messageOf(res), path).toBe(whole.message);
+        }
+        // A name nothing declares is still the miss, at either qualified address.
+        expect(statusOf(await h.dispatcher.handleSecurity('/_activation/webhook/our_own_hook', 'POST', { enabled: false }, { package: A }, TENANT_ADMIN()))).toBe(404);
+        expect(statusOf(await flip(h, TENANT_ADMIN(), '/_activation/webhook/alpha/our_own_hook'))).toBe(404);
+        expect(h.writes).toEqual([]);
+    });
+
+    it('a read that fails while the exact address looks for a whole refusal is 503, never a 404 or a write', async () => {
+        const h = boot('single', {}, {
+            declaredWebhooks: {
+                async list() { return []; },
+                async declaredWebhookNamed() { throw new Error('registry down'); },
+            },
+        });
+        const res = await h.dispatcher.handleSecurity(`/_activation/webhook/${HOOK}`, 'POST', { enabled: false }, { package: A }, TENANT_ADMIN());
+        expect([statusOf(res), codeOf(res)]).toEqual([503, 'SERVICE_UNAVAILABLE']);
+        expect(h.writes).toEqual([]);
+    });
+
     it('the namespace address is the webhook\'s alone: any other type with four segments is the shape 400', async () => {
         const h = bootWith([A]);
         expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/sharing_rule/alpha/${HOOK}`))).toBe(400);

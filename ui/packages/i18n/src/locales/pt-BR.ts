@@ -4929,6 +4929,7 @@ const pt = {
     disableAppNamed: "Desabilitar {{name}}",
     setDefault: "Definir como padrão",
     setDefaultNamed: "Definir {{name}} como padrão",
+    alreadyDefault: "Já é o aplicativo padrão",
     deleteApp: "Excluir aplicativo",
     deleteAppNamed: "Excluir {{name}}",
     confirmDelete: "Clique novamente para confirmar a exclusão",
