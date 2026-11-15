@@ -232,6 +232,25 @@ describe('a field a dependent package adds through objectExtensions is translate
         expect(marketOf(out).label).toBe('市场');
     });
 
+    it('a later extender that adds the same name and is DISABLED is withheld from the base as from the fold: the enabled one\'s field is translated', async () => {
+        const reg = withDependent();
+        reg.installPackage({ id: 'com.example.later', name: 'later', version: '1.0.0' } as any, 'code');
+        reg.registerObject(
+            { name: OBJ, fields: { cb_market: { ...MARKET, label: 'Sales Market' } } } as any,
+            'com.example.later',
+            undefined,
+            'extend',
+            300,
+        );
+        reg.disablePackage('com.example.later');
+        // The premise: the fold serves the enabled extender's declaration.
+        expect(marketOf(served(reg)).label).toBe('Market');
+        expect((reg.getPackagedObjectBase(OBJ) as any).fields.cb_market.label).toBe('Market');
+        const out: any = await translateMetaDocument(mergedSources(reg, 'zh-CN'), 'object', served(reg));
+        expect(marketOf(out).label).toBe('市场');
+        expect(marketOf(out).options.map((o: any) => o.label)).toEqual(['内销', '出口']);
+    });
+
     it('a field a tenant overlay adds stays authored after the fact and keeps its text', async () => {
         const reg = withDependent();
         reg.registerObject(

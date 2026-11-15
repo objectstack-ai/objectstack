@@ -380,9 +380,9 @@ export interface TranslateDocumentOptions extends ResolveOptions {
    * layer shipped that rule name, and its `fields` also carry each field a
    * code extender ADDS under a name the owner does not declare, as that
    * extender ships it — the catalog rows for such a field can only translate
-   * what its extender ships. Its scalars, every field the owner declares, and
-   * the owner's fields as an extension's `fieldPatches` leave them stay the
-   * owner's.
+   * what its extender ships. Its scalars and every field the owner declares
+   * stay the owner's: an extension's `fieldPatches` are never folded in, so a
+   * patched owner field still reads as diverged.
    *
    * Supplied by the serving layer, which is the only one that knows it; when
    * it is absent the translators behave exactly as they did before #8284 (the
@@ -2240,8 +2240,8 @@ function packagedPart(
  * The packaged counterpart of one served FIELD of an object, with the same
  * three answers as {@link packagedPart}: `undefined` when no packaged base was
  * supplied, `{}` when the base is known but declares no such field (a field
- * authored after the fact — a tenant overlay's or a stored extension's; a
- * field a code extender adds is carried by the base the serving layer
+ * authored after the fact — a tenant overlay's, or one of tenant provenance;
+ * a field a code extender adds is carried by the base the serving layer
  * supplies, see {@link TranslateDocumentOptions.packagedBase}), and the
  * packaged field otherwise.
  *
@@ -4931,7 +4931,7 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
  * base does not declare counts as diverged on every slot, as below (the base
  * carries the fields a code extender adds — see
  * {@link TranslateDocumentOptions.packagedBase} — so this is a field a tenant
- * or a stored extension authored); the
+ * overlay or a tenant-provenance extension authored); the
  * built-in system-field labels apply only where the catalog may.
  * The embedded `listViews` follow the VIEW translator's
  * application of the same rule (ADR-0029 D9.2a, as {@link translateView}

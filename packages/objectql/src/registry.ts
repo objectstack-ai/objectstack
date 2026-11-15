@@ -960,6 +960,45 @@ function withoutWithheldMembers(base: ServiceObject, withheld: WithheldExtension
 }
 
 /**
+ * [ADR-0029 D9.2a, #27559's rule-name principle carried to field names] The
+ * fields the CODE `extend` contributors of an object add — every field name
+ * the owner does not declare — in fold order, so a later extender's
+ * declaration of one name replaces an earlier one's, as
+ * {@link mergeObjectDefinitions} does. The same filter as
+ * `SchemaRegistry.packagedRules` (`ownership === 'extend'` and a code artifact
+ * body), so a tenant overlay and any extension of tenant provenance
+ * (`_provenance: 'org'`) contribute nothing, while a stored extension row
+ * of package provenance is a code layer and does. `contributors` is the
+ * caller's: {@link SchemaRegistry.getPackagedObjectBase} hands in the list
+ * without a disabled package's extensions, as the served fold withholds them
+ * ({@link SchemaRegistry.withholdDisabledExtensions}), so the base and the
+ * served field are the same extender's. `fieldPatches` are not read.
+ * `undefined` when no code extender adds a field, or the owner's `fields` is
+ * not the canonical record.
+ */
+function packagedAddedFields(
+  owner: ServiceObject,
+  contributors: readonly ObjectContributor[],
+): Record<string, unknown> | undefined {
+  const ownFields = owner.fields as unknown;
+  if (ownFields !== undefined && (ownFields === null || typeof ownFields !== 'object' || Array.isArray(ownFields))) {
+    return undefined;
+  }
+  const declared = (ownFields ?? {}) as Record<string, unknown>;
+  let added: Record<string, unknown> | undefined;
+  for (const contrib of contributors) {
+    if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition)) continue;
+    const fields = contrib.definition.fields as unknown;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) continue;
+    for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
+      if (Object.prototype.hasOwnProperty.call(declared, name)) continue;
+      (added ??= {})[name] = def;
+    }
+  }
+  return added;
+}
+
+/**
  * Deep merge two ServiceObject definitions.
  *
  * The merge set is CLOSED and enumerable — this is NOT "every prop, later
@@ -1021,39 +1060,6 @@ function withoutWithheldMembers(base: ServiceObject, withheld: WithheldExtension
  * over the base rather than re-derived from the running `merged`; `tenantRules`
  * ({@link SchemaRegistry.tenantRuleSettings}) is computed once for the same reason.
  */
-/**
- * [ADR-0029 D9.2a, #27559's rule-name principle carried to field names] The
- * fields the CODE `extend` contributors of an object add — every field name
- * the owner does not declare — in fold order, so a later extender's
- * declaration of one name replaces an earlier one's, as
- * {@link mergeObjectDefinitions} does. The same filter as
- * `SchemaRegistry.packagedRules`: `ownership === 'extend'` and a code artifact
- * body, so a tenant overlay or a stored extension (`_provenance: 'org'`)
- * contributes nothing. `fieldPatches` are not read. `undefined` when no code
- * extender adds a field, or the owner's `fields` is not the canonical record.
- */
-function packagedAddedFields(
-  owner: ServiceObject,
-  contributors: readonly ObjectContributor[],
-): Record<string, unknown> | undefined {
-  const ownFields = owner.fields as unknown;
-  if (ownFields !== undefined && (ownFields === null || typeof ownFields !== 'object' || Array.isArray(ownFields))) {
-    return undefined;
-  }
-  const declared = (ownFields ?? {}) as Record<string, unknown>;
-  let added: Record<string, unknown> | undefined;
-  for (const contrib of contributors) {
-    if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition)) continue;
-    const fields = contrib.definition.fields as unknown;
-    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) continue;
-    for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
-      if (Object.prototype.hasOwnProperty.call(declared, name)) continue;
-      (added ??= {})[name] = def;
-    }
-  }
-  return added;
-}
-
 function mergeObjectDefinitions(
   base: ServiceObject,
   extension: ObjectExtensionBody,
@@ -8244,9 +8250,11 @@ export class SchemaRegistry {
    * owner declares, even one an extender redeclares; an extender's
    * `fieldPatches` are never folded in. Each must keep reading as diverged from
    * the packaged one, or the catalog — which translates the owner's text under
-   * the owner's keys — takes back the case #8037 filed. A tenant overlay and a
-   * stored (non-code) extension add nothing here: their fields stay authored
-   * after the fact.
+   * the owner's keys — takes back the case #8037 filed. A tenant overlay and an
+   * extension of tenant provenance (`_provenance: 'org'`) add nothing here:
+   * their fields stay authored after the fact. Nor does a disabled package's
+   * extension, which the served fold withholds. (The rule half, `packagedRules`,
+   * still reads every code extender, disabled ones included.)
    *
    * Returns the owner's definition BY REFERENCE when no code extender ships a
    * rule or adds a field, and `undefined` exactly where
@@ -8262,7 +8270,12 @@ export class SchemaRegistry {
     const extended = contributors.some((c) =>
       c.ownership === 'extend' && isCodeArtifactBody(c.definition)
       && Array.isArray(c.definition.validations) && c.definition.validations.length > 0);
-    const addedFields = packagedAddedFields(owner.definition, contributors);
+    // A disabled package's extension is withheld from the served fold, so it
+    // adds nothing the served object carries; its field is no packaged one.
+    const addedFields = packagedAddedFields(
+      owner.definition,
+      contributors.filter((c) => !(c.ownership === 'extend' && this.isPackageDisabled(c.packageId))),
+    );
     if (!extended && addedFields === undefined) return owner.definition;
     return {
       ...owner.definition,
