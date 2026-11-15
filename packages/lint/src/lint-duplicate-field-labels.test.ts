@@ -2,7 +2,10 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { BUILTIN_SYSTEM_FIELD_LABEL_LOCALES } from '@objectstack/spec/system';
+
 import { AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
 import { FIELD_LABEL_DUPLICATE, lintDuplicateFieldLabels } from './lint-duplicate-field-labels.js';
 
 /** The staging object: an AI-added `user` field labelled like the platform's `owner_id` in zh-CN. */
@@ -88,5 +91,11 @@ describe('lintDuplicateFieldLabels', () => {
       const rules = runAuthoringRules(command, { normalized: stack, parsed: stack }).filter((f) => f.rule === FIELD_LABEL_DUPLICATE);
       expect(rules.map((f) => f.severity), command).toEqual(['error']);
     }
+  });
+
+  it('the explanation names exactly the locales the platform translates the injected columns into', () => {
+    const text = explainRule(FIELD_LABEL_DUPLICATE)!.paragraphs.join(' ');
+    const named = new Set([...text.matchAll(/`([a-z]{2}(?:-[A-Z]{2})?)`/g)].map((m) => m[1]));
+    expect([...named].sort()).toEqual([...BUILTIN_SYSTEM_FIELD_LABEL_LOCALES].sort());
   });
 });

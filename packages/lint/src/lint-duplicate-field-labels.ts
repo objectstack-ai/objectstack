@@ -50,13 +50,17 @@
  * One finding per group of fields that share a label: in the authored pass
  * (then the label clashes for every reader the stack does not translate, and
  * the finding names no locale), or else only in some locales (the finding
- * names them). Each finding names every field of the group, so the message is
- * the same on every run and the publish door's differential charges a stored
- * object's clash only to the write that creates it.
+ * names them). Each finding names every field of the group and nothing
+ * positional beyond the object, so the message is the same on every run, which
+ * is what the publish door's differential compares.
  *
  * `error`: the build, `os validate`, `os lint` and the publish door refuse it.
- * Nothing on the boot or registration path runs the author-time rules, so an
- * app that is already installed keeps loading.
+ * At the door, as for every gating rule there, a write of ANOTHER object is
+ * never charged with a stored object's clash, while a write of the object
+ * itself is judged on the body it sends, so re-saving an object that still
+ * carries a clash is refused until the clash is fixed. Nothing on the boot or
+ * registration path runs the author-time rules, so an app that is already
+ * installed keeps loading and serving.
  */
 
 import {

@@ -2352,11 +2352,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // name in every grid, card and form, and editing one reads as editing the
   // other. GATING on all three commands and on the runtime publish gate's
   // `object` writes, the door an AI or Studio author has. The labels compared
-  // are the ones `translateObject` serves (see the rule's module note), and
-  // the gate's differential charges a stored object's clash only to the write
-  // that creates it, so an object already stored with one keeps saving
-  // unrelated edits. No boot or registration path runs this table, so an app
-  // already installed keeps loading.
+  // are the ones `translateObject` serves (see the rule's module note). The
+  // gate's differential never charges a stored object's clash to a write of
+  // another object; a re-save of that object is judged on its own body, as
+  // for every gating rule at this door. No boot or registration path runs
+  // this table, so an app already installed keeps loading.
   {
     name: 'lintDuplicateFieldLabels',
     tier: 'gating',
