@@ -38,8 +38,8 @@
   `~/.claude/projects/*/<id>.jsonl`;`verify-review-tier.mjs` 拒即重跑 ⛔ 不改档名。
 - ④ 设计判断欠 schema、governed 规则文本、收窄三面:逐 `hits` 文件判改动对所引代码与
   验收场景是否成立,ADR 另判首个消费者与执行计划;①–④ 合称完整复核,余面同形无 ④。
-- 实质 head 各欠一轮完整复核,发现逐条定 must-fix/should-fix/nit(无碍正确性与契约);有前两级
-  才由同一复核者 delta 复核修复;仅 nit 即终轮,nit 记接受的偏差、转后续卡或只改散文面。
+- 实质 head 各欠一轮完整复核,发现逐条定 must-fix/should-fix/nit(无碍正确性与契约);有前两级才
+  由同一复核者 delta 复核修复;仅 nit 即终轮,nit 记接受的偏差、转 PR 后续卡或只改散文面。
 - 另记作者:PR `user.login` 非 `objectstack-fleet[bot]` ⇒ ③ 注点名该 login(脱中继写),落地前读。
 - ③ 恒查(席位自读同):SQL 可下推处新增 id 物化或应用内 join 而无因由 ⇒ 记发现(AGENTS.md)。
 - 简报从 `record-recognisers.mjs --brief-template` 起稿:只读条款与输入集内建,⛔ 不删 ⛔ 行。
@@ -54,7 +54,7 @@
 - ② PR check 全绿,⛔ 非 required 子集;例外:merge-base 同签名的红不计、按设计而红见 SKILL.md。
 - 签名 = 失败步 + 首错行,读 base check runs 的 API ⛔ 不凭口述;主干红止血立单不变。
 - 落地时仍欠复核的 PR 在落地 head 复审,复核席或车道席按 (a)(b)(c) 接;FAIL ⛔ 不修已关 PR。
-- 每条 must-fix 引该记录立新卡、按发现定级;回退仅限主干红(p0,main-red 约定①)或安全边界。
+- 每条 must-fix 引该记录立卡、按发现定级;回退仅限主干红(p0,main-red 约定①)或安全边界。
 
 ## 等复核标记 `needs:contract-review`
 
