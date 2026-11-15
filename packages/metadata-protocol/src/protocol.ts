@@ -11071,12 +11071,32 @@ export class ObjectStackProtocolImplementation implements
      *         for any item with no history. Without that
      *         asymmetry an outage would be indistinguishable from "these two
      *         versions are identical" (ADR-0110 D3).
+     * @throws {@link PackageScopedNameRefusedError} — 409 /
+     *         `RESOURCE_CONFLICT` (ADR-0150 D3/D4, #33308), for a type stored
+     *         per `(package, name)`, when no `packageId` is named and two or
+     *         more row slots hold the name, or the bare plain read refuses it
+     *         (`details.candidates` naming every holder), before any version
+     *         is read; and when `packageId` names a package that neither
+     *         holds a row of the name nor ships it while another slot holds
+     *         one (`not-held-by-qualifier`). The history and rollback doors'
+     *         rule (`historySlotOf`).
+     * @throws `VERSION_NOT_FOUND` — 404 (#33308), with `packageId`, when an
+     *         explicit version belongs to another holder's slot, or is
+     *         attributed to no package while two hold the name, saying whose
+     *         it is: nothing is compared. With `packageId` the default `to`
+     *         side is that holder's own active row and the default `from`
+     *         side is found among its own versions.
+     * @throws `VALIDATION_ERROR` — 400 (#33308), when `packageId` is named
+     *         on a type not stored per `(package, name)`: refused, never
+     *         accepted and dropped.
      */
     async diffMetaItem(request: {
         type: string;
         name: string;
         fromVersion?: number;
         toVersion?: number;
+        /** [ADR-0150 D3/D4, #33308] The package whose versions to compare (`?package=`); omitted, the name's. */
+        packageId?: string;
     }): Promise<{
         type: string;
         name: string;
