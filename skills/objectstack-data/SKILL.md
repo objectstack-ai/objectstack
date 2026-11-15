@@ -66,7 +66,7 @@ database table and exposes automatic CRUD APIs.
 |:---------|:-------|:-----------|:------------|
 | `name`   | string | `snake_case` | Immutable machine identifier (`/^[a-z_][a-z0-9_]*$/`) |
 | `fields` | map    | keys in `snake_case` | Field definitions |
-| `sharingModel` | enum | one of the four below | Org-wide default record visibility (OWD). Zod marks it optional, but **a publish with no authored `sharingModel` is refused** with the 422 lint envelope `security-owd-unset` — absence is not a decision (maintainer ruling 2026-08-13). Author it on every object |
+| `sharingModel` | enum | one of the four below | Org-wide default record visibility (OWD). Zod marks it optional, but **a publish with no authored `sharingModel` is refused** with the 422 lint envelope `security-owd-unset` — absence is not a decision. Author it on every object |
 
 **`sharingModel` — the four canonical values** (ADR-0090 D4; legacy aliases
 removed). A *custom* object that omits it resolves to `private` at runtime, but
@@ -106,8 +106,6 @@ all (Relationship Patterns below).
 
 ### Object Capabilities (`enable`)
 
-Toggle system behaviours per object:
-
 | Flag | Default | Purpose |
 |:-----|:--------|:--------|
 | `trackHistory` | `false` | Field-level audit trail |
@@ -124,7 +122,7 @@ Toggle system behaviours per object:
 
 ## Search Fields (`searchableFields`)
 
-`searchableFields` on the object is the canonical set `$search` scans (ADR-0061).
+`searchableFields` on the object is the canonical set `$search` scans.
 Leave it unset and search auto-defaults to the `nameField` plus the object's
 short-text and enum columns (`text` / `email` / `phone` / `url` / `autonumber` /
 `textarea` / `markdown` / `select`) plus every field marked `searchable: true`,
@@ -254,7 +252,7 @@ schema, and the **database column wins at write time**:
 | rename a field | `renamedFrom: ['old_key']` on the new key: the sync carries the column's values |
 | declared index removed, or its columns changed | `os migrate apply` (`--allow-destructive` when it drops, or rebuilds as `UNIQUE`) |
 
-**`required` is not the `NOT NULL` dial (ADR-0113).** `required` is the
+**`required` is not the `NOT NULL` dial.** `required` is the
 **write contract** — the engine refuses an insert that omits the value — and it
 implies nothing about the column. The physical constraint is a separate explicit
 opt-in, `storage: { notNull: true }`, and it is what drift detection compares
@@ -293,7 +291,7 @@ picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`
   accepted" (terms, a confirmation) is a `validations[]` rule, not `required`.
   The default also lands seeded or imported rows that omit the column on a real
   `false` instead of a null that only looks unchecked.
-- A person on the record (assignee, approver, reviewer) is `type: 'user'` with
+- A person on the record (approver, reviewer) is `type: 'user'` with
   no `reference`, and optional unless the request says otherwise — the platform
   already stamps the owner and `created_by`.
 - A dynamic default (`defaultValue: 'current_user'`, `'NOW()'`, a CEL envelope)
@@ -312,7 +310,7 @@ picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`
 | Hierarchical | `tree` field (self-reference) |
 | Record status / lifecycle | a `select` on the business object (plus a `state_machine` validation) — never a separate status / stage / step table |
 | Approval, review, routing, audit trail | not objects: an approval is a flow node (**objectstack-automation**) and its trail is platform history; model only the people it references (approver, reviewer), as `user` fields beside the owner |
-| Record owner | the platform's `owner_id` (`ownership: 'user'`, the default) — never a hand-added "owner" / "person in charge" lookup, a second owner that owner-scoped visibility and "My records" views never read; `ownership: 'none'` only for a shared catalog or a pure junction table |
+| Record owner | the platform's `owner_id` (`ownership: 'user'`, the default), also when the request says assignee, 负责人 or 处理人 — never a hand-added owner field, a second owner that owner-scoped visibility and "My records" views never read. A handler the request names apart from the owner is a `user` field that grants no access, with a label no other visible field carries, injected ones included: `owner_id` (Owner, 负责人), `created_by` (创建人), `updated_by` (更新人), `created_at` (创建时间), `updated_at` (更新时间). `ownership: 'none'` only for a shared catalog or a pure junction table |
 
 > **`multiple: true` lookup ≠ junction object.** A multi-value lookup
 > (`{ type: 'lookup', reference: 'x', multiple: true }`) is stored and read as an
@@ -339,9 +337,7 @@ one: `draft` / `pending` / `new`), never a terminal one; keys and values are
 option `value`s, never labels.
 
 > **There is NO `unique` validation type** — uniqueness is a unique **index**
-> with its scope (ADR-0120; [rules/validation.md § Uniqueness](./rules/validation.md#uniqueness--use-unique-indexes)).
-
-See [rules/validation.md](./rules/validation.md) for all types and examples.
+> with its scope ([rules/validation.md § Uniqueness](./rules/validation.md#uniqueness--use-unique-indexes)).
 
 ### Index Patterns
 
@@ -372,13 +368,12 @@ To add fields/validations/indexes to an object you do not own, author
 `200`, range `0–999`); an extension can add but never remove, except that a new
 `label` without `pluralLabel` clears the base plural unless a tenant authored it (set both). ⛔ Not the same key
 as object-level `ownership` (the record-ownership enum
-`'user' | 'business_unit' | 'org' | 'none'`). Schema:
-`node_modules/@objectstack/spec/src/data/object.zod.ts` (`ObjectExtensionSchema`).
+`'user' | 'business_unit' | 'org' | 'none'`).
 
 **Relabel a field the owner declares with `fieldPatches` — never by redeclaring
 it in `fields`**, which takes the field over whole and cuts it off from the
-owner's upgrades. A patch carries display keys only
-(`BASE_FIELD_DISPLAY_WHITELIST`): `label`, `description`, `inlineHelpText`,
+owner's upgrades. A patch carries display keys only:
+`label`, `description`, `inlineHelpText`,
 `placeholder`, and an option's `label` keyed by its stored `value`; the type,
 values and rules stay the owner's. A key the tenant edited keeps the tenant's
 text; between two extensions the higher `priority` wins. A patch naming a field
@@ -386,7 +381,7 @@ or option value the target lacks is refused at install and by `os validate`, and
 a `picklist`-bound field's options are never patchable. Example:
 `defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } } })`.
 
-**An object an installed package ships** (ADR-0146 D10) is extended from the
+**An object an installed package ships** is extended from the
 base's paired `.custom` package (`hotcrm.custom`; **objectstack-platform**
 § Customizing an installed package), never replaced: it takes no `overrides`
 declaration. Every field the pair adds ends in `__c` (`region__c`). The suffix is
@@ -416,7 +411,7 @@ hand-writing an RLS policy (ADR-0057 D1): `own` (default) · `own_and_reports` �
 only `own` and `org` work in open source — the hierarchy-relative three need the
 paid `@objectstack/security-enterprise` plugin, **fail closed to `own`** without
 it, and `defineStack` errors unless the grant declares
-`requires: ['hierarchy-security']`. Schema: `PermissionSetSchema.objects.*`.
+`requires: ['hierarchy-security']`.
 
 ### Ownership queues — park a record for a team to claim
 

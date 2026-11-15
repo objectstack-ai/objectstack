@@ -120,7 +120,8 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         help: "Wie diese Identität angelegt wurde – idp_provisioned (föderiertes SSO, Just-in-Time) oder env_native (lokale Registrierung / Endbenutzer der App). Vom System verwaltet; nicht bearbeiten.",
         options: {
           idp_provisioned: "Vom IdP bereitgestellt",
-          env_native: "Lokales Konto"
+          env_native: "Lokales Konto",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {

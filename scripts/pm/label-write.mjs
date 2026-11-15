@@ -164,7 +164,9 @@
  *
  *   judged    by post-stamped's `judgeBody`, the ONE path its own `--comment` takes: the stamp contract with
  *             `{{NOW}}` read by this act, the signature first line, a claim's keyed lines, a record's line,
- *             the decision facets. A refusal is exit 2 with zero writes, its text post-stamped's own.
+ *             a record's tier (a record naming `CONTRACT_REVIEW_TIER` folds only with `--tier-evidence PATH`,
+ *             the reviewing run's transcript `verify-review-tier.mjs` passes), the decision facets. A refusal
+ *             is exit 2 with zero writes, its text post-stamped's own, naming this tool.
  *   paced     as every stroke: the dispatch POST behind `write-pace`, every write in it spaced by the executor.
  *   read back after a success run, each part on its own line: `④ labels` and `④ assignees` against the ②
  *             target; `④ comment` located on the board by its stored bytes (`pickRelayComment`) and judged by
@@ -286,9 +288,11 @@
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// The self-test's at-tier transcript fixture names the tier's value from the one place it is declared.
+import { CONTRACT_REVIEW_TIER } from './dispatch-gates.mjs';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -829,7 +833,7 @@ export function releaseTextRefusal(text) {
  * Returns `judgeBody`'s answer: `{ ok: true, rendered }` or `{ ok: false,
  * rendered, text }`. Pure given the instants.
  */
-export function composeReleaseBody({ text, resume, knock, serverNow, age, nowMs } = {}) {
+export function composeReleaseBody({ text, resume, knock, serverNow, age, nowMs, tierEvidence = null } = {}) {
   // Both instants are READINGS taken off the board by this act, so they are
   // declared as `{{WAS:…}}` — the stamp contract's spelling for a quoted
   // clock — at seconds grain, beside whatever `{{NOW}}` the operator stamped.
@@ -838,7 +842,7 @@ export function composeReleaseBody({ text, resume, knock, serverNow, age, nowMs 
     `Released by \`label-write.mjs --release\`: re-check ${knock.id} ({{WAS:${seconds(knock.created_at)}}}) unanswered for ` +
     `${formatHoursMinutes(age.ageMs)} on the server clock {{WAS:${seconds(serverNow)}}}, at or past \`RECLAIM_AFTER_HOURS = ${RECLAIM_AFTER_HOURS}\`.`;
   const raw = `${String(text).replace(/\s+$/, '')}\n\n${resume.line}\n${provenance}`;
-  return judgeBody(raw, { mode: 'comment' }, nowMs, 'label-write');
+  return judgeBody(raw, { mode: 'comment', tierEvidence }, nowMs, 'label-write');
 }
 
 /**
@@ -943,6 +947,7 @@ export function parseOptions(argv) {
     recheckComment: null,
     commentFile: null,
     resumeFrom: null,
+    tierEvidence: null,
   };
   const collect = { '--add': 'add', '--remove': 'remove', '--assign': 'assign', '--unassign': 'unassign' };
 
@@ -965,6 +970,7 @@ export function parseOptions(argv) {
     else if (flag === '--recheck-comment') opts.recheckComment = value();
     else if (flag === '--comment-file') opts.commentFile = value();
     else if (flag === '--resume-from') opts.resumeFrom = value();
+    else if (flag === '--tier-evidence') opts.tierEvidence = value() ?? '';
     else return { ok: false, error: `unrecognised option \`${flag}\`` };
   }
 
@@ -1012,6 +1018,8 @@ export function parseOptions(argv) {
   if (opts.clearAssignees && (opts.assign.length || opts.unassign.length)) {
     return { ok: false, error: '--clear-assignees cannot be combined with --assign/--unassign' };
   }
+  if (opts.tierEvidence !== null && !opts.commentFile) return { ok: false, error: '--tier-evidence PATH is the transcript behind a `## Contract review` record and travels with --comment-file PATH; alone it judges nothing' };
+  if (opts.tierEvidence === '') return { ok: false, error: '--tier-evidence names no file: pass the reviewing run\'s transcript, --tier-evidence PATH' };
   if (opts.land && !opts.commentFile) return { ok: false, error: '--land folds the landing into a verdict comment\'s stroke and needs --comment-file PATH; a bare landing is the relay actions file `rest-channel.md` spells' };
   const planned = opts.add.length || opts.remove.length || opts.assign.length || opts.unassign.length || opts.clearAssignees;
   if (opts.commentFile && !planned && !opts.land) {
@@ -1032,7 +1040,7 @@ const USAGE = [
   '                                  [--allow-two-states] [--dry-run] [--json]',
   '  node scripts/pm/label-write.mjs --issue N --release --recheck-comment ID --comment-file PATH',
   `                                  --resume-from BRANCH@SHA|${RESUME_FROM_NONE} [--repo OWNER/NAME] [--dry-run] [--json]`,
-  '  node scripts/pm/label-write.mjs --issue N [label/assignee flags] --comment-file PATH [--land] [--dry-run] [--json]',
+  '  node scripts/pm/label-write.mjs --issue N [label/assignee flags] --comment-file PATH [--tier-evidence PATH] [--land] [--dry-run] [--json]',
   '  node scripts/pm/label-write.mjs --self-test',
   '',
   `  --release reclaims a SILENT claim: ${RELEASE_FROM} → ${RELEASE_TO}, every assignee cleared, behind the \`Release:\``,
@@ -1044,6 +1052,8 @@ const USAGE = [
   '  --comment-file PATH beside a label/assignee change folds the comment (a Claim:, a Release:, a verdict) into the',
   '  SAME stroke, comment first, judged by post-stamped\'s own path (stamp, signature, keyed lines); --land appends',
   '  pr_ready then automerge_enable on a pull request. RELAY-ONLY; every part is read back on its own ④ line.',
+  '  A `## Contract review` record naming CONTRACT_REVIEW_TIER folds only with --tier-evidence PATH, the reviewing run\'s',
+  '  transcript, passed by verify-review-tier.mjs (post-stamped\'s rule; the path stays local).',
   '',
   '  Additive `POST .../labels` and directed `DELETE .../labels/{name}` first — neither can strip a',
   '  label a concurrent seat wrote. A platform refusal falls back ONCE to `PATCH .../issues/{n}` with',
@@ -1364,7 +1374,7 @@ async function foldStroke(c) {
   } catch (e) {
     return refuse(`cannot read --comment-file ${options.commentFile}: ${e?.message ?? e}`);
   }
-  const judged = judgeBody(text, { mode: 'comment' }, c.clock().getTime(), 'label-write');
+  const judged = judgeBody(text, { mode: 'comment', tierEvidence: options.tierEvidence }, c.clock().getTime(), 'label-write');
   if (!judged.ok) {
     record(judged.text);
     nothing();
@@ -1643,7 +1653,7 @@ export async function runRelease(options, deps = {}) {
   const why = releaseTextRefusal(text);
   if (why) return refuse(why, { stoppedAt: 2 });
   // Judged on post-stamped's path, as `--comment-file` is (header): an unsigned body is exit 2 here, before the stroke.
-  const judged = composeReleaseBody({ text, resume, knock: { id: knock.id, created_at: knock.created_at }, serverNow, age, nowMs: clock().getTime() });
+  const judged = composeReleaseBody({ text, resume, knock: { id: knock.id, created_at: knock.created_at }, serverNow, age, nowMs: clock().getTime(), tierEvidence: options.tierEvidence });
   if (!judged.ok) {
     record(judged.text);
     record(nothing());
@@ -2118,7 +2128,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CLI: what a typo must never be allowed to mean': 8,
   'the relay transport: ONE dispatch carrying the whole stroke, the same read-back, and an accepted dispatch with no run UNCONFIRMED under auto too — never a direct write': 14,
   'the release: a silent claim reclaimed in ONE relay stroke — Release: comment → pm:queue on → pm:dispatched off → unassign — on the knock\'s SERVER-clock age, RELAY-ONLY, never a direct write': 34,
-  [FOLD_BATTERY]: 24,
+  [FOLD_BATTERY]: 28,
   [REAL_TRANSPORT_BATTERY]: 5,
   [STATELESS_BATTERY]: 19,
 });
@@ -2518,7 +2528,7 @@ export async function selfTest() {
       const composeSource = own.slice(own.indexOf('export function composeReleaseBody('), own.indexOf('export function releaseActions('));
       const releaseSource = own.slice(own.indexOf('export async function runRelease('), own.indexOf('function reportPrerequisite('));
       t('structural: --release judges its composed body with post-stamped\'s judgeBody before it packs the stroke, and label-write defines no reader of its own', [
-        /return judgeBody\(raw, \{ mode: 'comment' \}, nowMs, 'label-write'\)/u.test(composeSource),
+        /return judgeBody\(raw, \{ mode: 'comment', tierEvidence \}, nowMs, 'label-write'\)/u.test(composeSource),
         releaseSource.indexOf('composeReleaseBody(') > 0 && releaseSource.indexOf('composeReleaseBody(') < releaseSource.indexOf('packRequest('),
         /\brenderBody\(/u.test(own),
         /function\s+(renderBody|signatureRefusal|claimKeyedLineRefusals|recordKeyedLineRefusals|decisionFacetRefusals|vacantLedgerRefusals)\b/u.test(own),
@@ -2640,11 +2650,34 @@ export async function selfTest() {
     const dry = await fold([...claimArgv, '--dry-run'], queued, 'success', { send: async () => { throw new Error('a dry run must not dispatch'); } });
     t('a dry run judges and packs the stroke, sends nothing, and says the board was never read back', [dry.exit, dry.res.dryRun, dry.res.payload?.actions.map((a) => a.op), dry.text.includes('never the board')], [EXIT_OK, true, ['comment', 'labels_add', 'labels_remove', 'assign'], true]);
 
+    // A `## Contract review` record naming the tier folds only on --tier-evidence that verify-review-tier passes.
+    const RECORD_FILE = '/tmp/self-test/record.md';
+    const RECORD = `${SIG}\n## Contract review\n\nServed-tier: \`CONTRACT_REVIEW_TIER\`\nHead-sha: \`${'0123456789abcdef'.repeat(2)}01234567\`\nLocal-runs: none\n\n**VERDICT: PASS**\n`;
+    const recordArgv = ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--remove', 'needs:contract-review', '--comment-file', RECORD_FILE];
+    const tierDir = mkdtempSync(join(tmpdir(), 'label-write-tier-'));
+    try {
+      const turn = (model) => JSON.stringify({ type: 'assistant', requestedModel: model, message: { role: 'assistant', model, content: [] } });
+      const atTier = join(tierDir, 'at-tier.output');
+      const offTier = join(tierDir, 'off-tier.output');
+      writeFileSync(atTier, [turn(CONTRACT_REVIEW_TIER), turn(CONTRACT_REVIEW_TIER)].join('\n'));
+      writeFileSync(offTier, [turn(CONTRACT_REVIEW_TIER), turn('other-model-for-the-self-test')].join('\n'));
+      const recBoard = { kind: 'pull', labels: ['needs:contract-review', 'domain:skills'], serverNow: at };
+      const recFiles = { files: { ...files, [RECORD_FILE]: RECORD } };
+      const bare = await fold(recordArgv, recBoard, 'success', recFiles);
+      t('⛔ an at-tier RECORD folded with no --tier-evidence is refused by post-stamped\'s judge, naming THIS tool: exit 2, zero sends', [bare.exit, bare.sent.length, bare.text.includes('label-write: REFUSED'), bare.text.includes('--tier-evidence')], [EXIT_USAGE, 0, true, true]);
+      const off = await fold([...recordArgv, '--tier-evidence', offTier], recBoard, 'success', recFiles);
+      t('⛔ …and with a transcript one turn of which was served off the tier: exit 2, zero sends, no path in the refusal', [off.exit, off.sent.length, off.text.includes(tierDir)], [EXIT_USAGE, 0, false]);
+      const good = await fold([...recordArgv, '--tier-evidence', atTier], recBoard, 'success', recFiles);
+      t('⭐ …while the same record with an at-tier transcript folds: the record and the label removal in ONE dispatch, exit 0', [good.exit, good.sent.length, good.sent[0]?.actions.map((a) => a.op)], [EXIT_OK, 1, ['comment', 'labels_remove']], good.text.slice(-600));
+    } finally {
+      rmSync(tierDir, { recursive: true, force: true });
+    }
+    t('the CLI: --tier-evidence rides a --comment-file stroke; alone, or naming no file, it is refused', [parseOptions([...recordArgv, '--tier-evidence', 'x.output']).ok, parseOptions(['--issue', '7', '--add', 'x', '--tier-evidence', 'x.output']).ok, parseOptions([...recordArgv, '--tier-evidence=']).ok], [true, false, false]);
     t('the CLI: a lone --comment-file is post-stamped\'s write; --land needs --comment-file; --land never rides a --release', [parseOptions(['--issue', '7', '--comment-file', 'c.md']).ok, parseOptions(['--issue', '7', '--land']).ok, parseOptions([...RELEASE_ARGV, '--land']).ok], [false, false, false]);
     t('…while a claim fold, a verdict fold and a release all parse', [parseOptions(claimArgv).ok, parseOptions(verdictArgv).ok, parseOptions(RELEASE_ARGV).ok], [true, true, true]);
     const own = readFileSync(SELF_PATH, 'utf8');
     const foldSource = own.slice(own.indexOf('async function foldStroke('), own.indexOf('export async function runRelease('));
-    t('structural: the fold judges its comment with post-stamped\'s judgeBody and sends exactly ONE dispatch', [/judgeBody\(text, \{ mode: 'comment' \}/u.test(foldSource), (foldSource.match(/c\.send\(/gu) ?? []).length, /\bdoCall\('(label-add|label-delete|assignee-add|assignee-remove|card-patch)'/u.test(foldSource)], [true, 1, false]);
+    t('structural: the fold judges its comment with post-stamped\'s judgeBody and sends exactly ONE dispatch', [/judgeBody\(text, \{ mode: 'comment', tierEvidence: options\.tierEvidence \}/u.test(foldSource), (foldSource.match(/c\.send\(/gu) ?? []).length, /\bdoCall\('(label-add|label-delete|assignee-add|assignee-remove|card-patch)'/u.test(foldSource)], [true, 1, false]);
     const duties = readFileSync(new URL('.claude/skills/pm-dispatch/references/execution-duties.md', REPO_ROOT), 'utf8');
     const landing = readFileSync(new URL('.claude/skills/pm-dispatch/references/landing-operations.md', REPO_ROOT), 'utf8');
     t('↔ the procedure text sends a claim and a landing through the fold, so a seat reads ONE stroke where it used to read two', [duties.includes('--comment-file'), landing.includes('--land')], [true, true]);

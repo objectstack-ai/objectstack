@@ -273,6 +273,14 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             const body = cfg.body === undefined ? undefined : resolveValueSlot(engine, cfg.body, variables, 'body', context);
 
             const durable = cfg.durable === true;
+            // The verb, resolved ONCE for every arm (the descriptor's "Default
+            // GET; POST when durable is true"): an authored `method` is sent as
+            // written; absent, a durable callout POSTs and a request/response
+            // call GETs. The durable arm's outbox enqueue and its no-outbox
+            // fallback (awaited, or in the background on the save path) both
+            // read this one value, so a flow sends the same verb whether or not
+            // an outbox is wired.
+            const method = cfg.method ?? (durable ? 'POST' : 'GET');
             const timeoutMs = cfg.timeoutMs;
             // Read as written (or as the credential channel holds it): no
             // template resolves here, so what was authored is what signs.
@@ -281,7 +289,6 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             // One inline send: the default mode, and the durable arm's no-outbox
             // fallback (awaited, or in the background on the save path).
             const sendInline = async () => {
-                const method = cfg.method ?? 'GET';
                 // #4354 — unlike a connector action, an HTTP call's effect IS
                 // knowable: the method says it. A GET reads and can never write, so
                 // it reports a real `0`; anything else is a mutating call.
@@ -376,7 +383,7 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                             dedupKey: randomUUID(),
                             label: `flow:${node.id}`,
                             url,
-                            method: cfg.method ?? 'POST',
+                            method,
                             headers,
                             signingSecret,
                             timeoutMs,
@@ -420,7 +427,8 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                     }
                 }
                 // No outbox available — degrade to a best-effort inline call,
-                // which signs exactly as the outbox would have.
+                // which sends the verb the outbox would have and signs exactly
+                // as the outbox would have.
                 if (onSavePath(context)) {
                     // Ruling 6810500711, letter D: the record save never waits on
                     // an external system. A run after a record change holds the

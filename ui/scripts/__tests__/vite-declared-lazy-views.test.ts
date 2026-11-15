@@ -5,6 +5,7 @@ import { attachedDocs } from './helpers/attached-docs';
 import {
   APP_CONTENT_PATH,
   DECLARED_LAZY_VIEWS_STILL_EAGER,
+  DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS,
   EAGER_WALK_CONTROL,
   bareSideEffectImport,
   declaredSideEffectful,
@@ -53,6 +54,28 @@ describe('DECLARED_LAZY_VIEWS_STILL_EAGER', () => {
   });
 });
 
+describe('DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS', () => {
+  it('is sorted, free of duplicates, and names declared-lazy files that exist', () => {
+    const entries = [...DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS];
+    expect(entries).toEqual([...new Set(entries)]);
+    expect(entries).toEqual([...entries].sort());
+    const declared = parseDeclaredLazyViews(read(APP_CONTENT_PATH));
+    for (const entry of entries) {
+      expect(fs.existsSync(path.join(REPO_ROOT, entry)), entry).toBe(true);
+      expect(declared, `${entry} is listed but no longer declared lazy`).toContain(entry);
+    }
+  });
+
+  it('lists only views that really carry a side effect, and none the eager ledger pins', () => {
+    // The plugin refuses a stale entry at build time; this is the same claim
+    // read from the sources, so a pure view cannot sit here undeclared.
+    for (const entry of DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS) {
+      expect(bareSideEffectImport(read(entry)), entry).not.toBeNull();
+      expect(DECLARED_LAZY_VIEWS_STILL_EAGER, entry).not.toContain(entry);
+    }
+  });
+});
+
 describe('parseDeclaredLazyViews', () => {
   it('finds every relative module AppContent declares, resolved to real files', () => {
     const declared = parseDeclaredLazyViews(read(APP_CONTENT_PATH));
@@ -61,15 +84,16 @@ describe('parseDeclaredLazyViews', () => {
     // vacuously. Eight single-file route views (objectui#6535), the
     // metadata-admin directory barrel that six declarations share, and the two
     // marketplace pages (objectui#6681 measured three; objectui#12733 retired the
-    // Installed Apps one), and the app's report index (objectui#13020) = twelve
-    // distinct files.
-    expect(declared).toHaveLength(12);
+    // Installed Apps one), the app's report index (objectui#13020) and the
+    // object list (objectstack#33581) = thirteen distinct files.
+    expect(declared).toHaveLength(13);
     for (const view of declared) {
       expect(fs.existsSync(path.join(REPO_ROOT, view)), view).toBe(true);
     }
     expect(declared).toContain('packages/app-shell/src/views/ObjectDataPage.tsx');
     expect(declared).toContain('packages/app-shell/src/views/ComponentNavView.tsx');
     expect(declared).toContain('packages/app-shell/src/views/AppReportIndexView.tsx');
+    expect(declared).toContain('packages/app-shell/src/views/ObjectView.tsx');
     // The three surfaces objectui#6535 deliberately looked away from and
     // objectui#6681 measured. Named individually: a bare length assertion goes
     // on passing if the widened matcher swaps one surface for another.
@@ -147,8 +171,9 @@ describe('bareSideEffectImport', () => {
 
   it('agrees with the real sources: every unpinned declared view is pure', () => {
     // The plugin declares `moduleSideEffects: false` for exactly the declared
-    // views it has NOT pinned, so this is the claim it makes about this repo.
-    const pinned = new Set(DECLARED_LAZY_VIEWS_STILL_EAGER);
+    // views it has neither pinned nor listed as side-effectful, so this is the
+    // claim it makes about this repo.
+    const pinned = new Set([...DECLARED_LAZY_VIEWS_STILL_EAGER, ...DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS]);
     const declared = parseDeclaredLazyViews(read(APP_CONTENT_PATH));
     const unpinned = declared.filter((view) => !pinned.has(view));
     expect(unpinned.length).toBeGreaterThan(0);
@@ -254,7 +279,7 @@ describe('EAGER_WALK_CONTROL', () => {
     // means anything while AppContent still imports it outside a `lazy()`.
     expect(fs.existsSync(path.join(REPO_ROOT, EAGER_WALK_CONTROL))).toBe(true);
     const appContent = read(APP_CONTENT_PATH);
-    expect(appContent).toContain("import { ObjectView } from '../views/ObjectView.js';");
+    expect(appContent).toContain("import { ConsoleLayout } from '../layout/ConsoleLayout.js';");
     expect(parseDeclaredLazyViews(appContent)).not.toContain(EAGER_WALK_CONTROL);
   });
 });
@@ -366,12 +391,14 @@ describe('the prose attached to the exported constants (objectui#7289)', () => {
     APP_CONTENT_PATH,
     EAGER_WALK_CONTROL,
     DECLARED_LAZY_VIEWS_STILL_EAGER,
+    DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS,
   } as const;
 
   it('locates the block attached to each constant, and only that block', () => {
     const appContent = attachedDocs(source, 'APP_CONTENT_PATH');
     const control = attachedDocs(source, 'EAGER_WALK_CONTROL');
     const ledger = attachedDocs(source, 'DECLARED_LAZY_VIEWS_STILL_EAGER');
+    const sideEffectful = attachedDocs(source, 'DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS');
 
     // Controls that MUST hit: a phrase verified to be inside each attached
     // block. A locator that quietly found the wrong span would pass every pin
@@ -379,6 +406,7 @@ describe('the prose attached to the exported constants (objectui#7289)', () => {
     expect(appContent.prose).toContain('declarations are the subject');
     expect(control.prose).toContain('The positive control for the eager walk');
     expect(ledger.prose).toContain('Deleting a line is a MEASUREMENT');
+    expect(sideEffectful.prose).toContain('never declares');
 
     // ...and the neighbours are not swept in. These three declarations sit
     // consecutively with nothing but their own blocks between them, so an
@@ -388,11 +416,14 @@ describe('the prose attached to the exported constants (objectui#7289)', () => {
     expect(control.prose).not.toContain('declarations are the subject');
     expect(ledger.prose).not.toContain('The positive control for the eager walk');
     expect(ledger.prose).not.toContain('Pull the modules out of');
+    expect(ledger.prose).not.toContain('never declares');
+    expect(sideEffectful.prose).not.toContain('Deleting a line is a MEASUREMENT');
+    expect(sideEffectful.prose).not.toContain('Pull the modules out of');
 
     // The code is not prose. Without this the positive pin below would be
     // satisfiable by the ledger's own entry line.
-    expect(ledger.code).toContain("'packages/app-shell/src/views/RecordDetailView.tsx'");
-    expect(ledger.prose).not.toContain("'packages/app-shell/src/views/RecordDetailView.tsx'");
+    expect(sideEffectful.code).toContain("'packages/app-shell/src/views/RecordDetailView.tsx'");
+    expect(sideEffectful.prose).not.toContain("'packages/app-shell/src/views/RecordDetailView.tsx'");
   });
 
   /**
@@ -410,8 +441,8 @@ describe('the prose attached to the exported constants (objectui#7289)', () => {
 
   /**
    * What each constant carries AS DATA, recorded so the pin above cannot go
-   * vacuous in silence. The two controls carry exactly themselves; the ledger
-   * carries one entry.
+   * vacuous in silence. The two controls carry exactly themselves; the eager
+   * ledger is empty and the side-effectful one carries one entry.
    *
    * ⚠️ The ledger EMPTYING is a win, not a failure — the block above this
    * declaration says it in as many words ("Deleting a line is a MEASUREMENT,
@@ -424,6 +455,7 @@ describe('the prose attached to the exported constants (objectui#7289)', () => {
   it('records what each constant carries as data, so the pin cannot go vacuous', () => {
     expect(pathsCarriedBy(APP_CONTENT_PATH)).toEqual([APP_CONTENT_PATH]);
     expect(pathsCarriedBy(EAGER_WALK_CONTROL)).toEqual([EAGER_WALK_CONTROL]);
-    expect(pathsCarriedBy(DECLARED_LAZY_VIEWS_STILL_EAGER)).toHaveLength(1);
+    expect(pathsCarriedBy(DECLARED_LAZY_VIEWS_STILL_EAGER)).toEqual([]);
+    expect(pathsCarriedBy(DECLARED_LAZY_VIEWS_WITH_SIDE_EFFECTS)).toHaveLength(1);
   });
 });

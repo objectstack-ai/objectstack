@@ -58,8 +58,13 @@
  * instead (ADR-0144 D6), which the write-time projection (D5) fills — named
  * when the amount declares `currencyConfig.homeAmount`, and the declaration
  * to add when it does not — or group by the code field for one row per
- * currency. A measure over the home field is no record-mode amount (the home
- * field is `dynamic`), so this door never judges it: it is served unchanged.
+ * currency. An amount following its parent's code (a `MASTER_DETAIL.CODE`
+ * pointer) reads the home-field prescription alone: no grouping makes it one
+ * currency — a dimension over the path groups by the parent's column — and
+ * the engine door (`record-currency-aggregate-door.ts` in
+ * `@objectstack/objectql`) admits none either. A measure over the home field
+ * is no record-mode amount (the home field is `dynamic`), so this door never
+ * judges it: it is served unchanged.
  */
 
 import type { AnalyticsQuery } from '@objectstack/spec/contracts';
@@ -112,12 +117,17 @@ export function assertRecordCurrencyAggregatesGrouped(
       : `for one total in the home currency, point the measure at the home field of '${target.column}' `
         + `(the field its \`currencyConfig.homeAmount.field\` names on object '${target.object}'; declare `
         + '`homeAmount` there first if it has none)';
+    // A `MASTER_DETAIL.CODE` pointer: no grouping remedy (module header, the envelope).
+    const verdict = codeField.includes('.')
+      ? `so the query was NOT run: no grouping makes it one currency (a dimension over '${codePath}' groups `
+        + `by the parent's column, not by a code this record stores), and the ${measure.type} would combine `
+        + `amounts in different currencies into one number. Instead, ${homeRemedy}.`
+      : `but the query does not group by '${codePath}', so the query was NOT run. Without the grouping the `
+        + `${measure.type} would combine amounts in different currencies into one number. Either `
+        + `${homeRemedy}; or add the dimension over '${codePath}' to the query, which answers one row per currency.`;
     const err = invalidMemberError(
       `Measure '${member}' on cube '${cubeName}' takes the ${measure.type} of field '${target.path}', `
-      + `a record-currency amount whose currency is each record's '${codeField}', but the query does not `
-      + `group by '${codePath}', so the query was NOT run. Without the grouping the ${measure.type} would `
-      + `combine amounts in different currencies into one number. Either ${homeRemedy}; or add the `
-      + `dimension over '${codePath}' to the query, which answers one row per currency.`,
+      + `a record-currency amount whose currency is each record's '${codeField}', ${verdict}`,
       { member, param: 'measures', cube: cubeName },
     ) as Error & { field?: string; object?: string };
     err.field = target.path;

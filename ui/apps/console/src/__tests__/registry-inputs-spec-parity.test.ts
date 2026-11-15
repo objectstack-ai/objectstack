@@ -310,6 +310,10 @@ import '@object-ui/plugin-tree';
 import '@object-ui/plugin-map';
 import '@object-ui/plugin-gantt';
 import '@object-ui/plugin-timeline';
+// The same remedy for `list-view`, which the console registers as a lazy stub
+// since its first load stopped carrying `@object-ui/plugin-list`
+// (objectstack#33581): without this import the block leaves `covered`.
+import '@object-ui/plugin-list';
 
 /** This block's spec props schema, or `undefined` when this pin has none. */
 const specSchema = (type: string): unknown => (ComponentPropsMap as Record<string, unknown>)[type];

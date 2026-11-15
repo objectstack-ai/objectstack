@@ -553,6 +553,12 @@ describe('bounded checkpoints: a window seals into consecutive parts of at most 
 describe('the uncounted re-walk is bounded while a chain stays skipped (review#3 S1)', () => {
   const HOURS = 200;
   /**
+   * Each of these tests first drives `stalled()`: some 200 windows sealed and
+   * signed over a dozen passes. That costs 2-5 s on a quiet CI shard and more
+   * on a loaded one, against vitest's 5 s default, so the budget is stated.
+   */
+  const STALLED_TIMEOUT_MS = 30_000;
+  /**
    * org_s skipped at 00:00 by a row its canonical rule refuses, while org_a
    * writes every hour: org_a catches up 24 windows a pass while org_s holds
    * the floor at 00:00, until the cap stops the walk.
@@ -585,7 +591,7 @@ describe('the uncounted re-walk is bounded while a chain stays skipped (review#3
     expect(windowsRead.size).toBe(1 + AUDIT_SEAL_MAX_IDLE_WINDOWS_PER_PASS); // the floor window, then the cap
     expect(s.logger.lines.filter((l) => l.level === 'error').map((l) => l.message))
       .toContainEqual(expect.stringMatching(/'ledger_probe'.*walked .* windows that seal nothing.*chain\(s\) 'org:org_s'/));
-  });
+  }, STALLED_TIMEOUT_MS);
 
   it('seals the whole object again once the skipped chain is fixed: its window and the windows past the cap seal as window checkpoints, none late', async () => {
     const s = await stalled();
@@ -596,7 +602,7 @@ describe('the uncounted re-walk is bounded while a chain stays skipped (review#3
     expect(listed).toEqual(rows);
     expect(late).toEqual([]);
     expect(s.checkpoints().filter((c) => c.tenant_id === 'org_s').map((c) => [c.kind, c.window_start, c.row_ids])).toEqual([['window', at(0, 0), ['stuck']]]);
-  });
+  }, STALLED_TIMEOUT_MS);
 
   it('seals the whole object again once the skipped chain has nothing left to seal (its refused row gone): no chain is skipped, so the walk past the cap is not cut', async () => {
     const s = await stalled();
@@ -608,7 +614,7 @@ describe('the uncounted re-walk is bounded while a chain stays skipped (review#3
     const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
     expect(report.ok).toBe(true);
     expect(report.totals).toMatchObject({ unmodified: HOURS, unsealed: 0 });
-  });
+  }, STALLED_TIMEOUT_MS);
 });
 
 describe('the lock: audit.sealer, its fencing token on each checkpoint (D3, Q2 (a))', () => {

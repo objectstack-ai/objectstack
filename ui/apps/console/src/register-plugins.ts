@@ -25,12 +25,12 @@
 
 import { ComponentRegistry } from '@object-ui/core';
 
-// Eager imports — core views needed on most pages.  These are cheap (no heavy
-// 3rd-party deps) so paying their cost upfront is the right tradeoff.
+// Eager imports — core views the console shell itself imports by name today
+// (the shell's own helpers and record surfaces reach these four packages'
+// entries), so a lazy stub here would move nothing out of the first load.
 import '@object-ui/plugin-grid';
 import '@object-ui/plugin-form';
 import '@object-ui/plugin-view';
-import '@object-ui/plugin-list';
 import '@object-ui/plugin-detail';
 
 // Lazy plugins — registered as deferred loaders.  The first time the
@@ -42,6 +42,23 @@ import '@object-ui/plugin-detail';
 // A lazily-registered tag is still a full member of the public contract:
 // `getPublicConfigs()` resolves these stubs, so `kind:'react'` pages get them
 // in scope before the chunk loads (objectui#2953).
+// The list view and the gallery: nothing on the first load imports
+// `@object-ui/plugin-list` by name, so each tag it registers is a stub that
+// loads the package the first time a schema names it.
+ComponentRegistry.registerLazy('list-view', () => import('@object-ui/plugin-list'), {
+  namespace: 'plugin-list',
+  category: 'Views',
+});
+ComponentRegistry.registerLazy('list', () => import('@object-ui/plugin-list'), {
+  namespace: 'view',
+  skipFallback: true,
+  category: 'view',
+});
+ComponentRegistry.registerLazy('object-gallery', () => import('@object-ui/plugin-list'), {
+  namespace: 'plugin-list',
+  category: 'view',
+});
+
 ComponentRegistry.registerLazy('object-map', () => import('@object-ui/plugin-map'), {
   namespace: 'plugin-map',
   category: 'view',

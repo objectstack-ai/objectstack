@@ -31,7 +31,8 @@ import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ImportWizard } from '@object-ui/plugin-grid';
-import { ObjectStackAdapter, clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
+import { ObjectStackAdapter } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../../data-objectstack/src/sharedDiscovery';
 import { createIdentityImportDataSource, IDENTITY_IMPORT_OBJECT } from '../identityImport';
 
 const BASE_URL = 'http://identity-import-selector-pin.local';

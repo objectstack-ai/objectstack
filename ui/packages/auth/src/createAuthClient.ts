@@ -118,6 +118,7 @@ interface AuthErrorDependent {
 /** The thrown value of every auth-client rejection that goes through {@link toAuthError}. */
 type AuthClientError = Error & {
   code?: string;
+  status?: number;
   dependents?: AuthErrorDependent[];
   userMessage?: string;
   details?: Record<string, unknown>;
@@ -184,6 +185,17 @@ function readDependents(raw: unknown): AuthErrorDependent[] | undefined {
  * `details.cause`, never on the message, so the body's `details` object is
  * carried on the thrown error as the server sent it. A `details` that is not a
  * plain object is not carried.
+ *
+ * ## And so is the HTTP `status` (objectstack#33650)
+ *
+ * Not every refusal carries a code. better-auth 1.7.12's `GET
+ * /organization/get-invitation` answers an unknown, used, expired or revoked
+ * invitation with a 400 whose body is `{ message: "Invitation not found!" }`
+ * and nothing else, while every other 400 on that route names its code. The
+ * console can tell that answer apart only by the route it called, the status
+ * and the absence of a code, never by the English sentence, so the status is
+ * carried as well. The two-factor and invitation-preview errors in this file
+ * already carry theirs.
  */
 function toAuthError(
   error: BetterAuthErrorLike,
@@ -193,6 +205,7 @@ function toAuthError(
     error.message ?? fallbackMessage ?? `Auth request failed with status ${error.status}`,
   ) as AuthClientError;
   if (error.code) err.code = error.code;
+  if (typeof error.status === 'number') err.status = error.status;
   const dependents = readDependents(error.dependents);
   if (dependents) err.dependents = dependents;
   if (typeof error.userMessage === 'string' && error.userMessage.trim()) err.userMessage = error.userMessage;

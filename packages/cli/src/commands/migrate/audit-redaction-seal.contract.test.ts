@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [ADR-0154 D7] The three `os migrate audit-*` ledger-copy rewrites compose the
+// [ADR-0154 D7] The four `os migrate audit-*` ledger-copy rewrites compose the
 // crypto `os serve` seals with (`composeRedactionSeal`) and hand its `seal` to
 // every run, hot and archive, so a sealed row is amended before it is rewritten
 // or refused; and a run that refused one exits non-zero. What the `seal` does is
@@ -29,6 +29,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const COMMANDS: Record<string, readonly string[]> = {
   'audit-mail-bodies.ts': ['migrateMailLogBodyCopies', 'migrateArchivedMailLogBodyCopies'],
   'audit-key-material.ts': ['migrateKeyMaterialCopies', 'migrateArchivedKeyMaterialCopies'],
+  'audit-side-copies.ts': ['migrateSideCopies', 'migrateArchivedSideCopies'],
   'audit-metadata-bodies.ts': ['migrateStoredMetadataBodyCopies'],
 };
 

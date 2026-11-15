@@ -20,9 +20,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   ObjectStackAdapter,
-  clearSharedDiscoveryCache,
   readTransactionalBatchCapability,
 } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 import type { DataSourceMutationEvent } from '@object-ui/types';
 
 function makeDS(stub: Record<string, any>) {

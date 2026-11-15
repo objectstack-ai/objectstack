@@ -28,10 +28,22 @@ import { useServedViewItems } from '../hooks/useServedViewItems.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import type { DataSource } from '@object-ui/types';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
-import { ViewConfigPanel } from './ViewConfigPanel.js';
+// objectstack#33293: the view config panel loads with the first list, not with
+// the console. Statically, it held the view-variant inspector, `SchemaForm` and
+// the Studio form widgets in the EAGER closure, so a dashboard route downloaded
+// them too. It is drawn on every list (closed, it draws nothing), so its chunk
+// is fetched as the list mounts, before any admin can open it.
+const ViewConfigPanel = lazy(() =>
+  import('./ViewConfigPanel.js').then((m) => ({ default: m.ViewConfigPanel })),
+);
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { dropPublishedViewList } from './metadata-admin/viewListDrop.js';
-import { CreateViewDialog } from './CreateViewDialog.js';
+// objectstack#33582: the create-view dialog loads with the first list, as the
+// view config panel above does. Statically, it held the dataset catalogue and,
+// through it, the Studio `en` string namespace in the EAGER closure.
+const CreateViewDialog = lazy(() =>
+  import('./CreateViewDialog.js').then((m) => ({ default: m.CreateViewDialog })),
+);
 import {
   usePreviewDrafts,
 } from '../preview/PreviewModeContext.js';
@@ -1372,28 +1384,32 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                         showViewConfigPanel && isAdmin ? 'max-w-[280px] opacity-100' : 'max-w-0 opacity-0'
                     }`}
                 >
-                    <ViewConfigPanel
-                        open={showViewConfigPanel && isAdmin}
-                        onClose={() => { setShowViewConfigPanel(false); setViewConfigPanelMode('edit'); }}
-                        mode={viewConfigPanelMode}
-                        activeView={activeView}
-                        objectDef={objectDef}
-                        recordCount={recordCount}
-                        onSave={handleViewConfigSave}
-                        onViewUpdate={handleViewUpdate}
-                        onCreate={handleViewCreate}
-                        metadataClient={metadataClient}
-                        dataSource={dataSource}
-                        onAfterChange={() => setRefreshKey(k => k + 1)}
-                    />
+                    <Suspense fallback={null}>
+                        <ViewConfigPanel
+                            open={showViewConfigPanel && isAdmin}
+                            onClose={() => { setShowViewConfigPanel(false); setViewConfigPanelMode('edit'); }}
+                            mode={viewConfigPanelMode}
+                            activeView={activeView}
+                            objectDef={objectDef}
+                            recordCount={recordCount}
+                            onSave={handleViewConfigSave}
+                            onViewUpdate={handleViewUpdate}
+                            onCreate={handleViewCreate}
+                            metadataClient={metadataClient}
+                            dataSource={dataSource}
+                            onAfterChange={() => setRefreshKey(k => k + 1)}
+                        />
+                    </Suspense>
                 </div>
-                <CreateViewDialog
-                    open={showCreateViewDialog && isAdmin}
-                    onOpenChange={setShowCreateViewDialog}
-                    existingLabels={views.map((v: any) => v.label).filter(Boolean)}
-                    objectDef={objectDef}
-                    onCreate={(cfg) => handleViewCreate(cfg)}
-                />
+                <Suspense fallback={null}>
+                    <CreateViewDialog
+                        open={showCreateViewDialog && isAdmin}
+                        onOpenChange={setShowCreateViewDialog}
+                        existingLabels={views.map((v: any) => v.label).filter(Boolean)}
+                        objectDef={objectDef}
+                        onCreate={(cfg) => handleViewCreate(cfg)}
+                    />
+                </Suspense>
                 <PersonalViewNameDialog
                     open={!!personalViewDialog}
                     onOpenChange={(open) => { if (!open) setPersonalViewDialog(null); }}

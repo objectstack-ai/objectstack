@@ -1794,6 +1794,17 @@ export const CEILINGS = new Map([
   // NEW file, so this is an added row and no other row moves; set at the
   // landed line count (headroom 0, same convention as every lane charter above).
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 45],
+  // Merge-queue seat charter (`queue#N`): the neutral cross-lane seat that
+  // patrols the queue (the 90-minute stall check, head-ejection causes, flake
+  // anchors, flake-victim re-queues, the front-jump under the existing three
+  // reasons); it holds no lane card and lands nothing of its own. Ruling of
+  // record: the card that ordered this file carries the maintainer's verbatim
+  // 「建议有专人来跟进队列吗？这种操作不应该等我」 (filing gate ③), and triage's
+  // landing-order comment 6889317333 names `references/lanes/queue.md` as its
+  // first PR. A NEW file, so this is an added row and no other row moves; set
+  // at the landed line count (headroom 0, same convention as every lane
+  // charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 30],
   // repo:cloud lane charter: the cloud seats keep first-touch triage of the
   // cloud repo, run the first-touch sweep before they claim, set grade and
   // state when they file, and triage's daily reconciliation is the backstop;
@@ -2623,6 +2634,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/review.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/qa.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 0],
   ['.claude/agents/os-dev.md', 0],
   ['.claude/skills/checklist-test/SKILL.md', 221],

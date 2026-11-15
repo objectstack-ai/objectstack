@@ -899,7 +899,9 @@ record-link cells (the first column, and any column authored `link: true`) as
 plain text, with no anchor and no ARIA link semantics, and the row's right-click menu
 offers no Open or Open in new tab; the row's actions stay. The row click still
 reaches `onRowClick`, so anything else the host does with it is unchanged.
-Absent (or `true`), every row is drawn as before. It is a host prop, not a
+On a phone, where the grid draws each row as a card, the card draws no pointer
+and no hover wash, and its "⋮" stays (objectstack#33548). Absent (or `true`),
+every row is drawn as before. It is a host prop, not a
 schema key: list metadata cannot set it. The console passes `false` for a view
 authored `navigation: { mode: 'none' }` and for an object whose data API serves
 no single-record read (objectstack#33317).
