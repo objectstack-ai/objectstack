@@ -418,7 +418,14 @@ export const CEILINGS = new Map([
   // also the one lane-wide line saying the mode is open to any lane past the split
   // threshold (cheaper than a line in each `lanes/*.md`). Measured delta +1; landed
   // count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/SKILL.md', 320],
+  // Raised 320 → 328 by the two review levels (an ORDINARY ruled raise; ruling record
+  // 6897685514, the maintainer, 2026-11-15, verbatim: 「复审车道和你这里的复审不是一个概念吗？
+  // 你派出的任务需要审核，但未必都需要契约复审」 · 「我觉得一步到位，先和我讨论区别最明显的名字，
+  // 座位也可以改」 · 「L1 普通审核 / L2 契约审核」): the 〈审核两级〉 glossary at the entry point — a
+  // heading, its two blank lines and five rule lines (L1, L2, the tier by face, the two
+  // levels' rules never crossing, what keeps its old name). Measured delta +8; every other
+  // line the renaming touched kept its line. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 328],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -1243,7 +1250,13 @@ export const CEILINGS = new Map([
   // SKILL.md). Landed count, headroom 0, same convention (lowering is always
   // legitimate).
   // 77 → 76 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  ['.claude/skills/pm-dispatch/references/review-checklist.md', 76],
+  // Renamed from `references/review-checklist.md` by the two review levels (ruling record
+  // 6897685514): the L1 checklist, same 76 lines, the key moved with the file.
+  ['.claude/skills/pm-dispatch/references/l1-review-checklist.md', 76],
+  // The old path's stub: one pointer line to the file above, so a link, a record or a
+  // running thread that still names it lands somewhere (same ruling record). A NEW row at
+  // its landed count; the stub is deleted with the alias, never grown.
+  ['.claude/skills/pm-dispatch/references/review-checklist.md', 1],
   // Lowered 80 → 69 by the rules-only rewrite of the seven core references
   // (maintainer ruling: provenance narratives, incident post-mortems and rationale
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
@@ -1818,7 +1831,15 @@ export const CEILINGS = new Map([
   // card that ordered this file (filing gate ③). A NEW file, so this is an
   // added row and no other row moves; set at the landed line count (headroom
   // 0, same convention as every lane charter above).
-  ['.claude/skills/pm-dispatch/references/lanes/review.md', 21],
+  // Renamed from `lanes/review.md` and raised 21 → 22 by the two review levels (ruling
+  // record 6897685514, whose 「座位也可以改」 orders the seat's new name): the seat is
+  // `l2-review#N`, and ONE added line says the old spellings (`review#N`, the seat words
+  // `review` and 复核) stay read while new seats and new writes use the new one. Measured
+  // delta +1; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/l2-review.md', 22],
+  // The old path's stub: one pointer line, which also keeps `review` a lane file name and
+  // so a seat word (`project-forms.md`). A NEW row at its landed count, same ruling record.
+  ['.claude/skills/pm-dispatch/references/lanes/review.md', 1],
   // QA seat charter (`qa#N`): the Routine seat that owns checklist-test §6's
   // two standing routines (the weekly four-record regression, the post-release
   // npm smoke), each round's close-out, record close and supersede, and the
@@ -2663,6 +2684,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/decision-analysis.md', 0],
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 0],
   ['.claude/skills/pm-dispatch/references/rest-channel.md', 0],
+  ['.claude/skills/pm-dispatch/references/l1-review-checklist.md', 0],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 0],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 0],
   ['.claude/skills/pm-dispatch/references/release-aftercare.md', 0],
@@ -2696,6 +2718,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/security.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/triage.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/l2-review.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/review.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/qa.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 0],
@@ -3614,7 +3637,7 @@ function selfTest() {
     ['every covered file has a positive ceiling', [...CEILINGS.values()].every((n) => Number.isInteger(n) && n > 0), true],
     ['SKILL.md is covered', CEILINGS.has('.claude/skills/pm-dispatch/SKILL.md'), true],
     ['the dev-agent definition is covered', CEILINGS.has('.claude/agents/os-dev.md'), true],
-    ['all five compressed references are covered', ['dispatch-runbook', 'platform-readings', 'review-checklist', 'landing-operations', 'seat-post-protocol'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/${n}.md`)), true],
+    ['all five compressed references are covered', ['dispatch-runbook', 'platform-readings', 'l1-review-checklist', 'landing-operations', 'seat-post-protocol'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/${n}.md`)), true],
     ['every lane/seat job description in the tree carries a ceiling row', laneRosterVerdict(laneFilesOnDisk(), CEILINGS).ok, true],
     ['...and one carrying no row is RED, with the message naming that file', !laneGap.ok && laneGap.msg.includes('triage.md'), true],
     ['...and an EMPTY roster is RED, not vacuously green: a derived roster checks nothing when the read fails', laneRosterVerdict([], CEILINGS).ok, false],

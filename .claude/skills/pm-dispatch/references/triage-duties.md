@@ -10,10 +10,10 @@
 - 两仓对账兜底:cloud 卡无状态逾 4 h ⇒ 写信 `repo:cloud` 各席,⛔ 不代打标签(`lanes/cloud.md`)。
 - 每日看板的车道一节展示 devx 六项度量;清单住 `lanes/devx.md` 范围节度量行,⛔ 不另抄。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
-- 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
+- 轮次记录按车道计欠 L2 逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
 - 每日看板与轮次记录列「待维护者」:当前里程碑已清的专题,注小结贴否;读数非门禁。
 - 「待维护者」另逐张列 open `needs-user-decision` 与 `pm:awaiting-maintainer` 卡,注入态以来卡龄。
-- UTC 3 倍数时的轮次记录报 24h 流量:卡新建/关闭/净增,合并 PR 数,open p1,引契约复核新卡数。
+- UTC 3 倍数时的轮次记录报 24h 流量:卡新建/关闭/净增,合并 PR 数,open p1,引 L2 审核新卡数。
 - 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`domain:*`);② `pm:queue` 无 `domain:*`(仅多车道仓);
 - ③ `domain:*` 无 pm-state;④ `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
@@ -40,7 +40,7 @@
 - 方向在 ADR/本卡裁决/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
 - `pm:queue` = 有具名落点或复现的具体缺陷,无可问之事;⛔ 工具/门禁修复不由此进。
 - `tooling` 入 `pm:queue` 仅凭三门之一:首行带 `Unblocks: #N`(open 产品卡)或点名所护的已发布面;
-- 或实测拖慢车队开发:正确源上假红/假绿、反复重跑、同因丢复核轮;卡须具名实例。
+- 或实测拖慢车队开发:正确源上假红/假绿、反复重跑、同因丢 L1/L2 轮;卡须具名实例。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
 - 入 `pm:queue` 前读最新转换评论(dispatch-runbook 状态提取):hold/冻结/裁决 ⇒ 分诊自补半状态。
 - 自补 = 同笔 `pm:on-hold`+原文 `Restart-when:`+降 p3;写不出可执行判据才挂 `pm:retriage` 问车道。
