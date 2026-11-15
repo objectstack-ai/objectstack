@@ -109,12 +109,12 @@ describe('control cards — corpus drift', () => {
 describe('control cards — scored end to end against their golden builds', () => {
   // Measured readings. The golden corpus models SHAPE: every `expect` check
   // passes, and so does every tag the closed table judges on shape. It models
-  // no permission set and no action, so a card's field-permission tag and every
-  // declared agent action fail on it — the card asks for more than the corpus
-  // build delivers, which is what a capability score exists to say. Its objects
-  // declare no sharing model, so they are private (ADR-0090 D1) and the
-  // row-scope tag passes on them.
-  const READINGS: Record<string, { tags: Record<string, string>; actions: number; passedOf: [number, number] }> = {
+  // no permission set and no action, so a card's field-permission tag, every
+  // declared agent action and every persona grant fail on it — the card asks
+  // for more than the corpus build delivers, which is what a capability score
+  // exists to say. Its objects declare no sharing model, so they are private
+  // (ADR-0090 D1) and the row-scope tag passes on them.
+  const READINGS: Record<string, { tags: Record<string, string>; actions: number; grants: number; passedOf: [number, number] }> = {
     crm_account_with_contacts: {
       tags: {
         'records-forms.lookup': 'pass',
@@ -124,7 +124,8 @@ describe('control cards — scored end to end against their golden builds', () =
         'access-security.row-scope': 'pass',
       },
       actions: 0,
-      passedOf: [12, 20],
+      grants: 6,
+      passedOf: [12, 26],
     },
     invoice_with_line_items: {
       tags: {
@@ -136,7 +137,8 @@ describe('control cards — scored end to end against their golden builds', () =
         'access-security.row-scope': 'pass',
       },
       actions: 0,
-      passedOf: [20, 29],
+      grants: 8,
+      passedOf: [20, 37],
     },
     project_with_tasks: {
       tags: {
@@ -147,18 +149,22 @@ describe('control cards — scored end to end against their golden builds', () =
         'access-security.row-scope': 'pass',
       },
       actions: 0,
-      passedOf: [20, 27],
+      grants: 5,
+      passedOf: [20, 32],
     },
   };
 
   for (const card of controls) {
-    it(`${card.id}: shape passes, the table judges each tag, every declared action fails`, () => {
+    it(`${card.id}: shape passes, the table judges each tag, every declared action and persona grant fails`, () => {
       const s = scoreScenarioArtifact(parsedBuild(corpusById.get(card.id)!.fixture), card);
       const reading = READINGS[card.id]!;
       expect(s.expect.passed).toBe(s.expect.total);
       expect(Object.fromEntries(s.tags.map((t) => [t.tag, t.status]))).toEqual(reading.tags);
       expect(s.agentActions.filter((c) => c.pass)).toHaveLength(reading.actions);
       expect(s.agentActions.length).toBeGreaterThan(0);
+      expect(s.personaGrants.map((c) => [c.pass, c.detail?.startsWith('the build declares no permission set ')])).toEqual(
+        Array.from({ length: reading.grants }, () => [false, true]),
+      );
       expect([s.passed, s.total]).toEqual(reading.passedOf);
     });
   }
@@ -166,12 +172,19 @@ describe('control cards — scored end to end against their golden builds', () =
   it('crm_account_with_contacts: the build completed with what the card asks scores 1, and each removal scores lower', () => {
     const card = controls.find((c) => c.id === 'crm_account_with_contacts')!;
     const stack = structuredClone(corpusById.get(card.id)!.fixture) as Bag;
-    stack.permissions = [{
-      name: 'crm_sdr',
-      label: 'SDR',
-      objects: { account: { allowRead: true }, contact: { allowRead: true, allowCreate: true, allowEdit: true } },
-      fields: { 'contact.email': { readable: false, editable: false } },
-    }];
+    // Each persona's own set, named as the runner grants it with no namespace
+    // (its id): the sdr reads accounts and works contacts; the partner user
+    // creates contacts and holds no grant on accounts, so its refused account
+    // edit is refused by the set.
+    stack.permissions = [
+      {
+        name: 'sdr',
+        label: 'SDR',
+        objects: { account: { allowRead: true }, contact: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+        fields: { 'contact.email': { readable: false, editable: false } },
+      },
+      { name: 'partner_user', label: 'Partner User', objects: { contact: { allowRead: true, allowCreate: true } } },
+    ];
     stack.actions = (card.run.agentActions ?? []).map((a) => ({
       name: a.name,
       label: a.name,
@@ -187,6 +200,8 @@ describe('control cards — scored end to end against their golden builds', () =
 
     for (const degrade of [
       (a: Bag) => { a.permissions = []; },
+      (a: Bag) => { delete a.permissions[0].objects.contact.allowEdit; },
+      (a: Bag) => { a.permissions[1].objects.account = { allowRead: true, allowEdit: true }; },
       (a: Bag) => { a.actions = []; },
       (a: Bag) => { delete a.actions.find((x: Bag) => x.name === 'delete_contact').ai.requiresConfirmation; },
       (a: Bag) => { delete (a.objects as Bag[]).find((o) => o.name === 'contact')!.fields.account; },
@@ -196,6 +211,15 @@ describe('control cards — scored end to end against their golden builds', () =
       degrade(a);
       expect(scoreScenarioArtifact(a, card).score!).toBeLessThan(1);
     }
+
+    // The sdr's delete waits on confirmation, and the build declares the
+    // card's confirm-gated delete_contact: withholding the raw delete is the
+    // route the card designs, so the check leaves both figures, never a pass.
+    const noDelete = structuredClone(complete);
+    delete noDelete.permissions[0].objects.contact.allowDelete;
+    const routed = scoreScenarioArtifact(noDelete, card);
+    expect([routed.score, routed.total, routed.passed]).toEqual([1, full.total - 1, full.passed - 1]);
+    expect(routed.personaGrants.find((c) => c.check === 'persona-grant:sdr:contact:delete')!.notMeasured).toMatch(/confirm-gated agent action delete_contact/);
   });
 
   it("crm_account_with_contacts: the first live run's build (public_read, sdr narrowed by read policies) passes the row-scope tag", () => {

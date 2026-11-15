@@ -1125,6 +1125,17 @@ export class ObjectQL implements IObjectQLEngine {
    * package's is replaced by that package's again, rather than leaving the
    * key empty; a package removed from beneath an override leaves the
    * override bound, with nothing beneath it to restore.
+   *
+   * [ADR-0150 D4/D5] A key whose unqualified handler was the removed
+   * package's while another owner still holds a handler under it in its own
+   * slot runs one remaining holder's handler for a call that names no
+   * package, rather than "not found", and stays in the unqualified
+   * {@link listRegisteredActions}; the bare-call ambiguity rule still
+   * refuses it while two or more packages hold the key. The holder is the
+   * last coordinate holding the key in slot-creation order, not the last
+   * registration of that key: with host code beside one package on an
+   * object-bound key it can be the package's where a restart runs host
+   * code's.
    */
   removeActionsByPackage(packageName: string): void {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
