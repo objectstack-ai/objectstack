@@ -29,6 +29,7 @@ export const salesUser = definePermissionSet({
   (`security-anchor-high-privilege`) and the binding refuse it. With none, invited
   members get nothing until an admin assigns each; no gate counts them. Its
   `systemPermissions` may name only app capabilities declared under `capabilities:`.
+- `tabPermissions` hides an app, never gates it: objectstack-ui → Who sees or opens an app.
 
 ## Assigning a permission set to a user
 
@@ -318,11 +319,11 @@ what changed and what an administrator re-checks after upgrading.
 **Renaming a position:** declare `renamedFrom: ['old_name']` on the renamed
 position, never delete and re-add (holders lose its sets). At boot its
 holders (`sys_user_position`) move to the new name in every organization,
-idempotently. Only holders: no metadata is read or rewritten, a Setup-authored
-body included. Re-point your own source naming the old one: a `type: 'position'`
-sharing recipient, queue member or approver, a policy's `positions`, a
-`current_user.positions` predicate. The boot log lists stored references by
-table (sharing, queue and share recipients, pending approvers, invitations)
-for an admin. Not carried (warned): an old name still a position anywhere,
+idempotently. Only holders: no other reference to the old name is rewritten,
+Setup-authored ones included. Re-point your own source naming the old one: a
+`type: 'position'` sharing recipient, queue member or approver, a policy's
+`positions`, a `current_user.positions` predicate. The boot log lists stored
+references by table (sharing, queue and share recipients, pending approvers,
+invitations) for an admin. Not carried (warned): an old name still a position anywhere,
 claimed twice, recorded under another owner (a package or the environment),
 switched off, or a disabled claimant.

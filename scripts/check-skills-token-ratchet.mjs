@@ -1045,8 +1045,24 @@ export const CEILINGS = new Map([
   // `origin/main` the file was 15056 bytes (3764 tokens, headroom 4); the
   // LANDED file is 15834 bytes -> 3959 tokens, ceiling +191, pinned AT the
   // measurement, zero headroom.
-  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(15834 / 4)
-  ['skills/objectstack-data/rules/security.md', 3959],
+  // 3959 -> 3986 (card #33566, the follow-up of the position-rename paragraph):
+  // a renamed position's holders are the only thing the boot carry rewrites,
+  // so the author re-points their own source that names the old position; an
+  // old name recorded under another owner, a package or the environment, is
+  // not carried; and who may explain another user (`manage_users`, an
+  // administrator of one of that user's organizations, or a delegated
+  // `adminScope` covering that user). Same standing ruling, tap A, verbatim
+  // and untranslated: 「A:先削重复,余额按实测提高」 (record 6513306068). PAID
+  // DOWN FIRST, 313 bytes: the kernel-name list of the membership-keys bullet
+  // (the placeholder table in the same file), the membership-tier list (the
+  // linked docs anchor), the second definition of the two closure refusals
+  // (the queue bullet above it), four restatements of a heading or a
+  // neighbouring sentence, and a shorter `tabPermissions` pointer. On
+  // `origin/main` the file was 15834 bytes (3959 tokens, headroom 0); the
+  // LANDED file is 15942 bytes -> 3986 tokens, ceiling +27, pinned AT the
+  // measurement, zero headroom.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(15942 / 4)
+  ['skills/objectstack-data/rules/security.md', 3986],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a

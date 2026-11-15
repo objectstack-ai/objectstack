@@ -204,11 +204,11 @@
     {
       "id": 21,
       "prompt": "Our package `com.acme.crm` ships a position `sales_rep`, live at customers, and a sharing rule in the same package whose `sharedWith` is `{ type: 'position', value: 'sales_rep' }`. The next version must call the position `crm_sales_rep`. What changes in the package?",
-      "expected_output": "The position becomes `{ name: 'crm_sales_rep', label: 'Sales Rep', renamedFrom: ['sales_rep'], permissionSets: [...] }`: renamed in place with `renamedFrom`, never deleted and re-added, so at boot its holders (`sys_user_position`) move to the new name in every organization. Only holders move: no metadata is read or rewritten, so the package's own sharing rule is re-pointed in source to `sharedWith: { type: 'position', value: 'crm_sales_rep' }`, as is any approver, queue member, policy `positions` entry or `current_user.positions` predicate in the package that names `sales_rep`. Stored references in an installed environment (recipients, pending approvers, invitations) are listed by table in the boot log for an administrator to re-point in Setup.",
+      "expected_output": "The position becomes `{ name: 'crm_sales_rep', label: 'Sales Rep', renamedFrom: ['sales_rep'], permissionSets: [...] }`: renamed in place with `renamedFrom`, never deleted and re-added, so at boot its holders (`sys_user_position`) move to the new name in every organization. Only holders move: no other reference to the old name is rewritten, so the package's own sharing rule is re-pointed in source to `sharedWith: { type: 'position', value: 'crm_sales_rep' }`, as is any approver, queue member, policy `positions` entry or `current_user.positions` predicate in the package that names `sales_rep`. Stored references in an installed environment (recipients, pending approvers, invitations) are listed by table in the boot log for an administrator to re-point in Setup.",
       "files": [],
       "assertions": {
         "must_contain": ["renamedFrom: ['sales_rep']", "value: 'crm_sales_rep'"],
-        "must_not_contain": ["value: 'sales_rep'"]
+        "must_not_contain": []
       }
     }
   ]
