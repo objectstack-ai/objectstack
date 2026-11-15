@@ -1249,9 +1249,14 @@ function ModelPicker({
   const { t, language } = useObjectTranslation();
   // The id a ×20-or-above pick is waiting to apply; `null` while nothing is asked.
   const [confirmingId, setConfirmingId] = React.useState<string | null>(null);
-  // Read from the CURRENT list, so Confirm writes a model that is still offered.
-  const confirming = confirmingId !== null ? models.find((m) => m.id === confirmingId) : undefined;
-  // The asked-about model left the list while the question was open: drop the pick.
+  // Read from the CURRENT list, so Confirm writes a model that is still offered
+  // and the question states the multiplier the list draws for it now.
+  const listed = confirmingId !== null ? models.find((m) => m.id === confirmingId) : undefined;
+  const listedDrawn = listed ? drawnMultiplierOf(listed) : undefined;
+  const confirming =
+    listedDrawn !== undefined && listedDrawn >= EXPENSIVE_MODEL_MULTIPLIER ? listed : undefined;
+  // The asked-about model left the list while the question was open, or the list
+  // now draws it below the threshold or with no multiplier: drop the pick.
   if (confirmingId !== null && confirming === undefined) setConfirmingId(null);
   const at = models.findIndex((m) => m.id === value);
   // The drawn value is already rounded (drawnMultiplierOf); this only spells it,
@@ -1333,14 +1338,14 @@ function ModelPicker({
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {t('chatbot.modelPicker.confirmBody', {
-                  multiplier: multiplierText(drawnMultiplierOf(confirming) ?? 0),
+                  multiplier: multiplierText(listedDrawn ?? 0),
                   defaultValue:
                     'Each message on this model uses {{multiplier}} times as much of your AI allowance as one on the default model.',
                 })}
                 {allowanceLeft !== undefined
                   ? ` ${t('chatbot.modelPicker.confirmAllowance', {
                       left: allowanceLeft,
-                      multiplier: multiplierText(drawnMultiplierOf(confirming) ?? 0),
+                      multiplier: multiplierText(listedDrawn ?? 0),
                       defaultValue: '{{left}} of it is left, and on this model it runs out {{multiplier}} times as fast.',
                     })}`
                   : null}

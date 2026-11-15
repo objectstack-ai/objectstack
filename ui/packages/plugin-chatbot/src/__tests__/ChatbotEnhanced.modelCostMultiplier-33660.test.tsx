@@ -27,7 +27,8 @@
  *   - the drawn (rounded) multiplier is what the ×20 question compares, a small
  *     one never reads ×0, and a non-finite or zero value draws nothing;
  *   - Confirm writes the asked-about model as the CURRENT list has it, and a
- *     model that leaves the list while asked is dropped.
+ *     model that leaves the list, or whose drawn multiplier falls below ×20 or
+ *     goes, while asked is dropped.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -152,6 +153,21 @@ describe('ChatbotEnhanced — the model picker shows each model’s cost multipl
     relist(MODELS);
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(onModelChange.mock.calls).toEqual([['opus']]);
+  });
+
+  it.each([
+    ['falls below ×20', 5],
+    ['loses its multiplier', undefined],
+  ])('a model whose multiplier %s while asked is dropped: the question closes and nothing is written', async (_case, next) => {
+    const { onModelChange, trigger, relist } = mount();
+    await pick(trigger(), 'Expert');
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+    relist(MODELS.map((m) => (m.id === 'opus' ? { ...m, costMultiplier: next } : m)));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    // It is ×20 again: the dropped pick does not ask on its own.
+    relist(MODELS);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(onModelChange).not.toHaveBeenCalled();
   });
 
   it('a ×20 pick asks first; Cancel keeps the model in force and writes nothing', async () => {
