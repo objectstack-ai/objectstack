@@ -1,5 +1,90 @@
 # @objectstack/types
 
+## 18.5.0
+
+### Patch Changes
+
+- 834d5f5: fix(types, rest): a package-scoped refusal's `details.candidates` is answered only when every element is a holder
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `packageScopedRefusalCandidates` (`@objectstack/types`), the one recogniser every door reads for a package-scoped refusal's `details.candidates`, answered the refusal's list as `readonly unknown[]` without looking at its elements, and the rest door cast that to core's `PackageScopedHolder[]`. The recogniser now checks each element against the four holder kinds (`package` with a string `packageId`, `environment`, `platform`, `residual` with a string `ownerId`) and answers the list typed as those holders, so the rest door assigns it without a cast. Every holder core's `PackageScopedNameRefusedError` carries passes, so every answer a framework producer can cause is unchanged.
+  
+  One corner moves, for a refusal no framework producer throws: a `409 RESOURCE_CONFLICT` of the refusal's shape whose `refusal.candidates` holds an element that is not a holder. FROM `details.candidates` echoing the list as thrown TO no `details.candidates` member, the answer the recogniser already gave a `candidates` that is not an array. It moves on every door that reads the recogniser alike (the `/data` doors, a batch row's error, the `/meta` reads, the resolver's doors), so they keep agreeing. Status, `code` and the sentence are unchanged.
+- 633d8c4: feat(plugin-auth): the organization's pending-invitation limit is a host setting, `OS_ORG_INVITATION_LIMIT`, that can be turned off
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization could hold at most 100 pending invitations: the auth library refuses the next one with `403 INVITATION_LIMIT_REACHED` when no limit is configured, and nothing configured one. A host can now set it with `OS_ORG_INVITATION_LIMIT`: a positive integer is the limit, and `off`, `unlimited` or `none` removes it, for a host that invites people in bulk. Unset, `0` or an unparsable value keeps today's limit of 100, so a deployment that sets nothing behaves exactly as before. `@objectstack/types` adds `resolveOrgInvitationLimit()` beside `resolveOrgMembershipLimit()`.
+- 09da8c7: fix(objectql): the duplicate refusal (`409 UNIQUE_VIOLATION`) now reads in the writer's language and names the fields of a composite unique index
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A write refused by a unique constraint used to answer the fixed English sentence "A record with this value already exists" as the 409 body's `error`, whatever the request's `Accept-Language`, and never named the fields of a unique index over several columns, so the user could not tell which combination collided. The engine now composes that sentence in the writer's locale from the platform's operation message catalog, the catalog the `DELETE_RESTRICTED` refusal already uses, so a `zh-CN` request reads `已存在「工厂」、「牌号」、「成本周次」均相同的记录` where it read English. A composite key is named only when the columns the database reported match, as a set, a unique index the object declares, and only when every one of those fields has a label; otherwise the sentence names nothing, because a wrong field name is worse than none. The wire shape does not change: `code` stays `UNIQUE_VIOLATION`, the status stays 409, and `field` still names one column only when the database named exactly one. An English deployment reads the same sentences as before for a single field or none.
+  
+  Three additions ride along. `BUILTIN_OPERATION_MESSAGES` (`@objectstack/spec/system`) gains `duplicate_record`, `duplicate_record_field` and `duplicate_record_fields` in every platform locale, so a deployment can override them with an `errors.duplicate_record*` translation. `@objectstack/types` exports `uniqueViolationColumns(error)`, the columns of a composite unique key the driver named, with the organization part set aside. `DuplicateRecordError` carries the composed sentence as `endUserMessage`. A MySQL refusal names an index and not its columns, so it still names no field.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [605d712]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [489ef5f]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [67274ac]
+  - @objectstack/spec@18.5.0
+
 ## 18.4.0
 
 ### Patch Changes

@@ -221,7 +221,11 @@ like any other notification.
 When it is sent, the confirmation says how many people it went to. Each
 message is a notification event with the topic `org.announcement`, listed on
 the same page. A member whose notification preferences turn that topic off
-is not sent it, and is not counted.
+is not sent it, and is not counted. The count is of the people a delivery
+was accepted for. A send that reached nobody is refused instead of
+confirmed: `409` when every person you picked has turned the topic off, and
+`503` when delivery could not be made, or, for **Everyone**, when the member
+list could not be read or every member has turned the topic off.
 
 Programs and agents send the same message through
 `POST /api/v1/messaging/in-app-messages`, with the body

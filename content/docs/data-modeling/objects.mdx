@@ -222,9 +222,11 @@ lifecycle: {
 }
 ```
 
-- Each hour of `created_at` is sealed ten minutes after it ends: one
-  checkpoint per organization (and one for rows about no organization),
-  holding a Merkle root over the rows, signed with the deployment's Ed25519
+- Each hour of `created_at` is sealed ten minutes after it ends, per
+  organization (and once for rows about no organization): into one
+  checkpoint, or, when the hour holds more than 10,000 such rows, into
+  consecutive checkpoints of at most 10,000 rows each. Each checkpoint holds a
+  Merkle root over its rows and is signed with the deployment's Ed25519
   key. A row that arrives later in a sealed hour is sealed as a `late`
   checkpoint; rows that already exist when sealing starts are sealed oldest
   first, archived rows included.

@@ -1,5 +1,153 @@
 # @objectstack/plugin-webhooks
 
+## 18.5.0
+
+### Patch Changes
+
+- 71ade1a: fix(plugin-webhooks, cli): an activation row a departed package left switches no remaining webhook holder, and the 18.x ownership ceremony writes a two-holder copy's switch as a row naming no package instead of picking one holder (ADR-0150 D8)
+  
+  Clause-②: yes (widening; narrowing on a departed row switched on) — widening: a departed package's row switched off no longer keeps a remaining holder off, so its outbound deliveries start on upgrade. Narrowing: a departed package's row switched on no longer turns on a holder shipped inactive.
+  Metadata-protocol: none
+  
+  **A departed package's activation row (plugin-webhooks).** A declared webhook's slot with no activation row of its own read the name's rows naming a package that no longer declares the name as its switch while the name had one holder, and under two holders such a row switched off kept both off. Such a row was the departed package's switch, and it now switches no remaining holder, in either direction:
+  
+  - one holder, a departed package's row switched off: FROM the holder off TO the holder at its own row, else its declared `isActive`;
+  - one holder shipped inactive, a departed package's row switched on: FROM the holder on TO the holder off (its declared default);
+  - two holders, a departed package's row switched off: FROM both off TO each at its own row or its declared default.
+  
+  The source says so once per name at `warn`, naming the departed package, the holders and the per-holder address (`POST /api/v1/security/_activation/webhook/NAME?package=PACKAGE`). A row naming no package is read exactly as before: the one holder's switch, and under two holders off keeps every holder with no row of its own off and on turns none on. A holder's own row still wins.
+  
+  **Operator action on upgrade.** A webhook you switched off while another package held its name, and which a remaining package now declares, starts delivering again after this release unless that holder has its own row. To keep it off, switch the holder off at its own address: `POST /api/v1/security/_activation/webhook/NAME?package=PACKAGE` (no `package` for the environment's own). The warning above names each such webhook and its holders.
+  
+  **The 18.x ownership ceremony's declared-webhooks step (cli).** A customized `sys_webhook` copy writes the declaration's activation row. When the copy's definition names no package, the row named the holder the composition listed LAST for the name. Of a name one holder declares it still names that holder; of a name two or more holders declare it now names no package — the name-keyed switch the copy was — and the step's notes name every holder and the per-holder address. When the environment is one of those holders, a row naming no package would be the environment's own switch, so the step writes no switch row and its notes report the copy's switch (on or off) and name every holder; switch each at its own address. A copy whose definition names its package writes that package's row, as before.
+- d4fbb4d: fix(deps)!: hono moves to ^4.13.16 and @hono/node-server to ^2.1.6, the releases that fix seven public advisories; a request path holding a backslash is answered 400
+  
+  Clause-②: yes (narrowing) — `@hono/node-server` 2.1.6 answers `400 Bad Request` to a request whose path (the part before `?`) holds a backslash, before any route runs. Up to 2.1.5 the backslash was rewritten to `/` and the request reached the route that path names. A backslash after `?` is query data and answers as before. One more edge moves in the same transport: a streamed response whose body stream errors within its first two reads used to be sent as a truncated `200`, and is now a `500` (`text/plain`) with the socket closed. Of ours, only a raw stream passthrough (the AI and MCP stream results) can meet it; the SSE path and the adapter's stream writer never error their stream. No other status, header, body or error text of ours moves; the request-body limit (`413 PAYLOAD_TOO_LARGE`) answers as before.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` and no page under `content/docs/**` teaches request-path spelling at the HTTP door; the moved answer is the transport refusing a malformed request line.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type, stored row or export is added, removed, renamed or re-shaped. What moves is the Node transport refusing a request line whose path holds a backslash, so there is nothing for an author or an operator to migrate. -->
+  
+  **BREAKING** for a client that sends a backslash inside a URL path, such as `GET /api/v1/data\account`: the Node server now answers `400 Bad Request` where it used to route the request as `/api/v1/data/account`. Browsers and WHATWG-URL clients (`fetch`, undici) already turn a backslash into `/` before sending; other clients, `curl` among them, send it as written and meet this. Send the path with `/`.
+  
+  The fixed advisories: `hono` GHSA-3gg2-335m-rxc6, GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-4m76-xfj5-7975 and GHSA-h7mg-cq63-vhpq (fixed in 4.13.16); `@hono/node-server` GHSA-jpvv-r467-5p4w and GHSA-qv5m-9pm6-hqp3 (fixed in 2.1.6). The declared ranges move so that a downstream install, which never sees this workspace's overrides, lands on the fixed releases too. The `@objectstack/hono` peer range on `hono` stays `^4.12.8`.
+- 467ec26: fix(plugin-webhooks, runtime): declared-webhook remedies name each holder's exact address, and a name refused whole is refused at every address naming both holders
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Remedy text and refusals for declared webhooks (ADR-0150 D2/D3/D5/D8):
+  
+  | Where | FROM | TO |
+  |:---|:---|:---|
+  | Name guard (`sys_webhook` create or rename onto a declared name) | names `POST /api/v1/security/_activation/webhook/NS/NAME` per holder, which answers `409` for two co-owners of one namespace and does not exist for a package that declares no namespace | names `POST /api/v1/security/_activation/webhook/NAME?package=PACKAGE` per holder, which switches exactly that holder |
+  | Redelivery veto, switched-off declared webhook | `switch it on (POST .../webhook/NS/NAME ...)` | `switch it on (POST .../webhook/NAME?package=PACKAGE ...)` |
+  | Dispatcher warning, a declared webhook withheld by a `sys_webhook` row | namespace address per holder | `?package=PACKAGE` address per holder |
+  | Dispatcher warning, a row naming no package under two holders | `.../webhook/<namespace>/NAME` | `.../webhook/NAME?package=PACKAGE`, as the departed-package warning already said |
+  | Metadata service lists the environment's declaration beside a package's (no registry item): bare refusal sentence | "Nothing picks one of them: address it by its package." | says neither declaration is dispatched and no address switches one, names both holders, and says to remove or rename declarations |
+  | Same state, `POST .../webhook/NAME?package=PACKAGE` and `POST .../webhook/NS/NAME` | `404` "no enabled package declares the name" | `409 RESOURCE_CONFLICT`, the refusal above, `candidates` naming the environment and the package; nothing written |
+  | Same state, name guard | names a `<namespace>` placeholder address | says no declaration of the name is dispatched and quotes the refusal |
+  | Same state, redelivery of a `declared:PACKAGE/NAME` delivery | "the package is disabled ... Enable the package" | refused with the refusal, naming both holders |
+  | `?package=` or namespace address when the reader serves no slot and the bare read fails | `404` | `503 SERVICE_UNAVAILABLE`, nothing written |
+  | Upgrade impact report, withheld-webhook line and `packageDisabled` doc | a disabled package's address "answers 409" | refuses the switch: `404` while the package is the name's only holder, `409` naming the other holders while another package declares it |
+  
+  A name that one package, or two packages each once, declare through the metadata service is unchanged: each served holder is switched at its own `?package=` address. A disabled sole holder still answers `404` at its address.
+  
+  No action is needed. Operators who scripted the namespace address keep it working where it worked; the `?package=PACKAGE` address the messages now name works for every package holder.
+- Updated dependencies [f229dfd]
+- Updated dependencies [322ded7]
+- Updated dependencies [f4cafd5]
+- Updated dependencies [c747cf0]
+- Updated dependencies [c747cf0]
+- Updated dependencies [30e364e]
+- Updated dependencies [68cb68e]
+- Updated dependencies [1cf2a5a]
+- Updated dependencies [605d712]
+- Updated dependencies [05b56ef]
+- Updated dependencies [f31f784]
+- Updated dependencies [7ffbb1a]
+- Updated dependencies [89d7bef]
+- Updated dependencies [89d7bef]
+- Updated dependencies [51ceb43]
+- Updated dependencies [d635599]
+- Updated dependencies [6a36b79]
+- Updated dependencies [548f8ff]
+- Updated dependencies [16e3486]
+- Updated dependencies [16e3486]
+- Updated dependencies [834d5f5]
+- Updated dependencies [d38ceba]
+- Updated dependencies [6538ba4]
+- Updated dependencies [5430b4a]
+- Updated dependencies [9673030]
+- Updated dependencies [84c66d3]
+- Updated dependencies [118d37a]
+- Updated dependencies [a1604ce]
+- Updated dependencies [6c5d31f]
+- Updated dependencies [b462444]
+- Updated dependencies [5ea8ce5]
+- Updated dependencies [4ace1fa]
+- Updated dependencies [61ed314]
+- Updated dependencies [40c73a8]
+- Updated dependencies [2c98485]
+- Updated dependencies [9317833]
+- Updated dependencies [5e29b7e]
+- Updated dependencies [1f8ce6e]
+- Updated dependencies [c312b26]
+- Updated dependencies [7adb1b5]
+- Updated dependencies [5b2ec82]
+- Updated dependencies [3e19223]
+- Updated dependencies [1b878e7]
+- Updated dependencies [6482c08]
+- Updated dependencies [6222ecb]
+- Updated dependencies [728be58]
+- Updated dependencies [728be58]
+- Updated dependencies [1fd5d8a]
+- Updated dependencies [26b5994]
+- Updated dependencies [0ba30eb]
+- Updated dependencies [27d042f]
+- Updated dependencies [cbb876c]
+- Updated dependencies [4dbcbdd]
+- Updated dependencies [633d8c4]
+- Updated dependencies [09da8c7]
+- Updated dependencies [53f5a4c]
+- Updated dependencies [bc50d11]
+- Updated dependencies [8a8c21e]
+- Updated dependencies [b194618]
+- Updated dependencies [0be91f0]
+- Updated dependencies [df9fe94]
+- Updated dependencies [8f9eb3d]
+- Updated dependencies [1da43fe]
+- Updated dependencies [6ff3eee]
+- Updated dependencies [8b53cc8]
+- Updated dependencies [b392ff7]
+- Updated dependencies [6107290]
+- Updated dependencies [3c231cd]
+- Updated dependencies [489ef5f]
+- Updated dependencies [480246b]
+- Updated dependencies [ee627c6]
+- Updated dependencies [53b3544]
+- Updated dependencies [b070e1c]
+- Updated dependencies [ea67b26]
+- Updated dependencies [3cbf1f2]
+- Updated dependencies [89defde]
+- Updated dependencies [06e53a7]
+- Updated dependencies [481f642]
+- Updated dependencies [f64c0f9]
+- Updated dependencies [1c32f6d]
+- Updated dependencies [b8f6237]
+- Updated dependencies [dd291b8]
+- Updated dependencies [e997113]
+- Updated dependencies [615c67f]
+- Updated dependencies [8d523b5]
+- Updated dependencies [67274ac]
+- Updated dependencies [0a6f193]
+  - @objectstack/spec@18.5.0
+  - @objectstack/objectql@18.5.0
+  - @objectstack/core@18.5.0
+  - @objectstack/platform-objects@18.5.0
+  - @objectstack/types@18.5.0
+  - @objectstack/service-messaging@18.5.0
+
 ## 18.4.0
 
 ### Minor Changes
