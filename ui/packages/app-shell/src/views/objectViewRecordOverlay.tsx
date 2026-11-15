@@ -18,14 +18,18 @@
  * and its counter names the list's view (`stepScope`).
  */
 
-import type { ReactNode } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import type { NavigationOverlayMode } from '@object-ui/components';
-import { RecordDetailView } from './RecordDetailView.js';
+import { SkeletonDetail } from '../skeletons/index.js';
 import { RecordStackDrawer, useRecordDrawerStack } from './recordDrawerStack.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
 type RecordNavigation = ReturnType<typeof useObjectViewRecordNavigation>;
+
+// The record view is fetched the first time a record opens here, not with the
+// list: a list that never opens a record never downloads it.
+const RecordDetailView = lazy(() => import('./RecordDetailView.js').then((m) => ({ default: m.RecordDetailView })));
 
 export function ObjectViewRecordOverlay({
     navOverlay,
@@ -74,14 +78,16 @@ export function ObjectViewRecordOverlay({
                  storageKey={`drawer-width:${objectDef.name}`}
                  objects={objects}
                  renderRecord={(level) => (
-                     <RecordDetailView
-                         dataSource={dataSource}
-                         objects={objects}
-                         onEdit={onEdit}
-                         objectNameOverride={level.objectName}
-                         recordIdOverride={level.recordId}
-                         embedded
-                     />
+                     <Suspense fallback={<SkeletonDetail />}>
+                         <RecordDetailView
+                             dataSource={dataSource}
+                             objects={objects}
+                             onEdit={onEdit}
+                             objectNameOverride={level.objectName}
+                             recordIdOverride={level.recordId}
+                             embedded
+                         />
+                     </Suspense>
                  )}
              />
     );

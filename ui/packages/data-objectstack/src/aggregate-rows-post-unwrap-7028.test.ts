@@ -34,8 +34,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   AnalyticsResultShapeError,
   ObjectStackAdapter,
-  clearSharedDiscoveryCache,
 } from './index';
+import { clearSharedDiscoveryCache } from './sharedDiscovery';
 
 const RECORDS = [
   { id: '1', stage: 'won', amount: 100 },

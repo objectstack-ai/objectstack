@@ -17,7 +17,7 @@ import {
   preloadBootstrapLocale,
   useObjectTranslation,
 } from '@object-ui/i18n';
-import { clearSharedDiscoveryCache } from '@object-ui/data-objectstack';
+import { clearSharedDiscoveryCache } from '../../../packages/data-objectstack/src/sharedDiscovery';
 import { __resetAppDefaultLocaleForTests, seedTenantLanguage } from './languageSeed';
 
 const BASE = '';

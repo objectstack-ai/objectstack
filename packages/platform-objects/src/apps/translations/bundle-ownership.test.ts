@@ -16,6 +16,18 @@ import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { arObjects } from './ar.objects.generated.js';
+import { deObjects } from './de.objects.generated.js';
+import { frObjects } from './fr.objects.generated.js';
+import { koObjects } from './ko.objects.generated.js';
+import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { ruObjects } from './ru.objects.generated.js';
+import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import * as identityObjects from '../../identity/index.js';
+import * as auditObjects from '../../audit/index.js';
+import * as metadataObjects from '../../metadata/index.js';
+import * as systemObjects from '../../system/index.js';
+import { SysMetadataCommitObject } from '@objectstack/metadata-core';
 
 // Objects the extract config (scripts/i18n-extract.config.ts) imports —
 // keep the two lists in sync when adding/moving platform objects.
@@ -92,6 +104,51 @@ describe('sys_metadata_commit reads in the translated locales', () => {
         .filter((f) => entry?.fields?.[f]?.label === undefined || entry.fields[f].label === en.fields[f].label);
       // es-ES "Actor" is the Spanish word too.
       expect(echoed.filter((f) => !(locale === 'es-ES' && f === 'actor'))).toEqual([]);
+    });
+  }
+});
+
+/**
+ * Two visible fields of one object under one label are two columns a reader
+ * cannot tell apart. The author-time rule `field-label-duplicate` judges app
+ * metadata, not these platform objects, so this walks the same comparison over
+ * every owned object in every locale bundle here: the label a reader is served
+ * is the bundle leaf when there is one, else the authored label, and a field
+ * declared `hidden: true` is not compared. Three translated leaves broke it at
+ * once (ru `sys_import_job` count vs timestamp, ar `sys_oauth_resource` id vs
+ * identifier, fr `sys_user` accountable owner vs manager).
+ */
+describe('no two visible fields of one platform object share a label in any locale', () => {
+  const bundles = {
+    '(authored)': {}, en: enObjects, 'zh-CN': zhCNObjects, 'ja-JP': jaJPObjects, 'es-ES': esESObjects,
+    ar: arObjects, de: deObjects, fr: frObjects, ko: koObjects, 'pt-BR': ptBRObjects, ru: ruObjects,
+    'zh-Hant': zhHantObjects,
+  } as Record<string, Record<string, any>>;
+  const defs = [identityObjects, auditObjects, metadataObjects, systemObjects, { SysMetadataCommitObject }]
+    .flatMap((mod) => Object.values(mod as Record<string, any>))
+    .filter((v) => v && typeof v === 'object' && typeof v.name === 'string' && OWNED_OBJECTS.has(v.name) && v.fields);
+
+  it('reads every owned object definition', () => {
+    expect(new Set(defs.map((d) => d.name))).toEqual(OWNED_OBJECTS);
+  });
+
+  for (const [locale, bundle] of Object.entries(bundles)) {
+    it(`${locale}`, () => {
+      const clashes: string[] = [];
+      for (const def of defs) {
+        const leaves = bundle[def.name]?.fields ?? {};
+        const byLabel = new Map<string, string[]>();
+        for (const [name, field] of Object.entries<any>(def.fields)) {
+          if (field.hidden === true) continue;
+          const label = typeof leaves[name]?.label === 'string' ? leaves[name].label : field.label;
+          if (typeof label !== 'string' || !label.trim()) continue;
+          byLabel.set(label.trim(), [...(byLabel.get(label.trim()) ?? []), name]);
+        }
+        for (const [label, names] of byLabel) {
+          if (names.length > 1) clashes.push(`${def.name}: ${names.join(' and ')} both read "${label}"`);
+        }
+      }
+      expect(clashes).toEqual([]);
     });
   }
 });

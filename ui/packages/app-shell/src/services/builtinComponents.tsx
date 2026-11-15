@@ -15,10 +15,10 @@
  * metadata type.
  */
 
-import { lazy, Suspense, type ComponentType } from 'react';
+import { lazy, Suspense } from 'react';
 import { registerAppComponent } from './componentRegistry.js';
+import { lazyPage, LazyPageFallback as MetadataAdminFallback } from './lazyPage.js';
 import { registerMetadataResource } from '../views/metadata-admin/registry.js';
-import { PositionGrantedSetsCell, PositionHolderCountCell } from '../views/metadata-admin/PositionGrantCells.js';
 import { CONNECTOR_CREDENTIALS_REF } from '../views/setup/connectorCredentials.js';
 import { CONNECTOR_CONNECTIONS_REF } from '../views/setup/connectorConnections.js';
 import { PERMISSION_SET_ASSIGNMENT_REF, POSITION_HOLDERS_REF } from '../views/setup/peopleAssignments.js';
@@ -94,42 +94,22 @@ const MetadataResourceRouter = lazy(() =>
   import('../views/metadata-admin/index.js').then((m) => ({ default: m.MetadataResourceRouter })),
 );
 
-function MetadataAdminFallback({ label }: { label: string }) {
-  return <div className="p-6 text-sm text-muted-foreground">Loading {label}…</div>;
-}
-
 /**
- * A page registered BY REFERENCE to its module, loaded the first time it is
- * drawn (objectstack#33293). Every page below was imported here by value, and
- * this module is a side-effect import of the package entry, so each one, with
- * everything it imports, was in the console's EAGER closure: on a dashboard
- * route the browser downloaded the Packages page, its package form dialog, the
- * permission-matrix editor and the Setup assignment pages before it asked for
- * data. Measured from `apps/console/dist/eager-closure.json` and the emitted
- * chunks' module lists, not from a source search (see the trap above): with
- * these registrations lazy, the `PackageFormDialog` and
- * `PositionHoldersSection` chunks leave the closure.
+ * Pages registered BY REFERENCE to their module, loaded the first time they are
+ * drawn (objectstack#33293), through the one wrapper `./lazyPage.tsx`, whose
+ * header says why. Every page below was imported here by value, and this module
+ * is a side-effect import of the package entry, so each one, with everything it
+ * imports, was in the console's EAGER closure: on a dashboard route the browser
+ * downloaded the Packages page, its package form dialog, the permission-matrix
+ * editor and the Setup assignment pages before it asked for data. Measured from
+ * `apps/console/dist/eager-closure.json` and the emitted chunks' module lists,
+ * not from a source search (see the trap above): with these registrations lazy,
+ * the `PackageFormDialog` and `PositionHoldersSection` chunks leave the closure.
  *
- * The same shape as the two registrations above: the `Suspense` boundary lives
- * inside the registered value, so `registerAppComponent` and
- * `registerMetadataResource` still receive a component, and no render site
- * learns about pending. ⛔ It only defers anything while nothing else in the
- * package's eager graph names the page module statically; the barrel's
- * `PackagedActionsPage` re-export is tree-shaken today because the console
- * imports no such name.
+ * ⛔ It only defers anything while nothing else in the package's eager graph
+ * names the page module statically; the barrel's `PackagedActionsPage`
+ * re-export is tree-shaken today because the console imports no such name.
  */
-function lazyPage<P extends object>(label: string, load: () => Promise<ComponentType<P>>): ComponentType<P> {
-  const Page = lazy(() => load().then((component) => ({ default: component })));
-  function LazyPage(props: P) {
-    return (
-      <Suspense fallback={<MetadataAdminFallback label={label} />}>
-        <Page {...props} />
-      </Suspense>
-    );
-  }
-  return LazyPage;
-}
-
 const PackagesPage = lazyPage('packages', () =>
   import('../views/metadata-admin/PackagesPage.js').then((m) => m.PackagesPage),
 );
@@ -153,6 +133,20 @@ const PermissionSetAssignmentPage = lazyPage('permission set assignments', () =>
 );
 const RecycleBinPage = lazyPage('recycle bin', () =>
   import('../views/setup/RecycleBinPage.js').then((m) => m.RecycleBinPage),
+);
+/**
+ * The position list's two served cells (objectstack#33582): by value they held
+ * `metadata-admin/i18n.ts`, and with it the Studio `en` string namespace, in the
+ * eager closure. A cell draws nothing until its module lands (no page-sized
+ * loading line inside a table cell); every cell shares the one load.
+ */
+const PositionHolderCountCell = lazyPage('position holders', () =>
+  import('../views/metadata-admin/PositionGrantCells.js').then((m) => m.PositionHolderCountCell),
+  null,
+);
+const PositionGrantedSetsCell = lazyPage('position permission sets', () =>
+  import('../views/metadata-admin/PositionGrantCells.js').then((m) => m.PositionGrantedSetsCell),
+  null,
 );
 
 /**

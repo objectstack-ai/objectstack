@@ -49,7 +49,7 @@ computed truths and declared outcomes:
 ```ts
 import { gradeCardAnswer, gradeCardOperation, scoreCardArtifact } from '@objectstack/scenarios/score/full';
 
-scoreCardArtifact(card, artifact);                 // a built dist/objectstack.json: expect, tags, agent actions
+scoreCardArtifact(card, artifact);                 // a built dist/objectstack.json: expect, tags, agent actions, persona grants
 gradeCardOperation(card, 'remove_ben', observed);  // an observed write against its declared outcome
 gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // an agent's answer
 ```
@@ -59,7 +59,24 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
 - `scenario-tags.ts` — the capability-tag checks and the agent-action exposure check (each
   declared action exists on its object, carries `ai.exposed: true`, and carries
   `ai.requiresConfirmation: true` where the card says `confirm`; a missing action fails, never
-  skipped).
+  skipped), and the persona grant checks (`gradePersonaGrants`): one Build check per persona ×
+  object × verb the card implies, `persona-grant:<persona>:<object>:<verb>`, against that
+  persona's own set (`<namespace>_<persona id>`). A question asked as the persona needs `read` on
+  its object (not when the persona hides that object: it declines), and an `applied` or
+  `pending_confirmation` operation needs its kind; each passes when the set grants the verb, read
+  as the platform folds it (`buildEffectiveObjectPermissions`, a `'*'` wildcard included where
+  `access.default` lets it cover the object, then `objectPermissionGrants`). An operation refused
+  `PERMISSION_DENIED` passes when the set refuses it: no verb, or a field the write names locked
+  (not editable, no `when`); it is not measured, out of passed and total, when only a row rule
+  could refuse it (a write row policy, a row-conditioned field entry), and fails when nothing in
+  the set does. The same persona, object and verb also needed elsewhere yields the needed check
+  alone: the refusal is a row's or a field's, not the grant's. A persona whose set the build does
+  not declare fails each of its checks. One needed write is not measured, never a pass: a verb the
+  set withholds that only `pending_confirmation` operations need, where the build declares the
+  card's confirm-gated agent action (`confirm: true`) on that object. That action is the route the
+  card designs for a write that asks first, and its body writes as the platform, so whether the
+  write goes through it is the run's to observe (ruling A on #31999 item 9, carried to the Build
+  side). An `applied` write stays measured against the grant, whatever actions the build adds.
 - `scenario-operation-grade.ts` — an observed write against `applied` / `refused` /
   `pending_confirmation`; a fact the observation does not carry fails. The operation the
   card's `write_validation` guardrail names is graded in two halves: the agent half (its write
@@ -86,6 +103,17 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   before.
   A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
+  **Temporary, until objectstack-ai/cloud#3826 item 6 (real human confirmation):** a
+  `pending_confirmation` operation is also met when the agent applied it through the action's
+  confirmation gate on the person's explicit instruction — the ask names the target row, read
+  off the card (`askNamesTarget`); the write went through `run_action`, never a raw data door;
+  the build declares `ai.requiresConfirmation: true` on that action; the call carried
+  `confirm: true`; and the rows written on the object are exactly the target, holding the
+  declared `values` (gone, for a `delete`). The grade says which way it went
+  (`OperationGrade.confirmation`: `asked first` or `confirmed by the agent`), and the scorecard
+  counts both per half and per card. The switch is `AGENT_CONFIRMATION_MEETS_PENDING` and the
+  rule is `agentConfirmationChecks`: set the switch to `false` to grade strictly again, or delete
+  both when the platform confirms for real.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows

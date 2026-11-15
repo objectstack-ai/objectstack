@@ -40,9 +40,11 @@
  *
  * ## What of the card the checks read
  *
- * `expect`, `capabilities`, `run.personas` (hidden fields and row scope) and
- * `run.agentActions` — picked from the card schema's own type
- * ({@link ScenarioArtifactCard}), never a copy of it.
+ * `expect`, `capabilities`, `run.personas` (hidden fields and row scope),
+ * `run.agentActions`, and `run.questions` / `run.operations` for the persona
+ * grant checks ({@link gradePersonaGrants}: what the card has each persona
+ * read and write, against that persona's permission set) — picked from the
+ * card schema's own type ({@link ScenarioArtifactCard}), never a copy of it.
  *
  * ## Whether an expression compiles
  *
@@ -55,7 +57,7 @@
  * Deterministic: no model call, no network (the cost ruling on cloud#3600).
  */
 
-import { resolveStackCollection } from '@objectstack/core';
+import { buildEffectiveObjectPermissions, resolveStackCollection, superuserFieldVote } from '@objectstack/core';
 import { standaloneActionOwnerKey } from '@objectstack/objectql';
 import { effectiveSharingModel } from '@objectstack/plugin-sharing';
 import {
@@ -72,6 +74,7 @@ import {
   referenceTargetOf,
   summaryFunctionReadsField,
 } from '@objectstack/spec/data';
+import { objectPermissionGrants, type ObjectPermissionVerbTarget } from '@objectstack/spec/security';
 import { SystemFieldName } from '@objectstack/spec/system';
 
 import { personaPermissionSetName, ROW_SCOPE_TAG, type ScenarioCard } from '../schema.js';
@@ -97,9 +100,13 @@ const norm = (s: string): string => s.trim().toLowerCase();
 
 // ── What of the card the checks read ────────────────────────────────────────
 
-/** What {@link scoreScenarioArtifact} reads of one card: a pick of the card schema's type. */
+/**
+ * What {@link scoreScenarioArtifact} reads of one card: a pick of the card
+ * schema's type. `questions` and `operations` feed the persona grant checks
+ * alone ({@link gradePersonaGrants}); a pick without them derives none.
+ */
 export type ScenarioArtifactCard = Pick<ScenarioCard, 'expect' | 'capabilities'> & {
-  run: Pick<ScenarioCard['run'], 'personas' | 'agentActions'>;
+  run: Pick<ScenarioCard['run'], 'personas' | 'agentActions'> & Partial<Pick<ScenarioCard['run'], 'questions' | 'operations'>>;
 };
 
 /** A business action the card declares an agent must be able to call (`run.agentActions[]`). */
@@ -892,6 +899,239 @@ export function gradeAgentActions(facts: ArtifactFacts, actions: readonly Scenar
   return out;
 }
 
+// ── Persona grants: what the card has each persona do, against its set ──────
+
+/** The verb a persona grant check names: `read` for a question, the operation's own kind for a write. */
+export type PersonaGrantVerb = 'read' | NonNullable<ScenarioArtifactCard['run']['operations']>[number]['kind'];
+
+/** The object-permission bit each verb needs, read through the spec's fold (`objectPermissionGrants`). */
+const VERB_GRANT: Readonly<Record<PersonaGrantVerb, ObjectPermissionVerbTarget>> = {
+  read: 'allowRead',
+  create: 'allowCreate',
+  update: 'allowEdit',
+  delete: 'allowDelete',
+};
+
+/** The row-policy operation (`RLSOperation`) a write of each kind meets, besides `all`. */
+const WRITE_POLICY_OPERATION: Readonly<Record<Exclude<PersonaGrantVerb, 'read'>, string>> = {
+  create: 'insert',
+  update: 'update',
+  delete: 'delete',
+};
+
+/** One persona × object × verb the card implies, and what implies it. */
+export interface PersonaGrantNeed {
+  persona: string;
+  object: string;
+  verb: PersonaGrantVerb;
+  /** The questions and operations that need the grant: a question the persona answers, a write applied or awaiting confirmation. */
+  requiredBy: string[];
+  /** The operations among those whose outcome is `pending_confirmation`: the write waits on a person's confirmation. */
+  awaitingConfirmation: string[];
+  /** The writes the card declares refused `PERMISSION_DENIED`, each with the fields it names. */
+  refusedBy: Array<{ operation: string; fields: string[] }>;
+}
+
+/**
+ * What the card alone implies each persona may and may not do, one entry per
+ * persona × object × verb, in card order:
+ *
+ *  - a question asked as a persona (`questions[].personas`) needs `read` on its
+ *    object, unless the persona hides that whole object (`hidden.objects`): a
+ *    persona that must not read the object declines the question, it reads
+ *    nothing;
+ *  - an operation whose outcome is `applied` or `pending_confirmation` needs
+ *    its kind on its object, for the persona it acts as;
+ *  - an operation refused `PERMISSION_DENIED` must be refused by that
+ *    persona's set. Any other refusal (`VALIDATION_FAILED`) implies nothing
+ *    about the grant.
+ */
+export function personaGrantNeeds(card: ScenarioArtifactCard): PersonaGrantNeed[] {
+  const needs = new Map<string, PersonaGrantNeed>();
+  const need = (persona: string, object: string, verb: PersonaGrantVerb): PersonaGrantNeed => {
+    const key = `${persona}:${object}:${verb}`;
+    let n = needs.get(key);
+    if (!n) needs.set(key, (n = { persona, object, verb, requiredBy: [], awaitingConfirmation: [], refusedBy: [] }));
+    return n;
+  };
+  const hidesObject = new Map(card.run.personas.map((p) => [p.id, new Set(p.hidden.objects ?? [])]));
+  for (const q of card.run.questions ?? []) {
+    for (const persona of q.personas ?? []) {
+      if (hidesObject.get(persona)?.has(q.object)) continue;
+      need(persona, q.object, 'read').requiredBy.push(`question ${q.id}`);
+    }
+  }
+  for (const op of card.run.operations ?? []) {
+    const { outcome } = op;
+    if (outcome.kind === 'applied' || outcome.kind === 'pending_confirmation') {
+      const n = need(op.actingAs, op.object, op.kind);
+      n.requiredBy.push(`operation ${op.id}`);
+      if (outcome.kind === 'pending_confirmation') n.awaitingConfirmation.push(op.id);
+    } else if (outcome.code === 'PERMISSION_DENIED') {
+      need(op.actingAs, op.object, op.kind).refusedBy.push({ operation: op.id, fields: Object.keys(op.values ?? {}) });
+    }
+  }
+  return [...needs.values()];
+}
+
+/**
+ * How a persona's own set can refuse one declared write that its object grant
+ * admits: a field lock, a row rule, or nothing. The platform answers the same
+ * `403 PERMISSION_DENIED` for an object verb it does not grant, for a write
+ * naming a field the caller's set does not let it edit (plugin-security's
+ * field-level write step), and for a row its row policy refuses; so a refused
+ * write does not by itself mean the verb is absent.
+ *
+ *  - `field-lock` — an entry with no row condition (`when`) on a field the
+ *    write names, not editable (`fieldPermissionVote`'s reading), and no Modify
+ *    All vote on the object (`superuserFieldVote`) to override it;
+ *  - `row-rule` — a row policy (`rowLevelSecurity`) that applies to this write
+ *    (`enabled` not false, its object or `'*'`, its operation or `all`, no
+ *    `positions`: the persona holds none), or a row-conditioned entry on a
+ *    field it names. Whether it refuses this row depends on the row, which the
+ *    artifact does not carry;
+ *  - `none` — nothing in the set refuses it.
+ */
+function writeRefusalRoute(
+  set: Bag,
+  object: string,
+  verb: Exclude<PersonaGrantVerb, 'read'>,
+  fields: readonly string[],
+): { route: 'field-lock' | 'row-rule' | 'none'; names: string[] } {
+  const entries = isBag(set.fields) ? set.fields : {};
+  const written = verb === 'delete' ? [] : fields.flatMap((f) => {
+    const entry = entries[`${object}.${f}`];
+    return isBag(entry) && entry.editable !== true ? [{ field: f, conditioned: entry.when !== undefined }] : [];
+  });
+  const modifyAll = superuserFieldVote([set as { objects?: Record<string, unknown> }], object)?.editable === true;
+  const locked = modifyAll ? [] : written.filter((w) => !w.conditioned).map((w) => w.field);
+  if (locked.length > 0) return { route: 'field-lock', names: locked };
+  const policies = (Array.isArray(set.rowLevelSecurity) ? set.rowLevelSecurity : []).filter(
+    (r): r is Bag =>
+      isBag(r) &&
+      r.enabled !== false &&
+      (r.object === '*' || r.object === object) &&
+      (r.operation === 'all' || r.operation === WRITE_POLICY_OPERATION[verb]) &&
+      !(Array.isArray(r.positions) && r.positions.length > 0),
+  );
+  const rowRules = [
+    ...policies.map((r) => `row policy ${String(r.name)}`),
+    ...(modifyAll ? [] : written.filter((w) => w.conditioned).map((w) => `row-conditioned field ${w.field}`)),
+  ];
+  return rowRules.length > 0 ? { route: 'row-rule', names: rowRules } : { route: 'none', names: [] };
+}
+
+/**
+ * The confirm-gated agent actions the card declares on `object`
+ * (`run.agentActions[]` with `confirm`) that the build declares there too, by
+ * name. An action body runs elevated (`isSystem`, the runtime's sandbox), so a
+ * build may withhold a write the card has wait on a person's confirmation from
+ * the persona's set and route it through such an action: the lock and the
+ * door ruling A on #31999 item 9 accepts on the Run side, here offered by the
+ * card itself. Only the confirm-gated door counts: a write the card applies
+ * outright stays measured against the grant, whatever actions the build adds.
+ */
+function confirmGatedRoutes(facts: ArtifactFacts, card: ScenarioArtifactCard, object: string): string[] {
+  return (card.run.agentActions ?? [])
+    .filter((a) => a.confirm === true && a.object === object && facts.actions.some((x) => x.object === object && x.action.name === a.name))
+    .map((a) => a.name);
+}
+
+/**
+ * One Build check per persona × object × verb the card implies
+ * ({@link personaGrantNeeds}), named `persona-grant:<persona>:<object>:<verb>`,
+ * judged against the persona's own permission set
+ * ({@link TagCheckContext.namespace}): the set the runner signs the persona in
+ * with, and the only one the data contract promises it ("a user holding only
+ * that set").
+ *
+ * The object grant is the platform's own answer, never a reading of one bit:
+ * the set is folded by `buildEffectiveObjectPermissions` (`@objectstack/core`,
+ * the map `/auth/me/permissions` serves — an explicit entry, else the set's
+ * `'*'` wildcard where the object's `access.default` lets one cover it), and
+ * the entry asked through the spec's `objectPermissionGrants`, the fold the
+ * enforcement door asks (`edit` and `delete` are `read ∧ grant`).
+ *
+ *  - Needed (a question's read, an applied or pending write): passes when the
+ *    set grants the verb. A refused write of the same persona, object and verb
+ *    beside it is refused by a row or a field, not the grant; it is named in
+ *    the detail and judged no further. One exception, not measured and never
+ *    a pass: a write verb the set withholds that only `pending_confirmation`
+ *    operations need, where the card's confirm-gated agent action on the
+ *    object is declared by the build ({@link confirmGatedRoutes}) — the route
+ *    the card itself designs for a write that asks before acting.
+ *  - Refused `PERMISSION_DENIED` only: passes when the set refuses every such
+ *    write — it grants no verb, or it locks a field each write names
+ *    ({@link writeRefusalRoute}). When only a row rule could refuse one, the
+ *    check is not measured: it counts in neither passed nor total and is never
+ *    a pass. When nothing in the set refuses one, it fails.
+ *
+ * A persona whose set the build does not declare fails every check: there is
+ * no built set to judge.
+ */
+export function gradePersonaGrants(facts: ArtifactFacts, card: ScenarioArtifactCard, ctx: TagCheckContext = {}): CheckResult[] {
+  const needs = personaGrantNeeds(card);
+  if (needs.length === 0) return [];
+  const schemas = [...facts.objects.values()];
+  const source = { allSchemas: () => schemas, schemaOf: (name: string) => facts.objects.get(name) };
+  const effective = new Map<string, ReturnType<typeof buildEffectiveObjectPermissions>>();
+  return needs.map((n) => {
+    const name = `persona-grant:${n.persona}:${n.object}:${n.verb}`;
+    const setName = personaSetName(ctx, n.persona);
+    const set = facts.permissionSets.find((ps) => ps.name === setName);
+    if (!set) return check(name, false, `the build declares no permission set ${setName}`);
+    if (!effective.has(setName)) effective.set(setName, buildEffectiveObjectPermissions([set as { objects?: Record<string, unknown> }], source));
+    const granted = objectPermissionGrants(effective.get(setName)![n.object], VERB_GRANT[n.verb]);
+    const refused = n.refusedBy.map((r) => r.operation);
+
+    if (n.requiredBy.length > 0) {
+      const beside = refused.length > 0 ? `; ${refused.join(', ')} is refused by a row or a field, not the grant` : '';
+      const onlyAwaiting = n.awaitingConfirmation.length === n.requiredBy.length;
+      const routed = granted || n.verb === 'read' || !onlyAwaiting ? [] : confirmGatedRoutes(facts, card, n.object);
+      if (routed.length > 0) {
+        return {
+          check: name,
+          pass: false,
+          notMeasured:
+            `${setName} grants no ${n.verb} on ${n.object}, and the build declares the card's confirm-gated agent action${routed.length > 1 ? 's' : ''} ` +
+            `${routed.join(', ')} there, a door that writes as the platform: whether ${n.requiredBy.join(', ')} goes through it is the run's to observe`,
+        };
+      }
+      return check(
+        name,
+        granted,
+        granted
+          ? `${setName} grants it${beside}`
+          : `${setName} grants no ${n.verb} on ${n.object}, which ${n.requiredBy.join(', ')} needs${beside}`,
+      );
+    }
+
+    if (!granted) return check(name, true, `${setName} grants no ${n.verb} on ${n.object}`);
+    const verb = n.verb as Exclude<PersonaGrantVerb, 'read'>;
+    const routes = n.refusedBy.map((r) => ({ operation: r.operation, ...writeRefusalRoute(set, n.object, verb, r.fields) }));
+    const open = routes.filter((r) => r.route === 'none');
+    if (open.length > 0) {
+      return check(
+        name,
+        false,
+        `${setName} grants ${n.verb} on ${n.object}, locks no field ${open.map((r) => r.operation).join(', ')} names, and no row rule applies: nothing in the set refuses it`,
+      );
+    }
+    const byRow = routes.filter((r) => r.route === 'row-rule');
+    const locks = routes.filter((r) => r.route === 'field-lock').map((r) => `${r.operation} by ${r.names.join(', ')}`);
+    if (byRow.length > 0) {
+      return {
+        check: name,
+        pass: false,
+        notMeasured:
+          `${setName} grants ${n.verb} on ${n.object}; only ${byRow.map((r) => r.names.join(', ')).join('; ')} could refuse ` +
+          `${byRow.map((r) => r.operation).join(', ')}, and whether it refuses the row depends on the row, which the artifact does not carry`,
+      };
+    }
+    return check(name, true, `${setName} grants ${n.verb} on ${n.object} and locks the fields: ${locks.join('; ')}`);
+  });
+}
+
 // ── One card against one artifact ───────────────────────────────────────────
 
 export interface ScenarioArtifactScore {
@@ -901,10 +1141,13 @@ export interface ScenarioArtifactScore {
   shape: ScoreResult;
   tags: TagVerdict[];
   agentActions: CheckResult[];
+  /** One check per persona × object × verb the card implies ({@link gradePersonaGrants}); a not-measured one is listed and counted in neither figure. */
+  personaGrants: CheckResult[];
   /** One failing check per bare view, doc, capability or position name ({@link gradeItemNames}); empty when no namespace was given. */
   naming: CheckResult[];
-  /** Checks passed across `expect`, the scored tags, the agent actions and the naming rule. */
+  /** Checks passed across `expect`, the scored tags, the agent actions, the persona grants and the naming rule. */
   passed: number;
+  /** The same checks, less the not-measured ones. */
   total: number;
   /** passed / total; `null` when nothing was scored — never a vacuous 1. */
   score: number | null;
@@ -913,27 +1156,33 @@ export interface ScenarioArtifactScore {
 }
 
 /**
- * Score one built artifact against one card: shape, capability tags and agent
- * actions, plus — given the app's `namespace` — every bare non-object item name.
+ * Score one built artifact against one card: shape, capability tags, agent
+ * actions and persona grants, plus — given the app's `namespace` — every bare
+ * non-object item name.
  */
 export function scoreScenarioArtifact(artifact: unknown, card: ScenarioArtifactCard, opts: { namespace?: string } = {}): ScenarioArtifactScore {
   const facts = readArtifactFacts(artifact);
+  const ctx: TagCheckContext = opts.namespace === undefined ? {} : { namespace: opts.namespace };
   const expect = scoreGraph(facts.graph, card.expect);
   const shape = scoreGraphShape(facts.graph, deriveShape(card.expect));
-  const tags = gradeCapabilityTags(facts, card, opts.namespace === undefined ? {} : { namespace: opts.namespace });
+  const tags = gradeCapabilityTags(facts, card, ctx);
   const agentActions = gradeAgentActions(facts, card.run.agentActions ?? []);
+  const personaGrants = gradePersonaGrants(facts, card, ctx);
   const naming = opts.namespace === undefined ? [] : gradeItemNames(artifact, opts.namespace);
-  const all = [...expect.checks, ...tags.flatMap((t) => t.checks), ...agentActions, ...naming];
-  const passed = all.filter((c) => c.pass).length;
+  const measured = [...expect.checks, ...tags.flatMap((t) => t.checks), ...agentActions, ...personaGrants, ...naming].filter(
+    (c) => c.notMeasured === undefined,
+  );
+  const passed = measured.filter((c) => c.pass).length;
   return {
     expect,
     shape,
     tags,
     agentActions,
+    personaGrants,
     naming,
     passed,
-    total: all.length,
-    score: all.length === 0 ? null : passed / all.length,
+    total: measured.length,
+    score: measured.length === 0 ? null : passed / measured.length,
     unscored: tags.filter((t) => t.status === 'unscored').map((t) => ({ tag: t.tag, reason: t.reason! })),
   };
 }

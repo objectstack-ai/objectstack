@@ -61,6 +61,8 @@ export function SummaryField({ value, field, dependentValues, ...props }: FieldW
   // A roll-up that declares its currency is money (ADR-0144 D6 as amended),
   // drawn by the call the currency cell and `CurrencyField` make, so this face
   // and `FormulaCellRenderer`'s agree; `dependentValues` is the parent record.
+  // A `dynamic` roll-up (of a stored home amount, objectstack#33659) resolves
+  // to the tenant default, as the metric tile over its home field does.
   const isNumber = typeof value === 'number' && !isNaN(value);
   const text =
     isNumber && summaryDeclaresCurrency(field)
