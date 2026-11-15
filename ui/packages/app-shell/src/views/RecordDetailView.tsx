@@ -52,6 +52,7 @@ import {
   seedRecordPageReaders,
   type RecordPageStreamsAsk,
 } from './recordPagePayload.js';
+import { applySavedRecordEcho } from './recordSaveEcho.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 import { resolveActionParams } from '@object-ui/fields';
@@ -1490,6 +1491,23 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // `effectivePage` or `perms` here — derive what the read sends from them
     // above instead (AGENTS.md #10).
   }, [hasPage, objectName, pureRecordId, dataSource, pageRecordExpand, recordInvalidationNonce, childInvalidationNonce]);
+
+  // objectstack#33827 — a save to THIS record draws its saved values from the
+  // save's own answer, not from the re-read above. The adapter hands the answer
+  // over with the write's MutationEvent, in the same dispatch that invalidates
+  // the record on the bus and before the write's promise resolves, so the page
+  // already holds the saved record when the save's success toast shows. The
+  // re-read still runs and replaces it whole (expanded relations, anything the
+  // answer leaves out); `applySavedRecordEcho` says what the answer may change.
+  useEffect(() => {
+    if (!hasPage || !objectName || !pureRecordId || typeof dataSource?.onMutation !== 'function') return;
+    const object = objectName.toLowerCase();
+    return dataSource.onMutation((e: { type?: string; resource?: string; id?: string | number; record?: unknown }) => {
+      if (e?.type !== 'update' || e.id == null || String(e.id) !== pureRecordId) return;
+      if (String(e.resource ?? '').toLowerCase() !== object) return;
+      setPageRecord((held: any) => applySavedRecordEcho(held, e.record, pureRecordId));
+    });
+  }, [hasPage, dataSource, objectName, pureRecordId]);
 
   // The loaded record AS THE VIEWER MAY READ IT (objectui#10434,
   // objectui#10499): `withoutDeniedFields` removes the fields the loaded
