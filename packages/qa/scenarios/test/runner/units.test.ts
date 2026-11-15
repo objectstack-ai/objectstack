@@ -94,6 +94,19 @@ describe('parseStreamJson', () => {
     expect(t.meta).toMatchObject({ model: 'm', numTurns: 3, resultSubtype: 'success', mcpServers: [{ name: 'app', status: 'connected' }] });
   });
 
+  it('reads the CLI\'s own duration off the result line, beside its cost; a result line without one states none, never a zero', () => {
+    // The result line's fields as Claude Code 2.1.325 printed them for a one-turn haiku answer (2026-11-15): the
+    // runner's clock read 5,824 ms for the same process, spawn to exit.
+    const timed = parseStreamJson(STREAM.replace('"total_cost_usd":0.1}', '"total_cost_usd":0.1,"duration_ms":4366,"duration_api_ms":1881}'));
+    expect(timed.meta).toMatchObject({ reportedCostUsd: 0.1, reportedDurationMs: 4366, reportedApiDurationMs: 1881 });
+    const untimed = parseStreamJson(STREAM);
+    expect(untimed.meta.reportedCostUsd).toBe(0.1);
+    expect(untimed.meta).not.toHaveProperty('reportedDurationMs');
+    expect(untimed.meta).not.toHaveProperty('reportedApiDurationMs');
+    // No result line at all (a killed process): nothing stated.
+    expect(parseStreamJson(STREAM.split('\n').slice(0, 2)).meta).not.toHaveProperty('reportedDurationMs');
+  });
+
   it('keeps a call with no result as output undefined — a cut-short turn is visible', () => {
     const t = parseStreamJson(STREAM.split('\n').slice(0, 2));
     expect(t.toolCalls).toHaveLength(1);

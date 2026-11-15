@@ -822,3 +822,116 @@ describe('[ADR-0150 D2/D8, #31698] the report lists each stale-column grant whos
     });
   });
 });
+
+/**
+ * [ADR-0150 D3] A name two packages hold is held, not missing: a grant naming
+ * no package of it, and a position of no package binding it, are each refused
+ * with every candidate named. Both halves of the report name that refusal and
+ * the fix it allows — for a grant, the reviewed bind when its column names no
+ * package, never "declare the set again".
+ */
+describe('[ADR-0150 D3] a name two packages hold: both halves of the report name the refusal and every candidate', () => {
+  const CRM = 'com.acme.crm';
+  const HR = 'com.acme.hr';
+  /** Of HR's namespace, holding no set: a stale column. */
+  const HR_OLD = 'com.acme.hr-old';
+  const HR_TWO = 'com.acme.hr-two';
+  const NAMESPACES: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr', [HR_OLD]: 'hr', [HR_TWO]: 'hr' };
+  /** `shared` held by CRM and HR; `twin` by HR and HR_TWO, one namespace. */
+  const HOLDERS: Record<string, string[]> = { shared: [CRM, HR], twin: [HR, HR_TWO] };
+  const set = (name: string, packageId: string) => ({ name, _packageId: packageId, systemPermissions: [`cap_${name}`] });
+  const position = { name: 'env_lead', label: 'Lead', permissionSets: ['shared'] };
+  const catalog = createSecurityCatalogReader({
+    registry: {
+      getItem: () => undefined,
+      listItems: (type: string) => (type === 'permission'
+        ? Object.entries(HOLDERS).flatMap(([name, ids]) => ids.map((id) => set(name, id)))
+        : []),
+      isPackageDisabled: () => false,
+      packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' ? HOLDERS[name] ?? [] : []),
+      getPackageScopedItem: (type: string, name: string, packageId: string) =>
+        type === 'permission' && (HOLDERS[name] ?? []).includes(packageId) ? set(name, packageId) : undefined,
+      getEnvironmentScopedItem: () => undefined,
+      getArtifactItem: () => undefined,
+      getPackage: (id: string) => (NAMESPACES[id] ? { manifest: { id, namespace: NAMESPACES[id] } } : undefined),
+      getAllPackages: () => [],
+    } as any,
+    metadata: {
+      get: (type: string, name: string) => (type === 'position' && name === position.name ? position : undefined),
+      list: (type: string) => (type === 'position' ? [position] : []),
+    },
+  });
+  const grant = (id: string, set: string, column: string | null) =>
+    ({ id, user_id: 'usr_a', permission_set: set, permission_set_package: column, organization_id: ORG });
+  const rows = [
+    grant('g_bare', 'shared', null),
+    grant('g_stale', 'twin', HR_OLD),
+    // CONTROL: the column names a holder, so the grant resolves.
+    grant('g_crm', 'shared', CRM),
+    // CONTROL: a set nothing holds is listed with no refusal.
+    grant('g_ghost', 'ghost', null),
+  ];
+  const engine: CatalogReferenceReportEngine = {
+    getObject: () => ({}),
+    find: async (object, options: any) =>
+      object === 'sys_user_permission_set' ? rows.slice(options.offset ?? 0, (options.offset ?? 0) + options.limit) : [],
+  };
+
+  it('the position half lists the position with the refusal naming both holders', async () => {
+    const report = await collectCatalogReferences(engine, { catalog });
+    expect(report.positions).toEqual([{
+      position: position.name,
+      packageId: null,
+      permissionSets: ['shared'],
+      refusals: [{
+        permissionSet: 'shared',
+        reason: 'ambiguous-in-environment',
+        candidates: [expect.stringContaining(CRM), expect.stringContaining(HR)],
+        message: expect.stringContaining(CRM),
+      }],
+    }]);
+  });
+
+  it('the permission-set half lists each refused grant with the refusal naming every candidate, and the column it names', async () => {
+    const report = await collectCatalogReferences(engine, { catalog });
+    const grants = report.organizations.flatMap((o) => o.permissionSetGrants);
+    expect(grants.map((g) => g.id)).toEqual(['g_bare', 'g_stale', 'g_ghost']);
+    expect(grants[0].refusal).toEqual({
+      packageId: null,
+      reason: 'ambiguous-in-environment',
+      candidates: [expect.stringContaining(CRM), expect.stringContaining(HR)],
+      message: expect.stringContaining(HR),
+    });
+    expect(grants[1].refusal).toMatchObject({
+      packageId: HR_OLD,
+      candidates: [expect.stringContaining(HR), expect.stringContaining(HR_TWO)],
+    });
+    expect(grants[2].refusal).toBeUndefined();
+  });
+
+  it('logs the refusals in the grant line, and its fix names the bind for a grant naming no package and the re-grant for one naming a package', async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    await reportCatalogReferences(engine, { catalog, logger });
+    const lines = logger.error.mock.calls.filter(([, , meta]: any[]) => meta?.organizations?.items?.[0]?.grants);
+    expect(lines).toHaveLength(1);
+    const [line, , meta] = lines[0];
+    expect(meta.organizations.items[0].refusals.items.map((r: any) => [r.id, r.packageId, r.candidates.length]))
+      .toEqual([['g_bare', null, 2], ['g_stale', HR_OLD, 2]]);
+    expect(String(line)).toContain('os migrate stored-references bind --table sys_user_permission_set --id ID --package PACKAGE');
+    expect(String(line)).toContain('grant the candidate meant again naming its package, then remove the listed grant');
+  });
+
+  it('CONTROL: a grant line with no refusal names neither the bind nor the re-grant', async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const ghostOnly: CatalogReferenceReportEngine = {
+      getObject: () => ({}),
+      find: async (object) => (object === 'sys_user_permission_set' ? [grant('g_ghost', 'ghost', null)] : []),
+    };
+    await reportCatalogReferences(ghostOnly, { catalog, logger });
+    const lines = logger.error.mock.calls.filter(([, , meta]: any[]) => meta?.organizations?.items?.[0]?.grants);
+    expect(lines).toHaveLength(1);
+    expect(lines[0][2].organizations.items[0].refusals).toBeUndefined();
+    expect(String(lines[0][0])).not.toContain('stored-references bind');
+    expect(String(lines[0][0])).not.toContain('refusals');
+  });
+});
