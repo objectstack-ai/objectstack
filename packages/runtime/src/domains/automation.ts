@@ -2298,8 +2298,9 @@ function notifyChannelEntries(value: unknown): NotifyChannelEntry[] {
  *    delivers nothing whatever it names (it records a skipped step), and a
  *    messaging service with no `getKnownChannels()` (another implementation of
  *    the service) cannot be enumerated: neither is judged. Nor is a reader
- *    that throws or answers something other than a list: an unreadable
- *    registry gives no verdict, and the save goes on as before.
+ *    that throws, answers something other than a list, or answers a list
+ *    with any member that is not a `{ id: string }`: an unreadable registry
+ *    gives no verdict, and the save goes on as before.
  *
  * Read per request and recorded nowhere: the answer is the registry as it
  * stands at this save (AGENTS.md, "Startup registry reads").
@@ -2328,8 +2329,10 @@ async function refuseUnknownNotifyChannels(
     // A reader that throws, or answers anything but a list, is a registry this
     // door cannot read: not judged, like a service with no reader at all. The
     // save goes on as it did before this check existed, and a delivery on an
-    // unknown channel still reports itself at run time. Members that are not a
-    // `{ id: string }` are not channels and are left out of the roster.
+    // unknown channel still reports itself at run time. So is a list with any
+    // member that is not a `{ id: string }` (the declared `NotifyChannelRegistry`
+    // shape): dropping such members would leave a roster that misses channels
+    // the reader does know, and refuse every name it carries.
     let read: unknown;
     try {
         read = messaging.getKnownChannels();
@@ -2337,10 +2340,10 @@ async function refuseUnknownNotifyChannels(
         return undefined;
     }
     if (!Array.isArray(read)) return undefined;
-    const known = (read as unknown[]).filter(
-        (entry): entry is { id: string; configured: boolean } =>
-            !!entry && typeof entry === 'object' && typeof (entry as { id?: unknown }).id === 'string',
-    );
+    const isChannel = (entry: unknown): entry is { id: string; configured: boolean } =>
+        !!entry && typeof entry === 'object' && typeof (entry as { id?: unknown }).id === 'string';
+    if (!(read as unknown[]).every(isChannel)) return undefined;
+    const known = read as Array<{ id: string; configured: boolean }>;
     const knownIds = known.map((entry) => entry.id);
 
     const lines: string[] = [];
