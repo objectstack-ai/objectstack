@@ -144,6 +144,30 @@ export async function readLockoutRequestState(): Promise<LockoutRequest | undefi
   }
 }
 
+/**
+ * Record the gate's verdict for the request that is running (`undefined`: this
+ * attempt has none, whatever an earlier call recorded). `false` when no request
+ * state is open, which the gate treats as "the verifier cannot carry the
+ * refusal" and refuses by itself instead.
+ */
+export async function recordSignInAttempt(attempt: SignInAttempt | undefined): Promise<boolean> {
+  try {
+    await signInAttemptState.set(attempt);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The verdict the gate recorded for the request that is running, if any. Never throws. */
+export async function readSignInAttempt(): Promise<SignInAttempt | undefined> {
+  try {
+    return await signInAttemptState.get();
+  } catch {
+    return undefined;
+  }
+}
+
 /** better-auth's `emailAndPassword.password` pair. */
 export interface PasswordHasher {
   hash: (password: string) => Promise<string>;
