@@ -291,13 +291,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Cited numbers resolve (#6634)': 15,
   'Cited decision LETTERS resolve (#9592)': 26,
   // ⛔ NOT today's count. This battery runs one case per `KNOWN_NUMBER_COLLISIONS`
-  // row (3 today) on top of 20 structural cases, and entries only ever LEAVE that
+  // row (3 today) on top of 21 structural cases, and entries only ever LEAVE that
   // list: a resolved collision is meant to be deleted, and the gate already fails
-  // a stale entry. A floor at 23 would redden every legitimate removal and train
+  // a stale entry. A floor at 24 would redden every legitimate removal and train
   // the next author to edit the floor, which is the one habit these floors exist
   // to prevent. Pinned instead is the part that does not move with the list: the
-  // 20 structural cases ran AND at least one row was actually audited.
-  'Live tree: green as shipped, red under ablation': 21,
+  // 21 structural cases ran AND at least one row was actually audited.
+  'Live tree: green as shipped, red under ablation': 22,
   'Stem-qualified citations name ONE record (#26076)': 21,
   'the sharded registry\'s assembly (#6957)': 13,
 });
@@ -1184,6 +1184,17 @@ function collectAnchorLetterCitations(anchorList) {
   }
   return out;
 }
+
+// dispatch-gates: whole-tree-population -- collectCitations below runs `git grep --untracked` with no pathspec, so every tracked and every untracked-not-ignored text file is read for an ADR-NNNN citation and a card adding one anywhere implicates this gate; the literals elsewhere in this file name the registry and the two release-owned changelogs its excuse list holds, never this scan's population.
+//
+// Why the marker and not a narrower scan (#34086): the whole-tree read is the
+// third check's whole point (#6634 — a citation nobody resolves rots wherever it
+// is written), so the population is not narrowed. Without the marker
+// `dispatch-gates --commands` placed this family by its path literals alone and
+// called it silent for every other file: on PR #33975 a fixture string in a
+// `scripts/pm/` tool reddened this gate in CI after a dev ran every command the
+// derivation named. The `live-scan-population-is-declared` self-test case below
+// holds the marker to the scan.
 
 /**
  * Every ADR citation in the repo's TRACKED text files.
@@ -2123,6 +2134,29 @@ function selfTest() {
         `expected the scan to find citations across the repo, got ${liveCitations.length} in ` +
           `${new Set(liveCitations.map((c) => c.file)).size} file(s) — the collector is not reading the tree`,
       );
+
+      // The scan's population and the population the gate DECLARES must agree
+      // (#34086). `dispatch-gates` reads the marker line above collectCitations;
+      // without it the family is placed by its path literals alone and reads
+      // silent for every card editing a file outside them — which is how a
+      // fixture string in a `scripts/pm/` tool reached CI red, unannounced. The
+      // other direction is held too: a scan narrowed to one root under a
+      // surviving marker would name this gate on every card on no evidence.
+      {
+        const ownSource = readFileSync(new URL(import.meta.url), 'utf8');
+        const declared = /^\/\/ dispatch-gates: whole-tree-population -- \S/m.test(ownSource);
+        const roots = [...new Set(liveCitations.map((c) => c.file.split('/')[0]))].sort();
+        assert(
+          'live-scan-population-is-declared',
+          declared === (roots.length > 1),
+          declared
+            ? `the whole-tree-population marker stands, but the scan read citations under ${roots.length} ` +
+              `top-level root(s) (${roots.join(', ')}) — narrow the marker with the scan, or restore the scan`
+            : `the scan read citations under ${roots.length} top-level roots (${roots.slice(0, 8).join(', ')}, …) ` +
+              'and this file carries no whole-tree-population marker, so dispatch-gates --commands will not ' +
+              'name this gate for a card that adds a citation outside its path literals — restore the marker',
+        );
+      }
 
       const citeGreen = auditCitedNumbers(
         liveCitations,
