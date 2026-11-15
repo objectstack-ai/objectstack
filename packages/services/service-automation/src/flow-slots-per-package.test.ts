@@ -1316,7 +1316,7 @@ describe('[#33893] the served holder of a name a disabled package co-holds keeps
 
     async function fireAll(): Promise<string[]> {
         ran = [];
-        for (const [key, callback] of armed) await callback({ params: { flowName: key } });
+        for (const [key, callback] of [...armed]) await callback({ params: { flowName: key } });
         return [...ran].sort();
     }
 
@@ -1441,6 +1441,84 @@ describe('[#33893] the served holder of a name a disabled package co-holds keeps
         expect(() => engine.unregisterFlow('t')).not.toThrow();
         expect(await engine.getFlow('t')).toBeNull();
         expect([...armed.keys()]).toEqual([]);
+    });
+
+    /** The disable both ways: the boot pull hands the engine the served holder only, or both are shipped and the re-sync withdraws the disabled one's slot. */
+    function disableBeside(path: 'boot' | 'runtime', off: string, on: string): void {
+        if (path === 'boot') {
+            for (const holder of [P1, P2]) heldOnly(holder, triggered('t', tagOf(holder)));
+            registry.disablePackage(off);
+            pull(on, triggered('t', tagOf(on)));
+        } else {
+            for (const holder of [P1, P2]) ship(holder, triggered('t', tagOf(holder)));
+            registry.disablePackage(off);
+            engine.withdrawFlowSlot(off, 't');
+        }
+    }
+
+    describe.each(['boot', 'runtime'] as const)('%s disable, then the enable\'s re-sync registers every contender', (path) => {
+        it.each([
+            [P1, P2, 'served holder first'],
+            [P2, P1, 'served holder first'],
+            [P1, P2, 'returning holder first'],
+            [P2, P1, 'returning holder first'],
+        ])('%s disabled, %s served, %s: both slots armed and dispatched, no refused-body warning (FROM: the served holder declined behind it and never re-armed)', async (off, on, order) => {
+            disableBeside(path, off, on);
+            expect(engine.flowSlotKey(on, 't')).toBe(`${on}/t`);
+
+            registry.enablePackage(off);
+            const contenders = order === 'served holder first' ? [on, off] : [off, on];
+            for (const holder of contenders) pull(holder, triggered('t', tagOf(holder)));
+
+            expect([...armed.keys()].sort()).toEqual([`${P1}/t`, `${P2}/t`]);
+            expect(await fireAll()).toEqual([tagOf(P1), tagOf(P2)].sort());
+            expect(refusedBodyWarned()).toEqual([]);
+        });
+    });
+
+    it('CONTROL — the returning holder\'s body really is refused: the served one is declined behind the warning, once; registered after all, both are armed', async () => {
+        disableBeside('runtime', P2, P1);
+        registry.enablePackage(P2);
+        pull(P1, triggered('t', 'alpha'));
+        expect([...armed.keys()]).toEqual([`${P1}/t`]);
+
+        engine.recordFlowRefusal('t', new Error('refused body'));
+        expect([...armed.keys()]).toEqual([]);
+        expect(refusedBodyWarned()).toHaveLength(1);
+
+        pull(P2, triggered('t', 'beta'));
+        expect([...armed.keys()].sort()).toEqual([`${P1}/t`, `${P2}/t`]);
+        expect(await fireAll()).toEqual(['alpha', 'beta']);
+        expect(refusedBodyWarned()).toHaveLength(1);
+    });
+
+    describe('the stretch between the uninstall and the re-sync\'s registration (no re-registration at all: a failed re-sync read)', () => {
+        function uninstalled(): void {
+            disableBeside('runtime', P2, P1);
+            registry.unregisterItemsByPackage(P2);
+            loaderSets.t = [P1];
+            expect(engine.flowSlotKey(P1, 't')).toBe(`${P1}/t`);
+        }
+
+        it('first touched by its trigger: the event runs the flow, and the slot folds back to the bare name with its binding (FROM: execute was asked a slot key and ran nothing)', async () => {
+            uninstalled();
+            expect(await fireAll()).toEqual(['alpha']);
+            expect(engine.flowSlotKey(P1, 't')).toBe('t');
+            expect([...armed.keys()]).toEqual(['t']);
+            expect(await fireAll()).toEqual(['alpha']);
+        });
+
+        it('first touched by a bare entry: each one serves the name (FROM: no flow under the bare name)', async () => {
+            uninstalled();
+            expect(engine.inboundHookSlot('t')).toBeUndefined();
+            expect(engine.flowSlotKey(P1, 't')).toBe('t');
+            expect(await engine.getFlow('t')).toMatchObject({ name: 't' });
+            expect(engine.getFlowVersionHistory('t')).toHaveLength(1);
+            ran = [];
+            expect((await engine.execute('t')).success).toBe(true);
+            expect(ran).toEqual(['alpha']);
+            expect([...armed.keys()]).toEqual(['t']);
+        });
     });
 
     it('CONTROL — the other holder uninstalled before its slot is withdrawn: the name folds back to its bare key, as before', async () => {

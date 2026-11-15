@@ -21,9 +21,10 @@
  * the name is filed, and stays, under its qualified key: the first holder
  * the boot pull registers beside a disabled one, and the holder a disabled
  * one's withdrawal leaves behind. Once the registry no longer holds the name
- * twice (the disabled holder uninstalled), the slot's next placement folds it
- * back to the bare name ({@link FlowSlotTable.settle}): one keying rule, so a
- * name one package holds is never read as shared.
+ * twice (the disabled holder uninstalled), it folds back to the bare name
+ * ({@link FlowSlotTable.settle}) the first time the engine places it, fires it
+ * or reads its name: one keying rule, so a name one package holds is never
+ * read as shared.
  *
  * Invariant (D4): a package-less slot never sits beside a package slot. A
  * package arriving for a name a package-less slot holds takes it over
@@ -121,9 +122,9 @@ export class FlowSlotTable {
      */
     settle(name: string): FlowKeyMove[] {
         const packages = this.byName.get(name);
-        if (packages?.size !== 1 || this.heldByMany?.(name) === true) return [];
+        if (packages?.size !== 1) return [];
         const [[onlyPackage, onlyKey]] = [...packages];
-        if (onlyKey === name) return [];
+        if (onlyKey === name || this.heldByMany?.(name) === true) return [];
         this.rekey(onlyKey, name);
         packages.set(onlyPackage, name);
         return [{ from: onlyKey, to: name }];
