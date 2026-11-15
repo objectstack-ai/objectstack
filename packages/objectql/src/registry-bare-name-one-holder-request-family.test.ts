@@ -53,7 +53,9 @@ import {
   bareNameReason,
   handlerOwnerPackageId,
 } from './bare-name-one-holder.js';
-import type { HookHandler, ObjectQL } from './engine.js';
+import { ObjectQL } from './engine.js';
+import type { HookHandler } from './engine.js';
+import { resolvePackageScopedFunction } from './package-scoped-resolver.js';
 
 type ManifestService = { register(m: unknown): void | Promise<void> };
 type Holder = { kind: string; packageId?: string };
@@ -880,13 +882,12 @@ describe('[#32534] the bare engine function read after a holder leaves', () => {
     expect(ql.resolveFunction('platform_fn')).toBe(platform);
   });
 
-  // CURRENT BEHAVIOUR, see #32907 — not the rule. ADR-0150 D4 refuses a caller
-  // with no package `ambiguous-in-environment` when the platform and a package
-  // both hold a name (a 409 naming each); the bare read counts package holders
-  // only (epic seat ruling R2-C), so this pair answers nothing here. #32907
-  // aligns the bare read with D4 and flips this pin on purpose. What it pins
-  // for #32534: the restore picks no holder of two.
-  it('CONTROL (current behaviour, see #32907) — the platform and one package remain after the last-registered package leaves: two holders, so the restore picks nothing', async () => {
+  // [#32907] Flipped from the CONTROL that pinned the current behaviour: ADR-0150
+  // D4 refuses a caller with no package `ambiguous-in-environment` when the
+  // platform and a package both hold a name, and the bare read now counts the
+  // platform beside the packages. What it still pins for #32534: the restore
+  // picks no holder of two (FROM nothing TO 409 naming both).
+  it('the platform and one package remain after the last-registered package leaves: two holders, so the restore picks nothing and the bare read is refused naming both (FROM nothing TO 409)', async () => {
     const { ql } = await boot();
     ql.registerFunction('platform_fn', fn('platform'));
     ql.registerFunction('platform_fn', fn('alpha'), { packageId: 'app:com.acme.alpha' });
@@ -894,6 +895,149 @@ describe('[#32534] the bare engine function read after a holder leaves', () => {
     ql.unregisterFunctionsByPackage('app:com.acme.beta');
     expect(ql.functionHoldersOf('platform_fn').packageHolders).toEqual(['com.acme.alpha']);
     expect(ql.functionHoldersOf('platform_fn').platformItem?.()).toBeDefined();
-    expect(ql.resolveFunctionEntry('platform_fn')).toBeUndefined();
+    expectPlatformAndPackageRefused(await caught(() => ql.resolveFunctionEntry('platform_fn')), 'com.acme.alpha');
+    expectPlatformAndPackageRefused(await caught(() => ql.resolveFunction('platform_fn')), 'com.acme.alpha');
+  });
+});
+
+/** A bare read refused because the platform and `packageId` both hold the name: the ADR-0112 envelope and both holders, the package first. */
+function expectPlatformAndPackageRefused(err: Refusal | undefined, packageId: string) {
+  expect(err, 'the bare read was refused').toBeDefined();
+  expect(err!.name).toBe('PackageScopedNameRefusedError');
+  expect(err!.code).toBe('RESOURCE_CONFLICT');
+  expect(err!.status).toBe(409);
+  expect((err as Refusal & { refusal?: { reason: string; candidates: unknown[] } }).refusal).toMatchObject({
+    reason: 'ambiguous-in-environment',
+    callerPackageId: null,
+    candidates: [{ kind: 'package', packageId }, { kind: 'platform' }],
+  });
+}
+
+// [#32907, ADR-0150 D4] The bare function read (`resolveFunction`,
+// `resolveFunctionEntry`: a caller with no package) when the platform (an
+// owner-less registration) and one package hold a name: refused with the same
+// 409 as two packages, naming both, in either registration order. Before, it
+// answered whichever registered last.
+describe('[#32907] the bare engine function read when the platform and one package hold the name', () => {
+  it.each([
+    ['the package registered last (FROM the package\'s entry TO 409)', ['platform', 'package']],
+    ['the platform registered last (FROM the platform\'s entry TO 409)', ['package', 'platform']],
+  ] as const)('%s', async (_case, order) => {
+    const { ql } = await boot();
+    for (const holder of order) {
+      if (holder === 'platform') ql.registerFunction('shared_fn', fn('platform'));
+      else ql.registerFunction('shared_fn', fn('alpha'), { packageId: 'app:com.acme.alpha' });
+    }
+    expectPlatformAndPackageRefused(await caught(() => ql.resolveFunctionEntry('shared_fn')), 'com.acme.alpha');
+    expectPlatformAndPackageRefused(await caught(() => ql.resolveFunction('shared_fn')), 'com.acme.alpha');
+    // The caller-less package-scoped read already refused it: the two reads agree.
+    expect(resolvePackageScopedFunction(ql, { name: 'shared_fn', callerPackageId: null })).toMatchObject({
+      status: 'refused', reason: 'ambiguous-in-environment',
+    });
+  });
+
+  it('CONTROL — the platform alone, and one package alone, answer their own entry, unchanged', async () => {
+    const { ql } = await boot();
+    const platform = fn('platform');
+    const alpha = fn('alpha');
+    ql.registerFunction('platform_only', platform);
+    ql.registerFunction('alpha_only', alpha, { packageId: 'app:com.acme.alpha' });
+    expect(ql.resolveFunction('platform_only')).toBe(platform);
+    expect(ql.resolveFunction('alpha_only')).toBe(alpha);
+    expect(ql.resolveFunctionEntry('alpha_only')?.packageId).toBe('app:com.acme.alpha');
+  });
+
+  it('CONTROL — a caller package that holds the name itself still resolves its own, beside the platform', async () => {
+    const { ql, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    ql.registerFunction('shared_fn', fn('platform'));
+    bindFunctions(ql, 'com.acme.alpha', ['shared_fn']);
+    expect(resolvePackageScopedFunction(ql, { name: 'shared_fn', callerPackageId: 'com.acme.alpha' })).toMatchObject({
+      status: 'resolved', via: 'own', holder: { kind: 'package', packageId: 'com.acme.alpha' },
+    });
+  });
+});
+
+// [#32933; ruling A 6824698376, #32497] A function read that names no package
+// counts a disabled package as a holder and is never answered with its
+// function; the every-holder doors (the hook binder's bind after the seal, the
+// seal itself) count it as before.
+describe('[#32933] the engine function holder set and a disabled package', () => {
+  /** Alpha installed and binding `alpha_fn` after the seal, then disabled. */
+  const disabledAlpha = async () => {
+    const booted = await boot();
+    expect(await booted.register(pkg('com.acme.alpha'))).toBeUndefined();
+    bindFunctions(booted.ql, 'com.acme.alpha', ['alpha_fn']);
+    booted.registry.disablePackage('com.acme.alpha');
+    return booted;
+  };
+
+  it('a name only a disabled package holds: the bare read and the caller-less read answer nothing; enabled again, both answer it (FROM its entry TO nothing)', async () => {
+    const { ql, registry } = await disabledAlpha();
+    const alphas = ql.functionHoldersOf('alpha_fn').packageItem('com.acme.alpha');
+    expect(alphas, 'precondition: alpha still registers it').toBeDefined();
+
+    expect(ql.resolveFunctionEntry('alpha_fn')).toBeUndefined();
+    expect(ql.resolveFunction('alpha_fn')).toBeUndefined();
+    expect(resolvePackageScopedFunction(ql, { name: 'alpha_fn', callerPackageId: null })).toEqual({ status: 'not-found' });
+
+    registry.enablePackage('com.acme.alpha');
+    expect(ql.resolveFunctionEntry('alpha_fn')).toBe(alphas);
+    expect(resolvePackageScopedFunction(ql, { name: 'alpha_fn', callerPackageId: null })).toMatchObject({
+      status: 'resolved', via: 'unique-holder', item: alphas,
+    });
+  });
+
+  it('CONTROL — the disabled package\'s own read (a caller of that package) resolves its own function, unchanged', async () => {
+    const { ql } = await disabledAlpha();
+    expect(resolvePackageScopedFunction(ql, { name: 'alpha_fn', callerPackageId: 'com.acme.alpha' })).toMatchObject({
+      status: 'resolved', via: 'own', holder: { kind: 'package', packageId: 'com.acme.alpha' },
+    });
+  });
+
+  it('counted: the platform beside a disabled package is still two holders — the bare read is refused naming both, never answered with the platform', async () => {
+    const { ql } = await disabledAlpha();
+    ql.registerFunction('alpha_fn', fn('platform'));
+    expectPlatformAndPackageRefused(await caught(() => ql.resolveFunctionEntry('alpha_fn')), 'com.acme.alpha');
+    expect(resolvePackageScopedFunction(ql, { name: 'alpha_fn', callerPackageId: null })).toMatchObject({
+      status: 'refused', candidates: [{ kind: 'package', packageId: 'com.acme.alpha' }, { kind: 'platform' }],
+    });
+  });
+
+  it('CONTROL — counted: two namespaces\' packages, one disabled, stay refused naming both, unchanged', async () => {
+    const { ql, register, registry } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta'))).toBeUndefined();
+    bindFunctions(ql, 'com.acme.alpha', ['shared_fn']);
+    bindFunctions(ql, 'com.acme.beta', ['shared_fn']);
+    registry.disablePackage('com.acme.beta');
+    const err = await caught(() => ql.resolveFunctionEntry('shared_fn'));
+    expect(err?.code).toBe('RESOURCE_CONFLICT');
+    expect(err?.status).toBe(409);
+    expect((err as Refusal & { refusal?: { candidates: unknown[] } }).refusal?.candidates).toEqual([
+      { kind: 'package', packageId: 'com.acme.alpha' },
+      { kind: 'package', packageId: 'com.acme.beta' },
+    ]);
+  });
+
+  it('CONTROL — every holder at the door: after the seal, a co-owner\'s bind of a name a disabled package holds is refused naming it, unchanged', async () => {
+    const { ql, register } = await disabledAlpha();
+    expect(await register(rival('function', 'com.acme.beta'))).toBeUndefined();
+    const err = await caught(() => bindFunctions(ql, 'com.acme.beta', ['alpha_fn']));
+    expect(err?.code).toBe(NAMESPACE_CONFLICT_CODE);
+    expect(err!.conflicts!.map((c) => c.existingHolder)).toEqual([{ kind: 'package', packageId: 'com.acme.alpha' }]);
+  });
+
+  it('CONTROL — every holder at the seal: a cold boot whose co-owners both bind a name, one of them disabled, reports the clash, unchanged', () => {
+    const ql = new ObjectQL();
+    ql.registry.logLevel = 'silent';
+    ql.registry.installPackage(pkg('com.acme.alpha') as never, 'code' as never);
+    ql.registry.installPackage(rival('function', 'com.acme.beta') as never, 'code' as never);
+    bindFunctions(ql, 'com.acme.alpha', ['shared_fn']);
+    bindFunctions(ql, 'com.acme.beta', ['shared_fn']);
+    ql.registry.disablePackage('com.acme.alpha');
+    expect(ql.registry.sealBareNameHolders().map((c) => [c.type, c.name, c.existingHolder, c.incomingPackageId])).toEqual([
+      ['function', 'shared_fn', { kind: 'package', packageId: 'com.acme.alpha' }, 'com.acme.beta'],
+    ]);
   });
 });

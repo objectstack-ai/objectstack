@@ -47,6 +47,7 @@ import {
   resolvePackageScopedHolders,
   type PackageScopedHolderSource,
 } from '@objectstack/core';
+import { callerlessFunctionResolution } from './package-scoped-resolver.js';
 import { hookStoppedRefusal } from './summary-errors.js';
 import { startSummaryRefreshOnEnable } from './summary-enable-refresh.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
@@ -93,31 +94,39 @@ export interface HooksAndFunctionsHost {
 /** The bodies of the "Class head: units, hooks, functions, body runners, hook dispatch" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 
 /**
- * [ADR-0150 D3/D4, #31700; epic seat ruling R2-C, 6812862622] The bare
- * function map's entry for `name` — the last registration of the name —
- * unless two PACKAGES hold it, which two namespaces may since #31700: then no
- * entry is picked, and the read is refused as the rule refuses a caller with
- * no package (`resolvePackageScopedHolders`, `ambiguous-in-environment`),
- * naming every holder. A name one package holds, and an owner-less (platform)
- * registration, answer as before. A reader that knows its package resolves
- * through `functionHoldersOf` (the flow `script` node, #32073).
+ * [ADR-0150 D3/D4, #31700, #32907; epic seat ruling R2-C, 6812862622] The
+ * bare function map's entry for `name` — the last registration of the name —
+ * when ONE holder holds it. Two or more holders get no pick, in whatever
+ * order they registered: two PACKAGES (two namespaces may each hold one since
+ * #31700), or the PLATFORM (an owner-less registration) beside a package. The
+ * read is refused as the rule refuses a caller with no package
+ * (`resolvePackageScopedHolders`, `ambiguous-in-environment`), naming every
+ * holder. A disabled package is counted and never answered
+ * ({@link callerlessFunctionResolution}, #32933). A name one package holds,
+ * and one only the platform holds, answer as before. A reader that knows its
+ * package resolves through `functionHoldersOf` (the flow `script` node,
+ * #32073).
  *
  * @throws {PackageScopedNameRefusedError} `409 RESOURCE_CONFLICT`, every holder named.
  */
 function bareFunctionEntry(
-  host: Pick<HooksAndFunctionsHost, 'functions' | 'functionHolders'>,
+  host: Pick<HooksAndFunctionsHost, '_registry' | 'functions' | 'functionHolders'>,
   name: string,
 ): Readonly<FunctionEntry> | undefined {
-  const holders = host.functionHolders.get(name);
-  if (holders && [...holders.keys()].filter((holder) => holder !== null).length > 1) {
-    const refused = resolvePackageScopedHolders(
+  const resolution = callerlessFunctionResolution(
+    resolvePackageScopedHolders(
       { type: ENGINE_FUNCTION_TYPE, name, callerPackageId: null },
       HooksAndFunctionsFacet.functionHoldersOf.call(host, name),
       () => new Set<string>(),
-    );
-    if (refused.status === 'refused') throw new PackageScopedNameRefusedError(refused);
-  }
-  return host.functions.get(name);
+    ),
+    (packageId) => host._registry.isPackageDisabled(packageId),
+  );
+  if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
+  // The one holder's answer is the bare map's entry, as it always was: the
+  // holder set keeps the same entry object for it (`registerFunction`), and
+  // `unregisterFunctionsByPackage` puts it back when the last registration
+  // leaves (#32534).
+  return resolution.status === 'resolved' ? host.functions.get(name) : undefined;
 }
 
 export class HooksAndFunctionsFacet {
@@ -303,12 +312,12 @@ export class HooksAndFunctionsFacet {
   }
 
   /** The body of `ObjectQL#resolveFunction`; the method's docblock there is its contract. */
-  static resolveFunction(this: Pick<HooksAndFunctionsHost, 'functions' | 'functionHolders'>, name: string): HookHandler | undefined {
+  static resolveFunction(this: Pick<HooksAndFunctionsHost, '_registry' | 'functions' | 'functionHolders'>, name: string): HookHandler | undefined {
     return bareFunctionEntry(this, name)?.handler;
   }
 
   /** The body of `ObjectQL#resolveFunctionEntry`; the method's docblock there is its contract. */
-  static resolveFunctionEntry(this: Pick<HooksAndFunctionsHost, 'functions' | 'functionHolders'>, name: string): Readonly<FunctionEntry> | undefined {
+  static resolveFunctionEntry(this: Pick<HooksAndFunctionsHost, '_registry' | 'functions' | 'functionHolders'>, name: string): Readonly<FunctionEntry> | undefined {
     return bareFunctionEntry(this, name);
   }
 
@@ -331,8 +340,9 @@ export class HooksAndFunctionsFacet {
       // [#32534] The bare entry left with the last registration while ONE
       // holder of the name remains: that holder's entry is the bare answer, as
       // a one-holder name's always is. Two or more remaining holders get no
-      // pick (the bare read of two packages' name stays refused, naming them),
-      // and an owner-less registration never leaves with a package.
+      // pick (the bare read of two holders' name stays refused, naming them,
+      // the platform's owner-less registration among them, #32907), and an
+      // owner-less registration never leaves with a package.
       else if (holders.size === 1 && !this.functions.has(name)) this.functions.set(name, [...holders.values()][0]);
     }
     if (removed > 0) {
