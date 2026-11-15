@@ -20,9 +20,14 @@
 
 import * as React from 'react';
 import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import { z } from 'zod';
-import { HookSchema, hookForm, HOOK_REFUSAL_CODE_PATTERN } from '@objectstack/spec/data';
+import {
+  HookSchema,
+  hookForm,
+  HOOK_REFUSAL_CODE_PATTERN,
+  HOOK_REFUSAL_REASON_PATTERN,
+} from '@objectstack/spec/data';
 import { SchemaForm, KEY_ONLY_RECORD_WIDGET } from './SchemaForm';
 
 afterEach(cleanup);
@@ -86,9 +91,14 @@ function renderHook(row: FormRow, initial: Record<string, unknown> = HOOK_BASE) 
   return sink;
 }
 
+/**
+ * Add a code through the catalogue's own add box. An open entry draws a second
+ * one for its `reasons` (objectstack#33657), inside its card; the catalogue's
+ * box comes after every card, so it is the last of them.
+ */
 function addKey(code: string) {
-  fireEvent.change(screen.getByPlaceholderText('Key'), { target: { value: code } });
-  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  fireEvent.change(screen.getAllByPlaceholderText('Key').at(-1)!, { target: { value: code } });
+  fireEvent.click(screen.getAllByRole('button', { name: 'Add' }).at(-1)!);
 }
 
 function refusalsOf(sink: { value: Record<string, unknown> }) {
@@ -198,5 +208,100 @@ describe('the default record face is unchanged (objectstack#26835)', () => {
     expect(parsed.error!.issues).toEqual([
       expect.objectContaining({ code: 'unrecognized_keys', keys: ['name'], path: ['refusals', 'CLEAN_VERSION_REQUIRED'] }),
     ]);
+  });
+});
+
+/** A sub-row of the hook form's `refusals` row, by field name — read from `hookForm`. */
+function refusalSubRow(field: string): FormRow {
+  const row = (refusalsRow().fields ?? []) as Array<FormRow | string>;
+  const found = row.find((f): f is FormRow => typeof f !== 'string' && f.field === field);
+  if (!found) throw new Error(`hookForm's refusals row offers no \`${field}\``);
+  return found;
+}
+
+/** The entry card the key-only face draws for `key`, found from its header chip. */
+function entryCard(key: string): HTMLElement {
+  return screen.getByText(key, { selector: 'span' }).closest('.rounded-md') as HTMLElement;
+}
+
+describe('a refusal entry offers `reasons` and `params` (objectstack#33657)', () => {
+  it('declares `reasons` as a key-only record of `{ message }` and `params` as a name list', () => {
+    const reasons = refusalSubRow('reasons');
+    expect(reasons.type).toBe('record');
+    expect(reasons.widget).toBe(KEY_ONLY_RECORD_WIDGET);
+    expect((reasons.fields as FormRow[]).map((f) => f.field)).toEqual(['message']);
+    expect(refusalSubRow('params').type).toBe('tags');
+  });
+
+  it("serves the reason key rule the nested control reads, derived from the spec's reason spelling", () => {
+    const refusals = (HOOK_JSON_SCHEMA.properties as Record<string, Record<string, unknown>>).refusals;
+    const entry = refusals.additionalProperties as { properties: Record<string, Record<string, unknown>> };
+    const reasons = entry.properties.reasons;
+    expect((reasons.propertyNames as { pattern?: string }).pattern).toBe(HOOK_REFUSAL_REASON_PATTERN.source);
+  });
+
+  it('authors a reason and a param under a code, and saves a body HookSchema accepts as written', () => {
+    const sink = renderHook(refusalsRow(), {
+      ...HOOK_BASE,
+      refusals: { CONTRACT_LOCKED: { message: 'This contract is locked.', status: 409 } },
+    });
+    fireEvent.click(screen.getByText('CONTRACT_LOCKED'));
+    const card = entryCard('CONTRACT_LOCKED');
+    // The nested key-only control: its own add box, inside the entry's card.
+    const reasonKeyBox = within(card).getByPlaceholderText('Key');
+    fireEvent.change(reasonKeyBox, { target: { value: 'plan_locked' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Add' }));
+    // The new reason opens on its own message row, beside the entry's.
+    const messages = within(card).getAllByLabelText(/Message/);
+    expect(messages).toHaveLength(2);
+    fireEvent.change(messages[1]!, { target: { value: 'The plan is locked while {{ state }}.' } });
+    const params = within(card).getByLabelText(/Params/);
+    fireEvent.change(params, { target: { value: 'state' } });
+    fireEvent.keyDown(params, { key: 'Enter' });
+
+    const saved = JSON.parse(JSON.stringify(sink.value)) as Record<string, unknown>;
+    expect(saved.refusals).toEqual({
+      CONTRACT_LOCKED: {
+        message: 'This contract is locked.',
+        status: 409,
+        reasons: { plan_locked: { message: 'The plan is locked while {{ state }}.' } },
+        params: ['state'],
+      },
+    });
+    const parsed = HookSchema.safeParse(saved);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(JSON.stringify(parsed.data!.refusals)).toBe(JSON.stringify(saved.refusals));
+  });
+
+  it('refuses a reason key that breaks the served reason rule, and leaves the value as it was', () => {
+    const sink = renderHook(refusalsRow(), {
+      ...HOOK_BASE,
+      refusals: { CONTRACT_LOCKED: { message: 'This contract is locked.' } },
+    });
+    fireEvent.click(screen.getByText('CONTRACT_LOCKED'));
+    const card = entryCard('CONTRACT_LOCKED');
+    fireEvent.change(within(card).getByPlaceholderText('Key'), { target: { value: 'PLAN_LOCKED' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Add' }));
+    expect(refusalsOf(sink)).toEqual({ CONTRACT_LOCKED: { message: 'This contract is locked.' } });
+    expect(within(card).getByText(`Key must match ${String(HOOK_REFUSAL_REASON_PATTERN)}`)).toBeInTheDocument();
+  });
+
+  it('reloads a catalogue that declares reasons and params into the same rows', () => {
+    renderHook(refusalsRow(), {
+      ...HOOK_BASE,
+      refusals: {
+        CONTRACT_LOCKED: {
+          message: 'This contract is locked ({{ state }}).',
+          params: ['state'],
+          reasons: { plan_locked: { message: 'The plan is locked while {{ state }}.' } },
+        },
+      },
+    });
+    fireEvent.click(screen.getByText('CONTRACT_LOCKED'));
+    const card = entryCard('CONTRACT_LOCKED');
+    fireEvent.click(within(card).getByText('plan_locked'));
+    expect(within(card).getByDisplayValue('plan_locked')).toBeInTheDocument();
+    expect(within(card).getByDisplayValue('The plan is locked while {{ state }}.')).toBeInTheDocument();
+    expect(within(card).getByText('state', { selector: 'span' })).toBeInTheDocument();
   });
 });
