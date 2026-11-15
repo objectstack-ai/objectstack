@@ -252,7 +252,7 @@ describe('every composition an os migrate subcommand boots with registers the ow
       try {
         expect(stack.kernel.getService(OWNERSHIP_QUEUE_SERVICE)).toBeInstanceOf(OwnershipQueueService);
         expect(() => stack.kernel.getService('sharing')).toThrow(/not found/);
-        const engine = stack.kernel.getService<{ getConfigs(): Record<string, unknown> }>('objectql');
+        const engine = stack.kernel.getService('objectql') as { getConfigs(): Record<string, unknown> };
         // The served platform's composition declares the sharing objects itself; no other one does.
         expect('sys_queue' in engine.getConfigs()).toBe(composition.servedPlatform === true);
       } finally {
