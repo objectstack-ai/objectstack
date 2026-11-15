@@ -91,7 +91,8 @@ const REST_REQUEST = {
 const STORED = [{ synced_at: '2026-01-02T00:00:00.000Z' }];
 
 function harness(opts: {
-    inputSchema: Record<string, unknown>;
+    /** Absent ⇒ the action declares no `inputSchema`. */
+    inputSchema: Record<string, unknown> | undefined;
     input: Record<string, unknown>;
     stored?: Array<Record<string, unknown>>;
 }) {
@@ -179,6 +180,13 @@ describe('[#33894] connector pull — the watermark parameter the door adds is j
         await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
         expect(h.handler).toHaveBeenCalledTimes(1);
         expect(h.handler.mock.calls[0][0]).toEqual({ query: { limit: 50 } });
+    });
+
+    it('CONTROL: an openapi operation with no parameter and no body declares no inputSchema, so nothing is judged and the watermark is sent', async () => {
+        const h = harness({ inputSchema: undefined, input: {}, stored: STORED });
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect(h.handler).toHaveBeenCalledTimes(1);
+        expect(h.handler.mock.calls[0][0]).toEqual({ query: { since: '2026-01-02T00:00:00.000Z' } });
     });
 
     it('CONTROL: a rest connector\'s open query section takes the watermark parameter as before', async () => {

@@ -481,8 +481,9 @@ export const MappingSchema = lazySchema(() => strictObject({
       'Fixed input passed to the action on every pull (e.g. `{ method: \'GET\', path: \'/contacts\' }` '
       + 'for `rest`). Judged against the action\'s `inputSchema` before the call, as a `connector_action` '
       + 'node\'s input is: a key the action does not declare is refused, never sent — the watermark '
-      + 'parameter the pull adds to `query` included, so an `openapi` action must declare it in its '
-      + 'OpenAPI document',
+      + 'parameter the pull adds to `query` included, so an `openapi` operation that declares any parameter '
+      + 'or a body must declare it in its OpenAPI document. An operation that declares neither has no '
+      + '`inputSchema` and is not judged, until the day it gains its first parameter or a body',
     ),
     recordsPath: z.string().min(1).optional().describe(
       'Dot path, within the action\'s result, to the array of records (e.g. `body.results`); '
