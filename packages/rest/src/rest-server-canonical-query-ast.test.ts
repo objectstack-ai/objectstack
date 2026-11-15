@@ -492,7 +492,8 @@ describe('[#16337] §1 the two sites rest-server.ts named are canonical, by name
 
 describe('[#16638] §1 the three sites import-runner.ts names are canonical, and the helper still types them', () => {
     it('the three literals are there, canonical, and carry the required `object`', () => {
-        expect(IMPORT_RUNNER).toContain('query: { object: referenceObject, where: { [f]: display }, limit: 2 },');
+        // [#33523] The reference lookup's `where` also carries the row's master scope (canonical keys only).
+        expect(IMPORT_RUNNER).toContain('query: { object: referenceObject, where: { [f]: display, ...(scope ?? {}) }, limit: 2 },');
         expect(IMPORT_RUNNER).toContain('query: { object: objectName, where: filter, limit: 2 },');
         expect(IMPORT_RUNNER).toContain('query: { object: objectName, where: { id: { $in: ids } }, limit: ids.length },');
     });

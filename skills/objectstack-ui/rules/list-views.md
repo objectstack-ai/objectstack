@@ -50,14 +50,14 @@ data: { provider: 'value', items: [...] }
 
 ```typescript
 // Simple — field names only
-columns: ['subject', 'status', 'priority', 'assigned_to', 'due_date']
+columns: ['subject', 'status', 'priority', 'owner_id', 'due_date']
 
 // Enhanced — full control
 columns: [
   { field: 'subject', link: true, width: 300 },
   { field: 'status',  width: 120, align: 'center' },
   { field: 'priority' },
-  { field: 'assigned_to', label: 'Owner' },
+  { field: 'owner_id' },
   {
     field: 'due_date',
     summary: 'min',       // plain enum value, not an object
@@ -98,7 +98,7 @@ filter: [
     { field: 'status', operator: 'equals', value: 'open' },
     { field: 'priority', operator: 'equals', value: 'urgent' },
   ] },
-  { field: 'assigned_to', operator: 'equals', value: '{current_user_id}' },   // … AND mine ({current_user_id} = the signed-in user)
+  { field: 'owner_id', operator: 'equals', value: '{current_user_id}' },   // … AND mine: the record owner (objectstack-data § Relationship Patterns)
 ]
 ```
 
@@ -262,12 +262,12 @@ import type { ListView } from '@objectstack/spec/ui';
 const board: ListView = {
   type: 'kanban',
   data: { provider: 'object', object: 'project_task' },
-  columns: ['title', 'assignee', 'priority'],
+  columns: ['title', 'owner_id', 'priority'],
   kanban: {
     groupByField: 'status',                // a select field — one lane per option
     lanes: ['todo', 'in_progress', 'review'],
     summarizeField: 'estimate_hours',      // optional — summed at the top of each column
-    columns: ['title', 'assignee', 'priority'],   // fields shown on each card
+    columns: ['title', 'owner_id', 'priority'],   // fields shown on each card
   },
   sort: [{ field: 'priority', order: 'desc' }],
 };
@@ -318,7 +318,7 @@ import type { ListView } from '@objectstack/spec/ui';
 const timeline: ListView = {
   type: 'gantt',
   data: { provider: 'object', object: 'project_task' },
-  columns: ['name', 'assigned_to', 'status'],   // left-pane tree columns
+  columns: ['name', 'owner_id', 'status'],   // left-pane tree columns
   gantt: {
     startDateField: 'start_date',               // task bar start
     endDateField: 'end_date',                   // task bar end

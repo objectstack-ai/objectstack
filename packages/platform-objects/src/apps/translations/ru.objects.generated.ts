@@ -120,7 +120,8 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         help: "Как была создана эта учётная запись — idp_provisioned (JIT через федеративный SSO) или env_native (локальная регистрация / конечный пользователь приложения). Управляется системой; не редактируйте.",
         options: {
           idp_provisioned: "Создан IdP",
-          env_native: "Локальная учётная запись"
+          env_native: "Локальная учётная запись",
+          idp_pending: "Pending SSO Sign-In"
         }
       },
       id: {

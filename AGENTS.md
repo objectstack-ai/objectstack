@@ -197,7 +197,9 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
      `packages/spec/src/kernel/metadata-plugin.zod.ts`
    - REST endpoints → plural (`/api/v1/ai/agents`)
 4. **Imports:** Use `@objectstack/spec` namespaces or subpaths. Never relative `../../packages/spec`.
-5. **No workarounds.** Adopt sustainable, well-architected solutions — not temporary patches.
+5. **No workarounds.** Adopt sustainable, well-architected solutions — not temporary patches. **SQL first:** build
+   a query capability at its fastest SQL shape (JOIN or semi-join, aggregates in the database); memory and mongo refuse
+   what they cannot run with a stable code; ⛔ never a slower path built only for parity (ruling record 6888468549).
 6. **Object name = table name.** The object `name` is the canonical id everywhere (API, ObjectQL, REST, SDK, DB table).
    **Never** set `namespace` (deprecated) or `tableName` (always equals `name`). For module prefixes, embed in the name
    (`sys_user`, `ai_conversations`).
@@ -490,8 +492,7 @@ Even inside your own worktree, operate defensively:
 6. **Don't rebase or force-update shared branches** to tidy other agents' commits.
 7. **Land through the merge queue: arm auto-merge on a PR that is already green,
    accepted and non-draft, then let the queue merge it**
-   ([why](docs/agents/multi-agent-discipline.md#what-the-merge-queue-does-with-your-pr)). **Arm only what is
-   already green and accepted.**
+   ([why](docs/agents/multi-agent-discipline.md#what-the-merge-queue-does-with-your-pr)).
 
    ⛔ **Three classes of PR never enter this path on green alone:** (a) a diff touching any **governed surface**
    (**Prime Directive #14**, which names them and holds the current list — **this file and `CLAUDE.md` are on it**,
@@ -1010,8 +1011,7 @@ Both non-handshake shapes, and how to classify and probe your own:
 1. `pnpm test` — verify nothing broke. Touched a type-check-covered package? `pnpm typecheck` too.
 2. **Land it — don't leave passing work in the working tree.** Once tests pass, create
    a feature branch, commit, push, open a PR, and — once remote CI is fully green and
-   the PR is accepted — arm auto-merge so the queue lands it (Multi-agent discipline
-   §7: never straight to `main`; never arm a PR that isn't green yet). A finished task
+   the PR is accepted — arm auto-merge so the queue lands it (Multi-agent discipline §7). A finished task
    = a merged PR, not a dirty working tree. ⛔ **Except a diff touching a governed
    surface** (Prime Directive #14 names them — more than ADRs): push it, open the PR, and stop
    there; landing waits for its tier's record — the maintainer's word, or a seat's contract-tier

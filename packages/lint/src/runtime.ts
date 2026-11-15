@@ -81,6 +81,10 @@ export type {
   RuntimeStackContext,
 } from './runtime-gate.js';
 export type { AuthoringFinding, AuthoringSeverity } from './authoring-rules.js';
+// [#33494] The other packages' published extensions the `object_extension`
+// door states for the written entry's target
+// (`runRuntimeAuthoringRules({ storedObjectExtensions })`).
+export type { StoredObjectExtension } from './object-graph.js';
 // [ruling record 6819749037] The user-facing sentence of a finding, for the
 // door that holds the request: it hands in the request's locale and the
 // workspace default, and puts the answer on the wire as

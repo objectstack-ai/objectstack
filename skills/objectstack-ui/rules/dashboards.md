@@ -266,7 +266,7 @@ import type { DashboardWidget } from '@objectstack/spec/ui';
 const widgets: DashboardWidget[] = [
 // Metric — WoW delta
 { id: 'done_this_week', type: 'metric', dataset: 'crm_task_metrics', values: ['task_count'],
-  filter: { assignee: '{current_user_id}', status: 'done',
+  filter: { owner_id: '{current_user_id}', status: 'done',
             completed_at: { $gte: '{week_start}' } },
   compareTo: { kind: 'previousPeriod' } },
 

@@ -104,11 +104,11 @@
     "personas": [
       {
         "id": "contractor",
-        "role": "External contractor",
+        "role": "External contractor who logs, updates and removes their own tasks",
         "hidden": {"fields": [{"object": "task", "field": "estimate_hours"}, {"object": "project", "field": "total_estimate"}]},
         "scope": [{"object": "task", "field": "assignee", "value": "u_kim"}]
       },
-      {"id": "client_viewer", "role": "Client stakeholder", "hidden": {"objects": ["task"]}}
+      {"id": "client_viewer", "role": "Client stakeholder who may not change tasks", "hidden": {"objects": ["task"]}}
     ],
     "operations": [
       {
