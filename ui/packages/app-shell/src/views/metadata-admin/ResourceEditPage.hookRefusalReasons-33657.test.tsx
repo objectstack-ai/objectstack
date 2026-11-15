@@ -1,32 +1,55 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * MEASUREMENT (objectstack#33657) — the Studio hook form against a refusal
- * catalogue that declares `reasons` and `params`, through the real edit page.
+ * The Studio hook editor authors a refusal's `reasons` and `params`
+ * (objectstack#33657), through the real edit page.
+ *
+ * A refusal entry is `{ message, status?, reasons?, params? }`
+ * (`HookRefusalSchema`): `reasons` is keyed by the snake_case reason the body
+ * throws beside the code, each `{ message }`, and `params` names the holes its
+ * sentences may fill. The hook form offers both on the entry: `reasons` takes
+ * the key-only record control one level down, `params` the name list.
+ *
+ * The REAL page with the production registrations: `hook` has no designer, so
+ * the page takes its generic-form branch and renders the form the server
+ * serves for the type. The type row here is that row built from the spec the
+ * way the server builds it: `hookForm` as the form, and `HookSchema` converted
+ * with `z.toJSONSchema(…, { io: 'input' })` as the schema. The only stand-ins
+ * are the metadata client (the "server" a save writes to and a reload reads
+ * back) and the code editor's loader.
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { z } from 'zod';
 import { HookSchema, hookForm } from '@objectstack/spec/data';
 
+// Module-scope imports of the engines the page reaches through dynamic
+// `import()` (the condition row's CEL authoring and the save-time lint), per
+// AGENTS.md's flaky-test rule: a cold first load stays out of every `waitFor`.
 import '@objectstack/formula';
 import '@objectstack/lint';
 
+/** The `hook` row's `schema`, converted from the spec the way the server does. */
 const HOOK_JSON_SCHEMA = z.toJSONSchema(HookSchema as unknown as z.ZodType, {
   io: 'input',
   unrepresentable: 'any',
 }) as Record<string, unknown>;
 
-const STORED_HOOK = {
+const BASE = {
   name: 'sign_contract',
   label: 'Sign contract',
   object: 'contract',
   events: ['beforeUpdate'],
-  body: { language: 'js', source: "throw { code: 'CONTRACT_LOCKED', reason: 'plan_locked', params: { state: 'x' } };" },
+  body: { language: 'js', source: "throw { code: 'CONTRACT_LOCKED' };" },
+};
+
+/** A catalogue that uses both parts, as code would declare it. */
+const WITH_REASONS = {
+  ...BASE,
   refusals: {
     CONTRACT_LOCKED: {
       message: 'This contract is locked ({{ state }}).',
@@ -37,16 +60,14 @@ const STORED_HOOK = {
   },
 };
 
-let stored: Record<string, unknown> = STORED_HOOK;
-const FORM: { current: unknown } = { current: hookForm };
-function withReasons(): unknown {
-  const clone = JSON.parse(JSON.stringify(hookForm));
-  for (const s of clone.sections) for (const f of s.fields) if (f.field === 'refusals') {
-    f.fields.push({ field: 'reasons', type: 'record', widget: 'key-only-record', fields: [{ field: 'message', type: 'textarea', required: true }] });
-    f.fields.push({ field: 'params', type: 'tags' });
-  }
-  return clone;
-}
+/** The control: a refusal that declares only what the form offered before. */
+const PLAIN = {
+  ...BASE,
+  refusals: { CONTRACT_LOCKED: { message: 'This contract is locked.', status: 409 } },
+};
+
+/** What the last accepted save stored — the "server" a reload reads back. */
+let stored: Record<string, unknown> = PLAIN;
 
 const mockClient = {
   list: vi.fn(async () => []),
@@ -54,7 +75,7 @@ const mockClient = {
   layered: vi.fn(async () => ({ effective: stored, code: null, editable: true, deletable: true })),
   getDraft: vi.fn(async () => null),
   get: vi.fn(async () => stored),
-  save: vi.fn(async (_t: string, _n: string, item: unknown) => {
+  save: vi.fn(async (_type: string, _name: string, item: unknown) => {
     stored = item as Record<string, unknown>;
     return {};
   }),
@@ -79,29 +100,34 @@ vi.mock('./useMetadata', async (importOriginal) => ({
         allowEnvironmentOverlay: true,
         allowRuntimeCreate: true,
         schema: HOOK_JSON_SCHEMA,
-        form: FORM.current,
+        form: hookForm,
       },
     ],
   }),
 }));
+// The body's code editor falls back to its plain textarea when Monaco's loader
+// rejects — the shape an offline install gets.
 vi.mock('@monaco-editor/react', () => {
   const Editor = () => null;
   return { Editor, default: Editor, loader: { init: () => Promise.reject(new Error('offline')) } };
 });
 vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
+// The page's own side reads go through the global `fetch`; one double answers
+// "absent" for the whole file, so no read reaches a socket.
 vi.stubGlobal(
   'fetch',
   vi.fn(async () => new Response('null', { status: 404, headers: { 'content-type': 'application/json' } })),
 );
 
 import { MetadataResourceEditPage } from './ResourceEditPage';
+// The load-time registrations, exactly as the package entry runs them, so the
+// branch this file takes is the branch production takes.
 import './register-builtins';
 import { registerBuiltinDesigners } from './register-builtin-designers';
 registerBuiltinDesigners();
 
 beforeEach(() => {
-  stored = STORED_HOOK;
-  FORM.current = hookForm;
+  stored = PLAIN;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   window.localStorage.setItem('metadata-admin:autosave', '0');
 });
@@ -110,53 +136,77 @@ afterEach(() => {
   window.localStorage.removeItem('metadata-admin:autosave');
 });
 
-describe('MEASURE', () => {
-  it('what the refusal entry offers, and what a label edit saves', async () => {
-    render(
-      <MemoryRouter initialEntries={['/metadata/hook/sign_contract']}>
-        <MetadataResourceEditPage type="hook" name="sign_contract" />
-      </MemoryRouter>,
-    );
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }, { timeout: 8000 }))[0]);
-    fireEvent.click(await screen.findByText('CONTRACT_LOCKED'));
-    const group = screen.getByText('CONTRACT_LOCKED').closest('.rounded-md') as HTMLElement;
-    const labels = Array.from(group.querySelectorAll('label')).map((l) => l.textContent);
-    console.log('MEASURE entry labels:', JSON.stringify(labels));
-    const label = document.getElementById('mdf-label') as HTMLInputElement;
-    fireEvent.change(label, { target: { value: 'Sign the contract' } });
-    fireEvent.click(screen.getByTestId('resource-save'));
-    await waitFor(() => expect(mockClient.save.mock.calls.length + mockClient.saveDraft.mock.calls.length).toBeGreaterThan(0));
-    console.log('MEASURE save calls:', JSON.stringify(mockClient.save.mock.calls.map((c) => c[2])));
-    console.log('MEASURE saveDraft calls:', JSON.stringify(mockClient.saveDraft.mock.calls));
+/** Open the stored hook, enter edit mode, and open its one refusal entry. */
+async function openRefusal(): Promise<HTMLElement> {
+  render(
+    <MemoryRouter initialEntries={['/metadata/hook/sign_contract']}>
+      <MetadataResourceEditPage type="hook" name="sign_contract" />
+    </MemoryRouter>,
+  );
+  // The page renders Edit twice (header and toolbar); either enters edit mode.
+  fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }, { timeout: 8000 }))[0]!);
+  fireEvent.click(await screen.findByText('CONTRACT_LOCKED', { selector: 'span' }));
+  return screen.getByText('CONTRACT_LOCKED', { selector: 'span' }).closest('.rounded-md') as HTMLElement;
+}
+
+/** Save, and hand back the body the page sent. */
+async function save(): Promise<Record<string, unknown>> {
+  fireEvent.click(screen.getByTestId('resource-save'));
+  await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1));
+  return JSON.parse(JSON.stringify(mockClient.save.mock.calls[0]![2])) as Record<string, unknown>;
+}
+
+describe('the Studio hook editor authors a refusal\'s reasons and params (objectstack#33657)', () => {
+  it('offers Reasons and Params on a refusal entry, beside Message and Status', async () => {
+    const card = await openRefusal();
+    const labels = Array.from(card.querySelectorAll('label')).map((l) => l.textContent?.replace(/\*$/, ''));
+    expect(labels).toEqual(['Key', 'Message', 'Status', 'Reasons', 'Params']);
   });
 
-  it('editing the entry message keeps reasons/params', async () => {
-    render(
-      <MemoryRouter initialEntries={['/metadata/hook/sign_contract']}>
-        <MetadataResourceEditPage type="hook" name="sign_contract" />
-      </MemoryRouter>,
-    );
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }, { timeout: 8000 }))[0]);
-    fireEvent.click(await screen.findByText('CONTRACT_LOCKED'));
-    fireEvent.change(screen.getByDisplayValue('This contract is locked ({{ state }}).'), { target: { value: 'Locked ({{ state }}).' } });
-    fireEvent.click(screen.getByTestId('resource-save'));
-    await waitFor(() => expect(mockClient.save).toHaveBeenCalled());
-    console.log('MEASURE2 refusals:', JSON.stringify((mockClient.save.mock.calls[0][2] as any).refusals));
+  it('authors a reason and a param, saves them, and the stored hook reads them back', async () => {
+    const card = await openRefusal();
+    // The entry's own reasons control: its add box sits inside the entry's card.
+    fireEvent.change(within(card).getByPlaceholderText('Key'), { target: { value: 'plan_locked' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Add' }));
+    const messages = within(card).getAllByLabelText(/Message/);
+    fireEvent.change(messages[1]!, { target: { value: 'The plan is locked while {{ state }}.' } });
+    const params = within(card).getByLabelText(/Params/);
+    fireEvent.change(params, { target: { value: 'state' } });
+    fireEvent.keyDown(params, { key: 'Enter' });
+
+    const body = await save();
+    expect(body.refusals).toEqual({
+      CONTRACT_LOCKED: {
+        message: 'This contract is locked.',
+        status: 409,
+        reasons: { plan_locked: { message: 'The plan is locked while {{ state }}.' } },
+        params: ['state'],
+      },
+    });
+    const parsed = HookSchema.safeParse(body);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+
+    // Read the stored hook back: a fresh page over what the save stored.
+    cleanup();
+    const reloaded = await openRefusal();
+    fireEvent.click(within(reloaded).getByText('plan_locked', { selector: 'span' }));
+    expect(within(reloaded).getByDisplayValue('The plan is locked while {{ state }}.')).toBeInTheDocument();
+    expect(within(reloaded).getByText('state', { selector: 'span' })).toBeInTheDocument();
   });
-  it('renderer with a nested key-only record + tags row', async () => {
-    FORM.current = withReasons();
-    render(
-      <MemoryRouter initialEntries={['/metadata/hook/sign_contract']}>
-        <MetadataResourceEditPage type="hook" name="sign_contract" />
-      </MemoryRouter>,
-    );
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }, { timeout: 8000 }))[0]);
-    fireEvent.click(await screen.findByText('CONTRACT_LOCKED'));
-    const group = screen.getByText('CONTRACT_LOCKED').closest('.rounded-md') as HTMLElement;
-    console.log('MEASURE3 labels:', JSON.stringify(Array.from(group.querySelectorAll('label')).map((l) => l.textContent)));
-    console.log('MEASURE3 has plan_locked:', !!screen.queryByText('plan_locked'));
-    console.log('MEASURE3 placeholders:', JSON.stringify(Array.from(group.querySelectorAll('input')).map((i) => [i.placeholder, i.value, i.id])));
-    const ids = Array.from(document.querySelectorAll('[id]')).map((e) => e.id);
-    console.log('MEASURE3 dup ids:', JSON.stringify(ids.filter((x, i) => ids.indexOf(x) !== i)));
+
+  it('a catalogue that uses reasons and params round-trips a Studio edit of another field unchanged', async () => {
+    stored = WITH_REASONS;
+    await openRefusal();
+    fireEvent.change(document.getElementById('mdf-label') as HTMLInputElement, { target: { value: 'Sign the contract' } });
+    const body = await save();
+    expect(body).toEqual({ ...WITH_REASONS, label: 'Sign the contract' });
+  });
+
+  it('CONTROL: a refusal with only message and status saves exactly as it was', async () => {
+    await openRefusal();
+    fireEvent.change(document.getElementById('mdf-label') as HTMLInputElement, { target: { value: 'Sign the contract' } });
+    const body = await save();
+    expect(body).toEqual({ ...PLAIN, label: 'Sign the contract' });
+    expect(Object.keys((body.refusals as Record<string, object>).CONTRACT_LOCKED)).toEqual(['message', 'status']);
   });
 });
