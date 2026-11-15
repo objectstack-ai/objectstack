@@ -1285,7 +1285,7 @@
       "title": "Analytics on v18 asks each object's `enable` block and internal flags: a cube or dataset over an apiEnabled:false object is 404, an internal field as dimension / measure / filter is 400 even for admin, an unexposed configured cube is warned at boot and absent from /analytics/meta, and a dataset answer's measure column states its aggregate",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1309,7 +1309,7 @@
         {
           "clause": "the analytics exposure door, registration refusal, label withholding and measure aggregate — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -1370,6 +1370,12 @@
           "date": "2026-11-15",
           "change": "steps[1] names the filter key, `where` (QA run #33829, comment 6893937847; ledger 6896511848 of #33761 row 29). No clause changed. Read at base bc6b7ffd",
           "ref": "#34016"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -1444,6 +1450,114 @@
           "date": "2026-11-10",
           "change": "initial — the per-measure drill scope on report drills and Open in list (#30651, #30735). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
           "ref": "#32270"
+        }
+      ]
+    },
+    {
+      "id": "dashboards.cross-object-where-engine-path",
+      "title": "An analytics where with a one-hop dotted leaf ('order.status') is served on the engine path: it equals the /data nested-relation filter, never selects an orphan detail, answers no rows on an empty parent match, refuses more than 1000 matching parents 400 INVALID_FILTER rather than truncate, keeps two hops, $not and $field refused, reads the parent as the caller, and answers a related field the caller cannot read 403",
+      "since": "v18.5",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin (the seeded admin, admin@objectos.ai): authors the fixture and makes every admin call",
+        "reader: a member holding read on the parent object WITHOUT View All and with one parent field (secret_note) not readable, read and View All on the detail, and read on the controlled_by_parent detail"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch copy of the showcase (never the shared example), compiled into its own dist, adding a parent object (e.g. showcase_qa_an_order: name, status, region, secret_note), a detail with a lookup 'order' to it (showcase_qa_an_line: name, amount) and a controlled_by_parent detail of the same parent. Seed through POST /api/v1/data/OBJ/createMany as admin: 1,000 open NA parents, 3 open APAC parents, 100 cancelled EU parents; lines under APAC, NA and cancelled parents, and ONE orphan line naming no parent. The recipe QA run #33785 drove at a557fa38 (record comment 6893199839)",
+          "the reader's set as described: View All on the parent restores the masked field, so the set must not carry it",
+          "the engine path: the detail's inferred object cube queried with a time bucket (timeDimensions with granularity 'month'), which the ObjectQL strategy serves (its answer carries no `sql`). Without a bucket an admin query is served natively, its answer carrying `sql`, which this item does not score (knownGaps[0])"
+        ],
+        "knownGaps": [
+          "the native SQL path selects the orphan line under $ne where the engine path and /data do not (#33792, open), so adding a time bucket changes a widget's total. This item scores the engine path; a native-path $ne reading is that card's evidence, never a verdict here"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/analytics/query {cube: the detail's cube, measures: [count, the amount sum], timeDimensions: [a month bucket], where: {'order.status': 'cancelled'}}, then the same with the nested form {order: {status: 'cancelled'}}; as the same persona GET /api/v1/data/DETAIL?filter={\"order\":{\"status\":\"cancelled\"}}",
+        "where {'order.status': {$ne: 'open'}}, then {$or: [that, {order: {$null: true}}]}",
+        "where {$or: [{'order.region': 'APAC'}, {name: ONE_LINE_NAME}]}, then {'order.region': 'APAC', 'order.status': 'open'}",
+        "where {'order.status': 'nope'}; {'order.status': 'open'} (1,003 matching parents); {'order.region': 'NA'} (exactly 1,000)",
+        "where 'order.owner_id.name' (two hops); {$not: {'order.status': 'cancelled'}}; {'order.status': {$eq: {$field: 'name'}}}",
+        "as the reader: {'order.secret_note': 'TOPSECRET'} and {'order.secret_note': 'NOPE'}; then the controlled_by_parent detail's cube with {'order.status': 'cancelled'}, beside the admin's answer",
+        "POST /api/v1/analytics/sql with a bucketed {'order.status': 'cancelled'}"
+      ],
+      "acceptance": [
+        {
+          "clause": "the cross-object where's lowering, its refusals and the parent read in the caller's scope — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time, never through a bare `--`; `--reporter=tree` prints the one line per file this clause is scored on, RUNNER.md's environment facts); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "a one-hop dotted leaf is served on the engine path and answers what the nested form and /data answer",
+          "oracle": "api",
+          "verify": "the dotted where answers 200 (never the 400 INVALID_FIELD it answered before); its count and amount equal the nested form's and the /data list's for the same persona (packages/services/service-analytics/src/strategies/cross-object-where.ts#lowerCrossObjectWhere)",
+          "evidence": "the three answers side by side"
+        },
+        {
+          "clause": "an orphan detail is never selected by a parent condition, $ne included; an $or with $null keeps it",
+          "oracle": "api",
+          "verify": "$ne 'open' leaves the orphan out and equals /data's nested $ne; the $or with {order: {$null: true}} adds exactly the orphan",
+          "evidence": "both answers and the /data comparison"
+        },
+        {
+          "clause": "a leaf inside $or is served, and two leaves on one relationship in one conjunction are one condition on one parent",
+          "oracle": "api",
+          "verify": "each answer equals the count and sum the seed gives by hand",
+          "evidence": "the two answers and the hand count"
+        },
+        {
+          "clause": "an empty parent match answers no rows, and more than 1,000 matching parents is refused, never truncated",
+          "oracle": "api",
+          "verify": "'nope' answers rows []; 1,003 parents answers 400 INVALID_FILTER saying the filter matched more than 1000 records of the parent and was not applied; exactly 1,000 is served",
+          "evidence": "the three answers"
+        },
+        {
+          "clause": "two hops, a leaf under $not and a $field comparand stay refused",
+          "oracle": "api",
+          "verify": "each answers 400 INVALID_FIELD naming its reason (two relationships, under a $not, a $field comparand)",
+          "evidence": "the three bodies"
+        },
+        {
+          "clause": "the parent is read as the caller: a related field the caller cannot read is refused whatever its value, and a controlled_by_parent detail is read in the caller's scope",
+          "oracle": "api",
+          "verify": "both secret_note probes answer the same 403 PERMISSION_DENIED naming the unreadable field, with no value-dependent difference; the reader's cbp-detail answer equals the admin's where the reader reads every parent the condition matches",
+          "evidence": "the two refusal bodies and the two cbp answers"
+        },
+        {
+          "clause": "the SQL echo refuses to render a served leaf",
+          "oracle": "api",
+          "verify": "/analytics/sql answers 400 INVALID_FILTER saying it cannot render display SQL for the cross-object filter, which the engine answers as a nested-relation condition",
+          "evidence": "the body"
+        }
+      ],
+      "negative": [
+        "a dotted where answering the unfiltered total, or a total cut at the cap, is a FAIL",
+        "a related-field refusal whose body changes with the probed value is a value-oracle FAIL"
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-analytics/src/__tests__/crossobject-conjunct-refusal.test.ts + packages/services/service-analytics/src/__tests__/dotted-dimension-unbacked-join-parity.test.ts + packages/services/service-analytics/src/__tests__/infer-cube-relation-traversal.test.ts + packages/services/service-analytics/src/__tests__/objectql-read-scope.test.ts + packages/services/service-analytics/src/__tests__/unlisted-refusal-envelope.test.ts + packages/services/service-analytics/src/__tests__/where-source-field-gate.test.ts + packages/rest/src/analytics-nested-relation-filter.test.ts + packages/rest/src/analytics-hop-object-reference.test.ts + packages/rest/src/analytics-masked-field-gate.test.ts. The service-analytics files drive the strategies over engine doubles; the rest files drive the service over a real ObjectQL on SQLite with SecurityPlugin"
+      },
+      "source": [
+        "packages/services/service-analytics/src/strategies/cross-object-where.ts#lowerCrossObjectWhere",
+        "packages/services/service-analytics/src/strategies/objectql-strategy.ts#ObjectQLStrategy",
+        "content/docs/ui/dashboards.mdx (the engine path's orphan rule and the 1000-parent cap)",
+        "#33512 (fixes #33335), driven live by QA run #33785"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-15",
+          "change": "initial — new coverage for #33512's one-hop cross-object analytics where (ledger 6896511848 of #33761, row 15): no item cited cross-object-where.ts, objectql-strategy.ts or dashboards.mdx, and dashboards.cube-query scores the showcase_delivery cube's reconciliation, not this filter. Steps and answers follow QA run #33785's live run at a557fa38 (comment 6893199839); its native-path observation is #33792 (knownGaps[0]). Sources re-read at main 159757ab. Card #33969",
+          "ref": "#34068"
         }
       ]
     }

@@ -51,6 +51,8 @@ export interface OptionLabelI18n {
   getTranslations?: (locale: string) => Record<string, unknown>;
   getFallbackLocale?: () => string | undefined;
   getDefaultLocale?: () => string | undefined;
+  /** [#33634] The declared `i18n.sourceLocale`; read before `getDefaultLocale` as the authored language. */
+  getSourceLocale?: () => string | undefined;
 }
 
 /** The slice of a formula plan entry this module reads: its expression. */
@@ -153,7 +155,12 @@ export function readerOptionLabels(
     const bundle = bundleOf(i18n);
     if (!bundle) return labelMap(fields);
     const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
-    const defaultLocale = typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+    // [#33634] The authored language: the declared `sourceLocale`, else the
+    // users' `defaultLocale` (the metadata route's `metaTranslateOptions` rule).
+    const source = typeof i18n.getSourceLocale === 'function' ? i18n.getSourceLocale() : undefined;
+    const defaultLocale = typeof source === 'string' && source.length > 0
+      ? source
+      : typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
     const translated = translateObject({ name, fields }, bundle, {
       locale,
       ...(typeof fallback === 'string' && fallback.length > 0 ? { fallbackChain: [fallback] } : {}),

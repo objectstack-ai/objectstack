@@ -1647,7 +1647,7 @@
       "title": "The package manifest is enforced at the install boundary: an incompatible `engines` range is refused before the registry write, the namespace gate holds ownership, and a namespace-less runtime package has one derived",
       "since": "v15",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1687,7 +1687,7 @@
           "evidence": "the refusal body, plus the GET /packages/:id and GET /packages reads taken after it"
         },
         {
-          "clause": "the refusal is a STRUCTURED diagnostic, not a bare failure: it carries code OS_PROTOCOL_INCOMPATIBLE, the declared `requiredRange`, the `rangeSource` it was read from, the protocol version it was judged against (`protocolVersion`, the protocol major padded to a semver such as '18.0.0' — never the runtime's package version; packages/metadata-core/src/protocol-handshake.ts ProtocolIncompatibleDiagnostic), and the remedy, which depends on the direction: a declared target major AT OR BELOW the runtime's carries a `migrateCommand` of the form `objectstack migrate meta --from <targetMajor>`; a target major ABOVE the runtime's carries NO `migrateCommand`, because `migrate meta` only moves metadata forward, and its `message` names the two remedies that apply instead, upgrading the runtime to protocol <targetMajor> or installing a build of the package for this runtime's protocol (checkProtocolCompat, #26480) — an author refused at the boundary is told which key to fix and which command or upgrade resolves it",
+          "clause": "the refusal is a STRUCTURED diagnostic, not a bare failure: it carries code OS_PROTOCOL_INCOMPATIBLE, the declared `requiredRange`, the `rangeSource` it was read from, the protocol version it was judged against (`protocolVersion`, the protocol major padded to a semver such as '18.0.0' — never the runtime's package version; packages/metadata-core/src/protocol-handshake.ts ProtocolIncompatibleDiagnostic), and the remedy, which depends on the direction and on the migrate-meta support floor (16, `MIGRATION_SUPPORT_FLOOR`, ADR-0087 D3): a declared target major AT OR ABOVE the floor and AT OR BELOW the runtime's carries a `migrateCommand` of the form `objectstack migrate meta --from <targetMajor>`; a target major BELOW the floor carries NO `migrateCommand`, because `migrate meta --from N` refuses every N under the floor, and its `message` names the two remedies that apply instead, installing a build of the package for this runtime's protocol or bringing its metadata to protocol 16 by another path and then running `objectstack migrate meta --from 16` (checkProtocolCompat, #33466); a target major ABOVE the runtime's carries NO `migrateCommand`, because `migrate meta` only moves metadata forward, and its `message` names the two remedies that apply instead, upgrading the runtime to protocol <targetMajor> or installing a build of the package for this runtime's protocol (checkProtocolCompat, #26480) — every refusal carries `targetMajor` whichever direction it takes, and an author refused at the boundary is told which key to fix and which command or upgrade resolves it",
           "oracle": "api",
           "verify": "read the named fields off the captured refusal body; the migrateCommand's --from must be the major of the DECLARED range, not the runtime's. On the AHEAD probe (steps[2], ^(RT+1)) the body carries targetMajor RT+1 and NO migrateCommand member at all, and its message names the runtime upgrade; a `migrate meta` command offered there is a FAIL, since it cannot resolve that refusal",
           "evidence": "both refusal bodies (the older and the AHEAD probe) with every named field shown"
@@ -1797,6 +1797,12 @@
           "date": "2026-11-14",
           "change": "steps[0] names where RT is read (stale read, card #33330, row 68 of the #32908 close-out ledger; QA run #33025 comment 6844741021 on #32908). GET /api/v1/meta has no protocol field; the major comes from GET /api/v1's version, which DiscoverySchema (packages/spec/src/api/discovery.zod.ts) declares and metadata-protocol's discovery-version.ts fills with the runtime's version, whose major equals the protocol major because protocol-version.test.ts holds PROTOCOL_VERSION in lockstep with the spec package major. No clause changed. Read from source at base 87330e89, not driven live",
           "ref": "#33330"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-15",
+          "change": "acceptance[1] scopes migrateCommand to the migrate-meta support floor. Loose end of #33031 (PR #33466): the clause said every declared target major at or below the runtime's carries `objectstack migrate meta --from <targetMajor>`, but checkProtocolCompat (packages/metadata-core/src/protocol-handshake.ts) leaves migrateCommand out when the target major is below MIGRATE_META_SUPPORT_FLOOR (16, held equal to the spec's MIGRATION_SUPPORT_FLOOR) and its message names the two remedies that apply. The clause also says every refusal carries targetMajor. The steps' probes (^(RT-1), ^(RT+1)) and the verify text are unchanged: on an 18 runtime ^(RT-1) targets 17, above the floor. Read from source at base 895783a1e8, not driven live",
+          "ref": "#33618"
         }
       ]
     },
@@ -3604,7 +3610,7 @@
       "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming the tables and the ownership ceremony's plan and apply, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
       "since": "v18",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P0",
       "surface": "cli",
       "personas": [
@@ -3628,7 +3634,7 @@
         {
           "clause": "the organization-ownership boot guard and the identity-objects boot refusal — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=1 FILE`, one package at a time and never through a bare `--`; RUNNER.md's memory fact: the container holds the Tier 1 vitest pins under its memory cap only at --maxWorkers=1, and an exit 137 is that cap, not a failing test); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -3727,6 +3733,12 @@
           "date": "2026-11-15",
           "change": "acceptance[1] names `os serve --dev` alone as the development boot that prints the `--dev` spelling (rows 4 and 185 of ledger 6896511848 on #33761; QA runs #33784 at a557fa38 and #33909 at b914e724). Under `os dev` the refused `serve --dev` child announces the refusal to its parent and exits without printing it, and `os dev` runs the ceremony on a copy itself (serve.ts announceOrganizationOwnershipRequired, dev.ts upgradeRefusedDevelopmentDatabase, ADR-0131 D10), so the clause listed a boot that never shows the text. The spelling the clause pins is unchanged. Read from source at base 0ac112fc",
           "ref": "#34004"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -3735,7 +3747,7 @@
       "title": "Protocol 18 upgrade surfaces: a package declaring engines.protocol \"^17\" is refused 422 OS_PROTOCOL_INCOMPATIBLE naming `os migrate meta --from 17` (\"^18\" is admitted), a stored v17-shaped row is served canonical while a PUT of the same old shape is refused at parse, and a \"^18\" artifact built before a retirement boots with one warn per replayed conversion",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3760,7 +3772,7 @@
         {
           "clause": "the protocol handshake, stored-row replay and artifact forward conversion — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -3818,6 +3830,12 @@
           "date": "2026-11-15",
           "change": "steps[2] and acceptance[3].verify re-pointed (row 122 of ledger 6896511848 on #33761; QA run #33853 at a557fa38): a named, non-conventional artifact boots alone, without the cwd config (artifact-precedence.ts cwdConfigJoinsBoot), so the showcase copy's code plugins drop out and its boot aborts on the 'showcase_status_api' rest provider after the conversion warns. The clause is read from the warns that precede the abort; a serving boot needs an app with no code-plugin connector. No clause changed. Read from source at base 0ac112fc",
           "ref": "#34004"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -3826,7 +3844,7 @@
       "title": "Settings on v18: a global-scope key is stored in sys_platform_setting (readable through /data only with manage_platform_settings), and under a walled posture one organization's tenant save or lock does not change or lock another's, with a data-API read of sys_setting filtered to readable namespaces",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3856,7 +3874,7 @@
         {
           "clause": "the platform rung and per-organization settings isolation — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -3930,6 +3948,12 @@
           "date": "2026-11-01",
           "change": "negative[0] added, with steps[2] driving it: LOCKED means platform-locked, so an organization administrator's save of its own locked tenant row must be refused, and a save that lands is a security FAIL. Ruling 6545938831 item ⑤ on #28345, which settles the semantics; the clause is a walled leg like acceptance[2] and [3]. No existing clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },
@@ -3938,7 +3962,7 @@
       "title": "`os serve` composition on v18: unclaimed top-level items of a packages[] config are served under manifest.id with a warn line, an app shipping its own default sys_organization record page boots, a host datasourceMapping is installed before the first schema sync, a production host with no storage refuses to boot naming three remedies, and /_console/ answers 503 with the remedy when the console is not built",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "cli",
       "personas": [
@@ -3963,7 +3987,7 @@
         {
           "clause": "the serve composition guards and fallbacks — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item. One exception to that reading: packages/cli/test/serve-organization-record-page.e2e.test.ts is a *.e2e.test.ts file, which the cli vitest config collects only under OS_TEST_TIERS=nightly (packages/cli/vitest.config.ts, the nightly tiers) — run it with OS_TEST_TIERS=nightly set; without it the file reports 0 tests, which is not-run for that file (acceptance[2] then unscored), not a stale ref",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --reporter=tree --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item. One exception to that reading: packages/cli/test/serve-organization-record-page.e2e.test.ts is a *.e2e.test.ts file, which the cli vitest config collects only under OS_TEST_TIERS=nightly (packages/cli/vitest.config.ts, the nightly tiers) — run it with OS_TEST_TIERS=nightly set; without it the file reports 0 tests, which is not-run for that file (acceptance[2] then unscored), not a stale ref",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
@@ -4032,6 +4056,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[1] and acceptance[4] name the host config the no-storage leg needs. Checklist-accuracy finding of QA run #27438 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): a plugin-less production stack booted on SQLite instead of refusing. That is by design: shouldBootWithLibrary sends a config with no instantiated plugin through createStandaloneStack, which provisions the SQLite default, and only a host config reaches the storage guard (the integration pin boots one). The clause is unchanged for the shape it was written for. Re-read at 3fd80337",
           "ref": "#27438"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-15",
+          "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
+          "ref": "#34068"
         }
       ]
     },

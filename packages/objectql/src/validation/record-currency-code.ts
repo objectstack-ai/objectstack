@@ -48,7 +48,11 @@
  * read it. A field's machine name never holds a dot, so that key can never be
  * a stored column. A parent with a blank code refuses the child's amount here,
  * as a blank sibling code does ("a child amount beside a blank code is
- * refused at its own write", the D2 note).
+ * refused at its own write", the D2 note). A parent object that, as served at
+ * the write, declares no such code field (the package that contributed it is
+ * disabled or uninstalled) refuses it with the same code, and the message
+ * says the field is not served, naming the disabled package when the registry
+ * still holds its contribution ({@link parentCodeFieldServingOf}).
  *
  * The parent is read the way the write's other header reads are: first
  * through the WRITER's read door, then elevated, keeping the organization. A
@@ -299,6 +303,103 @@ export function isRecordCurrencyBlank(value: unknown): boolean {
 const isBlank = isRecordCurrencyBlank;
 
 /**
+ * [ADR-0144 D2, amended] A followed parent object, as served at the write,
+ * that declares no field under the code segment of the pointer: a package that
+ * contributed the field was disabled or uninstalled after the pointer was
+ * admitted. The amount then has no code to follow at all, and the refusal says
+ * so instead of asking for a code to be written into a field that is not
+ * there.
+ */
+export interface ParentCodeFieldUnserved {
+  /**
+   * The disabled packages whose contribution to the parent still declares the
+   * field, as the registry holds them; empty when it holds none (the package
+   * was uninstalled, or the field left in some other way).
+   */
+  readonly disabledContributors: readonly string[];
+}
+
+/**
+ * Asks whether parent object `master` serves field `code` at the write:
+ * `undefined` when it does (or when `master` itself is not served, which the
+ * write's own reads answer), a {@link ParentCodeFieldUnserved} when it does
+ * not. Read only on the refusal path.
+ */
+export type ParentCodeFieldServing = (master: string, code: string) => ParentCodeFieldUnserved | undefined;
+
+/** The registry reads {@link parentCodeFieldServingOf} makes; `SchemaRegistry` answers them. */
+export interface ParentCodeFieldRegistry {
+  getObject(name: string): { readonly fields?: unknown } | undefined;
+  getObjectContributors(name: string): ReadonlyArray<{ readonly packageId: string | undefined; readonly definition: unknown }>;
+  isPackageDisabled(packageId?: string): boolean;
+}
+
+const declaresField = (fields: unknown, name: string): boolean =>
+  fields !== null && typeof fields === 'object' && !Array.isArray(fields) && Object.prototype.hasOwnProperty.call(fields, name);
+
+/**
+ * The {@link ParentCodeFieldServing} a write passes {@link assertRecordCurrencyCodes}:
+ * the parent's served field map (the fold, a disabled package's extension left
+ * out) decides whether the field is served, and the parent's contributors name
+ * the disabled packages that still declare it.
+ */
+export function parentCodeFieldServingOf(registry: ParentCodeFieldRegistry): ParentCodeFieldServing {
+  return (master, code) => {
+    const served = registry.getObject(master);
+    if (served === undefined || declaresField(served.fields, code)) return undefined;
+    const disabledContributors = [...new Set(registry.getObjectContributors(master)
+      .filter((c) => typeof c.packageId === 'string' && registry.isPackageDisabled(c.packageId)
+        && declaresField((c.definition as { fields?: unknown } | null | undefined)?.fields, code))
+      .map((c) => c.packageId as string))];
+    return { disabledContributors };
+  };
+}
+
+/** The message of {@link RecordCurrencyCodeRequiredError}: the first hit's verdict and remedy, and the other hits. */
+function codeRequiredMessage(
+  object: string,
+  operation: 'insert' | 'update',
+  hits: readonly RecordCurrencyPair[],
+  recordId: unknown,
+  unserved: ParentCodeFieldUnserved | undefined,
+): string {
+  const [first] = hits;
+  const row = recordId === undefined || recordId === null ? '' : ` (record ${String(recordId)})`;
+  const path = first.path;
+  const head = `${operation === 'insert' ? 'Insert' : 'Update'} on '${object}'${row} was REFUSED: '${first.amountField}' `;
+  const also = hits.length > 1 ? ` (also: ${hits.slice(1).map((h) => `'${h.codeField}' for '${h.amountField}'`).join(', ')})` : '';
+  if (path && path.master !== undefined && unserved) {
+    const ids = unserved.disabledContributors;
+    const names = ids.map((id) => `'${id}'`).join(', ');
+    const contributed = ids.length === 0
+      ? 'a package that contributed it may be disabled or uninstalled'
+      : `the ${ids.length === 1 ? 'package' : 'packages'} ${names} that contributed it ${ids.length === 1 ? 'is' : 'are'} disabled`;
+    return `${head}holds an amount in its parent record's currency (currencyMode: 'record', following '${first.codeField}' `
+      + `through the master_detail '${path.via}'), and '${path.master}' does not serve a field '${path.code}' `
+      + `(${contributed})${also}; the amount has no code to follow until that field is served again, or leave `
+      + `'${first.amountField}' empty. The row was not written.`;
+  }
+  return head
+    + (path
+      ? `holds an amount in its parent record's currency (currencyMode: 'record', following '${first.codeField}' `
+        + `through the master_detail '${path.via}'), and `
+        + (path.master === undefined
+          ? `'${path.via}' is no master_detail field naming a parent object, so no parent holds its code`
+          : `the '${path.master}' record it names has a blank '${path.code}', or it names none`)
+      : `holds an amount in the record's own currency (currencyMode: 'record'), and its currency code field `
+        + `'${first.codeField}' is blank`)
+    + also
+    + (path
+      ? `. The row was not written. Write the parent's ISO 4217 code (for example 'USD') into `
+        + `'${path.master ?? path.via}.${path.code}' first, and name that parent in '${path.via}', or leave `
+        + `'${first.amountField}' empty. A child stores no code of its own: it follows its parent's.`
+      : `. The row was not written. Write the record's ISO 4217 code (for example 'USD') into '${first.codeField}' `
+        + `in the same write, or leave '${first.amountField}' empty.`)
+    + ` The server never fills a currency in: a form pre-fills the organization's currency, and the stored code `
+    + `is always the one submitted.`;
+}
+
+/**
  * `ERR_CURRENCY_CODE_REQUIRED` / 400 — see the module header. Identified by
  * `code`, which survives crossing package boundaries.
  */
@@ -316,35 +417,25 @@ export class RecordCurrencyCodeRequiredError extends Error {
   /** The record-mode amount whose currency `field` holds. */
   readonly amountField: string;
 
-  constructor(object: string, operation: 'insert' | 'update', hits: readonly RecordCurrencyPair[], recordId?: unknown) {
-    const [first] = hits;
-    const row = recordId === undefined || recordId === null ? '' : ` (record ${String(recordId)})`;
-    const path = first.path;
-    super(
-      `${operation === 'insert' ? 'Insert' : 'Update'} on '${object}'${row} was REFUSED: '${first.amountField}' `
-        + (path
-          ? `holds an amount in its parent record's currency (currencyMode: 'record', following '${first.codeField}' `
-            + `through the master_detail '${path.via}'), and `
-            + (path.master === undefined
-              ? `'${path.via}' is no master_detail field naming a parent object, so no parent holds its code`
-              : `the '${path.master}' record it names has a blank '${path.code}', or it names none`)
-          : `holds an amount in the record's own currency (currencyMode: 'record'), and its currency code field `
-            + `'${first.codeField}' is blank`)
-        + (hits.length > 1 ? ` (also: ${hits.slice(1).map((h) => `'${h.codeField}' for '${h.amountField}'`).join(', ')})` : '')
-        + (path
-          ? `. The row was not written. Write the parent's ISO 4217 code (for example 'USD') into `
-            + `'${path.master ?? path.via}.${path.code}' first, and name that parent in '${path.via}', or leave `
-            + `'${first.amountField}' empty. A child stores no code of its own: it follows its parent's.`
-          : `. The row was not written. Write the record's ISO 4217 code (for example 'USD') into '${first.codeField}' `
-            + `in the same write, or leave '${first.amountField}' empty.`)
-        + ` The server never fills a currency in: a form pre-fills the organization's currency, and the stored code `
-        + `is always the one submitted.`,
-    );
+  /**
+   * @param unserved set when the first hit follows a parent whose object, as
+   *   served at the write, declares no field `path.code`
+   *   ({@link ParentCodeFieldServing}); the message then says that field is not
+   *   served instead of asking for a code to be written into it.
+   */
+  constructor(
+    object: string,
+    operation: 'insert' | 'update',
+    hits: readonly RecordCurrencyPair[],
+    recordId?: unknown,
+    unserved?: ParentCodeFieldUnserved,
+  ) {
+    super(codeRequiredMessage(object, operation, hits, recordId, unserved));
     this.name = 'RecordCurrencyCodeRequiredError';
     this.object = object;
-    this.field = first.codeField;
+    this.field = hits[0].codeField;
     this.fields = [...new Set(hits.map((h) => h.codeField))];
-    this.amountField = first.amountField;
+    this.amountField = hits[0].amountField;
   }
 }
 
@@ -365,6 +456,9 @@ export class RecordCurrencyCodeRequiredError extends Error {
  * @param touched  an update's payload: only the pairs it carries an input of are judged;
  *                 omitted on insert, where every pair is judged
  * @param messages the write's validation message context, for the reference finding's locale
+ * @param parentCodeServing asked about the first refused pair's parent code field
+ *                 ({@link parentCodeFieldServingOf}): a field the parent object no longer
+ *                 serves is said so, instead of asking for a code to be written into it
  */
 export function assertRecordCurrencyCodes(
   object: string,
@@ -374,6 +468,7 @@ export function assertRecordCurrencyCodes(
   touched?: Record<string, unknown> | null,
   recordId?: unknown,
   messages?: ValidationMessageContext,
+  parentCodeServing?: ParentCodeFieldServing,
 ): void {
   if (!image) return;
   const pairs = recordCurrencyPairs(fields);
@@ -396,7 +491,10 @@ export function assertRecordCurrencyCodes(
     )));
   }
   const hits = judged.filter((p) => !isBlank(image[p.amountField]) && isBlank(image[p.codeField]));
-  if (hits.length > 0) throw new RecordCurrencyCodeRequiredError(object, operation, hits, recordId);
+  if (hits.length === 0) return;
+  const path = hits[0].path;
+  const unserved = path?.master !== undefined ? parentCodeServing?.(path.master, path.code) : undefined;
+  throw new RecordCurrencyCodeRequiredError(object, operation, hits, recordId, unserved);
 }
 
 /**

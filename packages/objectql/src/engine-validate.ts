@@ -50,7 +50,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { validateRecordInScope, normalizeBlankTypedValues, normalizeNumericStringValues, ValidationError, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import { evaluateValidationRules, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
-import { assertRecordCurrencyCodes, followParentCurrencyCodes, recordCurrencyPairs, RecordCurrencyCodeRequiredError, touchesRecordCurrency } from './validation/record-currency-code.js';
+import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs, RecordCurrencyCodeRequiredError, touchesRecordCurrency } from './validation/record-currency-code.js';
 import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { isHomeAmountRefusal } from './home-amount-projection.js';
 import { referencesCheckedBeforeRules } from './engine-referential-integrity.js';
@@ -580,7 +580,7 @@ export async function validate(
         assertRecordCurrencyCodes(
           object, currencyFields,
           followCodes && currencyImage ? followCodes(currencyImage) : currencyImage, mode, mode === 'insert' ? undefined : row, storedIds[i],
-          messages,
+          messages, parentCodeFieldServingOf(this._registry),
         );
         // [ADR-0144 D2, amended] …and the write's parent-code lock, on the
         // stored row the by-id update writes: a record a child row follows

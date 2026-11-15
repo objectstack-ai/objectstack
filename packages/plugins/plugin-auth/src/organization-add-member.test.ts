@@ -35,6 +35,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { AuthManager } from './auth-manager';
 import { AuthPlugin } from './auth-plugin';
 import { runOrganizationAddMember } from './organization-add-member.js';
+import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import type { PluginContext } from '@objectstack/core';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 import { bindTestSecurityCatalog, catalogFromTables } from './__tests__/security-catalog.testkit';
@@ -431,5 +432,54 @@ describe('#9941 runOrganizationAddMember — capability ordering on a degraded d
     // Headers forwarded so an omitted organizationId can default to the
     // caller's ACTIVE org — the action metadata's documented behaviour.
     expect(call.headers).toBe(req.headers);
+  });
+});
+
+describe('runOrganizationAddMember — an unclassified internal failure is answered with the generic message and logged once', () => {
+  const MARKER = 'unclassified-failure-marker-71fa';
+  const post = (body: unknown) =>
+    new Request(`${BASE}${BASE_PATH}/organization/add-member`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  it('a vendor call that fails without a code answers INTERNAL_ERROR in the generic words, and the logger receives the error once', async () => {
+    const thrown = new Error(`adapter failed ${MARKER}`);
+    const addMember = vi.fn(async () => { throw thrown; });
+    const logger = { warn: vi.fn(), error: vi.fn() };
+    const res = await runOrganizationAddMember(
+      { getAuthApi: async () => ({ addMember }), logger },
+      post({ userId: 'usr_1', role: 'member', organizationId: 'org_1' }),
+    );
+    expect(res).toEqual({
+      status: 500,
+      body: { success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } },
+    });
+    expect(JSON.stringify(res)).not.toContain(MARKER);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith('[AuthPlugin] organization/add-member failed', thrown);
+  });
+
+  it('CONTROL: a refusal the vendor classifies keeps its own message and status, and is not logged', async () => {
+    const addMember = vi.fn(async () => {
+      throw Object.assign(new Error('already'), {
+        statusCode: 400,
+        body: { code: 'USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION', message: 'User is already a member of this organization' },
+      });
+    });
+    const logger = { warn: vi.fn(), error: vi.fn() };
+    const res = await runOrganizationAddMember(
+      { getAuthApi: async () => ({ addMember }), logger },
+      post({ userId: 'usr_1', role: 'member', organizationId: 'org_1' }),
+    );
+    expect(res).toEqual({
+      status: 400,
+      body: {
+        success: false,
+        error: { code: 'USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION', message: 'User is already a member of this organization' },
+      },
+    });
+    expect(logger.error).not.toHaveBeenCalled();
   });
 });

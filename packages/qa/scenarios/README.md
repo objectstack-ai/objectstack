@@ -200,6 +200,8 @@ pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # m
 pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # turns per authoring turn, every card (default by tier)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-repeats 3           # ask each question turn 3 times, score k/3 (default 1; operations once)
+pnpm --filter @objectstack/scenarios run-scenarios --modes ask --template dist/objectstack.json --ask-model haiku  # questions and operations only, on a build you supply
+pnpm --filter @objectstack/scenarios run-scenarios --modes scratch,ask --author-model opus --ask-model haiku   # ask mode on this run's scratch build
 pnpm --filter @objectstack/scenarios run-scenarios --model sonnet            # the model every turn asks for (default: the login's own)
 pnpm --filter @objectstack/scenarios run-scenarios --author-model opus --ask-model haiku  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --effort medium           # the effort every turn asks for (default: the CLI's own)
@@ -239,6 +241,23 @@ npx @objectstack/scenarios help                                      # the comma
 |:---|:---|
 | `scratch` | `create-objectstack` → the agent builds from the card prompt and the runner's data contract (`prompts.ts`) → `objectstack validate` / `build` / `verify` (proofs chosen from the tags) → score → `objectstack dev --fresh` → seed, one user + permission-set grant + API key per persona → every question as every persona it names and every operation as its persona, over the app's MCP → the iterate change → rebuild, re-score, re-run |
 | `template` | a blank host project (`host<code>`) → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
+| `ask` | the same install of the same verified build as `template`, into a blank host of its own → seed → Run, and nothing else: no authoring turn, no score, no iterate. Off by default (`--modes ask`, or `--modes scratch,ask`) |
+
+- **Ask mode** (`orchestrate.ts`, `scorecard.ts`): `--modes ask` runs only the Run half — every question (with
+  `--ask-repeats`) and every operation — on a verified build: `--template F` when given, else this run's scratch build
+  when it passed, exactly the build template mode installs. Two ask models run this way on one build are graded on the
+  same app, so a difference in 问数 is theirs, not the build's. The driver is never asked to author. Without
+  `--template` and without `scratch` in the same run it is refused before any card runs; when it relies on the scratch
+  build and that build did not pass, it is skipped with the reason, as template mode is. Its turns key as
+  `card/ask/run/<step>/<persona>`, so `--driver recorded:F` replays it from a recording that holds them, with no
+  authoring turn. The record names the build's source (`template.source` on the mode: `supplied template` or `this
+  run’s from-scratch build`), its Build rows are `not-run` with that note, and its iterate rows `not-run: ask mode
+  authors no iterate`. The scorecard's `ask` column reads `supplied` in its Build cells (not scored), a line under the
+  table names the source, and its `Author cost` / `Author time` read `no authoring turns` (so do the card's lines when
+  ask is the only mode that ran); every Run row — 问数, operations, `Run · model`, guardrails, `Ask cost`, `Ask time`,
+  the k/N table — reads as for any Run half. On the same build and the same turns its grades equal scratch mode's
+  first Run half's. The gallery exporter reads such a record and passes over the ask mode: it is not judged and its
+  turns are not shown, and the transcript says why (`notShown`).
 
 - **Package source** (`packages.ts`, `--packages`): `published` (the default) scaffolds with `npx -y
   create-objectstack@<version>` and installs from npm, what a customer gets. `workspace` measures the next release before
@@ -521,7 +540,7 @@ the directory you run from. For anything more, write a wrapper script.
 - **`author`**: build or iterate the app in `cwd` with shell and file tools; the call runs in `cwd`.
   `{"contract":…,"kind":"author","step":{"card","mode","phase","step"},"prompt":"…","cwd":"/abs/project","tier":"starter","limits":{…}}`
 - **`ask`**: answer one data question or write operation as a persona, over the app's MCP endpoint; the call runs in
-  the directory of `mcp.configFile`.
+  the directory of `mcp.configFile`. `step.mode` is `scratch`, `template` or `ask` (ask mode sends only `ask` calls).
   `{"contract":…,"kind":"ask","step":{"card","mode","phase","step","persona"},"prompt":"…","mcp":{"url":"…","configFile":"/tmp/…/mcp.json"},"limits":{…}}`
 - **The answer** to `author` and `ask`, strict (an unknown key is refused):
   `{"replyText":"every text the agent said, joined","toolCalls":[{"name":"query_records","input":{…},"output":"…","isError":false}],"model":"…","numTurns":3,"reportedCostUsd":0.42,"inputTokens":18000,"outputTokens":2300}`.
