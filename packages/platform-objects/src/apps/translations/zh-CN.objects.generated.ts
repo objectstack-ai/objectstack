@@ -218,6 +218,54 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      add_sso_user: {
+        label: "添加用户",
+        description: "在对方首次登录前按邮箱地址添加。对方通过你所在组织的身份提供方登录；这里不设置密码。",
+        params: {
+          positions: {
+            label: "岗位",
+            helpText: "可选。此人从被添加起就担任的岗位。"
+          },
+          permissionSets: {
+            label: "权限集",
+            helpText: "可选。把此权限集授予此人，使其首次登录即可打开自己的应用。"
+          },
+          manager: {
+            label: "上级邮箱",
+            helpText: "可选。此人上级的邮箱地址，须是本环境中的用户。"
+          }
+        },
+        resultDialog: {
+          title: "用户已添加",
+          acknowledge: "完成",
+          fields: {
+            email: "邮箱",
+            notApplied: "此人仍待激活，以下内容未生效（请在其记录上设置）",
+            managerError: "上级",
+            "host.reason": "邀请未发出"
+          }
+        }
+      },
+      import_sso_users: {
+        label: "导入用户",
+        description: "从 CSV 文本一次添加多人。每一行单独添加，某一行出错只影响该行。他们通过你所在组织的身份提供方登录；这里不设置密码。",
+        params: {
+          csv: {
+            label: "CSV",
+            helpText: "第一行为表头，之后每行一人，最多 500 行。列：email、name、positions 和 permission_sets（机器名，用 ; 分隔）以及 manager_id（上级的邮箱地址）。"
+          }
+        },
+        resultDialog: {
+          title: "导入完成",
+          acknowledge: "完成",
+          fields: {
+            "summary.added": "已添加",
+            "summary.alreadyPending": "已在待激活中，已再次通知",
+            "summary.failed": "未添加",
+            rows: "逐行结果"
+          }
+        }
+      },
       set_user_password: {
         label: "设置密码",
         successMessage: "密码已更新",

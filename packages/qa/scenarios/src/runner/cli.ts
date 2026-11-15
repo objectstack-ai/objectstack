@@ -12,8 +12,9 @@
  *   --modes M[,M]        scratch, template (default: both)
  *   --driver claude      the local Claude Code CLI on your own login (default)
  *   --driver codex       the local OpenAI Codex CLI on your own ChatGPT plan
- *                        login (`drivers/codex.ts`); it has no turn cap, so the
- *                        two --*-max-turns flags are refused with it
+ *                        login (`drivers/codex.ts`); it has no turn cap and no
+ *                        effort flag, so the two --*-max-turns flags and the
+ *                        three effort flags are refused with it
  *   --driver external:C  any command C that speaks the driver contract (one
  *                        process per call, JSON in on stdin, JSON out on stdout;
  *                        `drivers/external.ts` and the package README); every
@@ -38,6 +39,16 @@
  *   --ask-model M        the model for question and operation turns, in place
  *                        of --model; the record and the scorecard state the
  *                        model each turn was served, and mark a mismatch
+ *   --effort LEVEL       the effort level every live turn asks for, as
+ *                        `claude --effort` takes it (Claude Code 2.1.325: low,
+ *                        medium, high, xhigh, max); a level the CLI's own
+ *                        `--help` does not list is refused before any card
+ *                        runs (default: CLAUDE_CODE_EFFORT_LEVEL when set, else
+ *                        the CLI's default effort)
+ *   --author-effort L    the effort for authoring turns, in place of --effort
+ *   --ask-effort L       the effort for question and operation turns, in place
+ *                        of --effort; the record and the scorecard state the
+ *                        effort each turn asked for beside its served model
  *   --template F         a verified build (dist/objectstack.json) for template mode
  *   --no-iterate-run     skip the Run half after the iterate (scratch mode)
  *   --out DIR            where records go (default docs/qa/platform-checklist/runs, git-ignored;
@@ -69,6 +80,7 @@ import { CAPABILITY_AREAS_DIR, locateLibraryRoot } from './library.js';
 import { minutesText, runCard, type ProjectOps } from './orchestrate.js';
 import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleWorkspaceProject, workspaceScaffolder, type PackageSource, type PackagesMode } from './packages.js';
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
+import { rebaseScenario } from './run-date.js';
 import { cardScorecard, renderScorecard, runRecord } from './scorecard.js';
 
 /** The dev admin `objectstack dev --fresh` seeds; the runner and the gallery exporter sign in as it. */
@@ -104,6 +116,12 @@ export interface CliArgs {
   authorModel?: string;
   /** The model a question or operation turn asks for (`--ask-model`), in place of `model`. */
   askModel?: string;
+  /** The effort level every live turn asks for (`--effort`); the CLI's default when absent. */
+  effort?: string;
+  /** The effort level an authoring turn asks for (`--author-effort`), in place of `effort`. */
+  authorEffort?: string;
+  /** The effort level a question or operation turn asks for (`--ask-effort`), in place of `effort`. */
+  askEffort?: string;
   out?: string;
   work?: string;
   createVersion?: string;
@@ -131,6 +149,11 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       if (raw.trim() === '' || raw.startsWith('-')) throw new Error(`${flag} takes a model alias or name (sonnet, opus, claude-sonnet-4-5), not \`${raw}\``);
       return raw;
     };
+    const effort = () => {
+      const raw = val();
+      if (raw.trim() === '' || raw.startsWith('-')) throw new Error(`${flag} takes an effort level as \`claude --effort\` takes it (low, medium, high, xhigh, max), not \`${raw}\``);
+      return raw.trim();
+    };
     if (flag === '--cards') a.cards = val();
     else if (flag === '--only') a.only = val().split(',');
     else if (flag === '--modes') {
@@ -152,6 +175,9 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     else if (flag === '--model') a.model = model();
     else if (flag === '--author-model') a.authorModel = model();
     else if (flag === '--ask-model') a.askModel = model();
+    else if (flag === '--effort') a.effort = effort();
+    else if (flag === '--author-effort') a.authorEffort = effort();
+    else if (flag === '--ask-effort') a.askEffort = effort();
     else if (flag === '--out') a.out = val();
     else if (flag === '--work') a.work = val();
     else if (flag === '--create-version') a.createVersion = val();
@@ -173,16 +199,26 @@ export type DriverLimits = Pick<CliArgs, 'authorTimeoutMin' | 'authorMaxTurns' |
 /** The models a run may ask the live driver for: `--model`, `--author-model`, `--ask-model`. */
 export type DriverModels = Pick<CliArgs, 'model' | 'authorModel' | 'askModel'>;
 
-const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels), string]> = [
+/** The effort levels a run may ask the live driver for: `--effort`, `--author-effort`, `--ask-effort`. */
+export type DriverEfforts = Pick<CliArgs, 'effort' | 'authorEffort' | 'askEffort'>;
+
+const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels & DriverEfforts), string]> = [
   ['authorTimeoutMin', '--author-timeout'],
   ['authorMaxTurns', '--author-max-turns'],
   ['askMaxTurns', '--ask-max-turns'],
   ['model', '--model'],
   ['authorModel', '--author-model'],
   ['askModel', '--ask-model'],
+  ['effort', '--effort'],
+  ['authorEffort', '--author-effort'],
+  ['askEffort', '--ask-effort'],
 ];
 
-export function makeDriver(spec: string, opts: DriverLimits & DriverModels = {}): AgentDriver {
+/** The live flags of `keys` that `opts` sets, as typed (`--effort`), in {@link LIVE_FLAGS} order. */
+const givenFlags = (opts: DriverLimits & DriverModels & DriverEfforts, keys?: ReadonlyArray<keyof (DriverLimits & DriverModels & DriverEfforts)>): string[] =>
+  LIVE_FLAGS.filter(([key]) => (keys === undefined || keys.includes(key)) && opts[key] !== undefined).map(([, flag]) => flag);
+
+export function makeDriver(spec: string, opts: DriverLimits & DriverModels & DriverEfforts = {}): AgentDriver {
   if (spec === 'claude') {
     return new ClaudeCodeDriver({
       ...(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {}),
@@ -191,17 +227,25 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels = {})
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.authorModel !== undefined ? { authorModel: opts.authorModel } : {}),
       ...(opts.askModel !== undefined ? { askModel: opts.askModel } : {}),
+      ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
+      ...(opts.authorEffort !== undefined ? { authorEffort: opts.authorEffort } : {}),
+      ...(opts.askEffort !== undefined ? { askEffort: opts.askEffort } : {}),
     });
   }
   if (spec.startsWith('recorded:')) {
-    const given = LIVE_FLAGS.filter(([key]) => opts[key] !== undefined).map(([, flag]) => flag);
+    const given = givenFlags(opts);
     if (given.length) throw new Error(`${given.join(', ')} ${given.length === 1 ? 'applies' : 'apply'} to the live driver only: a replay re-reads each turn as it was recorded`);
     return RecordedDriver.fromFile(spec.slice('recorded:'.length));
   }
   if (spec === 'codex') {
     // Measured on codex-cli 0.167.0: `codex exec` takes no cap on its agentic turns (`drivers/codex.ts`).
-    const capped = (['authorMaxTurns', 'askMaxTurns'] as const).filter((k) => opts[k] !== undefined).map((k) => LIVE_FLAGS.find(([key]) => key === k)![1]);
+    const capped = givenFlags(opts, ['authorMaxTurns', 'askMaxTurns']);
     if (capped.length) throw new Error(`${capped.join(', ')} ${capped.length === 1 ? 'has' : 'have'} no equivalent in the Codex CLI: \`codex exec\` takes no turn cap`);
+    // Measured on codex-cli 0.167.0: `codex exec --help` has no effort flag, and the config key
+    // `model_reasoning_effort` starts a turn with any value (`bogus` included), so no level
+    // name could be checked against what the model was served; refused, never guessed.
+    const effort = givenFlags(opts, ['effort', 'authorEffort', 'askEffort']);
+    if (effort.length) throw new Error(`${effort.join(', ')} ${effort.length === 1 ? 'has' : 'have'} no equivalent in the Codex CLI: \`codex exec\` takes no effort flag`);
     return new CodexDriver({
       ...(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {}),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
@@ -218,6 +262,9 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels = {})
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.authorModel !== undefined ? { authorModel: opts.authorModel } : {}),
       ...(opts.askModel !== undefined ? { askModel: opts.askModel } : {}),
+      ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
+      ...(opts.authorEffort !== undefined ? { authorEffort: opts.authorEffort } : {}),
+      ...(opts.askEffort !== undefined ? { askEffort: opts.askEffort } : {}),
     });
   }
   throw new Error(`unknown driver \`${spec}\` (claude, codex, external:COMMAND, recorded:FILE)`);
@@ -257,7 +304,9 @@ export async function main(argv: readonly string[]): Promise<number> {
       (info.authorMaxTurns ? ` · author max turns: ${Object.entries(info.authorMaxTurns).map(([tier, n]) => `${tier} ${n}`).join(', ')}` : '') +
       (info.askMaxTurns !== undefined ? ` · ask max turns: ${info.askMaxTurns}` : '') +
       (info.authorModel ? ` · author model: ${info.authorModel}` : '') +
-      (info.askModel ? ` · ask model: ${info.askModel}` : ''),
+      (info.askModel ? ` · ask model: ${info.askModel}` : '') +
+      (info.authorEffort ? ` · author effort: ${info.authorEffort}` : '') +
+      (info.askEffort ? ` · ask effort: ${info.askEffort}` : ''),
   );
 
   // Built and packed once, before the first card: every scaffold of this run installs the same tarballs.
@@ -296,8 +345,15 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
   const date = new Date().toISOString().slice(0, 10);
 
-  for (const scenario of chosen) {
+  for (const loaded of chosen) {
+    // The card's dates move onto the day this card starts, so its "today", its
+    // seeded rows and the app's own clock agree (`run-date.ts`).
+    const runDate = new Date().toISOString().slice(0, 10);
+    const scenario = rebaseScenario(loaded, runDate);
     console.log(`\n▶ ${scenario.card.id} (${args.modes.join(' + ')})`);
+    if (loaded.card.asOf !== undefined && loaded.card.asOf !== scenario.card.asOf) {
+      console.log(`dates: the card's ${loaded.card.asOf} is run as ${scenario.card.asOf}, every card date moved by the same days`);
+    }
     publishedVersions = new Set();
     const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}) });
     const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };

@@ -218,6 +218,54 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      add_sso_user: {
+        label: "Adicionar usuário",
+        description: "Adicione alguém pelo endereço de e-mail antes do primeiro login. A pessoa entra pelo provedor de identidade da sua organização; nenhuma senha é definida aqui.",
+        params: {
+          positions: {
+            label: "Cargo",
+            helpText: "Opcional. O cargo que esta pessoa ocupa desde o momento em que é adicionada."
+          },
+          permissionSets: {
+            label: "Conjunto de permissões",
+            helpText: "Opcional. Concede este conjunto de permissões à pessoa, para que ela possa abrir seus aplicativos no primeiro login."
+          },
+          manager: {
+            label: "E-mail do gestor",
+            helpText: "Opcional. O endereço de e-mail do gestor desta pessoa, um usuário deste ambiente."
+          }
+        },
+        resultDialog: {
+          title: "Usuário adicionado",
+          acknowledge: "Concluído",
+          fields: {
+            email: "E-mail",
+            notApplied: "Já pendente, então não aplicado (defina no registro)",
+            managerError: "Gestor",
+            "host.reason": "Convite não enviado"
+          }
+        }
+      },
+      import_sso_users: {
+        label: "Importar usuários",
+        description: "Adicione várias pessoas de uma vez a partir de texto CSV. Cada linha é adicionada separadamente, então uma linha com erro falha sozinha. Elas entram pelo provedor de identidade da sua organização; nenhuma senha é definida aqui.",
+        params: {
+          csv: {
+            label: "CSV",
+            helpText: "Uma linha de cabeçalho e depois uma pessoa por linha, no máximo 500. Colunas: email, name, positions e permission_sets (nomes de máquina separados por ;) e manager_id (o endereço de e-mail do gestor)."
+          }
+        },
+        resultDialog: {
+          title: "Importação concluída",
+          acknowledge: "Concluído",
+          fields: {
+            "summary.added": "Adicionados",
+            "summary.alreadyPending": "Já pendentes, avisados novamente",
+            "summary.failed": "Não adicionados",
+            rows: "Resultado por linha"
+          }
+        }
+      },
       set_user_password: {
         label: "Definir senha",
         successMessage: "Senha atualizada",

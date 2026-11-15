@@ -218,6 +218,54 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      add_sso_user: {
+        label: "ユーザーを追加",
+        description: "初回サインインの前に、メールアドレスで追加します。追加された人は組織の ID プロバイダー経由でサインインします。ここではパスワードを設定しません。",
+        params: {
+          positions: {
+            label: "役職",
+            helpText: "任意。追加された時点からこの人が就く役職です。"
+          },
+          permissionSets: {
+            label: "権限セット",
+            helpText: "任意。この権限セットを付与し、初回サインイン時からアプリを開けるようにします。"
+          },
+          manager: {
+            label: "上司のメールアドレス",
+            helpText: "任意。この人の上司のメールアドレス（この環境のユーザー）。"
+          }
+        },
+        resultDialog: {
+          title: "ユーザーを追加しました",
+          acknowledge: "完了",
+          fields: {
+            email: "メールアドレス",
+            notApplied: "保留中のため適用されませんでした（レコードで設定してください）",
+            managerError: "上司",
+            "host.reason": "招待は送信されませんでした"
+          }
+        }
+      },
+      import_sso_users: {
+        label: "ユーザーをインポート",
+        description: "CSV テキストから複数の人をまとめて追加します。各行は個別に追加されるため、不正な行だけが失敗します。追加された人は組織の ID プロバイダー経由でサインインします。ここではパスワードを設定しません。",
+        params: {
+          csv: {
+            label: "CSV",
+            helpText: "1 行目はヘッダー行、その後は 1 行に 1 人、最大 500 行。列：email、name、positions と permission_sets（; 区切りのマシン名）、manager_id（上司のメールアドレス）。"
+          }
+        },
+        resultDialog: {
+          title: "インポートが完了しました",
+          acknowledge: "完了",
+          fields: {
+            "summary.added": "追加済み",
+            "summary.alreadyPending": "保留中のため再通知",
+            "summary.failed": "未追加",
+            rows: "行ごとの結果"
+          }
+        }
+      },
       set_user_password: {
         label: "パスワードを設定",
         successMessage: "パスワードを更新しました",

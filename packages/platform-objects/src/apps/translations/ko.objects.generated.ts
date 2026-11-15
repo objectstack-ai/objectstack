@@ -218,6 +218,54 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      add_sso_user: {
+        label: "사용자 추가",
+        description: "첫 로그인 전에 이메일 주소로 사람을 추가합니다. 추가된 사람은 조직의 ID 공급자를 통해 로그인하며, 여기서는 비밀번호를 설정하지 않습니다.",
+        params: {
+          positions: {
+            label: "직위",
+            helpText: "선택 사항. 추가된 시점부터 이 사람이 맡는 직위입니다."
+          },
+          permissionSets: {
+            label: "권한 세트",
+            helpText: "선택 사항. 이 권한 세트를 부여하여 첫 로그인부터 앱을 열 수 있게 합니다."
+          },
+          manager: {
+            label: "관리자 이메일",
+            helpText: "선택 사항. 이 사람의 관리자 이메일 주소로, 이 환경의 사용자여야 합니다."
+          }
+        },
+        resultDialog: {
+          title: "사용자 추가됨",
+          acknowledge: "완료",
+          fields: {
+            email: "이메일",
+            notApplied: "이미 대기 중이어서 적용되지 않음(레코드에서 설정하세요)",
+            managerError: "관리자",
+            "host.reason": "초대가 전송되지 않음"
+          }
+        }
+      },
+      import_sso_users: {
+        label: "사용자 가져오기",
+        description: "CSV 텍스트에서 여러 사람을 한 번에 추가합니다. 각 행은 따로 추가되므로 잘못된 행만 실패합니다. 추가된 사람은 조직의 ID 공급자를 통해 로그인하며, 여기서는 비밀번호를 설정하지 않습니다.",
+        params: {
+          csv: {
+            label: "CSV",
+            helpText: "첫 행은 머리글이고 이후 한 줄에 한 명씩, 최대 500행입니다. 열: email, name, positions 및 permission_sets(; 로 구분한 머신 이름), manager_id(관리자의 이메일 주소)."
+          }
+        },
+        resultDialog: {
+          title: "가져오기 완료",
+          acknowledge: "완료",
+          fields: {
+            "summary.added": "추가됨",
+            "summary.alreadyPending": "이미 대기 중, 다시 알림",
+            "summary.failed": "추가되지 않음",
+            rows: "행별 결과"
+          }
+        }
+      },
       set_user_password: {
         label: "비밀번호 설정",
         successMessage: "비밀번호 업데이트됨",

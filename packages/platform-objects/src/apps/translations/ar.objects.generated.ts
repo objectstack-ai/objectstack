@@ -218,6 +218,54 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      add_sso_user: {
+        label: "إضافة مستخدم",
+        description: "أضف شخصًا بعنوان بريده الإلكتروني قبل أول تسجيل دخول له. يسجّل الدخول عبر موفّر الهوية في مؤسستك؛ لا تُعيَّن كلمة مرور هنا.",
+        params: {
+          positions: {
+            label: "المنصب",
+            helpText: "اختياري. المنصب الذي يشغله هذا الشخص منذ لحظة إضافته."
+          },
+          permissionSets: {
+            label: "مجموعة الأذونات",
+            helpText: "اختياري. يمنح هذا الشخص مجموعة الأذونات هذه، ليتمكن من فتح تطبيقاته عند أول تسجيل دخول."
+          },
+          manager: {
+            label: "البريد الإلكتروني للمدير",
+            helpText: "اختياري. عنوان البريد الإلكتروني لمدير هذا الشخص، وهو مستخدم في هذه البيئة."
+          }
+        },
+        resultDialog: {
+          title: "تمت إضافة المستخدم",
+          acknowledge: "تم",
+          fields: {
+            email: "البريد الإلكتروني",
+            notApplied: "معلّق بالفعل، لذا لم يُطبَّق (عيّنه في السجل)",
+            managerError: "المدير",
+            "host.reason": "لم تُرسَل الدعوة"
+          }
+        }
+      },
+      import_sso_users: {
+        label: "استيراد المستخدمين",
+        description: "أضف عدة أشخاص دفعة واحدة من نص CSV. يُضاف كل صف على حدة، فيفشل الصف الخاطئ وحده. يسجّلون الدخول عبر موفّر الهوية في مؤسستك؛ لا تُعيَّن كلمة مرور هنا.",
+        params: {
+          csv: {
+            label: "CSV",
+            helpText: "صف عناوين، ثم شخص واحد في كل سطر، 500 على الأكثر. الأعمدة: email وname وpositions وpermission_sets (أسماء آلية مفصولة بـ ;) وmanager_id (عنوان البريد الإلكتروني للمدير)."
+          }
+        },
+        resultDialog: {
+          title: "اكتمل الاستيراد",
+          acknowledge: "تم",
+          fields: {
+            "summary.added": "تمت الإضافة",
+            "summary.alreadyPending": "معلّق بالفعل، أُبلغ مجددًا",
+            "summary.failed": "لم تتم الإضافة",
+            rows: "النتيجة لكل صف"
+          }
+        }
+      },
       set_user_password: {
         label: "تعيين كلمة المرور",
         successMessage: "تم تحديث كلمة المرور",
