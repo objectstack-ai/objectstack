@@ -26,6 +26,9 @@
  *     contract (the package README states it).
  *   - {@link RecordedDriver} replays turns recorded earlier, so the runner's
  *     own tests (and a re-grade of an old run) need no model and no network.
+ *     It re-sends each turn's recorded writes to the booted app through the
+ *     runner's door ({@link AskTask.callTool}), so an operation reads back
+ *     what the recorded run wrote.
  *
  * {@link RecordingDriver} wraps a live driver and writes every turn it sees to
  * a recording the replay driver reads back.
@@ -37,8 +40,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { SCENARIO_TIERS, type ScenarioTier } from '../schema.js';
+import { flowRefusalOf } from '../score/scenario-run-grade.js';
+import type { ToolAnswer } from './app.js';
 import { noResult, runTurnProcess } from './drivers/process.js';
-import { parseStreamJson, type ParsedTurn } from './transcript.js';
+import { WRITE_TOOLS } from './observe.js';
+import { parseStreamJson, refusalCodeOf, type ParsedTurn, type RunnerToolCall } from './transcript.js';
 
 /** Which run step a turn belongs to; the replay key is built from it. */
 export interface StepRef {
@@ -66,6 +72,13 @@ export interface AskTask extends StepRef {
   prompt: string;
   /** The booted app's MCP endpoint and the persona's API key. */
   mcp: { url: string; apiKey: string };
+  /**
+   * The runner's own door to the booted app as this turn's persona: one MCP
+   * `tools/call` with the persona's key (`AppHarness.callTool`). The replay
+   * driver re-sends the turn's recorded writes through it; a live driver
+   * ignores it. Absent ⇒ a replay re-reads the turn and sends nothing.
+   */
+  callTool?: (tool: string, args: Record<string, unknown>) => Promise<ToolAnswer>;
 }
 
 export interface AuthorResult {
@@ -359,8 +372,76 @@ export class MissingRecordingError extends Error {
   }
 }
 
-/** Replays a {@link Recording}. A step it has no turn for is a loud error, never an empty turn. */
+/**
+ * A replayed turn whose recorded writes the booted app did not answer as it
+ * answered the recorded run, or that the recording cannot re-send faithfully.
+ * What the turn's operation reads back then measures the replay, not the
+ * agent: the runner records it NOT MEASURED with {@link reason}, never a fail.
+ */
+export class ReplayNotFaithfulError extends Error {
+  constructor(
+    readonly key: string,
+    /** Why, naming each write call that broke the replay. */
+    readonly reason: string,
+    /** The recorded turn, as the run saw it. */
+    readonly turn: ParsedTurn,
+  ) {
+    super(`the replay of \`${key}\` is not faithful: ${reason}`);
+    this.name = 'ReplayNotFaithfulError';
+  }
+}
+
+/** The calls of a recorded turn to the app's write doors, in recorded order (reads are never re-sent). */
+const recordedWrites = (turn: ParsedTurn): RunnerToolCall[] => turn.toolCalls.filter((c) => (WRITE_TOOLS as readonly string[]).includes(c.name));
+
+/** How a write door answered, as a replay compares it: `applied`, or the refusal it carried (rule 3 of `observe.ts`). */
+function answerOutcome(output: unknown, isError: boolean): string {
+  const code = refusalCodeOf(output);
+  if (code !== undefined) return `refused ${code}`;
+  if (flowRefusalOf(output) !== undefined) return 'refused by its flow';
+  return isError ? 'refused without a code' : 'applied';
+}
+
+/** The id an applied create answered (`{ id }`), when its output carries one. */
+function createdIdOf(output: unknown): string | undefined {
+  if (typeof output !== 'string') return undefined;
+  try {
+    const v: unknown = JSON.parse(output);
+    const id = typeof v === 'object' && v !== null ? (v as Record<string, unknown>).id : undefined;
+    return typeof id === 'string' && id !== '' ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `value` with every string equal to a recorded id replaced by the id the replay's app gave that row. */
+function remapIds(value: unknown, ids: ReadonlyMap<string, string>): unknown {
+  if (typeof value === 'string') return ids.get(value) ?? value;
+  if (Array.isArray(value)) return value.map((v) => remapIds(v, ids));
+  if (typeof value === 'object' && value !== null) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, remapIds(v, ids)]));
+  return value;
+}
+
+/**
+ * Replays a {@link Recording}. A step it has no turn for is a loud error, never an empty turn.
+ *
+ * A question or operation turn's recorded writes (`create_record`,
+ * `update_record`, `delete_record`, `run_action` through the app's MCP door)
+ * are re-sent to the freshly booted app, in recorded order, as the turn's
+ * persona ({@link AskTask.callTool}), before the turn is handed back: the
+ * runner's read-back then finds what the recorded run wrote. Reads are never
+ * re-sent. A refused write is re-sent too, and must be refused again with the
+ * same code. A row the recorded run created is known to the replay's app
+ * under a new id, so a later write naming the recorded id is sent with the
+ * new one. The replay is not faithful, and the turn's grade measures nothing
+ * ({@link ReplayNotFaithfulError}), when a recorded write has no recorded
+ * answer (nothing is re-sent for that turn: whether it ran is unknown), or
+ * when the app answers a re-sent write otherwise than it answered the run.
+ */
 export class RecordedDriver implements AgentDriver {
+  /** Recorded id → the id the replay's app gave the same created row. */
+  private readonly ids = new Map<string, string>();
+
   constructor(
     private readonly recording: Recording,
     private readonly source = '(in memory)',
@@ -402,6 +483,37 @@ export class RecordedDriver implements AgentDriver {
     const key = stepKey(task);
     const turn = this.recording.turns[key];
     if (!turn) throw new MissingRecordingError(key);
+    const writes = recordedWrites(turn);
+    if (writes.length === 0 || task.callTool === undefined) return turn;
+    const unanswered = writes.filter((c) => c.output === undefined);
+    if (unanswered.length > 0) {
+      const names = unanswered.map((c) => `\`${c.name}\``).join(', ');
+      throw new ReplayNotFaithfulError(key, `the recording holds no answer to ${names} (the turn was cut short), so whether it wrote is unknown; nothing was re-sent`, turn);
+    }
+    const broken: string[] = [];
+    for (const c of writes) {
+      const input = (typeof c.input === 'object' && c.input !== null && !Array.isArray(c.input) ? c.input : {}) as Record<string, unknown>;
+      const target = typeof input.objectName === 'string' ? ` on ${input.objectName}` : '';
+      const recorded = answerOutcome(c.output, c.isError === true);
+      let replayed: string;
+      let answer: ToolAnswer | undefined;
+      try {
+        answer = await task.callTool(c.name, remapIds(input, this.ids) as Record<string, unknown>);
+        replayed = answerOutcome(answer.output, answer.isError);
+      } catch (e) {
+        replayed = `not sent (${e instanceof Error ? e.message : String(e)})`;
+      }
+      if (replayed !== recorded) {
+        broken.push(`\`${c.name}\`${target} was ${recorded} in the recorded run and ${replayed} on replay`);
+        continue;
+      }
+      if (c.name === 'create_record' && recorded === 'applied') {
+        const was = createdIdOf(c.output);
+        const now = createdIdOf(answer?.output);
+        if (was !== undefined && now !== undefined && was !== now) this.ids.set(was, now);
+      }
+    }
+    if (broken.length > 0) throw new ReplayNotFaithfulError(key, `the booted app answered a re-sent write otherwise than the recorded run: ${broken.join('; ')}`, turn);
     return turn;
   }
 }

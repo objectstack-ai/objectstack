@@ -43,7 +43,8 @@
  *   - at least one assistant turn exists, and every one names a served model equal to `CONTRACT_REVIEW_TIER`
  *     (a turn with no model field refuses: a turn nobody can attribute is not a turn at the tier);
  *   - every `requestedModel`, every `advisorModel` and every `model` attachment present names the same value;
- *   - no assistant turn calls a tool that runs or drives ANOTHER agent (`SUB_AGENT_TOOLS`): that agent's turns
+ *   - no assistant turn calls a tool that runs or drives ANOTHER agent (`SUB_AGENT_TOOLS`, `SUB_AGENT_TOOL_SHAPES`,
+ *     read by `handsWorkToAnotherAgent`): that agent's turns
  *     live in its own file, so this one cannot show them at the tier, nor which agent served the review — the
  *     evidence is the transcript of the agent that RAN the review, one that ran no other (a seat that reviewed
  *     in-seat while it ran unrelated agents passes the review's own sub-agent file, or reviews in a fresh agent);
@@ -79,6 +80,26 @@ export const FALLBACK_NOTICE = /\bswitched to\b[^\n]*\bbecause its earlier model
  * sub-agent spawn (and its older name), a workflow of sub-agents, and a message to a running agent.
  */
 export const SUB_AGENT_TOOLS = Object.freeze(['Agent', 'Task', 'Workflow', 'SendMessage']);
+
+/**
+ * The same refusal by SHAPE (#33729 N3), because an exact-name list misses a door it was never told about:
+ *   - `Skill`: a skill can fork into a sub-agent, and the call reads the same in this file whether it forked or not;
+ *   - a connector tool (`mcp__SERVER__TOOL`, the spelling measured in a session transcript) whose tool name starts
+ *     with a verb that sends to or starts another agent, thread or session (`send_message`, `message_thread`,
+ *     `start_remote_control`, `fire_trigger`), or that names a trigger (a trigger runs a session).
+ * ⛔ Fail closed: a read-only connector tool that happens to fit refuses too, and the remedy is the same one —
+ * review in an agent that calls none of these.
+ */
+export const SUB_AGENT_TOOL_SHAPES = Object.freeze([
+  /^Skill$/,
+  /^mcp__.+__(?:send|message|start|fire|spawn|dispatch|delegate)(?:_\w*)?$/i,
+  /^mcp__.+__\w*_triggers?$/i,
+]);
+
+/** Does a `tool_use` name run or drive another agent? Exact names first, then the shapes. Pure. */
+export function handsWorkToAnotherAgent(name) {
+  return typeof name === 'string' && (SUB_AGENT_TOOLS.includes(name) || SUB_AGENT_TOOL_SHAPES.some((re) => re.test(name)));
+}
 
 /** Every string inside a value, flattened — for the notice scan of a harness `system` entry. */
 function stringsOf(value, out = []) {
@@ -127,7 +148,7 @@ export function judgeReviewTranscript(text, tier = CONTRACT_REVIEW_TIER) {
         return { ok: false, reason: `${at} is an assistant turn whose advisor model is not ${name}` };
       }
       const content = Array.isArray(entry.message?.content) ? entry.message.content : [];
-      const spawn = content.find((c) => c?.type === 'tool_use' && SUB_AGENT_TOOLS.includes(c?.name));
+      const spawn = content.find((c) => c?.type === 'tool_use' && handsWorkToAnotherAgent(c?.name));
       if (spawn) {
         return { ok: false, reason: `${at} calls ${spawn.name}, so this file cannot show which agent served the review, and part of the run is in a file this one does not name — pass the transcript of the agent that ran the review, one that called no other agent: a review sub-agent's own output file, or a session that reviewed without running any other agent` };
       }
@@ -171,7 +192,7 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'passes: every turn at the tier': 4,
   'refuses: a turn, a request or an identity off the tier': 5,
-  'refuses: an advisor off the tier, and a run that hands work to another agent': 7,
+  'refuses: an advisor off the tier, and a run that hands work to another agent': 10,
   'refuses: the fallback notice in a harness entry, and only there': 3,
   'refuses: no model field, empty, unparseable or unreadable': 6,
   'output: no model identifier and no path in any verdict line': 2,
@@ -236,6 +257,16 @@ function selfTest() {
     return !v.ok && v.reason.includes('the transcript of the agent that ran the review') && !v.reason.includes("that agent's own transcript");
   })());
   t('a tool that runs in this agent (Read, Bash) passes', judgeReviewTranscript(jl(user, calls('Read'), calls('Bash'))).ok);
+  t('⛔ #33729 N3: a skill (it can fork into a sub-agent) refuses, naming the call', (() => {
+    const v = judgeReviewTranscript(jl(user, calls('Skill'), turn(TIER)));
+    return !v.ok && v.reason.includes('calls Skill');
+  })());
+  t('⛔ #33729 N3: a connector tool that messages or starts another thread, session or trigger refuses',
+    ['mcp__hearthbot__message_thread', 'mcp__hearthbot__message_coordinator', 'mcp__claude-code-remote__send_message', 'mcp__hearthbot__start_remote_control', 'mcp__claude-code-remote__fire_trigger', 'mcp__claude-code-remote__create_trigger']
+      .every((n) => !judgeReviewTranscript(jl(user, calls(n))).ok));
+  t('control: a connector tool that reads (a GitHub file, a thread\'s messages) and a name merely containing a verb pass',
+    ['mcp__github__get_file_contents', 'mcp__hearthbot__read_thread', 'mcp__github__pull_request_read', 'SkillSearch', 'mcp__x__resend_log']
+      .every((n) => judgeReviewTranscript(jl(user, calls(n), turn(TIER))).ok));
 
   battery('refuses: the fallback notice in a harness entry, and only there');
   t('a system entry carrying the fallback notice refuses', !judgeReviewTranscript(jl(user, turn(TIER), { type: 'system', content: NOTICE })).ok);
