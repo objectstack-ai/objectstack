@@ -349,10 +349,14 @@ workload needs it. Ship correct-and-uniform first.
 >   zone with DST (`CST` to `America/Chicago`, `CET` to `Europe/Brussels`) where PostgreSQL
 >   reads it as a fixed offset, an hour apart in summer. The test is therefore: resolve the
 >   string through the runtime (the `resolvedOptions().timeZone` of an `Intl.DateTimeFormat`
->   built with it); if that throws, or the resolved name is an offset or an abbreviation, keep
->   the in-memory path; otherwise push down the resolved canonical name.
->   Membership in `Intl.supportedValuesOf('timeZone')` is not the test: it refuses every link
->   name, such as `US/Eastern`, which resolves to `America/New_York`.
+>   built with it); if that throws, or the resolved name is not an area/location name (it
+>   contains no `/`: an offset such as `+08:00`, or an abbreviation such as `CET` or `EST`,
+>   which older tz data still resolves to itself), keep the in-memory path, which answers it
+>   as it does today; otherwise push down the resolved canonical name. So `CST` goes down as
+>   `America/Chicago`, the zone the in-memory path already reads it as: the rule is that the
+>   database answers what the in-memory path answers. Membership in
+>   `Intl.supportedValuesOf('timeZone')` is not the test: it refuses every link name, such as
+>   `US/Eastern`, which resolves to `America/New_York`.
 > - **Parity is the acceptance rule.** In-database buckets equal the in-memory buckets
 >   (`applyInMemoryAggregation`, the side `checkDateBucketParity` in `@objectstack/verify`
 >   reads) for a DST zone across both DST boundaries — Europe/Berlin in March and in October —
