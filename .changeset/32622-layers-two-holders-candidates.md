@@ -3,10 +3,21 @@
 '@objectstack/rest': patch
 ---
 
-fix(metadata-protocol, rest): the layered read of a name two packages hold refuses as the plain read does, naming the holders as `details.candidates` (ADR-0150 D3/D5)
+fix(metadata-protocol, rest)!: the layered read of a name two packages hold refuses as the plain read does, naming the holders as `details.candidates` (ADR-0150 D3/D5)
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are reads of a name two packages hold, which now refuse as the plain read of that name already did: no stored row, layer, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+
+**BREAKING** for a reader of the layers of a name two or more served packages register in code, naming no package. Such a name has no one holder (ADR-0150 D3/D5), and the plain read already refused it. Two answers move, measured in both registration orders:
+
+- FROM: on a host that wires no engine for the REST door chain, `GET /meta/:type/:name/layers` (and `?layers=true`) answered 200 with the layers of the holder that registered first. TO: it answers `409 RESOURCE_CONFLICT` naming both holders as `details.candidates`.
+- FROM: in process, the protocol's `getMetaItemLayered({ type, name })` with no `packageId` resolved the holder that registered first. TO: it throws `PackageScopedNameRefusedError` (`RESOURCE_CONFLICT`, 409) naming both, as `getMetaItem` does.
+
+**Not moved.** A name one package holds, and every read naming the package (`?package=`, `packageId`), answer as before. On a host whose door chain has an engine, `/layers` already refused 409; it now also names the holders. The save and delete doors do not move.
+
+The fix for a caller: name the package whose layers it means.
 
 `GET /meta/:type/:name/layers` (and the deprecated `?layers=true`) of a name two or more packages hold, read naming no package, now answers like the plain read on every exit and on both transports: `409 RESOURCE_CONFLICT` with the holders as `details.candidates` (`[{ kind: 'package', packageId }, …]`), never one holder's layers.
 
