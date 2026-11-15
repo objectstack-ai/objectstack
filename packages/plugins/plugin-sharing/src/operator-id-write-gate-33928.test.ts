@@ -216,6 +216,72 @@ describe('sharing write gate: a write the engine runs as a predicate meets the b
     });
   });
 
+  describe('every write the engine runs as a predicate meets the bulk scope at the door', () => {
+    const delMany = (where: Record<string, unknown>, context: unknown = asCaller()) =>
+      outcomeOf(ql.delete(LINE, { where, multi: true, context } as never));
+    const updMany = (where: Record<string, unknown>, data: Record<string, unknown>, context: unknown = asCaller()) =>
+      outcomeOf(ql.update(LINE, data, { where, multi: true, context } as never));
+    const stageOf = async (id: string) =>
+      ((await ql.find(LINE, { where: { id }, context: SYSTEM } as never)) as Array<{ stage?: string }>)[0]?.stage;
+
+    it('a scalar id beside another predicate key writes the row only when the caller may write it', async () => {
+      const { mine, theirs } = await seedLines('p1');
+
+      expect(await delMany({ id: theirs, stage: 'p1' })).toMatchObject({ kind: 'landed' });
+      expect(await delMany({ id: mine[0], stage: 'p1' })).toMatchObject({ kind: 'landed' });
+      expect(await updMany({ id: theirs, stage: 'p1' }, { name: 'written' })).toMatchObject({ kind: 'landed' });
+      expect(await updMany({ id: mine[1], stage: 'p1' }, { stage: 'p1_written' })).toMatchObject({ kind: 'landed' });
+
+      expect(await storedLines('p1')).toEqual([mine[1], theirs].sort());
+      expect(await stageOf(mine[1])).toBe('p1_written');
+      const other = ((await ql.find(LINE, { where: { id: theirs }, context: SYSTEM } as never)) as Array<{ name?: string }>)[0];
+      expect(other?.name ?? null).not.toBe('written');
+    });
+
+    it('a falsy id names no row: no error, nothing written', async () => {
+      const { mine, theirs } = await seedLines('p2');
+
+      expect(await delMany({ id: '' })).toMatchObject({ kind: 'landed' });
+      expect(await delMany({ id: 0 })).toMatchObject({ kind: 'landed' });
+      expect(await updMany({ id: '' }, { stage: 'p2_written' })).toMatchObject({ kind: 'landed' });
+
+      expect(await storedLines('p2')).toEqual([...mine, theirs].sort());
+      for (const id of [...mine, theirs]) expect(await stageOf(id)).toBe('p2');
+    });
+
+    it('an empty `$in` matches no row: no error, nothing written', async () => {
+      const { mine, theirs } = await seedLines('p3');
+
+      expect(await delMany({ id: { $in: [] } })).toMatchObject({ kind: 'landed' });
+      expect(await updMany({ id: { $in: [] } }, { stage: 'p3_written' })).toMatchObject({ kind: 'landed' });
+
+      expect(await storedLines('p3')).toEqual([...mine, theirs].sort());
+      for (const id of [...mine, theirs]) expect(await stageOf(id)).toBe('p3');
+    });
+
+    it('a read share admits no write: an `$eq` or `$in` update of a read-shared row writes nothing', async () => {
+      await ql.insert(LINE, { id: 'p4_read', owner_id: OTHER, stage: 'p4' }, SYS);
+      await shareToMe('p4_read', 'read');
+      expect(await ql.findOne(LINE, { where: { id: 'p4_read' }, context: asCaller() } as never)).toMatchObject({ id: 'p4_read' });
+
+      expect(await updMany({ id: { $eq: 'p4_read' } }, { stage: 'p4_written' })).toMatchObject({ kind: 'landed' });
+      expect(await updMany({ id: { $in: ['p4_read'] } }, { stage: 'p4_written' })).toMatchObject({ kind: 'landed' });
+
+      expect(await stageOf('p4_read')).toBe('p4');
+    });
+
+    it('control: the system context writes every row the predicate matches', async () => {
+      const { mine, theirs } = await seedLines('p5');
+
+      expect(await updMany({ id: { $in: [...mine, theirs] } }, { stage: 'p5_written' }, SYSTEM)).toMatchObject({ kind: 'landed' });
+      for (const id of [...mine, theirs]) expect(await stageOf(id)).toBe('p5_written');
+      expect(await delMany({ id: theirs, stage: 'p5_written' }, SYSTEM)).toMatchObject({ kind: 'landed' });
+      expect(await delMany({ id: { $in: mine } }, SYSTEM)).toMatchObject({ kind: 'landed' });
+
+      expect(await storedLines('p5')).toEqual([]);
+    });
+  });
+
   describe('a cascade delete gives the answer the by-id delete of the refused child gives', () => {
     it('a child the caller reads and may edit but not delete: the same refusal envelope, and nothing is deleted', async () => {
       await ql.insert(ORDER, { id: 'c1', name: 'c1' }, SYS);
@@ -291,6 +357,16 @@ describe('sharing write gate: the by-id branch is exactly the engine dispatch de
     // where.id scalar beside another predicate key under multi: the engine runs a predicate.
     ['delete', undefined, { where: { id: 'r_1', stage: 'open' }, multi: true }, BULK],
     ['update', { stage: 'x' }, { where: { id: 'r_1', stage: 'open' }, multi: true }, BULK],
+    // A falsy scalar id names no row for the engine.
+    ['delete', undefined, { where: { id: '' }, multi: true }, BULK],
+    ['delete', undefined, { where: { id: 0 }, multi: true }, BULK],
+    ['update', { stage: 'x' }, { where: { id: '' }, multi: true }, BULK],
+    ['update', { id: '', stage: 'x' }, { where: { stage: 'open' }, multi: true }, BULK],
+    // Calls the engine refuses at dispatch: no row is written by id.
+    ['delete', undefined, { where: { id: 'r_1', stage: 'open' } }, BULK],
+    ['update', { stage: 'x' }, { where: { id: 'r_1', stage: 'open' } }, BULK],
+    ['update', { id: 'r_1', stage: 'x' }, { where: { stage: 'open' } }, BULK],
+    ['update', { id: 'r_1', stage: 'x' }, { where: { stage: 'open' }, multi: true }, BULK],
   ];
 
   function service() {
