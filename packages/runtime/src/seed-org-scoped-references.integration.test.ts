@@ -522,8 +522,9 @@ describe('a dataset OF a global object (tenancy disabled) replays per organizati
     expect(south.errors).toEqual([]);
     expect(north.inserted).toBe(1);
     expect(south.inserted).toBe(0);
-    const landed = await rowsOf(engine, 'crm_country');
-    expect(landed.map((r) => r.name)).toEqual(['Japan']);
+    // The harness's own fixture rows stay; the seed adds exactly one Japan.
+    const landed = (await rowsOf(engine, 'crm_country')).filter((r) => r.name === 'Japan');
+    expect(landed).toHaveLength(1);
     // No organization column to stamp: the row carries none.
     expect(landed[0].organization_id ?? null).toBeNull();
 
@@ -532,7 +533,7 @@ describe('a dataset OF a global object (tenancy disabled) replays per organizati
       expect(r.errors).toEqual([]);
       expect(r.inserted).toBe(0);
     }
-    expect(await rowsOf(engine, 'crm_country')).toEqual(landed);
+    expect((await rowsOf(engine, 'crm_country')).filter((r) => r.name === 'Japan')).toEqual(landed);
   });
 
   it('a load with no organization, pinned or derivable, writes the row: it is not refused for a column it does not have', async () => {
@@ -542,6 +543,6 @@ describe('a dataset OF a global object (tenancy disabled) replays per organizati
     const result = await loader.load({ seeds: [countries([{ name: 'Peru' }])], config: { multiPass: true } } as any);
 
     expect(result.errors).toEqual([]);
-    expect((await rowsOf(engine, 'crm_country')).map((r) => r.name)).toEqual(['Peru']);
+    expect((await rowsOf(engine, 'crm_country')).filter((r) => r.name === 'Peru')).toHaveLength(1);
   });
 });
