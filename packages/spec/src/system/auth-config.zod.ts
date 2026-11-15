@@ -78,12 +78,13 @@ export const AuthPluginConfigSchema = lazySchema(() => z.object({
     'Enable RFC 8628 Device Authorization Grant (CLI / TV-style login)',
   ),
   /**
-   * Enable better-auth's `admin` plugin so platform admins can ban / unban
-   * users, set their password (out-of-band recovery), impersonate them for
-   * support sessions, and assign global platform roles.
+   * Enable better-auth's `admin` plugin so platform admins can set a user's
+   * password (out-of-band recovery), impersonate them for support sessions,
+   * and assign global platform roles. Banning and unbanning do not need it:
+   * `POST /admin/ban-user` / `POST /admin/unban-user` are ObjectStack mounts,
+   * served with the plugin off as well as on.
    *
    * Endpoints exposed under the auth route:
-   *   - `POST /admin/ban-user` / `POST /admin/unban-user`
    *   - `POST /admin/set-user-password`
    *   - `POST /admin/impersonate-user` / `POST /admin/stop-impersonating`
    *   - `POST /admin/set-role`
@@ -110,7 +111,7 @@ export const AuthPluginConfigSchema = lazySchema(() => z.object({
    * admin plugin, or disable SCIM.
    */
   admin: z.boolean().optional().describe(
-    'Enable platform admin operations (ban/unban, set-password, impersonate, set-role). ' +
+    'Enable platform admin operations (set-password, impersonate, set-role; ban/unban are served without it). ' +
     'Unset: forced on by effective SCIM (ADR-0134), otherwise off. An explicit false beside ' +
     'effective SCIM is a conflict refused at construction time.',
   ),

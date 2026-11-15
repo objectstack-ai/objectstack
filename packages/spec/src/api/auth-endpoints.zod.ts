@@ -366,8 +366,8 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
     + 'Absent means not wired',
   ),
   admin: z.boolean().optional().describe(
-    'Admin plugin wired (forced on whenever SCIM is enabled), so user administration (creating, banning, unlocking and impersonating users, setting their passwords) is available; '
-    + 'the console shows those actions only when it is true. Absent means not wired',
+    'Admin plugin wired (forced on whenever SCIM is enabled), so user administration (creating, unlocking and impersonating users, setting their passwords) is available; '
+    + 'the console shows those actions only when it is true. Banning and unbanning do not need it and are offered either way. Absent means not wired',
   ),
   termsUrl: z.string().optional().describe(
     'Terms-of-service link shown beneath the login and register cards: the trimmed OS_TERMS_URL value when set, otherwise the public ObjectStack terms page; absent when the operator set OS_TERMS_URL to an empty or blank (whitespace-only) value to suppress the link',
