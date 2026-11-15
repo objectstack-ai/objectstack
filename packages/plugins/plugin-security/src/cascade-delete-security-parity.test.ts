@@ -374,11 +374,20 @@ describe('cascade delete: security parity between id-shaped and predicate-shaped
         return byId;
       };
       const once = Object.fromEntries([prefix, ...children].map((id) => [id, 1]));
-      expect(count('before')).toEqual(once);
-      expect(count('after')).toEqual(once);
-      expect(await auditedDeletes(prefix)).toEqual([prefix, ...children].sort());
-      expect(await sharedRecords(prefix), 'plugin-sharing revoked every child\'s shares').toEqual([]);
-      expect(await stored(prefix)).toEqual({ [ORDER]: [], [LINE]: [], [NOTE]: [] });
+      // One object, so a failure shows every face at once.
+      expect({
+        objectLessBefore: count('before'),
+        objectLessAfter: count('after'),
+        auditedDeletes: await auditedDeletes(prefix),
+        sharesLeft: await sharedRecords(prefix),
+        stored: await stored(prefix),
+      }).toEqual({
+        objectLessBefore: once,
+        objectLessAfter: once,
+        auditedDeletes: [prefix, ...children].sort(),
+        sharesLeft: [],
+        stored: { [ORDER]: [], [LINE]: [], [NOTE]: [] },
+      });
     });
   });
 });
