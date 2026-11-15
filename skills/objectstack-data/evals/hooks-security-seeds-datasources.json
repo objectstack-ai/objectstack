@@ -190,6 +190,16 @@
         "must_contain": ["membershipKeys", "my_employee_ids", "valueField: 'id'", "employee in current_user.my_employee_ids"],
         "must_not_contain": ["using: 'owner_id"]
       }
+    },
+    {
+      "id": 20,
+      "prompt": "Each `project` shows a `task_count` — the number of its `task` records (each task has a `project` lookup). Add a `client_viewer` permission set: clients read projects, but must never be able to read tasks.",
+      "expected_output": "`task_count` is a `summary` on `project` (`summaryOperations: { object: 'task', function: 'count' }`). `client_viewer` grants `project: { allowRead: true }` and no `task` entry — and because a roll-up covers every child row and answers only to the parent field's own access, the set also masks the summary: `fields: { 'project.task_count': { readable: false } }`, with no View All / Modify All on `project` (either overrides the mask). The build then finishes without `security-rollup-source-unreadable`; the warning is resolved, not left standing or explained away, and not silenced by granting the `task` read the request forbids.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["function: 'count'", "'project.task_count': { readable: false }"],
+        "must_not_contain": ["task: { allowRead: true }", "viewAllRecords: true", "safe to ignore"]
+      }
     }
   ]
 }
