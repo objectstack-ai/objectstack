@@ -1771,6 +1771,64 @@ describe('[#32681] /actions/account/approve judges and runs one item over the st
             });
         }
     }
+    /**
+     * [#33456, ADR-0150 D4] …and that row's item is served as the
+     * environment's: the bare read's artifact envelope names a package only
+     * for the item that package holds at its own `(object, name)`, so the
+     * holder's `account` artifact lends nothing to the `contact` row (mirror)
+     * and BETA's `contact` artifact nothing to the `account` row (cell). On
+     * the execution face, the served face, and the declaration the row's
+     * route judges; the holder's exact address keeps its own envelope.
+     *
+     * BASE (main 1e65a389e1, the owner-key rule ablated in
+     * `lookupArtifactItem` and rebuilt): each of those three answered the
+     * package-less row under the holder's `_packageId` and `_provenance:
+     * 'package'`, while the route's `packageId` stayed unset and the
+     * environment's handler ran.
+     *
+     * Still not pinned: the holder's own route, which judges no declaration
+     * on this host before and after (the note above). The CONTROL, one
+     * package and the package-less row on one object, reads the same before
+     * and after: its customization, under the package's envelope.
+     */
+    const envelopeOf = (item: any) => (item ? [item.label, item.objectName, item._packageId, item._provenance === 'package'] : item);
+    const stored = async (holder: string, held: string, other: string, order: 'the package-less save last' | 'the package-less save first') => {
+        const { rowEngine, rows } = writableEngine();
+        const saves = [() => save(rowEngine, holder, held, holder === A ? 'alpha' : 'beta'), () => save(rowEngine, undefined, other, 'custom')];
+        for (const step of order === 'the package-less save last' ? saves : [...saves].reverse()) await step();
+        install(holder);
+        ship(holder, held);
+        engine.registerAction(held, 'approve', () => `ran ${holder}`, `app:${holder}`);
+        if (other !== held) engine.registerAction(other, 'approve', () => 'ran env');
+        await boot(rowEngine, rows);
+    };
+    for (const { shape, holder, held, label, other } of SHAPES) {
+        for (const order of ['the package-less save last', 'the package-less save first'] as const) {
+            it(`[#33456] ${shape} (${order}): the package-less row is served as the environment's on both faces and on its route, never under the holder's envelope`, async () => {
+                await stored(holder, held, other, order);
+                const environment = ['custom', other, undefined, false];
+                expect(envelopeOf((await protocol.getMetaItemForExecution({ type: 'action', name: 'approve' }) as any)?.item)).toEqual(environment);
+                expect(envelopeOf((await protocol.getMetaItem({ type: 'action', name: 'approve' }) as any)?.item)).toEqual(environment);
+                const route = await routeTo(other);
+                expect([...envelopeOf(route.action), route.packageId]).toEqual([...environment, undefined]);
+                expect((await judgedAndRun(other)).run).toBe('ran env');
+                // CONTROL: the holder's exact address keeps its own item and envelope.
+                expect(envelopeOf((await protocol.getMetaItemForExecution({ type: 'action', name: 'approve', packageId: holder }) as any)?.item))
+                    .toEqual([label, held, holder, true]);
+            });
+        }
+    }
+    for (const order of ['the package-less save last', 'the package-less save first'] as const) {
+        it(`[#33456] CONTROL — A and the package-less row both on \`account\` (${order}): its customization, under A's envelope, unchanged`, async () => {
+            await stored(A, 'account', 'account', order);
+            // One row: the package-less save is A's `account` row; its content is the save made last.
+            const label = order === 'the package-less save last' ? 'custom' : 'alpha';
+            for (const face of ['getMetaItemForExecution', 'getMetaItem'] as const) {
+                expect(envelopeOf(((await (protocol as any)[face]({ type: 'action', name: 'approve' })) as any)?.item), face).toEqual([label, 'account', A, true]);
+            }
+            expect(await judgedAndRun('account')).toEqual({ judged: label, refusal: undefined, degraded: undefined, run: `ran ${A}` });
+        });
+    }
 });
 
 /**
