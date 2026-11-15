@@ -111,7 +111,7 @@
     "personas": [
       {
         "id": "sales_rep",
-        "role": "Sales representative",
+        "role": "Sales representative who adds and removes invoice lines and sends invoices",
         "hidden": {"fields": [{"object": "invoice_line", "field": "unit_price"}]},
         "scope": [
           {"object": "invoice", "field": "owner", "value": "u_ana"},
@@ -120,7 +120,7 @@
       },
       {
         "id": "warehouse_staff",
-        "role": "Warehouse staff",
+        "role": "Warehouse staff who may read invoices but not change them",
         "hidden": {
           "objects": ["account"],
           "fields": [{"object": "invoice_line", "field": "amount"}, {"object": "invoice_line", "field": "unit_price"}]

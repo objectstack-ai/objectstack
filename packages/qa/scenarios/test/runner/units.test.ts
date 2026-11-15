@@ -452,7 +452,7 @@ describe('prompts, seed order, template manifest and change size', () => {
   it('the build prompt carries the seed, the persona sets and the handles — never a question or an outcome', () => {
     const p = buildPrompt(namespacedScenario(crm).card);
     expect(p).toContain('"full_name": "Ana Ruiz"');
-    expect(p).toContain('`democrm_sdr` for `sdr` (Sales development representative): must not read the field `democrm_contact.email`');
+    expect(p).toContain('`democrm_sdr` for `sdr` (Sales development representative who adds, updates and removes contacts): must not read the field `democrm_contact.email`');
     expect(dataContract(crm.card)).toContain('`u_sam` → the `sdr` user');
     for (const q of crm.card.run.questions) expect(p).not.toContain(q.ask.en!);
     expect(p).not.toContain('VALIDATION_FAILED');
