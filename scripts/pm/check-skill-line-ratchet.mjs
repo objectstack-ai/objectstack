@@ -1403,7 +1403,12 @@ export const CEILINGS = new Map([
   // the same comment 6897821873: the final-green-head review line, the contract-record line
   // (contract-review.md's head-move exception; a same patch-id main merge keeps only the
   // thread's ACCEPT) and the cost line; the 2-dev merge-queue gate and the p3 ride-along
-  // replace the old lines in place.
+  // replace the old lines in place. The dev line is then reworded in place, +0, by the
+  // maintainer's 2026-11-15T16:56Z ruling, verbatim: 「建议每区3个，你通过降低开发节约token没有意义啊」
+  // · 「我要尽快处理」, recorded in comment 6898023768 on #34007 (superseding the 2-dev cap):
+  // each area keeps 3 devs running with a freed slot refilled at once, the queue gate per
+  // slot, a PR waiting on a person (Tier H or a decision) frees its slot, and the cost line
+  // saves tokens without cutting devs.
   ['.claude/skills/pm-dispatch/references/area-lease.md', 71],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为

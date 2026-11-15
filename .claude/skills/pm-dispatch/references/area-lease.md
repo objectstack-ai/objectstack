@@ -40,9 +40,9 @@
 - dev 开 PR 前自查申报:os-dev.md〈Definition of done〉,BREAKING/ADR-0087 照 AGENTS.md Post-Task 第 3 条。
 - 席线程只协调,⛔ 不读 diff 与日志;ACCEPT 欠的自读(`contract-review.md`、〈路径分叉〉)除外。
   所落 PR 欠的红检查读日志(`platform-readings.md`)派子代理读,一读兼守本条与该文。
-- 每区至多 2 个 dev 代理;上张 PR 已入合并队列才领下一张;额度墙照 `execution-duties.md`。
+- 每区恒 3 dev,空即补;逐位上张 PR 入合并队列才领下张,此前跑修复轮;Tier H 或待裁 PR 让位。
 - 席每轮逐区查;⛔ 不单做 p3:只搭同文件 p1/p2 PR(每 PR ≤5 卡);转制时已领未动的 p3 释放。
-- 同函数互相牵连的卡合一 PR,准入照 `execution-duties.md` 折叠五门。
+- 同函数互相牵连的卡合一 PR,准入照 `execution-duties.md` 折叠五门,额度墙亦照该文。
 - 留道:修法已清的卡碰 `ui/**`、`packages/spec/**` 仍在本道开发、本席复审;他道席在线只通知
   「如果车道有人在线，只需要通知他就可以。」本条先于条款②行(`execution-duties.md`)、
   移道的 `lanes/spec.md` 与 `--tier` 提示;交出闭集:他道在线席已认领、cloud 路由、安全、ADR。
@@ -60,7 +60,7 @@
   均带 `Prior rulings read:` 行,开工前呈 ⛔ 不在施工中途;对维护者「应该用中文和我沟通」。
 - 席信箱只收:待裁、待落地受管 PR、跨区冲突、阻塞、交接完成;安全照 `security-findings.md`。
 - 线程约 150k 即在干净点轮换,⛔ 不在复审中途;交接写 `/mnt/project-files/<席>/handover-<区>.md`。
-- 省耗:dev 推前范围照 os-dev.md〈本地验证范围〉;跨线程只传指针;线程 effort high。
+- 省耗:dev 推前照 os-dev.md〈本地验证范围〉;跨线程只传指针;线程 effort high;⛔ 不减 dev。
 - 每读一次用量,在座位贴评论记一行:用量 %、关卡数、合并 PR 数。
 
 ## 交接与换号
